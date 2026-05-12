@@ -1,0 +1,179 @@
+"""会话管理 — SQLite 持久化."""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
+
+import aiosqlite
+
+from naumi_agent.config.settings import MemoryConfig
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Session:
+    """会话对象."""
+    id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    title: str = ""
+    model: str = "claude-sonnet-4-6"
+    messages: list[dict[str, Any]] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+    status: str = "active"
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+
+    def add_message(self, role: str, content: str, **metadata: Any) -> None:
+        msg: dict[str, Any] = {
+            "role": role,
+            "content": content,
+            "timestamp": datetime.now().isoformat(),
+        }
+        msg.update(metadata)
+        self.messages = [*self.messages, msg]  # immutable
+        self.updated_at = datetime.now()
+
+    def to_row(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "model": self.model,
+            "messages": json.dumps(self.messages, ensure_ascii=False),
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+            "status": self.status,
+            "total_tokens": self.total_tokens,
+            "total_cost_usd": self.total_cost_usd,
+        }
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> Session:
+        return cls(
+            id=row["id"],
+            title=row["title"],
+            model=row["model"],
+            messages=json.loads(row["messages"]) if isinstance(row["messages"], str) else row["messages"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            status=row["status"],
+            total_tokens=row.get("total_tokens", 0),
+            total_cost_usd=row.get("total_cost_usd", 0.0),
+        )
+
+
+_CREATE_TABLE = """
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT 'claude-sonnet-4-6',
+    messages TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    total_cost_usd REAL NOT NULL DEFAULT 0.0
+)
+"""
+
+_UPSERT = """
+INSERT INTO sessions (id, title, model, messages, created_at, updated_at, status, total_tokens, total_cost_usd)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+    title = excluded.title,
+    model = excluded.model,
+    messages = excluded.messages,
+    updated_at = excluded.updated_at,
+    status = excluded.status,
+    total_tokens = excluded.total_tokens,
+    total_cost_usd = excluded.total_cost_usd
+"""
+
+_GET = "SELECT * FROM sessions WHERE id = ?"
+_LIST = "SELECT * FROM sessions WHERE status = 'active' ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+_DELETE = "DELETE FROM sessions WHERE id = ?"
+
+
+class SessionStore:
+    """SQLite 会话存储."""
+
+    def __init__(self, config: MemoryConfig) -> None:
+        self._db_path = config.session_db_path
+        self._db: aiosqlite.Connection | None = None
+
+    async def _get_db(self) -> aiosqlite.Connection:
+        if self._db is None:
+            os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
+            self._db = await aiosqlite.connect(self._db_path)
+            self._db.row_factory = aiosqlite.Row
+            await self._db.execute(_CREATE_TABLE)
+            await self._db.commit()
+        return self._db
+
+    async def create_session(
+        self,
+        title: str | None = None,
+        model: str | None = None,
+        system_prompt: str | None = None,
+    ) -> Session:
+        session = Session(
+            title=title or "新会话",
+            model=model or "kimi-for-coding",
+        )
+        if system_prompt:
+            session.add_message("system", system_prompt)
+        await self.save(session)
+        return session
+
+    async def save(self, session: Session) -> None:
+        db = await self._get_db()
+        row = session.to_row()
+        await db.execute(
+            _UPSERT,
+            (
+                row["id"], row["title"], row["model"], row["messages"],
+                row["created_at"], row["updated_at"], row["status"],
+                row["total_tokens"], row["total_cost_usd"],
+            ),
+        )
+        await db.commit()
+
+    async def load(self, session_id: str) -> Session | None:
+        db = await self._get_db()
+        cursor = await db.execute(_GET, (session_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return Session.from_row(dict(row))
+
+    async def list_sessions(
+        self, page: int = 1, page_size: int = 20
+    ) -> tuple[list[Session], int]:
+        db = await self._get_db()
+        offset = (page - 1) * page_size
+
+        cursor = await db.execute("SELECT COUNT(*) FROM sessions WHERE status = 'active'")
+        total = (await cursor.fetchone())[0]
+
+        cursor = await db.execute(_LIST, (page_size, offset))
+        rows = await cursor.fetchall()
+        sessions = [Session.from_row(dict(r)) for r in rows]
+
+        return sessions, total
+
+    async def delete(self, session_id: str) -> bool:
+        db = await self._get_db()
+        cursor = await db.execute(_DELETE, (session_id,))
+        await db.commit()
+        return cursor.rowcount > 0
+
+    async def close(self) -> None:
+        if self._db:
+            await self._db.close()
+            self._db = None
