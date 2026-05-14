@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime
+import logging
 from typing import Any
 
-from textual import on
+from rich.markdown import Markdown
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
@@ -17,14 +17,13 @@ from textual.widgets import (
     Footer,
     Header,
     Input,
-    Label,
-    Markdown,
-    RichLog,
     Static,
 )
 
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
+
+logger = logging.getLogger(__name__)
 
 
 class AgentTokenMessage(Message):
@@ -61,25 +60,29 @@ class ChatPanel(VerticalScroll):
     }
     """
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._agent_text = ""
+        self._current_agent_widget: Static | None = None
+
     def add_user_message(self, content: str) -> None:
         md = Static(Markdown(f"**你** {content}"), classes="user-msg")
         self.mount(md)
         self.scroll_end(animate=False)
 
     def add_agent_chunk(self, token: str) -> None:
-        last = self.query_one("#agent-response", Static) if self.query("#agent-response") else None
-        if last is None:
-            last = Static(Markdown(token), id="agent-response", classes="agent-msg")
-            self.mount(last)
+        if self._current_agent_widget is None:
+            self._agent_text = token
+            self._current_agent_widget = Static(Markdown(token), classes="agent-msg")
+            self.mount(self._current_agent_widget)
         else:
-            current = last.renderable.markup if hasattr(last.renderable, "markup") else str(last.renderable)
-            last.update(Markdown(current + token))
+            self._agent_text += token
+            self._current_agent_widget.update(Markdown(self._agent_text))
         self.scroll_end(animate=False)
 
     def finalize_agent_message(self, turns: int, cost: float) -> None:
-        widget = self.query_one("#agent-response", Static) if self.query("#agent-response") else None
-        if widget:
-            widget.id = None  # reset for next message
+        self._agent_text = ""
+        self._current_agent_widget = None
         self.mount(Static(
             f"[dim]轮次: {turns} | 费用: ${cost:.4f}[/dim]",
             classes="usage-info",
@@ -253,18 +256,22 @@ class NaumiApp(App):
         chat.add_user_message(msg.content)
         status = self.query_one(StatusBar)
         status.status_text = "思考中..."
-        asyncio.create_task(self._run_agent(msg.content))
+        self._set_input_enabled(False)
+        self._run_agent(msg.content)
 
+    @work(exclusive=True, exit_on_error=False)
     async def _run_agent(self, task: str) -> None:
         chat = self.query_one(ChatPanel)
-        activity = self.query_one(ActivityPanel)
         status = self.query_one(StatusBar)
 
         try:
             result = await self.engine.run(task)
 
-            # 显示响应
-            chat.add_agent_chunk(result.response)
+            if result.status == "error" and result.error:
+                chat.add_agent_chunk(f"**错误**: {result.error}")
+            else:
+                chat.add_agent_chunk(result.response or "(无响应)")
+
             chat.finalize_agent_message(result.usage.turns, result.usage.total_cost_usd)
 
             status.status_text = (
@@ -273,8 +280,21 @@ class NaumiApp(App):
                 f"费用: ${result.usage.total_cost_usd:.4f}"
             )
         except Exception as e:
+            logger.exception("Agent run failed")
             chat.add_agent_chunk(f"**错误**: {e}")
+            chat.finalize_agent_message(0, 0.0)
             status.status_text = f"错误: {e}"
+        finally:
+            self._set_input_enabled(True)
+
+    def _set_input_enabled(self, enabled: bool) -> None:
+        input_bar = self.query_one(InputBar)
+        msg_input = input_bar.query_one(Input)
+        send_btn = input_bar.query_one("#send-btn", Button)
+        msg_input.disabled = not enabled
+        send_btn.disabled = not enabled
+        if enabled:
+            msg_input.focus()
 
     def action_toggle_activity(self) -> None:
         activity = self.query_one(ActivityPanel)
@@ -283,6 +303,8 @@ class NaumiApp(App):
     def action_clear_chat(self) -> None:
         chat = self.query_one(ChatPanel)
         chat.query(Static).remove()
+        chat._agent_text = ""
+        chat._current_agent_widget = None
         self.engine.reset()
 
     def action_show_tools(self) -> None:
