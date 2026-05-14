@@ -1,4 +1,4 @@
-"""NaumiAgent TUI — Textual 界面."""
+"""NaumiAgent TUI — Textual 界面，支持流式输出与思考过程展示."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from rich.markdown import Markdown
+from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -14,6 +15,7 @@ from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import (
     Button,
+    Collapsible,
     Footer,
     Header,
     Input,
@@ -24,6 +26,8 @@ from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 
 logger = logging.getLogger(__name__)
+
+_THINKING_LABEL = "\U0001f4ad 思考中"  # 💭 思考中
 
 
 class AgentTokenMessage(Message):
@@ -49,7 +53,7 @@ class ToolCallMessage(Message):
 
 
 class ChatPanel(VerticalScroll):
-    """聊天面板 — 显示对话消息."""
+    """聊天面板 — 显示对话消息，支持流式输出."""
 
     DEFAULT_CSS = """
     ChatPanel {
@@ -62,29 +66,91 @@ class ChatPanel(VerticalScroll):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._agent_text = ""
-        self._current_agent_widget: Static | None = None
+        self._response_text = ""
+        self._response_widget: Static | None = None
+        self._thinking_text = ""
+        self._thinking_content_widget: Static | None = None
+        self._thinking_collapsible: Collapsible | None = None
+        self._current_tool_widget: Static | None = None
 
     def add_user_message(self, content: str) -> None:
-        md = Static(Markdown(f"**你** {content}"), classes="user-msg")
-        self.mount(md)
+        self.mount(Static(Markdown(f"**你** {content}"), classes="user-msg"))
         self.scroll_end(animate=False)
 
-    def add_agent_chunk(self, token: str) -> None:
-        if self._current_agent_widget is None:
-            self._agent_text = token
-            self._current_agent_widget = Static(Markdown(token), classes="agent-msg")
-            self.mount(self._current_agent_widget)
-        else:
-            self._agent_text += token
-            self._current_agent_widget.update(Markdown(self._agent_text))
+    # --- 思考过程 ---
+
+    def start_thinking(self) -> None:
+        self._thinking_text = ""
+        self._thinking_content_widget = Static(_THINKING_LABEL, classes="thinking-content")
+        self._thinking_collapsible = Collapsible(
+            self._thinking_content_widget,
+            title="💭 思考过程",
+            classes="thinking-block",
+        )
+        self.mount(self._thinking_collapsible)
         self.scroll_end(animate=False)
 
-    def finalize_agent_message(self, turns: int, cost: float) -> None:
-        self._agent_text = ""
-        self._current_agent_widget = None
+    def add_thinking_chunk(self, content: str) -> None:
+        self._thinking_text += content
+        if self._thinking_content_widget:
+            self._thinking_content_widget.update(Markdown(self._thinking_text))
+            self.scroll_end(animate=False)
+
+    def end_thinking(self) -> None:
+        if not self._thinking_text:
+            if self._thinking_collapsible:
+                self._thinking_collapsible.remove()
+        elif self._thinking_collapsible:
+            self._thinking_collapsible.collapsed = True
+        self._thinking_text = ""
+        self._thinking_content_widget = None
+        self._thinking_collapsible = None
+
+    # --- 流式响应 ---
+
+    def start_response(self) -> None:
+        self._response_text = ""
+        self._response_widget = Static("", classes="agent-msg")
+        self.mount(self._response_widget)
+        self.scroll_end(animate=False)
+
+    def add_response_token(self, token: str) -> None:
+        self._response_text += token
+        if self._response_widget:
+            self._response_widget.update(Markdown(self._response_text))
+            self.scroll_end(animate=False)
+
+    # --- 工具调用 ---
+
+    def start_tool(self, name: str) -> None:
+        self._current_tool_widget = Static(
+            Text.from_markup(f"  ⏳ [dim]{name}[/dim]"),
+            classes="tool-running",
+        )
+        self.mount(self._current_tool_widget)
+        self.scroll_end(animate=False)
+
+    def end_tool(self, name: str, status: str, duration_ms: int) -> None:
+        if self._current_tool_widget is None:
+            return
+        icon = "✅" if status == "success" else "❌"
+        self._current_tool_widget.update(
+            Text.from_markup(f"  {icon} [dim]{name} ({duration_ms}ms)[/dim]")
+        )
+        self._current_tool_widget.set_class(False, "tool-running")
+        self._current_tool_widget.set_class(True, "tool-done")
+        self._current_tool_widget = None
+        self.scroll_end(animate=False)
+
+    # --- 结束 ---
+
+    def finalize(self, turns: int, cost: float, tokens: int = 0) -> None:
+        self._response_text = ""
+        self._response_widget = None
         self.mount(Static(
-            f"[dim]轮次: {turns} | 费用: ${cost:.4f}[/dim]",
+            Text.from_markup(
+                f"[dim]轮次: {turns} | Token: {tokens} | 费用: ${cost:.4f}[/dim]"
+            ),
             classes="usage-info",
         ))
         self.scroll_end(animate=False)
@@ -186,6 +252,32 @@ class StatusBar(Static):
         self.update(text)
 
 
+class Spinner(Static):
+    """动画旋转指示器."""
+
+    _FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    _frame: reactive[int] = reactive(0)
+    _active: reactive[bool] = reactive(False)
+
+    def on_mount(self) -> None:
+        self._timer = self.set_interval(0.08, self._tick, pause=True)
+
+    def _tick(self) -> None:
+        self._frame = (self._frame + 1) % len(self._FRAMES)
+
+    def watch__frame(self, idx: int) -> None:
+        if self._active:
+            self.update(Text(f"  {self._FRAMES[idx]}", style="bold green"))
+
+    def watch__active(self, active: bool) -> None:
+        if active:
+            self._timer.resume()
+            self._frame = 0
+        else:
+            self._timer.pause()
+            self.update("")
+
+
 class NaumiApp(App):
     """NaumiAgent TUI 应用."""
 
@@ -206,18 +298,43 @@ class NaumiApp(App):
         background: $boost;
         padding: 1 2;
         margin: 1 0;
-        border-left: solid blue;
+        border-left: thick blue;
     }
 
     .agent-msg {
         background: $surface;
         padding: 1 2;
         margin: 1 0;
-        border-left: solid green;
+        border-left: thick green;
     }
 
-    .tool-msg {
+    .thinking-block {
+        margin: 1 0;
+        padding: 0;
+        border-left: thick yellow;
+        background: $surface-darken-1;
+    }
+
+    .thinking-block CollapsibleTitle {
+        text-style: bold italic;
+        color: yellow;
+        padding: 0 1;
+    }
+
+    .thinking-content {
+        padding: 0 1;
+        color: $text-muted;
+        text-style: italic;
+    }
+
+    .tool-running {
         padding: 0 2;
+        margin: 0 0;
+    }
+
+    .tool-done {
+        padding: 0 2;
+        margin: 0 0;
     }
 
     .usage-info {
@@ -228,6 +345,12 @@ class NaumiApp(App):
     .tool-log-entry {
         padding: 0 1;
         margin-bottom: 1;
+    }
+
+    Spinner {
+        height: 1;
+        padding: 0 2;
+        color: green;
     }
     """
 
@@ -248,6 +371,7 @@ class NaumiApp(App):
             yield ChatPanel()
             yield ActivityPanel()
         yield InputBar()
+        yield Spinner()
         yield StatusBar()
         yield Footer()
 
@@ -257,6 +381,7 @@ class NaumiApp(App):
         status = self.query_one(StatusBar)
         status.status_text = "思考中..."
         self._set_input_enabled(False)
+        self.query_one(Spinner)._active = True
         self._run_agent(msg.content)
 
     @work(exclusive=True, exit_on_error=False)
@@ -264,27 +389,61 @@ class NaumiApp(App):
         chat = self.query_one(ChatPanel)
         status = self.query_one(StatusBar)
 
+        async def on_event(event_type: str, data: dict[str, Any]) -> None:
+            match event_type:
+                case "thinking_start":
+                    chat.start_thinking()
+                    status.status_text = "💭 思考中..."
+                case "thinking_delta":
+                    chat.add_thinking_chunk(data["content"])
+                case "thinking_end":
+                    chat.end_thinking()
+                case "response_start":
+                    chat.start_response()
+                    status.status_text = "✍ 生成回复..."
+                case "token":
+                    chat.add_response_token(data["content"])
+                case "response_end":
+                    pass
+                case "turn_start":
+                    turn = data["turn"]
+                    if turn > 1:
+                        status.status_text = f"🔄 第 {turn} 轮..."
+                case "tool_start":
+                    chat.start_tool(data["name"])
+                    status.status_text = f"⚙ {data['name']}..."
+                case "tool_end":
+                    chat.end_tool(data["name"], data["status"], data["duration_ms"])
+                case "error":
+                    chat.start_response()
+                    chat.add_response_token(f"**错误**: {data['message']}")
+                    chat.finalize(0, 0.0)
+
         try:
-            result = await self.engine.run(task)
+            result = await self.engine.run_streaming(task, on_event)
 
             if result.status == "error" and result.error:
-                chat.add_agent_chunk(f"**错误**: {result.error}")
-            else:
-                chat.add_agent_chunk(result.response or "(无响应)")
+                chat.start_response()
+                chat.add_response_token(f"**错误**: {result.error}")
 
-            chat.finalize_agent_message(result.usage.turns, result.usage.total_cost_usd)
-
+            chat.finalize(
+                result.usage.turns,
+                result.usage.total_cost_usd,
+                result.usage.total_input_tokens + result.usage.total_output_tokens,
+            )
             status.status_text = (
-                f"完成 | 轮次: {result.usage.turns} | "
+                f"✅ 完成 | 轮次: {result.usage.turns} | "
                 f"Token: {result.usage.total_input_tokens + result.usage.total_output_tokens} | "
                 f"费用: ${result.usage.total_cost_usd:.4f}"
             )
         except Exception as e:
             logger.exception("Agent run failed")
-            chat.add_agent_chunk(f"**错误**: {e}")
-            chat.finalize_agent_message(0, 0.0)
-            status.status_text = f"错误: {e}"
+            chat.start_response()
+            chat.add_response_token(f"**错误**: {e}")
+            chat.finalize(0, 0.0)
+            status.status_text = f"❌ 错误: {e}"
         finally:
+            self.query_one(Spinner)._active = False
             self._set_input_enabled(True)
 
     def _set_input_enabled(self, enabled: bool) -> None:
@@ -303,8 +462,13 @@ class NaumiApp(App):
     def action_clear_chat(self) -> None:
         chat = self.query_one(ChatPanel)
         chat.query(Static).remove()
-        chat._agent_text = ""
-        chat._current_agent_widget = None
+        chat.query(Collapsible).remove()
+        chat._response_text = ""
+        chat._response_widget = None
+        chat._thinking_text = ""
+        chat._thinking_content_widget = None
+        chat._thinking_collapsible = None
+        chat._current_tool_widget = None
         self.engine.reset()
 
     def action_show_tools(self) -> None:
