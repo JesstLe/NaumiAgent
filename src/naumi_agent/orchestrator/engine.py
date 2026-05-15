@@ -52,11 +52,25 @@ produce remediation plan
 - **analysis_state**: Cloud-native audit — find stateful violations, \
 provide distributed solutions
 - **analysis_vibe**: Rapid prototyping — generate working demo code fast
+- **analysis_eval**: Eval-Driven Development (EDD) — statically scan code \
+structure and generate runnable pytest covering all branches & edge cases
+- **analysis_page**: LLM OS memory paging — analyze context window pressure, \
+produce register snapshot, page_out/page_in recommendations
+- **analysis_heal**: Self-healing code — diagnose error logs, locate root \
+cause, generate minimal hotfix + defensive guards + regression test
+- **analysis_dspy**: DSPy prompt compiler — scan prompt templates, \
+few-shot coverage, evaluation metrics, and generate optimization plan
+- **analysis_graph**: GraphRAG topology analysis — extract entity nodes \
+and relationship edges from code, compute centrality/cycles/components, \
+trace risk propagation paths
+- **analysis_mcts**: Monte Carlo Tree Search — explore multiple solution \
+paths, simulate disasters on each, prune bad branches, output verified best
 
 When the user's request involves reviewing code quality, scalability, \
-resilience, or rapid prototyping, proactively use the appropriate \
-analysis tool. You can also chain them (e.g., use analysis_chaos \
-after writing code to verify it's resilient).
+resilience, rapid prototyping, testing, context management, or bug fixing, \
+proactively use the appropriate analysis tool. You can also chain them \
+(e.g., use analysis_chaos after writing code to verify it's resilient, \
+or use analysis_eval after implementing a feature to generate tests).
 
 ## Guidelines
 1. Break complex tasks into steps

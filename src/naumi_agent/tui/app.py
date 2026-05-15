@@ -701,6 +701,12 @@ class NaumiApp(App):
                     "- `/scale [QPS]` — 并发海啸测试\n"
                     "- `/state` — 云原生状态审查\n"
                     "- `/vibe <描述>` — 极速构建 Demo\n"
+                    "- `/eval <路径>` — 评测驱动 (EDD)\n"
+                    "- `/page` — 内存分页调度\n"
+                    "- `/heal <错误>` — 自愈修复\n"
+                    "- `/dspy [描述]` — DSPy 编译优化\n"
+                    "- `/graph [路径]` — 图谱推演 (GraphRAG)\n"
+                    "- `/mcts <问题>` — 蒙特卡洛树搜索\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -748,6 +754,27 @@ class NaumiApp(App):
                     status.status_text = "用法: /vibe <功能描述>"
                 else:
                     self._run_analysis_mode("vibe", arg)
+            case "/eval":
+                if not arg:
+                    status.status_text = "用法: /eval <文件或目录路径>"
+                else:
+                    self._run_analysis_mode("eval", arg)
+            case "/page":
+                self._run_analysis_mode("page", "memory")
+            case "/heal":
+                if not arg:
+                    status.status_text = "用法: /heal <错误日志或错误描述>"
+                else:
+                    self._run_analysis_mode("heal", arg)
+            case "/dspy":
+                self._run_analysis_mode("dspy", arg or "")
+            case "/graph":
+                self._run_analysis_mode("graph", arg or "")
+            case "/mcts":
+                if not arg:
+                    status.status_text = "用法: /mcts <问题描述>"
+                else:
+                    self._run_analysis_mode("mcts", arg)
             case "/quit" | "/exit":
                 self.exit()
             case _:
@@ -843,12 +870,24 @@ class NaumiApp(App):
             "scale": "analysis_scale",
             "state": "analysis_state",
             "vibe": "analysis_vibe",
+            "eval": "analysis_eval",
+            "page": "analysis_page",
+            "heal": "analysis_heal",
+            "dspy": "analysis_dspy",
+            "graph": "analysis_graph",
+            "mcts": "analysis_mcts",
         }
         labels = {
             "chaos": "⚡ 灾难演练",
             "scale": "🌊 并发海啸 (10K QPS)",
             "state": "☁️ 状态审查",
             "vibe": "🚀 极速构建",
+            "eval": "🧪 评测驱动 (EDD)",
+            "page": "💾 内存分页",
+            "heal": "🏥 自愈修复",
+            "dspy": "🔧 DSPy 编译优化",
+            "graph": "🕸️ 图谱推演 (GraphRAG)",
+            "mcts": "🌳 蒙特卡洛树搜索",
         }
 
         chat = self.query_one(ChatPanel)
@@ -870,6 +909,18 @@ class NaumiApp(App):
                 result = await tool.execute(description=target)
             elif mode == "scale":
                 result = await tool.execute(target=target, qps=10000)
+            elif mode == "eval":
+                result = await tool.execute(target=target)
+            elif mode == "page":
+                result = await tool.execute()
+            elif mode == "heal":
+                result = await tool.execute(error_log=target)
+            elif mode == "dspy":
+                result = await tool.execute(prompt_target=target)
+            elif mode == "graph":
+                result = await tool.execute(target=target)
+            elif mode == "mcts":
+                result = await tool.execute(problem=target)
             else:
                 result = await tool.execute(target=target)
             chat.mount(Markdown(result, classes="agent-msg"))

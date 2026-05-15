@@ -225,6 +225,36 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 console.print("[yellow]用法: /vibe <功能描述>[/yellow]")
             else:
                 await _run_analysis(engine, "vibe", arg)
+        case "/eval":
+            if not arg:
+                console.print("[yellow]用法: /eval <文件或目录路径>[/yellow]")
+                console.print("[dim]例: /eval src/naumi_agent/orchestrator/[/dim]")
+            else:
+                await _run_analysis(engine, "eval", arg)
+        case "/page":
+            await _run_analysis(engine, "page", "memory")
+        case "/heal":
+            if not arg:
+                console.print(
+                    "[yellow]用法: /heal <错误日志或错误描述>[/yellow]"
+                )
+                console.print("[dim]例: /heal \"TypeError: unsupported operand\"[/dim]")
+            else:
+                await _run_analysis(engine, "heal", arg)
+        case "/dspy":
+            await _run_analysis(engine, "dspy", arg or "")
+        case "/graph":
+            await _run_analysis(engine, "graph", arg or "")
+        case "/mcts":
+            if not arg:
+                console.print(
+                    "[yellow]用法: /mcts <问题描述>[/yellow]"
+                )
+                console.print(
+                    "[dim]例: /mcts \"如何设计一个高可用的分布式锁\"[/dim]"
+                )
+            else:
+                await _run_analysis(engine, "mcts", arg)
         case "/help":
             _print_help()
         case _:
@@ -259,6 +289,12 @@ def _print_help() -> None:
         ("/scale [QPS]", "并发海啸 — 高并发分析"),
         ("/state", "状态审查 — 云原生合规"),
         ("/vibe <描述>", "极速构建 — 生成 Demo"),
+        ("/eval <路径>", "评测驱动 — 生成 pytest 测试"),
+        ("/page", "内存分页 — 上下文压力分析"),
+        ("/heal <错误>", "自愈修复 — 分析并修复错误"),
+        ("/dspy [描述]", "DSPy 编译优化 — Prompt 工程优化"),
+        ("/graph [路径]", "图谱推演 — GraphRAG 拓扑分析"),
+        ("/mcts <问题>", "蒙特卡洛树搜索 — 多路径决策"),
         ("/clear", "清除当前会话"),
         ("/quit", "退出"),
     ]
@@ -268,12 +304,18 @@ def _print_help() -> None:
 
 
 async def _run_analysis(engine: Any, mode: str, target: str) -> None:
-    """执行分析模式命令（chaos/scale/state/vibe）."""
+    """执行分析模式命令."""
     tool_names = {
         "chaos": "analysis_chaos",
         "scale": "analysis_scale",
         "state": "analysis_state",
         "vibe": "analysis_vibe",
+        "eval": "analysis_eval",
+        "page": "analysis_page",
+        "heal": "analysis_heal",
+        "dspy": "analysis_dspy",
+        "graph": "analysis_graph",
+        "mcts": "analysis_mcts",
     }
 
     labels = {
@@ -281,6 +323,12 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "scale": "并发海啸 (10K QPS)",
         "state": "状态审查",
         "vibe": "极速构建",
+        "eval": "评测驱动开发 (EDD)",
+        "page": "内存分页调度 (LLM OS)",
+        "heal": "自愈修复",
+        "dspy": "DSPy 编译优化",
+        "graph": "图谱推演 (GraphRAG)",
+        "mcts": "蒙特卡洛树搜索 (MCTS)",
     }
 
     tool_name = tool_names[mode]
@@ -296,6 +344,18 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
             result = await tool.execute(description=target)
         elif mode == "scale":
             result = await tool.execute(target=target, qps=10000)
+        elif mode == "eval":
+            result = await tool.execute(target=target)
+        elif mode == "page":
+            result = await tool.execute()
+        elif mode == "heal":
+            result = await tool.execute(error_log=target)
+        elif mode == "dspy":
+            result = await tool.execute(prompt_target=target)
+        elif mode == "graph":
+            result = await tool.execute(target=target)
+        elif mode == "mcts":
+            result = await tool.execute(problem=target)
         else:
             result = await tool.execute(target=target)
 
