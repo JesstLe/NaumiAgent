@@ -11,10 +11,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.memory.compactor import ContextCompactor
+from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.router import ModelResponse, ModelRouter, ModelTier, TokenUsage
 from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail, SecurityError
+from naumi_agent.streaming.event_bus import EventEmitter
 from naumi_agent.tools.base import Tool, ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.builtin import create_builtin_tools
 from naumi_agent.tools.browser import create_browser_tools
@@ -75,12 +78,15 @@ class AgentEngine:
         ))
         self._behavior_monitor = BehaviorMonitor()
         self._output_guardrail = OutputGuardrail()
-
-        from naumi_agent.memory.session import SessionStore
-        from naumi_agent.streaming.event_bus import EventEmitter
+        self._compactor = ContextCompactor(
+            config.memory,
+            self._router,
+            threshold=config.memory.compaction_threshold,
+        )
 
         self.session_store = SessionStore(config.memory)
         self.emitter = EventEmitter()
+        self._session: Session | None = None
 
         self._register_builtin_tools()
 
@@ -116,6 +122,7 @@ class AgentEngine:
     def reset(self) -> None:
         self._messages.clear()
         self._usage = AgentUsage()
+        self._session = None
 
     def set_system_prompt(self, prompt: str) -> None:
         """设置/更新系统提示词."""
@@ -123,23 +130,90 @@ class AgentEngine:
         self._messages = [m for m in self._messages if m.get("role") != "system"]
         self._messages.insert(0, {"role": "system", "content": prompt})
 
+    # --- 会话持久化 ---
+
+    async def get_or_create_session(self, title: str | None = None) -> Session:
+        """获取当前会话，不存在则创建."""
+        if self._session is not None:
+            return self._session
+        self._session = await self.session_store.create_session(
+            title=title,
+            model=self._router.resolve_model(ModelTier.CAPABLE),
+            system_prompt=next(
+                (m["content"] for m in self._messages if m.get("role") == "system"),
+                SYSTEM_PROMPT,
+            ),
+        )
+        return self._session
+
+    async def load_session(self, session_id: str) -> bool:
+        """加载已有会话，恢复上下文."""
+        session = await self.session_store.load(session_id)
+        if session is None:
+            return False
+        self._session = session
+        self._messages = list(session.messages)
+        self._usage = AgentUsage(
+            total_input_tokens=session.total_tokens,
+            total_cost_usd=session.total_cost_usd,
+        )
+        return True
+
+    async def _save_session(self) -> None:
+        """将当前上下文写入持久化存储."""
+        session = await self.get_or_create_session()
+        session.messages = list(self._messages)
+        session.total_tokens = self._usage.total_input_tokens + self._usage.total_output_tokens
+        session.total_cost_usd = self._usage.total_cost_usd
+        await self.session_store.save(session)
+
+    # --- 上下文压缩 ---
+
+    async def _maybe_compact(self, on_event: EventCallback | None = None) -> None:
+        """检查并执行上下文压缩."""
+        max_tokens = self._config.safety.max_input_tokens
+        if not self._compactor.should_compact(self._messages, max_tokens):
+            return
+
+        before = len(self._messages)
+        self._messages = await self._compactor.compact(self._messages, max_tokens)
+        after = len(self._messages)
+
+        if after < before:
+            logger.info("Context compacted: %d → %d messages", before, after)
+            if on_event:
+                await on_event("context_compacted", {
+                    "before": before,
+                    "after": after,
+                })
+
+    def _check_budget(self) -> AgentResult | None:
+        """检查预算是否超限，超限则返回错误结果."""
+        if self._budget_tracker.is_exceeded():
+            return AgentResult(
+                status="error",
+                response="预算已达上限，停止执行。",
+                usage=self._usage,
+                error="budget_exceeded",
+            )
+        return None
+
     async def run(self, task: str) -> AgentResult:
         """执行任务 — ReAct 主循环."""
-        start_time = time.time()
-
-        # 确保 system prompt 存在
         if not any(m.get("role") == "system" for m in self._messages):
             self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
         self._messages.append({"role": "user", "content": task})
-
         tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
 
         try:
-            return await self._react_loop(tools)
+            result = await self._react_loop(tools)
         except Exception as e:
             logger.exception("Agent loop failed")
-            return AgentResult(status="error", error=str(e))
+            result = AgentResult(status="error", error=str(e))
+
+        await self._save_session()
+        return result
 
     async def run_streaming(
         self,
@@ -154,11 +228,14 @@ class AgentEngine:
         tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
 
         try:
-            return await self._react_loop_streaming(tools, on_event)
+            result = await self._react_loop_streaming(tools, on_event)
         except Exception as e:
             logger.exception("Agent streaming loop failed")
             await on_event("error", {"message": str(e)})
-            return AgentResult(status="error", error=str(e))
+            result = AgentResult(status="error", error=str(e))
+
+        await self._save_session()
+        return result
 
     async def _react_loop(
         self, tools: list[dict[str, Any]] | None
@@ -168,6 +245,12 @@ class AgentEngine:
 
         for turn in range(max_turns):
             self._usage.turns = turn + 1
+
+            exceeded = self._check_budget()
+            if exceeded:
+                return exceeded
+
+            await self._maybe_compact()
 
             # --- 推理：调用 LLM ---
             response = await self._router.call(
@@ -209,14 +292,9 @@ class AgentEngine:
                         "content": result.content,
                     })
 
-                    # 检查预算
-                    if self._usage.total_cost_usd >= self._config.safety.max_budget_usd:
-                        return AgentResult(
-                            status="error",
-                            response="预算已达上限，停止执行。",
-                            usage=self._usage,
-                            error="budget_exceeded",
-                        )
+                exceeded = self._check_budget()
+                if exceeded:
+                    return exceeded
 
                 continue
 
@@ -246,6 +324,12 @@ class AgentEngine:
 
         for turn in range(max_turns):
             self._usage.turns = turn + 1
+
+            exceeded = self._check_budget()
+            if exceeded:
+                return exceeded
+
+            await self._maybe_compact(on_event)
             await on_event("turn_start", {"turn": turn + 1})
 
             text_parts: list[str] = []
@@ -338,13 +422,9 @@ class AgentEngine:
                         "content": result.content,
                     })
 
-                    if self._usage.total_cost_usd >= self._config.safety.max_budget_usd:
-                        return AgentResult(
-                            status="error",
-                            response="预算已达上限，停止执行。",
-                            usage=self._usage,
-                            error="budget_exceeded",
-                        )
+                exceeded = self._check_budget()
+                if exceeded:
+                    return exceeded
                 continue
 
             # --- 最终回答 ---

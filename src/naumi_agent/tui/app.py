@@ -414,6 +414,11 @@ class NaumiApp(App):
                     status.status_text = f"⚙ {data['name']}..."
                 case "tool_end":
                     chat.end_tool(data["name"], data["status"], data["duration_ms"])
+                case "context_compacted":
+                    logger.info(
+                        "Context compacted: %d → %d messages",
+                        data["before"], data["after"],
+                    )
                 case "error":
                     chat.start_response()
                     chat.add_response_token(f"**错误**: {data['message']}")
