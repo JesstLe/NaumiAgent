@@ -6655,6 +6655,351 @@ class MacroTool(Tool):
         return await _run_analysis(router, _MACRO_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /cosmos — 创世引擎审计 (Computational Cosmology)
+# ===========================================================================
+
+# State richness patterns — how many dimensions does the system track?
+_STATE_RICHNESS_PATTERNS = [
+    (r"(?:position|coordinate|location|vector|matrix)\s*[:=]",
+     "空间/位置状态"),
+    (r"(?:velocity|speed|acceleration|momentum|force)\s*[:=]",
+     "运动/力学状态"),
+    (r"(?:mass|density|volume|temperature|energy)\s*[:=]",
+     "物理属性状态"),
+    (r"(?:color|texture|material|light|shadow)\s*[:=]",
+     "视觉/材质状态"),
+    (r"(?:health|hunger|mood|personality|emotion)\s*[:=]",
+     "生命体内部状态"),
+    (r"(?:relationship|friendship|trust|reputation)\s*[:=]",
+     "社会关系状态"),
+    (r"(?:memory|history|experience|knowledge)\s*[:=]",
+     "记忆/认知状态"),
+    (r"(?:resource|inventory|currency|supply|demand)\s*[:=]",
+     "经济/资源状态"),
+    (r"(?:rule|law|policy|constraint|boundary)\s*[:=]",
+     "规则/法则状态"),
+    (r"(?:time|tick|frame|step|epoch|generation)\s*[:=]",
+     "时间/演化状态"),
+]
+
+# Generative capacity — can the system create novel content?
+_GENERATIVE_PATTERNS = [
+    (r"(?:random|rand|noise|stochastic|sample)\s*\(",
+     "随机性/噪声生成"),
+    (r"(?:procedural|generate|synthesize|create)\s*\(",
+     "程序化生成"),
+    (r"(?:mutate|evolve|crossover|breed)\s*\(",
+     "进化/变异操作"),
+    (r"(?:compose|assemble|combine|blend|interpolate)\s*\(",
+     "组合/混合操作"),
+    (r"(?:Perlin|Simplex|Worley|Voronoi|fractal)\s*",
+     "程序化噪声/分形算法"),
+    (r"(?:LLM|GPT|Claude|model|neural)\s*.\s*(?:generate|create)",
+     "LLM 生成能力"),
+    (r"(?:seed|initialize|bootstrap)\s*\(",
+     "种子/初始化机制"),
+]
+
+# Social simulation readiness — multi-agent interaction infrastructure
+_SOCIAL_PATTERNS = [
+    (r"(?:agent|character|npc|entity|actor)\s*",
+     "智能体定义"),
+    (r"(?:interact|communicate|message|talk|negotiate)\s*\(",
+     "交互/通信机制"),
+    (r"(?:observe|perceive|sense|detect)\s*\(",
+     "感知/观测机制"),
+    (r"(?:remember|recall|forget|memory|experience)\s*",
+     "记忆/经验系统"),
+    (r"(?:decide|choose|plan|intend|goal)\s*\(",
+     "决策/意图系统"),
+    (r"(?:emote|express|react|respond)\s*\(",
+     "情感/反应系统"),
+    (r"(?:group|faction|tribe|culture|norm)\s*",
+     "群体/文化结构"),
+    (r"(?:trade|exchange|barter|gift|share)\s*\(",
+     "交易/共享机制"),
+]
+
+# Observer effect — does the system react to observation/interaction?
+_OBSERVER_PATTERNS = [
+    (r"(?:on_click|on_hover|on_touch|on_key|input)\s*",
+     "用户输入响应"),
+    (r"(?:event|trigger|callback|listener|subscribe)\s*",
+     "事件驱动机制"),
+    (r"(?:stream|real.?time|live|update|render)\s*",
+     "实时渲染/流式更新"),
+    (r"(?:camera|viewport|frustum|visibility)\s*",
+     "视点/可见性系统"),
+    (r"(?:LOD|level.?of.?detail|chunk|region|tile)\s*",
+     "细节层次/分块加载"),
+    (r"(?:lazy|on.?demand|just.?in.?time|procedural)\s*",
+     "按需/延迟生成"),
+]
+
+
+def _scan_cosmos(target: str) -> str:
+    """Scan system for world-creation potential — state richness, generative
+    capacity, social simulation readiness, and observer-effect reactivity."""
+    findings: list[str] = []
+    source = _read_sources(target)
+
+    if not source.strip():
+        return "⚠️ 未找到可分析的源代码。"
+
+    lines = source.split("\n")
+
+    # --- 1. State Richness (Physical Laws of the World) ---
+    findings.append("## 1. 状态维度丰富度 (State Dimensions)")
+    state_dims: dict[str, list[int]] = {}
+    for pattern, label in _STATE_RICHNESS_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                state_dims.setdefault(label, []).append(i)
+
+    if state_dims:
+        total_state = sum(len(v) for v in state_dims.values())
+        findings.append(
+            f"- 检测到 **{total_state}** 处状态定义，"
+            f"覆盖 **{len(state_dims)}** 个维度："
+        )
+        for label, line_nos in sorted(
+            state_dims.items(), key=lambda x: -len(x[1])
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+        dim_count = len(state_dims)
+        if dim_count >= 7:
+            richness = "极高 (可支撑复杂世界)"
+        elif dim_count >= 4:
+            richness = "中等"
+        else:
+            richness = "较低 (世界较平坦)"
+        findings.append(f"- 状态空间丰富度: {richness}")
+    else:
+        findings.append("- ❌ 未检测到多维状态定义 — 世界缺乏物理法则")
+    findings.append("")
+
+    # --- 2. Generative Capacity ---
+    findings.append("## 2. 生成能力 (Generative Capacity)")
+    gen_hits: dict[str, list[int]] = {}
+    for pattern, label in _GENERATIVE_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                gen_hits.setdefault(label, []).append(i)
+
+    if gen_hits:
+        total_gen = sum(len(v) for v in gen_hits.values())
+        findings.append(
+            f"- 检测到 **{total_gen}** 处生成能力，"
+            f"**{len(gen_hits)}** 类："
+        )
+        for label, line_nos in sorted(
+            gen_hits.items(), key=lambda x: -len(x[1])
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 无程序化生成能力 — 世界无法自我扩展"
+        )
+    findings.append("")
+
+    # --- 3. Social Simulation Readiness ---
+    findings.append("## 3. 社会模拟就绪度 (Social Simulation)")
+    social_hits: dict[str, list[int]] = {}
+    for pattern, label in _SOCIAL_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                social_hits.setdefault(label, []).append(i)
+
+    if social_hits:
+        total_social = sum(len(v) for v in social_hits.values())
+        findings.append(
+            f"- 检测到 **{total_social}** 处社会模拟要素，"
+            f"**{len(social_hits)}** 类："
+        )
+        for label, line_nos in sorted(
+            social_hits.items(), key=lambda x: -len(x[1])
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 无社会模拟要素 — 无法涌现文明行为"
+        )
+    findings.append("")
+
+    # --- 4. Observer Effect (Reactivity) ---
+    findings.append("## 4. 观测者效应 (Observer Effect)")
+    obs_hits: dict[str, list[int]] = {}
+    for pattern, label in _OBSERVER_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                obs_hits.setdefault(label, []).append(i)
+
+    if obs_hits:
+        total_obs = sum(len(v) for v in obs_hits.values())
+        findings.append(
+            f"- 检测到 **{total_obs}** 处观测响应机制，"
+            f"**{len(obs_hits)}** 类："
+        )
+        for label, line_nos in obs_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+        findings.append(
+            "- 💡 世界能根据观测者的行为动态展开现实"
+        )
+    else:
+        findings.append(
+            "- ⚠️ 无观测响应 — 世界是静态的，不因交互而改变"
+        )
+    findings.append("")
+
+    # --- 5. Genesis Potential Score ---
+    state_score = min(len(state_dims) / 8.0, 1.0)
+    gen_score = min(len(gen_hits) / 5.0, 1.0)
+    social_score = min(len(social_hits) / 6.0, 1.0)
+    observer_score = min(len(obs_hits) / 4.0, 1.0)
+
+    cosmos_score = (
+        state_score * 0.25
+        + gen_score * 0.30
+        + social_score * 0.25
+        + observer_score * 0.20
+    )
+    cosmos_score = max(0.0, min(1.0, cosmos_score))
+
+    findings.append("## 5. 创世潜力评分 (Genesis Potential)")
+    findings.append(f"- **综合评分: {cosmos_score:.0%}**")
+    findings.append(
+        f"- 物理法则维度: {state_score:.0%} "
+        f"({len(state_dims)}/10 类状态)"
+    )
+    findings.append(
+        f"- 生成能力: {gen_score:.0%} "
+        f"({len(gen_hits)} 类生成机制)"
+    )
+    findings.append(
+        f"- 社会模拟: {social_score:.0%} "
+        f"({len(social_hits)} 类社会要素)"
+    )
+    findings.append(
+        f"- 观测响应: {observer_score:.0%} "
+        f"({len(obs_hits)} 类响应机制)"
+    )
+
+    if cosmos_score >= 0.7:
+        findings.append(
+            "- ✅ 系统具备创世引擎雏形，"
+            "可尝试构建微型世界模拟"
+        )
+    elif cosmos_score >= 0.4:
+        findings.append(
+            "- ⚠️ 部分具备创世条件，需补强缺失维度"
+        )
+    else:
+        findings.append(
+            "- ❌ 系统距创世引擎尚远，建议先建立"
+            "状态空间和生成能力基础"
+        )
+
+    return "\n".join(findings)
+
+
+_COSMOS_SYSTEM = """\
+你是一位计算宇宙学架构师 (Computational Cosmology Architect)。
+你的任务是评估系统的"创世潜力"——它距离成为一个能自我演化的
+虚拟世界还有多远，以及如何跨越这段距离。
+
+## 创世三大协议
+
+### 协议一：物理法则的渲染 (Physical Law Rendering)
+AI 不输出代码，直接输出"物理场"：
+- NeRF / 3D Gaussian Splatting 映射到显存
+- 光线折射率、重力加速度、碰撞体积的数学定义
+- 从高维概率云到确定现实的实时"坍缩"
+- 目标：用数学公式凭空生成拥有绝对物理法则的空间
+
+### 协议二：灵魂注入 (Soul Injection — Generative Societies)
+空物理空间不是世界，必须有生命和文明：
+- 每个实体由 LLM 驱动，拥有初始性格 + RAG 记忆
+- 无固定剧本，行为由性格+记忆+环境涌现
+- 参考 Stanford Smallville: 25 个 AI 居民自发产生
+  友谊、派对、八卦传播、微观经济
+- 目标：从个体规则涌现出群体文明
+
+### 协议三：动态因果律 (Dynamic Causality — Infinite Reality)
+- 世界不预生成，根据观测实时"坍缩"
+- 薛定谔式：未观测 = 高维概率云；观测瞬间 = 确定现实
+- LOD (Level of Detail): 远处用低精度模拟，近处用高精度渲染
+- 目标：世界的边界只取决于算力，而非人工设计
+
+## 造物主的工作流
+
+1. **设定初始边界条件 (Initial Conditions)**
+   - 引力常数、基础利率、智能体算力上限
+   - 物理法则的参数表
+
+2. **定义目标函数 (Fitness Function)**
+   - 这个世界存在的目的？
+   - 演化方向：最高效交易策略？群体免疫反应？艺术创作？
+   - 自然选择标准：什么"存活"，什么"淘汰"
+
+3. **启动并观察 (Genesis & Observation)**
+   - 按下"开始"，让世界自行演化
+   - 仅在关键分歧点介入（宏观调控）
+   - 记录涌现行为，分析演化趋势
+
+## 输出格式
+
+1. **状态宇宙图谱** — 系统当前追踪的状态维度和缺失维度
+2. **物理法则补全方案** — 哪些物理规则需要添加
+3. **灵魂注入设计** — 智能体的性格/记忆/决策架构
+4. **动态生成策略** — 按需生成 vs 预生成的权衡
+5. **创世路线图** — 从当前系统到创世引擎的迭代步骤
+6. **算力预算** — 各模块的算力需求估算和优化建议
+"""
+
+
+class CosmosTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_cosmos"
+
+    @property
+    def description(self) -> str:
+        return (
+            "创世引擎审计：评估系统的'创世潜力'——状态维度丰富度、"
+            "程序化生成能力、多智能体社会模拟就绪度、观测者响应机制。"
+            "设计从当前系统到虚拟世界的创世路线——"
+            "物理法则渲染、灵魂注入、动态因果律。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "要审计的代码路径或系统描述",
+                },
+            },
+            "required": ["target"],
+        }
+
+    async def execute(
+        self, *, target: str, **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("cosmos", target[:200])
+        scan_evidence = _scan_cosmos(target)
+        user_msg = (
+            f"## 创世目标\n{target}\n\n"
+            f"## 创世扫描\n{scan_evidence}\n"
+        )
+        return await _run_analysis(router, _COSMOS_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
 
@@ -6728,4 +7073,5 @@ def create_analysis_tools() -> list[Tool]:
         ZKPTool(),
         GenesisTool(),
         MacroTool(),
+        CosmosTool(),
     ]

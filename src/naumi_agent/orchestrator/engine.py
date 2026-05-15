@@ -126,6 +126,10 @@ rollback for continuous self-improvement
 centralized AI into free-market ecosystem with 1000+ micro-agents, \
 Token economy, natural selection, price discovery, and macro \
 regulation. Emergent collective intelligence via selfish competition
+- **analysis_cosmos**: Computational Cosmology — evaluate a system's \
+genesis potential: state dimension richness, procedural generation \
+capacity, multi-agent social simulation readiness, observer-effect \
+reactivity. Design the path from code to world
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \

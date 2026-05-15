@@ -726,6 +726,7 @@ class NaumiApp(App):
                     "- `/zkp <目标>` — 零知识证明与轨迹校验\n"
                     "- `/genesis <目标>` — 系统自重构与热演化\n"
                     "- `/macro <目标>` — 多智能体自由市场博弈\n"
+                    "- `/cosmos <目标>` — 创世引擎审计\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -881,6 +882,11 @@ class NaumiApp(App):
                     status.status_text = "用法: /macro <任务或系统描述>"
                 else:
                     self._run_analysis_mode("macro", arg)
+            case "/cosmos":
+                if not arg:
+                    status.status_text = "用法: /cosmos <代码路径或系统描述>"
+                else:
+                    self._run_analysis_mode("cosmos", arg)
             case "/hook":
                 if not arg:
                     status.status_text = "用法: /hook <逆向目标描述>"
@@ -1006,6 +1012,7 @@ class NaumiApp(App):
             "zkp": "analysis_zkp",
             "genesis": "analysis_genesis",
             "macro": "analysis_macro",
+            "cosmos": "analysis_cosmos",
         }
         labels = {
             "chaos": "⚡ 灾难演练",
@@ -1037,6 +1044,7 @@ class NaumiApp(App):
             "zkp": "🔐 零知识证明与轨迹校验 (ZKP)",
             "genesis": "🧬 系统自重构与热演化 (Genesis)",
             "macro": "🏦 多智能体自由市场博弈 (Agentic Economy)",
+            "cosmos": "🌌 创世引擎审计 (Cosmos)",
         }
 
         chat = self.query_one(ChatPanel)
@@ -1108,6 +1116,8 @@ class NaumiApp(App):
                 result = await tool.execute(target=target)
             elif mode == "macro":
                 result = await tool.execute(task=target)
+            elif mode == "cosmos":
+                result = await tool.execute(target=target)
             else:
                 result = await tool.execute(target=target)
             chat.mount(Markdown(result, classes="agent-msg"))
