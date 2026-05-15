@@ -13,6 +13,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.message import Message
 from textual.reactive import reactive
+from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Collapsible,
@@ -26,6 +27,19 @@ from textual.widgets import (
 from naumi_agent.orchestrator.engine import AgentEngine
 
 logger = logging.getLogger(__name__)
+
+
+class LoadSessionMessage(Message):
+    def __init__(self, session_id: str) -> None:
+        super().__init__()
+        self.session_id = session_id
+
+
+class DeleteSessionMessage(Message):
+    def __init__(self, session_id: str, title: str) -> None:
+        super().__init__()
+        self.session_id = session_id
+        self.title = title
 
 _THINKING_LABEL = "\U0001f4ad 思考中"  # 💭 思考中
 
@@ -206,6 +220,239 @@ class ActivityPanel(VerticalScroll):
             )
         )
         self.scroll_end(animate=False)
+
+
+class HistoryPanel(VerticalScroll):
+    """历史会话面板 — 显示会话列表，点击加载."""
+
+    DEFAULT_CSS = """
+    HistoryPanel {
+        width: 36;
+        height: 1fr;
+        padding: 0 1;
+        border-left: solid green;
+        background: $surface;
+        display: none;
+    }
+
+    HistoryPanel .history-title {
+        padding: 1 0;
+        text-style: bold;
+        color: $text;
+    }
+
+    HistoryPanel .session-entry {
+        padding: 0 1;
+        margin: 0 0 1 0;
+        background: $boost;
+        width: 1fr;
+    }
+
+    HistoryPanel .session-entry:hover {
+        background: $primary-darken-1;
+    }
+
+    HistoryPanel .session-entry.current {
+        border-left: thick green;
+    }
+
+    HistoryPanel .session-entry .session-id {
+        color: $text-muted;
+        text-style: dim;
+    }
+
+    HistoryPanel .session-entry .session-title {
+        color: $text;
+    }
+
+    HistoryPanel .session-entry .session-meta {
+        color: $text-muted;
+        text-style: dim;
+    }
+    """
+
+    show_panel: reactive[bool] = reactive(False)
+
+    def watch_show_panel(self, show: bool) -> None:
+        self.display = show
+
+    @work
+    async def refresh_sessions(self) -> None:
+        """从数据库加载会话列表."""
+        app = self.app
+        if not isinstance(app, NaumiApp):
+            return
+
+        # 清除旧内容
+        for child in list(self.children):
+            child.remove()
+
+        self.mount(Static("📋 历史会话", classes="history-title"))
+
+        try:
+            sessions, total = await app.engine.list_sessions(page=1, page_size=50)
+        except Exception:
+            self.mount(Static("[dim]加载失败[/dim]"))
+            return
+
+        if not sessions:
+            self.mount(Static("[dim]暂无历史会话[/dim]"))
+            return
+
+        current_id = app.engine._session.id if app.engine._session else None
+
+        for s in sessions:
+            title = s.title or "新会话"
+            if len(title) > 28:
+                title = title[:26] + "…"
+            time_str = s.updated_at.strftime("%m-%d %H:%M")
+            msg_count = len(s.messages)
+            is_current = s.id == current_id
+
+            entry = SessionEntry(
+                session_id=s.id,
+                title=title,
+                time_str=time_str,
+                msg_count=msg_count,
+                is_current=is_current,
+            )
+            self.mount(entry)
+
+        self.mount(Static(f"[dim]共 {total} 个会话[/dim]"))
+
+    def on_session_entry_clicked(self, event: SessionEntry.Clicked) -> None:
+        self.app.post_message(LoadSessionMessage(event.entry.session_id))
+
+    def on_delete_session_message(self, event: DeleteSessionMessage) -> None:
+        app = self.app
+        if not isinstance(app, NaumiApp):
+            return
+
+        def on_confirm(confirmed: bool) -> None:
+            if confirmed:
+                app._delete_session(event.session_id, event.title)
+
+        app.push_screen(DeleteConfirmScreen(event.title), on_confirm)
+
+
+class DeleteConfirmScreen(ModalScreen[bool]):
+    """删除确认弹窗."""
+
+    DEFAULT_CSS = """
+    DeleteConfirmScreen {
+        align: center middle;
+    }
+    DeleteConfirmScreen > Container {
+        width: auto;
+        height: auto;
+        padding: 1 2;
+        border: thick $background 80%;
+        background: $surface;
+    }
+    DeleteConfirmScreen > Container > Label {
+        width: auto;
+        margin: 0 0 1 0;
+    }
+    DeleteConfirmScreen > Container > Horizontal {
+        width: auto;
+        height: auto;
+    }
+    DeleteConfirmScreen > Container > Horizontal > Button {
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self, title: str) -> None:
+        super().__init__()
+        self.session_title = title
+
+    def compose(self) -> ComposeResult:
+        from textual.widgets import Label
+        with Container():
+            yield Label(f"确认删除会话 [bold]{self.session_title}[/bold]？")
+            with Horizontal():
+                yield Button("确认", variant="error", id="confirm")
+                yield Button("取消", variant="primary", id="cancel")
+
+    @on(Button.Pressed, "#confirm")
+    def on_confirm(self) -> None:
+        self.dismiss(True)
+
+    @on(Button.Pressed, "#cancel")
+    def on_cancel(self) -> None:
+        self.dismiss(False)
+
+
+class SessionEntry(Static):
+    """单个会话条目 — 可点击加载，右侧删除按钮."""
+
+    class Clicked(Message):
+        def __init__(self, entry: SessionEntry) -> None:
+            super().__init__()
+            self.entry = entry
+
+    DEFAULT_CSS = """
+    SessionEntry {
+        padding: 0 1;
+        margin: 0 0 1 0;
+        background: $boost;
+        width: 1fr;
+        height: auto;
+        layout: horizontal;
+    }
+
+    SessionEntry:hover {
+        background: $primary-darken-1;
+    }
+
+    SessionEntry.current {
+        border-left: thick green;
+    }
+
+    SessionEntry .session-info {
+        width: 1fr;
+    }
+
+    SessionEntry .delete-btn {
+        width: 3;
+        height: 3;
+        min-width: 3;
+    }
+    """
+
+    def __init__(
+        self,
+        session_id: str,
+        title: str,
+        time_str: str,
+        msg_count: int,
+        is_current: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.session_id = session_id
+        self.title_text = title
+        self._entry_title = title
+        self._entry_time = time_str
+        self._entry_count = msg_count
+        if is_current:
+            self.add_class("current")
+
+    def compose(self) -> ComposeResult:
+        yield Static(
+            f"[dim]{self.session_id}[/dim]\n"
+            f"{self._entry_title}\n"
+            f"[dim]{self._entry_time} · {self._entry_count}条消息[/dim]",
+            classes="session-info",
+        )
+        yield Button("✕", variant="error", classes="delete-btn")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.post_message(DeleteSessionMessage(self.session_id, self.title_text))
+
+    def on_click(self) -> None:
+        self.post_message(self.Clicked(self))
 
 
 class InputBar(Horizontal):
@@ -390,6 +637,7 @@ class NaumiApp(App):
     BINDINGS = [
         Binding("ctrl+q", "quit", "退出"),
         Binding("tab", "toggle_activity", "活动面板"),
+        Binding("ctrl+h", "toggle_history", "历史"),
         Binding("ctrl+l", "clear_chat", "清空"),
         Binding("ctrl+t", "show_tools", "工具列表"),
     ]
@@ -402,6 +650,7 @@ class NaumiApp(App):
         yield Header()
         with Container(id="main-area"):
             yield ChatPanel()
+            yield HistoryPanel()
             yield ActivityPanel()
         yield InputBar()
         yield Spinner()
@@ -412,6 +661,13 @@ class NaumiApp(App):
         await self.engine.shutdown()
 
     def on_user_input_message(self, msg: UserInputMessage) -> None:
+        text = msg.content.strip()
+
+        # 斜杠命令拦截
+        if text.startswith("/"):
+            self._handle_slash_command(text)
+            return
+
         chat = self.query_one(ChatPanel)
         chat.add_user_message(msg.content)
         status = self.query_one(StatusBar)
@@ -419,6 +675,88 @@ class NaumiApp(App):
         self._set_input_enabled(False)
         self.query_one(Spinner)._active = True
         self._run_agent(msg.content)
+
+    def _handle_slash_command(self, text: str) -> None:
+        parts = text.split(maxsplit=1)
+        cmd = parts[0]
+        arg = parts[1] if len(parts) > 1 else ""
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+
+        match cmd:
+            case "/clear":
+                chat.clear()
+                self.engine.reset()
+                status.status_text = "会话已清除"
+            case "/help":
+                help_text = (
+                    "## 可用命令\n"
+                    "- `/help` — 显示帮助\n"
+                    "- `/tools` — 列出可用工具\n"
+                    "- `/model` — 显示模型配置\n"
+                    "- `/usage` — 显示 token 用量\n"
+                    "- `/history` — 查看历史会话列表\n"
+                    "- `/load <id>` — 加载指定会话\n"
+                    "- `/chaos [目标]` — 灾难演练 (SPOF)\n"
+                    "- `/scale [QPS]` — 并发海啸测试\n"
+                    "- `/state` — 云原生状态审查\n"
+                    "- `/vibe <描述>` — 极速构建 Demo\n"
+                    "- `/clear` — 清除当前会话\n"
+                    "- `/quit` — 退出\n"
+                )
+                chat.mount(Markdown(help_text, classes="agent-msg"))
+            case "/tools":
+                tools = self.engine.tool_registry.all()
+                lines = ["## 可用工具\n"]
+                for t in tools:
+                    lines.append(f"- **{t.name}** — {t.description}")
+                chat.mount(Markdown("\n".join(lines), classes="agent-msg"))
+            case "/model":
+                info = (
+                    f"## 模型配置\n"
+                    f"- 默认: `{self.engine.router.resolve_model('capable')}`\n"
+                    f"- 快速: `{self.engine.router.resolve_model('fast')}`\n"
+                    f"- 推理: `{self.engine.router.resolve_model('reasoning')}`\n"
+                )
+                chat.mount(Markdown(info, classes="agent-msg"))
+            case "/usage":
+                u = self.engine.usage
+                total_tok = u.total_input_tokens + u.total_output_tokens
+                info = (
+                    f"## 用量统计\n"
+                    f"- Token: {total_tok}\n"
+                    f"- 费用: ${u.total_cost_usd:.4f}\n"
+                    f"- 轮次: {u.turns}\n"
+                )
+                chat.mount(Markdown(info, classes="agent-msg"))
+            case "/history":
+                self.action_toggle_history()
+            case "/load":
+                if not arg:
+                    status.status_text = "用法: /load <session_id>"
+                    self.action_toggle_history()
+                else:
+                    self._load_and_show_session(arg)
+            case "/chaos":
+                self._run_analysis_mode("chaos", arg or "当前项目")
+            case "/scale":
+                self._run_analysis_mode("scale", arg or "当前项目")
+            case "/state":
+                self._run_analysis_mode("state", arg or "当前项目")
+            case "/vibe":
+                if not arg:
+                    status.status_text = "用法: /vibe <功能描述>"
+                else:
+                    self._run_analysis_mode("vibe", arg)
+            case "/quit" | "/exit":
+                self.exit()
+            case _:
+                chat.mount(
+                    Markdown(
+                        f"**未知命令**: `{cmd}`\n输入 `/help` 查看可用命令",
+                        classes="agent-msg",
+                    )
+                )
 
     @work(exclusive=True, exit_on_error=False)
     async def _run_agent(self, task: str) -> None:
@@ -497,14 +835,122 @@ class NaumiApp(App):
         if enabled:
             msg_input.focus()
 
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_analysis_mode(self, mode: str, target: str) -> None:
+        """执行分析模式 (chaos/scale/state/vibe) — 走工具的 execute 路径."""
+        tool_names = {
+            "chaos": "analysis_chaos",
+            "scale": "analysis_scale",
+            "state": "analysis_state",
+            "vibe": "analysis_vibe",
+        }
+        labels = {
+            "chaos": "⚡ 灾难演练",
+            "scale": "🌊 并发海啸 (10K QPS)",
+            "state": "☁️ 状态审查",
+            "vibe": "🚀 极速构建",
+        }
+
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        label = labels[mode]
+
+        tool = self.engine.tool_registry.get(tool_names[mode])
+        if tool is None:
+            chat.mount(Markdown(f"**工具未注册**: {tool_names[mode]}", classes="agent-msg"))
+            return
+
+        chat.mount(Markdown(f"**{label}** 扫描 + 分析中...", classes="agent-msg"))
+        status.status_text = f"{label} 分析中..."
+        self._set_input_enabled(False)
+        self.query_one(Spinner)._active = True
+
+        try:
+            if mode == "vibe":
+                result = await tool.execute(description=target)
+            elif mode == "scale":
+                result = await tool.execute(target=target, qps=10000)
+            else:
+                result = await tool.execute(target=target)
+            chat.mount(Markdown(result, classes="agent-msg"))
+            status.status_text = f"✅ {label} 完成"
+        except Exception as e:
+            chat.mount(Markdown(f"**分析失败**: {e}", classes="agent-msg"))
+            status.status_text = f"❌ 分析失败: {e}"
+        finally:
+            self.query_one(Spinner)._active = False
+            self._set_input_enabled(True)
+
     def action_toggle_activity(self) -> None:
         activity = self.query_one(ActivityPanel)
         activity.show_panel = not activity.show_panel
+
+    def action_toggle_history(self) -> None:
+        history = self.query_one(HistoryPanel)
+        history.show_panel = not history.show_panel
+        if history.show_panel:
+            history.refresh_sessions()
+
+    def on_load_session_message(self, msg: LoadSessionMessage) -> None:
+        self._load_and_show_session(msg.session_id)
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _load_and_show_session(self, session_id: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+
+        loaded = await self.engine.load_session(session_id)
+        if not loaded:
+            status.status_text = f"会话 {session_id} 不存在"
+            return
+
+        session = self.engine._session
+        chat.clear()
+
+        # 回放历史消息
+        for m in session.messages:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            if role == "user":
+                chat.add_user_message(content)
+            elif role == "assistant":
+                chat.mount(Markdown(content, classes="agent-msg"))
+
+        title = session.title or session_id
+        msg_count = len(session.messages)
+        status.status_text = (
+            f"已加载: {title} | {msg_count}条消息 | "
+            f"Token: {session.total_tokens} | ${session.total_cost_usd:.4f}"
+        )
+
+        # 刷新历史面板高亮
+        history = self.query_one(HistoryPanel)
+        if history.show_panel:
+            history.refresh_sessions()
 
     def action_clear_chat(self) -> None:
         chat = self.query_one(ChatPanel)
         chat.clear()
         self.engine.reset()
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _delete_session(self, session_id: str, title: str) -> None:
+        status = self.query_one(StatusBar)
+        try:
+            ok = await self.engine.delete_session(session_id)
+            if ok:
+                status.status_text = f"已删除: {title}"
+                if self.engine._session and self.engine._session.id == session_id:
+                    chat = self.query_one(ChatPanel)
+                    chat.clear()
+                    self.engine.reset()
+                history = self.query_one(HistoryPanel)
+                if history.show_panel:
+                    history.refresh_sessions()
+            else:
+                status.status_text = f"会话不存在: {session_id}"
+        except Exception as e:
+            status.status_text = f"删除失败: {e}"
 
     def action_show_tools(self) -> None:
         chat = self.query_one(ChatPanel)

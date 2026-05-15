@@ -222,6 +222,18 @@ class PermissionChecker:
         """检查工具调用是否被允许."""
         rule = TOOL_PERMISSIONS.get(tool_name)
 
+        # 某些 API（如 Kimi）返回的工具名可能带 namespace 前缀
+        if not rule:
+            normalized = tool_name
+            if "." in normalized:
+                normalized = normalized.split(".")[-1]
+            elif "__" in normalized:
+                normalized = normalized.split("__")[-1]
+            if normalized != tool_name:
+                rule = TOOL_PERMISSIONS.get(normalized)
+                if rule:
+                    tool_name = normalized
+
         if not rule:
             # MCP tools are dynamic — allow based on mode
             if tool_name.startswith("mcp__"):

@@ -72,35 +72,52 @@ class WebSearchTool(Tool):
         return "\n---\n".join(results)
 
     async def _ddg_search(self, query: str, max_results: int) -> str:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                "https://html.duckduckgo.com/html/",
-                params={"q": query},
-                headers={"User-Agent": "Mozilla/5.0"},
-                timeout=10,
-            )
-            resp.raise_for_status()
-
-        # 简单的 HTML 结果解析
-        text = resp.text
-        results = []
+        import html as html_mod
         import re
 
-        # 提取搜索结果块
-        blocks = re.findall(
-            r'<a rel="nofollow" class="result__a" href="([^"]+)".*?>(.*?)</a>.*?'
-            r'<a class="result__snippet".*?>(.*?)</a>',
-            text,
-            re.DOTALL,
-        )
-        for url, title, snippet in blocks[:max_results]:
-            clean_title = re.sub(r"<[^>]+>", "", title).strip()
-            clean_snippet = re.sub(r"<[^>]+>", "", snippet).strip()
-            results.append(f"### [{clean_title}]({url})\n{clean_snippet}\n")
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    "https://lite.duckduckgo.com/lite/",
+                    data={"q": query, "kl": "wt-wt"},
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; NaumiAgent/1.0)"},
+                    timeout=15,
+                )
+                resp.raise_for_status()
 
-        if not results:
-            return "No results found. Consider setting BRAVE_SEARCH_API_KEY for better results."
-        return "\n---\n".join(results)
+            page = resp.text
+
+            link_pattern = re.compile(
+                r'<a[^>]*href="([^"]+)"[^>]*class=[\'"]result-link[\'"][^>]*>(.*?)</a>',
+                re.DOTALL,
+            )
+            snippet_pattern = re.compile(
+                r"class=['\"]result-snippet['\"]>(.*?)</td>", re.DOTALL
+            )
+
+            links = link_pattern.findall(page)
+            snippets = snippet_pattern.findall(page)
+
+            results = []
+            for i, (url, raw_title) in enumerate(links[:max_results]):
+                title = html_mod.unescape(re.sub(r"<[^>]+>", "", raw_title).strip())
+                snippet = ""
+                if i < len(snippets):
+                    snippet = html_mod.unescape(
+                        re.sub(r"<[^>]+>", "", snippets[i]).strip()
+                    )
+                results.append(f"### [{title}]({url})\n{snippet}\n")
+
+            if not results:
+                return "No results found. Consider setting BRAVE_SEARCH_API_KEY for better results."
+            return "\n---\n".join(results)
+        except httpx.HTTPStatusError as e:
+            return (
+                f"Search failed (HTTP {e.response.status_code}). "
+                "Consider setting BRAVE_SEARCH_API_KEY."
+            )
+        except Exception as e:
+            return f"Search failed: {type(e).__name__}: {e}"
 
 
 class WebFetchTool(Tool):

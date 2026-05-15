@@ -178,6 +178,7 @@ async def _handle_command(engine: Any, cmd: str) -> None:
     """处理斜杠命令."""
     parts = cmd.strip().split(maxsplit=1)
     command = parts[0]
+    arg = parts[1] if len(parts) > 1 else ""
 
     match command:
         case "/tools":
@@ -199,6 +200,31 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             console.print(f"默认模型: {engine.router.resolve_model('capable')}")
             console.print(f"快速模型: {engine.router.resolve_model('fast')}")
             console.print(f"推理模型: {engine.router.resolve_model('reasoning')}")
+        case "/history":
+            await _show_history(engine)
+        case "/load":
+            if not arg:
+                console.print("[yellow]用法: /load <session_id>[/yellow]")
+                console.print("[dim]使用 /history 查看会话列表[/dim]")
+            else:
+                await _load_session(engine, arg)
+        case "/delete":
+            if not arg:
+                console.print("[yellow]用法: /delete <session_id>[/yellow]")
+                console.print("[dim]使用 /history 查看会话列表[/dim]")
+            else:
+                await _delete_session(engine, arg)
+        case "/chaos":
+            await _run_analysis(engine, "chaos", arg or "当前项目")
+        case "/scale":
+            await _run_analysis(engine, "scale", arg or "当前项目")
+        case "/state":
+            await _run_analysis(engine, "state", arg or "当前项目")
+        case "/vibe":
+            if not arg:
+                console.print("[yellow]用法: /vibe <功能描述>[/yellow]")
+            else:
+                await _run_analysis(engine, "vibe", arg)
         case "/help":
             _print_help()
         case _:
@@ -226,12 +252,135 @@ def _print_help() -> None:
         ("/tools", "列出可用工具"),
         ("/model", "显示模型配置"),
         ("/usage", "显示 token 用量"),
+        ("/history", "查看历史会话列表"),
+        ("/load <id>", "加载指定会话并继续对话"),
+        ("/delete <id>", "删除指定会话"),
+        ("/chaos [目标]", "灾难演练 — SPOF 分析"),
+        ("/scale [QPS]", "并发海啸 — 高并发分析"),
+        ("/state", "状态审查 — 云原生合规"),
+        ("/vibe <描述>", "极速构建 — 生成 Demo"),
         ("/clear", "清除当前会话"),
         ("/quit", "退出"),
     ]
     for cmd, desc in commands:
         console.print(f"  [cyan]{cmd:12s}[/cyan] {desc}")
     console.print()
+
+
+async def _run_analysis(engine: Any, mode: str, target: str) -> None:
+    """执行分析模式命令（chaos/scale/state/vibe）."""
+    tool_names = {
+        "chaos": "analysis_chaos",
+        "scale": "analysis_scale",
+        "state": "analysis_state",
+        "vibe": "analysis_vibe",
+    }
+
+    labels = {
+        "chaos": "灾难演练",
+        "scale": "并发海啸 (10K QPS)",
+        "state": "状态审查",
+        "vibe": "极速构建",
+    }
+
+    tool_name = tool_names[mode]
+    label = labels[mode]
+    tool = engine.tool_registry.get(tool_name)
+    if tool is None:
+        console.print(f"[red]工具 {tool_name} 未注册[/red]")
+        return
+
+    console.print(f"[bold yellow]⚡ {label} 分析中...[/bold yellow]")
+    with console.status("[bold green]分析中...[/bold green]"):
+        if mode == "vibe":
+            result = await tool.execute(description=target)
+        elif mode == "scale":
+            result = await tool.execute(target=target, qps=10000)
+        else:
+            result = await tool.execute(target=target)
+
+    console.print()
+    console.print(
+        Panel(
+            Markdown(result),
+            title=f"[bold yellow]⚡ {label}[/bold yellow]",
+            border_style="yellow",
+            padding=(1, 2),
+        )
+    )
+    console.print()
+
+
+async def _show_history(engine: Any) -> None:
+    """显示历史会话列表."""
+    from rich.table import Table
+
+    sessions, total = await engine.list_sessions(page=1, page_size=20)
+    if not sessions:
+        console.print("[dim]暂无历史会话[/dim]")
+        return
+
+    table = Table(title=f"历史会话 (共 {total} 个)", show_lines=False)
+    table.add_column("ID", style="cyan", width=12)
+    table.add_column("标题", max_width=40)
+    table.add_column("消息数", justify="right", width=6)
+    table.add_column("Token", justify="right", width=8)
+    table.add_column("更新时间", width=20)
+
+    for s in sessions:
+        title = s.title or "新会话"
+        if len(title) > 38:
+            title = title[:36] + "…"
+        table.add_row(
+            s.id,
+            title,
+            str(len(s.messages)),
+            str(s.total_tokens),
+            s.updated_at.strftime("%Y-%m-%d %H:%M"),
+        )
+
+    console.print(table)
+    console.print("[dim]使用 /load <id> 加载指定会话[/dim]")
+    console.print()
+
+
+async def _load_session(engine: Any, session_id: str) -> None:
+    """加载历史会话."""
+    loaded = await engine.load_session(session_id)
+    if loaded:
+        session = engine._session
+        title = session.title if session else session_id
+        msg_count = len(session.messages) if session else 0
+        console.print(f"[green]已加载会话:[/green] {title}")
+        console.print(
+            f"[dim]消息数: {msg_count} | Token: {session.total_tokens} | "
+            f"费用: ${session.total_cost_usd:.4f}[/dim]"
+        )
+
+        # 显示最近几条对话
+        user_msgs = [m for m in session.messages if m.get("role") in ("user", "assistant")]
+        if user_msgs:
+            console.print("[dim]--- 最近对话 ---[/dim]")
+            for m in user_msgs[-6:]:
+                role = m.get("role", "")
+                content = m.get("content", "")
+                if len(content) > 100:
+                    content = content[:97] + "..."
+                label = "[blue]你[/blue]" if role == "user" else "[green]Naumi[/green]"
+                console.print(f"  {label}: {content}")
+        console.print()
+    else:
+        console.print(f"[red]会话 {session_id} 不存在[/red]")
+        console.print("[dim]使用 /history 查看可用会话[/dim]")
+
+
+async def _delete_session(engine: Any, session_id: str) -> None:
+    """删除指定会话."""
+    ok = await engine.delete_session(session_id)
+    if ok:
+        console.print(f"[green]已删除会话:[/green] {session_id}")
+    else:
+        console.print(f"[red]会话 {session_id} 不存在[/red]")
 
 
 def _check_api_key(config: AppConfig) -> None:
