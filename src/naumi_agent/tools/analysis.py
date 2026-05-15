@@ -2545,6 +2545,286 @@ class JITTool(Tool):
         return await _run_analysis(router, _JIT_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /pointer — 语义指针架构 (SPA) 推理态/物理态分离
+# ===========================================================================
+
+# Patterns indicating precision-sensitive data (hallucination risk)
+_PRECISION_PATTERNS = [
+    (r"(?:Decimal|decimal\.Decimal|float|double|np\.float\d*)", "浮点精确类型"),
+    (r"(?:money|currency|price|amount|balance|fee)", "金融金额"),
+    (r"(?:PE|EPS|ROE|ROI|NAV| sharpe|alpha|beta)\b", "金融指标"),
+    (r"(?:dosage|blood_pressure|heart_rate|diagnosis)", "医疗数据"),
+    (r"(?:coordinate|altitude|velocity|trajectory|orbit)", "航天/物理数据"),
+    (r"(?:hash|checksum|signature|token|secret|key)\b", "安全哈希"),
+    (r"(?:id|uuid|guid|serial)\s*[:=]\s*[\"']\w+", "唯一标识符"),
+]
+
+# Patterns for external data sources (pointer-ifiable)
+_POINTER_SOURCES = [
+    (r"(?:api|fetch|get|query|request)\s*\([^)]*stock", "股票 API"),
+    (r"(?:api|fetch|get|query|request)\s*\([^)]*price", "价格 API"),
+    (r"(?:\.execute\(|cursor\.|session\.query)", "数据库查询"),
+    (r"(?:redis\.get|cache\.get|memcached)", "缓存读取"),
+    (r"(?:pd\.read_|read_csv|read_json|read_parquet)", "数据文件读取"),
+    (r"(?:requests\.(get|post)|httpx\.client)", "HTTP 数据源"),
+]
+
+# Patterns where AI output meets precise data (boundary risk)
+_BOUNDARY_PATTERNS = [
+    (r"return\s+str\(.*(?:price|amount|balance)", "数值转字符串返回"),
+    (r"f[\"'].*{(?:price|amount|pe|eps).*}[\"']", "f-string 插入金融数据"),
+    (r"(?:format|round)\s*\(.*(?:price|amount|rate)", "金融数据格式化"),
+    (r"json\.dumps\s*\([^)]*(?:result|data|response)", "JSON 序列化 AI 输出"),
+    (r"response\s*[:=]\s*(?:await\s+)?(?:llm|model|chat|complete)", "LLM 原始输出"),
+]
+
+
+def _scan_pointer(
+    files: list[Path], source_text: str, target: str,
+) -> str:
+    """pointer 模式静态扫描：检测幻觉风险点和可指针化的数据边界."""
+    findings: list[str] = []
+
+    # 1. Detect precision-sensitive data patterns
+    precision_hits: list[tuple[str, int]] = []
+    for pattern, label in _PRECISION_PATTERNS:
+        count = len(re.findall(pattern, source_text, re.IGNORECASE))
+        if count:
+            precision_hits.append((label, count))
+
+    if precision_hits:
+        findings.append("- 精密数据类型（幻觉高风险）:")
+        for label, count in precision_hits:
+            findings.append(f"  - {label}: {count} 处引用")
+    else:
+        findings.append("- 精密数据类型: 未检测到")
+
+    # 2. Detect pointer-ifiable external sources
+    pointer_sources: list[tuple[str, int]] = []
+    for pattern, label in _POINTER_SOURCES:
+        count = len(re.findall(pattern, source_text, re.IGNORECASE))
+        if count:
+            pointer_sources.append((label, count))
+
+    if pointer_sources:
+        findings.append("- 可指针化的数据源（建议物理态隔离）:")
+        for label, count in pointer_sources:
+            findings.append(f"  - {label}: {count} 处")
+    else:
+        findings.append("- 外部数据源: 未检测到")
+
+    # 3. Detect boundary risk points
+    boundary_hits: list[tuple[str, int]] = []
+    for pattern, label in _BOUNDARY_PATTERNS:
+        count = len(re.findall(pattern, source_text, re.IGNORECASE))
+        if count:
+            boundary_hits.append((label, count))
+
+    if boundary_hits:
+        findings.append(
+            "- ⚠️ 推理态/物理态边界风险点: "
+            f"{sum(c for _, c in boundary_hits)} 处"
+        )
+        for label, count in boundary_hits:
+            findings.append(f"  - {label}: {count} 处")
+    else:
+        findings.append("- 边界风险: 未检测到明显风险")
+
+    # 4. Detect hardcoded values (should be pointers instead)
+    magic_numbers = re.findall(
+        r"(?<!self\.)(?:price|rate|ratio|threshold)\s*[=:]\s*[\d.]+",
+        source_text,
+        re.IGNORECASE,
+    )
+    if magic_numbers:
+        findings.append(
+            f"- ⚠️ 硬编码数值: {len(magic_numbers)} 处"
+            f"（应改为指针引用外部数据源）"
+        )
+        for m in magic_numbers[:5]:
+            findings.append(f"  - `{m.strip()}`")
+
+    # 5. Identify existing abstraction layers (good or missing)
+    has_dao = bool(re.findall(r"(?:Repository|DAO|Mapper|Gateway)", source_text))
+    has_service = bool(re.findall(r"(?:Service|Manager|Handler)", source_text))
+    has_controller = bool(re.findall(
+        r"(?:Controller|Router|Endpoint|View)", source_text,
+    ))
+    layers = []
+    if has_dao:
+        layers.append("数据层(DAO)")
+    if has_service:
+        layers.append("服务层(Service)")
+    if has_controller:
+        layers.append("控制层(Controller)")
+    if layers:
+        findings.append(
+            f"- 已有分层: {' → '.join(layers)}"
+        )
+    else:
+        findings.append(
+            "- ⚠️ 无明显分层架构（需要 SPA 重构）"
+        )
+
+    # 6. Hallucination Risk Score
+    risk_score = 0
+    risk_score += sum(c for _, c in precision_hits) * 5
+    risk_score += sum(c for _, c in boundary_hits) * 8
+    risk_score += len(magic_numbers) * 10
+    if not layers:
+        risk_score += 20
+
+    level = (
+        "CRITICAL" if risk_score > 100
+        else "HIGH" if risk_score > 50
+        else "MEDIUM" if risk_score > 20
+        else "LOW"
+    )
+    findings.append(
+        f"\n- 幻觉风险评分: {risk_score} ({level})"
+    )
+    if level in ("HIGH", "CRITICAL"):
+        findings.append(
+            "  → 强烈建议：将精密数据计算剥离为独立模块，"
+            "AI 仅通过指针(API调用)获取结果"
+        )
+
+    return "\n".join(findings)
+
+
+_POINTER_SYSTEM = """\
+You are a Semantic Pointer Architecture (SPA) analyst implementing the \
+C++ pointer concept in AI systems.
+
+## Core Principle
+**Separate "reasoning space" (fuzzy AI thinking) from "physical space" \
+(precise data computation).** The AI should NEVER directly generate or \
+manipulate precise data. Instead:
+
+1. **Reasoning Space (AI's job)**: Strategy, logic, orchestration, \
+natural language understanding, user interaction
+2. **Physical Space (Hardcoded modules)**: Numerical computation, \
+data retrieval, type-safe operations, precision-critical calculations
+3. **Pointers (The bridge)**: API calls, DB queries, function references \
+that let AI "dereference" precise data without touching it
+
+## Your Tasks
+
+### 1. Hallucination Risk Assessment
+Based on scan evidence, identify where the current system risks AI \
+hallucination on precise data:
+- Which modules handle financial/medical/safety-critical data?
+- Where does AI output flow directly into data computations?
+- What hardcoded values should be externalized?
+
+### 2. SPA Architecture Design
+Redesign the system into two spaces:
+
+**Reasoning Space (AI-managed):**
+- List what the AI SHOULD do (strategy, routing, NL generation)
+- Define the "pointer interface" — what APIs/calls the AI can make
+- Specify the contract: input format, expected return type
+
+**Physical Space (Code-managed):**
+- List what must be in precise modules (calculations, DB queries)
+- Define the "dereference modules" — functions that fetch real data
+- Specify type contracts: Decimal, not float; validated, not raw
+
+### 3. Pointer Protocol
+For each data boundary:
+- Define the pointer token format (API endpoint, function name, query)
+- Define the dereference contract (input type → output type)
+- Define the error handling (what if pointer returns null/error?)
+- Define the validation layer (how to verify dereferenced data)
+
+### 4. Migration Plan
+Phase-by-phase refactoring:
+- Phase 1: Identify and isolate the highest-risk boundary
+- Phase 2: Build the dereference module for that boundary
+- Phase 3: Replace AI direct data handling with pointer calls
+- Phase 4: Add validation layer and monitoring
+- Phase 5: Repeat for remaining boundaries
+
+### 5. Example Pointer Table
+Provide a concrete table:
+
+| Pointer | Dereference Module | Input | Output | Risk Level |
+|---------|-------------------|-------|--------|------------|
+| ...     | ...               | ...   | ...    | ...        |
+
+Be architectural. Think in terms of memory management, not prompts.
+"""
+
+
+class PointerTool(Tool):
+    """语义指针架构 — 推理态/物理态分离，消除 AI 幻觉风险."""
+
+    @property
+    def name(self) -> str:
+        return "analysis_pointer"
+
+    @property
+    def description(self) -> str:
+        return (
+            "语义指针架构(SPA)：检测代码中 AI 直接处理精密数据"
+            "的幻觉风险点，设计推理态(AI逻辑)与物理态(精确计算)"
+            "分离方案，定义指针协议（API/DB引用）替代直接数据操作。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "要分析的文件或目录路径",
+                },
+                "context": {
+                    "type": "string",
+                    "description": "补充上下文（业务领域、精度要求等）",
+                    "default": "",
+                },
+            },
+            "required": ["target"],
+        }
+
+    async def execute(
+        self,
+        *,
+        target: str,
+        context: str = "",
+        **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("pointer", target)
+
+        files = _resolve_target(target)
+        if not files:
+            return f"无法解析目标: {target} (请提供文件或目录路径)"
+
+        source_text = _read_sources(files)
+        scan_evidence = _scan_pointer(files, source_text, target)
+
+        user_msg = (
+            f"## SPA 扫描证据\n{scan_evidence}\n\n"
+            f"## 源代码\n{source_text[:50000]}\n"
+        )
+        if context:
+            user_msg += f"\n## 补充上下文\n{context}\n"
+
+        return await _run_analysis(router, _POINTER_SYSTEM, user_msg)
+
+
+# ---------------------------------------------------------------------------
+#  内部基础设施
+# ---------------------------------------------------------------------------
+
+_global_router: Any = None
+
+
 def set_analysis_router(router: Any) -> None:
     """注入 ModelRouter 实例，供工具内部调用 LLM."""
     global _global_router
@@ -2596,4 +2876,5 @@ def create_analysis_tools() -> list[Tool]:
         MoERouteTool(),
         SpeculateTool(),
         JITTool(),
+        PointerTool(),
     ]
