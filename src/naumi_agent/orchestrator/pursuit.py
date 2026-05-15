@@ -655,18 +655,19 @@ class GoalPursuitLoop:
         self, tool: Any, description: str, action_id: str,
     ) -> dict[str, Any]:
         """Generate file content via LLM and write it."""
-        # Extract path from description
+        import os
         import re
         path_match = re.search(r'([\w/.]+\.py)', description)
         path = path_match.group(1) if path_match else ""
 
-        # Read existing content if file exists
+        # Read raw existing content if file exists
         existing = ""
         if path:
+            resolved = os.path.expanduser(path)
             try:
-                read_tool = self._tools.get("file_read")
-                if read_tool:
-                    existing = await read_tool.execute(path=path)
+                if os.path.isfile(resolved):
+                    with open(resolved, encoding="utf-8") as f:
+                        existing = f.read()
             except Exception:
                 pass
 
@@ -715,6 +716,7 @@ class GoalPursuitLoop:
         self, tool: Any, description: str, action_id: str,
     ) -> dict[str, Any]:
         """Generate old_text/new_text for file_edit via LLM."""
+        import os
         import re
         path_match = re.search(r'([\w/.]+\.py)', description)
         path = path_match.group(1) if path_match else ""
@@ -725,25 +727,34 @@ class GoalPursuitLoop:
                 "output": "Could not determine file path",
             }
 
-        # Read current content
+        # Read RAW file content (not formatted by file_read tool)
+        resolved = os.path.expanduser(path)
         existing = ""
         try:
-            read_tool = self._tools.get("file_read")
-            if read_tool:
-                existing = await read_tool.execute(path=path)
+            if os.path.isfile(resolved):
+                with open(resolved, encoding="utf-8") as f:
+                    existing = f.read()
         except Exception:
             pass
 
+        if not existing:
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": f"File {path} not found or empty",
+            }
+
         prompt = (
             f"Action: {description}\n\n"
-            f"## Current file content ({path})\n{existing}\n\n"
+            f"## Current file content ({path})\n```\n{existing}\n```\n\n"
             "Generate the edit. Output EXACTLY two blocks:\n"
-            "===OLD===\n<exact text to find>\n===NEW===\n<replacement text>\n"
-            "The OLD text must be an exact substring from the current file."
+            "===OLD===\n<exact text from the file above>\n===NEW===\n<replacement text>\n\n"
+            "IMPORTANT: The OLD text must be an EXACT verbatim substring "
+            "from the file content above. Copy it character-for-character."
         )
 
         response = await self._llm_call(
-            "You generate precise file edits. Output OLD and NEW blocks.",
+            "You generate precise file edits. Output OLD and NEW blocks exactly.",
             prompt,
         )
 
