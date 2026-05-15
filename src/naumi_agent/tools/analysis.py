@@ -6057,10 +6057,306 @@ class ZKPTool(Tool):
         return await _run_analysis(router, _ZKP_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /genesis — 系统自重构与热演化 (Meta-Programming & Self-Modification)
+# ===========================================================================
+
+# Hardcoded rigidity patterns — code that cannot adapt without recompilation
+_RIGIDITY_PATTERNS = [
+    (r"(?:MAGIC_NUMBER|HARD_CODED|FIXME|HACK)\s*[:=]",
+     "硬编码常量 (无法运行时调整)"),
+    (r"(?:MAX_RETRIES|TIMEOUT|BUFFER_SIZE|PORT)\s*=\s*\d+",
+     "编译时固定参数 (无配置化)"),
+    (r"if\s+\w+\s*(?:==|!=)\s*['\"]", "硬编码字符串比较"),
+    (r"import\s+\w+", "静态导入 (无动态加载)"),
+    (r"class\s+\w+\s*\([^)]*\):", "固定类继承 (无运行时混入)"),
+    (r"(?:api_key|secret|password|token)\s*=\s*['\"][^'\"]+['\"]",
+     "硬编码密钥 (安全+灵活性双杀)"),
+]
+
+# Hot-reload / meta-programming indicators (good for evolution)
+_EVOLUTION_PATTERNS = [
+    (r"(?:importlib|__import__|import_module)\s*\(",
+     "动态导入机制"),
+    (r"(?:getattr|setattr|delattr|hasattr)\s*\(",
+     "运行时属性操作"),
+    (r"(?:exec|eval|compile)\s*\(", "运行时代码执行"),
+    (r"(?:type|__class__|__bases__|__dict__)\s*[.=]",
+     "元类/类型操作"),
+    (r"(?:plugin|extension|addon|module)\s*_?(?:load|register)",
+     "插件/扩展加载机制"),
+    (r"(?:reload|hot.?reload|watch)\s*\(",
+     "热重载机制"),
+    (r"(?:config|setting)\s*\.\s*(?:get|load|from)",
+     "外部配置加载"),
+    (r"(?:@property|__slots__|__getattr__|__setattr__)",
+     "动态属性描述符"),
+    (r"(?:decorator|wrapper|factory)\s*",
+     "装饰器/工厂模式 (可组合)"),
+]
+
+# Self-reflection / introspection patterns
+_REFLECTION_PATTERNS = [
+    (r"(?:inspect|dis|ast|symtable)\s*\.", "代码内省模块"),
+    (r"(?:__name__|__file__|__doc__|__module__)\s*",
+     "自我元信息访问"),
+    (r"(?:sys\.modules|globals|locals)\s*\(",
+     "运行时命名空间访问"),
+    (r"(?:__init_subclass__|__set_name__|__class_getitem__)",
+     "类生命周期钩子"),
+    (r"(?:abstractmethod|Protocol|ABC)\s*",
+     "抽象接口定义 (可替换实现)"),
+]
+
+# Architecture flexibility patterns
+_FLEXIBILITY_PATTERNS = [
+    (r"(?:strategy|policy|adapter|bridge)\s*",
+     "设计模式 (可替换组件)"),
+    (r"(?:register|registry|factory)\s*[\[(]",
+     "注册表/工厂 (动态实例化)"),
+    (r"(?:config\.yaml|config\.json|\.env|toml)",
+     "外部配置文件引用"),
+    (r"(?:ABC|Protocol|interface)\s*",
+     "接口抽象层"),
+]
+
+
+def _scan_genesis(target: str) -> str:
+    """Scan codebase for self-evolution readiness — detect rigidity
+    patterns, meta-programming capabilities, reflection support, and
+    architecture flexibility."""
+    findings: list[str] = []
+    source = _read_sources(target)
+
+    if not source.strip():
+        return "⚠️ 未找到可分析的源代码。"
+
+    lines = source.split("\n")
+    total_lines = len(lines)
+
+    # --- 1. Rigidity Detection ---
+    findings.append("## 1. 刚性检测 (Code Rigidity)")
+    rigid_hits: dict[str, list[int]] = {}
+    for pattern, label in _RIGIDITY_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line):
+                rigid_hits.setdefault(label, []).append(i)
+
+    total_rigid = sum(len(v) for v in rigid_hits.values())
+    if rigid_hits:
+        findings.append(
+            f"- 检测到 **{total_rigid}** 处刚性代码，"
+            f"**{len(rigid_hits)}** 类 (需重新编译才能修改)："
+        )
+        for label, line_nos in sorted(
+            rigid_hits.items(), key=lambda x: -len(x[1])
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+        findings.append(
+            "- 💡 这些点应外化为配置/策略模式，支持运行时变更"
+        )
+    else:
+        findings.append("- ✅ 代码刚性较低，具备灵活调整空间")
+    findings.append("")
+
+    # --- 2. Meta-Programming Capability ---
+    findings.append("## 2. 元编程能力 (Meta-Programming)")
+    evo_hits: dict[str, list[int]] = {}
+    for pattern, label in _EVOLUTION_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line):
+                evo_hits.setdefault(label, []).append(i)
+
+    total_evo = sum(len(v) for v in evo_hits.values())
+    if evo_hits:
+        findings.append(
+            f"- 检测到 **{total_evo}** 处元编程机制，"
+            f"**{len(evo_hits)}** 类："
+        )
+        for label, line_nos in sorted(
+            evo_hits.items(), key=lambda x: -len(x[1])
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 无元编程能力 — 代码无法在运行时修改自身"
+        )
+    findings.append("")
+
+    # --- 3. Self-Reflection ---
+    findings.append("## 3. 自省能力 (Self-Reflection)")
+    reflect_hits: dict[str, list[int]] = {}
+    for pattern, label in _REFLECTION_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line):
+                reflect_hits.setdefault(label, []).append(i)
+
+    if reflect_hits:
+        total_reflect = sum(len(v) for v in reflect_hits.values())
+        findings.append(
+            f"- 检测到 **{total_reflect}** 处自省机制，"
+            f"**{len(reflect_hits)}** 类："
+        )
+        for label, line_nos in reflect_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 无自省能力 — 系统无法在运行时审视自身结构"
+        )
+    findings.append("")
+
+    # --- 4. Architecture Flexibility ---
+    findings.append("## 4. 架构灵活性 (Architecture Flexibility)")
+    flex_hits: dict[str, list[int]] = {}
+    for pattern, label in _FLEXIBILITY_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                flex_hits.setdefault(label, []).append(i)
+
+    if flex_hits:
+        total_flex = sum(len(v) for v in flex_hits.values())
+        findings.append(
+            f"- 检测到 **{total_flex}** 处灵活性模式，"
+            f"**{len(flex_hits)}** 类："
+        )
+        for label, line_nos in flex_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ⚠️ 架构偏向静态绑定，建议引入策略/注册/工厂模式"
+        )
+    findings.append("")
+
+    # --- 5. Self-Evolution Readiness Score ---
+    evo_score = min(total_evo / max(total_lines / 100, 1), 1.0)
+    reflect_score = min(len(reflect_hits) / 3.0, 1.0)
+    flex_score = min(len(flex_hits) / 3.0, 1.0)
+    rigid_penalty = min(total_rigid / max(total_lines / 50, 1), 0.5)
+
+    genesis_score = (
+        evo_score * 0.30
+        + reflect_score * 0.25
+        + flex_score * 0.25
+        - rigid_penalty
+        + 0.20
+    )
+    genesis_score = max(0.0, min(1.0, genesis_score))
+
+    findings.append("## 5. 自演化就绪度评分")
+    findings.append(f"- **综合评分: {genesis_score:.0%}**")
+    findings.append(f"- 元编程能力: {evo_score:.0%}")
+    findings.append(f"- 自省深度: {reflect_score:.0%}")
+    findings.append(f"- 架构灵活性: {flex_score:.0%}")
+    findings.append(f"- 刚性惩罚: -{rigid_penalty:.0%}")
+
+    if genesis_score >= 0.7:
+        findings.append(
+            "- ✅ 系统具备较强的自演化基础，可启动热进化实验"
+        )
+    elif genesis_score >= 0.4:
+        findings.append(
+            "- ⚠️ 部分具备演化条件，需先降低刚性、增加元编程能力"
+        )
+    else:
+        findings.append(
+            "- ❌ 系统高度刚性，需大幅重构才能支持自演化"
+        )
+
+    return "\n".join(findings)
+
+
+_GENESIS_SYSTEM = """\
+你是一位系统自演化架构师 (Genesis Architect)。
+你的任务是将静态的软件系统改造为具备"自重构与热演化"能力的
+硅基生命——代码本身不是资产，产生代码的"系统"才是资产。
+
+## 核心原理：从硬编码到元编程
+
+传统软件：写死逻辑 → 需求变更 → 人工改代码 → 重新编译部署
+自演化系统：定义规则 → 系统自行评估 → 自动修改自身 → 热加载生效
+
+## 三层演化架构
+
+### Layer 1: 配置外化 (Externalization)
+- 所有硬编码常量外化为配置文件 (YAML/JSON/.env)
+- 所有策略模式化为可插拔组件
+- 所有 if-else 分支改为策略注册表查找
+- 实现运行时配置热更新 (watch config file → reload)
+
+### Layer 2: 反射与自省 (Reflection & Introspection)
+- 系统在运行时能感知自身的模块结构、依赖关系、性能指标
+- 当发现某个模块成为瓶颈时，能自动定位到对应的源码位置
+- 实现插件注册表：新功能以插件形式动态加载，无需重启
+
+### Layer 3: 自重构与热演化 (Self-Modification)
+- 系统在沙盒中自动生成新代码（新算法/新策略/新模块）
+- 自动编译并运行测试套件验证新代码
+- 验证通过后热加载替换旧实现
+- 失败则自动回滚到上一个稳定版本
+
+## 关键设计模式
+
+1. **策略注册表模式**: 所有算法以名称注册，运行时按名查找
+2. **插件架构**: 核心只定义接口，具体实现通过插件加载
+3. **工厂 + 配置**: 对象创建由配置驱动，不硬编码 new
+4. **观察者 + 热重载**: 文件变更触发自动重载和重新注册
+5. **沙盒执行**: 新生成的代码在隔离环境中运行和验证
+
+## 输出格式
+
+1. **刚性热点清单** — 标注需要外化的硬编码常量和固定逻辑
+2. **元编程改造方案** — 每个模块如何从静态绑定变为动态加载
+3. **插件架构设计** — 核心接口 + 插件注册 + 动态加载机制
+4. **热演化流水线** — 代码生成 → 编译 → 测试 → 热加载 → 回滚
+5. **安全边界** — 防止自演化失控的熔断机制和版本回退
+6. **实施路线** — 从刚性系统到自演化系统的渐进改造计划
+"""
+
+
+class GenesisTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_genesis"
+
+    @property
+    def description(self) -> str:
+        return (
+            "系统自重构与热演化：扫描代码的刚性程度和元编程能力，"
+            "设计从'硬编码逻辑'到'能自动修改自身基因的硅基生命'的"
+            "改造方案——配置外化、反射自省、插件架构、热加载、"
+            "沙盒验证、自动回滚的完整演化流水线。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "要审计的代码路径或系统描述",
+                },
+            },
+            "required": ["target"],
+        }
+
+    async def execute(
+        self, *, target: str, **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("genesis", target[:200])
+        scan_evidence = _scan_genesis(target)
+        user_msg = (
+            f"## 审计目标\n{target}\n\n"
+            f"## 自演化扫描\n{scan_evidence}\n"
+        )
+        return await _run_analysis(router, _GENESIS_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
-#  内部基础设施
-# ---------------------------------------------------------------------------
 
 _global_router: Any = None
 
@@ -6130,4 +6426,5 @@ def create_analysis_tools() -> list[Tool]:
         ConsensusTool(),
         PIDTool(),
         ZKPTool(),
+        GenesisTool(),
     ]
