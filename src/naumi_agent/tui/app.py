@@ -717,6 +717,7 @@ class NaumiApp(App):
                     "- `/ooda <路径>` — OODA 战场指挥\n"
                     "- `/probe <需求>` — 黑盒探测\n"
                     "- `/hook <目标>` — 逆向插桩\n"
+                    "- `/vision <目标>` — AI 视觉数据提取\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -827,6 +828,11 @@ class NaumiApp(App):
                     status.status_text = "用法: /probe <功能需求描述>"
                 else:
                     self._run_analysis_mode("probe", arg)
+            case "/vision":
+                if not arg:
+                    status.status_text = "用法: /vision <数据提取目标描述>"
+                else:
+                    self._run_analysis_mode("vision", arg)
             case "/hook":
                 if not arg:
                     status.status_text = "用法: /hook <逆向目标描述>"
@@ -943,6 +949,7 @@ class NaumiApp(App):
             "ooda": "analysis_ooda",
             "probe": "analysis_probe",
             "hook": "analysis_hook",
+            "vision": "analysis_vision",
         }
         labels = {
             "chaos": "⚡ 灾难演练",
@@ -965,6 +972,7 @@ class NaumiApp(App):
             "ooda": "⚔️ OODA 战场指挥",
             "probe": "🔦 黑盒探测 (Probe)",
             "hook": "💉 逆向插桩 (Hook)",
+            "vision": "👁️ AI 视觉数据提取 (Vision)",
         }
 
         chat = self.query_one(ChatPanel)
@@ -1017,6 +1025,8 @@ class NaumiApp(App):
             elif mode == "probe":
                 result = await tool.execute(task=target)
             elif mode == "hook":
+                result = await tool.execute(task=target)
+            elif mode == "vision":
                 result = await tool.execute(task=target)
             else:
                 result = await tool.execute(target=target)

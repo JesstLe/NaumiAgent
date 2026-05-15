@@ -3932,6 +3932,221 @@ class HookTool(Tool):
         return await _run_analysis(router, _HOOK_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /vision — AI 视觉数据提取协议
+# ===========================================================================
+
+# Anti-scraping indicators
+_ANTI_SCRAPE_PATTERNS = [
+    (r"(?:验证码|captcha|滑块|slider|recaptcha|hCaptcha)", "人机验证"),
+    (r"(?:封.?IP|rate.?limit|429|too.?many|频率限制)", "IP/频率封锁"),
+    (r"(?:Cloudflare|WAF|DDoS.?protect|Akamai)", "CDN/WAF 防护"),
+    (r"(?:login|登录|cookie|session|token)", "登录墙"),
+    (r"(?:动态加载|lazy.?load|无限滚动|SPA)", "动态渲染"),
+    (r"(?:字体加密|CSS偏移|反爬|anti.?scrape|字体反爬)", "前端反爬"),
+    (r"(?:加密|encrypt|obfusc|混淆|解密)", "数据加密"),
+]
+
+# Data type detection
+_DATA_TYPES = {
+    "table": [
+        (r"(?:表格|table|报表|榜单|排名|list)", "表格数据"),
+        (r"(?:财报|income|balance|cashflow)", "财务报表"),
+    ],
+    "chart": [
+        (r"(?:K线|candlestick|图表|chart|走势|趋势)", "图表/走势"),
+        (r"(?:MACD|RSI|布林|均线|BOLL)", "技术指标图"),
+    ],
+    "text": [
+        (r"(?:新闻|公告|公告|文章|正文)", "文本内容"),
+        (r"(?:评论|comment|review|舆情)", "评论/舆情"),
+    ],
+    "number": [
+        (r"(?:价格|price|股价|市值|PE|EPS)", "数值型数据"),
+        (r"(?:成交量|volume|换手率|涨跌幅)", "交易数值"),
+    ],
+}
+
+
+def _scan_vision(task: str) -> str:
+    """vision 模式静态扫描：评估反爬虫难度和视觉提取可行性."""
+    findings: list[str] = []
+    task_lower = task.lower()
+
+    # 1. Detect anti-scraping measures
+    anti_scrape: list[str] = []
+    for pattern, label in _ANTI_SCRAPE_PATTERNS:
+        if re.search(pattern, task_lower, re.IGNORECASE):
+            anti_scrape.append(label)
+
+    if anti_scrape:
+        findings.append(
+            f"- 反爬虫措施: {len(anti_scrape)} 种"
+        )
+        for as_type in anti_scrape:
+            findings.append(f"  - {as_type}")
+        findings.append(
+            "  → 传统 HTTP/API 方案可行性: 低"
+        )
+    else:
+        findings.append("- 反爬虫措施: 未提及（传统方案可能可行）")
+
+    # 2. Detect data types to extract
+    data_types: list[str] = []
+    for dtype, patterns in _DATA_TYPES.items():
+        for pattern, label in patterns:
+            if re.search(pattern, task_lower, re.IGNORECASE):
+                data_types.append(f"{dtype}: {label}")
+                break
+
+    if data_types:
+        findings.append("- 需要提取的数据类型:")
+        for dt in data_types:
+            findings.append(f"  - {dt}")
+    else:
+        findings.append("- 数据类型: 需要进一步明确")
+
+    # 3. Recommend vision pipeline components
+    findings.append("- 推荐视觉管线:")
+    if any(t.startswith("table") for t in data_types):
+        findings.append("  - 表格检测: YOLO/LayoutLM → 单元格定位 → OCR")
+    if any(t.startswith("chart") for t in data_types):
+        findings.append("  - 图表解析: 截屏 → 颜色/形态检测 → 数值重建")
+    if any(t.startswith("text") for t in data_types):
+        findings.append("  - 文本提取: 截屏 → OCR (PaddleOCR/Tesseract)")
+    if any(t.startswith("number") for t in data_types):
+        findings.append("  - 数值精确提取: 区域裁剪 → OCR → 数字校验")
+    if not any(
+        t.startswith(x) for t in data_types for x in ("table", "chart", "text", "number")
+    ):
+        findings.append("  - 通用: 截屏 → 多模态LLM直接提取")
+
+    # 4. Vision feasibility score
+    vision_score = len(anti_scrape) * 15 + len(data_types) * 10
+    level = (
+        "IDEAL" if vision_score > 40
+        else "GOOD" if vision_score > 20
+        else "VIABLE" if vision_score > 10
+        else "OVERKILL"
+    )
+    findings.append(f"- 视觉方案适合度: {vision_score} ({level})")
+    if level in ("IDEAL", "GOOD"):
+        findings.append(
+            "  → 强烈推荐视觉方案：反爬虫严重，传统方法不可行"
+        )
+    elif level == "OVERKILL":
+        findings.append(
+            "  → 传统 API/HTTP 方案可能更优，视觉方案作为备选"
+        )
+
+    return "\n".join(findings)
+
+
+_VISION_SYSTEM = """\
+You are an AI Vision Data Extraction architect designing screen-based \
+data pipelines that bypass anti-scraping protections by "observing" \
+data like a human would.
+
+## Core Principle
+When APIs are blocked, rate-limited, or encrypted, switch from \
+"requesting data" to "looking at data." The screen is the universal \
+API — every system eventually renders data visually.
+
+## The Vision Pipeline
+
+### Stage 1: Capture
+Design the screen capture strategy:
+- Full page vs region-of-interest (ROI) cropping
+- Capture frequency (real-time vs periodic)
+- Headless browser (Playwright/Puppeteer) vs physical display
+- Screenshot coordination with page load timing
+
+### Stage 2: Detect
+Identify where the data lives on screen:
+- Layout analysis (table boundaries, chart regions, text blocks)
+- Use YOLO/LayoutLM for structured layout detection
+- Use color/edge detection for chart element isolation
+- Template matching for recurring UI elements
+
+### Stage 3: Extract
+Pull structured data from detected regions:
+- OCR for text/numbers (PaddleOCR, Tesseract, EasyOCR)
+- Chart axis reading + interpolation for chart data
+- Table cell segmentation + row/column alignment
+- Multi-modal LLM as fallback for complex layouts
+
+### Stage 4: Validate & Structure
+Ensure extracted data is correct:
+- Cross-validation (do numbers sum correctly? do dates align?)
+- Type casting (string → float, date parsing)
+- Delta checking (does this match known previous values?)
+- Confidence scoring (how certain is the extraction?)
+
+### Stage 5: Output
+Format the final structured data:
+- JSON/CSV with consistent schema
+- Timestamp and source metadata
+- Diff against previous extraction for change detection
+
+## Architecture Comparison
+
+| Approach | Speed | Accuracy | Anti-Scrape Resilience | Cost |
+|----------|-------|----------|----------------------|------|
+| HTTP/API | Fast | High | None | Low |
+| Browser Automation | Medium | High | Low | Medium |
+| AI Vision | Slow | Medium-High | High | High |
+
+## Output Format
+1. Anti-scrape assessment
+2. Vision pipeline design (5 stages with code examples)
+3. Accuracy optimization strategies
+4. Fallback mechanisms
+5. Cost/speed trade-off analysis
+6. Comparison with alternative approaches
+"""
+
+
+class VisionTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_vision"
+
+    @property
+    def description(self) -> str:
+        return (
+            "AI 视觉数据提取：当传统 API/HTTP 被反爬虫封锁时，"
+            "设计\"像人一样看屏幕\"的视觉管线——"
+            "截屏→检测→OCR→结构化，绕过软件层限制。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "要提取的数据来源和目标描述",
+                },
+            },
+            "required": ["task"],
+        }
+
+    async def execute(
+        self, *, task: str, **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("vision", task[:200])
+        scan_evidence = _scan_vision(task)
+        user_msg = (
+            f"## 数据提取需求\n{task}\n\n"
+            f"## 视觉方案扫描\n{scan_evidence}\n"
+        )
+        return await _run_analysis(router, _VISION_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
 # ---------------------------------------------------------------------------
@@ -3997,4 +4212,5 @@ def create_analysis_tools() -> list[Tool]:
         OODATool(),
         ProbeTool(),
         HookTool(),
+        VisionTool(),
     ]
