@@ -437,6 +437,16 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             else:
                 await _run_analysis(engine, "supervisor", arg)
+        case "/autopsy":
+            if not arg:
+                console.print(
+                    "[yellow]用法: /autopsy <代码路径或 Bug 描述>[/yellow]"
+                )
+                console.print(
+                    "[dim]例: /autopsy src/naumi_agent/engine.py[/dim]"
+                )
+            else:
+                await _run_analysis(engine, "autopsy", arg)
         case "/hook":
             if not arg:
                 console.print("[yellow]用法: /hook <逆向目标描述>[/yellow]")
@@ -502,6 +512,7 @@ def _print_help() -> None:
         ("/cosmos <目标>", "创世引擎审计 — 评估创世潜力"),
         ("/watchdog <目标>", "看门狗 — 不死鸟灾难恢复协议"),
         ("/supervisor <目标>", "守护者树 — Let-it-crash 双子星架构"),
+        ("/autopsy <目标>", "执行迹切片 — SWE-bench 级 Bug 解剖"),
         ("/vision <目标>", "AI 视觉数据提取 — 反封锁视觉管线"),
         ("/hook <目标>", "逆向插桩 — 黑盒解剖"),
         ("/clear", "清除当前会话"),
@@ -547,6 +558,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "cosmos": "analysis_cosmos",
         "watchdog": "analysis_watchdog",
         "supervisor": "analysis_supervisor",
+        "autopsy": "analysis_autopsy",
     }
 
     labels = {
@@ -582,6 +594,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "cosmos": "创世引擎审计 (Cosmos)",
         "watchdog": "看门狗与灾难隔离 (Watchdog)",
         "supervisor": "Erlang 守护者树 (Supervisor)",
+        "autopsy": "执行迹切片与爆炸半径隔离 (DTS-CHE)",
     }
 
     tool_name = tool_names[mode]
@@ -652,6 +665,8 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         elif mode == "watchdog":
             result = await tool.execute(target=target)
         elif mode == "supervisor":
+            result = await tool.execute(target=target)
+        elif mode == "autopsy":
             result = await tool.execute(target=target)
         else:
             result = await tool.execute(target=target)

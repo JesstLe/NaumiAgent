@@ -7632,8 +7632,361 @@ class SupervisorTool(Tool):
         return await _run_analysis(router, _SUPERVISOR_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /autopsy — 执行迹切片与爆炸半径隔离 (DTS-CHE)
+# ===========================================================================
+
+# Blind code reading patterns — RAG/grep overuse without trace context
+_BLIND_READ_PATTERNS = [
+    (r"(?:grep|rg|ag|find)\s+[^|]+\s*\|\s*\w+",
+     "管道式盲目搜索 (信息过载风险)"),
+    (r"(?:read_file|open)\s*\([^)]*(?:\*|\.\*)\s*",
+     "通配符批量读取 (上下文爆炸)"),
+    (r"(?:search|query|retrieve)\s*\([^)]*\).*top_k\s*=\s*\d{2,}",
+     "大范围 RAG 检索 (k>10，噪声过高)"),
+    (r"for\s+\w+\s+in\s+(?:glob|os\.walk)",
+     "遍历式文件扫描 (效率极低)"),
+]
+
+# Execution trace infrastructure patterns (good — runtime evidence)
+_TRACE_PATTERNS = [
+    (r"(?:sys\.settrace|sys\.setprofile|trace)\s*\(",
+     "Python 调用追踪"),
+    (r"(?:cProfile|profile|line_profiler)\s*",
+     "性能剖析工具"),
+    (r"(?:pdb|ipdb|breakpoint|debugger)\s*",
+     "交互式调试器"),
+    (r"(?:strace|ltrace|dtrace|perf)\s*",
+     "系统级调用追踪"),
+    (r"(?:logging|logger)\.\w+\s*\([^)]*(?:trace|debug|verbose)",
+     "详细日志追踪"),
+    (r"(?:pytest|--tb|traceback|stack.?trace)\s*",
+     "测试堆栈追踪"),
+    (r"(?:coverage|branch)\s*",
+     "覆盖率追踪"),
+]
+
+# Single-hypothesis debugging patterns (bad — fix without verification)
+_SINGLE_HYPOTHESIS_PATTERNS = [
+    (r"(?:fix|patch|hotfix)\s*\([^)]*\)\s*:\s*\n\s*(?:self\.\w+)\s*=\s*",
+     "直接赋值修复 (无假设验证)"),
+    (r"#\s*fix\s*:\s*\w+\s*",
+     "注释式修复标记 (未经证伪)"),
+    (r"return\s+(?:True|False|None|0)\s*#\s*(?:fix|workaround)",
+     "返回值绕过 (非真正修复)"),
+]
+
+# Multi-hypothesis verification patterns (good — scientific method)
+_HYPOTHESIS_PATTERNS = [
+    (r"(?:hypothesis|assume|conjecture|guess)\s*[:=]",
+     "假设定义"),
+    (r"(?:assert|verify|check|confirm)\s*\([^)]*(?:hypothesis|assume)",
+     "假设验证断言"),
+    (r"(?:probe|inject|instrument)\s*\(",
+     "探测脚本注入"),
+    (r"(?:control|variable|experiment)\s*",
+     "控制变量实验"),
+    (r"(?:reproduce|minimal|repro)\s*",
+     "最小复现脚本"),
+    (r"(?:bisect|binary.?search|narrow)\s*",
+     "二分定位法"),
+]
+
+# Blast-radius / impact analysis patterns (good — prevent regression)
+_BLAST_RADIUS_PATTERNS = [
+    (r"(?:caller|callee|dependency|dependents)\s*",
+     "调用者/依赖者分析"),
+    (r"(?:ast|parse|syntax.?tree)\s*",
+     "AST 解析"),
+    (r"(?:refactor|impact|risk|radius)\s*",
+     "影响范围评估"),
+    (r"(?:backward.?compat|breaking.?change|migration)\s*",
+     "向后兼容性检查"),
+    (r"(?:grep|find)\s+[^)]*(?:caller|usage|import|reference)",
+     "引用搜索 (爆炸半径计算)"),
+    (r"(?:test|spec).*(?:run|execute|suite)\s*",
+     "回归测试执行"),
+]
+
+
+def _scan_autopsy(target: str) -> str:
+    """Scan system for DTS-CHE readiness — blind reading risks, trace
+    infrastructure, hypothesis verification, and blast-radius containment."""
+    findings: list[str] = []
+    source = _read_sources(target)
+
+    if not source.strip():
+        return "⚠️ 未找到可分析的源代码。"
+
+    lines = source.split("\n")
+
+    # --- 1. Blind Reading Risk ---
+    findings.append("## 1. 盲目读取风险 (Blind Code Reading)")
+    blind_hits: list[tuple[str, int]] = []
+    for pattern, desc in _BLIND_READ_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line):
+                blind_hits.append((desc, i))
+
+    if blind_hits:
+        findings.append(
+            f"- ⚠️ 发现 **{len(blind_hits)}** 处盲目读取模式 — "
+            f"上下文可能被无关代码撑爆："
+        )
+        for desc, line_no in blind_hits[:6]:
+            findings.append(f"  - L{line_no}: {desc}")
+        findings.append(
+            "- 💡 应改为: 只读取执行迹涉及的关键函数，压缩 99% 无效信息"
+        )
+    else:
+        findings.append("- ✅ 代码读取模式较为精准")
+    findings.append("")
+
+    # --- 2. Execution Trace Infrastructure ---
+    findings.append("## 2. 执行迹基础设施 (Trace Infrastructure)")
+    trace_hits: dict[str, list[int]] = {}
+    for pattern, label in _TRACE_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                trace_hits.setdefault(label, []).append(i)
+
+    if trace_hits:
+        total_trace = sum(len(v) for v in trace_hits.values())
+        findings.append(
+            f"- 检测到 **{total_trace}** 处执行迹工具，"
+            f"**{len(trace_hits)}** 类："
+        )
+        for label, line_nos in sorted(
+            trace_hits.items(), key=lambda x: -len(x[1])
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 无执行迹工具 — 无法获取'死亡瞬间的解剖图'"
+        )
+    findings.append("")
+
+    # --- 3. Hypothesis Verification ---
+    findings.append(
+        "## 3. 假设验证能力 (Hypothesis Verification)"
+    )
+    hyp_hits: dict[str, list[int]] = {}
+    for pattern, label in _HYPOTHESIS_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                hyp_hits.setdefault(label, []).append(i)
+
+    single_hits: list[tuple[str, int]] = []
+    for pattern, desc in _SINGLE_HYPOTHESIS_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                single_hits.append((desc, i))
+
+    if hyp_hits:
+        total_hyp = sum(len(v) for v in hyp_hits.values())
+        findings.append(
+            f"- 检测到 **{total_hyp}** 处科学验证机制，"
+            f"**{len(hyp_hits)}** 类："
+        )
+        for label, line_nos in hyp_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 无假设验证机制 — Bug 修复可能基于幻觉"
+        )
+
+    if single_hits:
+        findings.append(
+            f"- ⚠️ 发现 **{len(single_hits)}** 处单假设直接修复 "
+            f"— 未经证伪，可能改错地方"
+        )
+    findings.append("")
+
+    # --- 4. Blast-Radius Containment ---
+    findings.append(
+        "## 4. 爆炸半径隔离 (Blast-Radius Containment)"
+    )
+    blast_hits: dict[str, list[int]] = {}
+    for pattern, label in _BLAST_RADIUS_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                blast_hits.setdefault(label, []).append(i)
+
+    if blast_hits:
+        total_blast = sum(len(v) for v in blast_hits.values())
+        findings.append(
+            f"- 检测到 **{total_blast}** 处爆炸半径控制机制，"
+            f"**{len(blast_hits)}** 类："
+        )
+        for label, line_nos in blast_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 无爆炸半径控制 — 修复可能引发连锁崩溃"
+        )
+    findings.append("")
+
+    # --- 5. DTS-CHE Readiness Score ---
+    trace_score = min(len(trace_hits) / 4.0, 1.0)
+    hyp_score = min(len(hyp_hits) / 3.0, 1.0)
+    blast_score = min(len(blast_hits) / 4.0, 1.0)
+    blind_penalty = min(len(blind_hits) * 0.1, 0.3)
+    single_penalty = min(len(single_hits) * 0.1, 0.3)
+
+    dts_score = (
+        trace_score * 0.35
+        + hyp_score * 0.30
+        + blast_score * 0.25
+        - blind_penalty
+        - single_penalty
+        + 0.10
+    )
+    dts_score = max(0.0, min(1.0, dts_score))
+
+    findings.append("## 5. DTS-CHE 就绪度评分")
+    findings.append(f"- **综合评分: {dts_score:.0%}**")
+    findings.append(f"- 执行迹能力: {trace_score:.0%}")
+    findings.append(f"- 假设验证能力: {hyp_score:.0%}")
+    findings.append(f"- 爆炸半径控制: {blast_score:.0%}")
+    findings.append(f"- 盲目读取惩罚: -{blind_penalty:.0%}")
+    findings.append(f"- 单假设惩罚: -{single_penalty:.0%}")
+
+    if dts_score >= 0.7:
+        findings.append(
+            "- ✅ 系统具备 DTS-CHE 架构，可高效定位复杂 Bug"
+        )
+    elif dts_score >= 0.4:
+        findings.append(
+            "- ⚠️ 部分具备定位能力，需补强执行迹和假设验证"
+        )
+    else:
+        findings.append(
+            "- ❌ Bug 定位方式原始，建议引入 DTS-CHE 三刀锋架构"
+        )
+
+    return "\n".join(findings)
+
+
+_AUTOPSY_SYSTEM = """\
+你是一位动态执行迹架构师 (Dynamic Trace Slicing Architect)。
+你的任务是设计 DTS-CHE 架构——通过"法医解剖"而非"大海捞针"
+来定位和修复 Bug，将 SWE-bench 级复杂度的 Bug 解决效率提升
+一个数量级。
+
+## 核心哲学
+
+死人不撒谎。只有运行时的内存和调用栈才是唯一真实的。
+绝对不让 AI 读静态源代码，只让 AI 看程序"死亡瞬间的解剖图"。
+
+## 三把物理刀锋
+
+### 刀锋一：动态调用栈切片 (法医解剖)
+代码是三维的，但执行流是一维的。
+
+**流程：**
+1. 不给 AI 看整个项目。用 sys.settrace / eBPF / DTrace
+   强行运行引发 Bug 的测试用例
+2. 记录从启动到崩溃的精确"函数调用路径"和"变量变化图"
+3. 只把沾血的执行迹喂给 AI:
+   "Bug 绝对发生在 15 个函数的依次调用中，第 14 步时
+   指针 p 突然变成了 Null"
+4. 压缩 99.9% 无效信息，算力全部倾注在案发现场
+
+### 刀锋二：平行假设与反事实编译 (物理学家模式)
+看完解剖图后，强制 AI 不准写修复代码。
+
+**流程：**
+1. 提出 3 个互斥独立假设:
+   A. 数组越界  B. 多线程锁未同步  C. 上游 API 传脏数据
+2. 针对每个假设写极小的"探测脚本 (Probe)"注入内存
+3. 只有当探测脚本返回"假设 B 成立，其他不成立"时
+   才允许 AI 真正动手改那一行代码
+4. 彻底杀死 AI 幻觉——只相信物理证据
+
+### 刀锋三：AST 爆炸半径隔离 (外科医生模式)
+AI 提 PR 前，引入编译原理级别的静态分析。
+
+**流程：**
+1. 用 AST 解析器计算修改函数的"爆炸半径"
+2. "你修改了 calculate_tax()，系统里 147 个地方调用了它。
+   你必须证明修改不会让这 147 个地方崩溃。"
+3. 如果证明不了，强制退回，要求向后兼容改法
+   (重载函数而非修改原函数)
+4. 自动运行回归测试验证爆炸半径内的所有调用者
+
+## DTS-CHE 工作流
+
+```
+Issue 描述
+  → 复现脚本
+  → 动态追踪 (sys.settrace/eBPF)
+  → 调用栈切片 (压缩到关键路径)
+  → 3 个互斥假设
+  → 探测脚本注入验证
+  → 证伪 2 个，确认 1 个
+  → 精准修复 (只改 1 行)
+  → AST 爆炸半径计算
+  → 回归测试 (覆盖所有调用者)
+  → 提交 PR
+```
+
+## 输出格式
+
+1. **执行迹切片方案** — 用什么工具追踪，追踪哪些维度
+2. **调用栈压缩报告** — 从 N 个函数压缩到关键路径
+3. **三个互斥假设** — 基于执行迹提出的候选根因
+4. **探测脚本设计** — 每个假设的注入验证代码
+5. **精准修复方案** — 只改动必要的最小代码
+6. **爆炸半径报告** — 修改影响的所有调用者及验证策略
+"""
+
+
+class AutopsyTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_autopsy"
+
+    @property
+    def description(self) -> str:
+        return (
+            "执行迹切片与爆炸半径隔离 (DTS-CHE)：法医解剖式 Bug 定位——"
+            "不看静态代码，只看'死亡瞬间的调用栈切片'；"
+            "强制 3 个互斥假设 + 探测脚本证伪；"
+            "AST 爆炸半径隔离确保修复不引发连锁崩溃。"
+            "SWE-bench 级复杂度 Bug 的终极定位武器。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "要分析的代码路径、Bug 描述或错误日志",
+                },
+            },
+            "required": ["target"],
+        }
+
+    async def execute(
+        self, *, target: str, **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("autopsy", target[:200])
+        scan_evidence = _scan_autopsy(target)
+        user_msg = (
+            f"## Bug 解剖目标\n{target}\n\n"
+            f"## DTS-CHE 扫描\n{scan_evidence}\n"
+        )
+        return await _run_analysis(router, _AUTOPSY_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
+
 
 
 _global_router: Any = None
@@ -7709,4 +8062,5 @@ def create_analysis_tools() -> list[Tool]:
         CosmosTool(),
         WatchdogTool(),
         SupervisorTool(),
+        AutopsyTool(),
     ]

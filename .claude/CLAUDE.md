@@ -128,6 +128,7 @@ src/naumi_agent/
 | `/cosmos <目标>` | 创世引擎审计 — 状态维度·生成能力·社会模拟 | ✅ |
 | `/watchdog <目标>` | 看门狗与灾难隔离 — 心跳·回滚·蓝绿部署 | ✅ |
 | `/supervisor <目标>` | Erlang 守护者树 — Let-it-crash 双子星架构 | ✅ |
+| `/autopsy <目标>` | 执行迹切片与爆炸半径隔离 (DTS-CHE) | ✅ |
 | `/history` | 历史会话列表 | ✅ |
 | `/load <id>` | 加载历史会话 | ✅ |
 | `/delete <id>` | 删除指定会话 | ✅ |
