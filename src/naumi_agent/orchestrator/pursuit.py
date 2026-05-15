@@ -337,8 +337,20 @@ class GoalPursuitLoop:
                 status = GoalStatus.STUCK
                 break
 
+            # Store plan in checkpoint
+            checkpoint.actions_planned = [
+                f"{a['id']}: {a['description']}" for a in actions
+            ]
+
             # Phase 3: Execute actions
-            await self._execute_actions(spec, actions)
+            results = await self._execute_actions(spec, actions)
+
+            # Store results for next iteration's evidence
+            checkpoint.actions_taken = [
+                f"[{r.get('status', '?')}] {r.get('action_id', '?')}: "
+                f"{str(r.get('output', ''))[:200]}"
+                for r in results
+            ]
 
             # Phase 4: Verify (if interval matches)
             if iteration % self._config.verify_interval == 0:
@@ -556,6 +568,8 @@ class GoalPursuitLoop:
         """Execute planned actions using real tool calls."""
         results: list[dict[str, Any]] = []
 
+        bash_tool = self._tools.get("bash_run")
+
         for action in actions:
             if self._cancelled:
                 break
@@ -566,20 +580,20 @@ class GoalPursuitLoop:
 
             logger.info("Executing action %s: %s", action_id, description)
 
-            # Strategy 1: If tool exists, translate action into correct args
+            # Strategy 1: bash_run as universal executor (most reliable)
+            if bash_tool:
+                result = await self._execute_via_bash(
+                    bash_tool, description, action_id,
+                )
+                if result["status"] == "completed":
+                    results.append(result)
+                    continue
+
+            # Strategy 2: Try direct tool call with LLM parameter translation
             tool = self._tools.get(tool_name)
             if tool:
                 result = await self._execute_tool_action(
                     tool, tool_name, description, action_id,
-                )
-                results.append(result)
-                continue
-
-            # Strategy 2: Try bash_run as universal executor
-            bash_tool = self._tools.get("bash_run")
-            if bash_tool:
-                result = await self._execute_via_bash(
-                    bash_tool, description, action_id,
                 )
                 results.append(result)
                 continue
@@ -656,11 +670,17 @@ class GoalPursuitLoop:
         action_id: str,
     ) -> dict[str, Any]:
         """Execute an action by asking LLM to generate a bash command."""
+        # Gather codebase context for accurate command generation
+        context = self._build_codebase_context()
+
         command_prompt = (
             f"Given this action: \"{description}\"\n\n"
-            f"Generate a single bash command that accomplishes it. "
-            f"Output ONLY the command, no explanation. "
-            f"Use python3 not python."
+            f"## Codebase Context\n{context}\n\n"
+            f"Generate a single bash command that accomplishes it. Rules:\n"
+            f"- Use heredoc (cat <<'EOF' > file.py ... EOF) for writing files\n"
+            f"- Use python3 not python\n"
+            f"- For sed edits, use: sed -i '' 's/old/new/' file\n"
+            f"- Output ONLY the command, no explanation, no markdown fences\n"
         )
 
         try:
@@ -676,9 +696,12 @@ class GoalPursuitLoop:
             command = command.strip()
 
             output = await bash_tool.execute(command=command)
+            status = "completed"
+            if "[exit code:" in str(output) and "0" not in str(output).split("[exit code:")[-1][:3]:
+                status = "error"
             return {
                 "action_id": action_id,
-                "status": "completed",
+                "status": status,
                 "output": str(output)[:3000],
             }
         except Exception as e:
@@ -850,15 +873,33 @@ class GoalPursuitLoop:
                 except Exception:
                     pass
 
+            # Include Tool base class and existing tool pattern
             try:
-                # List relevant files
-                ls_result = await bash_tool.execute(
-                    command="find . -name '*.py' -newer . -not -path './.*' "
-                    "-not -path './__pycache__/*' | head -30",
+                base_result = await bash_tool.execute(
+                    command="cat src/naumi_agent/tools/base.py | head -90",
                 )
-                evidence_parts.append(f"最近修改的文件:\n{ls_result}")
+                evidence_parts.append(f"Tool 基类源码:\n{base_result}")
             except Exception:
                 pass
+
+            try:
+                sample_result = await bash_tool.execute(
+                    command="cat src/naumi_agent/tools/builtin.py | head -60",
+                )
+                evidence_parts.append(f"已有工具模式(builtin.py):\n{sample_result}")
+            except Exception:
+                pass
+
+            # Read files mentioned in the goal
+            for path in self._extract_file_paths(spec.original_goal):
+                try:
+                    file_result = await bash_tool.execute(
+                        command=f"cat {path} 2>/dev/null | head -50",
+                    )
+                    if file_result and "No such file" not in file_result:
+                        evidence_parts.append(f"文件 {path}:\n{file_result}")
+                except Exception:
+                    pass
 
             try:
                 test_result = await bash_tool.execute(
@@ -885,6 +926,54 @@ class GoalPursuitLoop:
                 )
 
         return "\n\n".join(evidence_parts) if evidence_parts else "暂无状态证据"
+
+    @staticmethod
+    def _extract_file_paths(text: str) -> list[str]:
+        """Extract file paths mentioned in text (e.g. src/foo/bar.py)."""
+        import re
+        return list(set(re.findall(r'(?:src/[\w/]+\.py|[\w/]+\.py)', text)))
+
+    def _build_codebase_context(self) -> str:
+        """Build a concise context string with key codebase interfaces."""
+        parts: list[str] = []
+
+        # Tool base class signature (from source we know)
+        parts.append(
+            "Tool base class (src/naumi_agent/tools/base.py):\n"
+            "  class Tool(ABC):\n"
+            "      @property name -> str (abstract)\n"
+            "      @property description -> str (abstract)\n"
+            "      @property parameters_schema -> dict (abstract)\n"
+            "      async def execute(self, **kwargs) -> str (abstract)\n"
+        )
+
+        # Existing tool pattern
+        parts.append(
+            "Existing tool pattern (from builtin.py):\n"
+            "  class BashRunTool(Tool):\n"
+            "      @property def name -> 'bash_run'\n"
+            "      @property def description -> str\n"
+            "      @property def parameters_schema -> dict\n"
+            "      async def execute(self, *, command, timeout=30, ...) -> str\n"
+        )
+
+        # Registration pattern
+        parts.append(
+            "Registration in create_builtin_tools():\n"
+            "  return [FileReadTool(), FileWriteTool(), FileEditTool(), BashRunTool()]\n"
+        )
+
+        # Project structure
+        parts.append(
+            "Project structure:\n"
+            "  src/naumi_agent/tools/base.py    — Tool base class + ToolRegistry\n"
+            "  src/naumi_agent/tools/builtin.py  — Built-in tools + create_builtin_tools()\n"
+            "  src/naumi_agent/tools/pursuit.py  — PursueTool\n"
+            "  src/naumi_agent/main.py           — CLI entry, slash commands in _handle_command()\n"
+            "  src/naumi_agent/tui/app.py        — TUI, slash commands in _handle_command()\n"
+        )
+
+        return "\n".join(parts)
 
     async def _llm_call(
         self, system_prompt: str, user_msg: str,

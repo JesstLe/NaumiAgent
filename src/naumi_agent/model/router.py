@@ -206,10 +206,13 @@ class ModelRouter:
         response = await litellm.acompletion(**kwargs)
 
         choice = response.choices[0]
-        content = choice.message.content or ""
+        raw_content = choice.message.content or ""
         tool_calls = self._extract_tool_calls(choice.message.tool_calls)
         usage = self._build_usage(response.usage, resolved)
         reasoning = getattr(choice.message, "reasoning_content", None) or ""
+
+        # kimi-for-coding puts actual output in reasoning_content with empty content
+        content = raw_content if raw_content else reasoning
 
         return ModelResponse(
             content=content,
