@@ -719,6 +719,7 @@ class NaumiApp(App):
                     "- `/hook <目标>` — 逆向插桩\n"
                     "- `/vision <目标>` — AI 视觉数据提取\n"
                     "- `/spar <目标>` — 对抗自博弈 (GAN for Code)\n"
+                    "- `/world <目标>` — 世界模型审计\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -839,6 +840,11 @@ class NaumiApp(App):
                     status.status_text = "用法: /spar <目标代码路径或功能描述>"
                 else:
                     self._run_analysis_mode("spar", arg)
+            case "/world":
+                if not arg:
+                    status.status_text = "用法: /world <代码路径或系统描述>"
+                else:
+                    self._run_analysis_mode("world", arg)
             case "/hook":
                 if not arg:
                     status.status_text = "用法: /hook <逆向目标描述>"
@@ -957,6 +963,7 @@ class NaumiApp(App):
             "hook": "analysis_hook",
             "vision": "analysis_vision",
             "spar": "analysis_spar",
+            "world": "analysis_world",
         }
         labels = {
             "chaos": "⚡ 灾难演练",
@@ -981,6 +988,7 @@ class NaumiApp(App):
             "hook": "💉 逆向插桩 (Hook)",
             "vision": "👁️ AI 视觉数据提取 (Vision)",
             "spar": "⚔️ 对抗性自博弈 (GAN for Code)",
+            "world": "🌍 世界模型审计 (World Model)",
         }
 
         chat = self.query_one(ChatPanel)
@@ -1038,6 +1046,8 @@ class NaumiApp(App):
                 result = await tool.execute(task=target)
             elif mode == "spar":
                 result = await tool.execute(task=target)
+            elif mode == "world":
+                result = await tool.execute(target=target)
             else:
                 result = await tool.execute(target=target)
             chat.mount(Markdown(result, classes="agent-msg"))
