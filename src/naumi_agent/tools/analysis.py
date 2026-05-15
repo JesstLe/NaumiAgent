@@ -2084,8 +2084,24 @@ class MoERouteTool(Tool):
         scan_evidence: str,
         source_text: str,
     ) -> str:
-        """Use SubAgentManager + DynamicAgentFactory to spawn expert agents."""
+        """Use SubAgentManager + Factory + MessageBus for multi-agent MoE."""
+        from naumi_agent.agents.message_bus import AgentMessage
         from naumi_agent.orchestrator.subagent_manager import SubTask
+
+        # Reset bus for clean session
+        await manager.message_bus.reset()
+
+        # Write initial context to blackboard for all agents to read
+        await manager.message_bus.blackboard_set(
+            "task", task, author="orchestrator",
+        )
+        await manager.message_bus.blackboard_set(
+            "scan_evidence", scan_evidence, author="orchestrator",
+        )
+        if source_text:
+            await manager.message_bus.blackboard_set(
+                "source_summary", source_text[:4000], author="orchestrator",
+            )
 
         # Phase 1: Use LLM to plan expert panel
         planning_prompt = (
@@ -2154,29 +2170,62 @@ class MoERouteTool(Tool):
         # Phase 3: Execute experts in parallel
         results = await manager.execute_parallel(subtasks)
 
-        # Phase 4: Collect expert analyses
+        # Phase 4: Write results to blackboard + collect reports
         expert_reports: list[str] = []
         for st, result in zip(subtasks, results):
             agent_name = st.agent_name or "unknown"
             if result.status == "completed" and result.response:
-                expert_reports.append(f"### {agent_name}\n{result.response}")
+                expert_reports.append(
+                    f"### {agent_name}\n{result.response}"
+                )
+                # Share findings on blackboard
+                await manager.message_bus.blackboard_set(
+                    f"expert_{agent_name}",
+                    result.response[:2000],
+                    author=agent_name,
+                )
+                # Broadcast completion
+                await manager.message_bus.publish(AgentMessage(
+                    sender=agent_name,
+                    topic="moe.expert.completed",
+                    content=result.response[:500],
+                    metadata={"domain": st.description[:100]},
+                ))
             else:
                 expert_reports.append(
                     f"### {agent_name}\n"
                     f"⚠️ 分析未完成: {result.error or '未知错误'}"
                 )
 
-        # Phase 5: Synthesize via LLM
+        # Phase 5: Synthesize — include blackboard state
+        bb_state = await manager.message_bus.blackboard_get_all()
+        bb_summary = ""
+        if bb_state:
+            bb_lines = ["### 共享状态摘要"]
+            for k, entry in bb_state.items():
+                if k.startswith("expert_"):
+                    bb_lines.append(
+                        f"- **{k}** (v{entry.version}): "
+                        f"{str(entry.value)[:100]}..."
+                    )
+            bb_summary = "\n".join(bb_lines)
+
         synthesis_msg = f"## 原始任务\n{task}\n\n"
         synthesis_msg += f"## 静态扫描\n{scan_evidence}\n\n"
         synthesis_msg += "## 各专家独立分析\n\n"
         synthesis_msg += "\n\n---\n\n".join(expert_reports)
+        if bb_summary:
+            synthesis_msg += f"\n\n---\n\n{bb_summary}"
 
         synthesis = await _run_analysis(router, _ROUTE_SYSTEM, synthesis_msg)
 
         # Phase 6: Cleanup
         for name in spawned_names:
             manager.destroy(name)
+        await manager.message_bus.reset()
+
+        # Bus stats for report
+        bus_stats = manager.message_bus.stats()
 
         total_tok = sum(
             r.total_tokens for r in results if hasattr(r, "total_tokens")
@@ -2189,7 +2238,9 @@ class MoERouteTool(Tool):
             f"**任务**: {task[:200]}\n"
             f"**专家组**: {len(spawned_names)} 位专家并行分析\n"
             f"**总 Token 消耗**: {total_tok}\n"
-            f"**总成本**: ${total_usd:.4f}\n\n"
+            f"**总成本**: ${total_usd:.4f}\n"
+            f"**消息总线**: {bus_stats['total_messages']} 条消息, "
+            f"{bus_stats['blackboard_entries']} 条共享状态\n\n"
             f"---\n\n"
         )
         return header + synthesis
@@ -4674,11 +4725,24 @@ class SparTool(Tool):
         task: str,
         scan_evidence: str,
     ) -> str:
-        """Execute real adversarial self-play with blue/red agents."""
+        """Execute real adversarial self-play with blue/red agents + bus."""
         from naumi_agent.agents.base import AgentCapability
+        from naumi_agent.agents.message_bus import (
+            AgentMessage,
+            MessagePriority,
+        )
         from naumi_agent.orchestrator.subagent_manager import SubTask
 
         spar_caps = [AgentCapability.FILE_OPS, AgentCapability.CODE_EXEC]
+
+        await manager.message_bus.reset()
+
+        await manager.message_bus.blackboard_set(
+            "target", task, author="orchestrator",
+        )
+        await manager.message_bus.blackboard_set(
+            "attack_surface", scan_evidence, author="orchestrator",
+        )
 
         manager.spawn_for_task(
             name="spar_blue_builder",
@@ -4742,6 +4806,11 @@ class SparTool(Tool):
                     f"{blue_code[:3000]}"
                 )
 
+                # Share blue's code on blackboard for red to read
+                await manager.message_bus.blackboard_set(
+                    "blue_code", blue_code, author="spar_blue_builder",
+                )
+
                 # Red: attack
                 red_task = (
                     f"## 对抗目标\n{task}\n\n"
@@ -4776,11 +4845,31 @@ class SparTool(Tool):
                     f"{attack_report[:3000]}"
                 )
 
+                # Share red's findings on blackboard + send to blue
+                await manager.message_bus.blackboard_set(
+                    f"red_findings_r{round_num}",
+                    attack_report[:2000],
+                    author="spar_red_breaker",
+                )
+
                 # Check convergence
                 has_critical = (
                     "CRITICAL" in attack_report.upper()
                     or "HIGH" in attack_report.upper()
                 )
+
+                priority = (
+                    MessagePriority.HIGH if has_critical
+                    else MessagePriority.LOW
+                )
+                await manager.message_bus.send(AgentMessage(
+                    sender="spar_red_breaker",
+                    topic="spar.attack_report",
+                    recipient="spar_blue_builder",
+                    content=attack_report[:500],
+                    priority=priority,
+                ))
+
                 if not has_critical:
                     rounds_log.append(
                         "✅ 红军未发现 CRITICAL/HIGH 级别漏洞，"
@@ -4792,6 +4881,9 @@ class SparTool(Tool):
             manager.destroy("spar_blue_builder")
             manager.destroy("spar_red_breaker")
 
+        bus_stats = manager.message_bus.stats()
+        await manager.message_bus.reset()
+
         # Final synthesis
         rounds_completed = len(
             [r for r in rounds_log if "蓝军" in r and "输出" in r]
@@ -4801,7 +4893,9 @@ class SparTool(Tool):
             f"**目标**: {task[:200]}\n"
             f"**对抗轮次**: {rounds_completed}\n"
             f"**总 Token**: {total_tokens}\n"
-            f"**总成本**: ${total_cost:.4f}\n\n"
+            f"**总成本**: ${total_cost:.4f}\n"
+            f"**消息总线**: {bus_stats['total_messages']} 条消息, "
+            f"{bus_stats['blackboard_entries']} 条共享状态\n\n"
             f"---\n\n"
             f"## 对抗过程完整记录\n\n"
         )

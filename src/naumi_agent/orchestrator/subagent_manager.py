@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult, BaseAgent
 from naumi_agent.agents.factory import DynamicAgentFactory
+from naumi_agent.agents.message_bus import AgentMessageBus
 from naumi_agent.agents.presets import ALL_AGENT_CONFIGS
 
 if TYPE_CHECKING:
@@ -61,6 +62,7 @@ class SubAgentManager:
         self._agents: dict[str, BaseAgent] = {}
         self._configs: dict[str, AgentConfig] = dict(ALL_AGENT_CONFIGS)
         self._factory = DynamicAgentFactory(engine.router)
+        self.message_bus = AgentMessageBus()
 
     def get_agent(self, name: str) -> BaseAgent | None:
         """获取或创建 Agent 实例."""
@@ -216,10 +218,59 @@ class SubAgentManager:
         if extra_context:
             context_parts.append(extra_context)
 
+        # Inject blackboard state into context if available
+        blackboard = await self.message_bus.blackboard_get_all()
+        if blackboard:
+            bb_lines = ["## 共享状态 (Blackboard)"]
+            for key, entry in blackboard.items():
+                val_str = (
+                    str(entry.value)[:200] if entry.value is not None else "None"
+                )
+                bb_lines.append(
+                    f"- **{key}** (by {entry.author}, v{entry.version}): "
+                    f"{val_str}"
+                )
+            context_parts.append("\n".join(bb_lines))
+
+        # Inject pending messages for this agent
+        pending = await self.message_bus.receive(agent_name)
+        if pending:
+            msg_lines = [f"## 待处理消息 ({len(pending)} 条)"]
+            for msg in pending:
+                if msg.priority == "critical":
+                    prefix = "🔴"
+                elif msg.priority == "high":
+                    prefix = "🟡"
+                else:
+                    prefix = "📨"
+                msg_lines.append(
+                    f"{prefix} **来自 {msg.sender}** [{msg.topic}]: "
+                    f"{msg.content[:300]}"
+                )
+            context_parts.append("\n".join(msg_lines))
+
         context = "\n\n".join(context_parts) if context_parts else ""
 
         logger.info("Delegating task %s to agent %s", task.id, agent_name)
-        return await agent.execute(task=task.description, context=context)
+        result = await agent.execute(task=task.description, context=context)
+
+        # Auto-publish completed results to the bus
+        if result.status == "completed" and result.response:
+            from naumi_agent.agents.message_bus import AgentMessage
+
+            bus_msg = AgentMessage(
+                sender=agent_name,
+                topic=f"task.{task.id}.completed",
+                content=result.response[:2000],
+                metadata={
+                    "task_id": task.id,
+                    "tokens": result.total_tokens,
+                    "cost": result.total_cost_usd,
+                },
+            )
+            await self.message_bus.publish(bus_msg)
+
+        return result
 
     async def execute_sequential(
         self,
