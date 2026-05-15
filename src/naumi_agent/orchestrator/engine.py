@@ -74,6 +74,9 @@ generate runnable Python/C++ scripts, show execution trace, verify with tests
 - **analysis_pointer**: Semantic Pointer Architecture — separate reasoning \
 space (AI logic) from physical space (precise computation), define pointer \
 protocol to eliminate hallucination on precise data
+- **analysis_cooe**: Cognitive Out-of-Order Execution — decompose tasks \
+into DAG, identify data dependencies vs parallelizable steps, design \
+scheduler + reservation stations + reorder buffer pipeline
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
