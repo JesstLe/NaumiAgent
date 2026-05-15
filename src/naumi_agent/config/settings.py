@@ -10,6 +10,15 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class ModelMeta(BaseSettings):
+    """单个模型的元数据覆盖（上下文窗口、价格等）."""
+
+    max_context: int | None = None
+    max_output: int | None = None
+    input_cost_per_million: float | None = None
+    output_cost_per_million: float | None = None
+
+
 class ModelConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NAUMI_MODEL__")
 
@@ -20,6 +29,7 @@ class ModelConfig(BaseSettings):
     temperature: float = 0.7
     api_base: str | None = None
     api_key: str | None = None
+    model_info: dict[str, ModelMeta] = Field(default_factory=dict)
 
 
 class MemoryConfig(BaseSettings):

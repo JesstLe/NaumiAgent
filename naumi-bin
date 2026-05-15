@@ -1,0 +1,2 @@
+#!/bin/bash
+exec /Users/lv/Workspace/NaumiAgent/.venv/bin/python -m naumi_agent.main "$@"

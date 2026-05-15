@@ -13,8 +13,11 @@ from naumi_agent.config.settings import ModelConfig
 
 logger = logging.getLogger(__name__)
 
-# 关闭 LiteLLM 默认的冗长日志
 litellm.suppress_debug_info = True
+
+_FALLBACK_CONTEXT = 128_000
+_FALLBACK_MAX_OUTPUT = 4_096
+_FALLBACK_COST = {"input": 3.0, "output": 15.0}
 
 
 class ModelTier(str, Enum):
@@ -50,18 +53,7 @@ class StreamChunk:
     usage: TokenUsage | None = None
 
 
-# 每百万 token 价格 (USD)
-_COST_TABLE: dict[str, dict[str, float]] = {
-    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
-    "claude-haiku-4-5": {"input": 0.80, "output": 4.0},
-    "claude-opus-4-7": {"input": 15.0, "output": 75.0},
-    "gpt-4o": {"input": 2.5, "output": 10.0},
-    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
-}
-
-
-def _calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    rates = _COST_TABLE.get(model, {"input": 3.0, "output": 15.0})
+def _calculate_cost(model: str, input_tokens: int, output_tokens: int, rates: dict[str, float]) -> float:
     return input_tokens * rates["input"] / 1_000_000 + output_tokens * rates["output"] / 1_000_000
 
 
@@ -74,6 +66,70 @@ class ModelRouter:
             ModelTier.FAST: config.fast_model,
             ModelTier.CAPABLE: config.default_model,
             ModelTier.REASONING: config.reasoning_model,
+        }
+        self._info_cache: dict[str, dict[str, Any]] = {}
+
+    # --- 模型元数据 ---
+
+    def get_model_info(self, model: str) -> dict[str, Any]:
+        """三级查找: config 覆盖 → litellm 内置 → fallback."""
+        if model in self._info_cache:
+            return self._info_cache[model]
+
+        info = self._resolve_model_info(model)
+        self._info_cache[model] = info
+        return info
+
+    def get_context_window(self, model: str) -> int:
+        """获取模型上下文窗口大小（input token 上限）."""
+        info = self.get_model_info(model)
+        return info.get("max_input_tokens", _FALLBACK_CONTEXT)
+
+    def get_max_output(self, model: str) -> int:
+        """获取模型单次输出上限."""
+        info = self.get_model_info(model)
+        return info.get("max_output_tokens", _FALLBACK_MAX_OUTPUT)
+
+    def get_cost_rates(self, model: str) -> dict[str, float]:
+        """获取模型每百万 token 价格 {"input": x, "output": y}."""
+        info = self.get_model_info(model)
+        inp = info.get("input_cost_per_token")
+        out = info.get("output_cost_per_token")
+        if inp is not None and out is not None:
+            return {"input": inp * 1_000_000, "output": out * 1_000_000}
+        return info.get("cost_rates", _FALLBACK_COST)
+
+    def _resolve_model_info(self, model: str) -> dict[str, Any]:
+        # 1. 用户配置覆盖
+        meta = self._config.model_info.get(model)
+        if meta and meta.max_context:
+            info: dict[str, Any] = {"max_input_tokens": meta.max_context}
+            if meta.max_output:
+                info["max_output_tokens"] = meta.max_output
+            if meta.input_cost_per_million is not None and meta.output_cost_per_million is not None:
+                info["cost_rates"] = {
+                    "input": meta.input_cost_per_million,
+                    "output": meta.output_cost_per_million,
+                }
+            return info
+
+        # 2. litellm 内置
+        try:
+            raw = litellm.get_model_info(model)
+            return {
+                "max_input_tokens": raw.get("max_input_tokens", _FALLBACK_CONTEXT),
+                "max_output_tokens": raw.get("max_output_tokens", _FALLBACK_MAX_OUTPUT),
+                "input_cost_per_token": raw.get("input_cost_per_token"),
+                "output_cost_per_token": raw.get("output_cost_per_token"),
+            }
+        except Exception:
+            logger.info("Model %s not in litellm registry, using fallback", model)
+
+        # 3. Fallback
+        return {
+            "max_input_tokens": _FALLBACK_CONTEXT,
+            "max_output_tokens": _FALLBACK_MAX_OUTPUT,
+            "cost_rates": _FALLBACK_COST,
         }
 
     def _base_kwargs(self) -> dict[str, Any]:
@@ -92,6 +148,14 @@ class ModelRouter:
             tier = ModelTier(tier)
         return self._tier_map[tier]
 
+    def _resolve_max_tokens(self, model: str, requested: int | None) -> int:
+        """确定 max_tokens: 调用方指定 > 配置值 > 模型输出上限."""
+        if requested:
+            return requested
+        config_val = self._config.max_tokens
+        model_limit = self.get_max_output(model)
+        return min(config_val, model_limit)
+
     async def call(
         self,
         messages: list[dict[str, Any]],
@@ -108,7 +172,7 @@ class ModelRouter:
         kwargs: dict[str, Any] = {
             "model": resolved,
             "messages": messages,
-            "max_tokens": max_tokens or self._config.max_tokens,
+            "max_tokens": self._resolve_max_tokens(resolved, max_tokens),
             "temperature": temperature if temperature is not None else self._config.temperature,
         }
         if tools:
@@ -149,7 +213,7 @@ class ModelRouter:
         kwargs: dict[str, Any] = {
             "model": resolved,
             "messages": messages,
-            "max_tokens": max_tokens or self._config.max_tokens,
+            "max_tokens": self._resolve_max_tokens(resolved, max_tokens),
             "temperature": temperature if temperature is not None else self._config.temperature,
             "stream": True,
             "stream_options": {"include_usage": True},
@@ -241,9 +305,10 @@ class ModelRouter:
             return TokenUsage()
         inp = usage.prompt_tokens or 0
         out = usage.completion_tokens or 0
+        rates = self.get_cost_rates(model)
         return TokenUsage(
             input_tokens=inp,
             output_tokens=out,
             total_tokens=inp + out,
-            cost_usd=round(_calculate_cost(model, inp, out), 6),
+            cost_usd=round(_calculate_cost(model, inp, out, rates), 6),
         )

@@ -171,7 +171,12 @@ class AgentEngine:
 
     async def _maybe_compact(self, on_event: EventCallback | None = None) -> None:
         """检查并执行上下文压缩."""
-        max_tokens = self._config.safety.max_input_tokens
+        model = self._router.resolve_model(ModelTier.CAPABLE)
+        context_window = self._router.get_context_window(model)
+        # 用户配置的 max_input_tokens 作为硬上限兜底
+        hard_cap = self._config.safety.max_input_tokens
+        max_tokens = min(context_window, hard_cap)
+
         if not self._compactor.should_compact(self._messages, max_tokens):
             return
 
@@ -180,7 +185,10 @@ class AgentEngine:
         after = len(self._messages)
 
         if after < before:
-            logger.info("Context compacted: %d → %d messages", before, after)
+            logger.info(
+                "Context compacted: %d → %d messages (window=%d, cap=%d)",
+                before, after, context_window, hard_cap,
+            )
             if on_event:
                 await on_event("context_compacted", {
                     "before": before,
