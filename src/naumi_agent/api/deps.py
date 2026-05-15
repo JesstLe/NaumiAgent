@@ -17,9 +17,9 @@ def get_config(request: Request) -> AppConfig:
 
 async def verify_api_key(request: Request) -> str:
     api_key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
-    config: AppConfig = request.app.state.config
+    config: AppConfig | None = getattr(request.app.state, "config", None)
 
-    if not config.api.api_keys:
+    if not config or not config.api.api_keys:
         return "anonymous"
 
     if not api_key or api_key not in config.api.api_keys:
