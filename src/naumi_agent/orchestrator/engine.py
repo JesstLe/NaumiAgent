@@ -22,7 +22,7 @@ from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.event_bus import EventEmitter
 from naumi_agent.tools.base import Tool, ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.builtin import create_builtin_tools
-from naumi_agent.tools.browser import create_browser_tools
+from naumi_agent.tools.browser import BrowserSession, create_browser_tools
 from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
 from naumi_agent.tools.web import create_web_tools
@@ -101,6 +101,7 @@ class AgentEngine:
         self.long_term_memory = LongTermMemory(config.memory)
         self.emitter = EventEmitter()
         self._session: Session | None = None
+        self._browser_session = BrowserSession()
 
         self._register_builtin_tools()
         self._register_subagent_manager()
@@ -108,7 +109,7 @@ class AgentEngine:
     def _register_builtin_tools(self) -> None:
         for tool in create_builtin_tools():
             self._tool_registry.register(tool)
-        for tool in create_browser_tools():
+        for tool in create_browser_tools(self._browser_session):
             self._tool_registry.register(tool)
         for tool in create_sandbox_tools():
             self._tool_registry.register(tool)
@@ -156,7 +157,8 @@ class AgentEngine:
         self._permission_checker.reset_counts()
 
     async def shutdown(self) -> None:
-        """释放资源（关闭数据库连接等）."""
+        """释放资源（关闭数据库连接、浏览器等）."""
+        await self._browser_session.close()
         await self.session_store.close()
 
     def set_system_prompt(self, prompt: str) -> None:

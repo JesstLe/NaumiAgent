@@ -11,44 +11,49 @@ from naumi_agent.tools.base import Tool
 
 logger = logging.getLogger(__name__)
 
-_BROWSER_STATE: dict[str, Any] = {}
 
+class BrowserSession:
+    """管理单个浏览器会话的生命周期."""
 
-async def _get_page():
-    """获取或创建浏览器页面（懒加载单例）."""
-    if _BROWSER_STATE.get("page") is None:
+    def __init__(self) -> None:
+        self._pw: Any = None
+        self._browser: Any = None
+        self._context: Any = None
+        self._page: Any = None
+
+    async def get_page(self) -> Any:
+        if self._page is not None:
+            return self._page
+
         from playwright.async_api import async_playwright
 
-        pw = await async_playwright().start()
-        browser = await pw.chromium.launch(headless=True)
-        context = await browser.new_context(
+        self._pw = await async_playwright().start()
+        self._browser = await self._pw.chromium.launch(headless=True)
+        self._context = await self._browser.new_context(
             viewport={"width": 1280, "height": 720},
             user_agent=(
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             ),
         )
-        page = await context.new_page()
-        _BROWSER_STATE["pw"] = pw
-        _BROWSER_STATE["browser"] = browser
-        _BROWSER_STATE["context"] = context
-        _BROWSER_STATE["page"] = page
-    return _BROWSER_STATE["page"]
+        self._page = await self._context.new_page()
+        return self._page
 
-
-async def close_browser() -> None:
-    """关闭浏览器实例."""
-    browser = _BROWSER_STATE.pop("browser", None)
-    pw = _BROWSER_STATE.pop("pw", None)
-    _BROWSER_STATE.pop("context", None)
-    _BROWSER_STATE.pop("page", None)
-    if browser:
-        await browser.close()
-    if pw:
-        await pw.stop()
+    async def close(self) -> None:
+        if self._browser:
+            await self._browser.close()
+        if self._pw:
+            await self._pw.stop()
+        self._pw = None
+        self._browser = None
+        self._context = None
+        self._page = None
 
 
 class BrowserNavigateTool(Tool):
+    def __init__(self, session: BrowserSession) -> None:
+        self._session = session
+
     @property
     def name(self) -> str:
         return "browser_navigate"
@@ -74,7 +79,7 @@ class BrowserNavigateTool(Tool):
 
     async def execute(self, *, url: str, wait_until: str = "domcontentloaded", **kwargs: Any) -> str:
         try:
-            page = await _get_page()
+            page = await self._session.get_page()
             response = await page.goto(url, wait_until=wait_until, timeout=30000)
             title = await page.title()
 
@@ -85,6 +90,9 @@ class BrowserNavigateTool(Tool):
 
 
 class BrowserScreenshotTool(Tool):
+    def __init__(self, session: BrowserSession) -> None:
+        self._session = session
+
     @property
     def name(self) -> str:
         return "browser_screenshot"
@@ -112,7 +120,7 @@ class BrowserScreenshotTool(Tool):
 
     async def execute(self, *, full_page: bool = False, selector: str | None = None, **kwargs: Any) -> str:
         try:
-            page = await _get_page()
+            page = await self._session.get_page()
             if selector:
                 element = await page.query_selector(selector)
                 if not element:
@@ -128,6 +136,9 @@ class BrowserScreenshotTool(Tool):
 
 
 class BrowserClickTool(Tool):
+    def __init__(self, session: BrowserSession) -> None:
+        self._session = session
+
     @property
     def name(self) -> str:
         return "browser_click"
@@ -153,7 +164,7 @@ class BrowserClickTool(Tool):
 
     async def execute(self, *, selector: str, button: str = "left", **kwargs: Any) -> str:
         try:
-            page = await _get_page()
+            page = await self._session.get_page()
             element = await page.wait_for_selector(selector, timeout=5000)
             if not element:
                 return f"Error: Element not found: {selector}"
@@ -164,6 +175,9 @@ class BrowserClickTool(Tool):
 
 
 class BrowserTypeTool(Tool):
+    def __init__(self, session: BrowserSession) -> None:
+        self._session = session
+
     @property
     def name(self) -> str:
         return "browser_type"
@@ -190,7 +204,7 @@ class BrowserTypeTool(Tool):
 
     async def execute(self, *, selector: str, text: str, press_enter: bool = False, **kwargs: Any) -> str:
         try:
-            page = await _get_page()
+            page = await self._session.get_page()
             element = await page.wait_for_selector(selector, timeout=5000)
             if not element:
                 return f"Error: Element not found: {selector}"
@@ -203,6 +217,9 @@ class BrowserTypeTool(Tool):
 
 
 class BrowserExtractTool(Tool):
+    def __init__(self, session: BrowserSession) -> None:
+        self._session = session
+
     @property
     def name(self) -> str:
         return "browser_extract"
@@ -233,7 +250,7 @@ class BrowserExtractTool(Tool):
 
     async def execute(self, *, selector: str | None = None, max_length: int = 50000, **kwargs: Any) -> str:
         try:
-            page = await _get_page()
+            page = await self._session.get_page()
 
             if selector:
                 element = await page.query_selector(selector)
@@ -253,6 +270,9 @@ class BrowserExtractTool(Tool):
 
 
 class BrowserGetHtmlTool(Tool):
+    def __init__(self, session: BrowserSession) -> None:
+        self._session = session
+
     @property
     def name(self) -> str:
         return "browser_get_html"
@@ -280,7 +300,7 @@ class BrowserGetHtmlTool(Tool):
 
     async def execute(self, *, selector: str | None = None, max_length: int = 50000, **kwargs: Any) -> str:
         try:
-            page = await _get_page()
+            page = await self._session.get_page()
 
             if selector:
                 element = await page.query_selector(selector)
@@ -297,12 +317,19 @@ class BrowserGetHtmlTool(Tool):
             return f"Error getting HTML: {type(e).__name__}: {e}"
 
 
-def create_browser_tools() -> list[Tool]:
+def create_browser_tools(session: BrowserSession | None = None) -> list[Tool]:
+    """创建浏览器工具集.
+
+    Args:
+        session: BrowserSession 实例，不传则创建新的（向后兼容）.
+    """
+    if session is None:
+        session = BrowserSession()
     return [
-        BrowserNavigateTool(),
-        BrowserScreenshotTool(),
-        BrowserClickTool(),
-        BrowserTypeTool(),
-        BrowserExtractTool(),
-        BrowserGetHtmlTool(),
+        BrowserNavigateTool(session),
+        BrowserScreenshotTool(session),
+        BrowserClickTool(session),
+        BrowserTypeTool(session),
+        BrowserExtractTool(session),
+        BrowserGetHtmlTool(session),
     ]
