@@ -17,6 +17,7 @@ from naumi_agent.model.router import ModelResponse, ModelRouter, ModelTier, Toke
 from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail, SecurityError
+from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.event_bus import EventEmitter
 from naumi_agent.tools.base import Tool, ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.builtin import create_builtin_tools
@@ -78,6 +79,10 @@ class AgentEngine:
         ))
         self._behavior_monitor = BehaviorMonitor()
         self._output_guardrail = OutputGuardrail()
+        self._permission_checker = PermissionChecker(
+            mode=PermissionMode(config.safety.permission_mode),
+            allowed_dirs=config.safety.allowed_dirs,
+        )
         self._compactor = ContextCompactor(
             config.memory,
             self._router,
@@ -453,7 +458,7 @@ class AgentEngine:
         )
 
     async def _execute_tool(self, tc: ToolCall) -> ToolResult:
-        """执行单个工具调用."""
+        """执行单个工具调用（含权限检查）."""
         tool = self._tool_registry.get(tc.name)
         if tool is None:
             return ToolResult(
@@ -464,6 +469,19 @@ class AgentEngine:
 
         try:
             args = tool.parse_arguments(tc.arguments)
+        except ValueError as e:
+            return ToolResult(call_id=tc.id, status="error", content=str(e))
+
+        decision = self._permission_checker.check(tc.name, args)
+        if not decision.allowed:
+            logger.warning("Tool %s blocked: %s", tc.name, decision.reason)
+            return ToolResult(
+                call_id=tc.id,
+                status="error",
+                content=f"Permission denied: {decision.reason}",
+            )
+
+        try:
             start = time.time()
             output = await tool.execute(**args)
             duration = int((time.time() - start) * 1000)
