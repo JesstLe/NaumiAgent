@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.mcp.client import MCPClientManager, setup_mcp_servers
 from naumi_agent.memory.compactor import ContextCompactor
 from naumi_agent.memory.long_term import LongTermMemory
 from naumi_agent.memory.session import Session, SessionStore
@@ -105,6 +106,8 @@ class AgentEngine:
         self._browser_session = BrowserSession()
         self._planner = AdaptivePlanner(self._router)
 
+        self._mcp_manager: MCPClientManager | None = None
+
         self._register_builtin_tools()
         self._register_subagent_manager()
 
@@ -135,6 +138,17 @@ class AgentEngine:
         for tool in create_subagent_tools(self.subagent_manager):
             self._tool_registry.register(tool)
 
+    async def setup_mcp_tools(self) -> None:
+        """从配置连接 MCP Server 并注册工具（需在异步上下文中调用）."""
+        server_configs = self._config.mcp.servers
+        if not server_configs:
+            return
+
+        manager, tools = await setup_mcp_servers(server_configs)
+        self._mcp_manager = manager
+        for tool in tools:
+            self._tool_registry.register(tool)
+
     @property
     def tool_registry(self) -> ToolRegistry:
         return self._tool_registry
@@ -159,8 +173,10 @@ class AgentEngine:
         self._permission_checker.reset_counts()
 
     async def shutdown(self) -> None:
-        """释放资源（关闭数据库连接、浏览器等）."""
+        """释放资源（关闭数据库连接、浏览器、MCP 连接等）."""
         await self._browser_session.close()
+        if self._mcp_manager:
+            await self._mcp_manager.disconnect_all()
         await self.session_store.close()
 
     def set_system_prompt(self, prompt: str) -> None:
