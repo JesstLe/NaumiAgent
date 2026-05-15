@@ -69,6 +69,8 @@ paths, simulate disasters on each, prune bad branches, output verified best
 instantiate 3-5 domain experts, distribute sub-problems, synthesize
 - **analysis_speculate**: Speculative Decoding — fast intern draft + slow \
 architect review, identify boilerplate vs high-risk zones, dual-pass
+- **analysis_jit**: JIT tool generation — when LLM reasoning is unreliable, \
+generate runnable Python/C++ scripts, show execution trace, verify with tests
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
