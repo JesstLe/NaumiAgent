@@ -12,6 +12,7 @@ from typing import Any
 
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.memory.compactor import ContextCompactor
+from naumi_agent.memory.long_term import LongTermMemory
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.router import ModelResponse, ModelRouter, ModelTier, TokenUsage
 from naumi_agent.safety.behavior import BehaviorMonitor
@@ -22,6 +23,7 @@ from naumi_agent.streaming.event_bus import EventEmitter
 from naumi_agent.tools.base import Tool, ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.builtin import create_builtin_tools
 from naumi_agent.tools.browser import create_browser_tools
+from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
 from naumi_agent.tools.web import create_web_tools
 
@@ -38,6 +40,8 @@ You are NaumiAgent, a general-purpose AI assistant with tool access.
 - Browse the web (navigate, click, type, extract content)
 - Search the web and fetch web pages
 - Execute code in sandboxed environments
+- Store important facts in long-term memory for future sessions
+- Recall relevant memories from past conversations
 
 ## Guidelines
 1. Break complex tasks into steps
@@ -45,6 +49,8 @@ You are NaumiAgent, a general-purpose AI assistant with tool access.
 3. Use tools precisely — provide exact file paths and commands
 4. Explain what you're doing before taking actions
 5. If something fails, analyze the error and try a different approach
+6. Use memory_store to save important user preferences, facts, or decisions
+7. Use memory_recall to check if relevant information was discussed before
 """
 
 
@@ -90,6 +96,7 @@ class AgentEngine:
         )
 
         self.session_store = SessionStore(config.memory)
+        self.long_term_memory = LongTermMemory(config.memory)
         self.emitter = EventEmitter()
         self._session: Session | None = None
 
@@ -107,6 +114,12 @@ class AgentEngine:
                 self._tool_registry.register(tool)
         except Exception:
             pass  # web tools optional (may need API keys)
+
+        try:
+            for tool in create_memory_tools(self.long_term_memory):
+                self._tool_registry.register(tool)
+        except Exception:
+            pass  # memory tools optional (chromadb may not be installed)
 
     @property
     def tool_registry(self) -> ToolRegistry:

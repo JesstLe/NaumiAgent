@@ -104,6 +104,16 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT],
         requires_confirmation=False,
     ),
+    "memory_store": PermissionRule(
+        tool_name="memory_store",
+        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT, PermissionMode.LOCKDOWN],
+        requires_confirmation=False,
+    ),
+    "memory_recall": PermissionRule(
+        tool_name="memory_recall",
+        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT, PermissionMode.LOCKDOWN],
+        requires_confirmation=False,
+    ),
 }
 
 # 阻止的危险 shell 命令模式
