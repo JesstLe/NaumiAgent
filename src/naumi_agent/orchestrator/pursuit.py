@@ -715,7 +715,12 @@ class GoalPursuitLoop:
     async def _execute_file_edit(
         self, tool: Any, description: str, action_id: str,
     ) -> dict[str, Any]:
-        """Generate old_text/new_text for file_edit via LLM."""
+        """Generate updated file content and use file_write to apply it.
+
+        Instead of asking for OLD/NEW diff blocks (which reasoning models
+        struggle with), we read the file, ask the LLM to produce the
+        complete updated content, and write it back.
+        """
         import os
         import re
         path_match = re.search(r'([\w/.]+\.py)', description)
@@ -727,7 +732,7 @@ class GoalPursuitLoop:
                 "output": "Could not determine file path",
             }
 
-        # Read RAW file content (not formatted by file_read tool)
+        # Read raw file content
         resolved = os.path.expanduser(path)
         existing = ""
         try:
@@ -744,38 +749,46 @@ class GoalPursuitLoop:
                 "output": f"File {path} not found or empty",
             }
 
+        context = self._build_codebase_context()
         prompt = (
             f"Action: {description}\n\n"
-            f"## Current file content ({path})\n```\n{existing}\n```\n\n"
-            "Generate the edit. Output EXACTLY two blocks:\n"
-            "===OLD===\n<exact text from the file above>\n===NEW===\n<replacement text>\n\n"
-            "IMPORTANT: The OLD text must be an EXACT verbatim substring "
-            "from the file content above. Copy it character-for-character."
+            f"## Codebase Context\n{context}\n\n"
+            f"## Current file content ({path})\n"
+            f"```\n{existing}\n```\n\n"
+            "Apply the described change to this file. "
+            "Output the COMPLETE updated file content. "
+            "Output ONLY valid Python code — "
+            "no markdown fences, no explanation, no commentary."
         )
 
-        response = await self._llm_call(
-            "You generate precise file edits. Output OLD and NEW blocks exactly.",
+        content = await self._llm_call(
+            "You update Python source files. "
+            "Output only the complete updated file content as valid Python.",
             prompt,
         )
 
-        # Parse OLD/NEW blocks
-        old_text = ""
-        new_text = ""
-        if "===OLD===" in response and "===NEW===" in response:
-            parts = response.split("===OLD===")[1].split("===NEW===")
-            old_text = parts[0].strip()
-            new_text = parts[1].strip() if len(parts) > 1 else ""
+        # Strip markdown fences if present
+        text = content.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
 
-        if not old_text:
+        if not text:
             return {
                 "action_id": action_id,
                 "status": "error",
-                "output": "Failed to parse edit blocks from LLM response",
+                "output": "LLM returned empty content for file edit",
             }
 
-        output = await tool.execute(
-            path=path, old_text=old_text, new_text=new_text,
-        )
+        # Use file_write tool to apply the update
+        write_tool = self._tools.get("file_write")
+        if write_tool:
+            output = await write_tool.execute(path=path, content=text)
+        else:
+            # Fallback: write directly
+            with open(resolved, "w", encoding="utf-8") as f:
+                f.write(text)
+            output = f"Updated {path}"
+
         return {
             "action_id": action_id,
             "status": "completed",
