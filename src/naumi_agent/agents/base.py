@@ -19,12 +19,6 @@ class AgentCapability(str, Enum):
     SHELL_EXEC = "shell_execution"
 
 
-class ModelTier(str, Enum):
-    FAST = "fast"
-    CAPABLE = "capable"
-    REASONING = "reasoning"
-
-
 @dataclass(frozen=True)
 class AgentConfig:
     """Agent 配置."""
@@ -97,7 +91,7 @@ class BaseAgent:
 
     async def execute(self, task: str, context: str = "") -> AgentResult:
         """执行子任务."""
-        from naumi_agent.model.router import ModelTier as RouterTier
+        from naumi_agent.model.router import ModelTier
 
         messages: list[dict[str, Any]] = []
 
@@ -114,6 +108,12 @@ class BaseAgent:
         messages.append({"role": "user", "content": task})
 
         tools = self._get_tool_schemas() or None
+        tier_map = {
+            "fast": ModelTier.FAST,
+            "capable": ModelTier.CAPABLE,
+            "reasoning": ModelTier.REASONING,
+        }
+        tier = tier_map.get(self.config.model_tier, ModelTier.CAPABLE)
         tier_map = {
             "fast": RouterTier.FAST,
             "capable": RouterTier.CAPABLE,
