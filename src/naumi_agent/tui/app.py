@@ -298,7 +298,7 @@ class Spinner(Static):
 class NaumiApp(App):
     """NaumiAgent TUI 应用."""
 
-    TITLE = "NaumiAgent"
+    TITLE = "⬡ NaumiAgent"
     SUB_TITLE = "通用智能 Agent"
 
     CSS = """
