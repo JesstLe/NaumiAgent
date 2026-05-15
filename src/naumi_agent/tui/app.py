@@ -723,6 +723,7 @@ class NaumiApp(App):
                     "- `/fusion <目标>` — 决定论-概率论融合审计\n"
                     "- `/consensus <目标>` — 拜占庭容错共识\n"
                     "- `/pid <目标>` — PID 闭环纠偏\n"
+                    "- `/zkp <目标>` — 零知识证明与轨迹校验\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -863,6 +864,11 @@ class NaumiApp(App):
                     status.status_text = "用法: /pid <代码路径或流程描述>"
                 else:
                     self._run_analysis_mode("pid", arg)
+            case "/zkp":
+                if not arg:
+                    status.status_text = "用法: /zkp <代码路径或系统描述>"
+                else:
+                    self._run_analysis_mode("zkp", arg)
             case "/hook":
                 if not arg:
                     status.status_text = "用法: /hook <逆向目标描述>"
@@ -985,6 +991,7 @@ class NaumiApp(App):
             "fusion": "analysis_fusion",
             "consensus": "analysis_consensus",
             "pid": "analysis_pid",
+            "zkp": "analysis_zkp",
         }
         labels = {
             "chaos": "⚡ 灾难演练",
@@ -1013,6 +1020,7 @@ class NaumiApp(App):
             "fusion": "⚖️ 决定论-概率论融合 (Fusion)",
             "consensus": "🏛️ 拜占庭容错共识 (Consensus)",
             "pid": "🎛️ PID 闭环纠偏 (Control Theory)",
+            "zkp": "🔐 零知识证明与轨迹校验 (ZKP)",
         }
 
         chat = self.query_one(ChatPanel)
@@ -1077,6 +1085,8 @@ class NaumiApp(App):
             elif mode == "consensus":
                 result = await tool.execute(target=target)
             elif mode == "pid":
+                result = await tool.execute(target=target)
+            elif mode == "zkp":
                 result = await tool.execute(target=target)
             else:
                 result = await tool.execute(target=target)
