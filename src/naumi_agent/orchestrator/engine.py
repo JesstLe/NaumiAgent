@@ -13,6 +13,7 @@ from naumi_agent.memory.compactor import ContextCompactor
 from naumi_agent.memory.long_term import LongTermMemory
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.router import ModelRouter, ModelTier, TokenUsage
+from naumi_agent.orchestrator.planner import AdaptivePlanner, ExecutionMode
 from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
@@ -102,6 +103,7 @@ class AgentEngine:
         self.emitter = EventEmitter()
         self._session: Session | None = None
         self._browser_session = BrowserSession()
+        self._planner = AdaptivePlanner(self._router)
 
         self._register_builtin_tools()
         self._register_subagent_manager()
@@ -250,7 +252,7 @@ class AgentEngine:
         return None
 
     async def run(self, task: str) -> AgentResult:
-        """执行任务 — ReAct 主循环."""
+        """执行任务 — 自适应规划 + ReAct 主循环."""
         if not any(m.get("role") == "system" for m in self._messages):
             self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
@@ -258,7 +260,11 @@ class AgentEngine:
         tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
 
         try:
-            result = await self._react_loop(tools)
+            plan = await self._planner.plan(task)
+            if plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
+                result = await self._run_orchestrated(plan, tools)
+            else:
+                result = await self._react_loop(tools)
         except Exception as e:
             logger.exception("Agent loop failed")
             result = AgentResult(status="error", error=str(e))
@@ -287,6 +293,55 @@ class AgentEngine:
 
         await self._save_session()
         return result
+
+    async def _run_orchestrated(
+        self, plan: Any, tools: list[dict[str, Any]] | None
+    ) -> AgentResult:
+        """执行编排模式：按 DAG 依赖关系委派子任务给专用 Agent."""
+        from naumi_agent.orchestrator.subagent_manager import SubTask
+
+        tasks = [
+            SubTask(
+                id=step.id,
+                description=step.description,
+                agent_name=None,
+                depends_on=step.depends_on,
+            )
+            for step in plan.steps
+        ]
+
+        results = await self.subagent_manager.execute_dag(tasks)
+
+        combined_parts = []
+        total_tokens = 0
+        total_cost = 0.0
+        for step in plan.steps:
+            r = results.get(step.id)
+            if r and r.status == "completed":
+                combined_parts.append(f"## {step.description}\n{r.response[:2000]}")
+                total_tokens += r.total_tokens
+                total_cost += r.total_cost_usd
+            elif r:
+                combined_parts.append(
+                    f"## {step.description}\n⚠️ {r.status}: {r.error or ''}"
+                )
+
+        self._accumulate_usage(
+            TokenUsage(
+                input_tokens=0,
+                output_tokens=total_tokens,
+                total_tokens=total_tokens,
+                cost_usd=total_cost,
+            )
+        )
+
+        response = "\n\n".join(combined_parts)
+        self._messages.append({"role": "assistant", "content": response})
+        return AgentResult(
+            status="completed",
+            response=response,
+            usage=self._usage,
+        )
 
     async def _react_loop(self, tools: list[dict[str, Any]] | None) -> AgentResult:
         """ReAct 循环：推理 → 行动 → 观察."""
