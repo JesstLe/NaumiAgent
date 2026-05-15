@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class ModelMeta(BaseSettings):
@@ -85,9 +88,11 @@ class AppConfig(BaseSettings):
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> AppConfig:
-        p = Path(path)
+        p = Path(path).resolve()
         if not p.exists():
+            logger.warning("Config file not found: %s, using defaults + env vars", p)
             return cls()
+        logger.debug("Loading config from %s", p)
         with p.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         return cls(**data)

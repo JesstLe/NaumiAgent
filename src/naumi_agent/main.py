@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -13,12 +14,22 @@ from rich.text import Text
 
 from naumi_agent.config.settings import AppConfig
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 app = typer.Typer(
     name="naumi",
     help="NaumiAgent — 通用智能 Agent",
     no_args_is_help=True,
 )
 console = Console()
+
+
+def _resolve_config_path(path: str) -> str:
+    """如果指定路径存在就直接用，否则回退到项目根目录的 config.yaml."""
+    if Path(path).exists():
+        return path
+    fallback = str(_PROJECT_ROOT / "config.yaml")
+    return fallback
 
 
 @app.command()
@@ -38,7 +49,8 @@ def _launch_tui(config_path: str) -> None:
     from naumi_agent.orchestrator.engine import AgentEngine
     from naumi_agent.tui.app import NaumiApp
 
-    config = AppConfig.from_yaml(config_path)
+    resolved = _resolve_config_path(config_path)
+    config = AppConfig.from_yaml(resolved)
     setup_logging(config.log_level)
     _check_api_key(config)
     engine = AgentEngine(config)
@@ -50,7 +62,8 @@ async def _chat(config_path: str) -> None:
     from naumi_agent.log_setup import setup_logging
     from naumi_agent.orchestrator.engine import AgentEngine
 
-    config = AppConfig.from_yaml(config_path)
+    resolved = _resolve_config_path(config_path)
+    config = AppConfig.from_yaml(resolved)
     setup_logging(config.log_level)
     _check_api_key(config)
     engine = AgentEngine(config)
@@ -122,7 +135,8 @@ async def _run_task(task: str, config_path: str) -> None:
     from naumi_agent.log_setup import setup_logging
     from naumi_agent.orchestrator.engine import AgentEngine
 
-    config = AppConfig.from_yaml(config_path)
+    resolved = _resolve_config_path(config_path)
+    config = AppConfig.from_yaml(resolved)
     setup_logging(config.log_level)
     engine = AgentEngine(config)
 
