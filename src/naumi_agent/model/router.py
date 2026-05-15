@@ -109,7 +109,11 @@ class ModelRouter:
             info: dict[str, Any] = {"max_input_tokens": meta.max_context}
             if meta.max_output:
                 info["max_output_tokens"] = meta.max_output
-            if meta.input_cost_per_million is not None and meta.output_cost_per_million is not None:
+            if (
+                meta.input_cost_per_million
+                and meta.output_cost_per_million
+                and (meta.input_cost_per_million > 0 or meta.output_cost_per_million > 0)
+            ):
                 info["cost_rates"] = {
                     "input": meta.input_cost_per_million,
                     "output": meta.output_cost_per_million,
