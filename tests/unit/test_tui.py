@@ -11,7 +11,7 @@ class TestNaumiApp:
         engine = AgentEngine(config)
         app = NaumiApp(engine)
         assert app.engine is engine
-        assert app.TITLE == "NaumiAgent"
+        assert app.TITLE == "⬡ NaumiAgent"
 
     def test_bindings_exist(self) -> None:
         config = AppConfig()

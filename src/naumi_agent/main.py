@@ -193,11 +193,11 @@ async def _handle_command(engine: Any, cmd: str) -> None:
 
 
 def _print_banner() -> None:
+    from naumi_agent.assets import BANNER_TEXT
+
     console.print(
         Panel(
-            "[bold green]NaumiAgent v0.1.0[/bold green]\n"
-            "通用智能 Agent — 输入任务开始对话\n"
-            "[dim]/help 查看命令 | /quit 退出[/dim]",
+            BANNER_TEXT,
             border_style="green",
             padding=(1, 2),
         )

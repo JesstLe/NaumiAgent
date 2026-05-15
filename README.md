@@ -1,6 +1,8 @@
-# NaumiAgent
-
-通用智能 Agent 系统，支持多模型、工具调用、流式输出和长期记忆。
+<div align="center">
+  <img src="assets/logo.svg" width="128" height="128" alt="NaumiAgent Logo">
+  <h1>NaumiAgent</h1>
+  <p>通用智能 Agent 系统，支持多模型、工具调用、流式输出和长期记忆。</p>
+</div>
 
 ## 快速开始
 
