@@ -283,7 +283,7 @@ class AgentEngine:
                 result = await self._react_loop(tools)
         except Exception as e:
             logger.exception("Agent loop failed")
-            result = AgentResult(status="error", error=str(e))
+            result = AgentResult(status="error", error=self._format_error(e))
 
         await self._save_session()
         return result
@@ -304,8 +304,9 @@ class AgentEngine:
             result = await self._react_loop_streaming(tools, on_event)
         except Exception as e:
             logger.exception("Agent streaming loop failed")
-            await on_event("error", {"message": str(e)})
-            result = AgentResult(status="error", error=str(e))
+            error_msg = self._format_error(e)
+            await on_event("error", {"message": error_msg})
+            result = AgentResult(status="error", error=error_msg)
 
         await self._save_session()
         return result
@@ -633,3 +634,18 @@ class AgentEngine:
         self._usage.total_input_tokens += usage.input_tokens
         self._usage.total_output_tokens += usage.output_tokens
         self._usage.total_cost_usd += usage.cost_usd
+
+    @staticmethod
+    def _format_error(e: Exception) -> str:
+        """将异常转为用户友好的错误信息."""
+        error_type = type(e).__name__
+        msg = str(e)
+        if "AuthenticationError" in error_type or "api_key" in msg.lower():
+            return (
+                "API Key 未设置或无效。请通过环境变量设置:\n"
+                "  export NAUMI_MODELS__API_KEY=your-key\n"
+                "或在 config.yaml 中配置 api_key"
+            )
+        if "RateLimitError" in error_type:
+            return "API 调用频率超限，请稍后重试。"
+        return f"{error_type}: {msg}"
