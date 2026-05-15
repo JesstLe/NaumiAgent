@@ -275,6 +275,16 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             else:
                 await _run_analysis(engine, "speculate", arg)
+        case "/jit":
+            if not arg:
+                console.print(
+                    "[yellow]用法: /jit <计算任务描述>[/yellow]"
+                )
+                console.print(
+                    "[dim]例: /jit \"计算斐波那契数列第100项\"[/dim]"
+                )
+            else:
+                await _run_analysis(engine, "jit", arg)
         case "/help":
             _print_help()
         case _:
@@ -317,6 +327,7 @@ def _print_help() -> None:
         ("/mcts <问题>", "蒙特卡洛树搜索 — 多路径决策"),
         ("/route <任务>", "MoE 混合专家调度 — 多视角分析"),
         ("/speculate <路径>", "推测解码 — 快速起草+深度审查"),
+        ("/jit <任务>", "JIT 即时工具 — 用代码保证确定性"),
         ("/clear", "清除当前会话"),
         ("/quit", "退出"),
     ]
@@ -340,6 +351,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "mcts": "analysis_mcts",
         "route": "analysis_route",
         "speculate": "analysis_speculate",
+        "jit": "analysis_jit",
     }
 
     labels = {
@@ -355,6 +367,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "mcts": "蒙特卡洛树搜索 (MCTS)",
         "route": "MoE 混合专家调度",
         "speculate": "推测解码 (Draft+Review)",
+        "jit": "JIT 即时工具生成",
     }
 
     tool_name = tool_names[mode]
@@ -386,6 +399,8 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
             result = await tool.execute(task=target)
         elif mode == "speculate":
             result = await tool.execute(target=target)
+        elif mode == "jit":
+            result = await tool.execute(task=target)
         else:
             result = await tool.execute(target=target)
 

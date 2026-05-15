@@ -2317,11 +2317,232 @@ class SpeculateTool(Tool):
         return await _run_analysis(router, _SPECULATE_SYSTEM, user_msg)
 
 
-# ---------------------------------------------------------------------------
-#  内部基础设施
-# ---------------------------------------------------------------------------
+# ===========================================================================
+#  /jit — JIT 即时沙盒工具生成
+# ===========================================================================
 
-_global_router: Any = None
+# Task types that require computational verification
+_COMPUTATION_TASKS = {
+    "math": [
+        r"(?:计算|求值|积分|微分|矩阵|向量|概率|统计|回归)",
+        r"(?:calculate|compute|integral|derivative|matrix|vector)",
+        r"(?:fibonacci|prime|factorial|permutation|combination)",
+        r"(?:方程|不等式|最优化|线性规划)",
+    ],
+    "string": [
+        r"(?:字符串|正则|匹配|替换|编码|解码|哈希)",
+        r"(?:regex|parse|transform|encode|decode|hash|base64)",
+        r"(?:格式化|提取|分割|拼接|转义)",
+    ],
+    "data": [
+        r"(?:排序|过滤|聚合|去重|分组|透视|统计)",
+        r"(?:sort|filter|aggregate|dedup|group|pivot)",
+        r"(?:csv|json|yaml|xml|excel|pandas|dataframe)",
+    ],
+    "algo": [
+        r"(?:算法|图|树|路径|搜索|动态规划|贪心|回溯)",
+        r"(?:graph|tree|bfs|dfs|dijkstra|dp|greedy|backtrack)",
+        r"(?:排序算法|查找|时间复杂度|空间复杂度)",
+    ],
+    "network": [
+        r"(?:爬虫|抓取|请求|http|api|websocket|socket)",
+        r"(?:scrape|fetch|request|crawl|download)",
+        r"(?:dns|tcp|udp|ip|端口|代理)",
+    ],
+}
+
+
+def _scan_jit(task: str) -> str:
+    """jit 模式静态扫描：分析任务是否需要计算验证及推荐运行时."""
+    findings: list[str] = []
+    task_lower = task.lower()
+
+    # 1. Identify computation type
+    matched_types: list[tuple[str, list[str]]] = []
+    for comp_type, patterns in _COMPUTATION_TASKS.items():
+        hits = []
+        for pattern in patterns:
+            matches = re.findall(pattern, task_lower)
+            hits.extend(matches)
+        if hits:
+            matched_types.append((comp_type, hits))
+
+    if matched_types:
+        findings.append("- 检测到计算需求:")
+        for comp_type, keywords in matched_types:
+            unique_kw = list(set(keywords))[:5]
+            findings.append(f"  - {comp_type}: {', '.join(unique_kw)}")
+    else:
+        findings.append(
+            "- 计算需求: 未匹配到明确模式（将由 LLM 判断）"
+        )
+
+    # 2. Recommend language/runtime
+    if any(t[0] == "math" for t in matched_types):
+        findings.append("- 推荐语言: Python (numpy/scipy) 或 C++ (高性能)")
+    elif any(t[0] == "string" for t in matched_types):
+        findings.append("- 推荐语言: Python (re/字符串操作)")
+    elif any(t[0] == "data" for t in matched_types):
+        findings.append("- 推荐语言: Python (pandas/csv/json)")
+    elif any(t[0] == "algo" for t in matched_types):
+        findings.append(
+            "- 推荐语言: Python (快速验证) 或 C++ (生产级)"
+        )
+    elif any(t[0] == "network" for t in matched_types):
+        findings.append("- 推荐语言: Python (httpx/requests)")
+    else:
+        findings.append(
+            "- 推荐语言: Python (通用) — 最适合即时生成与执行"
+        )
+
+    # 3. Identify constraints from the task
+    constraints: list[str] = []
+    if re.search(r"\d+\s*(?:ms|毫秒|秒|second)", task_lower):
+        constraints.append("时间限制")
+    if re.search(r"\d+\s*(?:MB|GB|KB|字节)", task_lower):
+        constraints.append("内存限制")
+    if re.search(
+        r"(?:精确|精确到|小数点|精度|float|double|decimal)",
+        task_lower,
+    ):
+        constraints.append("精度要求")
+    if re.search(r"(?:并发|并行|多线程|multi)", task_lower):
+        constraints.append("并发要求")
+    if re.search(r"(?:大数|10\^\d+|万|亿|million|billion)", task_lower):
+        constraints.append("大数据量")
+    if constraints:
+        findings.append(f"- 约束条件: {', '.join(constraints)}")
+
+    # 4. Detect if answer needs verification
+    verification_needed = any(
+        t[0] in ("math", "algo") for t in matched_types
+    )
+    if verification_needed:
+        findings.append(
+            "- ✅ 需要计算验证 — LLM 推理不可靠，必须运行代码"
+        )
+    else:
+        findings.append(
+            "- ℹ️ 可选计算验证 — LLM 推理可能够用，但代码更可靠"
+        )
+
+    return "\n".join(findings)
+
+
+_JIT_SYSTEM = """\
+You are a JIT (Just-In-Time) Tool Generator. When pure LLM reasoning \
+cannot guarantee correctness, you generate and present actual runnable \
+code as your "external brain computation."
+
+## Core Principle
+**STOP guessing.** If the answer involves:
+- Mathematical computation → write and trace through the code
+- String manipulation with precise rules → write and test the code
+- Data transformation → write and run the pipeline
+- Algorithm correctness → implement and verify with test cases
+
+## Your Tasks
+
+### 1. Task Analysis
+- State whether LLM reasoning alone is sufficient (confidence < 90% → use code)
+- Identify the exact computation needed
+- Declare the input/output contract
+
+### 2. Code Generation
+Generate a COMPLETE, RUNNABLE script:
+- Language: Python (preferred for JIT) or C++ (if performance critical)
+- Include all imports and setup
+- Include test cases that verify correctness
+- Include print statements that show the computation trace
+- The code must be copy-paste-runnable (no missing dependencies)
+
+### 3. Execution Trace
+Simulate running the code mentally (or for simple cases, show the actual \
+output):
+- Show the step-by-step computation
+- Show intermediate values at key checkpoints
+- Show the final result
+
+### 4. Verification
+- Provide at least 2 test cases with known correct answers
+- Show that the code produces the expected output
+- If any test fails, fix the code and re-run
+
+### 5. Result
+State the answer clearly, derived from the code's deterministic output, \
+not from LLM reasoning.
+
+Format:
+```
+## JIT Script
+```python
+# ... complete runnable code ...
+```
+
+## Execution Result
+```
+# ... actual or simulated output ...
+```
+
+## Verified Answer
+Based on the code output: [clear answer]
+```
+"""
+
+
+class JITTool(Tool):
+    """JIT 即时沙盒工具生成 — 停止玄学推理，用代码保证确定性."""
+
+    @property
+    def name(self) -> str:
+        return "analysis_jit"
+
+    @property
+    def description(self) -> str:
+        return (
+            "JIT 即时工具生成：当 LLM 推理无法保证准确性时，"
+            "立即生成可运行的 Python/C++ 脚本，"
+            "展示代码作为\"外置大脑计算过程\"，"
+            "基于代码的确定性结果回答问题。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "需要计算验证的任务描述",
+                },
+                "context": {
+                    "type": "string",
+                    "description": "补充上下文（已知条件、约束等）",
+                    "default": "",
+                },
+            },
+            "required": ["task"],
+        }
+
+    async def execute(
+        self,
+        *,
+        task: str,
+        context: str = "",
+        **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("jit", task[:200])
+
+        scan_evidence = _scan_jit(task)
+
+        user_msg = f"## 任务\n{task}\n"
+        user_msg += f"\n## JIT 扫描分析\n{scan_evidence}\n"
+        if context:
+            user_msg += f"\n## 补充上下文\n{context}\n"
+
+        return await _run_analysis(router, _JIT_SYSTEM, user_msg)
 
 
 def set_analysis_router(router: Any) -> None:
@@ -2374,4 +2595,5 @@ def create_analysis_tools() -> list[Tool]:
         MCTSTool(),
         MoERouteTool(),
         SpeculateTool(),
+        JITTool(),
     ]
