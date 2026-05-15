@@ -89,6 +89,9 @@ decide/act loop and self-healing mechanisms
 - **analysis_probe**: Black-Box Probe — anti-hallucination protocol for \
 unknown/closed-source systems, generate reconnaissance scripts first, \
 collect real data, then develop based on verified information
+- **analysis_hook**: Reverse Engineering & Instrumentation — dynamic \
+analysis for black-box targets (memory scanning, API hooking, IL \
+reflection), anti-debug evasion, data extraction pipeline
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
