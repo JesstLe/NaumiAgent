@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import litellm
+
 from naumi_agent.config.settings import MemoryConfig
 from naumi_agent.model.router import ModelRouter, ModelTier
 
@@ -158,11 +160,15 @@ class ContextCompactor:
         return "\n\n".join(parts)
 
     def _estimate_tokens(self, messages: list[dict[str, Any]]) -> int:
-        """粗略估算 token 数（1 token ≈ 4 chars）."""
-        total_chars = sum(len(m.get("content", "")) for m in messages)
-        # 工具调用参数也算
-        for m in messages:
-            for tc in m.get("tool_calls", []):
-                func = tc.get("function", {})
-                total_chars += len(func.get("arguments", ""))
-        return total_chars // 4
+        """使用 litellm token_counter 估算 token 数."""
+        try:
+            model = self._router.resolve_model(ModelTier.CAPABLE)
+            return litellm.token_counter(model=model, messages=messages)
+        except Exception:
+            # Fallback: 1 token ≈ 4 chars
+            total_chars = sum(len(m.get("content", "")) for m in messages)
+            for m in messages:
+                for tc in m.get("tool_calls", []):
+                    func = tc.get("function", {})
+                    total_chars += len(func.get("arguments", ""))
+            return total_chars // 4
