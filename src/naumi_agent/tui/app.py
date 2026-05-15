@@ -142,6 +142,18 @@ class ChatPanel(VerticalScroll):
         self._current_tool_widget = None
         self.scroll_end(animate=False)
 
+    # --- 清空 ---
+
+    def clear(self) -> None:
+        self.query(Static).remove()
+        self.query(Collapsible).remove()
+        self._response_text = ""
+        self._response_widget = None
+        self._thinking_text = ""
+        self._thinking_content_widget = None
+        self._thinking_collapsible = None
+        self._current_tool_widget = None
+
     # --- 结束 ---
 
     def finalize(self, turns: int, cost: float, tokens: int = 0) -> None:
@@ -211,7 +223,7 @@ class InputBar(Horizontal):
     """
 
     def compose(self) -> ComposeResult:
-        yield Input(placeholder="输入任务，Shift+Enter 换行...", id="msg-input")
+        yield Input(placeholder="输入任务，Enter 发送...", id="msg-input")
         yield Button("发送", variant="primary", id="send-btn")
 
     @on(Input.Submitted)
@@ -469,14 +481,7 @@ class NaumiApp(App):
 
     def action_clear_chat(self) -> None:
         chat = self.query_one(ChatPanel)
-        chat.query(Static).remove()
-        chat.query(Collapsible).remove()
-        chat._response_text = ""
-        chat._response_widget = None
-        chat._thinking_text = ""
-        chat._thinking_content_widget = None
-        chat._thinking_collapsible = None
-        chat._current_tool_widget = None
+        chat.clear()
         self.engine.reset()
 
     def action_show_tools(self) -> None:

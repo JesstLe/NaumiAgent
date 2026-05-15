@@ -35,10 +35,12 @@ def chat(
 
 
 def _launch_tui(config_path: str) -> None:
+    from naumi_agent.log_setup import setup_logging
     from naumi_agent.orchestrator.engine import AgentEngine
     from naumi_agent.tui.app import NaumiApp
 
     config = AppConfig.from_yaml(config_path)
+    setup_logging(config.log_level)
     _check_api_key(config)
     engine = AgentEngine(config)
     app = NaumiApp(engine)
@@ -46,9 +48,11 @@ def _launch_tui(config_path: str) -> None:
 
 
 async def _chat(config_path: str) -> None:
+    from naumi_agent.log_setup import setup_logging
     from naumi_agent.orchestrator.engine import AgentEngine
 
     config = AppConfig.from_yaml(config_path)
+    setup_logging(config.log_level)
     _check_api_key(config)
     engine = AgentEngine(config)
 
@@ -113,9 +117,11 @@ def run(
 
 
 async def _run_task(task: str, config_path: str) -> None:
+    from naumi_agent.log_setup import setup_logging
     from naumi_agent.orchestrator.engine import AgentEngine
 
     config = AppConfig.from_yaml(config_path)
+    setup_logging(config.log_level)
     engine = AgentEngine(config)
 
     with console.status("[bold green]执行中...[/bold green]"):
