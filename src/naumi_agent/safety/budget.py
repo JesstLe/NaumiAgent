@@ -5,18 +5,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any, Callable
 
 from naumi_agent.model.router import TokenUsage
 
 logger = logging.getLogger(__name__)
-
-_COST_PER_MILLION: dict[str, dict[str, float]] = {
-    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
-    "claude-haiku-4-5": {"input": 0.80, "output": 4.0},
-    "claude-opus-4-7": {"input": 15.0, "output": 75.0},
-    "gpt-4o": {"input": 2.5, "output": 10.0},
-    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
-}
 
 
 @dataclass(frozen=True)
@@ -47,12 +40,17 @@ class BudgetSummary:
 class BudgetTracker:
     """Token 预算追踪."""
 
-    def __init__(self, budget: TokenBudget) -> None:
+    def __init__(
+        self,
+        budget: TokenBudget,
+        cost_fn: Callable[[str], dict[str, float]] | None = None,
+    ) -> None:
         self.budget = budget
         self._records: list[UsageRecord] = []
+        self._cost_fn = cost_fn
 
     def track(self, usage: TokenUsage, model: str) -> None:
-        cost = self._calculate_cost(usage, model)
+        cost = usage.cost_usd
         self._records.append(UsageRecord(
             model=model,
             input_tokens=usage.input_tokens,
@@ -102,11 +100,4 @@ class BudgetTracker:
             total_cost_usd=round(self.total_cost_usd, 6),
             remaining_usd=round(self.remaining_usd, 4),
             model_breakdown=breakdown,
-        )
-
-    def _calculate_cost(self, usage: TokenUsage, model: str) -> float:
-        rates = _COST_PER_MILLION.get(model, {"input": 3.0, "output": 15.0})
-        return (
-            usage.input_tokens * rates["input"] / 1_000_000
-            + usage.output_tokens * rates["output"] / 1_000_000
         )
