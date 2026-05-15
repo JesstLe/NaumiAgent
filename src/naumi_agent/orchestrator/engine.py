@@ -382,7 +382,7 @@ class AgentEngine:
                         await on_event("token", {"content": chunk.token})
 
                     if chunk.tool_call and isinstance(chunk.tool_call, dict):
-                        collected_tool_calls = chunk.tool_call
+                        collected_tool_calls.update(chunk.tool_call)
             except Exception as e:
                 logger.warning("Streaming failed, fallback to non-streaming: %s", e)
                 response = await self._router.call(

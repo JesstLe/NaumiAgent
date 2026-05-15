@@ -48,6 +48,9 @@ class BudgetTracker:
         self.budget = budget
         self._records: list[UsageRecord] = []
         self._cost_fn = cost_fn
+        self._total_input: int = 0
+        self._total_output: int = 0
+        self._total_cost: float = 0.0
 
     def track(self, usage: TokenUsage, model: str) -> None:
         cost = usage.cost_usd
@@ -58,6 +61,9 @@ class BudgetTracker:
             cost_usd=cost,
             timestamp=datetime.now().isoformat(),
         ))
+        self._total_input += usage.input_tokens
+        self._total_output += usage.output_tokens
+        self._total_cost += cost
         logger.debug(
             "Tracked %s: %d in + %d out = $%.4f",
             model, usage.input_tokens, usage.output_tokens, cost,
@@ -65,25 +71,25 @@ class BudgetTracker:
 
     def is_exceeded(self) -> bool:
         return (
-            self.total_input_tokens > self.budget.max_input_tokens
-            or self.total_cost_usd > self.budget.max_usd
+            self._total_input > self.budget.max_input_tokens
+            or self._total_cost > self.budget.max_usd
         )
 
     @property
     def total_input_tokens(self) -> int:
-        return sum(r.input_tokens for r in self._records)
+        return self._total_input
 
     @property
     def total_output_tokens(self) -> int:
-        return sum(r.output_tokens for r in self._records)
+        return self._total_output
 
     @property
     def total_cost_usd(self) -> float:
-        return sum(r.cost_usd for r in self._records)
+        return self._total_cost
 
     @property
     def remaining_usd(self) -> float:
-        return max(0, self.budget.max_usd - self.total_cost_usd)
+        return max(0, self.budget.max_usd - self._total_cost)
 
     def get_summary(self) -> BudgetSummary:
         breakdown: dict[str, dict[str, float]] = {}
