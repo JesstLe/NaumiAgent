@@ -118,6 +118,10 @@ D(trend prediction) feedback control, monitor→evaluate→actuate cycle
 audit AI outputs for traceability, detect unverified outputs and \
 claim-fact gaps, design citation trace tree + deterministic verifier, \
 turn AI from black-box magician into auditable worker
+- **analysis_genesis**: Genesis Self-Evolution — scan code rigidity \
+vs meta-programming capability, design self-modifying architecture \
+with plugin system, hot-reload, sandbox verification, and automatic \
+rollback for continuous self-improvement
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
