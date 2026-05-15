@@ -715,11 +715,10 @@ class GoalPursuitLoop:
     async def _execute_file_edit(
         self, tool: Any, description: str, action_id: str,
     ) -> dict[str, Any]:
-        """Generate updated file content and use file_write to apply it.
+        """Edit a file using LLM-generated search/replace.
 
-        Instead of asking for OLD/NEW diff blocks (which reasoning models
-        struggle with), we read the file, ask the LLM to produce the
-        complete updated content, and write it back.
+        For small files (<200 lines): ask LLM for complete updated content.
+        For large files: ask LLM for just the old/new text blocks.
         """
         import os
         import re
@@ -749,7 +748,29 @@ class GoalPursuitLoop:
                 "output": f"File {path} not found or empty",
             }
 
+        line_count = existing.count("\n") + 1
         context = self._build_codebase_context()
+
+        if line_count <= 200:
+            # Small file: ask for complete rewrite
+            return await self._edit_small_file(
+                path, existing, description, action_id, context,
+            )
+        else:
+            # Large file: ask for targeted search/replace section
+            return await self._edit_large_file(
+                path, existing, description, action_id, context,
+            )
+
+    async def _edit_small_file(
+        self,
+        path: str,
+        existing: str,
+        description: str,
+        action_id: str,
+        context: str,
+    ) -> dict[str, Any]:
+        """Edit a small file by asking for complete updated content."""
         prompt = (
             f"Action: {description}\n\n"
             f"## Codebase Context\n{context}\n\n"
@@ -767,7 +788,6 @@ class GoalPursuitLoop:
             prompt,
         )
 
-        # Strip markdown fences if present
         text = content.strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
@@ -779,15 +799,119 @@ class GoalPursuitLoop:
                 "output": "LLM returned empty content for file edit",
             }
 
-        # Use file_write tool to apply the update
         write_tool = self._tools.get("file_write")
         if write_tool:
             output = await write_tool.execute(path=path, content=text)
         else:
-            # Fallback: write directly
+            resolved = __import__("os").path.expanduser(path)
             with open(resolved, "w", encoding="utf-8") as f:
                 f.write(text)
             output = f"Updated {path}"
+
+        return {
+            "action_id": action_id,
+            "status": "completed",
+            "output": str(output)[:3000],
+        }
+
+    async def _edit_large_file(
+        self,
+        path: str,
+        existing: str,
+        description: str,
+        action_id: str,
+        context: str,
+    ) -> dict[str, Any]:
+        """Edit a large file by finding and replacing a targeted section."""
+        # Send only file structure (imports + function/class signatures)
+        # plus the full content for context-aware editing
+        lines = existing.split("\n")
+        signatures = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if (stripped.startswith("def ") or stripped.startswith("class ")
+                    or stripped.startswith("case ")
+                    or stripped.startswith("async def ")):
+                signatures.append(f"L{i+1}: {line.rstrip()}")
+
+        sig_text = "\n".join(signatures)
+
+        prompt = (
+            f"Action: {description}\n\n"
+            f"## Codebase Context\n{context}\n\n"
+            f"## File structure ({path}, {len(lines)} lines)\n"
+            f"{sig_text}\n\n"
+            "Based on the action and file structure, provide:\n"
+            "1. LINE_RANGE: the start and end line numbers to replace\n"
+            "2. NEW_CONTENT: the replacement lines\n\n"
+            "Output format:\n"
+            "LINE_RANGE|<start>|<end>\n"
+            "<new content lines here>\n"
+            "END_CONTENT\n\n"
+            "Example:\n"
+            "LINE_RANGE|10|12\n"
+            "from .hello import HelloTool\n"
+            "from .pursuit import create_pursuit_tool\n"
+            "END_CONTENT"
+        )
+
+        response = await self._llm_call(
+            "You identify exact line ranges to edit in Python files.",
+            prompt,
+        )
+
+        # Parse LINE_RANGE and content
+        start_line = 0
+        end_line = 0
+        new_content = ""
+        in_content = False
+        content_lines: list[str] = []
+
+        for line in response.split("\n"):
+            if line.startswith("LINE_RANGE|"):
+                parts = line.split("|")
+                if len(parts) >= 3:
+                    try:
+                        start_line = int(parts[1].strip())
+                        end_line = int(parts[2].strip())
+                    except ValueError:
+                        pass
+                in_content = True
+                continue
+            if line.strip() == "END_CONTENT":
+                in_content = False
+                continue
+            if in_content:
+                content_lines.append(line)
+
+        if start_line <= 0 or end_line <= 0 or not content_lines:
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": (
+                    f"Failed to parse line range from LLM response. "
+                    f"Got start={start_line}, end={end_line}, "
+                    f"content_lines={len(content_lines)}"
+                ),
+            }
+
+        new_content = "\n".join(content_lines)
+        if not new_content.endswith("\n"):
+            new_content += "\n"
+
+        # Replace the lines (1-indexed)
+        lines_before = lines[: start_line - 1]
+        lines_after = lines[end_line:]
+        updated = "\n".join(lines_before + [new_content.rstrip("\n")] + lines_after) + "\n"
+
+        write_tool = self._tools.get("file_write")
+        if write_tool:
+            output = await write_tool.execute(path=path, content=updated)
+        else:
+            resolved = __import__("os").path.expanduser(path)
+            with open(resolved, "w", encoding="utf-8") as f:
+                f.write(updated)
+            output = f"Updated {path} (lines {start_line}-{end_line})"
 
         return {
             "action_id": action_id,
