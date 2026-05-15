@@ -377,6 +377,16 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             else:
                 await _run_analysis(engine, "pid", arg)
+        case "/zkp":
+            if not arg:
+                console.print(
+                    "[yellow]用法: /zkp <代码路径或系统描述>[/yellow]"
+                )
+                console.print(
+                    "[dim]例: /zkp src/naumi_agent/tools/[/dim]"
+                )
+            else:
+                await _run_analysis(engine, "zkp", arg)
         case "/hook":
             if not arg:
                 console.print("[yellow]用法: /hook <逆向目标描述>[/yellow]")
@@ -436,6 +446,7 @@ def _print_help() -> None:
         ("/fusion <目标>", "决定论-概率论融合 — AI与传统代码边界审计"),
         ("/consensus <目标>", "拜占庭共识 — 多模型表决防幻觉"),
         ("/pid <目标>", "PID 闭环纠偏 — 开环→闭环改造"),
+        ("/zkp <目标>", "零知识证明 — 执行轨迹校验"),
         ("/vision <目标>", "AI 视觉数据提取 — 反封锁视觉管线"),
         ("/hook <目标>", "逆向插桩 — 黑盒解剖"),
         ("/clear", "清除当前会话"),
@@ -475,6 +486,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "fusion": "analysis_fusion",
         "consensus": "analysis_consensus",
         "pid": "analysis_pid",
+        "zkp": "analysis_zkp",
     }
 
     labels = {
@@ -504,6 +516,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "fusion": "决定论-概率论融合审计 (Fusion)",
         "consensus": "拜占庭容错共识 (Consensus)",
         "pid": "PID 闭环纠偏 (Control Theory)",
+        "zkp": "零知识证明与轨迹校验 (ZKP)",
     }
 
     tool_name = tool_names[mode]
@@ -562,6 +575,8 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         elif mode == "consensus":
             result = await tool.execute(target=target)
         elif mode == "pid":
+            result = await tool.execute(target=target)
+        elif mode == "zkp":
             result = await tool.execute(target=target)
         else:
             result = await tool.execute(target=target)
