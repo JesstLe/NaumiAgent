@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
-import tempfile
 from typing import Any
 
 from naumi_agent.tools.base import Tool
@@ -51,7 +49,7 @@ class FileReadTool(Tool):
             return f"Error: File not found: {path}"
 
         try:
-            with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+            with open(resolved, encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
 
             total = len(lines)
@@ -151,14 +149,17 @@ class FileEditTool(Tool):
             return f"Error: File not found: {path}"
 
         try:
-            with open(resolved, "r", encoding="utf-8") as f:
+            with open(resolved, encoding="utf-8") as f:
                 content = f.read()
 
             count = content.count(old_text)
             if count == 0:
                 return f"Error: old_text not found in {path}"
             if count > 1:
-                return f"Error: old_text appears {count} times in {path}. Please provide more context to make it unique."
+                return (
+                    f"Error: old_text appears {count} times in {path}."
+                    " Please provide more context to make it unique."
+                )
 
             new_content = content.replace(old_text, new_text, 1)
             with open(resolved, "w", encoding="utf-8") as f:
@@ -178,10 +179,7 @@ class BashRunTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "在 shell 中执行命令并返回输出。"
-            "支持超时设置。工作目录默认为项目根目录。"
-        )
+        return "在 shell 中执行命令并返回输出。支持超时设置。工作目录默认为项目根目录。"
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -205,7 +203,9 @@ class BashRunTool(Tool):
             "required": ["command"],
         }
 
-    async def execute(self, *, command: str, timeout: int = 30, cwd: str | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self, *, command: str, timeout: int = 30, cwd: str | None = None, **kwargs: Any
+    ) -> str:
         try:
             proc = await asyncio.create_subprocess_shell(
                 command,
@@ -231,7 +231,7 @@ class BashRunTool(Tool):
                 output = output[:50000] + f"\n... (truncated, {len(output)} total chars)"
 
             return output
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return f"Error: Command timed out after {timeout}s"
         except Exception as e:
             return f"Error executing command: {type(e).__name__}: {e}"

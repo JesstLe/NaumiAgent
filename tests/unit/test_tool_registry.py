@@ -1,9 +1,5 @@
 """工具系统单元测试."""
 
-import json
-import os
-import tempfile
-
 import pytest
 
 from naumi_agent.tools.base import ToolRegistry

@@ -58,13 +58,14 @@ class CodeExecuteTool(Tool):
     async def _docker_available(self) -> bool:
         try:
             proc = await asyncio.create_subprocess_exec(
-                "docker", "info",
+                "docker",
+                "info",
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
             await asyncio.wait_for(proc.wait(), timeout=5)
             return proc.returncode == 0
-        except (FileNotFoundError, asyncio.TimeoutError):
+        except (TimeoutError, FileNotFoundError):
             return False
 
     async def _run_in_docker(self, code: str, language: str, timeout: int) -> str:
@@ -93,11 +94,17 @@ class CodeExecuteTool(Tool):
             cmd = cmd_map.get(language, ["python", container_path])
 
             proc = await asyncio.create_subprocess_exec(
-                "docker", "run", "--rm",
-                "-v", f"{host_path}:{container_path}:ro",
-                "--network", "none",
-                "--memory", "256m",
-                "--cpus", "1",
+                "docker",
+                "run",
+                "--rm",
+                "-v",
+                f"{host_path}:{container_path}:ro",
+                "--network",
+                "none",
+                "--memory",
+                "256m",
+                "--cpus",
+                "1",
                 image,
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -117,7 +124,7 @@ class CodeExecuteTool(Tool):
                 parts.append(f"[exit code: {proc.returncode}]")
 
             return "\n".join(parts) if parts else "(no output)"
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return f"Error: Execution timed out after {timeout}s"
         except Exception as e:
             return f"Error: {type(e).__name__}: {e}"
@@ -161,7 +168,7 @@ class CodeExecuteTool(Tool):
                     parts.append(f"[exit code: {proc.returncode}]")
 
                 return "\n".join(parts) if parts else "(no output)"
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 return f"Error: Execution timed out after {timeout}s"
             except Exception as e:
                 return f"Error: {type(e).__name__}: {e}"

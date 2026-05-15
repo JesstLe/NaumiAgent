@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class ToolSchema:
     """工具的 JSON Schema 描述（用于传给 LLM）."""
+
     name: str
     description: str
     parameters: dict[str, Any]
@@ -22,6 +23,7 @@ class ToolSchema:
 @dataclass(frozen=True)
 class ToolCall:
     """LLM 发起的工具调用."""
+
     id: str
     name: str
     arguments: str  # JSON string
@@ -30,6 +32,7 @@ class ToolCall:
 @dataclass(frozen=True)
 class ToolResult:
     """工具执行结果."""
+
     call_id: str
     status: str  # "success" | "error"
     content: str

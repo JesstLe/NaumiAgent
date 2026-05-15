@@ -1,7 +1,5 @@
 """TUI 组件测试."""
 
-import pytest
-
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.tui.app import NaumiApp

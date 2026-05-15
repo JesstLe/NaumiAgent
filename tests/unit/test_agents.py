@@ -2,8 +2,13 @@
 
 import pytest
 
-from naumi_agent.agents.base import AgentCapability, AgentConfig, BaseAgent
-from naumi_agent.agents.presets import CODER_CONFIG, RESEARCHER_CONFIG, BROWSER_CONFIG, ALL_AGENT_CONFIGS
+from naumi_agent.agents.base import AgentCapability, BaseAgent
+from naumi_agent.agents.presets import (
+    ALL_AGENT_CONFIGS,
+    BROWSER_CONFIG,
+    CODER_CONFIG,
+    RESEARCHER_CONFIG,
+)
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 

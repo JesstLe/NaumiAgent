@@ -1,8 +1,6 @@
 """网络工具测试."""
 
-import pytest
-
-from naumi_agent.tools.web import WebSearchTool, WebFetchTool, create_web_tools
+from naumi_agent.tools.web import WebFetchTool, WebSearchTool, create_web_tools
 
 
 class TestWebTools:

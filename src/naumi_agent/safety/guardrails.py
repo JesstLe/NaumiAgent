@@ -8,21 +8,21 @@ import re
 logger = logging.getLogger(__name__)
 
 _SECRET_PATTERNS: list[tuple[str, str]] = [
-    (r'(api[_\-]?key["\s:=]+)["\']?[\w\-]{20,}["\']?', r'\1[REDACTED]'),
-    (r'(password["\s:=]+)["\']?[\w\-]{8,}["\']?', r'\1[REDACTED]'),
-    (r'(token["\s:=]+)["\']?[\w\-]{20,}["\']?', r'\1[REDACTED]'),
-    (r'(secret["\s:=]+)["\']?[\w\-]{20,}["\']?', r'\1[REDACTED]'),
-    (r'sk-[a-zA-Z0-9]{20,}', '[REDACTED_API_KEY]'),
-    (r'ghp_[a-zA-Z0-9]{36}', '[REDACTED_GITHUB_TOKEN]'),
-    (r'gho_[a-zA-Z0-9]{36}', '[REDACTED_GITHUB_TOKEN]'),
+    (r'(api[_\-]?key["\s:=]+)["\']?[\w\-]{20,}["\']?', r"\1[REDACTED]"),
+    (r'(password["\s:=]+)["\']?[\w\-]{8,}["\']?', r"\1[REDACTED]"),
+    (r'(token["\s:=]+)["\']?[\w\-]{20,}["\']?', r"\1[REDACTED]"),
+    (r'(secret["\s:=]+)["\']?[\w\-]{20,}["\']?', r"\1[REDACTED]"),
+    (r"sk-[a-zA-Z0-9]{20,}", "[REDACTED_API_KEY]"),
+    (r"ghp_[a-zA-Z0-9]{36}", "[REDACTED_GITHUB_TOKEN]"),
+    (r"gho_[a-zA-Z0-9]{36}", "[REDACTED_GITHUB_TOKEN]"),
 ]
 
 _DANGEROUS_PATTERNS = [
-    r'rm\s+-rf\s+/',
-    r'del\s+/[sS]\s+/[qQ]\s+[a-zA-Z]:\\',
-    r'>\s*/dev/sd',
-    r'mkfs\.',
-    r'dd\s+if=.*of=/dev/',
+    r"rm\s+-rf\s+/",
+    r"del\s+/[sS]\s+/[qQ]\s+[a-zA-Z]:\\",
+    r">\s*/dev/sd",
+    r"mkfs\.",
+    r"dd\s+if=.*of=/dev/",
 ]
 
 
@@ -43,7 +43,7 @@ class OutputGuardrail:
     def _check_dangerous_content(self, text: str) -> None:
         for pattern in _DANGEROUS_PATTERNS:
             if re.search(pattern, text):
-                raise SecurityError(f"输出包含潜在危险命令，已拦截。")
+                raise SecurityError("输出包含潜在危险命令，已拦截。")
 
     @staticmethod
     def redact(text: str) -> str:

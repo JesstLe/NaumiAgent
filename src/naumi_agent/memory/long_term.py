@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import uuid
@@ -18,6 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class MemoryEntry:
     """一条记忆记录."""
+
     id: str
     content: str
     category: str  # "fact" | "preference" | "experience" | "plan_template"
@@ -39,6 +39,7 @@ class MemoryEntry:
 @dataclass(frozen=True)
 class MemorySearchResult:
     """记忆搜索结果."""
+
     entry: MemoryEntry
     relevance: float  # 0.0 - 1.0
 
@@ -127,8 +128,9 @@ class LongTermMemory:
             if relevance < min_relevance:
                 continue
 
-            clean_meta = {k: v for k, v in meta.items()
-                         if k not in ("category", "created_at", "access_count")}
+            clean_meta = {
+                k: v for k, v in meta.items() if k not in ("category", "created_at", "access_count")
+            }
 
             entry = MemoryEntry(
                 id=doc_id,
@@ -166,9 +168,7 @@ class LongTermMemory:
         self._ensure_initialized()
         return self._collection.count() or 0
 
-    async def forget_old(
-        self, max_age_days: int = 90, min_access_count: int = 1
-    ) -> int:
+    async def forget_old(self, max_age_days: int = 90, min_access_count: int = 1) -> int:
         """遗忘长期未访问且低频的记忆."""
         self._ensure_initialized()
 

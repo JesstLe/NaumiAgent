@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Sequence
 
 from naumi_agent.streaming.events import EventType, StreamEvent
 
@@ -42,7 +41,7 @@ class EventEmitter:
         """发布事件到所有订阅者."""
         self._history.append(event)
         if len(self._history) > self._history_limit:
-            self._history = self._history[-self._history_limit:]
+            self._history = self._history[-self._history_limit :]
 
         for sub_id, queue in self._subscribers.items():
             allowed = self._filters.get(sub_id)

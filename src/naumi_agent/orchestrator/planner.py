@@ -5,21 +5,20 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
+from enum import StrEnum
 
 from naumi_agent.model.router import ModelRouter, ModelTier
 
 logger = logging.getLogger(__name__)
 
 
-class ExecutionMode(str, Enum):
+class ExecutionMode(StrEnum):
     SINGLE_TURN = "single_turn"
     PROMPT_CHAIN = "prompt_chain"
     ORCHESTRATOR = "orchestrator"
 
 
-class Complexity(str, Enum):
+class Complexity(StrEnum):
     SIMPLE = "simple"
     MEDIUM = "medium"
     COMPLEX = "complex"
@@ -194,9 +193,7 @@ class AdaptivePlanner:
             mode=ExecutionMode.SINGLE_TURN,
         )
 
-    async def _medium_plan(
-        self, task: str, criteria: list[str] | None, intent: Intent
-    ) -> Plan:
+    async def _medium_plan(self, task: str, criteria: list[str] | None, intent: Intent) -> Plan:
         prompt = PLANNER_PROMPT.format(
             task=task,
             success_criteria=criteria or ["任务完成"],
@@ -213,9 +210,7 @@ class AdaptivePlanner:
         except Exception:
             return self._simple_plan(task, intent)
 
-    async def _complex_plan(
-        self, task: str, criteria: list[str] | None, intent: Intent
-    ) -> Plan:
+    async def _complex_plan(self, task: str, criteria: list[str] | None, intent: Intent) -> Plan:
         prompt = PLANNER_PROMPT.format(
             task=task,
             success_criteria=criteria or ["任务完成"],
@@ -242,7 +237,7 @@ class AdaptivePlanner:
         data = json.loads(text)
         steps = [
             Step(
-                id=s.get("id", f"step_{i+1}"),
+                id=s.get("id", f"step_{i + 1}"),
                 description=s.get("description", ""),
                 tool=s.get("tool"),
                 depends_on=s.get("depends_on", []),

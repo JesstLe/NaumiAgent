@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -44,7 +43,7 @@ class DelegateTaskTool(Tool):
                 },
                 "agent": {
                     "type": "string",
-                    "description": "Agent 名称: coder | researcher | browser（可选，不指定则自动选择）",
+                    "description": "Agent: coder | researcher | browser (optional)",
                 },
             },
             "required": ["task"],

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -38,15 +38,13 @@ class BehaviorMonitor:
     def check_anomalous_behavior(self) -> list[str]:
         warnings: list[str] = []
 
-        recent = self._call_history[-self._loop_window:]
+        recent = self._call_history[-self._loop_window :]
         if len(recent) >= self._loop_window:
             names = [r.tool_name for r in recent]
             if len(set(names)) <= 2:
-                warnings.append(
-                    f"检测到工具调用循环：重复调用 {set(names)}"
-                )
+                warnings.append(f"检测到工具调用循环：重复调用 {set(names)}")
 
-        recent_freq = self._call_history[-self._high_freq_window:]
+        recent_freq = self._call_history[-self._high_freq_window :]
         if len(recent_freq) >= self._high_freq_window:
             time_span = recent_freq[-1].timestamp - recent_freq[0].timestamp
             if time_span < self._high_freq_seconds:
@@ -57,8 +55,7 @@ class BehaviorMonitor:
         total = len(self._call_history)
         if total > 5 and self._error_count / total > self._error_rate_threshold:
             warnings.append(
-                f"工具调用失败率过高：{self._error_count}/{total} "
-                f"({self._error_count / total:.0%})"
+                f"工具调用失败率过高：{self._error_count}/{total} ({self._error_count / total:.0%})"
             )
 
         return warnings

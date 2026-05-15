@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 
-from naumi_agent.api.schemas import ToolInfo, ConfigResponse, ModelInfo
 from naumi_agent.api.deps import AuthDep
+from naumi_agent.api.schemas import ConfigResponse, ModelInfo, ToolInfo
 
 router = APIRouter(tags=["tools", "config"])
 
@@ -34,7 +34,9 @@ async def get_config(request: Request, auth: str = AuthDep):
     config = engine.config
     return ConfigResponse(
         models=[
-            ModelInfo(id="kimi-for-coding", name="Kimi for Coding", provider="moonshot", tier="capable"),
+            ModelInfo(
+                id="kimi-for-coding", name="Kimi for Coding", provider="moonshot", tier="capable"
+            ),
         ],
         tools=[
             ToolInfo(name=t.name, description=t.description, parameters=t.schema.parameters)

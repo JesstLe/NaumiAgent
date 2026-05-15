@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, TYPE_CHECKING
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
-    from naumi_agent.tools.base import ToolRegistry
 
 
-class AgentCapability(str, Enum):
+class AgentCapability(StrEnum):
     FILE_OPS = "file_operations"
     CODE_EXEC = "code_execution"
     WEB_BROWSE = "web_browsing"
@@ -22,6 +21,7 @@ class AgentCapability(str, Enum):
 @dataclass(frozen=True)
 class AgentConfig:
     """Agent 配置."""
+
     name: str
     description: str
     capabilities: list[AgentCapability]
@@ -36,6 +36,7 @@ class AgentConfig:
 @dataclass(frozen=True)
 class AgentResult:
     """Agent 执行结果."""
+
     status: str  # "completed" | "error" | "timeout" | "max_turns"
     response: str = ""
     total_tokens: int = 0
@@ -49,8 +50,12 @@ _CAPABILITY_TOOLS: dict[AgentCapability, list[str]] = {
     AgentCapability.FILE_OPS: ["file_read", "file_write", "file_edit"],
     AgentCapability.CODE_EXEC: ["code_execute"],
     AgentCapability.WEB_BROWSE: [
-        "browser_navigate", "browser_click", "browser_type",
-        "browser_screenshot", "browser_extract", "browser_get_html",
+        "browser_navigate",
+        "browser_click",
+        "browser_type",
+        "browser_screenshot",
+        "browser_extract",
+        "browser_get_html",
     ],
     AgentCapability.WEB_SEARCH: ["web_search", "web_fetch"],
     AgentCapability.SHELL_EXEC: ["bash_run"],
@@ -114,12 +119,6 @@ class BaseAgent:
             "reasoning": ModelTier.REASONING,
         }
         tier = tier_map.get(self.config.model_tier, ModelTier.CAPABLE)
-        tier_map = {
-            "fast": RouterTier.FAST,
-            "capable": RouterTier.CAPABLE,
-            "reasoning": RouterTier.REASONING,
-        }
-        tier = tier_map.get(self.config.model_tier, RouterTier.CAPABLE)
 
         total_tokens = 0
         total_cost = 0.0
@@ -148,11 +147,13 @@ class BaseAgent:
                 )
 
             if response.tool_calls:
-                messages.append({
-                    "role": "assistant",
-                    "content": response.content or "",
-                    "tool_calls": response.tool_calls,
-                })
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "tool_calls": response.tool_calls,
+                    }
+                )
 
                 for tc_raw in response.tool_calls:
                     func = tc_raw.get("function", {})
@@ -162,11 +163,13 @@ class BaseAgent:
 
                     tool = self.engine.tool_registry.get(tool_name)
                     if not tool:
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": call_id,
-                            "content": f"Unknown tool: {tool_name}",
-                        })
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "content": f"Unknown tool: {tool_name}",
+                            }
+                        )
                         continue
 
                     try:
@@ -175,11 +178,13 @@ class BaseAgent:
                     except Exception as e:
                         output = f"Error: {type(e).__name__}: {e}"
 
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": output,
-                    })
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": output,
+                        }
+                    )
 
                 continue
 

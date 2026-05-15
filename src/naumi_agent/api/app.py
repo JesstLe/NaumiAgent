@@ -37,12 +37,14 @@ def create_app() -> FastAPI:
     )
 
     from naumi_agent.api.routes import health, messages, tools, ws
+
     app.include_router(health.router, prefix="/api/v1")
     app.include_router(messages.router, prefix="/api/v1")
     app.include_router(tools.router, prefix="/api/v1")
     app.include_router(ws.router, prefix="/api/v1")
 
     from naumi_agent.api.middleware import AuthMiddleware, RateLimitMiddleware
+
     app.add_middleware(RateLimitMiddleware, requests_per_minute=60)
     app.add_middleware(AuthMiddleware)
 
