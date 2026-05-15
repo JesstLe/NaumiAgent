@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI):
     app.state.engine = engine
     app.state.config = config
     yield
-    await engine.session_store.close()
+    await engine.shutdown()
 
 
 def create_app() -> FastAPI:
