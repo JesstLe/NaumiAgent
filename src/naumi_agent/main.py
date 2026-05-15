@@ -327,6 +327,16 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 console.print("[yellow]用法: /vision <数据提取目标描述>[/yellow]")
             else:
                 await _run_analysis(engine, "vision", arg)
+        case "/spar":
+            if not arg:
+                console.print(
+                    "[yellow]用法: /spar <目标代码路径或功能描述>[/yellow]"
+                )
+                console.print(
+                    "[dim]例: /spar src/naumi_agent/tools/[/dim]"
+                )
+            else:
+                await _run_analysis(engine, "spar", arg)
         case "/hook":
             if not arg:
                 console.print("[yellow]用法: /hook <逆向目标描述>[/yellow]")
@@ -381,6 +391,7 @@ def _print_help() -> None:
         ("/entropy <文本>", "耗散结构熵减 — 锚点重启"),
         ("/ooda <路径>", "OODA 战场指挥 — 反脆弱架构"),
         ("/probe <需求>", "黑盒探测 — 反幻觉协议"),
+        ("/spar <目标>", "对抗自博弈 — 蓝军写代码 vs 红军搞破坏"),
         ("/vision <目标>", "AI 视觉数据提取 — 反封锁视觉管线"),
         ("/hook <目标>", "逆向插桩 — 黑盒解剖"),
         ("/clear", "清除当前会话"),
@@ -415,6 +426,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "probe": "analysis_probe",
         "hook": "analysis_hook",
         "vision": "analysis_vision",
+        "spar": "analysis_spar",
     }
 
     labels = {
@@ -439,6 +451,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "probe": "黑盒探测 (Probe)",
         "hook": "逆向插桩 (Hook)",
         "vision": "AI 视觉数据提取 (Vision)",
+        "spar": "对抗性自博弈 (GAN for Code)",
     }
 
     tool_name = tool_names[mode]
@@ -487,6 +500,8 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         elif mode == "hook":
             result = await tool.execute(task=target)
         elif mode == "vision":
+            result = await tool.execute(task=target)
+        elif mode == "spar":
             result = await tool.execute(task=target)
         else:
             result = await tool.execute(target=target)

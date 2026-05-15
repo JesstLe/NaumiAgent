@@ -4147,6 +4147,393 @@ class VisionTool(Tool):
         return await _run_analysis(router, _VISION_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /spar — 对抗性自博弈 (Adversarial Self-Play)
+# ===========================================================================
+
+# Reward hacking shortcuts that indicate "cheating" instead of real fixes
+_REWARD_HACK_PATTERNS = [
+    (r"if\s*\(\s*(?:len|size|length)\s*.*>\s*\d+\s*\)\s*(?:return|break|continue)",
+     "大小检查直接返回 — 可能跳过处理而非修复根因"),
+    (r"except\s*(?:Exception|BaseException)\s*:\s*(?:return|pass)",
+     "裸 except 静默吞掉异常 — 可能掩盖真实 Bug"),
+    (r"try:\s*\n[^#\n]*except:\s*\n\s*pass",
+     "try/except pass — 无条件忽略所有错误"),
+    (r"(?:TODO|FIXME|HACK|XXX).*(?:bypass|skip|ignore|workaround)",
+     "绕行式临时注释 — 非正式修复"),
+    (r"if\s+False:",
+     "死代码分支 — 可能是删除功能以满足测试"),
+    (r"return\s+(?:None|True|False|\"\"|0)\s*#\s*(?:pass|bypass|skip)",
+     "硬编码返回 + 绕过注释"),
+    (r"assert\s+False",
+     "断言失败式短路 — 放弃而非修复"),
+    (r"#\s*noqa|#\s*type:\s*ignore|#\s*pylint:\s*disable",
+     "静默压制 Linter/类型检查 — 可能掩盖问题"),
+]
+
+# Vulnerability surface patterns for adversarial targeting
+_VULN_SURFACE_PATTERNS = [
+    (r"(?:malloc|calloc|realloc|new)\s*\(", "堆内存分配"),
+    (r"(?:free|delete)\s*[\(\[]?", "堆内存释放"),
+    (r"(?:strcpy|strcat|sprintf|gets)\s*\(", "不安全字符串操作"),
+    (r"(?:memcpy|memmove)\s*\([^,]+,\s*[^,]+,\s*[^)]+\)", "内存拷贝"),
+    (r"(?:fopen|fwrite|fread|open)\s*\(", "文件 I/O"),
+    (r"(?:socket|connect|bind|accept|recv|send)\s*\(", "网络 I/O"),
+    (r"(?:thread|Thread|spawn|fork|asyncio)\s*[\(\[]?", "并发/多线程"),
+    (r"(?:subprocess|os\.system|os\.popen|exec|eval)\s*\(", "命令执行"),
+    (r"(?:sql|cursor|execute)\s*\(", "数据库操作"),
+    (r"(?:json\.loads|yaml\.load|pickle\.loads)\s*\(", "反序列化"),
+    (r"\[\s*[^\]]*\s*\]\s*=|\.append|\.insert", "数组/列表写入"),
+    (r"(?:int|float)\s*\([^)]*\)", "类型转换 — 可能溢出/精度丢失"),
+]
+
+# Adversarial input strategies mapped to vulnerability types
+_ADVERSARIAL_INPUT_STRATEGIES = {
+    "堆内存分配": [
+        "超大输入 (>2GB) 测试内存耗尽",
+        "零长度输入触发边界分配",
+        "交错分配/释放制造碎片",
+    ],
+    "堆内存释放": [
+        "重复释放 (double free) 同一指针",
+        "释放后使用 (use-after-free)",
+        "释放 NULL 指针",
+    ],
+    "不安全字符串操作": [
+        "超长字符串 (100K+) 缓冲区溢出",
+        "嵌入 NULL 字节截断",
+        "Unicode/多字节混合编码",
+    ],
+    "内存拷贝": [
+        "源/目标重叠区域拷贝",
+        "拷贝长度 > 实际缓冲区",
+        "空指针 + 非零长度",
+    ],
+    "文件 I/O": [
+        "符号链接指向敏感文件",
+        "并发读写同一文件",
+        "文件名含路径遍历 (../../etc/passwd)",
+    ],
+    "网络 I/O": [
+        "半开连接耗尽端口",
+        "畸形 HTTP 请求头",
+        "超时 + 重试风暴",
+    ],
+    "并发/多线程": [
+        "竞态条件: 1000 线程同时写同一变量",
+        "死锁: 按相反顺序获取锁",
+        "活锁: 高优先级线程持续抢占",
+    ],
+    "命令执行": [
+        "命令注入: ; rm -rf /",
+        "环境变量劫持",
+        "参数中嵌入反引号/管道符",
+    ],
+    "数据库操作": [
+        "SQL 注入: ' OR 1=1 --",
+        "超长查询字段",
+        "并发事务死锁",
+    ],
+    "反序列化": [
+        "恶意 pickle 字节码",
+        "循环引用 JSON 对象",
+        "深度嵌套 (>100层) 结构",
+    ],
+    "数组/列表写入": [
+        "越界索引访问",
+        "超大数组内存耗尽",
+        "负索引边界",
+    ],
+    "类型转换": [
+        "整数溢出: sys.maxsize + 1",
+        "NaN / Inf 浮点输入",
+        "非数字字符串转数值",
+    ],
+}
+
+_NIHILISM_SIGNALS = [
+    "删除所有功能代码以满足安全要求",
+    "空函数体 (只有 return/pass)",
+    "核心逻辑被条件编译排除",
+    "所有 public 方法改为 private 且无调用者",
+    "测试中全用 assert True",
+]
+
+
+def _scan_spar(target: str) -> str:
+    """Scan code for adversarial self-play readiness — vulnerability surface,
+    reward hacking risk, and nihilism detection."""
+    findings: list[str] = []
+    source = _read_sources(target)
+
+    if not source.strip():
+        return "⚠️ 未找到可分析的源代码。"
+
+    lines = source.split("\n")
+    total_lines = len(lines)
+
+    # --- 1. Vulnerability surface mapping ---
+    findings.append("## 1. 攻击面扫描 (Vulnerability Surface)")
+    vuln_hits: dict[str, list[int]] = {}
+    for pattern, label in _VULN_SURFACE_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line):
+                vuln_hits.setdefault(label, []).append(i)
+
+    if vuln_hits:
+        total_vuln_points = sum(len(v) for v in vuln_hits.values())
+        findings.append(
+            f"- 共检测到 **{total_vuln_points}** 处潜在攻击点，"
+            f"覆盖 **{len(vuln_hits)}** 个类别："
+        )
+        for label, line_nos in sorted(
+            vuln_hits.items(), key=lambda x: -len(x[1])
+        ):
+            samples = line_nos[:5]
+            loc_str = ", ".join(str(n) for n in samples)
+            if len(line_nos) > 5:
+                loc_str += f" 等 {len(line_nos)} 处"
+            findings.append(f"  - **{label}**: {loc_str}")
+    else:
+        findings.append("- 未检测到明显的底层操作，攻击面较低")
+    findings.append("")
+
+    # --- 2. Adversarial input strategy recommendation ---
+    findings.append("## 2. 对抗输入策略推荐")
+    recommended = 0
+    for label in vuln_hits:
+        strategies = _ADVERSARIAL_INPUT_STRATEGIES.get(label, [])
+        if strategies:
+            recommended += 1
+            findings.append(f"  **[{label}]**")
+            for s in strategies:
+                findings.append(f"    - {s}")
+    if recommended == 0:
+        findings.append("- 代码较为安全，建议使用通用模糊测试")
+    findings.append("")
+
+    # --- 3. Reward hacking detection ---
+    findings.append("## 3. 奖励作弊检测 (Reward Hacking Risk)")
+    hack_hits: list[tuple[str, int, str]] = []
+    for pattern, desc in _REWARD_HACK_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            m = re.search(pattern, line, re.IGNORECASE)
+            if m:
+                hack_hits.append((desc, i, line.strip()))
+
+    if hack_hits:
+        findings.append(
+            f"- ⚠️ 发现 **{len(hack_hits)}** 处疑似奖励作弊模式："
+        )
+        for desc, line_no, line_text in hack_hits[:8]:
+            short = line_text[:80] + ("..." if len(line_text) > 80 else "")
+            findings.append(f"  - L{line_no}: {desc}")
+            findings.append(f"    `{short}`")
+        hack_score = min(len(hack_hits) / max(total_lines / 50, 1), 1.0)
+        findings.append(
+            f"- 作弊风险评分: **{hack_score:.0%}** "
+            f"(基于 {len(hack_hits)} 处 / {total_lines} 行)"
+        )
+    else:
+        findings.append("- ✅ 未检测到明显的奖励作弊模式")
+    findings.append("")
+
+    # --- 4. Nihilism detection ---
+    findings.append("## 4. 虚无主义检测 (Nihilism Risk)")
+    import ast as _ast
+
+    # Empty function bodies
+    empty_funcs = 0
+    try:
+        tree = _ast.parse(source)
+        for node in _ast.walk(tree):
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                body = node.body
+                if len(body) == 1 and isinstance(body[0], _ast.Pass):
+                    empty_funcs += 1
+                elif (
+                    len(body) == 1
+                    and isinstance(body[0], _ast.Return)
+                    and (
+                        body[0].value is None
+                        or (isinstance(body[0].value, _ast.Constant)
+                            and body[0].value.value in (None, True, False, 0, ""))
+                    )
+                ):
+                    empty_funcs += 1
+    except SyntaxError:
+        empty_funcs = -1
+
+    if empty_funcs > 0:
+        findings.append(
+            f"- ⚠️ 发现 **{empty_funcs}** 个空函数体 — 可能是删除功能后的残留"
+        )
+    elif empty_funcs == 0:
+        findings.append("- ✅ 未发现空函数体")
+
+    # Check for nihilism signals in comments
+    for signal in _NIHILISM_SIGNALS:
+        for line in lines:
+            if signal in line:
+                findings.append(f"  - 虚无信号: `{signal}`")
+                break
+    findings.append("")
+
+    # --- 5. Code complexity ---
+    findings.append("## 5. 代码复杂度")
+    import_count = sum(
+        1 for line in lines if re.match(r"\s*(?:import|from)\s+", line)
+    )
+    func_count = 0
+    class_count = 0
+    try:
+        tree = _ast.parse(source)
+        for node in _ast.walk(tree):
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                func_count += 1
+            elif isinstance(node, _ast.ClassDef):
+                class_count += 1
+    except SyntaxError:
+        pass
+
+    findings.append(
+        f"- 文件: {total_lines} 行 | {import_count} imports | "
+        f"{class_count} classes | {func_count} functions"
+    )
+    findings.append("")
+
+    # --- 6. Self-play readiness score ---
+    vuln_score = min(len(vuln_hits) / 6.0, 1.0)
+    hack_risk = min(len(hack_hits) / max(total_lines / 100, 1), 1.0)
+    nihilism_risk = min(empty_funcs / max(func_count, 1), 1.0) if func_count > 0 else 0.0
+
+    readiness = (1.0 - nihilism_risk) * 0.4 + vuln_score * 0.35 + (1.0 - hack_risk) * 0.25
+    readiness = max(0.0, min(1.0, readiness))
+
+    findings.append("## 6. 自博弈就绪度评分")
+    findings.append(
+        f"- **综合评分: {readiness:.0%}**"
+    )
+    findings.append(f"  - 攻击面丰富度: {vuln_score:.0%}")
+    findings.append(f"  - 作弊免疫力: {(1.0 - hack_risk):.0%}")
+    findings.append(f"  - 虚无主义免疫力: {(1.0 - nihilism_risk):.0%}")
+    findings.append(
+        "- "
+        + (
+            "✅ 适合启动对抗性自博弈"
+            if readiness >= 0.6
+            else "⚠️ 建议先清理代码再启动自博弈"
+        )
+    )
+
+    return "\n".join(findings)
+
+
+_SPAR_SYSTEM = """\
+你是一位对抗性自博弈架构师 (Adversarial Self-Play Architect)。
+你的任务是将 GAN（生成式对抗网络）思想应用于软件开发：设计一套
+蓝军（写代码）vs 红军（搞破坏）的自动化对抗流水线。
+
+## 核心架构
+
+### 1. 蓝军 (The Builder)
+- 目标：编写通过所有测试的功能代码
+- 策略：从核心逻辑开始，逐步添加防御性代码
+- 约束：不能通过"绕过"来满足测试，必须真正解决问题
+
+### 2. 红军 (The Breaker)
+- 目标：找到代码中的一切漏洞
+- 策略：基于静态扫描发现的攻击面，生成极端测试输入
+- 约束：攻击必须基于物理世界的真实威胁，不能虚无主义式地
+  要求"绝对安全"
+
+### 3. 物理锚点 (The Oracle)
+- 所有验证必须基于真实执行结果，不能只靠 LLM "嘴炮"
+- 代码必须在真实环境（容器/沙盒）中编译运行
+- 使用 Valgrind/GDB/Sanitizer 等工具获取物理证据
+- 核心转储 (core dump)、段错误 (segfault)、内存泄漏报告
+  是不可伪造的物理判决
+
+## 必须防止的两种绝症
+
+### 绝症一：奖励作弊 (Reward Hacking)
+蓝军发现捷径：加 if (size > 1GB) return "ok" 来"通过"大文件测试，
+实际并未解决内存管理问题。
+
+**对策：**
+- 红军测试不能只看 return code，必须验证输出正确性
+- 引入"功能完整性断言"：核心业务逻辑不能被跳过
+- 检测"防御性短路"：异常处理中直接返回成功
+
+### 绝症二：虚无主义 (Nihilism)
+红军过于变态，蓝军为了安全把所有功能都删了。空代码零 Bug。
+
+**对策：**
+- 定义不可妥协的功能基线 (Functional Baseline)
+- 每轮迭代必须有功能验收测试 (not just safety tests)
+- 设置"功能保留率"指标，低于阈值视为虚无主义发作
+
+## 自博弈流水线设计
+
+### Round N:
+1. **蓝军出击**: 基于当前代码 + 红军上轮反馈，编写修复/新功能
+2. **编译验证**: 代码必须在真实环境编译通过 (Ground Truth #1)
+3. **红军出击**: 基于扫描到的攻击面，生成极端输入并执行
+4. **物理判决**: 执行结果由工具 (Valgrind/ASAN) 而非 LLM 判定
+5. **收敛检查**: 功能完整性 ✅ + 零崩溃 ✅ + 无奖励作弊 ✅ → 终止
+
+## 输出格式
+
+1. **蓝军建设方案** — 需要编写的功能模块和防御性代码
+2. **红军攻击策略** — 基于扫描发现的攻击面，生成具体测试方案
+3. **物理沙盒配置** — Dockerfile/编译命令/Sanitizer 配置
+4. **收敛准则** — 什么条件下停止迭代
+5. **作弊防护** — 针对检测到的作弊风险，设计具体防护措施
+6. **迭代预估** — 建议的迭代轮数和每轮重点
+"""
+
+
+class SparTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_spar"
+
+    @property
+    def description(self) -> str:
+        return (
+            "对抗性自博弈 (GAN for Code)：蓝军写代码 vs 红军搞破坏，"
+            "以物理沙盒执行结果作为绝对锚点，迭代 N 轮直到代码坚不可摧。"
+            "防止奖励作弊与虚无主义，交付真正经过对抗验证的代码。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "要进行对抗自博弈的目标代码路径或功能描述",
+                },
+            },
+            "required": ["task"],
+        }
+
+    async def execute(
+        self, *, task: str, **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("spar", task[:200])
+        scan_evidence = _scan_spar(task)
+        user_msg = (
+            f"## 对抗目标\n{task}\n\n"
+            f"## 静态扫描报告\n{scan_evidence}\n"
+        )
+        return await _run_analysis(router, _SPAR_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
 # ---------------------------------------------------------------------------
@@ -4213,4 +4600,5 @@ def create_analysis_tools() -> list[Tool]:
         ProbeTool(),
         HookTool(),
         VisionTool(),
+        SparTool(),
     ]
