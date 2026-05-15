@@ -130,6 +130,10 @@ regulation. Emergent collective intelligence via selfish competition
 genesis potential: state dimension richness, procedural generation \
 capacity, multi-agent social simulation readiness, observer-effect \
 reactivity. Design the path from code to world
+- **analysis_watchdog**: Watchdog & Disaster Isolation — prevent AI \
+from bricking itself during self-modification. Audit in-place surgery \
+risks, heartbeat coverage, rollback infrastructure, isolation level. \
+Design watchdog timer + A/B blue-green deployment + Ring -1 god node
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \

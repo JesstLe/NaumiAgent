@@ -727,6 +727,7 @@ class NaumiApp(App):
                     "- `/genesis <目标>` — 系统自重构与热演化\n"
                     "- `/macro <目标>` — 多智能体自由市场博弈\n"
                     "- `/cosmos <目标>` — 创世引擎审计\n"
+                    "- `/watchdog <目标>` — 看门狗与灾难隔离\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -887,6 +888,11 @@ class NaumiApp(App):
                     status.status_text = "用法: /cosmos <代码路径或系统描述>"
                 else:
                     self._run_analysis_mode("cosmos", arg)
+            case "/watchdog":
+                if not arg:
+                    status.status_text = "用法: /watchdog <代码路径或系统描述>"
+                else:
+                    self._run_analysis_mode("watchdog", arg)
             case "/hook":
                 if not arg:
                     status.status_text = "用法: /hook <逆向目标描述>"
@@ -1013,6 +1019,7 @@ class NaumiApp(App):
             "genesis": "analysis_genesis",
             "macro": "analysis_macro",
             "cosmos": "analysis_cosmos",
+            "watchdog": "analysis_watchdog",
         }
         labels = {
             "chaos": "⚡ 灾难演练",
@@ -1045,6 +1052,7 @@ class NaumiApp(App):
             "genesis": "🧬 系统自重构与热演化 (Genesis)",
             "macro": "🏦 多智能体自由市场博弈 (Agentic Economy)",
             "cosmos": "🌌 创世引擎审计 (Cosmos)",
+            "watchdog": "🛡️ 看门狗与灾难隔离 (Watchdog)",
         }
 
         chat = self.query_one(ChatPanel)
@@ -1117,6 +1125,8 @@ class NaumiApp(App):
             elif mode == "macro":
                 result = await tool.execute(task=target)
             elif mode == "cosmos":
+                result = await tool.execute(target=target)
+            elif mode == "watchdog":
                 result = await tool.execute(target=target)
             else:
                 result = await tool.execute(target=target)
