@@ -375,6 +375,9 @@ class NaumiApp(App):
         yield StatusBar()
         yield Footer()
 
+    async def on_unmount(self) -> None:
+        await self.engine.shutdown()
+
     def on_user_input_message(self, msg: UserInputMessage) -> None:
         chat = self.query_one(ChatPanel)
         chat.add_user_message(msg.content)

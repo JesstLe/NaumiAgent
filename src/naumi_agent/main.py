@@ -58,6 +58,7 @@ async def _chat(config_path: str) -> None:
         try:
             user_input = console.input("[bold blue]你>[/bold blue] ").strip()
         except (EOFError, KeyboardInterrupt):
+            await engine.shutdown()
             console.print("\n[green]再见！[/green]")
             break
 
@@ -65,6 +66,7 @@ async def _chat(config_path: str) -> None:
             continue
 
         if user_input in ("/quit", "/exit", "exit"):
+            await engine.shutdown()
             console.print("[green]再见！[/green]")
             break
 
