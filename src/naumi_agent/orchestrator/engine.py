@@ -71,6 +71,9 @@ instantiate 3-5 domain experts, distribute sub-problems, synthesize
 architect review, identify boilerplate vs high-risk zones, dual-pass
 - **analysis_jit**: JIT tool generation — when LLM reasoning is unreliable, \
 generate runnable Python/C++ scripts, show execution trace, verify with tests
+- **analysis_pointer**: Semantic Pointer Architecture — separate reasoning \
+space (AI logic) from physical space (precise computation), define pointer \
+protocol to eliminate hallucination on precise data
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
