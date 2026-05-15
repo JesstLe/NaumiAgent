@@ -7,7 +7,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from naumi_agent.agents.base import AgentConfig, AgentResult, BaseAgent
+from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult, BaseAgent
+from naumi_agent.agents.factory import DynamicAgentFactory
 from naumi_agent.agents.presets import ALL_AGENT_CONFIGS
 
 if TYPE_CHECKING:
@@ -59,6 +60,7 @@ class SubAgentManager:
         self._engine = engine
         self._agents: dict[str, BaseAgent] = {}
         self._configs: dict[str, AgentConfig] = dict(ALL_AGENT_CONFIGS)
+        self._factory = DynamicAgentFactory(engine.router)
 
     def get_agent(self, name: str) -> BaseAgent | None:
         """获取或创建 Agent 实例."""
@@ -86,6 +88,81 @@ class SubAgentManager:
         self._agents[name] = agent
         logger.info("Spawned dynamic agent: %s", name)
         return agent
+
+    def spawn_for_task(
+        self,
+        name: str,
+        task_description: str,
+        *,
+        role: str = "expert_analyst",
+        focus: str = "",
+        domain: str = "",
+        model_tier: str | None = None,
+        max_turns: int | None = None,
+        max_budget_usd: float | None = None,
+        extra_capabilities: list[AgentCapability] | None = None,
+    ) -> BaseAgent:
+        """基于任务描述自动生成 AgentConfig 并 spawn.
+
+        Uses DynamicAgentFactory to infer capabilities, domain, model tier,
+        and generate a specialized system prompt from the task description.
+        """
+        config = self._factory.create_config(
+            name=name,
+            task_description=task_description,
+            role=role,
+            focus=focus,
+            domain=domain,
+            model_tier=model_tier,
+            max_turns=max_turns,
+            max_budget_usd=max_budget_usd,
+            extra_capabilities=extra_capabilities,
+        )
+        return self.spawn(config)
+
+    async def spawn_for_task_with_llm(
+        self,
+        name: str,
+        task_description: str,
+        *,
+        role: str = "expert_analyst",
+        focus: str = "",
+        domain: str = "",
+        model_tier: str | None = None,
+        max_turns: int | None = None,
+        max_budget_usd: float | None = None,
+        extra_capabilities: list[AgentCapability] | None = None,
+    ) -> BaseAgent:
+        """基于任务描述自动生成 AgentConfig（LLM 生成 system prompt）并 spawn."""
+        config = await self._factory.create_config_with_llm_prompt(
+            name=name,
+            task_description=task_description,
+            role=role,
+            focus=focus,
+            domain=domain,
+            model_tier=model_tier,
+            max_turns=max_turns,
+            max_budget_usd=max_budget_usd,
+            extra_capabilities=extra_capabilities,
+        )
+        return self.spawn(config)
+
+    def destroy_all_dynamic(self) -> list[str]:
+        """销毁所有动态 Agent（保留预设 Agent）.
+
+        Returns list of destroyed agent names.
+        """
+        from naumi_agent.agents.presets import ALL_AGENT_CONFIGS
+
+        preset_names = set(ALL_AGENT_CONFIGS.keys())
+        dynamic_names = [
+            name for name in self._agents if name not in preset_names
+        ]
+        destroyed: list[str] = []
+        for name in dynamic_names:
+            if self.destroy(name):
+                destroyed.append(name)
+        return destroyed
 
     def destroy(self, name: str) -> bool:
         """销毁一个动态 Agent，释放资源.
