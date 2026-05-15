@@ -1825,6 +1825,254 @@ class MCTSTool(Tool):
 
         return await _run_analysis(router, _MCTS_SYSTEM, user_msg)
 
+
+# ===========================================================================
+#  /route — MoE 混合专家调度
+# ===========================================================================
+
+# Domain keywords for expert identification
+_DOMAIN_KEYWORDS: dict[str, list[str]] = {
+    "backend": [
+        "api", "server", "database", "sql", "orm", "redis", "cache",
+        "queue", "kafka", "grpc", "rest", "endpoint", "migration",
+    ],
+    "frontend": [
+        "ui", "component", "css", "html", "react", "vue", "dom",
+        "render", "style", "layout", "responsive", "animation",
+    ],
+    "infra": [
+        "docker", "k8s", "kubernetes", "ci/cd", "terraform", "deploy",
+        "nginx", "load.balance", "monitoring", "prometheus", "grafana",
+    ],
+    "security": [
+        "auth", "jwt", "oauth", "encrypt", "decrypt", "ssl", "tls",
+        "vulnerability", "xss", "csrf", "sql.inject", "firewall",
+    ],
+    "data": [
+        "etl", "pipeline", "spark", "hadoop", "warehouse", "lake",
+        "analytics", "metric", "dashboard", "visualization", "pandas",
+    ],
+    "ml": [
+        "model", "training", "inference", "neural", "transformer",
+        "embedding", "vector", "fine.tun", "prompt", "llm", "rag",
+    ],
+    "finance": [
+        "stock", "portfolio", "alpha", "beta", "sharpe", "volatility",
+        "option", "futures", "yield", "bond", "quantitative", "backtest",
+    ],
+    "architecture": [
+        "microservice", "monolith", "event.driven", "cqrs", "ddd",
+        "clean.arch", "hexagonal", "soa", "design.pattern", "solid",
+    ],
+}
+
+
+def _scan_route(
+    files: list[Path], source_text: str, task: str,
+) -> str:
+    """route 模式静态扫描：分析任务涉及的领域维度和专家画像."""
+    findings: list[str] = []
+    task_lower = task.lower()
+    source_lower = source_text.lower()
+
+    # 1. Identify domains from the task description
+    task_domains: dict[str, list[str]] = {}
+    for domain, keywords in _DOMAIN_KEYWORDS.items():
+        matched = [kw for kw in keywords if kw in task_lower]
+        if matched:
+            task_domains[domain] = matched
+
+    if task_domains:
+        findings.append("- 任务涉及领域:")
+        for domain, keywords in task_domains.items():
+            findings.append(
+                f"  - {domain}: {', '.join(keywords)}"
+            )
+    else:
+        findings.append(
+            "- 任务领域: 未匹配到明确领域关键词（将由 LLM 判断）"
+        )
+
+    # 2. Identify domains from the codebase
+    code_domains: dict[str, int] = {}
+    for domain, keywords in _DOMAIN_KEYWORDS.items():
+        count = sum(source_lower.count(kw) for kw in keywords)
+        if count > 0:
+            code_domains[domain] = count
+
+    if code_domains:
+        findings.append("- 代码库领域分布:")
+        for domain, count in sorted(
+            code_domains.items(), key=lambda x: x[1], reverse=True,
+        ):
+            findings.append(f"  - {domain}: {count} 次引用")
+
+    # 3. Analyze code structure for routing hints
+    class_count = len(re.findall(r"\bclass\s+\w+", source_text))
+    func_count = len(re.findall(r"\bdef\s+\w+", source_text))
+    async_count = len(re.findall(r"\basync\s+def\s+", source_text))
+    findings.append(
+        f"- 代码规模: {class_count} 个类, "
+        f"{func_count} 个函数 ({async_count} 个异步)"
+    )
+
+    # 4. Detect existing modular structure (suggests MoE readiness)
+    modules = set()
+    for f in files:
+        parts = f.parts
+        if "src" in parts:
+            idx = parts.index("src")
+            if idx + 1 < len(parts):
+                modules.add(parts[idx + 1])
+    if modules:
+        findings.append(
+            f"- 模块划分: {len(modules)} 个 "
+            f"({', '.join(sorted(modules)[:8])})"
+        )
+
+    # 5. Identify cross-cutting concerns (need multiple experts)
+    cross_cutting: list[str] = []
+    if "security" in task_domains and "backend" in task_domains:
+        cross_cutting.append("安全 + 后端: 需要安全专家审查 API 设计")
+    if "data" in task_domains and "ml" in task_domains:
+        cross_cutting.append("数据 + ML: 需要数据工程师和 ML 工程师协作")
+    if "finance" in task_domains and "data" in task_domains:
+        cross_cutting.append("金融 + 数据: 需要量化分析师和数据工程师")
+    if "frontend" in task_domains and "backend" in task_domains:
+        cross_cutting.append("前端 + 后端: 需要全栈协调")
+    if "infra" in task_domains and "security" in task_domains:
+        cross_cutting.append("基础设施 + 安全: 需要运维安全专家")
+    if cross_cutting:
+        findings.append("- 跨领域协作点:")
+        for cc in cross_cutting:
+            findings.append(f"  - {cc}")
+
+    # 6. Recommend expert panel
+    all_domains = set(task_domains.keys()) | set(code_domains.keys())
+    if all_domains:
+        findings.append(
+            f"\n- 推荐专家小组: {len(all_domains)} 位专家"
+        )
+        for domain in sorted(all_domains):
+            findings.append(f"  - 🧑‍💻 {domain} 专家")
+
+    return "\n".join(findings)
+
+
+_ROUTE_SYSTEM = """\
+You are a Mixture-of-Experts (MoE) orchestrator with semantic routing.
+
+## Core Principle
+DO NOT answer complex problems from a single perspective. Instead:
+1. **Decompose** the problem into domain-specific sub-problems
+2. **Instantiate** 3-5 specialized virtual experts
+3. **Distribute** sub-problems to each expert for independent analysis
+4. **Synthesize** their outputs into a unified, multi-dimensional solution
+
+## Your Tasks
+
+### 1. Expert Panel Formation
+Based on the scan evidence and the task, declare your expert team:
+- Each expert must have a specific domain, NOT a generic title
+- Each expert must have a clear analytical lens (what they focus on)
+- Minimum 3 experts, maximum 5
+
+### 2. Individual Expert Analysis
+For EACH expert, provide their independent analysis:
+- **Expert Name & Domain**
+- **Their Perspective**: What this expert sees as the key issues
+- **Their Recommendations**: Specific, actionable advice
+- **Their Concerns**: What could go wrong from their domain
+- **Confidence**: X/10
+
+### 3. Cross-Expert Conflict Resolution
+If experts disagree:
+- Identify the conflict explicitly
+- Present both sides
+- Make a ruling with justification
+- If uncertain, propose an experiment to resolve it
+
+### 4. Synthesized Solution
+Combine all expert outputs into a single actionable plan:
+- Priority-ordered action items
+- Each item tagged with the responsible expert domain
+- Dependencies between items
+- Risk assessment for the overall plan
+
+### 5. Resource Estimation
+- Estimated complexity (S/M/L/XL)
+- Recommended team size and skill requirements
+- Suggested phasing (what to do first, what to defer)
+
+Be thorough. Each expert's analysis should be substantive, not perfunctory.
+"""
+
+
+class MoERouteTool(Tool):
+    """MoE 混合专家调度 — 将复杂任务分发给虚拟专家小组并汇总."""
+
+    @property
+    def name(self) -> str:
+        return "analysis_route"
+
+    @property
+    def description(self) -> str:
+        return (
+            "MoE 混合专家调度：面对复杂跨学科任务时，实例化 3-5 个垂直领域"
+            "虚拟专家，将问题拆解分发给各专家独立分析，"
+            "最后汇总为多维度统一方案。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "要分析的任务描述",
+                },
+                "target": {
+                    "type": "string",
+                    "description": "相关代码路径（可选）",
+                    "default": "",
+                },
+            },
+            "required": ["task"],
+        }
+
+    async def execute(
+        self,
+        *,
+        task: str,
+        target: str = "",
+        **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("route", task[:200])
+
+        source_text = ""
+        files: list[Path] = []
+        if target:
+            files = _resolve_target(target)
+            if files:
+                source_text = _read_sources(files)
+
+        scan_evidence = _scan_route(files, source_text, task)
+
+        user_msg = f"## 任务描述\n{task}\n"
+        user_msg += f"\n## 专家路由扫描\n{scan_evidence}\n"
+        if source_text:
+            user_msg += f"\n## 相关源代码\n{source_text[:50000]}\n"
+
+        return await _run_analysis(router, _ROUTE_SYSTEM, user_msg)
+
+
+# ---------------------------------------------------------------------------
+#  内部基础设施
+# ---------------------------------------------------------------------------
+
 _global_router: Any = None
 
 
@@ -1876,4 +2124,5 @@ def create_analysis_tools() -> list[Tool]:
         DSPyTool(),
         GraphRAGTool(),
         MCTSTool(),
+        MoERouteTool(),
     ]

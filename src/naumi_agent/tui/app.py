@@ -707,6 +707,7 @@ class NaumiApp(App):
                     "- `/dspy [描述]` — DSPy 编译优化\n"
                     "- `/graph [路径]` — 图谱推演 (GraphRAG)\n"
                     "- `/mcts <问题>` — 蒙特卡洛树搜索\n"
+                    "- `/route <任务>` — MoE 混合专家调度\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -775,6 +776,11 @@ class NaumiApp(App):
                     status.status_text = "用法: /mcts <问题描述>"
                 else:
                     self._run_analysis_mode("mcts", arg)
+            case "/route":
+                if not arg:
+                    status.status_text = "用法: /route <任务描述>"
+                else:
+                    self._run_analysis_mode("route", arg)
             case "/quit" | "/exit":
                 self.exit()
             case _:
@@ -876,6 +882,7 @@ class NaumiApp(App):
             "dspy": "analysis_dspy",
             "graph": "analysis_graph",
             "mcts": "analysis_mcts",
+            "route": "analysis_route",
         }
         labels = {
             "chaos": "⚡ 灾难演练",
@@ -888,6 +895,7 @@ class NaumiApp(App):
             "dspy": "🔧 DSPy 编译优化",
             "graph": "🕸️ 图谱推演 (GraphRAG)",
             "mcts": "🌳 蒙特卡洛树搜索",
+            "route": "🧠 MoE 混合专家调度",
         }
 
         chat = self.query_one(ChatPanel)
@@ -921,6 +929,8 @@ class NaumiApp(App):
                 result = await tool.execute(target=target)
             elif mode == "mcts":
                 result = await tool.execute(problem=target)
+            elif mode == "route":
+                result = await tool.execute(task=target)
             else:
                 result = await tool.execute(target=target)
             chat.mount(Markdown(result, classes="agent-msg"))
