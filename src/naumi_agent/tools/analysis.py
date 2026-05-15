@@ -6355,6 +6355,306 @@ class GenesisTool(Tool):
         return await _run_analysis(router, _GENESIS_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /macro — 多智能体自由市场博弈 (Agentic Economy & Market Equilibrium)
+# ===========================================================================
+
+# Centralized decision patterns — single agent/monolith bottlenecks
+_CENTRALIZED_PATTERNS = [
+    (r"(?:main|master|primary|controller|coordinator)\s*.\s*(?:decide|plan|route)",
+     "中心化决策节点 (单点瓶颈)"),
+    (r"(?:if|switch|match)\s+\w+\s*(?:==|in)\s*\(",
+     "中心化条件路由 (硬编码分发)"),
+    (r"(?:router|dispatcher|scheduler)\s*=\s*\w+",
+     "单一调度器 (无竞争机制)"),
+    (r"(?:global|singleton)\s+\w+", "全局单例 (无并行替代)"),
+]
+
+# Data marketplace indicators — data can be priced and traded
+_DATA_MARKET_PATTERNS = [
+    (r"(?:api|fetch|scrape|crawl|collect)\s*\(",
+     "数据采集操作 (可作为数据商)"),
+    (r"(?:parse|extract|transform|clean)\s*\(",
+     "数据处理操作 (可定价出售)"),
+    (r"(?:cache|store|database|persist)\s*\(",
+     "数据存储 (可做数据交易所)"),
+    (r"(?:query|search|filter|aggregate)\s*\(",
+     "数据查询 (可按次收费)"),
+]
+
+# Incentive/reward mechanism patterns
+_INCENTIVE_PATTERNS = [
+    (r"(?:reward|score|rating|credit|token)\s*[:=]",
+     "奖励/积分机制"),
+    (r"(?:penalty|fine|deduct|cost)\s*[:=]",
+     "惩罚/成本机制"),
+    (r"(?:bid|auction|price|offer)\s*[:=]",
+     "竞价/定价机制"),
+    (r"(?:budget|balance|wallet|account)\s*[:=]",
+     "预算/账户系统"),
+    (r"(?:stake|bond|deposit|collateral)\s*[:=]",
+     "质押/保证金机制"),
+]
+
+# Competition/survival patterns
+_COMPETITION_PATTERNS = [
+    (r"(?:compete|rank|leaderboard|scoreboard)\s*",
+     "竞争/排名机制"),
+    (r"(?:evolve|mutate|breed|crossover)\s*\(",
+     "进化/变异操作"),
+    (r"(?:kill|retire|deprecate|sunset|remove)\s*\(",
+     "淘汰/退出机制"),
+    (r"(?:spawn|fork|replicate|clone)\s*\(",
+     "繁殖/复制操作"),
+    (r"(?:fitness|adapt|survive)\s*",
+     "适应度/生存评估"),
+]
+
+
+def _scan_macro(target: str) -> str:
+    """Scan system for market equilibrium readiness — detect centralized
+    bottlenecks, identify marketizable data flows, evaluate incentive
+    mechanisms, and assess competition/survival infrastructure."""
+    findings: list[str] = []
+    source = _read_sources(target)
+
+    if not source.strip():
+        return "⚠️ 未找到可分析的源代码。"
+
+    lines = source.split("\n")
+
+    # --- 1. Centralization Detection ---
+    findings.append("## 1. 中心化检测 (Centralization Audit)")
+    central_hits: list[tuple[str, int, str]] = []
+    for pattern, desc in _CENTRALIZED_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                central_hits.append((desc, i, line.strip()))
+
+    if central_hits:
+        findings.append(
+            f"- ⚠️ 发现 **{len(central_hits)}** 处中心化决策瓶颈："
+        )
+        for desc, line_no, line_text in central_hits[:8]:
+            short = line_text[:70] + ("..." if len(line_text) > 70 else "")
+            findings.append(f"  - L{line_no}: {desc}")
+            findings.append(f"    `{short}`")
+        findings.append(
+            "- 💡 这些点可拆分为多个自治 Agent，"
+            "通过竞争提高系统整体智能"
+        )
+    else:
+        findings.append("- ✅ 决策架构较为去中心化")
+    findings.append("")
+
+    # --- 2. Data Marketplace Potential ---
+    findings.append("## 2. 数据市场潜力 (Data Marketplace)")
+    market_hits: dict[str, list[int]] = {}
+    for pattern, label in _DATA_MARKET_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                market_hits.setdefault(label, []).append(i)
+
+    total_market = sum(len(v) for v in market_hits.values())
+    if market_hits:
+        findings.append(
+            f"- 检测到 **{total_market}** 处可市场化的数据操作，"
+            f"**{len(market_hits)}** 类："
+        )
+        for label, line_nos in sorted(
+            market_hits.items(), key=lambda x: -len(x[1])
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+        findings.append(
+            "- 💡 这些数据流可封装为'数据商 Agent'，"
+            "标价出售给'分析师 Agent'"
+        )
+    else:
+        findings.append("- 数据操作较少，市场潜力有限")
+    findings.append("")
+
+    # --- 3. Incentive Mechanism ---
+    findings.append("## 3. 激励机制 (Incentive Architecture)")
+    incentive_hits: dict[str, list[int]] = {}
+    for pattern, label in _INCENTIVE_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                incentive_hits.setdefault(label, []).append(i)
+
+    if incentive_hits:
+        total_incentive = sum(len(v) for v in incentive_hits.values())
+        findings.append(
+            f"- 检测到 **{total_incentive}** 处激励/定价机制，"
+            f"**{len(incentive_hits)}** 类："
+        )
+        for label, line_nos in incentive_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 无激励/定价机制 — "
+            "无法驱动 Agent 间的市场竞争"
+        )
+    findings.append("")
+
+    # --- 4. Competition & Survival ---
+    findings.append("## 4. 竞争与淘汰 (Competition & Survival)")
+    comp_hits: dict[str, list[int]] = {}
+    for pattern, label in _COMPETITION_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                comp_hits.setdefault(label, []).append(i)
+
+    if comp_hits:
+        total_comp = sum(len(v) for v in comp_hits.values())
+        findings.append(
+            f"- 检测到 **{total_comp}** 处竞争/淘汰机制，"
+            f"**{len(comp_hits)}** 类："
+        )
+        for label, line_nos in comp_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 无竞争/淘汰机制 — "
+            "Agent 无法通过自然选择进化"
+        )
+    findings.append("")
+
+    # --- 5. Market Equilibrium Readiness Score ---
+    decentral_score = max(0.2, 1.0 - len(central_hits) * 0.15)
+    market_score = min(total_market / 10.0, 1.0)
+    incentive_score = min(len(incentive_hits) / 3.0, 1.0)
+    competition_score = min(len(comp_hits) / 3.0, 1.0)
+
+    macro_score = (
+        decentral_score * 0.20
+        + market_score * 0.25
+        + incentive_score * 0.30
+        + competition_score * 0.25
+    )
+    macro_score = max(0.0, min(1.0, macro_score))
+
+    findings.append("## 5. 自由市场就绪度评分")
+    findings.append(f"- **综合评分: {macro_score:.0%}**")
+    findings.append(f"- 去中心化程度: {decentral_score:.0%}")
+    findings.append(f"- 数据市场化潜力: {market_score:.0%}")
+    findings.append(f"- 激励机制完备度: {incentive_score:.0%}")
+    findings.append(f"- 竞争淘汰能力: {competition_score:.0%}")
+
+    if macro_score >= 0.7:
+        findings.append(
+            "- ✅ 具备构建多 Agent 自由市场生态的基础设施"
+        )
+    elif macro_score >= 0.4:
+        findings.append(
+            "- ⚠️ 部分具备市场条件，需补强激励和淘汰机制"
+        )
+    else:
+        findings.append(
+            "- ❌ 系统高度中心化，需大幅改造才能支持市场博弈"
+        )
+
+    return "\n".join(findings)
+
+
+_MACRO_SYSTEM = """\
+你是一位多智能体经济系统架构师 (Agentic Economy Architect)。
+你的任务是将中心化的 AI 系统改造为自由市场生态——用"市场的无形之手"
+作为宇宙中算力最庞大的分布式计算机。
+
+## 核心原理：从中心化到自由市场
+
+单一超级 Agent 一定死于计算复杂度爆炸。解法是引入"经济系统"
+作为算力分配机制——1000 个极其微小、极其自私的微型 Agent，
+通过竞争与合作涌现出远超单个 Agent 的集体智能。
+
+## 市场生态设计
+
+### 角色定义
+1. **数据商 Agent (Data Vendor)**
+   - 专精于数据采集、清洗、标注
+   - 将高质量数据标价出售 (以算力 Token 计价)
+   - 数据质量由买家评价驱动，差评者被市场淘汰
+
+2. **分析师 Agent (Analyst)**
+   - 花费 Token 购买数据，产出分析报告/预测
+   - 不同分析师可专注不同领域 (宏观/技术面/基本面)
+   - 报告质量由实际结果验证
+
+3. **做市商 Agent (Market Maker / Arbitrator)**
+   - 根据现实世界最终结果，奖惩分析师
+   - 预测正确 → 奖励 Token; 预测错误 → 扣除 Token
+   - 充当系统的"物理锚点"——用真实世界校准 AI
+
+4. **套利者 Agent (Arbitrageur)**
+   - 监控各分析师之间的分歧，发现套利机会
+   - 防止群体思维 (herding) 导致系统性偏差
+
+### 经济机制
+- **初始配额**: 每个 Agent 获得等量初始 Token
+- **定价自由**: 数据商自主定价，买家自主选择
+- **破产淘汰**: Token 归零的 Agent 被永久移除
+- **繁殖机制**: 成功 Agent 可分裂出变异副本
+- **通胀控制**: 定期按比例增发 Token，防止通缩停滞
+
+### 宏观调控 (您是"美联储主席")
+- 调节 Token 发行速率 → 控制市场活跃度
+- 调节破产阈值 → 控制淘汰烈度
+- 引入"税收" → 防止垄断积累
+- 设置"补贴" → 鼓励探索新领域
+
+## 输出格式
+
+1. **中心化→市场化改造方案** — 哪些模块拆分为独立 Agent
+2. **角色生态设计** — 每种 Agent 的能力、激励、淘汰条件
+3. **Token 经济模型** — 发行、流通、回收、通胀控制
+4. **交易协议** — Agent 间的数据/服务定价和结算机制
+5. **宏观调控参数** — 初始 K 值建议和自适应策略
+6. **监控仪表盘** — 市场健康度指标 (基尼系数、交易量、淘汰率)
+"""
+
+
+class MacroTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_macro"
+
+    @property
+    def description(self) -> str:
+        return (
+            "多智能体自由市场博弈：将中心化 AI 系统改造为自由市场生态——"
+            "1000 个微小自私 Agent + 算力 Token + 自然淘汰机制，"
+            "用'市场的无形之手'涌现出超越单个 Agent 的集体智能。"
+            "您不再是程序员，而是这 1000 个硅基生命的'美联储主席'。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "要设计市场博弈的任务或系统描述",
+                },
+            },
+            "required": ["task"],
+        }
+
+    async def execute(
+        self, *, task: str, **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("macro", task[:200])
+        scan_evidence = _scan_macro(task)
+        user_msg = (
+            f"## 市场博弈目标\n{task}\n\n"
+            f"## 市场化扫描\n{scan_evidence}\n"
+        )
+        return await _run_analysis(router, _MACRO_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
 
@@ -6427,4 +6727,5 @@ def create_analysis_tools() -> list[Tool]:
         PIDTool(),
         ZKPTool(),
         GenesisTool(),
+        MacroTool(),
     ]
