@@ -1287,7 +1287,7 @@ class GoalPursuitLoop:
                 {"role": "user", "content": user_msg},
             ],
             tier=ModelTier.CAPABLE,
-            max_tokens=4096,
+            max_tokens=8192,
             temperature=0.3,
         )
         self._total_tokens += response.usage.total_tokens
