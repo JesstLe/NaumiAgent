@@ -73,6 +73,40 @@ class SubAgentManager:
         self._agents[name] = agent
         return agent
 
+    def spawn(self, config: AgentConfig) -> BaseAgent:
+        """动态创建并注册一个新 Agent（用于 MoE 专家等临时 Agent）."""
+        name = config.name
+        if name in self._agents:
+            return self._agents[name]
+
+        if name not in self._configs:
+            self._configs[name] = config
+
+        agent = BaseAgent(config, self._engine)
+        self._agents[name] = agent
+        logger.info("Spawned dynamic agent: %s", name)
+        return agent
+
+    def destroy(self, name: str) -> bool:
+        """销毁一个动态 Agent，释放资源.
+
+        返回 True 表示成功销毁，False 表示 Agent 不存在或属于预设 Agent。
+        预设 Agent（coder/researcher/browser）不可销毁。
+        """
+        from naumi_agent.agents.presets import ALL_AGENT_CONFIGS
+
+        if name in ALL_AGENT_CONFIGS:
+            logger.warning("Cannot destroy preset agent: %s", name)
+            return False
+
+        removed_agent = self._agents.pop(name, None)
+        self._configs.pop(name, None)
+
+        if removed_agent is not None:
+            logger.info("Destroyed dynamic agent: %s", name)
+            return True
+        return False
+
     def select_agent(self, task_description: str) -> str | None:
         """根据任务描述选择最合适的 Agent."""
         lower = task_description.lower()

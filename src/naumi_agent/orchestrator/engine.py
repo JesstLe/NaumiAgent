@@ -222,7 +222,10 @@ class AgentEngine:
             pass  # web tools optional (may need API keys)
 
         # 分析模式工具（chaos/scale/state/vibe）
-        from naumi_agent.tools.analysis import create_analysis_tools, set_analysis_router
+        from naumi_agent.tools.analysis import (
+            create_analysis_tools,
+            set_analysis_router,
+        )
 
         set_analysis_router(self._router)
         for tool in create_analysis_tools():
@@ -236,9 +239,11 @@ class AgentEngine:
 
     def _register_subagent_manager(self) -> None:
         from naumi_agent.orchestrator.subagent_manager import SubAgentManager
+        from naumi_agent.tools.analysis import set_analysis_subagent_manager
         from naumi_agent.tools.subagent import create_subagent_tools
 
         self.subagent_manager = SubAgentManager(self)
+        set_analysis_subagent_manager(self.subagent_manager)
         for tool in create_subagent_tools(self.subagent_manager):
             self._tool_registry.register(tool)
 
