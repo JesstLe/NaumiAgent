@@ -52,21 +52,6 @@ class PursueTool(Tool):
                     "type": "string",
                     "description": "要达成的目标（自然语言描述）",
                 },
-                "max_iterations": {
-                    "type": "integer",
-                    "description": "最大迭代轮次（默认 30）",
-                    "default": 30,
-                },
-                "max_budget_usd": {
-                    "type": "number",
-                    "description": "最大预算（美元，默认 5.0）",
-                    "default": 5.0,
-                },
-                "max_time_seconds": {
-                    "type": "number",
-                    "description": "最大运行时间（秒，默认 1800）",
-                    "default": 1800,
-                },
             },
             "required": ["goal"],
         }
@@ -75,9 +60,6 @@ class PursueTool(Tool):
         self,
         *,
         goal: str,
-        max_iterations: int = 30,
-        max_budget_usd: float = 5.0,
-        max_time_seconds: float = 1800.0,
         **kwargs: Any,
     ) -> str:
         loop = _global_pursuit_loop
@@ -87,11 +69,7 @@ class PursueTool(Tool):
                 "请在 Agent 启动后使用。"
             )
 
-        config = PursuitConfig(
-            max_iterations=max_iterations,
-            max_budget_usd=max_budget_usd,
-            max_time_seconds=max_time_seconds,
-        )
+        config = PursuitConfig()
 
         # Create a fresh loop instance for this goal
         pursuit = GoalPursuitLoop(
