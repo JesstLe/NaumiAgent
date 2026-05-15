@@ -20,6 +20,7 @@ from textual.widgets import (
     Header,
     Input,
     Static,
+    TextArea,
 )
 
 from naumi_agent.config.settings import AppConfig
@@ -205,16 +206,17 @@ class ActivityPanel(VerticalScroll):
 
 
 class InputBar(Horizontal):
-    """输入栏."""
+    """输入栏 — 多行输入 + 发送按钮."""
 
     DEFAULT_CSS = """
     InputBar {
-        height: 3;
+        height: 5;
         padding: 0 1;
         border-top: solid green;
     }
-    InputBar Input {
+    InputBar TextArea {
         width: 1fr;
+        height: 1fr;
     }
     InputBar Button {
         width: auto;
@@ -222,22 +224,24 @@ class InputBar(Horizontal):
     }
     """
 
+    BINDINGS = [
+        Binding("ctrl+enter", "send", "发送"),
+    ]
+
     def compose(self) -> ComposeResult:
-        yield Input(placeholder="输入任务，Enter 发送...", id="msg-input")
+        yield TextArea(id="msg-input")
         yield Button("发送", variant="primary", id="send-btn")
 
-    @on(Input.Submitted)
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.value.strip():
-            self.app.post_message(UserInputMessage(event.value))
-            event.input.value = ""
+    def action_send(self) -> None:
+        textarea = self.query_one("#msg-input", TextArea)
+        text = textarea.text.strip()
+        if text:
+            self.app.post_message(UserInputMessage(text))
+            textarea.clear()
 
     @on(Button.Pressed)
     def on_send_pressed(self) -> None:
-        input = self.query_one(Input)
-        if input.value.strip():
-            self.app.post_message(UserInputMessage(input.value))
-            input.value = ""
+        self.action_send()
 
 
 class UserInputMessage(Message):
@@ -468,7 +472,7 @@ class NaumiApp(App):
 
     def _set_input_enabled(self, enabled: bool) -> None:
         input_bar = self.query_one(InputBar)
-        msg_input = input_bar.query_one(Input)
+        msg_input = input_bar.query_one("#msg-input", TextArea)
         send_btn = input_bar.query_one("#send-btn", Button)
         msg_input.disabled = not enabled
         send_btn.disabled = not enabled
