@@ -378,11 +378,11 @@ RULES:
 - Output the FASTEST possible working code
 - No error handling unless it is a single line
 - No comments unless critical
-- Use the simplest libraries available
+- Use the most lightweight libraries available
 - Hardcode configuration values — refinement comes later
 - Skip writing tests initially
 - If there is a 3-line solution and a 30-line "proper" solution, use the 3-line one
-- Output COMPLETE, RUNNABLE code — no TODOs, no placeholders, no stubs
+- Output COMPLETE, RUNNABLE code — no TODOs, no gaps, no scaffolding
 
 Focus on the CORE functionality. Ship it.
 """
@@ -1080,7 +1080,7 @@ _PROMPT_SIGNATURES = [
 
 # Few-shot example patterns
 _FEW_SHOT_PATTERNS = [
-    r'(?:example|sample|few.?shot|demonstration)\s*[:=]',
+    r'(?:example|few.?shot|demonstration)\s*[:=]',
     r'#\s*(?:Example|示例|样例)\s*\d',
     r'(?:Input|输入|Question)\s*[:：].*?\n.*?(?:Output|输出|Answer)\s*[:：]',
 ]
@@ -1227,7 +1227,7 @@ For the target prompt/task, define a concrete evaluation function:
 - Edge case detection: does it handle empty/malformed inputs?
 - Provide actual Python code for the metric function
 
-### 3. Few-shot Sample Design
+### 3. Few-shot Example Design
 Provide 3-5 high-quality input/output pairs that:
 - Cover the main use case
 - Cover edge cases (empty, ambiguous, adversarial)
@@ -1415,7 +1415,7 @@ def _scan_graph(files: list[Path], source_text: str) -> str:
         if n not in visited:
             dfs_cycle(n, [])
 
-    # 5. Compute centrality (simple degree-based)
+    # 5. Compute centrality (degree-based)
     degree: dict[str, int] = collections.defaultdict(int)
     for src, dst, _rel in edges:
         degree[src] += 1
@@ -2457,7 +2457,7 @@ Generate a COMPLETE, RUNNABLE script:
 - The code must be copy-paste-runnable (no missing dependencies)
 
 ### 3. Execution Trace
-Simulate running the code mentally (or for simple cases, show the actual \
+Simulate running the code mentally (or for straightforward cases, show \
 output):
 - Show the step-by-step computation
 - Show intermediate values at key checkpoints
@@ -3149,6 +3149,343 @@ class COOETool(Tool):
         return await _run_analysis(router, _COOE_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /sleep — 昼夜节律突触修剪
+# ===========================================================================
+
+def _scan_sleep(
+    files: list[Path], source_text: str, session_context: str,
+) -> str:
+    findings: list[str] = []
+    topics: dict[str, int] = {}
+    for pattern, label in [
+        (r"(?:def |class |function |module )(\w+)", "代码定义"),
+        (r"(?:bug|error|fix|debug|crash)", "问题调试"),
+        (r"(?:test|spec|assert|verify)", "测试验证"),
+        (r"(?:design|arch|pattern|架构|设计)", "架构设计"),
+    ]:
+        count = len(re.findall(pattern, source_text, re.IGNORECASE))
+        if count:
+            topics[label] = count
+    if topics:
+        findings.append("- 对话主题分布:")
+        for label, count in sorted(
+            topics.items(), key=lambda x: x[1], reverse=True,
+        ):
+            findings.append(f"  - {label}: {count} 次出现")
+    total_chars = len(session_context)
+    findings.append(
+        f"- 会话上下文: {total_chars:,} 字符 (~{total_chars // 4:,} tokens)"
+    )
+    return "\n".join(findings)
+
+
+_SLEEP_SYSTEM = """\
+You are a Circadian Synaptic Pruning engine implementing biological \
+sleep consolidation for AI systems.
+
+## Tasks
+1. Replay & Summarize (concepts, skills, decisions, corrections)
+2. Synaptic Pruning (what to delete: dead-ends, understood basics, \
+repetition, debugging chatter)
+3. Knowledge Consolidation (what to hardcode: verified solutions, \
+user preferences, project conventions, architectural decisions)
+4. Evolution Patch (concise knowledge to append to system prompt)
+5. Memory State After Sleep (size reduction, insights preserved, \
+pruned items, readiness)
+"""
+
+
+class SleepPruningTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_sleep"
+
+    @property
+    def description(self) -> str:
+        return (
+            "昼夜节律突触修剪：对当前会话进行离线压缩，"
+            "提取核心方法论和已固化概念，修剪冗余内容，"
+            "生成可追加到 System Prompt 的进化补丁(Patch)。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "session_context": {
+                    "type": "string",
+                    "description": "当前会话的完整上下文",
+                    "default": "",
+                },
+                "target": {
+                    "type": "string",
+                    "description": "相关代码路径",
+                    "default": "",
+                },
+            },
+            "required": [],
+        }
+
+    async def execute(
+        self,
+        *,
+        session_context: str = "",
+        target: str = "",
+        **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("sleep", "session")
+        source_text = ""
+        files: list[Path] = []
+        if target:
+            files = _resolve_target(target)
+            if files:
+                source_text = _read_sources(files)
+        combined = source_text
+        if session_context:
+            combined = (
+                f"## 对话历史\n{session_context}\n\n"
+                f"## 源代码\n{source_text}"
+            )
+        elif not source_text:
+            combined = "（无会话上下文，将基于代码库进行分析）"
+        scan_evidence = _scan_sleep(files, combined, session_context)
+        user_msg = (
+            f"## 突触修剪扫描\n{scan_evidence}\n\n"
+            f"## 完整内容\n{combined[:60000]}\n"
+        )
+        return await _run_analysis(router, _SLEEP_SYSTEM, user_msg)
+
+
+# ===========================================================================
+#  /entropy — 耗散结构热力学重置
+# ===========================================================================
+
+def _scan_entropy(source_text: str, conversation: str) -> str:
+    findings: list[str] = []
+    sentences = re.split(r"[。！？.!?\n]", source_text + conversation)
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 5]
+    sentence_counts: dict[str, int] = {}
+    for s in sentences:
+        key = s[:50].lower()
+        sentence_counts[key] = sentence_counts.get(key, 0) + 1
+    repeated = sum(1 for c in sentence_counts.values() if c > 1)
+    total = max(len(sentence_counts), 1)
+    findings.append(f"- 语义重复率: {repeated / total:.1%}")
+    if sentences:
+        avg_len = sum(len(s) for s in sentences) / len(sentences)
+        findings.append(f"- 平均句长: {avg_len:.0f} 字符")
+    entropy_score = max(0, (repeated / total) * 40)
+    temp = (
+        "CRITICAL" if entropy_score > 60
+        else "HIGH" if entropy_score > 35
+        else "MEDIUM" if entropy_score > 15
+        else "LOW"
+    )
+    findings.append(f"- 上下文温度: {entropy_score:.0f} ({temp})")
+    return "\n".join(findings)
+
+
+_ENTROPY_SYSTEM = """\
+You are a Dissipative Structure Valve implementing thermodynamic \
+entropy reduction for AI reasoning chains.
+
+## Mandatory Protocol
+1. HALT current reasoning
+2. Condense context into 3 sentences: core task, verified facts, \
+remaining work
+3. Purge all dead-ends and repetition
+4. Restart from the 3-sentence anchor + original goal
+5. Anti-drift: check every 3 paragraphs for relevance
+"""
+
+
+class EntropyValveTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_entropy"
+
+    @property
+    def description(self) -> str:
+        return (
+            "耗散结构热力学重置：当推理链过长或逻辑发散时，"
+            "强制执行熵减 — 用3句话总结正确状态（锚点），"
+            "丢弃上下文包袱，从锚点重新启动推理。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "context": {
+                    "type": "string",
+                    "description": "当前对话上下文或需要熵减的长文本",
+                },
+                "goal": {
+                    "type": "string",
+                    "description": "原始目标/任务",
+                    "default": "",
+                },
+            },
+            "required": ["context"],
+        }
+
+    async def execute(
+        self, *, context: str, goal: str = "", **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("entropy", context[:200])
+        scan_evidence = _scan_entropy("", context)
+        user_msg = (
+            f"## 熵值扫描\n{scan_evidence}\n\n"
+            f"## 当前上下文\n{context[:60000]}\n"
+        )
+        if goal:
+            user_msg += f"\n## 原始目标\n{goal}\n"
+        return await _run_analysis(router, _ENTROPY_SYSTEM, user_msg)
+
+
+# ===========================================================================
+#  /ooda — 战场任务式指挥 (OODA Loop)
+# ===========================================================================
+
+_FRAGILE_PATTERNS = [
+    (
+        r"find_element\s*\(\s*By\.(?:XPATH|CSS_SELECTOR)",
+        "Selenium 硬编码选择器",
+    ),
+    (r"\.select\s*\(\s*[\"'][^\"']*[\"']\s*\)", "CSS 硬编码选择器"),
+    (r"driver\.find_element", "WebDriver 硬编码定位"),
+    (
+        r"(?:url|endpoint|host)\s*=\s*[\"']https?://[^\"']+[\"']",
+        "硬编码 URL",
+    ),
+    (r"sleep\s*\(\s*\d+\s*\)", "硬编码等待时间"),
+]
+
+_ERROR_HANDLING = [
+    (r"try\s*:", "try 块"),
+    (r"except\s+\w+", "具体异常捕获"),
+    (r"finally\s*:", "finally 清理"),
+    (r"raise\s+\w+", "主动抛出异常"),
+]
+
+
+def _scan_ooda(
+    files: list[Path], source_text: str, task: str,
+) -> str:
+    findings: list[str] = []
+    fragile_count = 0
+    for pattern, label in _FRAGILE_PATTERNS:
+        count = len(re.findall(pattern, source_text, re.IGNORECASE))
+        if count:
+            fragile_count += count
+            findings.append(f"  - {label}: {count} 处")
+    if fragile_count:
+        findings.insert(0, f"- 脆弱模式: {fragile_count} 处")
+    error_count = 0
+    for pattern, label in _ERROR_HANDLING:
+        count = len(re.findall(pattern, source_text, re.IGNORECASE))
+        if count:
+            error_count += count
+    findings.append(
+        f"- 错误处理: {error_count} 处" if error_count
+        else "- 错误处理: 无（极易崩溃）"
+    )
+    ooda_stages = sum([
+        bool(re.findall(r"(?:observe|monitor|detect)", source_text, re.IGNORECASE)),
+        bool(re.findall(r"(?:orient|analyze|judge)", source_text, re.IGNORECASE)),
+        bool(re.findall(r"(?:decide|choose|plan)", source_text, re.IGNORECASE)),
+        bool(re.findall(r"(?:act|execute|perform)", source_text, re.IGNORECASE)),
+    ])
+    findings.append(f"- OODA 覆盖: {ooda_stages}/4")
+    fragility = fragile_count * 10 + (0 if error_count else 30) + (4 - ooda_stages) * 10
+    level = (
+        "CRITICAL" if fragility > 80 else "HIGH" if fragility > 50
+        else "MEDIUM" if fragility > 25 else "LOW"
+    )
+    findings.append(f"- 脆弱性评分: {fragility} ({level})")
+    if task:
+        findings.append(f"- 任务: {task[:200]}")
+    return "\n".join(findings)
+
+
+_OODA_SYSTEM = """\
+You are a Mission Command architect implementing the OODA \
+(Observe-Orient-Decide-Act) loop for resilient AI agent design.
+
+## Output Format
+1. Commander's Intent (one sentence goal)
+2. OODA Loop Design (each stage: implementation, failure modes, \
+recovery)
+3. Self-Healing Mechanisms (failure detection, auto-retry, fallback, \
+self-repair)
+4. Anti-Fragility Checklist (no hardcoded URLs/selectors, no fixed \
+waits, no single-path, no silent failures)
+5. Resilience Score (1-10: adaptability, self-correction, isolation, \
+degradation, recovery)
+"""
+
+
+class OODATool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_ooda"
+
+    @property
+    def description(self) -> str:
+        return (
+            "战场任务式指挥(OODA)：分析代码脆弱性，"
+            "设计意图驱动的 OODA 循环架构，"
+            "包含环境感知、异常自纠错和自我修复。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "要分析的文件或目录路径",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "任务目标描述",
+                    "default": "",
+                },
+            },
+            "required": ["target"],
+        }
+
+    async def execute(
+        self, *, target: str, task: str = "", **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("ooda", target)
+        files = _resolve_target(target)
+        if not files:
+            return f"无法解析目标: {target}"
+        source_text = _read_sources(files)
+        scan_evidence = _scan_ooda(files, source_text, task)
+        user_msg = (
+            f"## 脆弱性扫描\n{scan_evidence}\n\n"
+            f"## 源代码\n{source_text[:50000]}\n"
+        )
+        if task:
+            user_msg += f"\n## 任务目标\n{task}\n"
+        return await _run_analysis(router, _OODA_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
 # ---------------------------------------------------------------------------
@@ -3209,4 +3546,7 @@ def create_analysis_tools() -> list[Tool]:
         JITTool(),
         PointerTool(),
         COOETool(),
+        SleepPruningTool(),
+        EntropyValveTool(),
+        OODATool(),
     ]
