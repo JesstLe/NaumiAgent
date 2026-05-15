@@ -407,6 +407,16 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             else:
                 await _run_analysis(engine, "macro", arg)
+        case "/cosmos":
+            if not arg:
+                console.print(
+                    "[yellow]用法: /cosmos <代码路径或系统描述>[/yellow]"
+                )
+                console.print(
+                    "[dim]例: /cosmos src/naumi_agent/[/dim]"
+                )
+            else:
+                await _run_analysis(engine, "cosmos", arg)
         case "/hook":
             if not arg:
                 console.print("[yellow]用法: /hook <逆向目标描述>[/yellow]")
@@ -469,6 +479,7 @@ def _print_help() -> None:
         ("/zkp <目标>", "零知识证明 — 执行轨迹校验"),
         ("/genesis <目标>", "系统自重构 — 元编程与热演化"),
         ("/macro <目标>", "多智能体市场博弈 — 自由市场涌现"),
+        ("/cosmos <目标>", "创世引擎审计 — 评估创世潜力"),
         ("/vision <目标>", "AI 视觉数据提取 — 反封锁视觉管线"),
         ("/hook <目标>", "逆向插桩 — 黑盒解剖"),
         ("/clear", "清除当前会话"),
@@ -511,6 +522,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "zkp": "analysis_zkp",
         "genesis": "analysis_genesis",
         "macro": "analysis_macro",
+        "cosmos": "analysis_cosmos",
     }
 
     labels = {
@@ -543,6 +555,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "zkp": "零知识证明与轨迹校验 (ZKP)",
         "genesis": "系统自重构与热演化 (Genesis)",
         "macro": "多智能体自由市场博弈 (Agentic Economy)",
+        "cosmos": "创世引擎审计 (Cosmos)",
     }
 
     tool_name = tool_names[mode]
@@ -608,6 +621,8 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
             result = await tool.execute(target=target)
         elif mode == "macro":
             result = await tool.execute(task=target)
+        elif mode == "cosmos":
+            result = await tool.execute(target=target)
         else:
             result = await tool.execute(target=target)
 
