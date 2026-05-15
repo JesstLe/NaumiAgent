@@ -2,6 +2,7 @@
 
 from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult, BaseAgent
 from naumi_agent.agents.factory import DynamicAgentFactory
+from naumi_agent.agents.message_bus import AgentMessage, AgentMessageBus, MessagePriority
 from naumi_agent.agents.presets import BROWSER_CONFIG, CODER_CONFIG, RESEARCHER_CONFIG
 
 __all__ = [
@@ -9,7 +10,10 @@ __all__ = [
     "AgentConfig",
     "AgentCapability",
     "AgentResult",
+    "AgentMessage",
+    "AgentMessageBus",
     "DynamicAgentFactory",
+    "MessagePriority",
     "CODER_CONFIG",
     "RESEARCHER_CONFIG",
     "BROWSER_CONFIG",

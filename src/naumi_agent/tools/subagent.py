@@ -11,7 +11,12 @@ logger = logging.getLogger(__name__)
 
 
 def create_subagent_tools(manager: Any) -> list[Tool]:
-    return [DelegateTaskTool(manager), ListAgentsTool(manager)]
+    return [
+        DelegateTaskTool(manager),
+        ListAgentsTool(manager),
+        BlackboardReadTool(manager),
+        BlackboardWriteTool(manager),
+    ]
 
 
 class DelegateTaskTool(Tool):
@@ -96,3 +101,105 @@ class ListAgentsTool(Tool):
         for a in agents:
             lines.append(f"  - {a['name']}: {a['description']}")
         return "\n".join(lines)
+
+
+class BlackboardReadTool(Tool):
+    """读取共享状态板上的数据."""
+
+    def __init__(self, manager: Any) -> None:
+        self._manager = manager
+
+    @property
+    def name(self) -> str:
+        return "blackboard_read"
+
+    @property
+    def description(self) -> str:
+        return (
+            "读取 Agent 共享状态板（Blackboard）上的数据。"
+            "多个 Agent 通过共享状态板交换中间结果和协同信息。"
+            "不传 key 则返回所有条目。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "要读取的键（可选，不传则返回全部）",
+                    "default": "",
+                },
+            },
+        }
+
+    async def execute(self, *, key: str = "", **kwargs: Any) -> str:
+        bus = self._manager.message_bus
+        if key:
+            entry = await bus.blackboard_get(key)
+            if not entry:
+                return f"共享状态 '{key}' 不存在。"
+            return (
+                f"**{entry.key}** (作者: {entry.author}, "
+                f"版本: {entry.version})\n\n"
+                f"{entry.value}"
+            )
+
+        all_entries = await bus.blackboard_get_all()
+        if not all_entries:
+            return "共享状态板为空。"
+
+        lines = [f"共享状态板 ({len(all_entries)} 条):"]
+        for k, entry in sorted(all_entries.items()):
+            val = str(entry.value)[:150]
+            lines.append(
+                f"  - **{k}** ({entry.author}, v{entry.version}): {val}"
+            )
+        return "\n".join(lines)
+
+
+class BlackboardWriteTool(Tool):
+    """向共享状态板写入数据."""
+
+    def __init__(self, manager: Any) -> None:
+        self._manager = manager
+
+    @property
+    def name(self) -> str:
+        return "blackboard_write"
+
+    @property
+    def description(self) -> str:
+        return (
+            "向 Agent 共享状态板（Blackboard）写入数据。"
+            "其他 Agent 可通过 blackboard_read 读取这些数据。"
+            "适用于在多个 Agent 之间传递中间结果。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "状态键名",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "要写入的值",
+                },
+            },
+            "required": ["key", "value"],
+        }
+
+    async def execute(
+        self, *, key: str, value: str, **kwargs: Any,
+    ) -> str:
+        bus = self._manager.message_bus
+        entry = await bus.blackboard_set(key, value, author="main_agent")
+        return (
+            f"✅ 已写入共享状态 '{key}' "
+            f"(版本: {entry.version})"
+        )
