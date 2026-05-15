@@ -163,19 +163,25 @@ _PLANNER_SYSTEM = """\
 You are an action planner. Given a goal, success criteria, current gaps, and available
 tools, you produce a concrete plan of 1-5 actions to close the gaps.
 
+## Available Tools (use these exact names)
+- **bash_run** — Execute any shell command (creating files, running tests, installing packages)
+- **file_write** — Write content to a file (params: path, content)
+- **file_read** — Read a file's content (params: path)
+- **file_edit** — Edit a file with search/replace (params: path, old_text, new_text)
+
 ## Rules
-- Each action must be SPECIFIC (which file to edit, what test to write, etc.)
-- Each action must be VERIFIABLE (you can check if it worked)
+- Each action must be SPECIFIC (which file, what content, which command)
+- Prefer **bash_run** for creating files (use cat heredoc or python3 -c)
+- Prefer **bash_run** for verification (pytest, ruff, python3 -c)
 - Do NOT plan actions that are already done
 - Focus on the BIGGEST gaps first
-- If stuck, try a COMPLETELY DIFFERENT approach
 
 ## Output Format
-ACTION|<id>|<description>|<tool_to_use>|<expected_result>
+ACTION|<id>|<description>|<tool_name>|<expected_result>
 
 Example:
-ACTION|a1|Create src/utils.py with parse_config|file_write|function exists
-ACTION|a2|Write tests in tests/test_utils.py|file_write|tests pass
+ACTION|a1|Create src/utils.py with parse_config|bash_run|file exists
+ACTION|a2|Write tests in tests/test_utils.py|bash_run|tests pass
 ACTION|a3|Run pytest to verify|bash_run|All tests pass
 """
 
@@ -547,73 +553,180 @@ class GoalPursuitLoop:
     async def _execute_actions(
         self, spec: GoalSpec, actions: list[dict[str, str]],
     ) -> list[dict[str, Any]]:
-        """Execute planned actions using sub-agents."""
+        """Execute planned actions using real tool calls."""
         results: list[dict[str, Any]] = []
 
         for action in actions:
             if self._cancelled:
                 break
 
-            tool_name = action["tool"]
+            action_id = action["id"]
             description = action["description"]
+            tool_name = action["tool"]
 
-            logger.info("Executing action %s: %s", action["id"], description)
+            logger.info("Executing action %s: %s", action_id, description)
 
-            # Try to use the tool directly from registry
+            # Strategy 1: If tool exists, translate action into correct args
             tool = self._tools.get(tool_name)
             if tool:
-                try:
-                    result = await tool.execute(
-                        task=description, target=description,
-                    )
-                    results.append({
-                        "action_id": action["id"],
-                        "status": "completed",
-                        "output": str(result)[:3000],
-                    })
-                except Exception as e:
-                    results.append({
-                        "action_id": action["id"],
-                        "status": "error",
-                        "output": f"{type(e).__name__}: {e}",
-                    })
-            else:
-                # Delegate to sub-agent
-                agent_name = f"pursuit_{action['id']}"
-                self._manager.spawn_for_task(
-                    name=agent_name,
-                    task_description=description,
-                    max_turns=5,
-                    max_budget_usd=0.3,
+                result = await self._execute_tool_action(
+                    tool, tool_name, description, action_id,
                 )
-                try:
-                    from naumi_agent.orchestrator.subagent_manager import SubTask
+                results.append(result)
+                continue
 
-                    subtask = SubTask(
-                        id=action["id"],
-                        description=description,
-                        agent_name=agent_name,
-                    )
-                    agent_result = await self._manager.delegate(subtask)
-                    results.append({
-                        "action_id": action["id"],
-                        "status": agent_result.status,
-                        "output": (agent_result.response or "")[:3000],
-                        "tokens": agent_result.total_tokens,
-                        "cost": agent_result.total_cost_usd,
-                    })
-                    self._total_tokens += agent_result.total_tokens
-                    self._total_cost += agent_result.total_cost_usd
-                except Exception as e:
-                    results.append({
-                        "action_id": action["id"],
-                        "status": "error",
-                        "output": f"{type(e).__name__}: {e}",
-                    })
-                finally:
-                    self._manager.destroy(agent_name)
+            # Strategy 2: Try bash_run as universal executor
+            bash_tool = self._tools.get("bash_run")
+            if bash_tool:
+                result = await self._execute_via_bash(
+                    bash_tool, description, action_id,
+                )
+                results.append(result)
+                continue
+
+            # Strategy 3: Delegate to sub-agent
+            result = await self._execute_via_agent(
+                description, action_id,
+            )
+            results.append(result)
 
         return results
+
+    async def _execute_tool_action(
+        self,
+        tool: Any,
+        tool_name: str,
+        description: str,
+        action_id: str,
+    ) -> dict[str, Any]:
+        """Execute an action by translating description to tool args via LLM."""
+        schema = tool.parameters_schema
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+
+        # Build a prompt to translate description into tool parameters
+        param_desc = "\n".join(
+            f"  - {k}: {v.get('description', v.get('type', 'string'))}"
+            for k, v in properties.items()
+        )
+
+        translation_prompt = (
+            f"Given this action description: \"{description}\"\n\n"
+            f"Generate parameters for tool '{tool_name}' with these fields:\n"
+            f"{param_desc}\n\n"
+            f"Required fields: {', '.join(required)}\n\n"
+            f"Output a single JSON object with the parameter values. "
+            f"No explanation, just the JSON."
+        )
+
+        try:
+            response = await self._llm_call(
+                "You translate action descriptions into tool parameters. "
+                "Output only valid JSON.",
+                translation_prompt,
+            )
+
+            # Parse JSON from response
+            import json
+            text = response.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
+            params = json.loads(text)
+
+            output = await tool.execute(**params)
+            return {
+                "action_id": action_id,
+                "status": "completed",
+                "output": str(output)[:3000],
+            }
+        except Exception as e:
+            logger.warning(
+                "Tool action %s failed: %s", action_id, e,
+            )
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": f"{type(e).__name__}: {e}",
+            }
+
+    async def _execute_via_bash(
+        self,
+        bash_tool: Any,
+        description: str,
+        action_id: str,
+    ) -> dict[str, Any]:
+        """Execute an action by asking LLM to generate a bash command."""
+        command_prompt = (
+            f"Given this action: \"{description}\"\n\n"
+            f"Generate a single bash command that accomplishes it. "
+            f"Output ONLY the command, no explanation. "
+            f"Use python3 not python."
+        )
+
+        try:
+            response = await self._llm_call(
+                "You generate precise bash commands. "
+                "Output only the command, no markdown.",
+                command_prompt,
+            )
+            command = response.strip()
+            # Strip markdown code fences
+            if command.startswith("```"):
+                command = command.split("\n", 1)[-1].rsplit("```", 1)[0]
+            command = command.strip()
+
+            output = await bash_tool.execute(command=command)
+            return {
+                "action_id": action_id,
+                "status": "completed",
+                "output": str(output)[:3000],
+            }
+        except Exception as e:
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": f"{type(e).__name__}: {e}",
+            }
+
+    async def _execute_via_agent(
+        self,
+        description: str,
+        action_id: str,
+    ) -> dict[str, Any]:
+        """Delegate action to a sub-agent as last resort."""
+        from naumi_agent.orchestrator.subagent_manager import SubTask
+
+        agent_name = f"pursuit_{action_id}"
+        self._manager.spawn_for_task(
+            name=agent_name,
+            task_description=description,
+            max_turns=5,
+            max_budget_usd=0.3,
+        )
+        try:
+            subtask = SubTask(
+                id=action_id,
+                description=description,
+                agent_name=agent_name,
+            )
+            agent_result = await self._manager.delegate(subtask)
+            self._total_tokens += agent_result.total_tokens
+            self._total_cost += agent_result.total_cost_usd
+            return {
+                "action_id": action_id,
+                "status": agent_result.status,
+                "output": (agent_result.response or "")[:3000],
+                "tokens": agent_result.total_tokens,
+                "cost": agent_result.total_cost_usd,
+            }
+        except Exception as e:
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": f"{type(e).__name__}: {e}",
+            }
+        finally:
+            self._manager.destroy(agent_name)
 
     # ------------------------------------------------------------------
     #  Phase 4: Verification
@@ -634,10 +747,12 @@ class GoalPursuitLoop:
                 bash_tool = self._tools.get("bash_run")
                 if bash_tool:
                     output = await bash_tool.execute(command=cmd)
+                    lower_output = output.lower()
                     passed = (
-                        "error" not in output.lower()
-                        and "fail" not in output.lower()
-                        and "traceback" not in output.lower()
+                        "error" not in lower_output
+                        and "fail" not in lower_output
+                        and "traceback" not in lower_output
+                        and "not found" not in lower_output
                     )
                     if passed:
                         criterion.status = CriterionStatus.VERIFIED
@@ -719,30 +834,41 @@ class GoalPursuitLoop:
         """Gather real evidence about current state."""
         evidence_parts: list[str] = []
 
-        # Check existing files related to the goal
         bash_tool = self._tools.get("bash_run")
         if bash_tool:
+            # Collect git diff since pursuit started
+            if self._start_time > 0:
+                try:
+                    diff_result = await bash_tool.execute(
+                        command="git diff --stat HEAD 2>/dev/null; "
+                        "echo '---'; git diff HEAD 2>/dev/null | head -80",
+                    )
+                    if diff_result and "fatal" not in diff_result:
+                        evidence_parts.append(
+                            f"Git 变更:\n{diff_result}"
+                        )
+                except Exception:
+                    pass
+
             try:
                 # List relevant files
                 ls_result = await bash_tool.execute(
                     command="find . -name '*.py' -newer . -not -path './.*' "
                     "-not -path './__pycache__/*' | head -30",
                 )
-                evidence_parts.append(f"最近修改的 Python 文件:\n{ls_result}")
+                evidence_parts.append(f"最近修改的文件:\n{ls_result}")
             except Exception:
                 pass
 
             try:
-                # Check test status
                 test_result = await bash_tool.execute(
-                    command="python -m pytest tests/ -q --tb=no 2>&1 | tail -5",
+                    command="python3 -m pytest tests/ -q --tb=no 2>&1 | tail -5",
                 )
                 evidence_parts.append(f"测试状态:\n{test_result}")
             except Exception:
                 pass
 
             try:
-                # Check lint status
                 lint_result = await bash_tool.execute(
                     command="ruff check src/ 2>&1 | tail -5",
                 )
