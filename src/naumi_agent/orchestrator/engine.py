@@ -92,6 +92,9 @@ collect real data, then develop based on verified information
 - **analysis_hook**: Reverse Engineering & Instrumentation — dynamic \
 analysis for black-box targets (memory scanning, API hooking, IL \
 reflection), anti-debug evasion, data extraction pipeline
+- **analysis_vision**: AI Vision Data Extraction — when APIs are blocked \
+by anti-scraping, design screen-level vision pipeline (capture→detect→\
+OCR→validate→output) to bypass software-layer restrictions
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
