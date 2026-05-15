@@ -98,6 +98,10 @@ OCR→validate→output) to bypass software-layer restrictions
 - **analysis_spar**: Adversarial Self-Play (GAN for Code) — blue team writes \
 code, red team breaks it, physical sandbox as oracle, iterate N rounds \
 until hardened. Prevents reward hacking and nihilism
+- **analysis_world**: World Model Audit — treat the system as a miniature \
+physics engine: inventory state entities, map transitions, trace causal \
+chains, audit object permanence, find counterfactual gaps, score \
+world model completeness
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
