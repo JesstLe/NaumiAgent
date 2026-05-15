@@ -75,13 +75,13 @@ class TestFileWriteTool:
     async def test_write_new_file(self, write_tool: FileWriteTool, tmp_path) -> None:
         f = tmp_path / "new.txt"
         result = await write_tool.execute(path=str(f), content="hello world")
-        assert "Successfully" in result
+        assert "已创建" in result or "Successfully" in result
         assert f.read_text() == "hello world"
 
     async def test_write_creates_dirs(self, write_tool: FileWriteTool, tmp_path) -> None:
         f = tmp_path / "sub" / "dir" / "file.txt"
         result = await write_tool.execute(path=str(f), content="nested")
-        assert "Successfully" in result
+        assert "已创建" in result or "Successfully" in result
         assert f.read_text() == "nested"
 
 
@@ -99,7 +99,7 @@ class TestFileEditTool:
             old_text="bar",
             new_text="BAR",
         )
-        assert "Successfully" in result
+        assert "已编辑" in result or "Successfully" in result
         assert f.read_text() == "foo BAR baz"
 
     async def test_edit_not_found(self, edit_tool: FileEditTool, tmp_path) -> None:

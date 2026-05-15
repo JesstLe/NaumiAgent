@@ -57,12 +57,13 @@ class FileReadTool(Tool):
             selected = lines[offset:end]
 
             result = "".join(selected)
-            header = f"File: {path} ({total} lines"
+            header = f"📄 {path} ({total} 行"
             if offset > 0 or limit > 0:
-                header += f", showing lines {offset + 1}-{end}"
+                header += f"，显示第 {offset + 1}-{end} 行"
             header += ")\n"
 
-            return header + result
+            lang = FileWriteTool._guess_lang(path)
+            return f"{header}\n```{lang}\n{result}```"
         except Exception as e:
             return f"Error reading file: {type(e).__name__}: {e}"
 
@@ -97,14 +98,82 @@ class FileWriteTool(Tool):
 
     async def execute(self, *, path: str, content: str, **kwargs: Any) -> str:
         resolved = os.path.expanduser(path)
+        is_new = not os.path.isfile(resolved)
 
         try:
+            old_content = ""
+            if not is_new:
+                with open(resolved, encoding="utf-8") as f:
+                    old_content = f.read()
+
             os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
             with open(resolved, "w", encoding="utf-8") as f:
                 f.write(content)
-            return f"Successfully wrote {len(content)} characters to {path}"
+
+            lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
+
+            if is_new:
+                preview = self._preview_content(content, max_lines=15)
+                return (
+                    f"✅ 已创建 {path} ({lines} 行, {len(content)} 字符)\n\n"
+                    f"```{self._guess_lang(path)}\n{preview}\n```"
+                )
+
+            if old_content == content:
+                return f"ℹ️ {path} 内容未变化"
+
+            diff = self._make_diff(old_content, content, path)
+            return (
+                f"✅ 已覆写 {path} ({lines} 行, {len(content)} 字符)\n\n"
+                f"{diff}"
+            )
         except Exception as e:
             return f"Error writing file: {type(e).__name__}: {e}"
+
+    @staticmethod
+    def _preview_content(content: str, max_lines: int = 15) -> str:
+        lines = content.splitlines()
+        if len(lines) <= max_lines:
+            return content
+        shown = "\n".join(lines[:max_lines])
+        return f"{shown}\n... ({len(lines) - max_lines} more lines)"
+
+    @staticmethod
+    def _guess_lang(path: str) -> str:
+        ext = path.rsplit(".", 1)[-1] if "." in path else ""
+        return {
+            "py": "python", "js": "javascript", "ts": "typescript",
+            "yaml": "yaml", "yml": "yaml", "json": "json",
+            "md": "markdown", "toml": "toml", "rs": "rust",
+            "go": "go", "sh": "bash", "sql": "sql",
+        }.get(ext, "")
+
+    @staticmethod
+    def _make_diff(old: str, new: str, path: str) -> str:
+        import difflib
+
+        old_lines = old.splitlines(keepends=True)
+        new_lines = new.splitlines(keepends=True)
+        diff = difflib.unified_diff(
+            old_lines, new_lines,
+            fromfile=f"{path} (before)",
+            tofile=f"{path} (after)",
+            lineterm="",
+        )
+        diff_lines = list(diff)
+        if not diff_lines:
+            return ""
+        if len(diff_lines) > 60:
+            total_count = len(
+                list(difflib.unified_diff(
+                    old_lines, new_lines, lineterm="",
+                ))
+            )
+            diff_lines = diff_lines[:60]
+            diff_lines.append(
+                f"... ({total_count} total diff lines)\n"
+            )
+        return "```diff\n" + "\n".join(diff_lines) + "\n```"
 
 
 class FileEditTool(Tool):
@@ -165,7 +234,10 @@ class FileEditTool(Tool):
             with open(resolved, "w", encoding="utf-8") as f:
                 f.write(new_content)
 
-            return f"Successfully edited {path} (replaced 1 occurrence)"
+            diff = FileWriteTool._make_diff(content, new_content, path)
+            return (
+                f"✅ 已编辑 {path} (替换 1 处)\n\n{diff}"
+            )
         except Exception as e:
             return f"Error editing file: {type(e).__name__}: {e}"
 
