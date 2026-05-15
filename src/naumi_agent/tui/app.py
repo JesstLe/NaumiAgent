@@ -729,6 +729,7 @@ class NaumiApp(App):
                     "- `/cosmos <目标>` — 创世引擎审计\n"
                     "- `/watchdog <目标>` — 看门狗与灾难隔离\n"
                     "- `/supervisor <目标>` — Erlang 守护者树\n"
+                    "- `/autopsy <目标>` — 执行迹切片与 Bug 解剖\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -899,6 +900,11 @@ class NaumiApp(App):
                     status.status_text = "用法: /supervisor <代码路径或系统描述>"
                 else:
                     self._run_analysis_mode("supervisor", arg)
+            case "/autopsy":
+                if not arg:
+                    status.status_text = "用法: /autopsy <代码路径或 Bug 描述>"
+                else:
+                    self._run_analysis_mode("autopsy", arg)
             case "/hook":
                 if not arg:
                     status.status_text = "用法: /hook <逆向目标描述>"
@@ -1027,6 +1033,7 @@ class NaumiApp(App):
             "cosmos": "analysis_cosmos",
             "watchdog": "analysis_watchdog",
             "supervisor": "analysis_supervisor",
+            "autopsy": "analysis_autopsy",
         }
         labels = {
             "chaos": "⚡ 灾难演练",
@@ -1061,6 +1068,7 @@ class NaumiApp(App):
             "cosmos": "🌌 创世引擎审计 (Cosmos)",
             "watchdog": "🛡️ 看门狗与灾难隔离 (Watchdog)",
             "supervisor": "⚙️ Erlang 守护者树 (Supervisor)",
+            "autopsy": "🔬 执行迹切片与爆炸半径隔离 (DTS-CHE)",
         }
 
         chat = self.query_one(ChatPanel)
@@ -1137,6 +1145,8 @@ class NaumiApp(App):
             elif mode == "watchdog":
                 result = await tool.execute(target=target)
             elif mode == "supervisor":
+                result = await tool.execute(target=target)
+            elif mode == "autopsy":
                 result = await tool.execute(target=target)
             else:
                 result = await tool.execute(target=target)
