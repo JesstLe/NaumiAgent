@@ -357,6 +357,16 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             else:
                 await _run_analysis(engine, "fusion", arg)
+        case "/consensus":
+            if not arg:
+                console.print(
+                    "[yellow]用法: /consensus <代码路径或系统描述>[/yellow]"
+                )
+                console.print(
+                    "[dim]例: /consensus src/naumi_agent/trading/[/dim]"
+                )
+            else:
+                await _run_analysis(engine, "consensus", arg)
         case "/hook":
             if not arg:
                 console.print("[yellow]用法: /hook <逆向目标描述>[/yellow]")
@@ -414,6 +424,7 @@ def _print_help() -> None:
         ("/spar <目标>", "对抗自博弈 — 蓝军写代码 vs 红军搞破坏"),
         ("/world <目标>", "世界模型审计 — 状态转移·因果链·反事实推演"),
         ("/fusion <目标>", "决定论-概率论融合 — AI与传统代码边界审计"),
+        ("/consensus <目标>", "拜占庭共识 — 多模型表决防幻觉"),
         ("/vision <目标>", "AI 视觉数据提取 — 反封锁视觉管线"),
         ("/hook <目标>", "逆向插桩 — 黑盒解剖"),
         ("/clear", "清除当前会话"),
@@ -451,6 +462,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "spar": "analysis_spar",
         "world": "analysis_world",
         "fusion": "analysis_fusion",
+        "consensus": "analysis_consensus",
     }
 
     labels = {
@@ -478,6 +490,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "spar": "对抗性自博弈 (GAN for Code)",
         "world": "世界模型审计 (World Model)",
         "fusion": "决定论-概率论融合审计 (Fusion)",
+        "consensus": "拜占庭容错共识 (Consensus)",
     }
 
     tool_name = tool_names[mode]
@@ -532,6 +545,8 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         elif mode == "world":
             result = await tool.execute(target=target)
         elif mode == "fusion":
+            result = await tool.execute(target=target)
+        elif mode == "consensus":
             result = await tool.execute(target=target)
         else:
             result = await tool.execute(target=target)

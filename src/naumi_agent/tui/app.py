@@ -721,6 +721,7 @@ class NaumiApp(App):
                     "- `/spar <目标>` — 对抗自博弈 (GAN for Code)\n"
                     "- `/world <目标>` — 世界模型审计\n"
                     "- `/fusion <目标>` — 决定论-概率论融合审计\n"
+                    "- `/consensus <目标>` — 拜占庭容错共识\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -851,6 +852,11 @@ class NaumiApp(App):
                     status.status_text = "用法: /fusion <代码路径或系统描述>"
                 else:
                     self._run_analysis_mode("fusion", arg)
+            case "/consensus":
+                if not arg:
+                    status.status_text = "用法: /consensus <代码路径或系统描述>"
+                else:
+                    self._run_analysis_mode("consensus", arg)
             case "/hook":
                 if not arg:
                     status.status_text = "用法: /hook <逆向目标描述>"
@@ -971,6 +977,7 @@ class NaumiApp(App):
             "spar": "analysis_spar",
             "world": "analysis_world",
             "fusion": "analysis_fusion",
+            "consensus": "analysis_consensus",
         }
         labels = {
             "chaos": "⚡ 灾难演练",
@@ -997,6 +1004,7 @@ class NaumiApp(App):
             "spar": "⚔️ 对抗性自博弈 (GAN for Code)",
             "world": "🌍 世界模型审计 (World Model)",
             "fusion": "⚖️ 决定论-概率论融合 (Fusion)",
+            "consensus": "🏛️ 拜占庭容错共识 (Consensus)",
         }
 
         chat = self.query_one(ChatPanel)
@@ -1057,6 +1065,8 @@ class NaumiApp(App):
             elif mode == "world":
                 result = await tool.execute(target=target)
             elif mode == "fusion":
+                result = await tool.execute(target=target)
+            elif mode == "consensus":
                 result = await tool.execute(target=target)
             else:
                 result = await tool.execute(target=target)

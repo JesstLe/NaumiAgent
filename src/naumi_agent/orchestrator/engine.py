@@ -107,6 +107,10 @@ the boundary between AI (probabilistic) and traditional code \
 (deterministic), detect dangerous fusion points where AI output feeds \
 into precision-critical operations without validation, identify \
 over-determined code that could benefit from AI
+- **analysis_consensus**: Byzantine Consensus — multi-model voting \
+system for high-risk decisions, detect single-point-of-decision risks, \
+design heterogeneous model deployment + quorum arbitration + circuit \
+breaker mechanism
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
