@@ -452,6 +452,17 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 console.print("[yellow]用法: /hook <逆向目标描述>[/yellow]")
             else:
                 await _run_analysis(engine, "hook", arg)
+        case "/pursue":
+            if not arg:
+                console.print(
+                    "[yellow]用法: /pursue <目标描述>[/yellow]"
+                )
+                console.print(
+                    "[dim]例: /pursue 为 NaumiAgent 添加一个 CSV 导出工具，"
+                    "支持自定义分隔符和编码[/dim]"
+                )
+            else:
+                await _run_pursue(engine, arg)
         case "/help":
             _print_help()
         case _:
@@ -515,6 +526,7 @@ def _print_help() -> None:
         ("/autopsy <目标>", "执行迹切片 — SWE-bench 级 Bug 解剖"),
         ("/vision <目标>", "AI 视觉数据提取 — 反封锁视觉管线"),
         ("/hook <目标>", "逆向插桩 — 黑盒解剖"),
+        ("/pursue <目标>", "目标追踪 — 自主循环执行直至真正达成"),
         ("/clear", "清除当前会话"),
         ("/quit", "退出"),
     ]
@@ -681,6 +693,47 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         )
     )
     console.print()
+
+
+async def _run_pursue(engine: Any, goal: str) -> None:
+    """执行目标追踪循环."""
+    from rich.panel import Panel
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+
+    console.print(
+        Panel(
+            f"[bold green]目标追踪启动[/bold green]\n\n{goal}",
+            border_style="green",
+            title="🎯 /pursue",
+        )
+    )
+
+    tool = engine.tool_registry.get("pursue_goal")
+    if not tool:
+        console.print("[red]目标追踪工具未注册[/red]")
+        return
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        progress.add_task("追踪中...", total=None)
+
+        try:
+            result = await tool.execute(goal=goal)
+        except KeyboardInterrupt:
+            console.print("\n[yellow]⚠️ 目标追踪被中断[/yellow]")
+            return
+
+    console.print(
+        Panel(
+            result,
+            border_style="green" if "达成" in result else "yellow",
+            title="🎯 目标追踪报告",
+        )
+    )
 
 
 async def _show_history(engine: Any) -> None:

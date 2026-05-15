@@ -240,11 +240,22 @@ class AgentEngine:
     def _register_subagent_manager(self) -> None:
         from naumi_agent.orchestrator.subagent_manager import SubAgentManager
         from naumi_agent.tools.analysis import set_analysis_subagent_manager
+        from naumi_agent.tools.pursuit import set_pursuit_dependencies
         from naumi_agent.tools.subagent import create_subagent_tools
 
         self.subagent_manager = SubAgentManager(self)
         set_analysis_subagent_manager(self.subagent_manager)
         for tool in create_subagent_tools(self.subagent_manager):
+            self._tool_registry.register(tool)
+
+        # Goal pursuit tool
+        set_pursuit_dependencies(
+            router=self._router,
+            tool_registry=self._tool_registry,
+            subagent_manager=self.subagent_manager,
+        )
+        from naumi_agent.tools.pursuit import create_pursuit_tool
+        for tool in create_pursuit_tool():
             self._tool_registry.register(tool)
 
     async def setup_mcp_tools(self) -> None:

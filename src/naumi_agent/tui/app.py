@@ -730,6 +730,7 @@ class NaumiApp(App):
                     "- `/watchdog <目标>` — 看门狗与灾难隔离\n"
                     "- `/supervisor <目标>` — Erlang 守护者树\n"
                     "- `/autopsy <目标>` — 执行迹切片与 Bug 解剖\n"
+                    "- `/pursue <目标>` — 目标追踪（自主循环直至达成）\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -910,6 +911,11 @@ class NaumiApp(App):
                     status.status_text = "用法: /hook <逆向目标描述>"
                 else:
                     self._run_analysis_mode("hook", arg)
+            case "/pursue":
+                if not arg:
+                    status.status_text = "用法: /pursue <目标描述>"
+                else:
+                    self._run_pursue(arg)
             case "/quit" | "/exit":
                 self.exit()
             case _:
@@ -1229,6 +1235,55 @@ class NaumiApp(App):
                 status.status_text = f"会话不存在: {session_id}"
         except Exception as e:
             status.status_text = f"删除失败: {e}"
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_pursue(self, goal: str) -> None:
+        """执行目标追踪循环."""
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+
+        chat.mount(
+            Markdown(
+                f"**🎯 目标追踪启动**\n\n{goal}",
+                classes="agent-msg",
+            )
+        )
+
+        tool = self.engine.tool_registry.get("pursue_goal")
+        if not tool:
+            chat.mount(
+                Markdown(
+                    "⚠️ 目标追踪工具未注册",
+                    classes="agent-msg",
+                )
+            )
+            return
+
+        status.status_text = "🎯 目标追踪中..."
+        chat.start_thinking()
+
+        try:
+            result = await tool.execute(goal=goal)
+            chat.stop_thinking()
+            chat.mount(
+                Markdown(
+                    f"## 🎯 目标追踪报告\n\n{result}",
+                    classes="agent-msg",
+                )
+            )
+        except Exception as e:
+            chat.stop_thinking()
+            chat.mount(
+                Markdown(
+                    f"⚠️ 目标追踪异常: {type(e).__name__}: {e}",
+                    classes="agent-msg",
+                )
+            )
+        finally:
+            status.status_text = "就绪"
+            input_bar = self.query_one(InputBar)
+            msg_input = input_bar.query_one("#msg-input", TextArea)
+            msg_input.focus()
 
     def action_show_tools(self) -> None:
         chat = self.query_one(ChatPanel)
