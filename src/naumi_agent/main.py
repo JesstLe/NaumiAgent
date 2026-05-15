@@ -305,6 +305,18 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             else:
                 await _run_analysis(engine, "cooe", arg)
+        case "/sleep":
+            await _run_analysis(engine, "sleep", arg or "")
+        case "/entropy":
+            if not arg:
+                console.print("[yellow]用法: /entropy <长文本或上下文>[/yellow]")
+            else:
+                await _run_analysis(engine, "entropy", arg)
+        case "/ooda":
+            if not arg:
+                console.print("[yellow]用法: /ooda <文件或目录路径>[/yellow]")
+            else:
+                await _run_analysis(engine, "ooda", arg)
         case "/help":
             _print_help()
         case _:
@@ -350,6 +362,9 @@ def _print_help() -> None:
         ("/jit <任务>", "JIT 即时工具 — 用代码保证确定性"),
         ("/pointer <路径>", "语义指针(SPA) — 推理态/物理态分离"),
         ("/cooe <任务>", "认知乱序执行(COOE) — DAG并行调度"),
+        ("/sleep", "昼夜节律突触修剪 — 知识压缩"),
+        ("/entropy <文本>", "耗散结构熵减 — 锚点重启"),
+        ("/ooda <路径>", "OODA 战场指挥 — 反脆弱架构"),
         ("/clear", "清除当前会话"),
         ("/quit", "退出"),
     ]
@@ -376,6 +391,9 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "jit": "analysis_jit",
         "pointer": "analysis_pointer",
         "cooe": "analysis_cooe",
+        "sleep": "analysis_sleep",
+        "entropy": "analysis_entropy",
+        "ooda": "analysis_ooda",
     }
 
     labels = {
@@ -394,6 +412,9 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "jit": "JIT 即时工具生成",
         "pointer": "语义指针架构 (SPA)",
         "cooe": "认知乱序执行 (COOE)",
+        "sleep": "昼夜节律突触修剪",
+        "entropy": "耗散结构熵减重置",
+        "ooda": "OODA 战场指挥",
     }
 
     tool_name = tool_names[mode]
@@ -431,6 +452,12 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
             result = await tool.execute(target=target)
         elif mode == "cooe":
             result = await tool.execute(task=target)
+        elif mode == "sleep":
+            result = await tool.execute(session_context=target)
+        elif mode == "entropy":
+            result = await tool.execute(context=target)
+        elif mode == "ooda":
+            result = await tool.execute(target=target)
         else:
             result = await tool.execute(target=target)
 

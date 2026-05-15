@@ -77,6 +77,15 @@ protocol to eliminate hallucination on precise data
 - **analysis_cooe**: Cognitive Out-of-Order Execution — decompose tasks \
 into DAG, identify data dependencies vs parallelizable steps, design \
 scheduler + reservation stations + reorder buffer pipeline
+- **analysis_sleep**: Circadian Synaptic Pruning — offline compression \
+of session knowledge, extract core insights, prune redundancy, \
+generate evolution patch for system prompt
+- **analysis_entropy**: Dissipative Structure Valve — force entropy \
+reduction when reasoning drifts, condense to 3-sentence anchor, \
+purge context, restart from anchor
+- **analysis_ooda**: OODA Loop Mission Command — analyze code fragility, \
+design intent-driven self-correcting architecture with observe/orient/\
+decide/act loop and self-healing mechanisms
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
