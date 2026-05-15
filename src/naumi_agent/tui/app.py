@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from rich.markdown import Markdown
+from rich.markdown import Markdown as RichMarkdown
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -18,6 +18,7 @@ from textual.widgets import (
     Collapsible,
     Footer,
     Header,
+    Markdown,
     Static,
     TextArea,
 )
@@ -66,14 +67,14 @@ class ChatPanel(VerticalScroll):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._response_text = ""
-        self._response_widget: Static | None = None
+        self._response_widget: Markdown | Static | None = None
         self._thinking_text = ""
         self._thinking_content_widget: Static | None = None
         self._thinking_collapsible: Collapsible | None = None
         self._current_tool_widget: Static | None = None
 
     def add_user_message(self, content: str) -> None:
-        self.mount(Static(Markdown(f"**你** {content}"), classes="user-msg"))
+        self.mount(Markdown(f"**你** {content}", classes="user-msg"))
         self.scroll_end(animate=False)
 
     # --- 思考过程 ---
@@ -92,7 +93,7 @@ class ChatPanel(VerticalScroll):
     def add_thinking_chunk(self, content: str) -> None:
         self._thinking_text += content
         if self._thinking_content_widget:
-            self._thinking_content_widget.update(Markdown(self._thinking_text))
+            self._thinking_content_widget.update(RichMarkdown(self._thinking_text))
             self.scroll_end(animate=False)
 
     def end_thinking(self) -> None:
@@ -109,14 +110,14 @@ class ChatPanel(VerticalScroll):
 
     def start_response(self) -> None:
         self._response_text = ""
-        self._response_widget = Static("", classes="agent-msg")
+        self._response_widget = Markdown("", classes="agent-msg")
         self.mount(self._response_widget)
         self.scroll_end(animate=False)
 
     def add_response_token(self, token: str) -> None:
         self._response_text += token
         if self._response_widget:
-            self._response_widget.update(Markdown(self._response_text))
+            self._response_widget.update(self._response_text)
             self.scroll_end(animate=False)
 
     # --- 工具调用 ---
@@ -145,6 +146,7 @@ class ChatPanel(VerticalScroll):
 
     def clear(self) -> None:
         self.query(Static).remove()
+        self.query(Markdown).remove()
         self.query(Collapsible).remove()
         self._response_text = ""
         self._response_widget = None
@@ -325,6 +327,20 @@ class NaumiApp(App):
         border-left: thick green;
     }
 
+    Markdown.user-msg {
+        background: $boost;
+        padding: 1 2;
+        margin: 1 0;
+        border-left: thick blue;
+    }
+
+    Markdown.agent-msg {
+        background: $surface;
+        padding: 1 2;
+        margin: 1 0;
+        border-left: thick green;
+    }
+
     .thinking-block {
         margin: 1 0;
         padding: 0;
@@ -496,4 +512,4 @@ class NaumiApp(App):
         lines = ["## 可用工具\n"]
         for t in tools:
             lines.append(f"- **{t.name}** — {t.description}")
-        chat.mount(Static(Markdown("\n".join(lines)), classes="agent-msg"))
+        chat.mount(Markdown("\n".join(lines), classes="agent-msg"))
