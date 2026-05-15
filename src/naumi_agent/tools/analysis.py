@@ -3486,6 +3486,221 @@ class OODATool(Tool):
         return await _run_analysis(router, _OODA_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /probe — 黑盒探测与反幻觉协议
+# ===========================================================================
+
+# Known system/API indicators (low hallucination risk)
+_KNOWN_SYSTEMS = [
+    (r"(?:numpy|pandas|scipy|sklearn|tensorflow|pytorch)", "Python 数据科学栈"),
+    (r"(?:react|vue|angular|next\.js|express)", "主流 Web 框架"),
+    (r"(?:django|flask|fastapi|starlette)", "Python Web 框架"),
+    (r"(?:unity|unreal|godot)", "游戏引擎"),
+    (r"(?:win32|windows\.api|user32|kernel32)", "Windows API"),
+    (r"(?:pthread|epoll|libuv|boost)", "系统级库"),
+]
+
+# Unknown/closed-source indicators (high hallucination risk)
+_UNKNOWN_INDICATORS = [
+    (r"(?:内部|私有|自研|闭源|proprietary|internal|private)", "私有系统"),
+    (r"(?:某个|某款|某个游戏|specific game|this game)", "模糊目标引用"),
+    (r"(?:没有文档|没有API|no docs|no sdk|无SDK)", "缺少文档"),
+    (r"(?:逆向|反编译|reverse.?engineer|decompil)", "逆向工程"),
+    (r"(?:内存地址|基址|偏移|base.?address|offset)", "内存hack"),
+]
+
+# Probe type recommendations
+_PROBE_TYPES = {
+    "reflection": [
+        (r"(?:C#|csharp|\.NET|unity|mono)", "反射遍历对象树"),
+        (r"(?:java|kotlin|android)", "Java 反射"),
+        (r"(?:python|inspect|dir\(\))", "Python inspect 模块"),
+    ],
+    "memory": [
+        (r"(?:内存|memory|address|指针|pointer)", "内存特征码扫描"),
+        (r"(?:cheat.?engine|cheat.?table|trainer)", "CE 表扫描"),
+        (r"(?:hook|detour|inject)", "API Hook/注入"),
+    ],
+    "network": [
+        (r"(?:抓包|抓取|packet|wireshark|fiddler)", "网络抓包监听"),
+        (r"(?:API|接口|endpoint|REST|websocket)", "API 探测"),
+        (r"(?:protobuf|grpc|thrift)", "协议逆向"),
+    ],
+    "file": [
+        (r"(?:配置|config|ini|yaml|json|xml)", "配置文件扫描"),
+        (r"(?:存档|save|archive|pak|asset)", "资源文件解析"),
+        (r"(?:log|日志|debug|trace)", "日志分析"),
+    ],
+}
+
+
+def _scan_probe(task: str, context: str) -> str:
+    """probe 模式静态扫描：评估目标系统已知性和幻觉风险."""
+    findings: list[str] = []
+    combined = (task + " " + context).lower()
+
+    # 1. Check if target is a known system
+    known_matches: list[str] = []
+    for pattern, label in _KNOWN_SYSTEMS:
+        if re.search(pattern, combined, re.IGNORECASE):
+            known_matches.append(label)
+
+    if known_matches:
+        findings.append(
+            f"- 已知系统特征: {', '.join(known_matches)}"
+        )
+        findings.append("  → 幻觉风险: 低（有公开文档和 SDK）")
+    else:
+        findings.append("- 已知系统特征: 未匹配")
+        findings.append("  → 幻觉风险: 中-高（AI 可能编造 API）")
+
+    # 2. Check for unknown/closed-source indicators
+    unknown_matches: list[str] = []
+    for pattern, label in _UNKNOWN_INDICATORS:
+        if re.search(pattern, combined, re.IGNORECASE):
+            unknown_matches.append(label)
+
+    if unknown_matches:
+        findings.append(
+            f"- ⚠️ 未知系统特征: {', '.join(unknown_matches)}"
+        )
+        findings.append("  → 必须使用探测优先策略，禁止直接编写业务代码")
+    else:
+        findings.append("- 未知系统特征: 未检测到")
+
+    # 3. Recommend probe type
+    findings.append("- 推荐探测方式:")
+    for probe_type, patterns in _PROBE_TYPES.items():
+        for pattern, desc in patterns:
+            if re.search(pattern, combined, re.IGNORECASE):
+                findings.append(f"  - {probe_type}: {desc}")
+                break
+
+    # 4. Hallucination risk score
+    risk = 0
+    if not known_matches:
+        risk += 40
+    if unknown_matches:
+        risk += 30
+    if not context.strip():
+        risk += 20
+    level = (
+        "CRITICAL" if risk > 60
+        else "HIGH" if risk > 40
+        else "MEDIUM" if risk > 20
+        else "LOW"
+    )
+    findings.append(f"\n- 幻觉风险评分: {risk} ({level})")
+    if risk > 40:
+        findings.append(
+            "  → 强烈建议: 先运行探测脚本收集真实信息，"
+            "再基于实际返回结果开发"
+        )
+
+    return "\n".join(findings)
+
+
+_PROBE_SYSTEM = """\
+You are a Black-Box Probe architect implementing anti-hallucination \
+protocols for unknown/closed-source systems.
+
+## Core Principle
+**NEVER guess APIs, class names, memory addresses, or function \
+signatures for systems you don't have documentation for.** Instead, \
+write reconnaissance scripts that discover the real interfaces.
+
+## The 3-Phase Protocol
+
+### Phase 1: Probe Script Generation
+Write a SAFE, HARMLESS reconnaissance script that:
+- Uses reflection/introspection to enumerate available classes/methods
+- Scans memory for known patterns (if applicable)
+- Captures network traffic to discover API endpoints
+- Dumps configuration files or log outputs
+- **MUST be non-destructive** — read-only, no writes or modifications
+
+Output a complete, runnable probe script with:
+- Language selection based on the target (C# for Unity, Python for \
+general, C for memory)
+- Clear instructions on how to run it
+- What output to expect
+- What to do with the output (feed it back for Phase 2)
+
+### Phase 2: Information Extraction Template
+Provide a template for the user to paste the probe output:
+- What fields to look for
+- How to identify the real API names vs noise
+- What to extract and bring back
+
+### Phase 3: Development Plan (AFTER probe results)
+Outline what you'll do with the real information:
+- How to map discovered APIs to the user's requirements
+- What the implementation will look like
+- What assertions to add to catch future API changes
+
+## Anti-Hallucination Rules
+1. If you don't know the exact API, say "UNKNOWN — probe required"
+2. Never fabricate function names, class names, or memory offsets
+3. Always include a verification step in generated code
+4. If the user provides probe results, validate them before coding
+5. Mark every assumption clearly as [ASSUMPTION — verify]
+
+## Output Format
+1. Risk assessment (how much do we NOT know?)
+2. Probe script (complete, runnable, non-destructive)
+3. Execution instructions
+4. Information extraction template
+5. Development plan (conditional on probe results)
+"""
+
+
+class ProbeTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_probe"
+
+    @property
+    def description(self) -> str:
+        return (
+            "黑盒探测与反幻觉协议：面对闭源/未知系统时，"
+            "禁止凭空编造业务代码，先生成无害的探测脚本"
+            "（反射遍历、内存扫描、网络抓包），"
+            "收集真实系统信息后再进行开发。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "要开发的功能描述",
+                },
+                "context": {
+                    "type": "string",
+                    "description": "已知的系统信息（SDK、文档片段等）",
+                    "default": "",
+                },
+            },
+            "required": ["task"],
+        }
+
+    async def execute(
+        self, *, task: str, context: str = "", **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("probe", task[:200])
+        scan_evidence = _scan_probe(task, context)
+        user_msg = f"## 开发任务\n{task}\n"
+        user_msg += f"\n## 探测扫描\n{scan_evidence}\n"
+        if context:
+            user_msg += f"\n## 已知系统信息\n{context}\n"
+        return await _run_analysis(router, _PROBE_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
 # ---------------------------------------------------------------------------
@@ -3549,4 +3764,5 @@ def create_analysis_tools() -> list[Tool]:
         SleepPruningTool(),
         EntropyValveTool(),
         OODATool(),
+        ProbeTool(),
     ]

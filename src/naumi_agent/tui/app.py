@@ -715,6 +715,7 @@ class NaumiApp(App):
                     "- `/sleep` — 昼夜节律突触修剪\n"
                     "- `/entropy <文本>` — 耗散结构熵减\n"
                     "- `/ooda <路径>` — OODA 战场指挥\n"
+                    "- `/probe <需求>` — 黑盒探测\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -820,6 +821,11 @@ class NaumiApp(App):
                     status.status_text = "用法: /ooda <文件或目录路径>"
                 else:
                     self._run_analysis_mode("ooda", arg)
+            case "/probe":
+                if not arg:
+                    status.status_text = "用法: /probe <功能需求描述>"
+                else:
+                    self._run_analysis_mode("probe", arg)
             case "/quit" | "/exit":
                 self.exit()
             case _:
@@ -929,6 +935,7 @@ class NaumiApp(App):
             "sleep": "analysis_sleep",
             "entropy": "analysis_entropy",
             "ooda": "analysis_ooda",
+            "probe": "analysis_probe",
         }
         labels = {
             "chaos": "⚡ 灾难演练",
@@ -949,6 +956,7 @@ class NaumiApp(App):
             "sleep": "🧬 昼夜节律突触修剪",
             "entropy": "🌡️ 耗散结构熵减",
             "ooda": "⚔️ OODA 战场指挥",
+            "probe": "🔦 黑盒探测 (Probe)",
         }
 
         chat = self.query_one(ChatPanel)
@@ -998,6 +1006,8 @@ class NaumiApp(App):
                 result = await tool.execute(context=target)
             elif mode == "ooda":
                 result = await tool.execute(target=target)
+            elif mode == "probe":
+                result = await tool.execute(task=target)
             else:
                 result = await tool.execute(target=target)
             chat.mount(Markdown(result, classes="agent-msg"))

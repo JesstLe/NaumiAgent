@@ -317,6 +317,11 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 console.print("[yellow]用法: /ooda <文件或目录路径>[/yellow]")
             else:
                 await _run_analysis(engine, "ooda", arg)
+        case "/probe":
+            if not arg:
+                console.print("[yellow]用法: /probe <功能需求描述>[/yellow]")
+            else:
+                await _run_analysis(engine, "probe", arg)
         case "/help":
             _print_help()
         case _:
@@ -365,6 +370,7 @@ def _print_help() -> None:
         ("/sleep", "昼夜节律突触修剪 — 知识压缩"),
         ("/entropy <文本>", "耗散结构熵减 — 锚点重启"),
         ("/ooda <路径>", "OODA 战场指挥 — 反脆弱架构"),
+        ("/probe <需求>", "黑盒探测 — 反幻觉协议"),
         ("/clear", "清除当前会话"),
         ("/quit", "退出"),
     ]
@@ -394,6 +400,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "sleep": "analysis_sleep",
         "entropy": "analysis_entropy",
         "ooda": "analysis_ooda",
+        "probe": "analysis_probe",
     }
 
     labels = {
@@ -415,6 +422,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "sleep": "昼夜节律突触修剪",
         "entropy": "耗散结构熵减重置",
         "ooda": "OODA 战场指挥",
+        "probe": "黑盒探测 (Probe)",
     }
 
     tool_name = tool_names[mode]
@@ -458,6 +466,8 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
             result = await tool.execute(context=target)
         elif mode == "ooda":
             result = await tool.execute(target=target)
+        elif mode == "probe":
+            result = await tool.execute(task=target)
         else:
             result = await tool.execute(target=target)
 

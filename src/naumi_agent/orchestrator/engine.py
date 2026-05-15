@@ -86,6 +86,9 @@ purge context, restart from anchor
 - **analysis_ooda**: OODA Loop Mission Command — analyze code fragility, \
 design intent-driven self-correcting architecture with observe/orient/\
 decide/act loop and self-healing mechanisms
+- **analysis_probe**: Black-Box Probe — anti-hallucination protocol for \
+unknown/closed-source systems, generate reconnaissance scripts first, \
+collect real data, then develop based on verified information
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
