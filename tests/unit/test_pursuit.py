@@ -89,8 +89,8 @@ class TestDataStructures:
 
     def test_pursuit_config_defaults(self) -> None:
         config = PursuitConfig()
-        assert config.max_iterations == 30
-        assert config.max_budget_usd == 5.0
+        assert config.max_iterations == 1000
+        assert config.max_budget_usd == float("inf")
         assert config.stagnation_threshold == 3
 
 
