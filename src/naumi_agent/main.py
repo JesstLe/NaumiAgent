@@ -255,6 +255,16 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             else:
                 await _run_analysis(engine, "mcts", arg)
+        case "/route":
+            if not arg:
+                console.print(
+                    "[yellow]用法: /route <任务描述>[/yellow]"
+                )
+                console.print(
+                    "[dim]例: /route \"设计一个AI股票分析系统\"[/dim]"
+                )
+            else:
+                await _run_analysis(engine, "route", arg)
         case "/help":
             _print_help()
         case _:
@@ -295,6 +305,7 @@ def _print_help() -> None:
         ("/dspy [描述]", "DSPy 编译优化 — Prompt 工程优化"),
         ("/graph [路径]", "图谱推演 — GraphRAG 拓扑分析"),
         ("/mcts <问题>", "蒙特卡洛树搜索 — 多路径决策"),
+        ("/route <任务>", "MoE 混合专家调度 — 多视角分析"),
         ("/clear", "清除当前会话"),
         ("/quit", "退出"),
     ]
@@ -316,6 +327,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "dspy": "analysis_dspy",
         "graph": "analysis_graph",
         "mcts": "analysis_mcts",
+        "route": "analysis_route",
     }
 
     labels = {
@@ -329,6 +341,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "dspy": "DSPy 编译优化",
         "graph": "图谱推演 (GraphRAG)",
         "mcts": "蒙特卡洛树搜索 (MCTS)",
+        "route": "MoE 混合专家调度",
     }
 
     tool_name = tool_names[mode]
@@ -356,6 +369,8 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
             result = await tool.execute(target=target)
         elif mode == "mcts":
             result = await tool.execute(problem=target)
+        elif mode == "route":
+            result = await tool.execute(task=target)
         else:
             result = await tool.execute(target=target)
 

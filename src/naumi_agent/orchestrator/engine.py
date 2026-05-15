@@ -65,6 +65,8 @@ and relationship edges from code, compute centrality/cycles/components, \
 trace risk propagation paths
 - **analysis_mcts**: Monte Carlo Tree Search — explore multiple solution \
 paths, simulate disasters on each, prune bad branches, output verified best
+- **analysis_route**: MoE expert routing — decompose complex tasks, \
+instantiate 3-5 domain experts, distribute sub-problems, synthesize
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
