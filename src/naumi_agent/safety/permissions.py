@@ -223,6 +223,20 @@ class PermissionChecker:
         rule = TOOL_PERMISSIONS.get(tool_name)
 
         if not rule:
+            # MCP tools are dynamic — allow based on mode
+            if tool_name.startswith("mcp__"):
+                mcp_allowed = [
+                    PermissionMode.BYPASS,
+                    PermissionMode.PERMISSIVE,
+                    PermissionMode.MODERATE,
+                ]
+                if self._mode in mcp_allowed:
+                    self._call_counts[tool_name] = self._call_counts.get(tool_name, 0) + 1
+                    return PermissionDecision(allowed=True)
+                return PermissionDecision(
+                    allowed=False,
+                    reason=f"MCP tool '{tool_name}' not allowed in {self._mode.value} mode",
+                )
             return PermissionDecision(allowed=False, reason=f"Unknown tool: {tool_name}")
 
         if self._mode not in rule.allowed_modes:
