@@ -111,6 +111,9 @@ over-determined code that could benefit from AI
 system for high-risk decisions, detect single-point-of-decision risks, \
 design heterogeneous model deployment + quorum arbitration + circuit \
 breaker mechanism
+- **analysis_pid**: PID Closed-Loop Control — transform open-loop \
+pipelines into P(real-time correction) + I(historical learning) + \
+D(trend prediction) feedback control, monitor→evaluate→actuate cycle
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
