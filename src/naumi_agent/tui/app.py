@@ -728,6 +728,7 @@ class NaumiApp(App):
                     "- `/macro <目标>` — 多智能体自由市场博弈\n"
                     "- `/cosmos <目标>` — 创世引擎审计\n"
                     "- `/watchdog <目标>` — 看门狗与灾难隔离\n"
+                    "- `/supervisor <目标>` — Erlang 守护者树\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -893,6 +894,11 @@ class NaumiApp(App):
                     status.status_text = "用法: /watchdog <代码路径或系统描述>"
                 else:
                     self._run_analysis_mode("watchdog", arg)
+            case "/supervisor":
+                if not arg:
+                    status.status_text = "用法: /supervisor <代码路径或系统描述>"
+                else:
+                    self._run_analysis_mode("supervisor", arg)
             case "/hook":
                 if not arg:
                     status.status_text = "用法: /hook <逆向目标描述>"
@@ -1020,6 +1026,7 @@ class NaumiApp(App):
             "macro": "analysis_macro",
             "cosmos": "analysis_cosmos",
             "watchdog": "analysis_watchdog",
+            "supervisor": "analysis_supervisor",
         }
         labels = {
             "chaos": "⚡ 灾难演练",
@@ -1053,6 +1060,7 @@ class NaumiApp(App):
             "macro": "🏦 多智能体自由市场博弈 (Agentic Economy)",
             "cosmos": "🌌 创世引擎审计 (Cosmos)",
             "watchdog": "🛡️ 看门狗与灾难隔离 (Watchdog)",
+            "supervisor": "⚙️ Erlang 守护者树 (Supervisor)",
         }
 
         chat = self.query_one(ChatPanel)
@@ -1127,6 +1135,8 @@ class NaumiApp(App):
             elif mode == "cosmos":
                 result = await tool.execute(target=target)
             elif mode == "watchdog":
+                result = await tool.execute(target=target)
+            elif mode == "supervisor":
                 result = await tool.execute(target=target)
             else:
                 result = await tool.execute(target=target)
