@@ -3701,6 +3701,237 @@ class ProbeTool(Tool):
         return await _run_analysis(router, _PROBE_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /hook — 底层逆向与插桩推演协议
+# ===========================================================================
+
+# Target type detection
+_TARGET_TYPES = {
+    "native_cpp": [
+        (r"(?:C\+\+|cpp|native|unreal engine|directx|vulkan)", "原生 C++ 编译"),
+        (r"(?:\.exe|\.dll|\.so|\.sys)", "原生二进制文件"),
+        (r"(?:3A|AAA|unreal|虚幻)", "3A 游戏引擎"),
+    ],
+    "dotnet": [
+        (r"(?:C#|csharp|\.NET|unity|mono|il2cpp)", ".NET/C# 平台"),
+        (r"(?:assembly-csharp|dnspy|ilspy)", ".NET 反编译特征"),
+        (r"(?:原神|genshin|honkai)", "Unity 游戏"),
+    ],
+    "java": [
+        (r"(?:java|kotlin|android|apk|dex)", "Java/Android 平台"),
+        (r"(?:jadx|smali|dalvik)", "Android 逆向特征"),
+    ],
+    "wasm": [
+        (r"(?:wasm|webassembly|emscripten)", "WebAssembly"),
+        (r"(?:\.wasm|wasm2wat)", "WASM 文件"),
+    ],
+}
+
+# Anti-debug/anti-cheat indicators
+_ANTI_DEBUG_PATTERNS = [
+    (r"(?:anti.?cheat|EAC|BattlEye|VAC|Easy.?Anti)", "商业反作弊系统"),
+    (r"(?:Themida|VMProtect|Enigma|UPX|ASPack)", "加壳/混淆保护"),
+    (r"(?:IsDebuggerPresent|NtQueryInformationProcess)", "反调试 API"),
+    (r"(?:integrity.?check|signature.?verify)", "完整性校验"),
+    (r"(?:kernel.?driver|ring.?0|驱动)", "内核级保护"),
+]
+
+
+def _scan_hook(task: str) -> str:
+    """hook 模式静态扫描：识别目标类型和反调试保护."""
+    findings: list[str] = []
+    task_lower = task.lower()
+
+    # 1. Detect target type
+    target_matches: list[tuple[str, str]] = []
+    for ttype, patterns in _TARGET_TYPES.items():
+        for pattern, label in patterns:
+            if re.search(pattern, task_lower, re.IGNORECASE):
+                target_matches.append((ttype, label))
+                break
+
+    if target_matches:
+        findings.append("- 目标平台:")
+        for ttype, label in target_matches:
+            findings.append(f"  - {ttype}: {label}")
+    else:
+        findings.append("- 目标平台: 未明确指定（将给出通用方案）")
+
+    # 2. Recommend approach based on target type
+    approaches: dict[str, list[str]] = {
+        "native_cpp": [
+            "内存特征码扫描 (Signature Scanning)",
+            "指针链追踪 (Pointer Chain Tracing)",
+            "API Hooking via Detours/MinHook",
+            "硬件断点 (Hardware Breakpoints)",
+        ],
+        "dotnet": [
+            "dnSpy/ILSpy 反编译还原源码",
+            "HarmonyLib 运行时补丁",
+            "反射直接调用内部方法",
+            "Il2CppDumper 提取元数据",
+        ],
+        "java": [
+            "jadx/smali 反编译",
+            "Xposed/Frida 运行时 Hook",
+            "dex 修改与重打包",
+            "protobuf/flatbuffers 协议逆向",
+        ],
+        "wasm": [
+            "wasm2wat 反编译为 WAT",
+            "浏览器 DevTools 断点调试",
+            "内存 inspect + hook",
+            "wasm-decompile 还原伪代码",
+        ],
+    }
+    findings.append("- 推荐侦测手段:")
+    matched_types = set(t for t, _ in target_matches)
+    if matched_types:
+        for ttype in matched_types:
+            for approach in approaches.get(ttype, []):
+                findings.append(f"  - [{ttype}] {approach}")
+    else:
+        for approach in approaches["native_cpp"]:
+            findings.append(f"  - {approach}")
+
+    # 3. Detect anti-debug protections
+    anti_debug: list[str] = []
+    for pattern, label in _ANTI_DEBUG_PATTERNS:
+        if re.search(pattern, task_lower, re.IGNORECASE):
+            anti_debug.append(label)
+
+    if anti_debug:
+        findings.append(
+            f"- ⚠️ 反调试保护: {len(anti_debug)} 种"
+        )
+        for ad in anti_debug:
+            findings.append(f"  - {ad}")
+        findings.append(
+            "  → 需要反反调试策略（驱动级 Hook 或虚拟化绕过）"
+        )
+    else:
+        findings.append("- 反调试保护: 未提及（仍需验证）")
+
+    # 4. Complexity assessment
+    complexity = len(matched_types) * 10 + len(anti_debug) * 15
+    level = (
+        "EXTREME" if complexity > 50
+        else "HIGH" if complexity > 30
+        else "MEDIUM" if complexity > 10
+        else "LOW"
+    )
+    findings.append(f"- 逆向复杂度: {complexity} ({level})")
+
+    return "\n".join(findings)
+
+
+_HOOK_SYSTEM = """\
+You are a Reverse Engineering architect implementing dynamic \
+instrumentation and hooking protocols for black-box system analysis.
+
+## Disclaimer
+All techniques discussed are for authorized security research, \
+compatibility testing, and educational reverse engineering only.
+
+## Core Principle
+When source code is unavailable, use the hardware and OS as your \
+documentation. Memory doesn't lie — data at rest reveals structure, \
+data in motion reveals behavior.
+
+## Output Format
+
+### 1. Target Analysis
+- Compilation type (native C++ / managed .NET / Java / WASM)
+- Expected protections (anti-debug, packing, obfuscation)
+- Entry points for instrumentation
+
+### 2. Reconnaissance Phase
+Based on target type, provide specific reconnaissance steps:
+
+**Native C++:**
+- Signature scanning patterns (byte arrays to search for)
+- Pointer chain: how to find base → offset → target
+- Memory differential technique (scan, change, rescan)
+
+**Managed (.NET/Unity):**
+- dnSpy/ILSpy decompilation workflow
+- Reflection-based API discovery
+- HarmonyLib patch template
+
+**Java/Android:**
+- jadx decompilation + smali analysis
+- Frida hook scripts for runtime interception
+- Network traffic interception
+
+### 3. Instrumentation Design
+- Where to place hooks (which functions/APIs)
+- What data to capture (parameters, return values, timing)
+- How to inject the instrumentation (DLL inject, Frida attach, etc.)
+- Complete hook script in appropriate language
+
+### 4. Anti-Debug Evasion (if applicable)
+- How to detect anti-debug checks
+- Bypass strategies (patching, driver-level, VM-based)
+- Risk assessment of each bypass method
+
+### 5. Data Extraction Pipeline
+- How captured data maps to the original task
+- What format to export results
+- How to verify correctness of extracted data
+
+Provide concrete code examples. Every recommendation must be \
+implementable with publicly available tools.
+"""
+
+
+class HookTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_hook"
+
+    @property
+    def description(self) -> str:
+        return (
+            "底层逆向与插桩推演：根据目标程序的编译特性"
+            "（原生C++/C#/Java/WASM），设计动态侦测方案，"
+            "包含内存基址定位、API Hooking 和反调试规避。"
+            "仅用于安全研究与合规逆向工程。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "逆向分析目标描述",
+                },
+                "target_type": {
+                    "type": "string",
+                    "description": "目标类型提示（可选）",
+                    "default": "",
+                },
+            },
+            "required": ["task"],
+        }
+
+    async def execute(
+        self, *, task: str, target_type: str = "", **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("hook", task[:200])
+        combined = f"{task} {target_type}".strip()
+        scan_evidence = _scan_hook(combined)
+        user_msg = (
+            f"## 逆向目标\n{task}\n\n"
+            f"## 侦测扫描\n{scan_evidence}\n"
+        )
+        return await _run_analysis(router, _HOOK_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
 # ---------------------------------------------------------------------------
@@ -3765,4 +3996,5 @@ def create_analysis_tools() -> list[Tool]:
         EntropyValveTool(),
         OODATool(),
         ProbeTool(),
+        HookTool(),
     ]
