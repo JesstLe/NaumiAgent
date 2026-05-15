@@ -71,6 +71,8 @@ class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NAUMI_",
         env_nested_delimiter="__",
+        env_file=str(Path(__file__).resolve().parents[3] / ".env"),
+        env_file_encoding="utf-8",
     )
 
     models: ModelConfig = Field(default_factory=ModelConfig)
