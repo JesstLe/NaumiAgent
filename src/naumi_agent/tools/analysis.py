@@ -7000,6 +7000,325 @@ class CosmosTool(Tool):
         return await _run_analysis(router, _COSMOS_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /watchdog — 看门狗与灾难隔离 (Watchdog & Disaster Isolation)
+# ===========================================================================
+
+# In-place modification patterns — modifying running code (DANGEROUS)
+_INPLACE_MOD_PATTERNS = [
+    (r"(?:open|write)\([^)]*(?:__file__|sys\.argv\[0\]|self\.__class__)",
+     "直接修改自身源文件 (原地手术)"),
+    (r"(?:shutil\.copy|os\.rename|os\.replace)\([^)]*\.\w+\.\w+",
+     "直接替换运行中的文件 (热替换风险)"),
+    (r"(?:importlib\.reload|reload)\s*\(",
+     "运行时重载模块 (可能导致状态不一致)"),
+    (r"(?:exec|eval)\s*\(\s*(?:open|read)",
+     "读取并执行动态代码 (注入风险)"),
+    (r"(?:sys\.modules|globals)\s*\[\s*['\"][^'\"]+['\"]\s*\]\s*=",
+     "运行时修改导入表 (全局污染)"),
+    (r"(?:setattr|__dict__)\s*\([^)]*class",
+     "运行时修改类定义 (对象可能损坏)"),
+]
+
+# Heartbeat / health check patterns (good — indicates liveness monitoring)
+_HEALTH_PATTERNS = [
+    (r"(?:heartbeat|health.?check|ping|alive)\s*",
+     "心跳/存活检测"),
+    (r"(?:timeout|deadline|time.?limit)\s*[:=]",
+     "超时/截止时间"),
+    (r"(?:watchdog|monitor|supervisor|guard)\s*",
+     "看门狗/监控进程"),
+    (r"(?:is_alive|is_healthy|is_ready|is_running)\s*",
+     "存活状态检查"),
+    (r"(?:Thread|Process)\s*\([^)]*target.*alive",
+     "线程/进程存活监控"),
+]
+
+# Rollback / backup patterns (good — allows recovery)
+_ROLLBACK_PATTERNS = [
+    (r"(?:backup|snapshot|checkpoint|savepoint)\s*",
+     "备份/快照机制"),
+    (r"(?:rollback|restore|revert|recover)\s*\(",
+     "回滚/恢复操作"),
+    (r"(?:version|revision|commit)\s*[:=]",
+     "版本/修订管理"),
+    (r"(?:git\s+checkout|git\s+revert|git\s+reset)",
+     "Git 回滚操作"),
+    (r"(?:copy|clone|mirror)\s*\([^)]*(?:before|pre)",
+     "修改前备份"),
+    (r"(?:try:.*\n.*except.*\n.*(?:restore|rollback|recover))",
+     "异常触发回滚"),
+]
+
+# Isolation patterns (good — sandboxing)
+_ISOLATION_PATTERNS = [
+    (r"(?:sandbox|container|docker|vm|jail)\s*",
+     "沙盒/容器隔离"),
+    (r"(?:namespace|cgroup|chroot|seccomp)\s*",
+     "系统级隔离机制"),
+    (r"(?:isolated|separate|staging|canary)\s*",
+     "隔离环境/金丝雀部署"),
+    (r"(?:blue.?green|a/?b|toggle|feature.?flag)\s*",
+     "蓝绿部署/特性开关"),
+    (r"(?:venv|virtualenv|conda)\s*",
+     "Python 虚拟环境隔离"),
+]
+
+
+def _scan_watchdog(target: str) -> str:
+    """Scan system for disaster recovery readiness — detect in-place
+    modification risks, health check gaps, missing rollback infrastructure,
+    and isolation weaknesses."""
+    findings: list[str] = []
+    source = _read_sources(target)
+
+    if not source.strip():
+        return "⚠️ 未找到可分析的源代码。"
+
+    lines = source.split("\n")
+
+    # --- 1. In-Place Modification Risks ---
+    findings.append(
+        "## 1. 原地修改风险 (In-Place Surgery Risks)"
+    )
+    inplace_hits: list[tuple[str, int, str]] = []
+    for pattern, desc in _INPLACE_MOD_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line):
+                inplace_hits.append((desc, i, line.strip()))
+
+    if inplace_hits:
+        findings.append(
+            f"- 🔴 发现 **{len(inplace_hits)}** 处危险的原地修改 — "
+            f"AI 可能在运行时把自己改死："
+        )
+        for desc, line_no, line_text in inplace_hits[:8]:
+            short = line_text[:70] + ("..." if len(line_text) > 70 else "")
+            findings.append(f"  - L{line_no}: {desc}")
+            findings.append(f"    `{short}`")
+        findings.append(
+            "- 💡 所有修改必须在沙盒副本上进行，"
+            "通过验证后才能替换原文件"
+        )
+    else:
+        findings.append("- ✅ 未检测到原地修改风险")
+    findings.append("")
+
+    # --- 2. Heartbeat / Health Check Coverage ---
+    findings.append(
+        "## 2. 心跳与健康检查 (Heartbeat & Health Check)"
+    )
+    health_hits: dict[str, list[int]] = {}
+    for pattern, label in _HEALTH_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                health_hits.setdefault(label, []).append(i)
+
+    if health_hits:
+        total_health = sum(len(v) for v in health_hits.values())
+        findings.append(
+            f"- 检测到 **{total_health}** 处健康检查机制，"
+            f"**{len(health_hits)}** 类："
+        )
+        for label, line_nos in sorted(
+            health_hits.items(), key=lambda x: -len(x[1])
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 无心跳/健康检查 — "
+            "AI 崩溃后系统无法自动感知和恢复"
+        )
+    findings.append("")
+
+    # --- 3. Rollback Infrastructure ---
+    findings.append(
+        "## 3. 回滚基础设施 (Rollback Infrastructure)"
+    )
+    rollback_hits: dict[str, list[int]] = {}
+    for pattern, label in _ROLLBACK_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                rollback_hits.setdefault(label, []).append(i)
+
+    if rollback_hits:
+        total_rollback = sum(len(v) for v in rollback_hits.values())
+        findings.append(
+            f"- 检测到 **{total_rollback}** 处回滚机制，"
+            f"**{len(rollback_hits)}** 类："
+        )
+        for label, line_nos in rollback_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 无回滚机制 — "
+            "一旦崩溃只能人工恢复，无法自动回退"
+        )
+    findings.append("")
+
+    # --- 4. Isolation Level ---
+    findings.append(
+        "## 4. 隔离级别 (Isolation Level)"
+    )
+    iso_hits: dict[str, list[int]] = {}
+    for pattern, label in _ISOLATION_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                iso_hits.setdefault(label, []).append(i)
+
+    if iso_hits:
+        total_iso = sum(len(v) for v in iso_hits.values())
+        findings.append(
+            f"- 检测到 **{total_iso}** 处隔离机制，"
+            f"**{len(iso_hits)}** 类："
+        )
+        for label, line_nos in iso_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ⚠️ 隔离级别低 — "
+            "建议引入沙盒/容器/蓝绿部署策略"
+        )
+    findings.append("")
+
+    # --- 5. Phoenix Score (Disaster Recovery Readiness) ---
+    inplace_risk = min(len(inplace_hits) * 0.2, 0.6)
+    health_score = min(len(health_hits) / 3.0, 1.0)
+    rollback_score = min(len(rollback_hits) / 3.0, 1.0)
+    iso_score = min(len(iso_hits) / 3.0, 1.0)
+
+    phoenix_score = (
+        health_score * 0.30
+        + rollback_score * 0.30
+        + iso_score * 0.25
+        - inplace_risk
+        + 0.15
+    )
+    phoenix_score = max(0.0, min(1.0, phoenix_score))
+
+    findings.append("## 5. 不死鸟评分 (Phoenix Recovery Score)")
+    findings.append(f"- **综合评分: {phoenix_score:.0%}**")
+    findings.append(f"- 健康检查覆盖: {health_score:.0%}")
+    findings.append(f"- 回滚能力: {rollback_score:.0%}")
+    findings.append(f"- 隔离级别: {iso_score:.0%}")
+    findings.append(f"- 原地修改风险: -{inplace_risk:.0%}")
+
+    if phoenix_score >= 0.7:
+        findings.append(
+            "- ✅ 系统具备较强的灾难恢复能力，"
+            "AI 自毁后可自动满血复活"
+        )
+    elif phoenix_score >= 0.4:
+        findings.append(
+            "- ⚠️ 部分具备恢复能力，需补强回滚和隔离"
+        )
+    else:
+        findings.append(
+            "- ❌ 系统一旦被 AI 改坏就需要人工收尸，"
+            "强烈建议引入看门狗 + A/B 分区 + 回滚通道"
+        )
+
+    return "\n".join(findings)
+
+
+_WATCHDOG_SYSTEM = """\
+你是一位系统可靠性架构师 (Site Reliability Architect)。
+你的任务是设计"不死鸟协议"——确保 AI 在自驱动修改自身代码时，
+即使把自己彻底写死，也能无需人类干预自动满血复活。
+
+## 核心悖论
+
+"当医生给自己做脑部手术，结果把自己麻醉死在了手术台上，
+谁来救他？" ——这是自进化系统的终极稳定性问题。
+
+## 三道续命防线
+
+### 防线一：看门狗定时器 (Watchdog Timer)
+借鉴航天器和火星车的设计：
+- 在主系统外部，放一个极简的、独立运行的监控脚本
+- 主系统必须定期发送"心跳包" (Heartbeat)
+- 如果心跳超时，看门狗判定系统已死，强制重启到快照
+- 看门狗本身必须极其简单（几百行纯 C/Shell），坚如磐石
+- 看门狗的代码绝对不允许 AI 修改
+
+### 防线二：A/B 分区与蓝绿发布 (Blue-Green Deployment)
+绝不在运行的引擎上直接换零件：
+- 生产环境 = A 区 (当前运行，只读)
+- 沙盒环境 = B 区 (AI 在此修改和测试)
+- 只有当 B 区通过所有测试 + 稳定运行一段时间后，才切换
+- 切换失败立即回退到 A 区
+- 用户完全无感知
+
+### 防线三：神明节点 (Hypervisor / God Node)
+运行在 Ring -1 的终极守护：
+- AI 只是虚拟机里的一个进程
+- 神明节点在 Hypervisor 层面运行，不受 AI 任何影响
+- 神明节点极其精简（几百行纯 C），AI 绝无权限修改
+- 职责：检测崩溃 → 快照回滚 → 记录失败原因 → 重启 AI
+- 神明节点的代码由人类手工编写和审核，永远不经 AI 之手
+
+## 回滚通道设计
+
+1. **预提交快照**: 每次修改前自动保存完整快照
+2. **快速回滚**: 从快照恢复到上一个已知稳定状态 < 1 秒
+3. **失败归因**: 记录崩溃的具体代码位置和原因
+4. **熔断升级**: 连续 N 次修改都失败 → 暂停自动进化，通知人类
+5. **渐进验证**: 每次修改必须通过: 单元测试 → 集成测试 → 真实流量灰度
+
+## 输出格式
+
+1. **原地修改风险清单** — 标注每个需要沙盒化的操作
+2. **看门狗设计方案** — 监控脚本、心跳协议、超时阈值
+3. **A/B 分区架构** — 生产区/沙盒区的隔离策略
+4. **神明节点设计** — Ring -1 守护进程的核心逻辑
+5. **回滚通道实现** — 快照存储、恢复机制、失败归因
+6. **熔断策略** — 自动进化的安全边界和人工介入条件
+"""
+
+
+class WatchdogTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_watchdog"
+
+    @property
+    def description(self) -> str:
+        return (
+            "看门狗与灾难隔离：扫描系统的不死鸟恢复能力——"
+            "检测原地修改风险、心跳健康检查覆盖、回滚基础设施、"
+            "隔离级别。设计看门狗定时器 + A/B 蓝绿分区 + "
+            "Ring -1 神明节点，确保 AI 把自己改死后"
+            "能无需人类干预自动满血复活。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "要审计的代码路径或系统描述",
+                },
+            },
+            "required": ["target"],
+        }
+
+    async def execute(
+        self, *, target: str, **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("watchdog", target[:200])
+        scan_evidence = _scan_watchdog(target)
+        user_msg = (
+            f"## 审计目标\n{target}\n\n"
+            f"## 看门狗扫描\n{scan_evidence}\n"
+        )
+        return await _run_analysis(router, _WATCHDOG_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
 
@@ -7074,4 +7393,5 @@ def create_analysis_tools() -> list[Tool]:
         GenesisTool(),
         MacroTool(),
         CosmosTool(),
+        WatchdogTool(),
     ]
