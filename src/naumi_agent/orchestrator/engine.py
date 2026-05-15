@@ -67,6 +67,8 @@ trace risk propagation paths
 paths, simulate disasters on each, prune bad branches, output verified best
 - **analysis_route**: MoE expert routing — decompose complex tasks, \
 instantiate 3-5 domain experts, distribute sub-problems, synthesize
+- **analysis_speculate**: Speculative Decoding — fast intern draft + slow \
+architect review, identify boilerplate vs high-risk zones, dual-pass
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \

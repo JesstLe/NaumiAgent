@@ -2069,6 +2069,254 @@ class MoERouteTool(Tool):
         return await _run_analysis(router, _ROUTE_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /speculate — 推测解码 (实习生起草 + 架构师审查)
+# ===========================================================================
+
+# Boilerplate / repetitive patterns
+_BOILERPLATE_PATTERNS = [
+    (r"def __init__\(self[^)]*\):\s*\n(?:\s+self\.\w+\s*=.*\n){3,}", "批量属性赋值"),
+    (r"def (get_|set_|is_|has_)\w+\(self[^)]*\):\s*\n\s+return self\.\w+", "trivial getter/setter"),
+    (r"(?:import|from)\s+\w+\s+import\s+\([^)]{50,}\)", "大批量导入"),
+    (r"class\s+\w+\(.*Model.*\):\s*\n(?:\s+\w+:\s+\w+.*\n){5,}", "数据模型字段列表"),
+    (r"@router\.(get|post|put|delete)\([^)]+\)\s*\n(?:async\s+)?def\s+\w+", "CRUD 端点"),
+    (
+        r"(?:try:\s*\n\s+.*\n\s+except\s+\w+.*:\s*\n"
+        r"\s+raise\s+HTTPException){3,}",
+        "重复 try/except 模式",
+    ),
+]
+
+# Risk indicators (high-priority review targets)
+_RISK_PATTERNS = [
+    (r"malloc|calloc|realloc|free\s*\(", "内存管理操作", "CRITICAL"),
+    (r"threading\.Lock|multiprocessing\.Lock|asyncio\.Lock", "并发锁", "HIGH"),
+    (r"\.join\(timeout\s*=\s*None\)|\.wait\(\)", "无限等待/死锁风险", "HIGH"),
+    (r"open\([^)]*,\s*['\"]w['\"]", "文件写入（无异常保护检查）", "MEDIUM"),
+    (r"eval\s*\(|exec\s*\(", "动态代码执行", "CRITICAL"),
+    (r"subprocess\.(call|run|Popen)\(", "子进程执行", "HIGH"),
+    (r"os\.system\s*\(", "系统命令执行", "CRITICAL"),
+    (r"pickle\.loads?\s*\(", "反序列化（安全风险）", "CRITICAL"),
+    (r"cursor\.execute\s*\(\s*f['\"]", "SQL 字符串拼接（注入风险）", "CRITICAL"),
+    (r"except\s*:\s*\n\s*pass", "静默吞异常", "HIGH"),
+]
+
+
+def _scan_speculate(
+    files: list[Path], source_text: str, target: str,
+) -> str:
+    """speculate 模式静态扫描：识别样板代码与高风险审查区域."""
+    findings: list[str] = []
+
+    # 1. Detect boilerplate patterns
+    boilerplate_items: list[str] = []
+    for pattern, label in _BOILERPLATE_PATTERNS:
+        matches = re.findall(pattern, source_text, re.MULTILINE)
+        if matches:
+            boilerplate_items.append(f"{label}: {len(matches)} 处")
+
+    if boilerplate_items:
+        findings.append("- 样板代码模式（可快速起草后审查）:")
+        for item in boilerplate_items:
+            findings.append(f"  - {item}")
+    else:
+        findings.append("- 样板代码: 未检测到明显样板模式")
+
+    # 2. Detect high-risk zones
+    risk_zones: list[tuple[str, str, str, int]] = []  # (label, risk, pattern, line)
+    for i, line in enumerate(source_text.split("\n"), 1):
+        for pattern, label, risk_level in _RISK_PATTERNS:
+            if re.search(pattern, line):
+                risk_zones.append((label, risk_level, line.strip()[:80], i))
+
+    if risk_zones:
+        findings.append(
+            f"- ⚠️ 高风险区域: {len(risk_zones)} 处（必须慢思考审查）"
+        )
+        # Group by risk level
+        for risk_level in ("CRITICAL", "HIGH", "MEDIUM"):
+            items = [r for r in risk_zones if r[1] == risk_level]
+            if items:
+                findings.append(f"  - {risk_level} ({len(items)} 处):")
+                for label, _, snippet, lineno in items[:5]:
+                    findings.append(f"    - L{lineno}: [{label}] `{snippet}`")
+                if len(items) > 5:
+                    findings.append(f"    ... 还有 {len(items) - 5} 处")
+    else:
+        findings.append("- 高风险区域: 未检测到明显风险模式")
+
+    # 3. Analyze code complexity distribution per file
+    file_complexity: dict[str, dict[str, int]] = {}
+    for f in files:
+        try:
+            content = f.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        branches = len(re.findall(r"\bif\s+|\belif\s+", content))
+        loops = len(re.findall(r"\bfor\s+|\bwhile\s+", content))
+        nesting = 0
+        max_nesting = 0
+        for char in content:
+            if char == '{' or char == '(':
+                nesting += 1
+                max_nesting = max(max_nesting, nesting)
+            elif char == '}' or char == ')':
+                nesting = max(0, nesting - 1)
+        file_complexity[f.name] = {
+            "branches": branches,
+            "loops": loops,
+            "max_nesting": min(max_nesting, 99),
+            "lines": content.count("\n") + 1,
+        }
+
+    if file_complexity:
+        findings.append("- 文件复杂度分布:")
+        for fname, metrics in sorted(
+            file_complexity.items(),
+            key=lambda x: x[1]["branches"],
+            reverse=True,
+        )[:6]:
+            findings.append(
+                f"  - {fname}: "
+                f"{metrics['branches']} 分支, "
+                f"{metrics['loops']} 循环, "
+                f"最大嵌套 {metrics['max_nesting']}, "
+                f"{metrics['lines']} 行"
+            )
+
+    # 4. Identify "safe zones" vs "danger zones"
+    total_files = len(files)
+    danger_files = sum(
+        1 for m in file_complexity.values()
+        if m["branches"] > 15 or m["max_nesting"] > 6
+    )
+    safe_files = total_files - danger_files
+    findings.append(
+        f"- 区域划分: {safe_files} 个安全文件, "
+        f"{danger_files} 个危险文件 (分支>15 或 嵌套>6)"
+    )
+
+    # 5. Estimate review effort
+    total_risks = len(risk_zones)
+    critical_count = sum(
+        1 for r in risk_zones if r[1] == "CRITICAL"
+    )
+    if total_risks > 0:
+        review_min = critical_count * 5 + (total_risks - critical_count) * 2
+        findings.append(
+            f"- 预估审查时间: ~{review_min} 分钟 "
+            f"({critical_count} 个 CRITICAL 需要逐行审查)"
+        )
+
+    return "\n".join(findings)
+
+
+_SPECULATE_SYSTEM = """\
+You are a Speculative Decoding engine using the "Intern Draft + Architect \
+Review" dual-mode paradigm.
+
+## Core Principle
+Split the work into TWO passes:
+1. **Intern Pass (Fast Draft)**: Rapidly generate the outline, boilerplate, \
+and straightforward sections. Don't overthink — just get it written.
+2. **Architect Pass (Slow Review)**: Carefully review ONLY the zones flagged \
+as high-risk. This is where you spend your "slow thinking" budget.
+
+## Your Tasks
+
+### Phase 1: Intern Draft (Fast)
+Generate the initial draft at high speed:
+- Produce the full solution outline
+- Write boilerplate sections (imports, setup, data models, config)
+- Implement the straightforward logic paths
+- For each section, mark: ✅ (confident) or ⚠️ (needs review)
+
+### Phase 2: Architect Review (Slow)
+For EVERY ⚠️ section, perform deep analysis:
+- **Memory safety**: Any leaks, double-frees, buffer overflows?
+- **Concurrency**: Deadlocks, race conditions, priority inversion?
+- **Error handling**: Are all failure paths covered? Silent catches?
+- **Security**: Injection, traversal, deserialization risks?
+- **Edge cases**: Empty inputs, None, negative numbers, concurrent access?
+
+For each reviewed section:
+- Show the original draft code
+- Show the reviewed/fixed code with changes highlighted
+- Explain WHY each change was needed
+
+### Phase 3: Diff Summary
+Produce a final summary:
+- Total lines drafted: N
+- Lines reviewed and modified: N
+- CRITICAL fixes applied: N
+- Remaining concerns: (list any unresolved issues)
+- Confidence in the final output: X/10
+
+Be decisive in the intern phase, surgical in the architect phase.
+"""
+
+
+class SpeculateTool(Tool):
+    """推测解码 — 实习生快速起草 + 架构师深度审查双模式."""
+
+    @property
+    def name(self) -> str:
+        return "analysis_speculate"
+
+    @property
+    def description(self) -> str:
+        return (
+            "推测解码(Speculative Decoding)：先用\"实习生\"模式极速生成初稿"
+            "（样板代码、大纲、常规逻辑），再用\"架构师\"模式"
+            "对高风险区域（内存、并发、安全、边界情况）进行逐行审查与重构。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "要生成/审查的文件或目录路径",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "要生成的代码功能描述",
+                    "default": "",
+                },
+            },
+            "required": ["target"],
+        }
+
+    async def execute(
+        self,
+        *,
+        target: str,
+        task: str = "",
+        **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("speculate", target)
+
+        files = _resolve_target(target)
+        if not files:
+            return f"无法解析目标: {target} (请提供文件或目录路径)"
+
+        source_text = _read_sources(files)
+        scan_evidence = _scan_speculate(files, source_text, target)
+
+        user_msg = (
+            f"## 风险扫描证据\n{scan_evidence}\n\n"
+            f"## 源代码\n{source_text[:50000]}\n"
+        )
+        if task:
+            user_msg += f"\n## 生成任务\n{task}\n"
+
+        return await _run_analysis(router, _SPECULATE_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
 # ---------------------------------------------------------------------------
@@ -2125,4 +2373,5 @@ def create_analysis_tools() -> list[Tool]:
         GraphRAGTool(),
         MCTSTool(),
         MoERouteTool(),
+        SpeculateTool(),
     ]
