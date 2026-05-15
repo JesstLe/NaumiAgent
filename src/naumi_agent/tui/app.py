@@ -711,6 +711,7 @@ class NaumiApp(App):
                     "- `/speculate <路径>` — 推测解码\n"
                     "- `/jit <任务>` — JIT 即时工具生成\n"
                     "- `/pointer <路径>` — 语义指针(SPA)\n"
+                    "- `/cooe <任务>` — 认知乱序执行(COOE)\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -799,6 +800,11 @@ class NaumiApp(App):
                     status.status_text = "用法: /pointer <文件或目录路径>"
                 else:
                     self._run_analysis_mode("pointer", arg)
+            case "/cooe":
+                if not arg:
+                    status.status_text = "用法: /cooe <多步骤任务描述>"
+                else:
+                    self._run_analysis_mode("cooe", arg)
             case "/quit" | "/exit":
                 self.exit()
             case _:
@@ -904,6 +910,7 @@ class NaumiApp(App):
             "speculate": "analysis_speculate",
             "jit": "analysis_jit",
             "pointer": "analysis_pointer",
+            "cooe": "analysis_cooe",
         }
         labels = {
             "chaos": "⚡ 灾难演练",
@@ -920,6 +927,7 @@ class NaumiApp(App):
             "speculate": "⚡推测解码 (Draft+Review)",
             "jit": "🛠️ JIT 即时工具生成",
             "pointer": "🔗 语义指针架构 (SPA)",
+            "cooe": "🔀 认知乱序执行 (COOE)",
         }
 
         chat = self.query_one(ChatPanel)
@@ -961,6 +969,8 @@ class NaumiApp(App):
                 result = await tool.execute(task=target)
             elif mode == "pointer":
                 result = await tool.execute(target=target)
+            elif mode == "cooe":
+                result = await tool.execute(task=target)
             else:
                 result = await tool.execute(target=target)
             chat.mount(Markdown(result, classes="agent-msg"))

@@ -295,6 +295,16 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             else:
                 await _run_analysis(engine, "pointer", arg)
+        case "/cooe":
+            if not arg:
+                console.print(
+                    "[yellow]用法: /cooe <多步骤任务描述>[/yellow]"
+                )
+                console.print(
+                    "[dim]例: /cooe \"生成宁德时代深度投资研报\"[/dim]"
+                )
+            else:
+                await _run_analysis(engine, "cooe", arg)
         case "/help":
             _print_help()
         case _:
@@ -339,6 +349,7 @@ def _print_help() -> None:
         ("/speculate <路径>", "推测解码 — 快速起草+深度审查"),
         ("/jit <任务>", "JIT 即时工具 — 用代码保证确定性"),
         ("/pointer <路径>", "语义指针(SPA) — 推理态/物理态分离"),
+        ("/cooe <任务>", "认知乱序执行(COOE) — DAG并行调度"),
         ("/clear", "清除当前会话"),
         ("/quit", "退出"),
     ]
@@ -364,6 +375,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "speculate": "analysis_speculate",
         "jit": "analysis_jit",
         "pointer": "analysis_pointer",
+        "cooe": "analysis_cooe",
     }
 
     labels = {
@@ -381,6 +393,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         "speculate": "推测解码 (Draft+Review)",
         "jit": "JIT 即时工具生成",
         "pointer": "语义指针架构 (SPA)",
+        "cooe": "认知乱序执行 (COOE)",
     }
 
     tool_name = tool_names[mode]
@@ -416,6 +429,8 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
             result = await tool.execute(task=target)
         elif mode == "pointer":
             result = await tool.execute(target=target)
+        elif mode == "cooe":
+            result = await tool.execute(task=target)
         else:
             result = await tool.execute(target=target)
 

@@ -2818,6 +2818,337 @@ class PointerTool(Tool):
         return await _run_analysis(router, _POINTER_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /cooe — 认知乱序执行流水线 (COOE)
+# ===========================================================================
+
+# I/O-blocking patterns (these cause sequential stalls)
+_IO_PATTERNS = [
+    (r"await\s+(?:client\.|session\.|httpx|aiohttp|requests)", "异步网络 I/O"),
+    (r"(?:fetch|download|scrape|crawl|request)\s*\(", "数据抓取"),
+    (r"(?:read_text|read_csv|read_json|read_file|open\()", "文件 I/O"),
+    (r"(?:cursor\.execute|session\.query|\.query\()", "数据库查询"),
+    (r"(?:redis\.\w+|cache\.\w+|memcached)", "缓存 I/O"),
+    (r"(?:LLM|model|chat|complete|generate)\s*\(", "LLM API 调用"),
+]
+
+# Parallelizable patterns (already async or could be)
+_PARALLEL_PATTERNS = [
+    (r"asyncio\.gather\s*\(", "已使用 asyncio.gather 并行"),
+    (r"asyncio\.create_task\s*\(", "已使用 create_task 并行"),
+    (r"concurrent\.futures", "已使用线程池并行"),
+    (r"multiprocessing", "已使用多进程"),
+    (r"threading\.Thread", "已使用多线程"),
+    (r"async\s+for\s+", "异步迭代器"),
+]
+
+# Sequential dependency patterns (bottleneck indicators)
+_SEQUENTIAL_PATTERNS = [
+    (r"result\s*=\s*await\s+\w+.*\n\s*\w+\s*=\s*await", "串行 await 链"),
+    (
+        r"(?:response|data|result)\s*=\s*await.*\n\s*(?:process|parse|extract)",
+        "I/O → 处理串行依赖",
+    ),
+    (r"for\s+\w+\s+in\s+(?:range|list|items)", "串行循环（可并行化）"),
+]
+
+
+def _scan_cooe(
+    files: list[Path], source_text: str, task: str,
+) -> str:
+    """cooe 模式静态扫描：分析 I/O 阻塞点、并行化机会和依赖图."""
+    findings: list[str] = []
+
+    # 1. Detect I/O-blocking operations
+    io_ops: list[tuple[str, int]] = []
+    for pattern, label in _IO_PATTERNS:
+        count = len(re.findall(pattern, source_text, re.IGNORECASE))
+        if count:
+            io_ops.append((label, count))
+
+    if io_ops:
+        total_io = sum(c for _, c in io_ops)
+        findings.append(
+            f"- I/O 阻塞操作: {total_io} 处"
+            f"（潜在串行等待瓶颈）"
+        )
+        for label, count in io_ops:
+            findings.append(f"  - {label}: {count} 处")
+    else:
+        findings.append("- I/O 阻塞操作: 未检测到")
+
+    # 2. Detect existing parallelization
+    parallel_ops: list[tuple[str, int]] = []
+    for pattern, label in _PARALLEL_PATTERNS:
+        count = len(re.findall(pattern, source_text))
+        if count:
+            parallel_ops.append((label, count))
+
+    if parallel_ops:
+        findings.append("- 已有并行化机制:")
+        for label, count in parallel_ops:
+            findings.append(f"  - ✅ {label}: {count} 处")
+    else:
+        findings.append("- 已有并行化机制: 无（全部串行执行）")
+
+    # 3. Detect sequential bottlenecks
+    seq_ops: list[tuple[str, int]] = []
+    for pattern, label in _SEQUENTIAL_PATTERNS:
+        count = len(re.findall(pattern, source_text, re.MULTILINE))
+        if count:
+            seq_ops.append((label, count))
+
+    if seq_ops:
+        findings.append(
+            f"- 串行瓶颈: {sum(c for _, c in seq_ops)} 处"
+        )
+        for label, count in seq_ops:
+            findings.append(f"  - {label}: {count} 处")
+    else:
+        findings.append("- 串行瓶颈: 未检测到明显瓶颈")
+
+    # 4. Analyze function call DAG potential
+    import ast as _ast
+    import collections
+
+    call_graph: dict[str, set[str]] = collections.defaultdict(set)
+    for f in files:
+        try:
+            tree = _ast.parse(
+                f.read_text(encoding="utf-8", errors="replace")
+            )
+        except SyntaxError:
+            continue
+        for node in _ast.walk(tree):
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                func_name = node.name
+                for child in _ast.walk(node):
+                    if isinstance(child, _ast.Call):
+                        if isinstance(child.func, _ast.Name):
+                            call_graph[func_name].add(child.func.id)
+                        elif isinstance(child.func, _ast.Attribute):
+                            call_graph[func_name].add(child.func.attr)
+
+    # Find functions with independent sub-trees (parallelizable)
+    top_level = set(call_graph.keys())
+    for callees in call_graph.values():
+        top_level -= callees
+
+    if call_graph:
+        findings.append(
+            f"- 调用图: {len(call_graph)} 个函数, "
+            f"{len(top_level)} 个顶层入口"
+        )
+        # Find independent sub-trees
+        independent_groups: list[list[str]] = []
+        used: set[str] = set()
+        for func in top_level:
+            if func in used:
+                continue
+            group = [func]
+            used.add(func)
+            for callee in call_graph.get(func, set()):
+                if callee not in used:
+                    group.append(callee)
+                    used.add(callee)
+            independent_groups.append(group)
+
+        if len(independent_groups) > 1:
+            findings.append(
+                f"- 可并行子图: {len(independent_groups)} 组"
+            )
+            for i, group in enumerate(independent_groups[:5]):
+                findings.append(
+                    f"  - 组 {i + 1}: {', '.join(group[:4])}"
+                )
+        else:
+            findings.append(
+                "- 可并行子图: 仅 1 组（强依赖，难以并行）"
+            )
+
+    # 5. Estimate speedup potential
+    io_count = sum(c for _, c in io_ops)
+    parallel_count = sum(c for _, c in parallel_ops)
+    if io_count > 0 and parallel_count == 0:
+        est_speedup = f"{min(io_count, 10)}x"
+        findings.append(
+            f"- 预估加速比: ~{est_speedup} "
+            f"（全部 I/O 串行，改为并行可获得显著提升）"
+        )
+    elif io_count > parallel_count:
+        findings.append(
+            "- 预估加速比: 2-5x（部分已并行，仍有优化空间）"
+        )
+    elif parallel_count > 0:
+        findings.append("- 预估加速比: ~1x（已有并行化机制）")
+
+    # 6. ROB readiness assessment
+    has_queue = bool(
+        re.findall(r"(?:Queue|deque|PriorityQueue|asyncio\.Queue)", source_text)
+    )
+    has_barrier = bool(
+        re.findall(
+            r"(?:Barrier|Event|Semaphore|gather|wait)", source_text,
+        )
+    )
+    rob_features = []
+    if has_queue:
+        rob_features.append("队列机制")
+    if has_barrier:
+        rob_features.append("同步屏障")
+    if rob_features:
+        findings.append(
+            f"- ROB 基础设施: {' + '.join(rob_features)}"
+        )
+    else:
+        findings.append(
+            "- ROB 基础设施: 无（需要构建调度器+ROB）"
+        )
+
+    if task:
+        findings.append(f"- 目标任务: {task[:200]}")
+
+    return "\n".join(findings)
+
+
+_COOE_SYSTEM = """\
+You are a Cognitive Out-of-Order Execution (COOE) engine architect, \
+directly applying CPU pipeline design to AI agent workflows.
+
+## Core Principle
+**NEVER think linearly about complex multi-step tasks.** Instead, model \
+the task as a Directed Acyclic Graph (DAG) and execute like a modern \
+CPU's out-of-order execution pipeline.
+
+## The 3-Stage Pipeline
+
+### Stage 1: Instruction Decode & DAG Generation
+Break the task into atomic sub-tasks and build the dependency graph:
+- Each node is an atomic operation (fetch data, compute, transform, etc.)
+- Each edge is a DATA dependency (Task B needs Task A's output)
+- Identify all independent branches (can run in parallel)
+
+Output a formal DAG:
+```
+Task A (fetch财报) ──┐
+                     ├──→ Task D (汇总分析) ──→ Task E (写报告)
+Task B (拉K线)   ──┤
+                     ├──→ Task D
+Task C (搜政策)   ──┘
+```
+
+### Stage 2: Reservation Stations & Parallel Issue
+For each independent task group:
+- Assign to a "reservation station" (worker agent/slot)
+- Mark estimated execution time (I/O bound vs CPU bound)
+- Mark resource requirements (API calls, memory, etc.)
+- Issue all independent tasks SIMULTANEOUSLY
+
+### Stage 3: Reorder Buffer (ROB) & Commit
+- All results enter the ROB in completion order
+- Results are held until all predecessors in the DAG are complete
+- Commit stage assembles results in the correct logical order
+- Only THEN produce the final output
+
+## Your Output Format
+
+### 1. Task Decomposition
+List every atomic sub-task with:
+- Name, estimated time, I/O vs CPU bound, dependencies
+
+### 2. DAG Visualization
+Show the complete dependency graph with ASCII art or structured text
+
+### 3. Execution Timeline
+Compare sequential vs parallel timelines:
+```
+Sequential:  [A: 10s] → [B: 5s] → [C: 3s] → [D: 2s] = 20s
+COOE:        [A: 10s]
+             [B: 5s]  ──→ [D: 2s]  = 12s
+             [C: 3s]  ──↗
+```
+
+### 4. Scheduler Design
+- How many worker slots (reservation stations)?
+- What's the dispatch strategy (FIFO, priority-based)?
+- How to handle failures (one task fails, what happens)?
+
+### 5. ROB Configuration
+- Buffer size and ordering policy
+- Commit trigger conditions
+- Backpressure handling (what if ROB is full?)
+
+### 6. Speedup Analysis
+- Theoretical maximum speedup (critical path)
+- Practical speedup accounting for overhead
+- Bottleneck analysis (which task limits parallelism?)
+
+Be architectural. Think in terms of CPU pipeline stages, not prompts.
+"""
+
+
+class COOETool(Tool):
+    """COOE 认知乱序执行引擎 — DAG 依赖分析 + 并行调度设计."""
+
+    @property
+    def name(self) -> str:
+        return "analysis_cooe"
+
+    @property
+    def description(self) -> str:
+        return (
+            "认知乱序执行引擎(COOE)：将复杂任务拆解为 DAG（有向无环图），"
+            "识别数据依赖和可并行步骤，设计调度器+保留站+"
+            "重排序缓冲(ROB)的 CPU 级流水线架构，"
+            "实现时间复杂度的极致压缩。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "要分析的多步骤任务描述",
+                },
+                "target": {
+                    "type": "string",
+                    "description": "相关代码路径（可选）",
+                    "default": "",
+                },
+            },
+            "required": ["task"],
+        }
+
+    async def execute(
+        self,
+        *,
+        task: str,
+        target: str = "",
+        **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("cooe", task[:200])
+
+        source_text = ""
+        files: list[Path] = []
+        if target:
+            files = _resolve_target(target)
+            if files:
+                source_text = _read_sources(files)
+
+        scan_evidence = _scan_cooe(files, source_text, task)
+
+        user_msg = f"## 任务描述\n{task}\n"
+        user_msg += f"\n## COOE 扫描证据\n{scan_evidence}\n"
+        if source_text:
+            user_msg += f"\n## 相关源代码\n{source_text[:40000]}\n"
+
+        return await _run_analysis(router, _COOE_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
 # ---------------------------------------------------------------------------
@@ -2877,4 +3208,5 @@ def create_analysis_tools() -> list[Tool]:
         SpeculateTool(),
         JITTool(),
         PointerTool(),
+        COOETool(),
     ]
