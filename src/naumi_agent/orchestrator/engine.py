@@ -128,6 +128,12 @@ class AgentEngine:
         self._messages.clear()
         self._usage = AgentUsage()
         self._session = None
+        self._behavior_monitor.reset()
+        self._permission_checker.reset_counts()
+
+    async def shutdown(self) -> None:
+        """释放资源（关闭数据库连接等）."""
+        await self.session_store.close()
 
     def set_system_prompt(self, prompt: str) -> None:
         """设置/更新系统提示词."""
