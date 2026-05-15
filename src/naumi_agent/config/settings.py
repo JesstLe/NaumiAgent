@@ -47,7 +47,7 @@ class SafetyConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NAUMI_SAFETY__")
 
     permission_mode: str = "moderate"
-    allowed_dirs: list[str] = Field(default_factory=lambda: ["/workspace"])
+    allowed_dirs: list[str] = Field(default_factory=lambda: ["/workspace", str(Path.cwd())])
     max_budget_usd: float = 5.0
     max_turns: int = 30
     max_input_tokens: int = 500_000
