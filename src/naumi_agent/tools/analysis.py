@@ -7319,8 +7319,322 @@ class WatchdogTool(Tool):
         return await _run_analysis(router, _WATCHDOG_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /supervisor — Erlang 守护者与 Let-it-crash 协议 (Supervisor Tree)
+# ===========================================================================
+
+# Single-agent monolith patterns — no supervision, one crash kills all
+_MONOLITH_PATTERNS = [
+    (r"(?:main|run|execute|process)\s*\([^)]*\)\s*:\s*\n"
+     r"\s*(?:await|result|call)",
+     "单线程顺序执行 (一崩全崩)"),
+    (r"while\s+True\s*:\s*\n\s*(?:await\s+\w+\.\w+){3,}",
+     "无限循环串行调用 (无断路器)"),
+    (r"try:\s*\n(?:\s+.*\n){10,}\s*except",
+     "巨型 try-except (试图穷举所有错误 — 反模式)"),
+    (r"(?:Agent|Worker|Runner)\s*\(\s*[^)]*\)\s*\.\s*run\s*\(\s*\)",
+     "单一 Agent 直接运行 (无守护包装)"),
+]
+
+# Worker patterns — high-intelligence, high-risk modules
+_WORKER_PATTERNS = [
+    (r"(?:llm|model|gpt|claude|ai|neural)\s*.\s*(?:call|generate|run)",
+     "LLM 调用 (高智能但不可靠)"),
+    (r"(?:crawl|scrape|parse|extract|analyze)\s*\(",
+     "外部数据抓取/解析 (高失败率)"),
+    (r"(?:compile|build|transpile|generate)\s*\(",
+     "代码生成/编译 (可能产出非法结果)"),
+    (r"(?:creative|brainstorm|ideate|explore)\s*",
+     "创意性/发散性操作 (天生不稳定)"),
+]
+
+# Supervisor patterns — already have guardianship
+_SUPERVISOR_PATTERNS = [
+    (r"(?:supervisor|guardian|watcher|monitor|overseer)\s*",
+     "守护/监督者角色"),
+    (r"(?:restart_policy|restart_strategy|max_retries)\s*[:=]",
+     "重启策略配置"),
+    (r"(?:child_spec|worker_spec|process_spec)\s*[:=]",
+     "子进程规格定义"),
+    (r"(?:spawn|fork|Process|Thread)\s*\([^)]*target",
+     "隔离式进程/线程启动"),
+    (r"(?:supervise|supervisor_tree|sup_tree)\s*",
+     "Erlang 式守护者树"),
+    (r"(?:on_failure|on_error|on_crash|error_handler)\s*[:=]",
+     "崩溃回调处理"),
+]
+
+# Error isolation patterns — one crash does not kill everything
+_ISOLATION_ERROR_PATTERNS = [
+    (r"(?:try:.*\n.*except\s+\w+.*\n\s*(?:log|report|notify))",
+     "异常隔离 + 日志记录"),
+    (r"(?:catch|except)\s*.*:\s*\n\s*(?:restart|retry|spawn)",
+     "异常触发重启"),
+    (r"(?:finally|cleanup|teardown|dispose)\s*:",
+     "清理/资源释放"),
+    (r"(?:circuit.?breaker|bulkhead|timeout)\s*",
+     "熔断/舱壁/超时隔离"),
+    (r"(?:isolate|quarantine|fence|contain)\s*",
+     "故障隔离机制"),
+]
+
+
+def _scan_supervisor(target: str) -> str:
+    """Scan system for supervisor tree readiness."""
+    findings: list[str] = []
+    source = _read_sources(target)
+
+    if not source.strip():
+        return "⚠️ 未找到可分析的源代码。"
+
+    lines = source.split("\n")
+
+    # --- 1. Monolith Risk Detection ---
+    findings.append("## 1. 单体风险检测 (Monolith Risk)")
+    mono_hits: list[tuple[str, int, str]] = []
+    for pattern, desc in _MONOLITH_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line):
+                mono_hits.append((desc, i, line.strip()))
+
+    if mono_hits:
+        findings.append(
+            f"- 🔴 发现 **{len(mono_hits)}** 处单体架构风险 — "
+            f"一个模块崩溃会拖垮整个系统："
+        )
+        for desc, line_no, line_text in mono_hits[:6]:
+            short = line_text[:70] + ("..." if len(line_text) > 70 else "")
+            findings.append(f"  - L{line_no}: {desc}")
+            findings.append(f"    `{short}`")
+    else:
+        findings.append("- ✅ 未检测到明显的单体架构风险")
+    findings.append("")
+
+    # --- 2. Worker Candidates ---
+    findings.append(
+        "## 2. 进化节点候选 (Worker Candidates — 需要守护)"
+    )
+    worker_hits: dict[str, list[int]] = {}
+    for pattern, label in _WORKER_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                worker_hits.setdefault(label, []).append(i)
+
+    total_workers = sum(len(v) for v in worker_hits.values())
+    if worker_hits:
+        findings.append(
+            f"- 检测到 **{total_workers}** 个高风险 Worker 候选，"
+            f"**{len(worker_hits)}** 类："
+        )
+        for label, line_nos in sorted(
+            worker_hits.items(), key=lambda x: -len(x[1])
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+        findings.append(
+            "- 💡 这些模块应该被包裹在守护者(Supervisor)中运行"
+        )
+    else:
+        findings.append("- 高风险 Worker 较少，守护需求不高")
+    findings.append("")
+
+    # --- 3. Existing Supervisor Infrastructure ---
+    findings.append(
+        "## 3. 守护基础设施 (Supervisor Infrastructure)"
+    )
+    sup_hits: dict[str, list[int]] = {}
+    for pattern, label in _SUPERVISOR_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                sup_hits.setdefault(label, []).append(i)
+
+    if sup_hits:
+        total_sup = sum(len(v) for v in sup_hits.values())
+        findings.append(
+            f"- 检测到 **{total_sup}** 处守护者机制，"
+            f"**{len(sup_hits)}** 类："
+        )
+        for label, line_nos in sorted(
+            sup_hits.items(), key=lambda x: -len(x[1])
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 无守护者基础设施 — 系统中无任何监督机制"
+        )
+    findings.append("")
+
+    # --- 4. Error Isolation Quality ---
+    findings.append(
+        "## 4. 错误隔离质量 (Error Isolation)"
+    )
+    iso_hits: dict[str, list[int]] = {}
+    for pattern, label in _ISOLATION_ERROR_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                iso_hits.setdefault(label, []).append(i)
+
+    if iso_hits:
+        total_iso = sum(len(v) for v in iso_hits.values())
+        findings.append(
+            f"- 检测到 **{total_iso}** 处错误隔离机制，"
+            f"**{len(iso_hits)}** 类："
+        )
+        for label, line_nos in iso_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 无错误隔离 — 一个模块的异常会传播到整个系统"
+        )
+    findings.append("")
+
+    # --- 5. Supervisor Tree Readiness Score ---
+    mono_penalty = min(len(mono_hits) * 0.15, 0.4)
+    worker_need = min(total_workers / 5.0, 1.0)
+    sup_score = min(len(sup_hits) / 4.0, 1.0)
+    iso_score = min(len(iso_hits) / 3.0, 1.0)
+
+    readiness = (
+        worker_need * 0.15
+        + sup_score * 0.35
+        + iso_score * 0.35
+        - mono_penalty
+        + 0.15
+    )
+    readiness = max(0.0, min(1.0, readiness))
+
+    findings.append("## 5. 守护者树就绪度评分")
+    findings.append(f"- **综合评分: {readiness:.0%}**")
+    findings.append(f"- Worker 需求密度: {worker_need:.0%}")
+    findings.append(f"- 守护者基础设施: {sup_score:.0%}")
+    findings.append(f"- 错误隔离质量: {iso_score:.0%}")
+    findings.append(f"- 单体风险惩罚: -{mono_penalty:.0%}")
+
+    if readiness >= 0.7:
+        findings.append(
+            "- ✅ 系统具备成熟的守护者树架构，"
+            "可实施 Let-it-crash 哲学"
+        )
+    elif readiness >= 0.4:
+        findings.append(
+            "- ⚠️ 部分具备守护条件，需为高风险 Worker "
+            "添加 Supervisor 包裹"
+        )
+    else:
+        findings.append(
+            "- ❌ 系统缺乏守护架构，强烈建议引入 "
+            "Erlang 式 Supervisor Tree"
+        )
+
+    return "\n".join(findings)
+
+
+_SUPERVISOR_SYSTEM = """\\
+你是一位 Erlang/OTP 守护者架构师 (Supervisor Tree Architect)。
+你的任务是设计"双子星架构"——进化 Agent 拓荒创新 + 守护 Agent
+兜底复活，践行 "Let it crash" 工程哲学。
+
+## 核心理念：Let it Crash
+
+不要试图写一个永远不出错的完美 Agent。
+设计一个"允许出错，但能瞬间复活"的系统架构。
+
+## 三大不对称铁律
+
+### 铁律一：智商不对称 (The Genius vs. The Janitor)
+- **进化 Agent (Worker)**:
+  高智商、大参数、发散思维 (Temperature=0.8)
+  负责创新、写代码、试错。极不稳定，随时可能崩。
+- **守护 Agent (Supervisor)**:
+  极低智商、极简代码、死板状态机 (Temperature=0.0)
+  可能只有几百行纯 C/Python 的 if-else。
+  脑子里只有: if (死了) { 重启 }
+
+### 铁律二：权限不对称 (Ring 3 vs Ring 0)
+- **进化 Agent**: 沙盒 Ring 3，只能改自己的业务代码
+- **守护 Agent**: Ring 0 上帝权限，握着电源线和快照备份
+- 进化 Agent 一旦死锁，守护 Agent 直接切断电源，无需商量
+
+### 铁律三：回滚优先于调试 (Rollback over Debugging)
+- 守护 Agent 提取崩溃日志 → 回滚到上一个稳定版本
+  → 把报错日志甩给进化 Agent："你写的代码崩了，日志在这，重写"
+
+## 架构设计
+
+### Supervisor Tree 结构
+Supervisor (Ring 0, 简单状态机)
+  Worker_1 (LLM 创意生成)
+  Worker_2 (数据抓取/解析)
+  Worker_3 (代码编译/测试)
+  Supervisor_2 (子守护者)
+    Worker_4 (交易策略执行)
+    Worker_5 (风控计算)
+
+### 重启策略
+1. 永久型 (Permanent): 崩溃立即重启，不休不眠
+2. 临时型 (Transient): 正常退出不重启，异常退出才重启
+3. 临时工 (Temporary): 崩了就崩了，不自动重启
+
+### 故障升级
+- Worker 崩溃 → Supervisor 重启 Worker (N 次)
+- Worker 连续崩溃 N 次 → Supervisor 认为任务有毒
+- Supervisor 向上级 Supervisor 报告 → 可能需要人类介入
+- 根 Supervisor 连续失败 → 触发全系统熔断，等待人类
+
+## 输出格式
+
+1. **Worker 清单** — 每个高风险模块的守护需求等级
+2. **Supervisor Tree 设计** — 完整的守护者树层级结构
+3. **重启策略配置** — 每个 Worker 的重启策略和阈值
+4. **权限隔离方案** — Ring 0/Ring 3 权限分配
+5. **故障升级链路** — 从 Worker 崩溃到人类介入的升级路径
+6. **控制流图** — 完整的双子星架构控制流
+"""
+
+
+class SupervisorTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_supervisor"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Erlang 守护者与 Let-it-crash 协议：设计'进化 Agent 拓荒 + "
+            "守护 Agent 兜底'的双子星架构——智商不对称、权限不对称、"
+            "回滚优先于调试。Worker 崩了由 Supervisor 自动回滚重启。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "要审计的代码路径或系统描述",
+                },
+            },
+            "required": ["target"],
+        }
+
+    async def execute(
+        self, *, target: str, **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("supervisor", target[:200])
+        scan_evidence = _scan_supervisor(target)
+        user_msg = (
+            f"## 审计目标\n{target}\n\n"
+            f"## 守护者树扫描\n{scan_evidence}\n"
+        )
+        return await _run_analysis(router, _SUPERVISOR_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
+
 
 _global_router: Any = None
 
@@ -7394,4 +7708,5 @@ def create_analysis_tools() -> list[Tool]:
         MacroTool(),
         CosmosTool(),
         WatchdogTool(),
+        SupervisorTool(),
     ]

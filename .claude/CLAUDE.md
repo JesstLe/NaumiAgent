@@ -127,6 +127,7 @@ src/naumi_agent/
 | `/macro <目标>` | 多智能体自由市场博弈 — Token经济·自然淘汰 | ✅ |
 | `/cosmos <目标>` | 创世引擎审计 — 状态维度·生成能力·社会模拟 | ✅ |
 | `/watchdog <目标>` | 看门狗与灾难隔离 — 心跳·回滚·蓝绿部署 | ✅ |
+| `/supervisor <目标>` | Erlang 守护者树 — Let-it-crash 双子星架构 | ✅ |
 | `/history` | 历史会话列表 | ✅ |
 | `/load <id>` | 加载历史会话 | ✅ |
 | `/delete <id>` | 删除指定会话 | ✅ |
