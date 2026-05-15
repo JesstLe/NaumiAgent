@@ -2061,12 +2061,147 @@ class MoERouteTool(Tool):
 
         scan_evidence = _scan_route(files, source_text, task)
 
+        # Try to use SubAgentManager for real multi-agent execution
+        manager = _global_subagent_manager
+        if manager is not None:
+            return await self._execute_with_agents(
+                router, manager, task, scan_evidence, source_text,
+            )
+
+        # Fallback: pure LLM analysis
         user_msg = f"## 任务描述\n{task}\n"
         user_msg += f"\n## 专家路由扫描\n{scan_evidence}\n"
         if source_text:
             user_msg += f"\n## 相关源代码\n{source_text[:50000]}\n"
 
         return await _run_analysis(router, _ROUTE_SYSTEM, user_msg)
+
+    async def _execute_with_agents(
+        self,
+        router: Any,
+        manager: Any,
+        task: str,
+        scan_evidence: str,
+        source_text: str,
+    ) -> str:
+        """Use SubAgentManager to spawn real expert agents in parallel."""
+        from naumi_agent.agents.base import AgentCapability, AgentConfig
+        from naumi_agent.orchestrator.subagent_manager import SubTask
+
+        # Phase 1: Use LLM to plan expert panel
+        planning_prompt = (
+            "Based on the task and scan evidence below, identify 3-5 expert domains.\n"
+            "For each expert, output EXACTLY this format (one per line):\n"
+            "EXPERT|<name>|<domain>|<one-line-focus>\n\n"
+            "Only output EXPERT lines, nothing else.\n\n"
+            f"## 任务\n{task}\n\n## 扫描结果\n{scan_evidence}"
+        )
+        planning_resp = await _run_analysis(router, planning_prompt, task)
+        expert_lines = [
+            ln for ln in planning_resp.strip().splitlines()
+            if ln.startswith("EXPERT|")
+        ]
+
+        if not expert_lines:
+            # LLM didn't follow format — fallback to pure analysis
+            user_msg = f"## 任务描述\n{task}\n"
+            user_msg += f"\n## 专家路由扫描\n{scan_evidence}\n"
+            if source_text:
+                user_msg += f"\n## 相关源代码\n{source_text[:50000]}\n"
+            return await _run_analysis(router, _ROUTE_SYSTEM, user_msg)
+
+        # Phase 2: Spawn expert agents
+        spawned_names: list[str] = []
+        subtasks: list[SubTask] = []
+
+        for i, line in enumerate(expert_lines[:5]):
+            parts = line.split("|")
+            if len(parts) < 4:
+                continue
+            _, raw_name, domain, focus = parts[0], parts[1], parts[2], parts[3]
+            safe_name = f"moe_expert_{raw_name.strip().replace(' ', '_').replace('/', '_')[:30]}"
+
+            config = AgentConfig(
+                name=safe_name,
+                description=f"{domain.strip()} 专家 — {focus.strip()}",
+                capabilities=[AgentCapability.FILE_OPS],
+                model_tier="capable",
+                system_prompt=(
+                    f"你是一位{domain.strip()}领域的顶级专家。\n\n"
+                    f"你的分析焦点: {focus.strip()}\n\n"
+                    "请从你的专业领域出发，深度分析任务，给出具体可操作的建议。\n"
+                    "输出格式:\n"
+                    "### 专家视角\n（你的关键发现）\n"
+                    "### 具体建议\n（可操作的改进方案）\n"
+                    "### 风险预警\n（从你的领域看可能出什么问题）\n"
+                    "### 置信度\n（X/10）"
+                ),
+                max_turns=3,
+                max_budget_usd=0.15,
+            )
+            manager.spawn(config)
+            spawned_names.append(safe_name)
+
+            expert_task = (
+                f"从{domain.strip()}专家视角分析以下任务:\n\n{task}\n"
+            )
+            if source_text:
+                expert_task += f"\n## 相关代码（摘要）\n{source_text[:8000]}\n"
+
+            subtasks.append(SubTask(
+                id=f"expert_{i}",
+                description=expert_task,
+                agent_name=safe_name,
+            ))
+
+        if not subtasks:
+            user_msg = f"## 任务描述\n{task}\n"
+            user_msg += f"\n## 专家路由扫描\n{scan_evidence}\n"
+            return await _run_analysis(router, _ROUTE_SYSTEM, user_msg)
+
+        # Phase 3: Execute experts in parallel
+        results = await manager.execute_parallel(subtasks)
+
+        # Phase 4: Collect expert analyses
+        expert_reports: list[str] = []
+        for st, result in zip(subtasks, results):
+            agent_name = st.agent_name or "unknown"
+            if result.status == "completed" and result.response:
+                expert_reports.append(
+                    f"### {agent_name}\n{result.response}"
+                )
+            else:
+                expert_reports.append(
+                    f"### {agent_name}\n⚠️ 分析未完成: {result.error or '未知错误'}"
+                )
+
+        # Phase 5: Synthesize via LLM
+        synthesis_msg = f"## 原始任务\n{task}\n\n"
+        synthesis_msg += f"## 静态扫描\n{scan_evidence}\n\n"
+        synthesis_msg += "## 各专家独立分析\n\n"
+        synthesis_msg += "\n\n---\n\n".join(expert_reports)
+
+        synthesis = await _run_analysis(router, _ROUTE_SYSTEM, synthesis_msg)
+
+        # Phase 6: Cleanup — destroy spawned agents
+        for name in spawned_names:
+            manager.destroy(name)
+
+        total_tok = sum(
+            r.total_tokens for r in results if hasattr(r, "total_tokens")
+        )
+        total_usd = sum(
+            r.total_cost_usd for r in results if hasattr(r, "total_cost_usd")
+        )
+        header = (
+            f"## MoE 混合专家调度报告\n\n"
+            f"**任务**: {task[:200]}\n"
+            f"**专家组**: {len(spawned_names)} 位专家并行分析\n"
+            f"**总 Token 消耗**: {total_tok}\n"
+            f"**总成本**: ${total_usd:.4f}\n\n"
+            f"---\n\n"
+        )
+        return header + synthesis
 
 
 # ===========================================================================
@@ -4526,12 +4661,179 @@ class SparTool(Tool):
         router = _global_router
         if router is None:
             return _router_unavailable("spar", task[:200])
+
         scan_evidence = _scan_spar(task)
+
+        manager = _global_subagent_manager
+        if manager is not None:
+            return await self._execute_adversarial(
+                router, manager, task, scan_evidence,
+            )
+
         user_msg = (
             f"## 对抗目标\n{task}\n\n"
             f"## 静态扫描报告\n{scan_evidence}\n"
         )
         return await _run_analysis(router, _SPAR_SYSTEM, user_msg)
+
+    async def _execute_adversarial(
+        self,
+        router: Any,
+        manager: Any,
+        task: str,
+        scan_evidence: str,
+    ) -> str:
+        """Execute real adversarial self-play with blue/red agents."""
+        from naumi_agent.agents.base import AgentCapability, AgentConfig
+        from naumi_agent.orchestrator.subagent_manager import SubTask
+
+        blue_config = AgentConfig(
+            name="spar_blue_builder",
+            description="蓝军 — 编写防御性代码",
+            capabilities=[AgentCapability.FILE_OPS, AgentCapability.CODE_EXEC],
+            model_tier="capable",
+            system_prompt=(
+                "你是 SPAR 对抗训练的蓝军（建设者）。\n\n"
+                "## 职责\n"
+                "根据任务要求编写健壮的代码，防御已知的攻击向量。\n\n"
+                "## 原则\n"
+                "1. 不走捷径——不能用 try/except 吞掉所有异常来'通过'测试\n"
+                "2. 每个防御措施必须有对应的具体攻击场景\n"
+                "3. 保持功能完整性——不能为了安全删除核心功能\n"
+                "4. 代码必须可运行，不能是伪代码\n\n"
+                "## 输出格式\n"
+                "给出完整可运行的代码，并附上防御说明。"
+            ),
+            max_turns=5,
+            max_budget_usd=0.2,
+        )
+        red_config = AgentConfig(
+            name="spar_red_breaker",
+            description="红军 — 寻找并利用代码漏洞",
+            capabilities=[AgentCapability.FILE_OPS, AgentCapability.CODE_EXEC],
+            model_tier="capable",
+            system_prompt=(
+                "你是 SPAR 对抗训练的红军（攻击者）。\n\n"
+                "## 职责\n"
+                "审查蓝军编写的代码，找到所有可能的漏洞、边界问题和攻击面。\n\n"
+                "## 原则\n"
+                "1. 基于真实的攻击向量——不能虚无主义式要求绝对安全\n"
+                "2. 每个漏洞必须给出具体的攻击示例（输入/场景）\n"
+                "3. 区分 CRITICAL / HIGH / MEDIUM / LOW 严重级别\n"
+                "4. 关注功能正确性，不仅仅是安全\n\n"
+                "## 输出格式\n"
+                "逐条列出发现的漏洞，每条包含：攻击向量、严重级别、利用方式、修复建议。"
+            ),
+            max_turns=5,
+            max_budget_usd=0.2,
+        )
+
+        manager.spawn(blue_config)
+        manager.spawn(red_config)
+
+        rounds_log: list[str] = []
+        blue_code = ""
+        total_tokens = 0
+        total_cost = 0.0
+        max_rounds = 3
+
+        try:
+            for round_num in range(max_rounds):
+                # Blue: build/fix
+                blue_task = (
+                    f"## 对抗目标\n{task}\n\n"
+                    f"## 静态扫描（攻击面）\n{scan_evidence}\n"
+                )
+                if round_num > 0 and rounds_log:
+                    blue_task += (
+                        f"\n## 红军上轮攻击报告\n{rounds_log[-1]}\n"
+                        "请修复上述所有漏洞，同时保持功能完整。"
+                    )
+                if blue_code:
+                    blue_task += f"\n## 当前代码\n{blue_code[:10000]}\n"
+
+                blue_subtask = SubTask(
+                    id=f"blue_r{round_num}",
+                    description=blue_task,
+                    agent_name="spar_blue_builder",
+                )
+                blue_result = await manager.delegate(blue_subtask)
+                total_tokens += getattr(blue_result, "total_tokens", 0)
+                total_cost += getattr(blue_result, "total_cost_usd", 0.0)
+
+                if blue_result.status != "completed":
+                    rounds_log.append(
+                        f"⚠️ 蓝军第 {round_num + 1} 轮失败: {blue_result.error}"
+                    )
+                    break
+
+                blue_code = blue_result.response or ""
+                rounds_log.append(
+                    f"### 蓝军 第 {round_num + 1} 轮输出\n{blue_code[:3000]}"
+                )
+
+                # Red: attack
+                red_task = (
+                    f"## 对抗目标\n{task}\n\n"
+                    f"## 蓝军本轮代码\n{blue_code[:10000]}\n\n"
+                    "请从以下角度全面攻击这段代码:\n"
+                    "1. 边界条件（空输入、超大数据、特殊字符）\n"
+                    "2. 并发/竞态条件\n"
+                    "3. 资源泄漏（内存、文件句柄、连接）\n"
+                    "4. 逻辑漏洞（未覆盖的分支、错误的条件）\n"
+                    "5. 安全漏洞（注入、路径穿越、权限绕过）\n"
+                )
+
+                red_subtask = SubTask(
+                    id=f"red_r{round_num}",
+                    description=red_task,
+                    agent_name="spar_red_breaker",
+                )
+                red_result = await manager.delegate(red_subtask)
+                total_tokens += getattr(red_result, "total_tokens", 0)
+                total_cost += getattr(red_result, "total_cost_usd", 0.0)
+
+                if red_result.status != "completed":
+                    rounds_log.append(
+                        f"⚠️ 红军第 {round_num + 1} 轮失败: {red_result.error}"
+                    )
+                    break
+
+                attack_report = red_result.response or ""
+                rounds_log.append(
+                    f"### 红军 第 {round_num + 1} 轮攻击报告\n{attack_report[:3000]}"
+                )
+
+                # Check if red team found nothing critical
+                if "CRITICAL" not in attack_report.upper() and "HIGH" not in attack_report.upper():
+                    rounds_log.append("✅ 红军未发现 CRITICAL/HIGH 级别漏洞，对抗训练收敛。")
+                    break
+
+        finally:
+            manager.destroy("spar_blue_builder")
+            manager.destroy("spar_red_breaker")
+
+        # Final synthesis
+        synthesis_msg = (
+            f"## 对抗自博弈 SPAR 报告\n\n"
+            f"**目标**: {task[:200]}\n"
+            f"**对抗轮次**: {len([r for r in rounds_log if '蓝军' in r and '输出' in r])}\n"
+            f"**总 Token**: {total_tokens}\n"
+            f"**总成本**: ${total_cost:.4f}\n\n"
+            f"---\n\n"
+            f"## 对抗过程完整记录\n\n"
+        )
+        for entry in rounds_log:
+            synthesis_msg += f"{entry}\n\n---\n\n"
+
+        synthesis_msg += (
+            "\n请基于上述对抗过程，给出最终的综合评估：\n"
+            "1. 代码是否足够健壮？\n"
+            "2. 残余风险有哪些？\n"
+            "3. 推荐的后续加固措施？\n"
+        )
+
+        return await _run_analysis(router, _SPAR_SYSTEM, synthesis_msg)
 
 
 # ===========================================================================
@@ -7624,12 +7926,158 @@ class SupervisorTool(Tool):
         router = _global_router
         if router is None:
             return _router_unavailable("supervisor", target[:200])
+
         scan_evidence = _scan_supervisor(target)
+
+        manager = _global_subagent_manager
+        if manager is not None:
+            return await self._execute_with_supervisor_tree(
+                router, manager, target, scan_evidence,
+            )
+
         user_msg = (
             f"## 审计目标\n{target}\n\n"
             f"## 守护者树扫描\n{scan_evidence}\n"
         )
         return await _run_analysis(router, _SUPERVISOR_SYSTEM, user_msg)
+
+    async def _execute_with_supervisor_tree(
+        self,
+        router: Any,
+        manager: Any,
+        target: str,
+        scan_evidence: str,
+    ) -> str:
+        """Execute real supervisor tree pattern with worker + guardian agents."""
+        from naumi_agent.agents.base import AgentCapability, AgentConfig
+
+        worker_config = AgentConfig(
+            name="supervisor_worker",
+            description="进化 Worker — 执行任务，允许失败",
+            capabilities=[AgentCapability.FILE_OPS, AgentCapability.CODE_EXEC],
+            model_tier="fast",
+            system_prompt=(
+                "你是 Supervisor 树中的 Worker 节点。\n\n"
+                "## Let-it-crash 原则\n"
+                "- 你被允许失败。遇到异常直接抛出，不要 try/except 吞掉。\n"
+                "- 你的任务是分析目标代码，识别所有崩溃点和恢复策略。\n"
+                "- 对于每个崩溃点，标记其严重程度和恢复难度。\n\n"
+                "## 输出格式\n"
+                "对每个崩溃点输出:\n"
+                "- 位置（函数/行号）\n"
+                "- 触发条件\n"
+                "- 崩溃传播范围\n"
+                "- 建议的恢复策略（重启/降级/回滚）"
+            ),
+            max_turns=5,
+            max_budget_usd=0.15,
+        )
+        guardian_config = AgentConfig(
+            name="supervisor_guardian",
+            description="守护 Guardian — 审查 Worker 产出，兜底设计",
+            capabilities=[AgentCapability.FILE_OPS],
+            model_tier="capable",
+            system_prompt=(
+                "你是 Supervisor 树中的 Guardian 节点。\n\n"
+                "## 职责\n"
+                "- 审查 Worker 的崩溃分析结果\n"
+                "- 设计 Erlang 式的 Supervisor 树结构\n"
+                "- 定义每层级的重启策略（permanent/transient/emporary）\n"
+                "- 规划回滚优先级\n\n"
+                "## 原则\n"
+                "- 权限不对称：Guardian 不能被 Worker 的异常影响\n"
+                "- 回滚优先于调试\n"
+                "- 隔离爆炸半径\n"
+            ),
+            max_turns=3,
+            max_budget_usd=0.15,
+        )
+
+        manager.spawn(worker_config)
+        manager.spawn(guardian_config)
+
+        total_tokens = 0
+        total_cost = 0.0
+        crash_points = ""
+
+        try:
+            # Phase 1: Worker analyzes crash points (may crash — that's OK)
+            worker_task = (
+                f"分析以下目标的崩溃点:\n\n{target}\n\n"
+                f"## 静态扫描结果\n{scan_evidence}\n"
+            )
+            from naumi_agent.orchestrator.subagent_manager import SubTask
+
+            worker_subtask = SubTask(
+                id="worker_analysis",
+                description=worker_task,
+                agent_name="supervisor_worker",
+            )
+            worker_result = await manager.delegate(worker_subtask)
+            total_tokens += getattr(worker_result, "total_tokens", 0)
+            total_cost += getattr(worker_result, "total_cost_usd", 0.0)
+
+            if worker_result.status == "completed":
+                crash_points = worker_result.response or ""
+            else:
+                crash_points = (
+                    f"⚠️ Worker 节点崩溃 (Let-it-crash!): "
+                    f"{worker_result.error or '未知错误'}\n\n"
+                    f"这正是 Erlang 哲学的体现——Worker 崩溃是正常的，"
+                    f"Guardian 会兜底分析。"
+                )
+
+            # Phase 2: Guardian designs supervisor tree
+            guardian_task = (
+                f"## 审计目标\n{target}\n\n"
+                f"## Worker 崩溃分析\n{crash_points}\n\n"
+                f"## 静态扫描\n{scan_evidence}\n\n"
+                "基于以上信息，设计完整的 Supervisor 树:\n"
+                "1. 树形层级结构（Supervisor → Worker）\n"
+                "2. 每层重启策略\n"
+                "3. 回滚点定义\n"
+                "4. 爆炸半径隔离方案\n"
+                "5. 心跳和健康检查设计\n"
+            )
+            guardian_subtask = SubTask(
+                id="guardian_design",
+                description=guardian_task,
+                agent_name="supervisor_guardian",
+            )
+            guardian_result = await manager.delegate(guardian_subtask)
+            total_tokens += getattr(guardian_result, "total_tokens", 0)
+            total_cost += getattr(guardian_result, "total_cost_usd", 0.0)
+
+        finally:
+            manager.destroy("supervisor_worker")
+            manager.destroy("supervisor_guardian")
+
+        worker_status = (
+            "✅ Worker 正常完成" if worker_result.status == "completed"
+            else f"⚠️ Worker 崩溃 (Let-it-crash): {worker_result.error}"
+        )
+        guardian_status = (
+            "✅ Guardian 设计完成" if guardian_result.status == "completed"
+            else f"⚠️ Guardian 异常: {guardian_result.error}"
+        )
+
+        report = (
+            f"## Erlang 守护者树分析报告\n\n"
+            f"**目标**: {target[:200]}\n"
+            f"**Worker 状态**: {worker_status}\n"
+            f"**Guardian 状态**: {guardian_status}\n"
+            f"**总 Token**: {total_tokens}\n"
+            f"**总成本**: ${total_cost:.4f}\n\n"
+            f"---\n\n"
+            f"### Worker 崩溃点分析\n{crash_points}\n\n---\n\n"
+            f"### Guardian 守护者树设计\n"
+        )
+        if guardian_result.status == "completed":
+            report += guardian_result.response
+        else:
+            report += f"Guardian 异常: {guardian_result.error}"
+
+        return report
 
 
 # ===========================================================================
@@ -7990,12 +8438,19 @@ class AutopsyTool(Tool):
 
 
 _global_router: Any = None
+_global_subagent_manager: Any = None
 
 
 def set_analysis_router(router: Any) -> None:
     """注入 ModelRouter 实例，供工具内部调用 LLM."""
     global _global_router
     _global_router = router
+
+
+def set_analysis_subagent_manager(manager: Any) -> None:
+    """注入 SubAgentManager 实例，供工具内部调度子 Agent."""
+    global _global_subagent_manager
+    _global_subagent_manager = manager
 
 
 async def _run_analysis(router: Any, system_prompt: str, user_msg: str) -> str:
