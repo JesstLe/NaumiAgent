@@ -725,6 +725,7 @@ class NaumiApp(App):
                     "- `/pid <目标>` — PID 闭环纠偏\n"
                     "- `/zkp <目标>` — 零知识证明与轨迹校验\n"
                     "- `/genesis <目标>` — 系统自重构与热演化\n"
+                    "- `/macro <目标>` — 多智能体自由市场博弈\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -875,6 +876,11 @@ class NaumiApp(App):
                     status.status_text = "用法: /genesis <代码路径或系统描述>"
                 else:
                     self._run_analysis_mode("genesis", arg)
+            case "/macro":
+                if not arg:
+                    status.status_text = "用法: /macro <任务或系统描述>"
+                else:
+                    self._run_analysis_mode("macro", arg)
             case "/hook":
                 if not arg:
                     status.status_text = "用法: /hook <逆向目标描述>"
@@ -999,6 +1005,7 @@ class NaumiApp(App):
             "pid": "analysis_pid",
             "zkp": "analysis_zkp",
             "genesis": "analysis_genesis",
+            "macro": "analysis_macro",
         }
         labels = {
             "chaos": "⚡ 灾难演练",
@@ -1029,6 +1036,7 @@ class NaumiApp(App):
             "pid": "🎛️ PID 闭环纠偏 (Control Theory)",
             "zkp": "🔐 零知识证明与轨迹校验 (ZKP)",
             "genesis": "🧬 系统自重构与热演化 (Genesis)",
+            "macro": "🏦 多智能体自由市场博弈 (Agentic Economy)",
         }
 
         chat = self.query_one(ChatPanel)
@@ -1098,6 +1106,8 @@ class NaumiApp(App):
                 result = await tool.execute(target=target)
             elif mode == "genesis":
                 result = await tool.execute(target=target)
+            elif mode == "macro":
+                result = await tool.execute(task=target)
             else:
                 result = await tool.execute(target=target)
             chat.mount(Markdown(result, classes="agent-msg"))

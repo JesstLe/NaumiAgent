@@ -122,6 +122,10 @@ turn AI from black-box magician into auditable worker
 vs meta-programming capability, design self-modifying architecture \
 with plugin system, hot-reload, sandbox verification, and automatic \
 rollback for continuous self-improvement
+- **analysis_macro**: Agentic Economy & Market Equilibrium — transform \
+centralized AI into free-market ecosystem with 1000+ micro-agents, \
+Token economy, natural selection, price discovery, and macro \
+regulation. Emergent collective intelligence via selfish competition
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
