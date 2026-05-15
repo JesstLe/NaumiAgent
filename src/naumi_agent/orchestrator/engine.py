@@ -44,6 +44,20 @@ You are NaumiAgent, a general-purpose AI assistant with tool access.
 - Recall relevant memories from past conversations
 - Delegate subtasks to specialized agents (coder, researcher, browser)
 
+## Analysis Modes (use tools autonomously when appropriate)
+- **analysis_chaos**: Disaster drill — find SPOFs, simulate failures, \
+produce hardening roadmap
+- **analysis_scale**: Concurrency stress test — identify bottlenecks, \
+produce remediation plan
+- **analysis_state**: Cloud-native audit — find stateful violations, \
+provide distributed solutions
+- **analysis_vibe**: Rapid prototyping — generate working demo code fast
+
+When the user's request involves reviewing code quality, scalability, \
+resilience, or rapid prototyping, proactively use the appropriate \
+analysis tool. You can also chain them (e.g., use analysis_chaos \
+after writing code to verify it's resilient).
+
 ## Guidelines
 1. Break complex tasks into steps
 2. Verify results after each action
@@ -123,6 +137,13 @@ class AgentEngine:
                 self._tool_registry.register(tool)
         except Exception:
             pass  # web tools optional (may need API keys)
+
+        # 分析模式工具（chaos/scale/state/vibe）
+        from naumi_agent.tools.analysis import create_analysis_tools, set_analysis_router
+
+        set_analysis_router(self._router)
+        for tool in create_analysis_tools():
+            self._tool_registry.register(tool)
 
         try:
             for tool in create_memory_tools(self.long_term_memory):
@@ -214,12 +235,28 @@ class AgentEngine:
         )
         return True
 
+    async def list_sessions(self, page: int = 1, page_size: int = 20) -> tuple[list[Session], int]:
+        """列出历史会话."""
+        return await self.session_store.list_sessions(page=page, page_size=page_size)
+
+    async def delete_session(self, session_id: str) -> bool:
+        """删除指定会话."""
+        return await self.session_store.delete(session_id)
+
     async def _save_session(self) -> None:
         """将当前上下文写入持久化存储."""
         session = await self.get_or_create_session()
         session.messages = list(self._messages)
         session.total_tokens = self._usage.total_input_tokens + self._usage.total_output_tokens
         session.total_cost_usd = self._usage.total_cost_usd
+
+        # 自动标题：从第一条用户消息中提取
+        if not session.title or session.title == "新会话":
+            for m in self._messages:
+                if m.get("role") == "user":
+                    session.title = m.get("content", "")[:50].split("\n")[0]
+                    break
+
         await self.session_store.save(session)
 
     # --- 上下文压缩 ---
@@ -391,7 +428,7 @@ class AgentEngine:
             if response.tool_calls:
                 assistant_msg: dict[str, Any] = {
                     "role": "assistant",
-                    "content": response.content or "",
+                    "content": response.content or None,
                     "tool_calls": response.tool_calls,
                 }
                 if response.reasoning_content:
@@ -517,7 +554,7 @@ class AgentEngine:
             if collected_tool_calls:
                 assistant_msg: dict[str, Any] = {
                     "role": "assistant",
-                    "content": text_content,
+                    "content": text_content or None,
                     "tool_calls": list(collected_tool_calls.values()),
                 }
                 if thinking_content:

@@ -150,7 +150,7 @@ class BaseAgent:
                 messages.append(
                     {
                         "role": "assistant",
-                        "content": response.content or "",
+                        "content": response.content or None,
                         "tool_calls": response.tool_calls,
                     }
                 )

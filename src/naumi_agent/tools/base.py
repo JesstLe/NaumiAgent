@@ -96,7 +96,16 @@ class ToolRegistry:
         self._tools[tool.name] = tool
 
     def get(self, name: str) -> Tool | None:
-        return self._tools.get(name)
+        if name in self._tools:
+            return self._tools[name]
+        # 某些 API（如 Kimi）返回的工具名可能带 namespace 前缀，
+        # 例如 "default.web_search" 或 "default__web_search"
+        normalized = name
+        if "." in normalized:
+            normalized = normalized.split(".")[-1]
+        elif "__" in normalized:
+            normalized = normalized.split("__")[-1]
+        return self._tools.get(normalized)
 
     def all(self) -> list[Tool]:
         return list(self._tools.values())

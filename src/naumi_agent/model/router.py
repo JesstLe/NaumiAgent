@@ -163,6 +163,21 @@ class ModelRouter:
         model_limit = self.get_max_output(model)
         return min(config_val, model_limit)
 
+    @staticmethod
+    def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """清理消息列表中不合法的格式，避免 API 报错.
+
+        OpenAI/Kimi API 要求：当 assistant message 包含 tool_calls 时，
+        content 不能是空字符串 ''，必须是 null 或省略。
+        """
+        sanitized: list[dict[str, Any]] = []
+        for msg in messages:
+            m = dict(msg)
+            if m.get("role") == "assistant" and "tool_calls" in m and m.get("content") == "":
+                m["content"] = None
+            sanitized.append(m)
+        return sanitized
+
     async def call(
         self,
         messages: list[dict[str, Any]],
@@ -178,7 +193,7 @@ class ModelRouter:
         resolved = model or self.resolve_model(tier)
         kwargs: dict[str, Any] = {
             "model": resolved,
-            "messages": messages,
+            "messages": self._sanitize_messages(messages),
             "max_tokens": self._resolve_max_tokens(resolved, max_tokens),
             "temperature": temperature if temperature is not None else self._config.temperature,
         }
@@ -219,7 +234,7 @@ class ModelRouter:
         resolved = model or self.resolve_model(tier)
         kwargs: dict[str, Any] = {
             "model": resolved,
-            "messages": messages,
+            "messages": self._sanitize_messages(messages),
             "max_tokens": self._resolve_max_tokens(resolved, max_tokens),
             "temperature": temperature if temperature is not None else self._config.temperature,
             "stream": True,
@@ -259,17 +274,20 @@ class ModelRouter:
                     if idx not in collected_tool_calls:
                         collected_tool_calls[idx] = {
                             "id": tc.id or "",
-                            "name": "",
-                            "arguments": "",
+                            "type": "function",
+                            "function": {
+                                "name": "",
+                                "arguments": "",
+                            },
                         }
                     entry = collected_tool_calls[idx]
                     if tc.id:
                         entry["id"] = tc.id
                     if tc.function:
                         if tc.function.name:
-                            entry["name"] = tc.function.name
+                            entry["function"]["name"] = tc.function.name
                         if tc.function.arguments:
-                            entry["arguments"] += tc.function.arguments
+                            entry["function"]["arguments"] += tc.function.arguments
 
             tool_call = None
             if finish_reason == "tool_calls" and collected_tool_calls:
