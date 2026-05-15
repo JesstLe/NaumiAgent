@@ -1,0 +1,20 @@
+{
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll": "explicit",
+      "source.organizeImports": "explicit"
+    }
+  },
+  "python.testing.pytestEnabled": true,
+  "python.testing.pytestArgs": ["tests/", "-q"],
+  "ruff.lineLength": 100,
+  "ruff.lint.args": ["--config=pyproject.toml"],
+  "files.exclude": {
+    "**/__pycache__": true,
+    ".pytest_cache": true,
+    ".ruff_cache": true,
+    ".mypy_cache": true
+  }
+}
