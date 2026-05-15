@@ -1,6 +1,6 @@
 """预定义专用 Agent 配置."""
 
-from naumi_agent.agents.base import AgentConfig, AgentCapability
+from naumi_agent.agents.base import AgentCapability, AgentConfig
 
 CODER_CONFIG = AgentConfig(
     name="coder",

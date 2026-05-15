@@ -1,11 +1,9 @@
 """流式事件系统单元测试."""
 
-import asyncio
-
 import pytest
 
-from naumi_agent.streaming.events import EventType, StreamEvent
 from naumi_agent.streaming.event_bus import EventEmitter
+from naumi_agent.streaming.events import EventType, StreamEvent
 
 
 @pytest.fixture
@@ -13,7 +11,9 @@ def emitter() -> EventEmitter:
     return EventEmitter(max_queue_size=10)
 
 
-def _make_event(event_type: EventType = EventType.TOKEN_DELTA, data: dict | None = None) -> StreamEvent:
+def _make_event(
+    event_type: EventType = EventType.TOKEN_DELTA, data: dict | None = None
+) -> StreamEvent:
     return StreamEvent(
         type=event_type,
         data=data or {"token": "test"},

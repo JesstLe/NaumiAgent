@@ -1,11 +1,8 @@
 """配置系统测试."""
 
-import pytest
-import tempfile
 import yaml
-from pathlib import Path
 
-from naumi_agent.config.settings import AppConfig, ModelConfig, SafetyConfig
+from naumi_agent.config.settings import AppConfig
 
 
 class TestAppConfig:
@@ -17,15 +14,19 @@ class TestAppConfig:
 
     def test_from_yaml(self, tmp_path) -> None:
         yaml_path = tmp_path / "config.yaml"
-        yaml_path.write_text(yaml.dump({
-            "models": {
-                "default_model": "gpt-4o",
-                "fast_model": "gpt-4o-mini",
-            },
-            "safety": {
-                "max_turns": 50,
-            },
-        }))
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "models": {
+                        "default_model": "gpt-4o",
+                        "fast_model": "gpt-4o-mini",
+                    },
+                    "safety": {
+                        "max_turns": 50,
+                    },
+                }
+            )
+        )
 
         config = AppConfig.from_yaml(yaml_path)
         assert config.models.default_model == "gpt-4o"

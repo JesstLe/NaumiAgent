@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable
 
 from naumi_agent.model.router import TokenUsage
 
@@ -54,19 +54,24 @@ class BudgetTracker:
 
     def track(self, usage: TokenUsage, model: str) -> None:
         cost = usage.cost_usd
-        self._records.append(UsageRecord(
-            model=model,
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.output_tokens,
-            cost_usd=cost,
-            timestamp=datetime.now().isoformat(),
-        ))
+        self._records.append(
+            UsageRecord(
+                model=model,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cost_usd=cost,
+                timestamp=datetime.now().isoformat(),
+            )
+        )
         self._total_input += usage.input_tokens
         self._total_output += usage.output_tokens
         self._total_cost += cost
         logger.debug(
             "Tracked %s: %d in + %d out = $%.4f",
-            model, usage.input_tokens, usage.output_tokens, cost,
+            model,
+            usage.input_tokens,
+            usage.output_tokens,
+            cost,
         )
 
     def is_exceeded(self) -> bool:

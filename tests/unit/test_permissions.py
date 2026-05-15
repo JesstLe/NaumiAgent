@@ -1,11 +1,7 @@
 """权限系统测试."""
 
-import pytest
-
 from naumi_agent.safety.permissions import (
-    BLOCKED_COMMANDS,
     PermissionChecker,
-    PermissionDecision,
     PermissionMode,
 )
 

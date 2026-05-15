@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -31,8 +30,7 @@ class MemoryStoreTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "将一条重要信息存入长期记忆。"
-            "适用于用户偏好、关键事实、重要决策等需要跨会话记住的内容。"
+            "将一条重要信息存入长期记忆。适用于用户偏好、关键事实、重要决策等需要跨会话记住的内容。"
         )
 
     @property
@@ -79,10 +77,7 @@ class MemoryRecallTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "从长期记忆中搜索与当前问题相关的内容。"
-            "用于回忆用户偏好、之前讨论过的事实等。"
-        )
+        return "从长期记忆中搜索与当前问题相关的内容。用于回忆用户偏好、之前讨论过的事实等。"
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -119,7 +114,5 @@ class MemoryRecallTool(Tool):
 
         parts = []
         for r in results:
-            parts.append(
-                f"- [{r.entry.category}] (相关度 {r.relevance:.0%}) {r.entry.content}"
-            )
+            parts.append(f"- [{r.entry.category}] (相关度 {r.relevance:.0%}) {r.entry.content}")
         return "\n".join(parts)

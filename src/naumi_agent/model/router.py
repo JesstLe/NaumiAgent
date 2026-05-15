@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, AsyncIterator
+from enum import StrEnum
+from typing import Any
 
 import litellm
 
@@ -20,7 +21,7 @@ _FALLBACK_MAX_OUTPUT = 4_096
 _FALLBACK_COST = {"input": 3.0, "output": 15.0}
 
 
-class ModelTier(str, Enum):
+class ModelTier(StrEnum):
     FAST = "fast"
     CAPABLE = "capable"
     REASONING = "reasoning"
@@ -53,7 +54,9 @@ class StreamChunk:
     usage: TokenUsage | None = None
 
 
-def _calculate_cost(model: str, input_tokens: int, output_tokens: int, rates: dict[str, float]) -> float:
+def _calculate_cost(
+    model: str, input_tokens: int, output_tokens: int, rates: dict[str, float]
+) -> float:
     return input_tokens * rates["input"] / 1_000_000 + output_tokens * rates["output"] / 1_000_000
 
 
@@ -281,9 +284,7 @@ class ModelRouter:
         if final_usage:
             yield StreamChunk(usage=final_usage, finish_reason="stop")
 
-    def _extract_tool_calls(
-        self, raw: list[litellm.utils.Function] | None
-    ) -> list[dict[str, Any]]:
+    def _extract_tool_calls(self, raw: list[litellm.utils.Function] | None) -> list[dict[str, Any]]:
         if not raw:
             return []
         return [
@@ -298,9 +299,7 @@ class ModelRouter:
             for tc in raw
         ]
 
-    def _build_usage(
-        self, usage: litellm.utils.Usage | None, model: str
-    ) -> TokenUsage:
+    def _build_usage(self, usage: litellm.utils.Usage | None, model: str) -> TokenUsage:
         if not usage:
             return TokenUsage()
         inp = usage.prompt_tokens or 0

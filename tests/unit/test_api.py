@@ -1,6 +1,5 @@
 """API 路由单元测试."""
 
-import pytest
 from fastapi.testclient import TestClient
 
 from naumi_agent.api.schemas import HealthResponse, SessionCreate
@@ -23,6 +22,7 @@ class TestSchemas:
 class TestHealthEndpoint:
     def test_health_check(self) -> None:
         from naumi_agent.api.app import create_app
+
         app = create_app()
         client = TestClient(app)
         resp = client.get("/api/v1/health")

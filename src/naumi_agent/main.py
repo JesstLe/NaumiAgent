@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import sys
-from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -87,18 +86,21 @@ async def _chat(config_path: str) -> None:
 
         # 渲染 Markdown 响应
         console.print()
-        console.print(Panel(
-            Markdown(result.response),
-            title="[bold green]NaumiAgent[/bold green]",
-            border_style="green",
-            padding=(1, 2),
-        ))
+        console.print(
+            Panel(
+                Markdown(result.response),
+                title="[bold green]NaumiAgent[/bold green]",
+                border_style="green",
+                padding=(1, 2),
+            )
+        )
 
         # 显示统计
         stats = Text()
         stats.append(f"轮次: {result.usage.turns}", style="dim")
         stats.append(" | ", style="dim")
-        stats.append(f"Token: {result.usage.total_input_tokens + result.usage.total_output_tokens}", style="dim")
+        total_tok = result.usage.total_input_tokens + result.usage.total_output_tokens
+        stats.append(f"Token: {total_tok}", style="dim")
         stats.append(" | ", style="dim")
         stats.append(f"费用: ${result.usage.total_cost_usd:.4f}", style="dim")
         if result.status != "completed":
@@ -158,11 +160,10 @@ def serve(
         )
 
 
-async def _handle_command(engine: AgentEngine, cmd: str) -> None:
+async def _handle_command(engine: Any, cmd: str) -> None:
     """处理斜杠命令."""
     parts = cmd.strip().split(maxsplit=1)
     command = parts[0]
-    args = parts[1] if len(parts) > 1 else ""
 
     match command:
         case "/tools":
@@ -192,13 +193,15 @@ async def _handle_command(engine: AgentEngine, cmd: str) -> None:
 
 
 def _print_banner() -> None:
-    console.print(Panel(
-        "[bold green]NaumiAgent v0.1.0[/bold green]\n"
-        "通用智能 Agent — 输入任务开始对话\n"
-        "[dim]/help 查看命令 | /quit 退出[/dim]",
-        border_style="green",
-        padding=(1, 2),
-    ))
+    console.print(
+        Panel(
+            "[bold green]NaumiAgent v0.1.0[/bold green]\n"
+            "通用智能 Agent — 输入任务开始对话\n"
+            "[dim]/help 查看命令 | /quit 退出[/dim]",
+            border_style="green",
+            padding=(1, 2),
+        )
+    )
     console.print()
 
 

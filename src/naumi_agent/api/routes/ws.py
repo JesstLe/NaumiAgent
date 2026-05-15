@@ -43,10 +43,12 @@ async def websocket_session(websocket: WebSocket, session_id: str):
                 task = asyncio.create_task(engine.run(content))
                 try:
                     result = await task
-                    await websocket.send_json({
-                        "type": "message_complete",
-                        "status": result.status,
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "message_complete",
+                            "status": result.status,
+                        }
+                    )
                 except Exception as e:
                     await websocket.send_json({"type": "error", "message": str(e)})
 
@@ -70,6 +72,7 @@ async def websocket_chat(websocket: WebSocket):
     engine = websocket.app.state.engine
 
     from naumi_agent.memory.session import Session
+
     session = Session(title="WebSocket Chat")
     await engine.session_store.save(session)
 
@@ -111,7 +114,7 @@ async def _push_events(websocket: WebSocket, queue: asyncio.Queue):
         try:
             event = await asyncio.wait_for(queue.get(), timeout=30.0)
             await websocket.send_text(event.to_ws())
-        except asyncio.TimeoutError:
+        except TimeoutError:
             try:
                 await websocket.send_json({"type": "ping"})
             except Exception:

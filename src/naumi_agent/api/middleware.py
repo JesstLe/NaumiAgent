@@ -30,7 +30,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         if config.api.api_keys:
             if not api_key or api_key not in config.api.api_keys:
-                return JSONResponse(status_code=401, content={"error": "Invalid or missing API key"})
+                return JSONResponse(
+                    status_code=401, content={"error": "Invalid or missing API key"}
+                )
 
         return await call_next(request)
 

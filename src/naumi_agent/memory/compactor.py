@@ -101,7 +101,9 @@ class ContextCompactor:
         # 用 fast model 生成摘要
         try:
             response = await self._router.call(
-                messages=[{"role": "user", "content": COMPACTION_PROMPT.format(history=history_text)}],
+                messages=[
+                    {"role": "user", "content": COMPACTION_PROMPT.format(history=history_text)}
+                ],
                 tier=ModelTier.FAST,
                 max_tokens=1000,
             )
@@ -144,7 +146,10 @@ class ContextCompactor:
                 if tool_calls:
                     for tc in tool_calls:
                         func = tc.get("function", {})
-                        parts.append(f"[Assistant called {func.get('name', '?')}]: {func.get('arguments', '')[:200]}")
+                        parts.append(
+                            f"[Assistant called {func.get('name', '?')}]:"
+                            f" {func.get('arguments', '')[:200]}"
+                        )
                 if content:
                     parts.append(f"[Assistant]: {content[:500]}")
             elif role == "user":

@@ -6,10 +6,10 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 
-class EventType(str, Enum):
+class EventType(StrEnum):
     # LLM 响应
     TOKEN_DELTA = "token_delta"
     THINKING_DELTA = "thinking_delta"
@@ -48,6 +48,7 @@ class EventType(str, Enum):
 @dataclass(frozen=True)
 class StreamEvent:
     """统一事件模型."""
+
     type: EventType
     data: dict
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])

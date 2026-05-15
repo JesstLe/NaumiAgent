@@ -18,12 +18,10 @@ from textual.widgets import (
     Collapsible,
     Footer,
     Header,
-    Input,
     Static,
     TextArea,
 )
 
-from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 
 logger = logging.getLogger(__name__)
@@ -160,20 +158,22 @@ class ChatPanel(VerticalScroll):
     def finalize(self, turns: int, cost: float, tokens: int = 0) -> None:
         self._response_text = ""
         self._response_widget = None
-        self.mount(Static(
-            Text.from_markup(
-                f"[dim]轮次: {turns} | Token: {tokens} | 费用: ${cost:.4f}[/dim]"
-            ),
-            classes="usage-info",
-        ))
+        self.mount(
+            Static(
+                Text.from_markup(f"[dim]轮次: {turns} | Token: {tokens} | 费用: ${cost:.4f}[/dim]"),
+                classes="usage-info",
+            )
+        )
         self.scroll_end(animate=False)
 
     def add_tool_call(self, tool_name: str, status: str, duration_ms: int) -> None:
         color = "green" if status == "success" else "red"
-        self.mount(Static(
-            f"  [dim]⚙ {tool_name} ({duration_ms}ms) [{color}]{status}[/{color}][/dim]",
-            classes="tool-msg",
-        ))
+        self.mount(
+            Static(
+                f"  [dim]⚙ {tool_name} ({duration_ms}ms) [{color}]{status}[/{color}][/dim]",
+                classes="tool-msg",
+            )
+        )
 
 
 class ActivityPanel(VerticalScroll):
@@ -197,11 +197,12 @@ class ActivityPanel(VerticalScroll):
     def add_tool_log(self, tool_name: str, args: dict, status: str, duration_ms: int) -> None:
         icon = "✓" if status == "success" else "✗"
         color = "green" if status == "success" else "red"
-        self.mount(Static(
-            f"[{color}]{icon}[/{color}] {tool_name} ({duration_ms}ms)\n"
-            f"  [dim]{args}[/dim]",
-            classes="tool-log-entry",
-        ))
+        self.mount(
+            Static(
+                f"[{color}]{icon}[/{color}] {tool_name} ({duration_ms}ms)\n  [dim]{args}[/dim]",
+                classes="tool-log-entry",
+            )
+        )
         self.scroll_end(animate=False)
 
 
@@ -436,7 +437,8 @@ class NaumiApp(App):
                 case "context_compacted":
                     logger.info(
                         "Context compacted: %d → %d messages",
-                        data["before"], data["after"],
+                        data["before"],
+                        data["after"],
                     )
                 case "error":
                     chat.start_response()

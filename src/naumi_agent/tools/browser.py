@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import logging
 from typing import Any
@@ -77,7 +76,9 @@ class BrowserNavigateTool(Tool):
             "required": ["url"],
         }
 
-    async def execute(self, *, url: str, wait_until: str = "domcontentloaded", **kwargs: Any) -> str:
+    async def execute(
+        self, *, url: str, wait_until: str = "domcontentloaded", **kwargs: Any
+    ) -> str:
         try:
             page = await self._session.get_page()
             response = await page.goto(url, wait_until=wait_until, timeout=30000)
@@ -118,7 +119,9 @@ class BrowserScreenshotTool(Tool):
             },
         }
 
-    async def execute(self, *, full_page: bool = False, selector: str | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self, *, full_page: bool = False, selector: str | None = None, **kwargs: Any
+    ) -> str:
         try:
             page = await self._session.get_page()
             if selector:
@@ -130,7 +133,8 @@ class BrowserScreenshotTool(Tool):
                 data = await page.screenshot(full_page=full_page)
 
             encoded = base64.b64encode(data).decode("ascii")
-            return f"Screenshot captured ({len(data)} bytes)\n[data:image/png;base64,{encoded[:100]}...]"
+            preview = encoded[:100]
+            return f"Screenshot captured ({len(data)} bytes)\n[data:image/png;base64,{preview}...]"
         except Exception as e:
             return f"Error taking screenshot: {type(e).__name__}: {e}"
 
@@ -202,7 +206,9 @@ class BrowserTypeTool(Tool):
             "required": ["selector", "text"],
         }
 
-    async def execute(self, *, selector: str, text: str, press_enter: bool = False, **kwargs: Any) -> str:
+    async def execute(
+        self, *, selector: str, text: str, press_enter: bool = False, **kwargs: Any
+    ) -> str:
         try:
             page = await self._session.get_page()
             element = await page.wait_for_selector(selector, timeout=5000)
@@ -226,10 +232,7 @@ class BrowserExtractTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "提取当前页面的文本内容。"
-            "支持提取整个页面或通过 CSS 选择器提取特定元素。"
-        )
+        return "提取当前页面的文本内容。支持提取整个页面或通过 CSS 选择器提取特定元素。"
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -248,7 +251,9 @@ class BrowserExtractTool(Tool):
             },
         }
 
-    async def execute(self, *, selector: str | None = None, max_length: int = 50000, **kwargs: Any) -> str:
+    async def execute(
+        self, *, selector: str | None = None, max_length: int = 50000, **kwargs: Any
+    ) -> str:
         try:
             page = await self._session.get_page()
 
@@ -298,7 +303,9 @@ class BrowserGetHtmlTool(Tool):
             },
         }
 
-    async def execute(self, *, selector: str | None = None, max_length: int = 50000, **kwargs: Any) -> str:
+    async def execute(
+        self, *, selector: str | None = None, max_length: int = 50000, **kwargs: Any
+    ) -> str:
         try:
             page = await self._session.get_page()
 

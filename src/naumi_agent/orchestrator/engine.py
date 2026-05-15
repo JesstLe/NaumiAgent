@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -14,15 +12,15 @@ from naumi_agent.config.settings import AppConfig
 from naumi_agent.memory.compactor import ContextCompactor
 from naumi_agent.memory.long_term import LongTermMemory
 from naumi_agent.memory.session import Session, SessionStore
-from naumi_agent.model.router import ModelResponse, ModelRouter, ModelTier, TokenUsage
+from naumi_agent.model.router import ModelRouter, ModelTier, TokenUsage
 from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
-from naumi_agent.safety.guardrails import OutputGuardrail, SecurityError
+from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.event_bus import EventEmitter
-from naumi_agent.tools.base import Tool, ToolCall, ToolRegistry, ToolResult
-from naumi_agent.tools.builtin import create_builtin_tools
+from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.browser import BrowserSession, create_browser_tools
+from naumi_agent.tools.builtin import create_builtin_tools
 from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
 from naumi_agent.tools.web import create_web_tools
@@ -81,10 +79,12 @@ class AgentEngine:
         self._tool_registry = ToolRegistry()
         self._messages: list[dict[str, Any]] = []
         self._usage = AgentUsage()
-        self._budget_tracker = BudgetTracker(TokenBudget(
-            max_input_tokens=config.safety.max_input_tokens,
-            max_usd=config.safety.max_budget_usd,
-        ))
+        self._budget_tracker = BudgetTracker(
+            TokenBudget(
+                max_input_tokens=config.safety.max_input_tokens,
+                max_usd=config.safety.max_budget_usd,
+            )
+        )
         self._behavior_monitor = BehaviorMonitor()
         self._output_guardrail = OutputGuardrail()
         self._permission_checker = PermissionChecker(
@@ -224,13 +224,19 @@ class AgentEngine:
         if after < before:
             logger.info(
                 "Context compacted: %d → %d messages (window=%d, cap=%d)",
-                before, after, context_window, hard_cap,
+                before,
+                after,
+                context_window,
+                hard_cap,
             )
             if on_event:
-                await on_event("context_compacted", {
-                    "before": before,
-                    "after": after,
-                })
+                await on_event(
+                    "context_compacted",
+                    {
+                        "before": before,
+                        "after": after,
+                    },
+                )
 
     def _check_budget(self) -> AgentResult | None:
         """检查预算是否超限，超限则返回错误结果."""
@@ -282,9 +288,7 @@ class AgentEngine:
         await self._save_session()
         return result
 
-    async def _react_loop(
-        self, tools: list[dict[str, Any]] | None
-    ) -> AgentResult:
+    async def _react_loop(self, tools: list[dict[str, Any]] | None) -> AgentResult:
         """ReAct 循环：推理 → 行动 → 观察."""
         max_turns = self._config.safety.max_turns
 
@@ -331,11 +335,13 @@ class AgentEngine:
                     self._behavior_monitor.record_tool_call(
                         tc.name, is_error=(result.status == "error")
                     )
-                    self._messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result.content,
-                    })
+                    self._messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": result.content,
+                        }
+                    )
 
                 exceeded = self._check_budget()
                 if exceeded:
@@ -453,19 +459,24 @@ class AgentEngine:
 
                     await on_event("tool_start", {"name": tc.name, "args": tc.arguments})
                     result = await self._execute_tool(tc)
-                    await on_event("tool_end", {
-                        "name": tc.name,
-                        "status": result.status,
-                        "duration_ms": result.duration_ms,
-                    })
+                    await on_event(
+                        "tool_end",
+                        {
+                            "name": tc.name,
+                            "status": result.status,
+                            "duration_ms": result.duration_ms,
+                        },
+                    )
                     self._behavior_monitor.record_tool_call(
                         tc.name, is_error=(result.status == "error")
                     )
-                    self._messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result.content,
-                    })
+                    self._messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": result.content,
+                        }
+                    )
 
                 exceeded = self._check_budget()
                 if exceeded:

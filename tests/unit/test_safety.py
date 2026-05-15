@@ -2,8 +2,8 @@
 
 import pytest
 
-from naumi_agent.safety.budget import BudgetTracker, TokenBudget, TokenUsage
 from naumi_agent.safety.behavior import BehaviorMonitor
+from naumi_agent.safety.budget import BudgetTracker, TokenBudget, TokenUsage
 from naumi_agent.safety.guardrails import OutputGuardrail, SecurityError
 
 
@@ -25,7 +25,9 @@ class TestBudgetTracker:
 
     def test_budget_exceeded(self) -> None:
         tracker = BudgetTracker(TokenBudget(max_usd=0.001))
-        usage = TokenUsage(input_tokens=100000, output_tokens=50000, total_tokens=150000, cost_usd=1.0)
+        usage = TokenUsage(
+            input_tokens=100000, output_tokens=50000, total_tokens=150000, cost_usd=1.0
+        )
         tracker.track(usage, "claude-sonnet-4-6")
         assert tracker.is_exceeded()
 

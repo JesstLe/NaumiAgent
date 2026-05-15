@@ -5,13 +5,13 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class PermissionMode(str, Enum):
+class PermissionMode(StrEnum):
     BYPASS = "bypass"
     PERMISSIVE = "permissive"
     MODERATE = "moderate"
@@ -39,17 +39,33 @@ class PermissionRule:
 TOOL_PERMISSIONS: dict[str, PermissionRule] = {
     "file_read": PermissionRule(
         tool_name="file_read",
-        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT, PermissionMode.LOCKDOWN],
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
         requires_confirmation=False,
     ),
     "file_write": PermissionRule(
         tool_name="file_write",
-        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT],
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
         requires_confirmation=False,
     ),
     "file_edit": PermissionRule(
         tool_name="file_edit",
-        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT],
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
         requires_confirmation=False,
     ),
     "bash_run": PermissionRule(
@@ -66,7 +82,12 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
     ),
     "browser_navigate": PermissionRule(
         tool_name="browser_navigate",
-        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT],
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
         requires_confirmation=False,
     ),
     "browser_click": PermissionRule(
@@ -81,47 +102,96 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
     ),
     "browser_extract": PermissionRule(
         tool_name="browser_extract",
-        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT, PermissionMode.LOCKDOWN],
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
         requires_confirmation=False,
     ),
     "browser_screenshot": PermissionRule(
         tool_name="browser_screenshot",
-        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT],
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
         requires_confirmation=False,
     ),
     "browser_get_html": PermissionRule(
         tool_name="browser_get_html",
-        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT],
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
         requires_confirmation=False,
     ),
     "web_search": PermissionRule(
         tool_name="web_search",
-        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT],
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
         requires_confirmation=False,
     ),
     "web_fetch": PermissionRule(
         tool_name="web_fetch",
-        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT],
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
         requires_confirmation=False,
     ),
     "memory_store": PermissionRule(
         tool_name="memory_store",
-        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT, PermissionMode.LOCKDOWN],
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
         requires_confirmation=False,
     ),
     "memory_recall": PermissionRule(
         tool_name="memory_recall",
-        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT, PermissionMode.LOCKDOWN],
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
         requires_confirmation=False,
     ),
     "delegate_task": PermissionRule(
         tool_name="delegate_task",
-        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT],
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
         requires_confirmation=False,
     ),
     "list_agents": PermissionRule(
         tool_name="list_agents",
-        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT, PermissionMode.LOCKDOWN],
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
         requires_confirmation=False,
     ),
 }

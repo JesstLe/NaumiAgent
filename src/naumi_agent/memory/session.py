@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Session:
     """会话对象."""
+
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     title: str = ""
     model: str = "claude-sonnet-4-6"
@@ -59,7 +60,9 @@ class Session:
             id=row["id"],
             title=row["title"],
             model=row["model"],
-            messages=json.loads(row["messages"]) if isinstance(row["messages"], str) else row["messages"],
+            messages=json.loads(row["messages"])
+            if isinstance(row["messages"], str)
+            else row["messages"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
             status=row["status"],
@@ -83,7 +86,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 """
 
 _UPSERT = """
-INSERT INTO sessions (id, title, model, messages, created_at, updated_at, status, total_tokens, total_cost_usd)
+INSERT INTO sessions
+    (id, title, model, messages, created_at, updated_at, status, total_tokens, total_cost_usd)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
@@ -137,9 +141,15 @@ class SessionStore:
         await db.execute(
             _UPSERT,
             (
-                row["id"], row["title"], row["model"], row["messages"],
-                row["created_at"], row["updated_at"], row["status"],
-                row["total_tokens"], row["total_cost_usd"],
+                row["id"],
+                row["title"],
+                row["model"],
+                row["messages"],
+                row["created_at"],
+                row["updated_at"],
+                row["status"],
+                row["total_tokens"],
+                row["total_cost_usd"],
             ),
         )
         await db.commit()
@@ -152,9 +162,7 @@ class SessionStore:
             return None
         return Session.from_row(dict(row))
 
-    async def list_sessions(
-        self, page: int = 1, page_size: int = 20
-    ) -> tuple[list[Session], int]:
+    async def list_sessions(self, page: int = 1, page_size: int = 20) -> tuple[list[Session], int]:
         db = await self._get_db()
         offset = (page - 1) * page_size
 

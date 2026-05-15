@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from naumi_agent.agents.base import AgentConfig, AgentResult, BaseAgent
 from naumi_agent.agents.presets import ALL_AGENT_CONFIGS
@@ -40,6 +40,7 @@ _KEYWORD_AGENT_MAP: dict[str, str] = {
 @dataclass(frozen=True)
 class SubTask:
     """子任务定义."""
+
     id: str
     description: str
     agent_name: str | None = None
@@ -138,18 +139,18 @@ class SubAgentManager:
         processed: list[AgentResult] = []
         for task, result in zip(tasks, results):
             if isinstance(result, Exception):
-                processed.append(AgentResult(
-                    status="error",
-                    error=f"{type(result).__name__}: {result}",
-                ))
+                processed.append(
+                    AgentResult(
+                        status="error",
+                        error=f"{type(result).__name__}: {result}",
+                    )
+                )
             else:
                 processed.append(result)
 
         return processed
 
-    async def execute_dag(
-        self, tasks: list[SubTask]
-    ) -> dict[str, AgentResult]:
+    async def execute_dag(self, tasks: list[SubTask]) -> dict[str, AgentResult]:
         """按 DAG 依赖关系执行任务.
 
         同一层级的无依赖任务并行执行，层级间顺序执行。
@@ -164,10 +165,7 @@ class SubAgentManager:
             iteration += 1
 
             # 找到所有依赖已完成的任务
-            ready = [
-                t for t in remaining
-                if all(dep in results for dep in (t.depends_on or []))
-            ]
+            ready = [t for t in remaining if all(dep in results for dep in (t.depends_on or []))]
 
             if not ready:
                 # 死锁：所有剩余任务都有未满足的依赖
@@ -181,12 +179,10 @@ class SubAgentManager:
             # 构建上下文
             for task in ready:
                 dep_contexts = []
-                for dep_id in (task.depends_on or []):
+                for dep_id in task.depends_on or []:
                     dep_result = results.get(dep_id)
                     if dep_result and dep_result.status == "completed":
-                        dep_contexts.append(
-                            f"## 前置任务 {dep_id}\n{dep_result.response[:1000]}"
-                        )
+                        dep_contexts.append(f"## 前置任务 {dep_id}\n{dep_result.response[:1000]}")
                 if dep_contexts:
                     object.__setattr__(task, "context", "\n\n".join(dep_contexts))
 
@@ -217,7 +213,9 @@ class SubAgentManager:
 
             task_with_feedback = task
             if accumulated_feedback:
-                task_with_feedback += f"\n\n## 审查反馈（第 {round_num} 轮）\n{accumulated_feedback}"
+                task_with_feedback += (
+                    f"\n\n## 审查反馈（第 {round_num} 轮）\n{accumulated_feedback}"
+                )
 
             result = await coder.execute(task=task_with_feedback)
 
