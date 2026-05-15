@@ -102,6 +102,11 @@ until hardened. Prevents reward hacking and nihilism
 physics engine: inventory state entities, map transitions, trace causal \
 chains, audit object permanence, find counterfactual gaps, score \
 world model completeness
+- **analysis_fusion**: Deterministic-Probabilistic Fusion Audit — scan \
+the boundary between AI (probabilistic) and traditional code \
+(deterministic), detect dangerous fusion points where AI output feeds \
+into precision-critical operations without validation, identify \
+over-determined code that could benefit from AI
 
 When the user's request involves reviewing code quality, scalability, \
 resilience, rapid prototyping, testing, context management, or bug fixing, \
