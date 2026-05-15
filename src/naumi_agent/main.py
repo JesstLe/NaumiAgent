@@ -39,6 +39,7 @@ def _launch_tui(config_path: str) -> None:
     from naumi_agent.tui.app import NaumiApp
 
     config = AppConfig.from_yaml(config_path)
+    _check_api_key(config)
     engine = AgentEngine(config)
     app = NaumiApp(engine)
     app.run()
@@ -48,6 +49,7 @@ async def _chat(config_path: str) -> None:
     from naumi_agent.orchestrator.engine import AgentEngine
 
     config = AppConfig.from_yaml(config_path)
+    _check_api_key(config)
     engine = AgentEngine(config)
 
     _print_banner()
@@ -205,6 +207,14 @@ def _print_help() -> None:
     for cmd, desc in commands:
         console.print(f"  [cyan]{cmd:12s}[/cyan] {desc}")
     console.print()
+
+
+def _check_api_key(config: AppConfig) -> None:
+    if not config.models.api_key:
+        console.print("[yellow]警告: 未设置 API Key。请通过环境变量设置:[/yellow]")
+        console.print("  [dim]export NAUMI_MODELS__API_KEY=your-key-here[/dim]")
+        console.print("  [dim]或在 config.yaml 中配置 api_key[/dim]")
+        console.print()
 
 
 def cli() -> None:
