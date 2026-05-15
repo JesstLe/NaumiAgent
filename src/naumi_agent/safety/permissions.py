@@ -114,6 +114,16 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT, PermissionMode.LOCKDOWN],
         requires_confirmation=False,
     ),
+    "delegate_task": PermissionRule(
+        tool_name="delegate_task",
+        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT],
+        requires_confirmation=False,
+    ),
+    "list_agents": PermissionRule(
+        tool_name="list_agents",
+        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT, PermissionMode.LOCKDOWN],
+        requires_confirmation=False,
+    ),
 }
 
 # 阻止的危险 shell 命令模式

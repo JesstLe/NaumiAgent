@@ -42,6 +42,7 @@ You are NaumiAgent, a general-purpose AI assistant with tool access.
 - Execute code in sandboxed environments
 - Store important facts in long-term memory for future sessions
 - Recall relevant memories from past conversations
+- Delegate subtasks to specialized agents (coder, researcher, browser)
 
 ## Guidelines
 1. Break complex tasks into steps
@@ -51,6 +52,7 @@ You are NaumiAgent, a general-purpose AI assistant with tool access.
 5. If something fails, analyze the error and try a different approach
 6. Use memory_store to save important user preferences, facts, or decisions
 7. Use memory_recall to check if relevant information was discussed before
+8. For complex subtasks (coding, research, browsing), consider delegating to specialized agents
 """
 
 
@@ -101,6 +103,7 @@ class AgentEngine:
         self._session: Session | None = None
 
         self._register_builtin_tools()
+        self._register_subagent_manager()
 
     def _register_builtin_tools(self) -> None:
         for tool in create_builtin_tools():
@@ -120,6 +123,14 @@ class AgentEngine:
                 self._tool_registry.register(tool)
         except Exception:
             pass  # memory tools optional (chromadb may not be installed)
+
+    def _register_subagent_manager(self) -> None:
+        from naumi_agent.orchestrator.subagent_manager import SubAgentManager
+        from naumi_agent.tools.subagent import create_subagent_tools
+
+        self.subagent_manager = SubAgentManager(self)
+        for tool in create_subagent_tools(self.subagent_manager):
+            self._tool_registry.register(tool)
 
     @property
     def tool_registry(self) -> ToolRegistry:
