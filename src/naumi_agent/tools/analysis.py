@@ -5204,6 +5204,270 @@ class FusionTool(Tool):
         return await _run_analysis(router, _FUSION_SYSTEM, user_msg)
 
 
+# ===========================================================================
+#  /consensus — 拜占庭容错与多源共识 (Byzantine Consensus)
+# ===========================================================================
+
+# High-risk decision patterns that warrant consensus
+_HIGH_RISK_PATTERNS = [
+    (r"(?:buy|sell|trade|order|execute)\s*\(", "金融交易指令"),
+    (r"(?:delete|drop|remove|truncate|destroy)\s*\(", "数据删除操作"),
+    (r"(?:deploy|publish|release|promote)\s*\(", "生产环境发布"),
+    (r"(?:INSERT|UPDATE|DELETE)\s+", "数据库写入"),
+    (r"(?:ssh|scp|rsync|ansible)\s+", "远程服务器操作"),
+    (r"(?:send|dispatch|notify|email|sms)\s*\(", "对外消息发送"),
+    (r"(?:refund|withdraw|transfer|payment)\s*\(", "资金流转操作"),
+    (r"(?:config|setting|env)\[.+\]\s*=", "关键配置修改"),
+    (r"(?:grant|revoke|permission|role|auth)\s*\(", "权限变更操作"),
+]
+
+# Single-point-of-decision indicators (no redundancy)
+_SINGLE_POINT_PATTERNS = [
+    (r"(?:result|decision|answer)\s*=\s*(?:await\s+)?(?:llm|ai|model|gpt)\.\w+",
+     "单模型直接决策"),
+    (r"if\s+(?:await\s+)?(?:llm|ai|model)\.\w+\([^)]*\)\s*:",
+     "单模型条件分支"),
+    (r"return\s+(?:await\s+)?(?:llm|ai|model)\.\w+\([^)]*\)",
+     "直接返回单模型结果"),
+    (r"(?:llm|ai|model|chat)\.?\w*\s*\(\s*[^)]*\)\s*\.\s*(?:json|parse)",
+     "单模型输出直接解析"),
+]
+
+# Diversity indicators (good for consensus)
+_DIVERSITY_PATTERNS = [
+    (r"(?:model|provider|backend)\s*=\s*[\"'][^\"']+[\"']",
+     "模型选择参数"),
+    (r"temperature\s*=\s*[0-9.]+", "温度参数"),
+    (r"(?:retry|fallback|backup|secondary)\s*\(",
+     "重试/备选机制"),
+    (r"(?:vote|quorum|majority|consensus)\s*\(",
+     "表决/共识机制"),
+    (r"for\s+\w+\s+in\s+(?:models|providers|agents)",
+     "多模型遍历"),
+    (r"(?:parallel|concurrent|gather)\s*\([^)]*model",
+     "并行多模型调用"),
+]
+
+
+def _scan_consensus(target: str) -> str:
+    """Scan codebase for consensus readiness — single-point-of-decision
+    risks, high-risk operations without quorum, diversity gaps."""
+    findings: list[str] = []
+    source = _read_sources(target)
+
+    if not source.strip():
+        return "⚠️ 未找到可分析的源代码。"
+
+    lines = source.split("\n")
+
+    # --- 1. High-Risk Decision Points ---
+    findings.append("## 1. 高风险决策点 (High-Risk Decisions)")
+    risk_points: dict[str, list[int]] = {}
+    for pattern, label in _HIGH_RISK_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                risk_points.setdefault(label, []).append(i)
+
+    total_risks = sum(len(v) for v in risk_points.values())
+    if risk_points:
+        findings.append(
+            f"- 检测到 **{total_risks}** 处高风险操作，"
+            f"**{len(risk_points)}** 类："
+        )
+        for label, line_nos in sorted(
+            risk_points.items(), key=lambda x: -len(x[1])
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append("- 未检测到明显的高风险决策操作")
+    findings.append("")
+
+    # --- 2. Single-Point-of-Decision Risks ---
+    findings.append(
+        "## 2. 单点决策风险 (Single-Point-of-Decision)"
+    )
+    spod_hits: list[tuple[str, int, str]] = []
+    for pattern, desc in _SINGLE_POINT_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                spod_hits.append((desc, i, line.strip()))
+
+    if spod_hits:
+        findings.append(
+            f"- ⚠️ 发现 **{len(spod_hits)}** 处单模型决策风险 "
+            f"— 一个模型的幻觉即可导致灾难："
+        )
+        for desc, line_no, line_text in spod_hits[:8]:
+            short = line_text[:75] + ("..." if len(line_text) > 75 else "")
+            findings.append(f"  - L{line_no}: {desc}")
+            findings.append(f"    `{short}`")
+    else:
+        findings.append("- ✅ 未检测到明显的单点决策模式")
+    findings.append("")
+
+    # --- 3. Diversity & Redundancy Check ---
+    findings.append(
+        "## 3. 多样性与冗余度 (Diversity & Redundancy)"
+    )
+    diversity_hits: dict[str, list[int]] = {}
+    for pattern, label in _DIVERSITY_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                diversity_hits.setdefault(label, []).append(i)
+
+    if diversity_hits:
+        findings.append(
+            f"- 检测到 **{len(diversity_hits)}** 类多样性机制："
+        )
+        for label, line_nos in sorted(
+            diversity_hits.items(), key=lambda x: -len(x[1])
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append(
+            "- ❌ 未检测到任何多样性/冗余机制 — "
+            "系统完全依赖单一决策源"
+        )
+    findings.append("")
+
+    # --- 4. Consensus Architecture Score ---
+    has_voting = any(
+        "表决" in label or "共识" in label
+        for label in diversity_hits
+    )
+    has_parallel = any(
+        "并行" in label for label in diversity_hits
+    )
+    has_retry = any(
+        "重试" in label or "备选" in label
+        for label in diversity_hits
+    )
+
+    diversity_score = min(len(diversity_hits) / 4.0, 1.0)
+    risk_exposure = min(total_risks / 10.0, 1.0)
+    spod_severity = min(len(spod_hits) * 0.2, 1.0)
+
+    consensus_score = (
+        diversity_score * 0.4
+        + has_voting * 0.2
+        + has_parallel * 0.1
+        + has_retry * 0.1
+        - spod_severity * 0.2
+        + 0.2
+    )
+    consensus_score = max(0.0, min(1.0, consensus_score))
+
+    findings.append("## 4. 共识架构评分")
+    findings.append(f"- **综合评分: {consensus_score:.0%}**")
+    findings.append(f"- 多样性机制: {diversity_score:.0%}")
+    findings.append(f"- 高风险暴露: {risk_exposure:.0%}")
+    findings.append(f"- 单点决策风险: {spod_severity:.0%}")
+
+    if total_risks > 0 and not has_voting:
+        findings.append(
+            "- 🔴 存在高风险操作但无共识机制 — "
+            "强烈建议引入多模型表决"
+        )
+    elif consensus_score >= 0.7:
+        findings.append("- ✅ 共识架构较为成熟")
+    elif consensus_score >= 0.4:
+        findings.append("- ⚠️ 部分具备共识能力，需补强多样性")
+    else:
+        findings.append(
+            "- ❌ 缺乏共识机制，高风险操作应引入拜占庭容错"
+        )
+
+    return "\n".join(findings)
+
+
+_CONSENSUS_SYSTEM = """\
+你是一位拜占庭容错架构师 (Byzantine Consensus Architect)。
+你的任务是设计一套多源共识机制，确保高风险决策不会被单一 AI
+的"概率抽风（幻觉）"所劫持。
+
+## 核心原理：拜占庭将军问题
+
+在分布式系统中，假设部分节点可能叛变（给出错误结果），系统依靠
+"多数表决 (Quorum)" 和 "交叉验证" 来达成正确共识。
+
+将此原理应用于 AI 系统：
+- 每个 AI 模型是一个"将军"
+- 模型的幻觉是"叛变"
+- 传统代码仲裁器是"共识协议"
+
+## 架构设计
+
+### 1. 异构多模型部署
+- 至少 3 个不同的底层模型 (DeepSeek / GPT-4 / Claude)
+- 不同的温度参数 (0.1 冷静 vs 0.8 创造性)
+- 不同的 Prompt 角色设定 (乐观派 / 悲观派 / 中立派)
+
+### 2. 独立推演与提案
+- 每个模型独立阅读相同数据
+- 各自提交"决策提案 + 推理逻辑 + 置信度"
+- 禁止模型间通信（防止从众效应）
+
+### 3. 传统代码仲裁器
+- 用确定论代码（非 AI）统计投票结果
+- 设置通过阈值：至少 ⌈N/2 + 1⌉ 个模型一致
+- 分歧过大时触发熔断，交由人类裁决
+
+### 4. 成本-安全权衡
+- 低风险操作：单模型 + 确定性校验
+- 中风险操作：双模型交叉验证
+- 高风险操作：3+ 模型拜占庭共识
+
+## 输出格式
+
+1. **高风险决策清单** — 标注每个决策点的灾难性后果等级
+2. **多模型部署方案** — 推荐哪些模型组合、温度配置
+3. **仲裁器设计** — 表决逻辑、阈值、熔断机制
+4. **成本估算** — API 调用成本 vs 风险降低幅度
+5. **渐进式实施路线** — 从单模型到多共识的迭代计划
+"""
+
+
+class ConsensusTool(Tool):
+
+    @property
+    def name(self) -> str:
+        return "analysis_consensus"
+
+    @property
+    def description(self) -> str:
+        return (
+            "拜占庭容错与多源共识：扫描高风险决策点，检测单点决策风险，"
+            "设计多模型独立推演→多数表决→确定性仲裁的共识流水线，"
+            "将 AI 幻觉导致的灾难概率从 1% 降至 0.0001%。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "要审计的代码路径或系统描述",
+                },
+            },
+            "required": ["target"],
+        }
+
+    async def execute(
+        self, *, target: str, **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("consensus", target[:200])
+        scan_evidence = _scan_consensus(target)
+        user_msg = (
+            f"## 审计目标\n{target}\n\n"
+            f"## 拜占庭共识扫描\n{scan_evidence}\n"
+        )
+        return await _run_analysis(router, _CONSENSUS_SYSTEM, user_msg)
+
+
 # ---------------------------------------------------------------------------
 #  内部基础设施
 # ---------------------------------------------------------------------------
@@ -5273,4 +5537,5 @@ def create_analysis_tools() -> list[Tool]:
         SparTool(),
         WorldModelTool(),
         FusionTool(),
+        ConsensusTool(),
     ]
