@@ -568,8 +568,6 @@ class GoalPursuitLoop:
         """Execute planned actions using real tool calls."""
         results: list[dict[str, Any]] = []
 
-        bash_tool = self._tools.get("bash_run")
-
         for action in actions:
             if self._cancelled:
                 break
@@ -578,30 +576,43 @@ class GoalPursuitLoop:
             description = action["description"]
             tool_name = action["tool"]
 
-            logger.info("Executing action %s: %s", action_id, description)
+            logger.info("Executing action %s: %s via %s", action_id, description, tool_name)
 
-            # Strategy 1: bash_run as universal executor (most reliable)
-            if bash_tool:
-                result = await self._execute_via_bash(
-                    bash_tool, description, action_id,
+            result: dict[str, Any] | None = None
+
+            # Route to the appropriate executor based on planned tool
+            if tool_name in ("file_write", "file_edit", "file_read"):
+                tool = self._tools.get(tool_name)
+                if tool:
+                    result = await self._execute_tool_action(
+                        tool, tool_name, description, action_id,
+                    )
+            elif tool_name == "bash_run":
+                bash_tool = self._tools.get("bash_run")
+                if bash_tool:
+                    result = await self._execute_via_bash(
+                        bash_tool, description, action_id,
+                    )
+            else:
+                # Unknown tool or generic action — try bash first, then tool
+                bash_tool = self._tools.get("bash_run")
+                if bash_tool:
+                    result = await self._execute_via_bash(
+                        bash_tool, description, action_id,
+                    )
+                    if result["status"] != "completed":
+                        tool = self._tools.get(tool_name)
+                        if tool:
+                            result = await self._execute_tool_action(
+                                tool, tool_name, description, action_id,
+                            )
+
+            # Fallback to sub-agent
+            if result is None:
+                result = await self._execute_via_agent(
+                    description, action_id,
                 )
-                if result["status"] == "completed":
-                    results.append(result)
-                    continue
 
-            # Strategy 2: Try direct tool call with LLM parameter translation
-            tool = self._tools.get(tool_name)
-            if tool:
-                result = await self._execute_tool_action(
-                    tool, tool_name, description, action_id,
-                )
-                results.append(result)
-                continue
-
-            # Strategy 3: Delegate to sub-agent
-            result = await self._execute_via_agent(
-                description, action_id,
-            )
             results.append(result)
 
         return results
@@ -613,12 +624,158 @@ class GoalPursuitLoop:
         description: str,
         action_id: str,
     ) -> dict[str, Any]:
-        """Execute an action by translating description to tool args via LLM."""
+        """Execute a file tool action by generating content via LLM."""
+        try:
+            if tool_name == "file_write":
+                return await self._execute_file_write(
+                    tool, description, action_id,
+                )
+            elif tool_name == "file_edit":
+                return await self._execute_file_edit(
+                    tool, description, action_id,
+                )
+            else:
+                return await self._execute_generic_tool(
+                    tool, tool_name, description, action_id,
+                )
+        except Exception as e:
+            logger.warning("Tool action %s failed: %s", action_id, e)
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": f"{type(e).__name__}: {e}",
+            }
+
+    async def _execute_file_write(
+        self, tool: Any, description: str, action_id: str,
+    ) -> dict[str, Any]:
+        """Generate file content via LLM and write it."""
+        # Extract path from description
+        import re
+        path_match = re.search(r'([\w/.]+\.py)', description)
+        path = path_match.group(1) if path_match else ""
+
+        # Read existing content if file exists
+        existing = ""
+        if path:
+            try:
+                read_tool = self._tools.get("file_read")
+                if read_tool:
+                    existing = await read_tool.execute(path=path)
+            except Exception:
+                pass
+
+        context = self._build_codebase_context()
+        prompt = (
+            f"Action: {description}\n\n"
+            f"## Codebase Context\n{context}\n\n"
+        )
+        if existing and "not found" not in existing.lower():
+            prompt += f"## Current file content ({path})\n{existing}\n\n"
+            prompt += (
+                "Generate the COMPLETE updated file content. "
+                "Output ONLY the Python code, no markdown fences, no explanation."
+            )
+        else:
+            prompt += (
+                "Generate the COMPLETE file content. "
+                "Output ONLY the Python code, no markdown fences, no explanation."
+            )
+
+        content = await self._llm_call(
+            "You generate complete Python source files. "
+            "Output only valid Python code, no markdown.",
+            prompt,
+        )
+        # Strip markdown fences if present
+        text = content.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+        if not path:
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": "Could not determine file path from description",
+            }
+
+        output = await tool.execute(path=path, content=text)
+        return {
+            "action_id": action_id,
+            "status": "completed",
+            "output": str(output)[:3000],
+        }
+
+    async def _execute_file_edit(
+        self, tool: Any, description: str, action_id: str,
+    ) -> dict[str, Any]:
+        """Generate old_text/new_text for file_edit via LLM."""
+        import re
+        path_match = re.search(r'([\w/.]+\.py)', description)
+        path = path_match.group(1) if path_match else ""
+        if not path:
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": "Could not determine file path",
+            }
+
+        # Read current content
+        existing = ""
+        try:
+            read_tool = self._tools.get("file_read")
+            if read_tool:
+                existing = await read_tool.execute(path=path)
+        except Exception:
+            pass
+
+        prompt = (
+            f"Action: {description}\n\n"
+            f"## Current file content ({path})\n{existing}\n\n"
+            "Generate the edit. Output EXACTLY two blocks:\n"
+            "===OLD===\n<exact text to find>\n===NEW===\n<replacement text>\n"
+            "The OLD text must be an exact substring from the current file."
+        )
+
+        response = await self._llm_call(
+            "You generate precise file edits. Output OLD and NEW blocks.",
+            prompt,
+        )
+
+        # Parse OLD/NEW blocks
+        old_text = ""
+        new_text = ""
+        if "===OLD===" in response and "===NEW===" in response:
+            parts = response.split("===OLD===")[1].split("===NEW===")
+            old_text = parts[0].strip()
+            new_text = parts[1].strip() if len(parts) > 1 else ""
+
+        if not old_text:
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": "Failed to parse edit blocks from LLM response",
+            }
+
+        output = await tool.execute(
+            path=path, old_text=old_text, new_text=new_text,
+        )
+        return {
+            "action_id": action_id,
+            "status": "completed",
+            "output": str(output)[:3000],
+        }
+
+    async def _execute_generic_tool(
+        self, tool: Any, tool_name: str, description: str, action_id: str,
+    ) -> dict[str, Any]:
+        """Execute generic tool by translating description to JSON params."""
+        import json
+
         schema = tool.parameters_schema
         properties = schema.get("properties", {})
         required = schema.get("required", [])
 
-        # Build a prompt to translate description into tool parameters
         param_desc = "\n".join(
             f"  - {k}: {v.get('description', v.get('type', 'string'))}"
             for k, v in properties.items()
@@ -633,35 +790,23 @@ class GoalPursuitLoop:
             f"No explanation, just the JSON."
         )
 
-        try:
-            response = await self._llm_call(
-                "You translate action descriptions into tool parameters. "
-                "Output only valid JSON.",
-                translation_prompt,
-            )
+        response = await self._llm_call(
+            "You translate action descriptions into tool parameters. "
+            "Output only valid JSON.",
+            translation_prompt,
+        )
 
-            # Parse JSON from response
-            import json
-            text = response.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
-            params = json.loads(text)
+        text = response.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
+        params = json.loads(text)
 
-            output = await tool.execute(**params)
-            return {
-                "action_id": action_id,
-                "status": "completed",
-                "output": str(output)[:3000],
-            }
-        except Exception as e:
-            logger.warning(
-                "Tool action %s failed: %s", action_id, e,
-            )
-            return {
-                "action_id": action_id,
-                "status": "error",
-                "output": f"{type(e).__name__}: {e}",
-            }
+        output = await tool.execute(**params)
+        return {
+            "action_id": action_id,
+            "status": "completed",
+            "output": str(output)[:3000],
+        }
 
     async def _execute_via_bash(
         self,
@@ -674,13 +819,15 @@ class GoalPursuitLoop:
         context = self._build_codebase_context()
 
         command_prompt = (
-            f"Given this action: \"{description}\"\n\n"
+            f'Given this action: "{description}"\n\n'
             f"## Codebase Context\n{context}\n\n"
-            f"Generate a single bash command that accomplishes it. Rules:\n"
-            f"- Use heredoc (cat <<'EOF' > file.py ... EOF) for writing files\n"
-            f"- Use python3 not python\n"
-            f"- For sed edits, use: sed -i '' 's/old/new/' file\n"
-            f"- Output ONLY the command, no explanation, no markdown fences\n"
+            "Generate a bash command or pipeline. Rules:\n"
+            "- To CREATE a file: use heredoc: "
+            "cat > path/file.py << 'PYEOF'\\n<content>\\nPYEOF\n"
+            "- To EDIT a file: prefer python3 -c to read lines and modify\n"
+            "- NEVER use sed for multi-line edits\n"
+            "- Use python3 not python\n"
+            "- Output ONLY the command, no explanation, no markdown fences\n"
         )
 
         try:
