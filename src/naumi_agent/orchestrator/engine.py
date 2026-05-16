@@ -665,6 +665,7 @@ class AgentEngine:
                             "name": tc.name,
                             "status": result.status,
                             "duration_ms": result.duration_ms,
+                            "content": result.content[:2000] if result.content else "",
                         },
                     )
                     self._behavior_monitor.record_tool_call(
