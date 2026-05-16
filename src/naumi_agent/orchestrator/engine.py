@@ -6,6 +6,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from naumi_agent.config.settings import AppConfig
@@ -20,6 +21,8 @@ from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
+from naumi_agent.skills.loader import SkillLoader
+from naumi_agent.skills.tool import create_skill_tools
 from naumi_agent.streaming.event_bus import EventEmitter
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.browser import BrowserSession, create_browser_tools
@@ -207,9 +210,12 @@ class AgentEngine:
 
         self._mcp_manager: MCPClientManager | None = None
 
+        self.skill_loader = SkillLoader()
+
         self._register_builtin_tools()
         self._register_subagent_manager()
         self._register_shell_hooks()
+        self._register_skills()
 
     def _register_builtin_tools(self) -> None:
         for tool in create_builtin_tools():
@@ -283,6 +289,28 @@ class AgentEngine:
                 registered += 1
         if registered:
             logger.info("Registered %d shell hooks from config", registered)
+
+    def _register_skills(self) -> None:
+        """从配置的搜索路径加载 Skill 并注册为 Tool."""
+        search_paths = self._config.skills.search_paths
+
+        # 默认搜索路径：项目 .naumi/skills/ 和用户 ~/.naumi/skills/
+        default_paths = [
+            str(Path.cwd() / ".naumi" / "skills"),
+            str(Path.home() / ".naumi" / "skills"),
+        ]
+        all_paths = default_paths + search_paths
+
+        self.skill_loader = SkillLoader(search_paths=all_paths)
+        skills = self.skill_loader.load_all()
+
+        if not skills:
+            return
+
+        for tool in create_skill_tools(skills):
+            self._tool_registry.register(tool)
+
+        logger.info("Registered %d skills from %d search paths", len(skills), len(all_paths))
 
     async def setup_mcp_tools(self) -> None:
         """从配置连接 MCP Server 并注册工具（需在异步上下文中调用）."""

@@ -248,6 +248,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
     match command:
         case "/hooks":
             _show_hooks(engine)
+        case "/skills":
+            _show_skills(engine)
         case "/tools":
             tools = engine.tool_registry.all()
             console.print("[bold]可用工具:[/bold]")
@@ -535,8 +537,14 @@ async def _handle_command(engine: Any, cmd: str) -> None:
         case "/help":
             _print_help()
         case _:
-            console.print(f"[yellow]未知命令: {command}[/yellow]")
-            _print_help()
+            # 尝试匹配已加载的 Skill
+            skill_name = command.lstrip("/")
+            skill = engine.skill_loader.get(skill_name) if hasattr(engine, "skill_loader") else None
+            if skill:
+                await _run_skill(engine, skill_name, arg)
+            else:
+                console.print(f"[yellow]未知命令: {command}[/yellow]")
+                _print_help()
 
 
 def _print_banner() -> None:
@@ -560,6 +568,7 @@ def _print_help() -> None:
         ("/model", "显示模型配置"),
         ("/usage", "显示 token 用量"),
         ("/hooks", "显示已注册的钩子"),
+        ("/skills", "列出已加载的 Skill"),
         ("/history", "查看历史会话列表"),
         ("/load <id>", "加载指定会话并继续对话"),
         ("/delete <id>", "删除指定会话"),
@@ -917,6 +926,74 @@ async def _new_conversation(engine: Any) -> None:
     # Reset session so next interaction creates a fresh one
     engine._session = None
     console.print("[green]新对话已开始[/green]")
+
+
+def _show_skills(engine: Any) -> None:
+    """显示已加载的 Skill."""
+    if not hasattr(engine, "skill_loader"):
+        console.print("[dim]Skill 系统未加载[/dim]")
+        return
+
+    skills = engine.skill_loader.all()
+    if not skills:
+        console.print("[dim]没有已加载的 Skill[/dim]")
+        console.print(
+            "[dim]提示：将 SKILL.md 文件放入 .naumi/skills/<skill-name>/ 目录[/dim]",
+        )
+        return
+
+    console.print("[bold]已加载的 Skill:[/bold]")
+    for skill in skills:
+        args_info = ""
+        if skill.arguments:
+            parts = []
+            for a in skill.arguments:
+                tag = "*" if a.required else ""
+                parts.append(f"{a.name}{tag}")
+            args_info = f" ({', '.join(parts)})"
+        console.print(
+            f"  [cyan]/{skill.name}[/cyan] — {skill.description}{args_info}",
+        )
+    console.print()
+
+
+async def _run_skill(engine: Any, skill_name: str, arguments: str) -> None:
+    """通过 CLI 执行一个 Skill."""
+    skill = engine.skill_loader.get(skill_name)
+    if not skill:
+        console.print(f"[red]Skill '{skill_name}' 未找到[/red]")
+        return
+
+    if not arguments and skill.arguments:
+        required = [a for a in skill.arguments if a.required]
+        if required:
+            names = ", ".join(a.name for a in required)
+            console.print(
+                f"[yellow]用法: /{skill_name} <{names}>[/yellow]",
+            )
+            return
+
+    console.print(f"[bold yellow]⚡ Skill: {skill_name}[/bold yellow]")
+    rendered = skill.render(arguments=arguments)
+
+    # 将渲染后的指令作为用户消息注入 engine 执行
+    with console.status("[bold green]执行中...[/bold green]"):
+        result = await engine.run_streaming(rendered, _cli_event_handler)
+
+    if result.status == "error" and result.error:
+        console.print(f"[red]错误: {result.error}[/red]")
+        return
+
+    if result.response:
+        console.print()
+        console.print(
+            Panel(
+                Markdown(result.response),
+                title=f"[bold yellow]⚡ {skill_name}[/bold yellow]",
+                border_style="yellow",
+                padding=(1, 2),
+            ),
+        )
 
 
 def _check_api_key(config: AppConfig) -> None:
