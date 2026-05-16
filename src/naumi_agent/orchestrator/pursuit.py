@@ -1190,7 +1190,7 @@ class GoalPursuitLoop:
             name=agent_name,
             task_description=description,
             max_turns=5,
-            max_budget_usd=0.3,
+            max_budget_usd=float("inf"),
         )
         try:
             subtask = SubTask(

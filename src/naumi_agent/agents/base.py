@@ -28,7 +28,7 @@ class AgentConfig:
     model_tier: str = "capable"
     system_prompt: str = ""
     max_turns: int = 20
-    max_budget_usd: float = 1.0
+    max_budget_usd: float = float("inf")
     tools: list[str] = field(default_factory=list)
     permission_level: str = "moderate"
 
@@ -135,16 +135,6 @@ class BaseAgent:
 
             total_tokens += response.usage.total_tokens
             total_cost += response.usage.cost_usd
-
-            if total_cost >= self.config.max_budget_usd:
-                return AgentResult(
-                    status="error",
-                    response=messages[-1].get("content", "") if messages else "",
-                    total_tokens=total_tokens,
-                    total_cost_usd=total_cost,
-                    turns=turn + 1,
-                    error="budget_exceeded",
-                )
 
             if response.tool_calls:
                 messages.append(
