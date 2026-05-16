@@ -393,14 +393,6 @@ class AgentEngine:
                 )
 
     def _check_budget(self) -> AgentResult | None:
-        """检查预算是否超限，超限则返回错误结果."""
-        if self._budget_tracker.is_exceeded():
-            return AgentResult(
-                status="error",
-                response="预算已达上限，停止执行。",
-                usage=self._usage,
-                error="budget_exceeded",
-            )
         return None
 
     async def run(self, task: str) -> AgentResult:
