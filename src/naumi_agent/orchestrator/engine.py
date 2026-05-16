@@ -247,6 +247,11 @@ class AgentEngine:
         except Exception:
             pass  # memory tools optional (chromadb may not be installed)
 
+        # Hot-reload tool
+        from naumi_agent.tools.hotreload import HotReloadTool
+
+        self._tool_registry.register(HotReloadTool())
+
     def _register_subagent_manager(self) -> None:
         from naumi_agent.orchestrator.subagent_manager import SubAgentManager
         from naumi_agent.tools.analysis import set_analysis_subagent_manager
@@ -356,6 +361,50 @@ class AgentEngine:
         if self._mcp_manager:
             await self._mcp_manager.disconnect_all()
         await self.session_store.close()
+
+    async def reload_tools(self, domain: str = "tools") -> dict[str, Any]:
+        """热重载指定域的模块并重新注册工具.
+
+        Args:
+            domain: "tools", "memory", "skills", "all"
+
+        Returns:
+            重载结果统计
+        """
+        from naumi_agent.tools.hotreload import reload_domain
+
+        results = reload_domain(domain)
+
+        reloaded = sum(1 for r in results if r["status"] == "reloaded")
+        errors = sum(1 for r in results if r["status"] == "error")
+
+        # If tools were reloaded, re-register analysis tools (most common case)
+        if domain in ("tools", "all") and reloaded > 0:
+            try:
+                from naumi_agent.tools.analysis import (
+                    create_analysis_tools,
+                    set_analysis_router,
+                )
+
+                set_analysis_router(self._router)
+                for tool in create_analysis_tools():
+                    self._tool_registry.register(tool)
+            except Exception as e:
+                logger.warning("Failed to re-register analysis tools: %s", e)
+
+        # If skills were reloaded, re-register
+        if domain in ("skills", "all") and reloaded > 0:
+            self._register_skills()
+
+        logger.info(
+            "Hot-reload complete: %d reloaded, %d errors", reloaded, errors,
+        )
+
+        return {
+            "reloaded": reloaded,
+            "errors": errors,
+            "details": results,
+        }
 
     def set_system_prompt(self, prompt: str) -> None:
         """设置/更新系统提示词."""

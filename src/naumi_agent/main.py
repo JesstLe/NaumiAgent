@@ -538,6 +538,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 await _run_pursue(engine, arg)
         case "/self-review":
             await _run_self_review(engine, arg)
+        case "/reload":
+            await _run_reload(engine, arg)
         case "/help":
             _print_help()
         case _:
@@ -612,6 +614,7 @@ def _print_help() -> None:
         ("/hook <目标>", "逆向插桩 — 黑盒解剖"),
         ("/pursue <目标>", "目标追踪 — 自主循环执行直至真正达成"),
         ("/self-review [模块]", "自我审查 — 扫描自身源码质量与架构"),
+        ("/reload [域]", "热重载 — 重载模块无需重启 (tools/memory/skills/all)"),
         ("/new", "保存当前会话并开始新对话"),
         ("/clear", "清除当前会话（不保存）"),
         ("/quit", "退出"),
@@ -846,6 +849,32 @@ async def _run_self_review(engine: Any, arg: str) -> None:
             padding=(1, 2),
         ),
     )
+    console.print()
+
+
+async def _run_reload(engine: Any, arg: str) -> None:
+    """执行热重载."""
+    domain = arg.strip() or "tools"
+    valid_domains = {"tools", "memory", "skills", "agents", "hooks", "all"}
+
+    if domain not in valid_domains:
+        console.print(
+            f"[yellow]未知域: {domain}[/yellow]\n"
+            f"[dim]可选: {', '.join(sorted(valid_domains))}[/dim]",
+        )
+        return
+
+    console.print(f"[bold yellow]🔄 热重载 {domain}...[/bold yellow]")
+    result = await engine.reload_tools(domain)
+
+    if result["errors"] > 0:
+        console.print(f"[green]✅ {result['reloaded']} 个模块已重载[/green]")
+        console.print(f"[red]❌ {result['errors']} 个模块重载失败[/red]")
+        for d in result["details"]:
+            if d["status"] == "error":
+                console.print(f"  [red]{d['module']}: {d['error']}[/red]")
+    else:
+        console.print(f"[green]✅ {result['reloaded']} 个模块已重载[/green]")
     console.print()
 
 
