@@ -844,7 +844,7 @@ class GoalPursuitLoop:
             prompt,
         )
 
-        logger.info(
+        logger.debug(
             "file_edit LLM response for %s (first 800 chars): %s",
             path, content[:800],
         )
