@@ -5273,6 +5273,7 @@ _AI_CALL_PATTERNS = [
     (r"(?:ChatCompletion|completion|generate|chat)\s*\(", "生成式 AI 接口"),
     (r"(?:embedding|embed)\s*\(", "向量嵌入调用"),
     (r"(?:classify|predict|analyze)\s*\([^)]*model", "ML 推理调用"),
+# kimi-k2.6 限制：temperature 参数取值范围为 0-1，且模型对该参数敏感
     (r"temperature\s*=\s*[^0]", "非零温度参数 (随机采样开启)"),
     (r"(?:prompt|system_prompt)\s*=", "Prompt 变量定义"),
     (r"\.content\s*$", "LLM 响应内容提取"),

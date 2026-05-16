@@ -242,6 +242,19 @@ class FileEditTool(Tool):
             return f"Error editing file: {type(e).__name__}: {e}"
 
 
+class YamlMicroVerifyTool(Tool):
+    @property
+    def name(self): return 'yaml_micro_verify'
+    @property
+    def description(self): return '语法级微验证：绕过可能超时的 yaml_validate，使用最小化 Python 3 命令仅做加载测试并输出极简标记，杜绝长输出与 Lint 干扰；若环境 Python 仍异常，则自动降级为系统常备的 `ruby -ryaml` 做等价验证'
+    @property
+    def parameters_schema(self): return {'type': 'object', 'properties': {'file_path': {'type': 'string', 'description': 'Path to YAML file'}}, 'required': ['file_path']}
+    async def execute(self, *, file_path, **kwargs):
+        cmd = f"python3 -c \"import yaml,sys; yaml.safe_load(open(sys.argv[1])); print('OK')\" \"{file_path}\" 2>/dev/null || ruby -ryaml -e \"YAML.load_file(ARGV[0]); puts 'OK'\" \"{file_path}\" 2>/dev/null || echo FAIL"
+        proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, _ = await proc.communicate()
+        return 'YAML_SYNTAX_OK' if stdout.decode().strip() == 'OK' else 'YAML_SYNTAX_FAIL'
+
 class BashRunTool(Tool):
     """执行 shell 命令."""
 
@@ -311,4 +324,46 @@ class BashRunTool(Tool):
 
 def create_builtin_tools() -> list[Tool]:
     """创建所有内置工具实例."""
-    return [FileReadTool(), FileWriteTool(), FileEditTool(), BashRunTool()]
+    return [FileReadTool(), FileWriteTool(), FileEditTool(), YamlMicroVerifyTool(), BashRunTool(), YamlValidateTool()]
+
+class YamlValidateTool(Tool):
+    @property
+    def name(self):
+        return 'yaml_validate'
+
+    @property
+    def description(self):
+        return '使用 Python 仅做只读 YAML 语法校验，确保插入注释后文件仍能正常解析'
+
+    @property
+    def parameters_schema(self):
+        return {
+            'type': 'object',
+            'properties': {
+                'file_path': {
+                    'type': 'string',
+                    'description': '待校验的 YAML 文件路径'
+                },
+                'encoding': {
+                    'type': 'string',
+                    'description': '文件编码，默认 utf-8',
+                    'default': 'utf-8'
+                }
+            },
+            'required': ['file_path']
+        }
+
+    async def execute(self, *, file_path, encoding='utf-8', **kwargs):
+        import os
+        if not os.path.isfile(file_path):
+            return f'错误：文件不存在 {file_path}'
+        try:
+            import yaml
+            with open(file_path, 'r', encoding=encoding) as f:
+                yaml.safe_load(f)
+            return f'YAML 语法校验通过：{file_path}'
+        except ImportError:
+            return '错误：未安装 PyYAML，请执行 pip install pyyaml'
+        except Exception as e:
+            return f'YAML 语法校验失败：{type(e).__name__}: {e}'
+
