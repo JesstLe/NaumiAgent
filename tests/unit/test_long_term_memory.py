@@ -297,7 +297,7 @@ class TestDeleteAndCount:
         assert await memory.count() == 0
 
     @pytest.mark.asyncio
-    async def test_forget_old(self, memory):
+    async def test_forget_old_marks_dormant(self, memory):
         old_time = (datetime.now() - timedelta(days=100)).isoformat()
         new_time = datetime.now().isoformat()
 
@@ -307,6 +307,147 @@ class TestDeleteAndCount:
         # Access the new memory so it has access_count > 0
         await memory.recall("新记忆", top_k=1)
 
-        forgotten = await memory.forget_old(max_age_days=90, min_access_count=2)
+        forgotten = await memory.forget_old(min_access_count=2)
         assert forgotten == 1
+        # Not deleted, just marked dormant
+        assert await memory.count() == 2
+
+        # Dormant memories are excluded from recall
+        results = await memory.recall("旧记忆", top_k=5)
+        assert all(r.entry.content != "旧记忆" for r in results)
+
+    @pytest.mark.asyncio
+    async def test_forget_deletes_very_old_dormant(self, memory):
+        very_old = (datetime.now() - timedelta(days=200)).isoformat()
+        await _store(memory, "很旧的记忆", created_at=very_old, updated_at=very_old)
+
+        # First pass: mark dormant
+        await memory.forget_old(min_access_count=2)
         assert await memory.count() == 1
+
+        # Second pass: delete dormant (200 days > _DELETE_AFTER_DAYS=180)
+        await memory.forget_old(min_access_count=2)
+        assert await memory.count() == 0
+
+
+# ---------------------------------------------------------------------------
+#  Stats, Search, Export
+# ---------------------------------------------------------------------------
+
+
+class TestStatsSearchExport:
+    @pytest.mark.asyncio
+    async def test_stats_empty(self, memory):
+        stats = await memory.stats()
+        assert stats.total == 0
+        assert stats.active == 0
+
+    @pytest.mark.asyncio
+    async def test_stats_counts(self, memory):
+        await _store(memory, "fact 1", category="fact")
+        await _store(memory, "pref 1", category="preference")
+
+        stats = await memory.stats()
+        assert stats.total == 2
+        assert stats.active == 2
+        assert stats.dormant == 0
+        assert "fact" in stats.by_category
+        assert "preference" in stats.by_category
+
+    @pytest.mark.asyncio
+    async def test_stats_with_dormant(self, memory):
+        old_time = (datetime.now() - timedelta(days=100)).isoformat()
+        await _store(memory, "旧记忆", created_at=old_time, updated_at=old_time)
+        await memory.forget_old(min_access_count=2)
+
+        stats = await memory.stats()
+        assert stats.total == 1
+        assert stats.dormant == 1
+        assert stats.active == 0
+
+    @pytest.mark.asyncio
+    async def test_stats_avg_access(self, memory):
+        await _store(memory, "mem1")
+        await _store(memory, "mem2")
+        await memory.recall("mem1", top_k=1)
+
+        stats = await memory.stats()
+        assert stats.avg_access_count >= 0.0
+
+    @pytest.mark.asyncio
+    async def test_search_returns_results(self, memory):
+        await _store(memory, "Python is great for web development")
+        await _store(memory, "Rust is great for systems programming")
+
+        results = await memory.search("Python", top_k=5)
+        assert len(results) >= 1
+        assert any("Python" in r.entry.content for r in results)
+
+    @pytest.mark.asyncio
+    async def test_search_excludes_dormant(self, memory):
+        old_time = (datetime.now() - timedelta(days=100)).isoformat()
+        await _store(memory, "dormant item", created_at=old_time, updated_at=old_time)
+        await memory.forget_old(min_access_count=2)
+
+        results = await memory.search("dormant", include_dormant=False)
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_search_includes_dormant(self, memory):
+        old_time = (datetime.now() - timedelta(days=100)).isoformat()
+        await _store(memory, "dormant item", created_at=old_time, updated_at=old_time)
+        await memory.forget_old(min_access_count=2)
+
+        results = await memory.search("dormant", include_dormant=True)
+        assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_export_returns_json(self, memory):
+        await _store(memory, "memory content")
+        exported = await memory.export_memories()
+        assert "[" in exported
+        assert "memory content" in exported
+
+    @pytest.mark.asyncio
+    async def test_export_empty(self, memory):
+        exported = await memory.export_memories()
+        assert exported == "[]"
+
+
+# ---------------------------------------------------------------------------
+#  Consolidate
+# ---------------------------------------------------------------------------
+
+
+class TestConsolidate:
+    @pytest.mark.asyncio
+    async def test_consolidate_dedup(self, memory):
+        await _store(memory, "duplicate content")
+        await _store(memory, "duplicate content")
+
+        # Both were merged by store dedup, but let's add via direct upsert
+        # to create a real duplicate scenario
+        from naumi_agent.memory.long_term import MemoryEntry
+
+        entry = MemoryEntry(
+            id="manual_dup",
+            content="duplicate content",
+            category="fact",
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat(),
+        )
+        memory._upsert_entry(entry)
+
+        count_before = await memory.count()
+        assert count_before >= 2
+
+        result = await memory.consolidate()
+        assert result["deduped"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_consolidate_forget(self, memory):
+        old_time = (datetime.now() - timedelta(days=100)).isoformat()
+        await _store(memory, "old memory", created_at=old_time, updated_at=old_time)
+
+        result = await memory.consolidate()
+        assert result["forgotten"] >= 1
