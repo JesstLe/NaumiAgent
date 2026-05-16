@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -14,11 +15,15 @@ from naumi_agent.config.settings import MemoryConfig
 
 logger = logging.getLogger(__name__)
 
-# Deduplication: cosine similarity threshold above which memories are merged.
 _DEDUP_SIMILARITY_THRESHOLD = 0.92
-
-# Scoring: half-life in days for recency decay.
 _RECENCY_HALF_LIFE_DAYS = 30.0
+
+# Forget policy: days before a memory is marked dormant / permanently deleted.
+_DORMANT_AFTER_DAYS = 90
+_DELETE_AFTER_DAYS = 180
+# Protected categories get longer retention.
+_PROTECTED_CATEGORIES = frozenset({"preference"})
+_PROTECTED_EXTRA_DAYS = 60
 
 
 @dataclass(frozen=True)
@@ -32,6 +37,7 @@ class MemoryEntry:
     created_at: str = ""
     updated_at: str = ""
     access_count: int = 0
+    status: str = "active"  # "active" | "dormant"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -42,6 +48,7 @@ class MemoryEntry:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "access_count": self.access_count,
+            "status": self.status,
         }
 
 
@@ -51,6 +58,17 @@ class MemorySearchResult:
 
     entry: MemoryEntry
     relevance: float  # 0.0 - 1.0
+
+
+@dataclass(frozen=True)
+class MemoryStats:
+    """记忆统计信息."""
+
+    total: int = 0
+    active: int = 0
+    dormant: int = 0
+    by_category: dict[str, int] = field(default_factory=dict)
+    avg_access_count: float = 0.0
 
 
 class LongTermMemory:
@@ -105,7 +123,7 @@ class LongTermMemory:
                 category=entry.category,
                 metadata=entry.metadata,
                 created_at=entry.created_at or now,
-                updated_at=now,
+                updated_at=entry.updated_at or now,
                 access_count=entry.access_count,
             )
 
@@ -119,7 +137,14 @@ class LongTermMemory:
         if self._collection.count() == 0:
             return None
 
-        where_filter = {"category": category} if category else None
+        # Only check active memories for dedup
+        if category:
+            where_filter: Any = {"$and": [
+                {"status": "active"},
+                {"category": category},
+            ]}
+        else:
+            where_filter = {"status": "active"}
         n_results = min(1, self._collection.count())
 
         results = self._collection.query(
@@ -178,6 +203,7 @@ class LongTermMemory:
             "created_at": entry.created_at,
             "updated_at": entry.updated_at,
             "access_count": str(entry.access_count),
+            "status": entry.status,
         }
         meta.update({k: str(v) for k, v in entry.metadata.items()})
 
@@ -205,7 +231,15 @@ class LongTermMemory:
         if count == 0:
             return []
 
-        where_filter = {"category": category} if category else None
+        # ChromaDB requires exactly one operator per where clause level.
+        # Multiple conditions must be wrapped in $and.
+        if category:
+            where_filter: Any = {"$and": [
+                {"status": "active"},
+                {"category": category},
+            ]}
+        else:
+            where_filter = {"status": "active"}
         # Over-fetch for scoring/reranking, then trim to top_k
         fetch_k = min(top_k * 3, count)
 
@@ -239,7 +273,7 @@ class LongTermMemory:
 
             clean_meta = {
                 k: v for k, v in meta.items()
-                if k not in ("category", "created_at", "updated_at", "access_count")
+                if k not in ("category", "created_at", "updated_at", "access_count", "status")
             }
 
             entry = MemoryEntry(
@@ -250,6 +284,7 @@ class LongTermMemory:
                 created_at=meta.get("created_at", ""),
                 updated_at=meta.get("updated_at", ""),
                 access_count=int(meta.get("access_count", "0")),
+                status=meta.get("status", "active"),
             )
             result = MemorySearchResult(entry=entry, relevance=relevance)
             scored.append((composite, result))
@@ -265,6 +300,7 @@ class LongTermMemory:
                 "created_at": r.entry.created_at,
                 "updated_at": r.entry.updated_at,
                 "access_count": str(new_count),
+                "status": r.entry.status,
             }
             updated_meta.update({k: str(v) for k, v in r.entry.metadata.items()})
             self._collection.update(
@@ -284,38 +320,203 @@ class LongTermMemory:
         self._ensure_initialized()
         return self._collection.count() or 0
 
-    async def forget_old(self, max_age_days: int = 90, min_access_count: int = 1) -> int:
-        """遗忘长期未访问且低频的记忆."""
+    async def forget_old(self, max_age_days: int = 0, min_access_count: int = 1) -> int:
+        """两阶段遗忘：先标记 dormant，再删除超期的 dormant.
+
+        Phase 1: 将超过 dormant_after_days 且低频的 active 记忆标记为 dormant.
+        Phase 2: 将超过 delete_after_days 的 dormant 记忆永久删除.
+        protected 类别（preference）获得额外保护期.
+        """
         self._ensure_initialized()
 
-        all_data = self._collection.get(include=["metadatas"])
+        all_data = self._collection.get(include=["metadatas", "documents"])
         if not all_data["ids"]:
             return 0
 
         now = datetime.now()
+        dormant_count = 0
+        delete_count = 0
         to_delete: list[str] = []
 
         for i, doc_id in enumerate(all_data["ids"]):
             meta = all_data["metadatas"][i]
-            created = meta.get("created_at", "")
+            status = meta.get("status", "active")
+            category = meta.get("category", "")
+            created = meta.get("updated_at", "") or meta.get("created_at", "")
             access = int(meta.get("access_count", "0"))
 
-            if access >= min_access_count:
-                continue
-
             try:
-                created_dt = datetime.fromisoformat(created)
-                age_days = (now - created_dt).days
-                if age_days > max_age_days:
-                    to_delete.append(doc_id)
+                updated_dt = datetime.fromisoformat(created) if created else None
+                age_days = (now - updated_dt).days if updated_dt else 0
             except (ValueError, TypeError):
                 continue
 
+            # Protected categories get extra retention
+            threshold = _DORMANT_AFTER_DAYS
+            if category in _PROTECTED_CATEGORIES:
+                threshold += _PROTECTED_EXTRA_DAYS
+
+            if status == "active" and access < min_access_count and age_days > threshold:
+                # Phase 1: mark dormant
+                new_meta = dict(meta)
+                new_meta["status"] = "dormant"
+                self._collection.update(ids=[doc_id], metadatas=[new_meta])
+                dormant_count += 1
+            elif status == "dormant" and age_days > _DELETE_AFTER_DAYS:
+                # Phase 2: permanently delete
+                to_delete.append(doc_id)
+                delete_count += 1
+
         if to_delete:
             self._collection.delete(ids=to_delete)
-            logger.info("Forgot %d old memories", len(to_delete))
 
-        return len(to_delete)
+        total = dormant_count + delete_count
+        if total:
+            logger.info(
+                "Forget pass: %d dormant, %d deleted", dormant_count, delete_count,
+            )
+        return total
+
+    async def consolidate(self) -> dict[str, int]:
+        """整理记忆：去重 + 老化遗忘. 返回操作统计."""
+        forgotten = await self.forget_old()
+
+        # Dedup pass: find pairs with similarity > threshold
+        all_data = self._collection.get(
+            include=["documents", "metadatas"],
+            where={"status": "active"},
+        )
+        deduped = 0
+        if all_data["ids"] and len(all_data["ids"]) > 1:
+            seen: set[str] = set()
+            for i, doc_id in enumerate(all_data["ids"]):
+                if doc_id in seen:
+                    continue
+                content = all_data["documents"][i]
+                similar = self._find_similar(content)
+                if similar is not None and similar["id"] != doc_id:
+                    # Keep the one with more access_count
+                    old_meta = all_data["metadatas"][i]
+                    new_meta = similar["metadata"]
+                    old_access = int(old_meta.get("access_count", "0"))
+                    new_access = int(new_meta.get("access_count", "0"))
+                    victim = similar["id"] if new_access <= old_access else doc_id
+                    self._collection.delete(ids=[victim])
+                    seen.add(victim)
+                    deduped += 1
+
+        return {"forgotten": forgotten, "deduped": deduped}
+
+    async def stats(self) -> MemoryStats:
+        """返回记忆统计信息."""
+        self._ensure_initialized()
+
+        all_data = self._collection.get(include=["metadatas"])
+        if not all_data["ids"]:
+            return MemoryStats()
+
+        total = len(all_data["ids"])
+        active = 0
+        dormant = 0
+        by_category: dict[str, int] = {}
+        total_access = 0
+
+        for meta in all_data["metadatas"]:
+            status = meta.get("status", "active")
+            if status == "active":
+                active += 1
+            else:
+                dormant += 1
+            cat = meta.get("category", "unknown")
+            by_category[cat] = by_category.get(cat, 0) + 1
+            total_access += int(meta.get("access_count", "0"))
+
+        return MemoryStats(
+            total=total,
+            active=active,
+            dormant=dormant,
+            by_category=by_category,
+            avg_access_count=round(total_access / total, 1) if total else 0.0,
+        )
+
+    async def search(
+        self, query: str, *, top_k: int = 10, include_dormant: bool = False,
+    ) -> list[MemorySearchResult]:
+        """搜索记忆（管理用途，不过滤 status）."""
+        self._ensure_initialized()
+
+        count = self._collection.count()
+        if count == 0:
+            return []
+
+        if include_dormant:
+            where_filter = None
+        else:
+            where_filter = {"status": "active"}
+
+        results = self._collection.query(
+            query_texts=[query],
+            n_results=min(top_k, count),
+            where=where_filter,
+            include=["documents", "metadatas", "distances"],
+        )
+
+        if not results["ids"] or not results["ids"][0]:
+            return []
+
+        entries: list[MemorySearchResult] = []
+        for i, doc_id in enumerate(results["ids"][0]):
+            doc = results["documents"][0][i]
+            meta = results["metadatas"][0][i]
+            distance = results["distances"][0][i]
+            relevance = round(1.0 - distance, 4)
+
+            clean_meta = {
+                k: v for k, v in meta.items()
+                if k not in ("category", "created_at", "updated_at", "access_count", "status")
+            }
+
+            entry = MemoryEntry(
+                id=doc_id,
+                content=doc,
+                category=meta.get("category", "unknown"),
+                metadata=clean_meta,
+                created_at=meta.get("created_at", ""),
+                updated_at=meta.get("updated_at", ""),
+                access_count=int(meta.get("access_count", "0")),
+                status=meta.get("status", "active"),
+            )
+            entries.append(MemorySearchResult(entry=entry, relevance=relevance))
+
+        return entries
+
+    async def export_memories(self) -> str:
+        """导出所有记忆为 JSON 字符串."""
+        self._ensure_initialized()
+
+        all_data = self._collection.get(include=["documents", "metadatas"])
+        if not all_data["ids"]:
+            return "[]"
+
+        items: list[dict[str, Any]] = []
+        for i, doc_id in enumerate(all_data["ids"]):
+            meta = all_data["metadatas"][i]
+            clean_meta = {
+                k: v for k, v in meta.items()
+                if k not in ("category", "created_at", "updated_at", "access_count", "status")
+            }
+            items.append({
+                "id": doc_id,
+                "content": all_data["documents"][i],
+                "category": meta.get("category", "unknown"),
+                "metadata": clean_meta,
+                "created_at": meta.get("created_at", ""),
+                "updated_at": meta.get("updated_at", ""),
+                "access_count": int(meta.get("access_count", "0")),
+                "status": meta.get("status", "active"),
+            })
+
+        return json.dumps(items, ensure_ascii=False, indent=2)
 
 
 def _recency_score(timestamp: str, now: datetime) -> float:
