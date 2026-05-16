@@ -100,6 +100,22 @@ class HooksConfig(BaseSettings):
     message_out: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class SkillsConfig(BaseSettings):
+    """Skill 搜索路径配置.
+
+    Example YAML::
+
+        skills:
+          search_paths:
+            - .naumi/skills/
+            - ~/.naumi/skills/
+    """
+
+    model_config = SettingsConfigDict(env_prefix="NAUMI_SKILLS__")
+
+    search_paths: list[str] = Field(default_factory=lambda: [])
+
+
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NAUMI_",
@@ -114,6 +130,7 @@ class AppConfig(BaseSettings):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     api: APIConfig = Field(default_factory=APIConfig)
     hooks: HooksConfig = Field(default_factory=HooksConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
     custom_tools_dir: str | None = None
     log_level: str = "INFO"
 
