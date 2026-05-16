@@ -70,6 +70,36 @@ class APIConfig(BaseSettings):
     rate_limit_rpm: int = 60
 
 
+class HooksConfig(BaseSettings):
+    """Shell hook 配置 — 按 hook point 分组.
+
+    Example YAML::
+
+        hooks:
+          tool_execute_start:
+            - command: "ruff check --fix $NAUMI_TOOL_FILE"
+              timeout: 10
+          tool_execute_end:
+            - command: "notify-send 'done'"
+    """
+
+    model_config = SettingsConfigDict(env_prefix="NAUMI_HOOKS__")
+
+    # point_name → list of {command, timeout}
+    tool_execute_start: list[dict[str, Any]] = Field(default_factory=list)
+    tool_execute_end: list[dict[str, Any]] = Field(default_factory=list)
+    llm_call_start: list[dict[str, Any]] = Field(default_factory=list)
+    llm_call_end: list[dict[str, Any]] = Field(default_factory=list)
+    engine_run_start: list[dict[str, Any]] = Field(default_factory=list)
+    engine_run_end: list[dict[str, Any]] = Field(default_factory=list)
+    agent_execute_start: list[dict[str, Any]] = Field(default_factory=list)
+    agent_execute_end: list[dict[str, Any]] = Field(default_factory=list)
+    delegate_start: list[dict[str, Any]] = Field(default_factory=list)
+    delegate_end: list[dict[str, Any]] = Field(default_factory=list)
+    message_in: list[dict[str, Any]] = Field(default_factory=list)
+    message_out: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NAUMI_",
@@ -83,6 +113,7 @@ class AppConfig(BaseSettings):
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     api: APIConfig = Field(default_factory=APIConfig)
+    hooks: HooksConfig = Field(default_factory=HooksConfig)
     custom_tools_dir: str | None = None
     log_level: str = "INFO"
 

@@ -209,6 +209,7 @@ class AgentEngine:
 
         self._register_builtin_tools()
         self._register_subagent_manager()
+        self._register_shell_hooks()
 
     def _register_builtin_tools(self) -> None:
         for tool in create_builtin_tools():
@@ -261,6 +262,27 @@ class AgentEngine:
             self._tool_registry.register(tool)
 
         self._reaper_started = False
+
+    def _register_shell_hooks(self) -> None:
+        """从 config.yaml 的 hooks 段注册 shell 命令 hook."""
+        from naumi_agent.hooks.shell_hook import ShellHookConfig, create_shell_hook_runner
+
+        hooks_cfg = self._config.hooks
+        registered = 0
+        for point_name in HookPoint:
+            entries = getattr(hooks_cfg, point_name.value, None)
+            if not entries:
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict) or "command" not in entry:
+                    logger.warning("Invalid shell hook config for %s: %s", point_name.value, entry)
+                    continue
+                shell_cfg = ShellHookConfig.from_dict(entry)
+                runner = create_shell_hook_runner(shell_cfg)
+                self.hooks.register(point_name, runner)
+                registered += 1
+        if registered:
+            logger.info("Registered %d shell hooks from config", registered)
 
     async def setup_mcp_tools(self) -> None:
         """从配置连接 MCP Server 并注册工具（需在异步上下文中调用）."""
