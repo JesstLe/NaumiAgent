@@ -189,6 +189,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
         case "/clear":
             engine.reset()
             console.print("[green]会话已清除[/green]")
+        case "/new":
+            await _new_conversation(engine)
         case "/usage":
             u = engine.usage
             console.print(
@@ -527,7 +529,8 @@ def _print_help() -> None:
         ("/vision <目标>", "AI 视觉数据提取 — 反封锁视觉管线"),
         ("/hook <目标>", "逆向插桩 — 黑盒解剖"),
         ("/pursue <目标>", "目标追踪 — 自主循环执行直至真正达成"),
-        ("/clear", "清除当前会话"),
+        ("/new", "保存当前会话并开始新对话"),
+        ("/clear", "清除当前会话（不保存）"),
         ("/quit", "退出"),
     ]
     for cmd, desc in commands:
@@ -806,6 +809,21 @@ async def _delete_session(engine: Any, session_id: str) -> None:
         console.print(f"[green]已删除会话:[/green] {session_id}")
     else:
         console.print(f"[red]会话 {session_id} 不存在[/red]")
+
+
+async def _new_conversation(engine: Any) -> None:
+    """保存当前会话并开始新对话."""
+    # Save current session if it has messages
+    if engine._messages and any(m.get("role") == "user" for m in engine._messages):
+        try:
+            await engine._save_session()
+            console.print("[dim]已保存当前会话[/dim]")
+        except Exception:
+            pass
+    engine.reset()
+    # Reset session so next interaction creates a fresh one
+    engine._session = None
+    console.print("[green]新对话已开始[/green]")
 
 
 def _check_api_key(config: AppConfig) -> None:

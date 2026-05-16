@@ -167,15 +167,38 @@ class ModelRouter:
     def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """清理消息列表中不合法的格式，避免 API 报错.
 
-        OpenAI/Kimi API 要求：当 assistant message 包含 tool_calls 时，
-        content 不能是空字符串 ''，必须是 null 或省略。
+        - assistant + tool_calls: content 不能是空字符串，必须为 None
+        - reasoning_content: Kimi API 不接受此字段，必须移除
+        - 裁剪末尾不完整的 assistant/tool 序列
         """
         sanitized: list[dict[str, Any]] = []
         for msg in messages:
             m = dict(msg)
-            if m.get("role") == "assistant" and "tool_calls" in m and m.get("content") == "":
-                m["content"] = None
+            if m.get("role") == "assistant":
+                if "tool_calls" in m and m.get("content") == "":
+                    m["content"] = None
+                # reasoning_content is not accepted by Kimi API
+                m.pop("reasoning_content", None)
             sanitized.append(m)
+
+        # Trim trailing incomplete assistant/tool sequences
+        while sanitized:
+            last = sanitized[-1]
+            role = last.get("role", "")
+            # Remove trailing tool messages without a following user message
+            if role == "tool":
+                sanitized.pop()
+                continue
+            # Remove trailing assistant with tool_calls but no tool responses
+            if role == "assistant" and "tool_calls" in last:
+                sanitized.pop()
+                continue
+            # Remove trailing assistant with no content (interrupted)
+            if role == "assistant" and not last.get("content"):
+                sanitized.pop()
+                continue
+            break
+
         return sanitized
 
     async def call(
