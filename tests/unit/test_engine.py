@@ -141,16 +141,11 @@ class TestUsageAccumulation:
 
 
 class TestBudgetCheck:
-    def test_budget_ok(self, engine: AgentEngine) -> None:
-        result = engine._check_budget()
-        assert result is None
-
-    def test_budget_exceeded(self, engine: AgentEngine) -> None:
+    def test_budget_disabled(self, engine: AgentEngine) -> None:
+        # Budget check is intentionally neutered — tracking only, no blocking
         engine._budget_tracker._total_input = 999_999_999
         result = engine._check_budget()
-        assert result is not None
-        assert result.status == "error"
-        assert result.error == "budget_exceeded"
+        assert result is None
 
 
 class TestRun:
