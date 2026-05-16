@@ -194,14 +194,15 @@ class AgentEngine:
             mode=PermissionMode(config.safety.permission_mode),
             allowed_dirs=config.safety.allowed_dirs,
         )
+        self.session_store = SessionStore(config.memory)
+        self.long_term_memory = LongTermMemory(config.memory)
         self._compactor = ContextCompactor(
             config.memory,
             self._router,
             threshold=config.memory.compaction_threshold,
+            long_term_memory=self.long_term_memory,
         )
 
-        self.session_store = SessionStore(config.memory)
-        self.long_term_memory = LongTermMemory(config.memory)
         self.emitter = EventEmitter()
         self.hooks = HookManager()
         self._session: Session | None = None
@@ -415,6 +416,38 @@ class AgentEngine:
 
         await self.session_store.save(session)
 
+    # --- 记忆注入 ---
+
+    async def _inject_relevant_memories(self, user_message: str) -> None:
+        """自动召回与用户消息相关的长期记忆，注入到上下文中."""
+        try:
+            results = await self.long_term_memory.recall(
+                user_message, top_k=3, min_relevance=0.4,
+            )
+        except Exception as e:
+            logger.debug("Memory recall for injection failed: %s", e)
+            return
+
+        if not results:
+            return
+
+        lines = ["## 相关记忆"]
+        for r in results:
+            lines.append(f"- [{r.entry.category}] {r.entry.content}")
+        memory_block = "\n".join(lines)
+
+        # Remove any previous memory injection to avoid accumulation
+        self._messages = [
+            m for m in self._messages
+            if not (
+                m.get("role") == "system"
+                and "## 相关记忆" in m.get("content", "")
+            )
+        ]
+
+        self._messages.append({"role": "system", "content": memory_block})
+        logger.info("Injected %d relevant memories into context", len(results))
+
     # --- 上下文压缩 ---
 
     async def _maybe_compact(self, on_event: EventCallback | None = None) -> None:
@@ -464,6 +497,7 @@ class AgentEngine:
             self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
         self._messages.append({"role": "user", "content": task})
+        await self._inject_relevant_memories(task)
         tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
 
         session_id = self._session.id if self._session else ""
@@ -503,6 +537,7 @@ class AgentEngine:
             self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
         self._messages.append({"role": "user", "content": task})
+        await self._inject_relevant_memories(task)
         tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
 
         session_id = self._session.id if self._session else ""
