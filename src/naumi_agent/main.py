@@ -58,6 +58,47 @@ def _launch_tui(config_path: str) -> None:
     app.run()
 
 
+async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
+    """实时显示 Agent 思考、工具调用过程."""
+    if event == "thinking_delta":
+        console.print(f"[dim bright_black]{data.get('content', '')}[/dim bright_black]", end="")
+    elif event == "thinking_start":
+        console.print("[dim]💭 思考中...[/dim]")
+    elif event == "thinking_end":
+        console.print()
+    elif event == "tool_start":
+        name = data.get("name", "?")
+        args = data.get("args", {})
+        if isinstance(args, dict):
+            summary = " ".join(f"{k}={v}" for k, v in list(args.items())[:3])
+            console.print(f"[cyan]🔧 {name}[/cyan] [dim]{summary}[/dim]")
+        else:
+            console.print(f"[cyan]🔧 {name}[/cyan]")
+    elif event == "tool_end":
+        name = data.get("name", "?")
+        status = data.get("status", "?")
+        content = data.get("content", "")
+        duration = data.get("duration_ms", 0)
+        if status == "error":
+            console.print(f"[red]  ✗ {name} 失败 ({duration:.0f}ms)[/red]")
+        else:
+            console.print(f"[green]  ✓ {name}[/green] [dim]({duration:.0f}ms)[/dim]")
+        if content and name in ("file_read", "file_edit", "file_write", "bash_run"):
+            lines = content.split("\n")
+            preview = "\n".join(lines[:12])
+            if len(lines) > 12:
+                preview += f"\n  ... ({len(lines) - 12} more lines)"
+            console.print(f"[dim]  {preview}[/dim]")
+    elif event == "token":
+        console.print(data.get("content", ""), end="")
+    elif event == "response_start":
+        console.print()
+    elif event == "response_end":
+        console.print()
+    elif event == "error":
+        console.print(f"[red]错误: {data.get('message', '')}[/red]")
+
+
 async def _chat(config_path: str) -> None:
     from naumi_agent.log_setup import setup_logging
     from naumi_agent.orchestrator.engine import AgentEngine
@@ -91,22 +132,23 @@ async def _chat(config_path: str) -> None:
             continue
 
         with console.status("[bold green]NaumiAgent 思考中...[/bold green]"):
-            result = await engine.run(user_input)
+            result = await engine.run_streaming(user_input, _cli_event_handler)
 
         if result.status == "error" and result.error:
             console.print(f"[red]错误: {result.error}[/red]")
             continue
 
         # 渲染 Markdown 响应
-        console.print()
-        console.print(
-            Panel(
-                Markdown(result.response),
-                title="[bold green]NaumiAgent[/bold green]",
-                border_style="green",
-                padding=(1, 2),
+        if result.response:
+            console.print()
+            console.print(
+                Panel(
+                    Markdown(result.response),
+                    title="[bold green]NaumiAgent[/bold green]",
+                    border_style="green",
+                    padding=(1, 2),
+                )
             )
-        )
 
         # 显示统计
         stats = Text()
