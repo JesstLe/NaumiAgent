@@ -741,8 +741,8 @@ class GoalPursuitLoop:
     ) -> dict[str, Any]:
         """Edit a file using LLM-generated search/replace.
 
-        For small files (<200 lines): ask LLM for complete updated content.
-        For large files: ask LLM for just the old/new text blocks.
+        Both small and large files use search/replace blocks.
+        Large files first locate the relevant region to keep context small.
         """
         import os
         import re
@@ -776,12 +776,10 @@ class GoalPursuitLoop:
         context = self._build_codebase_context()
 
         if line_count <= 200:
-            # Small file: ask for complete rewrite
             return await self._edit_small_file(
                 path, existing, description, action_id, context,
             )
         else:
-            # Large file: ask for targeted search/replace section
             return await self._edit_large_file(
                 path, existing, description, action_id, context,
             )
@@ -794,49 +792,103 @@ class GoalPursuitLoop:
         action_id: str,
         context: str,
     ) -> dict[str, Any]:
-        """Edit a small file by asking for complete updated content."""
+        """Edit a file using search/replace pairs from LLM."""
+        lines = existing.split("\n")
+        # Build a numbered listing for precise reference
+        numbered = "\n".join(f"{i+1:4d} | {line}" for i, line in enumerate(lines))
+
         prompt = (
             f"Action: {description}\n\n"
-            f"## Codebase Context\n{context}\n\n"
-            f"## Current file content ({path})\n"
-            f"```\n{existing}\n```\n\n"
-            "Apply the described change to this file. "
-            "Output the COMPLETE updated file content. "
-            "Output ONLY the raw file content — "
-            "no markdown fences, no explanation, no commentary."
+            f"## File: {path} ({len(lines)} lines)\n"
+            f"```\n{numbered}\n```\n\n"
+            "Apply the described change using EXACT search/replace. "
+            "Copy the original lines VERBATIM from the listing above as OLD_TEXT.\n\n"
+            "Output format — one block per change:\n"
+            "<<<OLD\n"
+            "<exact original lines copied verbatim>\n"
+            "===NEW\n"
+            "<replacement lines>\n"
+            ">>>\n\n"
+            "Rules:\n"
+            "- OLD_TEXT must be an EXACT verbatim copy of consecutive lines from the file\n"
+            "- Preserve exact indentation, spacing, and special characters\n"
+            "- For insertions, use the line BEFORE the insertion point as OLD\n"
+            "- Multiple changes: output multiple <<<OLD ... >>> blocks\n"
+            "- Output ONLY <<<OLD/===NEW/>>> blocks, nothing else"
         )
 
         content = await self._llm_call(
-            "You update source files. "
-            "Output only the complete updated file content as raw text.",
+            "You edit files using exact search/replace. "
+            "Output only <<<OLD/===NEW/>>> blocks.",
             prompt,
         )
 
-        text = content.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-
-        if not text:
+        replacements = self._parse_replacements(content)
+        if not replacements:
             return {
                 "action_id": action_id,
                 "status": "error",
-                "output": "LLM returned empty content for file edit",
+                "output": f"No valid search/replace blocks found in LLM response: {content[:500]}",
             }
 
-        write_tool = self._tools.get("file_write")
-        if write_tool:
-            output = await write_tool.execute(path=path, content=text)
-        else:
-            resolved = __import__("os").path.expanduser(path)
-            with open(resolved, "w", encoding="utf-8") as f:
-                f.write(text)
-            output = f"Updated {path}"
+        updated = existing
+        applied = 0
+        errors: list[str] = []
+        for old_text, new_text in replacements:
+            if old_text in updated:
+                updated = updated.replace(old_text, new_text, 1)
+                applied += 1
+            else:
+                # Try fuzzy: strip trailing whitespace per line
+                old_fuzzy = "\n".join(l.rstrip() for l in old_text.split("\n"))
+                updated_fuzzy = "\n".join(l.rstrip() for l in updated.split("\n"))
+                if old_fuzzy in updated_fuzzy:
+                    # Find the position and replace
+                    idx = updated_fuzzy.index(old_fuzzy)
+                    new_fuzzy = "\n".join(l.rstrip() for l in new_text.split("\n"))
+                    updated_fuzzy = updated_fuzzy[:idx] + new_fuzzy + updated_fuzzy[idx + len(old_fuzzy):]
+                    updated = "\n".join(l.rstrip() for l in updated.split("\n"))
+                    idx = updated.index(old_fuzzy)
+                    updated = updated[:idx] + new_text + updated[idx + len(old_fuzzy):]
+                    applied += 1
+                else:
+                    errors.append(f"OLD_TEXT not found: {old_text[:80]}...")
 
+        if applied == 0:
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": f"All replacements failed: {'; '.join(errors)}",
+            }
+
+        resolved = __import__("os").path.expanduser(path)
+        with open(resolved, "w", encoding="utf-8") as f:
+            f.write(updated)
+
+        msg = f"Applied {applied}/{len(replacements)} replacements"
+        if errors:
+            msg += f" (errors: {'; '.join(errors)})"
         return {
             "action_id": action_id,
             "status": "completed",
-            "output": str(output)[:3000],
+            "output": msg,
         }
+
+    @staticmethod
+    def _parse_replacements(llm_output: str) -> list[tuple[str, str]]:
+        """Parse <<<OLD ... ===NEW ... >>> blocks from LLM output."""
+        import re as _re
+        pattern = _re.compile(
+            r"<<<OLD\s*\n(.*?)===NEW\s*\n(.*?)>>>",
+            _re.DOTALL,
+        )
+        results: list[tuple[str, str]] = []
+        for m in pattern.finditer(llm_output):
+            old_text = m.group(1).rstrip("\n")
+            new_text = m.group(2).rstrip("\n")
+            if old_text:
+                results.append((old_text, new_text))
+        return results
 
     async def _edit_large_file(
         self,
@@ -846,102 +898,119 @@ class GoalPursuitLoop:
         action_id: str,
         context: str,
     ) -> dict[str, Any]:
-        """Edit a large file by finding and replacing a targeted section."""
-        # Send only file structure (imports + function/class signatures)
-        # plus the full content for context-aware editing
+        """Edit a large file using search/replace on a targeted section."""
         lines = existing.split("\n")
-        signatures = []
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if (stripped.startswith("def ") or stripped.startswith("class ")
-                    or stripped.startswith("case ")
-                    or stripped.startswith("async def ")):
-                signatures.append(f"L{i+1}: {line.rstrip()}")
 
-        sig_text = "\n".join(signatures)
+        # Identify the relevant region based on the action description
+        region_start, region_end = self._locate_region(
+            description, lines, context,
+        )
+
+        # Extract the target region + surrounding context
+        ctx_lines = 5
+        show_start = max(0, region_start - ctx_lines)
+        show_end = min(len(lines), region_end + ctx_lines)
+
+        region_numbered = "\n".join(
+            f"{i+1:4d} | {lines[i]}"
+            for i in range(show_start, show_end)
+        )
 
         prompt = (
             f"Action: {description}\n\n"
-            f"## Codebase Context\n{context}\n\n"
-            f"## File structure ({path}, {len(lines)} lines)\n"
-            f"{sig_text}\n\n"
-            "Based on the action and file structure, provide:\n"
-            "1. LINE_RANGE: the start and end line numbers to replace\n"
-            "2. NEW_CONTENT: the replacement lines\n\n"
+            f"## File: {path} (region, lines {show_start+1}-{show_end})\n"
+            f"```\n{region_numbered}\n```\n\n"
+            "Apply the described change using EXACT search/replace. "
+            "Copy the original lines VERBATIM from the listing above as OLD_TEXT.\n\n"
             "Output format:\n"
-            "LINE_RANGE|<start>|<end>\n"
-            "<new content lines here>\n"
-            "END_CONTENT\n\n"
-            "Example:\n"
-            "LINE_RANGE|10|12\n"
-            "from .hello import HelloTool\n"
-            "from .pursuit import create_pursuit_tool\n"
-            "END_CONTENT"
+            "<<<OLD\n"
+            "<exact original lines copied verbatim>\n"
+            "===NEW\n"
+            "<replacement lines>\n"
+            ">>>\n\n"
+            "Rules:\n"
+            "- OLD_TEXT must be an EXACT verbatim copy of consecutive lines from the file\n"
+            "- Preserve exact indentation and spacing\n"
+            "- Output ONLY <<<OLD/===NEW/>>> blocks"
         )
 
-        response = await self._llm_call(
-            "You identify exact line ranges to edit in source files.",
+        content = await self._llm_call(
+            "You edit files using exact search/replace. "
+            "Output only <<<OLD/===NEW/>>> blocks.",
             prompt,
         )
 
-        # Parse LINE_RANGE and content
-        start_line = 0
-        end_line = 0
-        new_content = ""
-        in_content = False
-        content_lines: list[str] = []
-
-        for line in response.split("\n"):
-            if line.startswith("LINE_RANGE|"):
-                parts = line.split("|")
-                if len(parts) >= 3:
-                    try:
-                        start_line = int(parts[1].strip())
-                        end_line = int(parts[2].strip())
-                    except ValueError:
-                        pass
-                in_content = True
-                continue
-            if line.strip() == "END_CONTENT":
-                in_content = False
-                continue
-            if in_content:
-                content_lines.append(line)
-
-        if start_line <= 0 or end_line <= 0 or not content_lines:
+        replacements = self._parse_replacements(content)
+        if not replacements:
             return {
                 "action_id": action_id,
                 "status": "error",
-                "output": (
-                    f"Failed to parse line range from LLM response. "
-                    f"Got start={start_line}, end={end_line}, "
-                    f"content_lines={len(content_lines)}"
-                ),
+                "output": f"No valid search/replace blocks found: {content[:500]}",
             }
 
-        new_content = "\n".join(content_lines)
-        if not new_content.endswith("\n"):
-            new_content += "\n"
+        updated = existing
+        applied = 0
+        errors: list[str] = []
+        for old_text, new_text in replacements:
+            if old_text in updated:
+                updated = updated.replace(old_text, new_text, 1)
+                applied += 1
+            else:
+                errors.append(f"OLD_TEXT not found: {old_text[:80]}...")
 
-        # Replace the lines (1-indexed)
-        lines_before = lines[: start_line - 1]
-        lines_after = lines[end_line:]
-        updated = "\n".join(lines_before + [new_content.rstrip("\n")] + lines_after) + "\n"
+        if applied == 0:
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": f"All replacements failed: {'; '.join(errors)}",
+            }
 
-        write_tool = self._tools.get("file_write")
-        if write_tool:
-            output = await write_tool.execute(path=path, content=updated)
-        else:
-            resolved = __import__("os").path.expanduser(path)
-            with open(resolved, "w", encoding="utf-8") as f:
-                f.write(updated)
-            output = f"Updated {path} (lines {start_line}-{end_line})"
+        resolved = __import__("os").path.expanduser(path)
+        with open(resolved, "w", encoding="utf-8") as f:
+            f.write(updated)
 
+        msg = f"Applied {applied}/{len(replacements)} replacements in region L{show_start+1}-L{show_end}"
+        if errors:
+            msg += f" (errors: {'; '.join(errors)})"
         return {
             "action_id": action_id,
             "status": "completed",
-            "output": str(output)[:3000],
+            "output": msg,
         }
+
+    def _locate_region(
+        self, description: str, lines: list[str], context: str,
+    ) -> tuple[int, int]:
+        """Heuristic: locate the relevant region in a large file."""
+        import re as _re
+        # Extract likely identifiers from the description
+        keywords = _re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]{2,}\b', description)
+
+        best_start = 0
+        best_end = min(len(lines), 50)
+        best_score = 0
+
+        window = 40
+        step = 20
+        for start in range(0, len(lines), step):
+            end = min(start + window, len(lines))
+            chunk = "\n".join(lines[start:end])
+            score = sum(1 for kw in keywords if kw in chunk)
+            if score > best_score:
+                best_score = score
+                best_start = start
+                best_end = end
+
+        if best_score == 0:
+            # Fallback: look for def/class/import near the top
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if any(kw in stripped for kw in keywords):
+                    best_start = max(0, i - 2)
+                    best_end = min(len(lines), i + 20)
+                    break
+
+        return best_start, best_end
 
     async def _execute_generic_tool(
         self, tool: Any, tool_name: str, description: str, action_id: str,
