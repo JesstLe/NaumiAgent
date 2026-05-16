@@ -465,6 +465,7 @@ class GoalPursuitLoop:
             user_msg += f"{history_summary}\n"
         user_msg += "请客观评估当前进度。"
 
+        logger.debug("Assessor evidence length: %d chars", len(state_evidence))
         response = await self._llm_call(_ASSESSOR_SYSTEM, user_msg)
 
         # Parse assessment
@@ -498,6 +499,28 @@ class GoalPursuitLoop:
                     convergence = float(line.split("|")[1].strip())
                 except (ValueError, IndexError):
                     convergence = 0.0
+
+        # Programmatic convergence floor: if the LLM says 0 but there is
+        # hard evidence of progress, boost convergence so stagnation
+        # detection doesn't fire unnecessarily.
+        if convergence < 0.1 and self._history:
+            last = self._history[-1]
+            has_completed = any(
+                a.startswith("[completed]") for a in last.actions_taken
+            )
+            has_diff = False
+            if "Git 变更:" in state_evidence:
+                diff_section = state_evidence.split("Git 变更:")[-1]
+                has_diff = any(
+                    line.startswith("+") and not line.startswith("+++")
+                    for line in diff_section.splitlines()
+                )
+            if has_completed and has_diff:
+                convergence = max(convergence, 0.5)
+                logger.info(
+                    "Boosted convergence %.2f→%.2f (completed actions + git diff)",
+                    0.0, convergence,
+                )
 
         # Apply updates
         for c in spec.success_criteria:
@@ -1303,11 +1326,18 @@ class GoalPursuitLoop:
         bash_tool = self._tools.get("bash_run")
         if bash_tool:
             # Collect git diff since pursuit started
+            # Use both working-tree diff and cached diff to catch
+            # staged changes that git diff HEAD might miss
             if self._start_time > 0:
                 try:
                     diff_result = await bash_tool.execute(
-                        command="git diff --stat HEAD 2>/dev/null; "
-                        "echo '---'; git diff HEAD 2>/dev/null | head -80",
+                        command=(
+                            "git diff --stat 2>/dev/null; "
+                            "git diff --cached --stat 2>/dev/null; "
+                            "echo '---'; "
+                            "git diff 2>/dev/null | head -80; "
+                            "git diff --cached 2>/dev/null | head -80"
+                        ),
                     )
                     if diff_result and "fatal" not in diff_result:
                         evidence_parts.append(
