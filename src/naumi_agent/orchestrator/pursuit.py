@@ -174,6 +174,7 @@ tools, you produce a concrete plan of 1-5 actions to close the gaps.
 
 ## Rules
 - Each action must be SPECIFIC (which file, what content, which command)
+- The description MUST contain the target file path (e.g. config.yaml, src/main.py)
 - Use **file_write** to CREATE new files — the system generates complete content
 - Use **file_edit** to MODIFY existing files — the system generates search/replace
 - Use **bash_run** ONLY for: pytest, ruff check, pip install, cat/grep/ls, verification commands
@@ -670,9 +671,7 @@ class GoalPursuitLoop:
         to avoid losing existing content.
         """
         import os
-        import re
-        path_match = re.search(r'([\w/.]+\.\w+)', description)
-        path = path_match.group(1) if path_match else ""
+        path = self._extract_target_path(description)
 
         # If file already exists, use edit instead of overwrite
         if path:
@@ -745,9 +744,7 @@ class GoalPursuitLoop:
         Large files first locate the relevant region to keep context small.
         """
         import os
-        import re
-        path_match = re.search(r'([\w/.]+\.\w+)', description)
-        path = path_match.group(1) if path_match else ""
+        path = self._extract_target_path(description)
         if not path:
             return {
                 "action_id": action_id,
@@ -801,26 +798,48 @@ class GoalPursuitLoop:
             f"Action: {description}\n\n"
             f"## File: {path} ({len(lines)} lines)\n"
             f"```\n{numbered}\n```\n\n"
-            "Apply the described change using EXACT search/replace. "
-            "Copy the original lines VERBATIM from the listing above as OLD_TEXT.\n\n"
-            "Output format — one block per change:\n"
-            "<<<OLD\n"
+            "Apply the described change using EXACT search/replace.\n"
+            "Copy the original lines VERBATIM from the listing above.\n\n"
+            "Output ONE block per change, using this EXACT format:\n"
+            "[SEARCH]\n"
             "<exact original lines copied verbatim>\n"
-            "===NEW\n"
+            "[REPLACE]\n"
             "<replacement lines>\n"
-            ">>>\n\n"
+            "[END]\n\n"
             "Rules:\n"
-            "- OLD_TEXT must be an EXACT verbatim copy of consecutive lines from the file\n"
+            "- The text after [SEARCH] must be an EXACT verbatim copy from the file\n"
             "- Preserve exact indentation, spacing, and special characters\n"
-            "- For insertions, use the line BEFORE the insertion point as OLD\n"
-            "- Multiple changes: output multiple <<<OLD ... >>> blocks\n"
-            "- Output ONLY <<<OLD/===NEW/>>> blocks, nothing else"
+            "- For insertions: copy the line BEFORE insertion as SEARCH, "
+            "then repeat it + the new line as REPLACE\n"
+            "- Multiple changes: output multiple [SEARCH]...[END] blocks\n"
+            "- Output ONLY [SEARCH]/[REPLACE]/[END] blocks\n\n"
+            "Example — add a comment above temperature:\n"
+            "[SEARCH]\n"
+            "  max_tokens: 4096\n"
+            "  temperature: 0.7\n"
+            "[REPLACE]\n"
+            "  max_tokens: 4096\n"
+            "  # kimi-k2.6 requires exactly 1.0\n"
+            "  temperature: 1.0\n"
+            "[END]\n\n"
+            "Example — change a function signature:\n"
+            "[SEARCH]\n"
+            "async def handle(self, request):\n"
+            "[REPLACE]\n"
+            "async def handle(self, request: Request) -> Response:\n"
+            "[END]"
         )
 
         content = await self._llm_call(
             "You edit files using exact search/replace. "
-            "Output only <<<OLD/===NEW/>>> blocks.",
+            "CRITICAL: output ONLY [SEARCH]/[REPLACE]/[END] blocks. "
+            "No explanation, no commentary, no markdown.",
             prompt,
+        )
+
+        logger.info(
+            "file_edit LLM response for %s (first 800 chars): %s",
+            path, content[:800],
         )
 
         replacements = self._parse_replacements(content)
@@ -876,14 +895,28 @@ class GoalPursuitLoop:
 
     @staticmethod
     def _parse_replacements(llm_output: str) -> list[tuple[str, str]]:
-        """Parse <<<OLD ... ===NEW ... >>> blocks from LLM output."""
+        """Parse [SEARCH]...[REPLACE]...[END] blocks from LLM output."""
         import re as _re
+        # Primary format: [SEARCH]...[REPLACE]...[END]
         pattern = _re.compile(
-            r"<<<OLD\s*\n(.*?)===NEW\s*\n(.*?)>>>",
+            r"\[SEARCH\]\s*\n(.*?)\[REPLACE\]\s*\n(.*?)\[END\]",
             _re.DOTALL,
         )
         results: list[tuple[str, str]] = []
         for m in pattern.finditer(llm_output):
+            old_text = m.group(1).rstrip("\n")
+            new_text = m.group(2).rstrip("\n")
+            if old_text:
+                results.append((old_text, new_text))
+        if results:
+            return results
+
+        # Fallback: <<<OLD/===NEW/>>> format
+        fallback = _re.compile(
+            r"<<<OLD\s*\n(.*?)===NEW\s*\n(.*?)>>>",
+            _re.DOTALL,
+        )
+        for m in fallback.finditer(llm_output):
             old_text = m.group(1).rstrip("\n")
             new_text = m.group(2).rstrip("\n")
             if old_text:
@@ -920,23 +953,33 @@ class GoalPursuitLoop:
             f"Action: {description}\n\n"
             f"## File: {path} (region, lines {show_start+1}-{show_end})\n"
             f"```\n{region_numbered}\n```\n\n"
-            "Apply the described change using EXACT search/replace. "
-            "Copy the original lines VERBATIM from the listing above as OLD_TEXT.\n\n"
-            "Output format:\n"
-            "<<<OLD\n"
+            "Apply the described change using EXACT search/replace.\n"
+            "Copy the original lines VERBATIM from the listing above.\n\n"
+            "Output ONE block per change, using this EXACT format:\n"
+            "[SEARCH]\n"
             "<exact original lines copied verbatim>\n"
-            "===NEW\n"
+            "[REPLACE]\n"
             "<replacement lines>\n"
-            ">>>\n\n"
+            "[END]\n\n"
             "Rules:\n"
-            "- OLD_TEXT must be an EXACT verbatim copy of consecutive lines from the file\n"
+            "- The text after [SEARCH] must be an EXACT verbatim copy from the file\n"
             "- Preserve exact indentation and spacing\n"
-            "- Output ONLY <<<OLD/===NEW/>>> blocks"
+            "- Output ONLY [SEARCH]/[REPLACE]/[END] blocks\n\n"
+            "Example:\n"
+            "[SEARCH]\n"
+            "    async def process(self, data):\n"
+            "        return data\n"
+            "[REPLACE]\n"
+            "    async def process(self, data: dict) -> dict:\n"
+            "        validated = self._validate(data)\n"
+            "        return validated\n"
+            "[END]"
         )
 
         content = await self._llm_call(
             "You edit files using exact search/replace. "
-            "Output only <<<OLD/===NEW/>>> blocks.",
+            "CRITICAL: output ONLY [SEARCH]/[REPLACE]/[END] blocks. "
+            "No explanation, no commentary, no markdown.",
             prompt,
         )
 
@@ -1315,6 +1358,34 @@ class GoalPursuitLoop:
                 )
 
         return "\n\n".join(evidence_parts) if evidence_parts else "暂无状态证据"
+
+    @staticmethod
+    def _extract_target_path(description: str) -> str:
+        """Extract the target file path from an action description.
+
+        Uses a strict regex for known extensions first, then falls back
+        to a broad match. Avoids matching version numbers like k2.6.
+        """
+        import re
+        # Strict: known file extensions (avoids matching 1.0, k2.6, etc.)
+        strict = re.search(
+            r'((?:src/[\w/.-]+/)?[\w.-]+\.(?:py|yaml|yml|toml|json|md|txt|cfg|ini|sh|rs|go|ts|js|tsx|jsx|css|html|xml|sql))',
+            description,
+        )
+        if strict:
+            return strict.group(1)
+
+        # Broad: any path with a dot extension (but skip obvious non-paths)
+        broad = re.search(r'([\w/.][\w/.-]*\.[a-zA-Z]{2,4})\b', description)
+        if broad:
+            candidate = broad.group(1)
+            # Skip version-like matches (e.g. 1.0, k2.6, v1.2)
+            if not re.match(r'^[kv]?\d+\.\d+$', candidate):
+                return candidate
+
+        # Last resort: use _extract_file_paths
+        paths = __class__._extract_file_paths(description)
+        return paths[0] if paths else ""
 
     @staticmethod
     def _extract_file_paths(text: str) -> list[str]:
