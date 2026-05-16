@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.hooks import HookContext, HookManager, HookPoint
 from naumi_agent.mcp.client import MCPClientManager, setup_mcp_servers
 from naumi_agent.memory.compactor import ContextCompactor
 from naumi_agent.memory.long_term import LongTermMemory
@@ -199,6 +200,7 @@ class AgentEngine:
         self.session_store = SessionStore(config.memory)
         self.long_term_memory = LongTermMemory(config.memory)
         self.emitter = EventEmitter()
+        self.hooks = HookManager()
         self._session: Session | None = None
         self._browser_session = BrowserSession()
         self._planner = AdaptivePlanner(self._router)
@@ -414,6 +416,13 @@ class AgentEngine:
         self._messages.append({"role": "user", "content": task})
         tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
 
+        session_id = self._session.id if self._session else ""
+        await self.hooks.fire(HookContext(
+            point=HookPoint.ENGINE_RUN_START,
+            data={"task": task},
+            session_id=session_id,
+        ))
+
         try:
             plan = await self._planner.plan(task)
             if plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
@@ -423,6 +432,12 @@ class AgentEngine:
         except Exception as e:
             logger.exception("Agent loop failed")
             result = AgentResult(status="error", error=self._format_error(e))
+
+        await self.hooks.fire(HookContext(
+            point=HookPoint.ENGINE_RUN_END,
+            data={"status": result.status, "task": task},
+            session_id=session_id,
+        ))
 
         await self._save_session()
         return result
@@ -440,6 +455,13 @@ class AgentEngine:
         self._messages.append({"role": "user", "content": task})
         tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
 
+        session_id = self._session.id if self._session else ""
+        await self.hooks.fire(HookContext(
+            point=HookPoint.ENGINE_RUN_START,
+            data={"task": task, "streaming": True},
+            session_id=session_id,
+        ))
+
         try:
             result = await self._react_loop_streaming(tools, on_event)
         except Exception as e:
@@ -447,6 +469,12 @@ class AgentEngine:
             error_msg = self._format_error(e)
             await on_event("error", {"message": error_msg})
             result = AgentResult(status="error", error=error_msg)
+
+        await self.hooks.fire(HookContext(
+            point=HookPoint.ENGINE_RUN_END,
+            data={"status": result.status, "task": task, "streaming": True},
+            session_id=session_id,
+        ))
 
         await self._save_session()
         return result
@@ -514,6 +542,12 @@ class AgentEngine:
             await self._maybe_compact()
 
             # --- 推理：调用 LLM ---
+            session_id = self._session.id if self._session else ""
+            await self.hooks.fire(HookContext(
+                point=HookPoint.LLM_CALL_START,
+                data={"turn": turn + 1, "message_count": len(self._messages)},
+                session_id=session_id,
+            ))
             response = await self._router.call(
                 messages=self._messages,
                 tier=ModelTier.CAPABLE,
@@ -521,6 +555,17 @@ class AgentEngine:
             )
             self._accumulate_usage(response.usage)
             self._budget_tracker.track(response.usage, response.model)
+            await self.hooks.fire(HookContext(
+                point=HookPoint.LLM_CALL_END,
+                data={
+                    "turn": turn + 1,
+                    "model": response.model,
+                    "total_tokens": response.usage.total_tokens,
+                    "cost_usd": response.usage.cost_usd,
+                    "has_tool_calls": bool(response.tool_calls),
+                },
+                session_id=session_id,
+            ))
 
             # 行为监控
             warnings = self._behavior_monitor.check_anomalous_behavior()
@@ -543,7 +588,35 @@ class AgentEngine:
                     if tc is None:
                         continue
 
+                    hook_ctx = await self.hooks.fire(HookContext(
+                        point=HookPoint.TOOL_EXECUTE_START,
+                        data={"tool_name": tc.name, "arguments": tc.arguments},
+                        session_id=session_id,
+                    ))
+                    if hook_ctx.should_abort:
+                        self._messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": (
+                                    "Aborted by hook: "
+                                    f"{hook_ctx.data.get('abort_reason', 'no reason')}"
+                                ),
+                            }
+                        )
+                        continue
+
                     result = await self._execute_tool(tc)
+                    await self.hooks.fire(HookContext(
+                        point=HookPoint.TOOL_EXECUTE_END,
+                        data={
+                            "tool_name": tc.name,
+                            "status": result.status,
+                            "duration_ms": result.duration_ms,
+                            "content_length": len(result.content) if result.content else 0,
+                        },
+                        session_id=session_id,
+                    ))
                     self._behavior_monitor.record_tool_call(
                         tc.name, is_error=(result.status == "error")
                     )
@@ -584,6 +657,7 @@ class AgentEngine:
         """流式 ReAct 循环：通过 router.stream() 逐 token 输出."""
         max_turns = self._config.safety.max_turns
         model_str = self._router.resolve_model(ModelTier.CAPABLE)
+        session_id = self._session.id if self._session else ""
 
         for turn in range(max_turns):
             self._usage.turns = turn + 1
@@ -600,6 +674,13 @@ class AgentEngine:
             collected_tool_calls: dict[int, dict[str, Any]] = {}
             got_response = False
             got_thinking = False
+            stream_tokens = 0
+
+            await self.hooks.fire(HookContext(
+                point=HookPoint.LLM_CALL_START,
+                data={"turn": turn + 1, "streaming": True, "message_count": len(self._messages)},
+                session_id=session_id,
+            ))
 
             try:
                 async for chunk in self._router.stream(
@@ -610,6 +691,7 @@ class AgentEngine:
                     if chunk.usage:
                         self._accumulate_usage(chunk.usage)
                         self._budget_tracker.track(chunk.usage, model_str)
+                        stream_tokens = chunk.usage.total_tokens
 
                     if chunk.thinking:
                         if not got_thinking:
@@ -636,6 +718,7 @@ class AgentEngine:
                 )
                 self._accumulate_usage(response.usage)
                 self._budget_tracker.track(response.usage, model_str)
+                stream_tokens = response.usage.total_tokens
                 if response.content:
                     if not got_response:
                         got_response = True
@@ -646,6 +729,18 @@ class AgentEngine:
                     thinking_parts.append(response.reasoning_content)
                 if response.tool_calls:
                     collected_tool_calls = {i: tc for i, tc in enumerate(response.tool_calls)}
+
+            await self.hooks.fire(HookContext(
+                point=HookPoint.LLM_CALL_END,
+                data={
+                    "turn": turn + 1,
+                    "model": model_str,
+                    "total_tokens": stream_tokens,
+                    "has_tool_calls": bool(collected_tool_calls),
+                    "streaming": True,
+                },
+                session_id=session_id,
+            ))
 
             if got_thinking:
                 await on_event("thinking_end", {"content": "".join(thinking_parts)})
@@ -670,6 +765,29 @@ class AgentEngine:
                         continue
 
                     await on_event("tool_start", {"name": tc.name, "args": tc.arguments})
+
+                    hook_ctx = await self.hooks.fire(HookContext(
+                        point=HookPoint.TOOL_EXECUTE_START,
+                        data={"tool_name": tc.name, "arguments": tc.arguments},
+                        session_id=session_id,
+                    ))
+                    if hook_ctx.should_abort:
+                        abort_reason = hook_ctx.data.get("abort_reason", "no reason")
+                        await on_event("tool_end", {
+                            "name": tc.name,
+                            "status": "aborted",
+                            "duration_ms": 0,
+                            "content": f"Aborted by hook: {abort_reason}",
+                        })
+                        self._messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": f"Aborted by hook: {abort_reason}",
+                            }
+                        )
+                        continue
+
                     result = await self._execute_tool(tc)
                     await on_event(
                         "tool_end",
@@ -680,6 +798,16 @@ class AgentEngine:
                             "content": result.content[:2000] if result.content else "",
                         },
                     )
+                    await self.hooks.fire(HookContext(
+                        point=HookPoint.TOOL_EXECUTE_END,
+                        data={
+                            "tool_name": tc.name,
+                            "status": result.status,
+                            "duration_ms": result.duration_ms,
+                            "content_length": len(result.content) if result.content else 0,
+                        },
+                        session_id=session_id,
+                    ))
                     self._behavior_monitor.record_tool_call(
                         tc.name, is_error=(result.status == "error")
                     )

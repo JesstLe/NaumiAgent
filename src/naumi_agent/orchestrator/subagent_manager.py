@@ -13,6 +13,7 @@ from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult, B
 from naumi_agent.agents.factory import DynamicAgentFactory
 from naumi_agent.agents.message_bus import AgentMessageBus
 from naumi_agent.agents.presets import ALL_AGENT_CONFIGS
+from naumi_agent.hooks import HookContext, HookManager, HookPoint
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
@@ -92,6 +93,7 @@ class SubAgentManager:
         self.message_bus = AgentMessageBus()
         self._lifecycle: dict[str, AgentLifecycle] = {}
         self._reaper_task: asyncio.Task[None] | None = None
+        self._hooks: HookManager = engine.hooks
 
     # --- 生命周期状态机 ---
 
@@ -360,10 +362,43 @@ class SubAgentManager:
         logger.info("Delegating task %s to agent %s", task.id, agent_name)
         self._ensure_lifecycle(agent_name)
         self._transition(agent_name, AgentState.RUNNING)
+
+        await self._hooks.fire(HookContext(
+            point=HookPoint.DELEGATE_START,
+            data={"task_id": task.id, "agent_name": agent_name, "description": task.description},
+            agent_name=agent_name,
+        ))
         try:
+            await self._hooks.fire(HookContext(
+                point=HookPoint.AGENT_EXECUTE_START,
+                data={"task_id": task.id, "agent_name": agent_name, "task": task.description},
+                agent_name=agent_name,
+            ))
             result = await agent.execute(task=task.description, context=context)
+            await self._hooks.fire(HookContext(
+                point=HookPoint.AGENT_EXECUTE_END,
+                data={
+                    "task_id": task.id,
+                    "agent_name": agent_name,
+                    "status": result.status,
+                    "tokens": result.total_tokens,
+                    "cost": result.total_cost_usd,
+                },
+                agent_name=agent_name,
+            ))
         finally:
             self._transition(agent_name, AgentState.IDLE)
+
+        await self._hooks.fire(HookContext(
+            point=HookPoint.DELEGATE_END,
+            data={
+                "task_id": task.id,
+                "agent_name": agent_name,
+                "status": result.status,
+                "tokens": result.total_tokens,
+            },
+            agent_name=agent_name,
+        ))
 
         # Auto-publish completed results to the bus
         if result.status == "completed" and result.response:

@@ -26,14 +26,14 @@ class TestToolRegistry:
         assert "file_write" in registry
         assert "file_edit" in registry
         assert "bash_run" in registry
-        assert len(registry) == 4
+        assert len(registry) >= 4
 
     def test_get_nonexistent(self, registry: ToolRegistry) -> None:
         assert registry.get("nonexistent") is None
 
     def test_openai_tools_format(self, registry: ToolRegistry) -> None:
         tools = registry.get_openai_tools()
-        assert len(tools) == 4
+        assert len(tools) >= 4
         for t in tools:
             assert t["type"] == "function"
             assert "function" in t

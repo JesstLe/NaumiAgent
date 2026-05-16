@@ -246,6 +246,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
     arg = parts[1] if len(parts) > 1 else ""
 
     match command:
+        case "/hooks":
+            _show_hooks(engine)
         case "/tools":
             tools = engine.tool_registry.all()
             console.print("[bold]可用工具:[/bold]")
@@ -557,6 +559,7 @@ def _print_help() -> None:
         ("/tools", "列出可用工具"),
         ("/model", "显示模型配置"),
         ("/usage", "显示 token 用量"),
+        ("/hooks", "显示已注册的钩子"),
         ("/history", "查看历史会话列表"),
         ("/load <id>", "加载指定会话并继续对话"),
         ("/delete <id>", "删除指定会话"),
@@ -802,6 +805,31 @@ async def _run_pursue(engine: Any, goal: str) -> None:
             title="🎯 目标追踪报告",
         )
     )
+
+
+async def _show_history(engine: Any) -> None:
+    """显示历史会话列表."""
+
+
+def _show_hooks(engine: Any) -> None:
+    """显示已注册的钩子."""
+    from naumi_agent.hooks import HookPoint
+
+    hooks = engine.hooks.list_hooks()
+    if not hooks:
+        console.print("[dim]没有已注册的钩子[/dim]")
+        return
+
+    console.print("[bold]已注册钩子:[/bold]")
+    for point, callbacks in hooks.items():
+        try:
+            label = HookPoint(point).value
+        except ValueError:
+            label = point
+        console.print(f"  [cyan]{label}[/cyan]")
+        for cb in callbacks:
+            console.print(f"    • {cb}")
+    console.print()
 
 
 async def _show_history(engine: Any) -> None:

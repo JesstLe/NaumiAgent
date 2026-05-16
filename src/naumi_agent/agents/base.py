@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from naumi_agent.hooks import HookContext, HookPoint
+
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
 
@@ -98,6 +100,8 @@ class BaseAgent:
         """执行子任务."""
         from naumi_agent.model.router import ModelTier
 
+        hooks = self.engine.hooks
+
         messages: list[dict[str, Any]] = []
 
         # 系统提示
@@ -125,16 +129,30 @@ class BaseAgent:
 
         for turn in range(self.config.max_turns):
             try:
+                await hooks.fire(HookContext(
+                    point=HookPoint.LLM_CALL_START,
+                    data={"turn": turn + 1, "agent": self.config.name},
+                    agent_name=self.config.name,
+                ))
                 response = await self.engine.router.call(
                     messages=messages,
                     tier=tier,
                     tools=tools,
                 )
+                total_tokens += response.usage.total_tokens
+                total_cost += response.usage.cost_usd
+                await hooks.fire(HookContext(
+                    point=HookPoint.LLM_CALL_END,
+                    data={
+                        "turn": turn + 1,
+                        "model": response.model,
+                        "total_tokens": response.usage.total_tokens,
+                        "agent": self.config.name,
+                    },
+                    agent_name=self.config.name,
+                ))
             except Exception as e:
                 return AgentResult(status="error", error=str(e))
-
-            total_tokens += response.usage.total_tokens
-            total_cost += response.usage.cost_usd
 
             if response.tool_calls:
                 messages.append(
@@ -162,11 +180,35 @@ class BaseAgent:
                         )
                         continue
 
+                    hook_ctx = await hooks.fire(HookContext(
+                        point=HookPoint.TOOL_EXECUTE_START,
+                        data={"tool_name": tool_name, "arguments": args_str},
+                        agent_name=self.config.name,
+                    ))
+                    if hook_ctx.should_abort:
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "content": (
+                                    "Aborted by hook: "
+                                    f"{hook_ctx.data.get('abort_reason', '')}"
+                                ),
+                            }
+                        )
+                        continue
+
                     try:
                         args = tool.parse_arguments(args_str)
                         output = await tool.execute(**args)
                     except Exception as e:
                         output = f"Error: {type(e).__name__}: {e}"
+
+                    await hooks.fire(HookContext(
+                        point=HookPoint.TOOL_EXECUTE_END,
+                        data={"tool_name": tool_name, "agent": self.config.name},
+                        agent_name=self.config.name,
+                    ))
 
                     messages.append(
                         {
@@ -179,6 +221,11 @@ class BaseAgent:
                 continue
 
             # 无工具调用 → 最终回答
+            await hooks.fire(HookContext(
+                point=HookPoint.MESSAGE_OUT,
+                data={"agent": self.config.name, "content_length": len(response.content or "")},
+                agent_name=self.config.name,
+            ))
             messages.append({"role": "assistant", "content": response.content})
             return AgentResult(
                 status="completed",
