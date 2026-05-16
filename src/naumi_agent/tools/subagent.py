@@ -215,7 +215,15 @@ class ListAgentsTool(Tool):
             return "没有可用的子 Agent。"
         lines = ["可用 Agent:"]
         for a in agents:
-            lines.append(f"  - {a['name']}: {a['description']}")
+            state = a.get("state", "?")
+            tasks = a.get("tasks", "0")
+            age = a.get("age_s", "?")
+            idle = a.get("idle_s", "")
+            info = f"  - {a['name']} [{state}] (任务: {tasks}, 存活: {age}s"
+            if idle:
+                info += f", 空闲: {idle}s"
+            info += f")\n    {a['description']}"
+            lines.append(info)
         return "\n".join(lines)
 
 
