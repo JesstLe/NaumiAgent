@@ -29,7 +29,7 @@ class ModelConfig(BaseSettings):
     fast_model: str = "claude-haiku-4-5"
     reasoning_model: str = "claude-opus-4-7"
     max_tokens: int = 4096
-    temperature: float = 0.7
+    temperature: float = 1.0
     api_base: str | None = None
     api_key: str | None = None
     model_info: dict[str, ModelMeta] = Field(default_factory=dict)

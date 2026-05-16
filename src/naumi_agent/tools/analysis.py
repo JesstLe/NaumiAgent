@@ -8517,8 +8517,8 @@ async def _run_analysis(router: Any, system_prompt: str, user_msg: str) -> str:
                 {"role": "user", "content": user_msg},
             ],
             tier=ModelTier.CAPABLE,
-            max_tokens=8192,
-            temperature=0.4,
+            max_tokens=16384,
+            temperature=1.0,
         )
         return response.content
     except Exception as e:

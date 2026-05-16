@@ -364,7 +364,7 @@ class DynamicAgentFactory:
                 ],
                 tier=ModelTier.FAST,
                 max_tokens=800,
-                temperature=0.3,
+                temperature=1.0,
             )
             return response.content.strip()
         except Exception as e:
