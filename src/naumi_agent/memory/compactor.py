@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import datetime
 from typing import Any
 
 import litellm
@@ -41,6 +43,33 @@ COMPACTION_PROMPT = """\
 - （剩余问题）
 """
 
+EXTRACTION_PROMPT = """\
+从以下对话中提取值得长期记住的关键信息。
+
+只提取以下类型：
+- fact: 客观事实（技术栈、项目结构、配置）
+- preference: 用户偏好（风格、习惯、约定）
+- decision: 重要决策（架构选型、方案确定）
+
+不要提取：
+- 临时性信息、中间过程
+- 已被后续消息推翻的信息
+- 文件内容片段
+
+对话内容：
+{history}
+
+输出 JSON 数组，每个元素包含 content 和 category 字段：
+```json
+[
+  {{"content": "...", "category": "fact"}},
+  {{"content": "...", "category": "preference"}}
+]
+```
+
+如果没有值得提取的信息，输出空数组：[]
+"""
+
 
 class ContextCompactor:
     """上下文压缩器."""
@@ -52,11 +81,13 @@ class ContextCompactor:
         *,
         threshold: float = 0.75,
         max_messages: int = 50,
+        long_term_memory: Any | None = None,
     ) -> None:
         self._threshold = threshold
         self._max_messages = max_messages
         self._config = config
         self._router = router
+        self._long_term_memory = long_term_memory
 
     def should_compact(self, messages: list[dict[str, Any]], max_tokens: int) -> bool:
         """判断是否需要压缩."""
@@ -90,6 +121,9 @@ class ContextCompactor:
 
         if not to_compact:
             return messages
+
+        # Extract memories from messages being compacted
+        await self._extract_memories(to_compact)
 
         # 将中间历史转为文本
         history_text = self._messages_to_text(to_compact)
@@ -172,3 +206,76 @@ class ContextCompactor:
                     func = tc.get("function", {})
                     total_chars += len(func.get("arguments", ""))
             return total_chars // 4
+
+    async def _extract_memories(self, messages: list[dict[str, Any]]) -> None:
+        """从即将被压缩的消息中提取关键信息存入长期记忆."""
+        if self._long_term_memory is None:
+            return
+
+        history_text = self._messages_to_text(messages)
+        if len(history_text) < 100:
+            return
+
+        try:
+            response = await self._router.call(
+                messages=[
+                    {"role": "user", "content": EXTRACTION_PROMPT.format(history=history_text)}
+                ],
+                tier=ModelTier.FAST,
+                max_tokens=500,
+            )
+            extracted = _parse_extraction_response(response.content)
+        except Exception as e:
+            logger.debug("Memory extraction failed: %s", e)
+            return
+
+        if not extracted:
+            return
+
+        now = datetime.now().isoformat()
+        stored = 0
+        for item in extracted:
+            content = item.get("content", "").strip()
+            category = item.get("category", "fact")
+            if not content:
+                continue
+            try:
+                from naumi_agent.memory.long_term import MemoryEntry
+
+                entry = MemoryEntry(
+                    id="",
+                    content=content,
+                    category=category,
+                    created_at=now,
+                    updated_at=now,
+                    metadata={"source": "compaction"},
+                )
+                await self._long_term_memory.store(entry)
+                stored += 1
+            except Exception as e:
+                logger.debug("Failed to store extracted memory: %s", e)
+
+        if stored:
+            logger.info("Auto-extracted %d memories during compaction", stored)
+
+
+def _parse_extraction_response(text: str) -> list[dict[str, str]]:
+    """Parse JSON array from LLM extraction response."""
+    # Try to extract JSON from markdown code block
+    import re
+
+    json_match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+    if json_match:
+        text = json_match.group(1).strip()
+
+    try:
+        data = json.loads(text)
+        if isinstance(data, list):
+            return [
+                item for item in data
+                if isinstance(item, dict) and "content" in item
+            ]
+    except json.JSONDecodeError:
+        pass
+
+    return []

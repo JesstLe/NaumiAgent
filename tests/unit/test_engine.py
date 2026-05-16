@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from naumi_agent.config.settings import AppConfig
-from naumi_agent.model.router import ModelResponse, ModelTier, TokenUsage
-from naumi_agent.orchestrator.engine import AgentEngine, AgentResult, SYSTEM_PROMPT
-from naumi_agent.tools.base import ToolCall, ToolResult
+from naumi_agent.model.router import ModelResponse, TokenUsage
+from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.tools.base import ToolCall
 
 
 @pytest.fixture
@@ -117,7 +117,10 @@ class TestToolExecution:
     @pytest.mark.asyncio
     async def test_path_in_allowed_dir(self, engine: AgentEngine) -> None:
         engine._permission_checker._allowed_dirs = ["/tmp"]
-        tc = ToolCall(id="x", name="file_read", arguments='{"path": "/tmp/nonexistent_test_file.txt"}')
+        tc = ToolCall(
+            id="x", name="file_read",
+            arguments='{"path": "/tmp/nonexistent_test_file.txt"}',
+        )
         result = await engine._execute_tool(tc)
         # Should attempt read, fail with "File not found" not "Permission denied"
         assert "Error: File not found" in result.content or "Permission denied" in result.content
@@ -156,7 +159,10 @@ class TestRun:
             usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=0.001),
             model="test-model",
         )
-        with patch.object(engine._router, "call", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            engine._router, "call", new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
             result = await engine.run("hi")
 
         assert result.status == "completed"
@@ -176,7 +182,112 @@ class TestRun:
             model="test-model",
         )
         engine._config.safety.max_turns = 2
-        with patch.object(engine._router, "call", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(
+            engine._router, "call", new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
             result = await engine.run("loop")
 
         assert result.status == "max_turns"
+
+
+class TestMemoryInjection:
+    @pytest.mark.asyncio
+    async def test_injects_relevant_memories(self, engine: AgentEngine) -> None:
+        from naumi_agent.memory.long_term import MemoryEntry, MemorySearchResult
+
+        fake_results = [
+            MemorySearchResult(
+                entry=MemoryEntry(
+                    id="m1", content="用户喜欢 Python", category="preference",
+                    created_at="2026-01-01", updated_at="2026-01-01",
+                ),
+                relevance=0.85,
+            ),
+        ]
+
+        with patch.object(
+            engine.long_term_memory, "recall",
+            new_callable=AsyncMock, return_value=fake_results,
+        ):
+            await engine._inject_relevant_memories("写一个 Python 脚本")
+
+        # Should have added a system message with memories
+        memory_msgs = [
+            m for m in engine._messages
+            if m.get("role") == "system" and "## 相关记忆" in m.get("content", "")
+        ]
+        assert len(memory_msgs) == 1
+        assert "用户喜欢 Python" in memory_msgs[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_no_injection_when_empty(self, engine: AgentEngine) -> None:
+        with patch.object(
+            engine.long_term_memory, "recall",
+            new_callable=AsyncMock, return_value=[],
+        ):
+            await engine._inject_relevant_memories("hello")
+
+        memory_msgs = [
+            m for m in engine._messages
+            if m.get("role") == "system" and "## 相关记忆" in m.get("content", "")
+        ]
+        assert len(memory_msgs) == 0
+
+    @pytest.mark.asyncio
+    async def test_injection_replaces_previous(self, engine: AgentEngine) -> None:
+        from naumi_agent.memory.long_term import MemoryEntry, MemorySearchResult
+
+        engine._messages.append({"role": "system", "content": "## 相关记忆\n- old"})
+
+        fake_results = [
+            MemorySearchResult(
+                entry=MemoryEntry(
+                    id="m1", content="new memory", category="fact",
+                    created_at="2026-01-01", updated_at="2026-01-01",
+                ),
+                relevance=0.9,
+            ),
+        ]
+
+        with patch.object(
+            engine.long_term_memory, "recall",
+            new_callable=AsyncMock, return_value=fake_results,
+        ):
+            await engine._inject_relevant_memories("query")
+
+        memory_msgs = [
+            m for m in engine._messages
+            if m.get("role") == "system" and "## 相关记忆" in m.get("content", "")
+        ]
+        assert len(memory_msgs) == 1
+        assert "new memory" in memory_msgs[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_injection_failure_does_not_crash(self, engine: AgentEngine) -> None:
+        with patch.object(
+            engine.long_term_memory, "recall",
+            new_callable=AsyncMock, side_effect=RuntimeError("db down"),
+        ):
+            await engine._inject_relevant_memories("query")  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_run_triggers_injection(self, engine: AgentEngine) -> None:
+        mock_response = ModelResponse(
+            content="Done!",
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=0.001),
+            model="test-model",
+        )
+        with (
+            patch.object(
+                engine._router, "call", new_callable=AsyncMock,
+                return_value=mock_response,
+            ),
+            patch.object(
+                engine.long_term_memory, "recall",
+                new_callable=AsyncMock, return_value=[],
+            ) as mock_recall,
+        ):
+            await engine.run("do something")
+
+        mock_recall.assert_called_once()
