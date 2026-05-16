@@ -258,6 +258,8 @@ class AgentEngine:
         for tool in create_pursuit_tool():
             self._tool_registry.register(tool)
 
+        self._reaper_started = False
+
     async def setup_mcp_tools(self) -> None:
         """从配置连接 MCP Server 并注册工具（需在异步上下文中调用）."""
         server_configs = self._config.mcp.servers
@@ -294,6 +296,9 @@ class AgentEngine:
 
     async def shutdown(self) -> None:
         """释放资源（关闭数据库连接、浏览器、MCP 连接等）."""
+        if hasattr(self, "subagent_manager"):
+            await self.subagent_manager.stop_reaper()
+            self.subagent_manager.destroy_all_dynamic()
         await self._browser_session.close()
         if self._mcp_manager:
             await self._mcp_manager.disconnect_all()
@@ -395,8 +400,14 @@ class AgentEngine:
     def _check_budget(self) -> AgentResult | None:
         return None
 
+    async def _ensure_reaper(self) -> None:
+        if not self._reaper_started and hasattr(self, "subagent_manager"):
+            self._reaper_started = True
+            await self.subagent_manager.start_reaper()
+
     async def run(self, task: str) -> AgentResult:
         """执行任务 — 自适应规划 + ReAct 主循环."""
+        await self._ensure_reaper()
         if not any(m.get("role") == "system" for m in self._messages):
             self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
@@ -422,6 +433,7 @@ class AgentEngine:
         on_event: EventCallback,
     ) -> AgentResult:
         """执行任务 — 流式 ReAct 主循环，通过回调实时推送事件."""
+        await self._ensure_reaper()
         if not any(m.get("role") == "system" for m in self._messages):
             self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
 

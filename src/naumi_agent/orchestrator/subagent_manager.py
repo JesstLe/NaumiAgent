@@ -1,10 +1,12 @@
-"""子 Agent 调度器 — 管理、选择、并行执行."""
+"""子 Agent 调度器 — 管理、选择、并行执行、生命周期."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult, BaseAgent
@@ -16,6 +18,9 @@ if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
 
 logger = logging.getLogger(__name__)
+
+_IDLE_TIMEOUT_SECONDS = 300  # 5 minutes
+_REAPER_INTERVAL_SECONDS = 30
 
 # 关键词 → Agent 映射
 _KEYWORD_AGENT_MAP: dict[str, str] = {
@@ -39,6 +44,28 @@ _KEYWORD_AGENT_MAP: dict[str, str] = {
 }
 
 
+class AgentState(StrEnum):
+    SPAWNED = "spawned"
+    READY = "ready"
+    RUNNING = "running"
+    IDLE = "idle"
+    DESTROYED = "destroyed"
+
+
+@dataclass
+class AgentLifecycle:
+    name: str
+    state: AgentState = AgentState.SPAWNED
+    spawned_at: float = 0.0
+    last_updated: float = field(default_factory=time.monotonic)
+    idle_since: float | None = None
+    task_count: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.spawned_at:
+            self.spawned_at = time.monotonic()
+
+
 @dataclass(frozen=True)
 class SubTask:
     """子任务定义."""
@@ -55,7 +82,7 @@ class SubTask:
 
 
 class SubAgentManager:
-    """管理和调度子 Agent."""
+    """管理和调度子 Agent（含生命周期状态机 + 自动回收）."""
 
     def __init__(self, engine: AgentEngine) -> None:
         self._engine = engine
@@ -63,6 +90,77 @@ class SubAgentManager:
         self._configs: dict[str, AgentConfig] = dict(ALL_AGENT_CONFIGS)
         self._factory = DynamicAgentFactory(engine.router)
         self.message_bus = AgentMessageBus()
+        self._lifecycle: dict[str, AgentLifecycle] = {}
+        self._reaper_task: asyncio.Task[None] | None = None
+
+    # --- 生命周期状态机 ---
+
+    def get_lifecycle(self, name: str) -> AgentLifecycle | None:
+        return self._lifecycle.get(name)
+
+    def get_state(self, name: str) -> AgentState | None:
+        lc = self._lifecycle.get(name)
+        return lc.state if lc else None
+
+    def _transition(self, name: str, new_state: AgentState) -> None:
+        lc = self._lifecycle.get(name)
+        if not lc:
+            return
+        old = lc.state
+        lc.state = new_state
+        lc.last_updated = time.monotonic()
+        if new_state == AgentState.IDLE:
+            lc.idle_since = time.monotonic()
+        else:
+            lc.idle_since = None
+        if new_state == AgentState.RUNNING:
+            lc.task_count += 1
+        logger.debug("Agent %s: %s → %s", name, old.value, new_state.value)
+
+    def _ensure_lifecycle(self, name: str) -> AgentLifecycle:
+        if name not in self._lifecycle:
+            self._lifecycle[name] = AgentLifecycle(name=name)
+        return self._lifecycle[name]
+
+    async def start_reaper(self) -> None:
+        """启动后台回收协程."""
+        if self._reaper_task and not self._reaper_task.done():
+            return
+        self._reaper_task = asyncio.create_task(self._reaper_loop())
+        logger.info("Agent reaper started (interval=%ds, idle_timeout=%ds)",
+                     _REAPER_INTERVAL_SECONDS, _IDLE_TIMEOUT_SECONDS)
+
+    async def stop_reaper(self) -> None:
+        if self._reaper_task and not self._reaper_task.done():
+            self._reaper_task.cancel()
+            try:
+                await self._reaper_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("Agent reaper stopped")
+
+    async def _reaper_loop(self) -> None:
+        """定期扫描并回收空闲超时的动态 Agent."""
+        while True:
+            await asyncio.sleep(_REAPER_INTERVAL_SECONDS)
+            try:
+                now = time.monotonic()
+                preset_names = set(ALL_AGENT_CONFIGS.keys())
+                to_reap = [
+                    name for name, lc in self._lifecycle.items()
+                    if name not in preset_names
+                    and lc.state == AgentState.IDLE
+                    and lc.idle_since
+                    and (now - lc.idle_since) > _IDLE_TIMEOUT_SECONDS
+                ]
+                for name in to_reap:
+                    logger.info("Reaping idle agent '%s' (idle %.0fs)",
+                                name, now - (self._lifecycle[name].idle_since or now))
+                    self.destroy(name)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Reaper error")
 
     def get_agent(self, name: str) -> BaseAgent | None:
         """获取或创建 Agent 实例."""
@@ -75,6 +173,8 @@ class SubAgentManager:
 
         agent = BaseAgent(config, self._engine)
         self._agents[name] = agent
+        self._ensure_lifecycle(name)
+        self._transition(name, AgentState.IDLE)
         return agent
 
     def spawn(self, config: AgentConfig) -> BaseAgent:
@@ -88,6 +188,10 @@ class SubAgentManager:
 
         agent = BaseAgent(config, self._engine)
         self._agents[name] = agent
+        lc = self._ensure_lifecycle(name)
+        lc.spawned_at = time.monotonic()
+        self._transition(name, AgentState.SPAWNED)
+        self._transition(name, AgentState.READY)
         logger.info("Spawned dynamic agent: %s", name)
         return agent
 
@@ -178,13 +282,15 @@ class SubAgentManager:
             logger.warning("Cannot destroy preset agent: %s", name)
             return False
 
-        removed_agent = self._agents.pop(name, None)
-        self._configs.pop(name, None)
+        if name not in self._agents:
+            return False
 
-        if removed_agent is not None:
-            logger.info("Destroyed dynamic agent: %s", name)
-            return True
-        return False
+        self._transition(name, AgentState.DESTROYED)
+        self._agents.pop(name, None)
+        self._configs.pop(name, None)
+        self._lifecycle.pop(name, None)
+        logger.info("Destroyed dynamic agent: %s", name)
+        return True
 
     def select_agent(self, task_description: str) -> str | None:
         """根据任务描述选择最合适的 Agent."""
@@ -252,7 +358,12 @@ class SubAgentManager:
         context = "\n\n".join(context_parts) if context_parts else ""
 
         logger.info("Delegating task %s to agent %s", task.id, agent_name)
-        result = await agent.execute(task=task.description, context=context)
+        self._ensure_lifecycle(agent_name)
+        self._transition(agent_name, AgentState.RUNNING)
+        try:
+            result = await agent.execute(task=task.description, context=context)
+        finally:
+            self._transition(agent_name, AgentState.IDLE)
 
         # Auto-publish completed results to the bus
         if result.status == "completed" and result.response:
@@ -411,8 +522,23 @@ class SubAgentManager:
         return result
 
     def list_agents(self) -> list[dict[str, str]]:
-        """列出可用的 Agent."""
-        return [
-            {"name": config.name, "description": config.description}
-            for config in self._configs.values()
-        ]
+        """列出可用的 Agent（含生命周期状态）."""
+        result = []
+        for config in self._configs.values():
+            lc = self._lifecycle.get(config.name)
+            entry: dict[str, str] = {
+                "name": config.name,
+                "description": config.description,
+            }
+            if lc:
+                entry["state"] = lc.state.value
+                entry["tasks"] = str(lc.task_count)
+                age = time.monotonic() - (lc.spawned_at or lc.last_updated)
+                entry["age_s"] = f"{age:.0f}"
+                if lc.idle_since:
+                    idle = time.monotonic() - lc.idle_since
+                    entry["idle_s"] = f"{idle:.0f}"
+            else:
+                entry["state"] = "uninitialized"
+            result.append(entry)
+        return result
