@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 def create_subagent_tools(manager: Any) -> list[Tool]:
     return [
         DelegateTaskTool(manager),
+        SpawnAgentTool(manager),
+        DestroyAgentTool(manager),
         ListAgentsTool(manager),
         BlackboardReadTool(manager),
         BlackboardWriteTool(manager),
@@ -70,6 +72,120 @@ class DelegateTaskTool(Tool):
             return f"子任务失败 ({result.status}): {result.error or result.response[:500]}"
         except Exception as e:
             return f"委派任务出错: {type(e).__name__}: {e}"
+
+
+class SpawnAgentTool(Tool):
+    """自主创建一个新的专用子 Agent."""
+
+    def __init__(self, manager: Any) -> None:
+        self._manager = manager
+
+    @property
+    def name(self) -> str:
+        return "spawn_agent"
+
+    @property
+    def description(self) -> str:
+        return (
+            "创建一个新的专用子 Agent。"
+            "根据任务描述自动推断能力、生成 system prompt。"
+            "创建后可用 delegate_task 向其委派任务。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Agent 唯一名称（如 security_auditor、perf_optimizer）",
+                },
+                "task_description": {
+                    "type": "string",
+                    "description": "Agent 负责的任务领域描述",
+                },
+                "role": {
+                    "type": "string",
+                    "description": "角色类型（expert_analyst、coder、researcher 等）",
+                    "default": "expert_analyst",
+                },
+                "focus": {
+                    "type": "string",
+                    "description": "专注领域（如 security、performance、testing）",
+                    "default": "",
+                },
+            },
+            "required": ["name", "task_description"],
+        }
+
+    async def execute(
+        self,
+        *,
+        name: str,
+        task_description: str,
+        role: str = "expert_analyst",
+        focus: str = "",
+        **kwargs: Any,
+    ) -> str:
+        if self._manager.get_agent(name):
+            return f"Agent '{name}' 已存在，可直接使用 delegate_task 委派任务。"
+
+        try:
+            agent = await self._manager.spawn_for_task_with_llm(
+                name=name,
+                task_description=task_description,
+                role=role,
+                focus=focus,
+            )
+            return (
+                f"✅ 已创建子 Agent '{agent.config.name}'\n"
+                f"   描述: {agent.config.description}\n"
+                f"   能力: {', '.join(c.value for c in agent.config.capabilities)}\n"
+                f"   可通过 delegate_task(task='...', agent='{name}') 委派任务。"
+            )
+        except Exception as e:
+            return f"创建 Agent 失败: {type(e).__name__}: {e}"
+
+
+class DestroyAgentTool(Tool):
+    """销毁一个动态子 Agent，释放资源."""
+
+    def __init__(self, manager: Any) -> None:
+        self._manager = manager
+
+    @property
+    def name(self) -> str:
+        return "destroy_agent"
+
+    @property
+    def description(self) -> str:
+        return (
+            "销毁一个动态创建的子 Agent，释放资源。"
+            "任务完成后不再需要的 Agent 应及时销毁。"
+            "预设 Agent（coder、researcher、browser）不可销毁。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "要销毁的 Agent 名称",
+                },
+            },
+            "required": ["name"],
+        }
+
+    async def execute(self, *, name: str, **kwargs: Any) -> str:
+        if not self._manager.get_agent(name):
+            return f"Agent '{name}' 不存在。"
+
+        if self._manager.destroy(name):
+            return f"✅ 已销毁子 Agent '{name}'，资源已释放。"
+        return f"无法销毁 '{name}'（预设 Agent 不可销毁）。"
 
 
 class ListAgentsTool(Tool):
