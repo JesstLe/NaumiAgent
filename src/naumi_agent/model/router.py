@@ -188,6 +188,7 @@ class ModelRouter:
         max_tokens: int | None = None,
         temperature: float | None = None,
         response_format: str | dict | None = None,
+        thinking: dict[str, str] | None = None,
     ) -> ModelResponse:
         """非流式调用."""
         resolved = model or self.resolve_model(tier)
@@ -203,6 +204,12 @@ class ModelRouter:
             kwargs["response_format"] = {"type": "json_object"}
 
         kwargs.update(self._base_kwargs())
+
+        # Kimi k2.6 thinking support
+        if thinking is not None:
+            self._apply_thinking(kwargs, thinking)
+        elif self._is_kimi_thinking_model(resolved):
+            self._apply_thinking(kwargs, {"type": "enabled"})
         response = await litellm.acompletion(**kwargs)
 
         choice = response.choices[0]
@@ -229,6 +236,7 @@ class ModelRouter:
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        thinking: dict[str, str] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式调用，yield StreamChunk."""
         resolved = model or self.resolve_model(tier)
@@ -244,6 +252,12 @@ class ModelRouter:
             kwargs["tools"] = tools
 
         kwargs.update(self._base_kwargs())
+
+        # Kimi k2.6 thinking support
+        if thinking is not None:
+            self._apply_thinking(kwargs, thinking)
+        elif self._is_kimi_thinking_model(resolved):
+            self._apply_thinking(kwargs, {"type": "enabled"})
         response = await litellm.acompletion(**kwargs)
 
         collected_tool_calls: dict[int, dict[str, Any]] = {}
@@ -305,6 +319,23 @@ class ModelRouter:
         # 最终 usage
         if final_usage:
             yield StreamChunk(usage=final_usage, finish_reason="stop")
+
+    def _is_kimi_thinking_model(self, model: str) -> bool:
+        """Check if the model is a kimi thinking model that supports the thinking param."""
+        return "kimi" in model.lower()
+
+    def _apply_thinking(
+        self, kwargs: dict[str, Any], thinking: dict[str, str],
+    ) -> None:
+        """Apply thinking parameter for models that support it.
+
+        For kimi-k2.6 via OpenAI-compatible API, thinking is passed
+        via extra_body since the OpenAI SDK doesn't natively support it.
+        """
+        existing = kwargs.get("extra_body", {})
+        existing["thinking"] = thinking
+        kwargs["extra_body"] = existing
+        logger.debug("Applied thinking=%s for model=%s", thinking, kwargs["model"])
 
     def _extract_tool_calls(self, raw: list[litellm.utils.Function] | None) -> list[dict[str, Any]]:
         if not raw:
