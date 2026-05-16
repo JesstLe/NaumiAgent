@@ -8536,6 +8536,228 @@ def _router_unavailable(mode: str, target: str) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+#  Self-Review — Agent 审查自身源码
+# ---------------------------------------------------------------------------
+
+_SELF_REVIEW_SYSTEM = """\
+你是 NaumiAgent 的自审查分析引擎。你正在审查 **自己的源代码**。
+
+## 分析维度
+
+### 1. 代码质量 (Code Quality)
+- 函数复杂度：是否有超长函数（>50行）、深层嵌套（>4层）
+- 命名一致性：是否遵循统一命名规范
+- 重复代码：是否有重复逻辑可抽象
+- 类型安全：是否有缺失的类型注解
+
+### 2. 架构脆弱性 (Architecture Fragility)
+- 模块耦合：是否存在循环依赖、不合理的跨层调用
+- SPOF：是否有单点故障风险（单例、全局状态、无重试）
+- 错误传播：异常是否被正确传播，有无裸 except
+- 资源泄漏：是否有未关闭的连接、文件句柄
+
+### 3. 工具系统健康度 (Tool System Health)
+- 工具注册：所有工具是否正确注册
+- 参数校验：工具参数是否完整校验
+- 错误处理：工具执行失败时是否有友好提示
+
+### 4. 记忆与安全 (Memory & Safety)
+- 记忆质量：存储/召回逻辑是否有边界问题
+- 权限控制：是否有越权风险
+- 敏感信息：是否有硬编码密钥或凭证
+
+### 5. 可进化性 (Evolvability)
+- 扩展点：新增工具/Skill 是否容易
+- 测试覆盖：关键路径是否有测试保护
+- 配置化：硬编码值是否可配置
+
+## 输出格式
+
+对每个发现，给出：
+- **严重程度**: CRITICAL / HIGH / MEDIUM / LOW
+- **位置**: 文件名:行号
+- **问题**: 一句话描述
+- **建议**: 修复方向（不需要完整代码）
+
+最后给出：
+- **整体评分**: A/B/C/D/F
+- **改进优先级**: 按影响力排序的 Top 5 改进建议
+- **自进化建议**: 哪些部分适合由 Agent 自己修改（Phase F 候选）
+"""
+
+
+def _scan_self_review(files: list[Path], source_text: str) -> str:
+    """self-review 模式静态扫描：审查 Agent 自身代码."""
+    findings: list[str] = []
+    lines = source_text.split("\n")
+    total_lines = len(lines)
+
+    # 1. Architecture overview
+    findings.append(
+        f"- 源文件: {len(files)} 个 | 总行数: {total_lines}"
+    )
+
+    # 2. Tool registration count
+    tool_registrations = re.findall(r"register\((\w+)\)", source_text)
+    findings.append(f"- 工具注册调用: {len(tool_registrations)} 处")
+
+    # 3. Bare except (critical for agent reliability)
+    bare_excepts = re.findall(r"except\s*:", source_text)
+    if bare_excepts:
+        findings.append(f"- 🔴 裸 except (吞掉所有异常): {len(bare_excepts)} 处")
+    else:
+        findings.append("- ✅ 无裸 except")
+
+    # 4. Hardcoded secrets / API keys
+    secrets = re.findall(
+        r"(?:api_key|password|secret|token)\s*=\s*[\"'][^\"']{8,}",
+        source_text,
+        re.IGNORECASE,
+    )
+    if secrets:
+        findings.append(f"- 🔴 疑似硬编码密钥: {len(secrets)} 处")
+        for s in secrets[:5]:
+            findings.append(f"  - `{s[:60]}`")
+    else:
+        findings.append("- ✅ 无硬编码密钥")
+
+    # 5. Missing type annotations
+    no_return_type = re.findall(
+        r"def (\w+)\([^)]*\)\s*:",
+        source_text,
+    )
+    typed_returns = re.findall(
+        r"def \w+\([^)]*\)\s*->\s+\w+",
+        source_text,
+    )
+    untyped = len(no_return_type) - len(typed_returns)
+    if untyped > 0:
+        findings.append(f"- 🟡 缺少返回类型注解的函数: {untyped} 个")
+    else:
+        findings.append("- ✅ 所有函数都有返回类型注解")
+
+    # 6. Global mutable state
+    global_mutable = re.findall(
+        r"^(\w+)\s*=\s*\{[^}]*\}|\[\]",
+        source_text,
+        re.MULTILINE,
+    )
+    if global_mutable:
+        findings.append(f"- 🟡 模块级可变状态: {len(global_mutable)} 处")
+
+    # 7. Error handling coverage
+    try_blocks = re.findall(r"\btry\s*:", source_text)
+    if try_blocks:
+        findings.append(f"- try/except 块: {len(try_blocks)} 个")
+
+    # 8. Async consistency
+    async_defs = re.findall(r"\basync def ", source_text)
+    sync_defs = re.findall(r"\bdef ", source_text)
+    async_ratio = len(async_defs) / max(len(sync_defs), 1)
+    findings.append(
+        f"- async/sync 函数比: {len(async_defs)}/{len(sync_defs)}"
+        f" ({async_ratio:.0%} async)"
+    )
+
+    # 9. Test coverage indicator
+    test_mentions = re.findall(r"test_\w+", source_text)
+    findings.append(
+        f"- 代码中测试函数引用: {len(test_mentions)} 处"
+    )
+
+    # 10. Logging usage
+    log_calls = re.findall(r"logger\.\w+\(", source_text)
+    print_calls = re.findall(r"\bprint\(", source_text)
+    findings.append(
+        f"- logger 调用: {len(log_calls)} | print 调用: {len(print_calls)}"
+    )
+
+    # 11. TODO/FIXME/HACK markers
+    todos = re.findall(r"#\s*(?:TODO|FIXME|HACK|XXX)\b", source_text, re.IGNORECASE)
+    if todos:
+        findings.append(f"- 🟡 TODO/FIXME/HACK 标记: {len(todos)} 处")
+
+    return "\n".join(findings)
+
+
+def _find_agent_source_dir() -> str:
+    """Locate the naumi_agent source directory."""
+    # Try relative to this file first
+    this_file = Path(__file__).resolve()
+    pkg_dir = this_file.parent.parent  # tools/ -> naumi_agent/
+    if (pkg_dir / "__init__.py").exists() and pkg_dir.name == "naumi_agent":
+        return str(pkg_dir)
+    # Fallback: search in site-packages or common locations
+    import naumi_agent
+    return str(Path(naumi_agent.__file__).resolve().parent)
+
+
+class SelfReviewTool(Tool):
+    """自我审查 — Agent 扫描自身源码，评估代码质量与架构脆弱性."""
+
+    @property
+    def name(self) -> str:
+        return "self_review"
+
+    @property
+    def description(self) -> str:
+        return (
+            "审查 NaumiAgent 自身源代码。"
+            "静态扫描代码质量、架构脆弱性、工具系统健康度、安全性，"
+            "再由 LLM 综合推理出改进建议和自进化候选。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "focus": {
+                    "type": "string",
+                    "description": "审查重点 (quality/architecture/tools/safety/all)",
+                    "default": "all",
+                },
+                "module": {
+                    "type": "string",
+                    "description": "只审查指定模块 (如 orchestrator, tools, memory)",
+                    "default": "",
+                },
+            },
+            "required": [],
+        }
+
+    async def execute(
+        self, *, focus: str = "all", module: str = "", **kwargs: Any,
+    ) -> str:
+        router = _global_router
+        if router is None:
+            return _router_unavailable("self-review", "naumi_agent source")
+
+        source_dir = _find_agent_source_dir()
+
+        if module:
+            target_dir = str(Path(source_dir) / module)
+        else:
+            target_dir = source_dir
+
+        files = _resolve_target(target_dir)
+        if not files:
+            return f"无法定位源码目录: {target_dir}"
+
+        source_text = _read_sources(files, max_chars=80000)
+        scan_evidence = _scan_self_review(files, source_text)
+
+        user_msg = (
+            f"## 静态扫描证据\n{scan_evidence}\n\n"
+            f"## 源代码\n{source_text[:50000]}\n"
+        )
+        if focus != "all":
+            user_msg += f"\n## 审查重点\n请重点关注: {focus}\n"
+
+        return await _run_analysis(router, _SELF_REVIEW_SYSTEM, user_msg)
+
+
 def create_analysis_tools() -> list[Tool]:
     """创建所有分析模式工具."""
     return [
@@ -8572,4 +8794,5 @@ def create_analysis_tools() -> list[Tool]:
         WatchdogTool(),
         SupervisorTool(),
         AutopsyTool(),
+        SelfReviewTool(),
     ]

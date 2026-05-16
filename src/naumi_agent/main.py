@@ -536,6 +536,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             else:
                 await _run_pursue(engine, arg)
+        case "/self-review":
+            await _run_self_review(engine, arg)
         case "/help":
             _print_help()
         case _:
@@ -609,6 +611,7 @@ def _print_help() -> None:
         ("/vision <目标>", "AI 视觉数据提取 — 反封锁视觉管线"),
         ("/hook <目标>", "逆向插桩 — 黑盒解剖"),
         ("/pursue <目标>", "目标追踪 — 自主循环执行直至真正达成"),
+        ("/self-review [模块]", "自我审查 — 扫描自身源码质量与架构"),
         ("/new", "保存当前会话并开始新对话"),
         ("/clear", "清除当前会话（不保存）"),
         ("/quit", "退出"),
@@ -817,6 +820,33 @@ async def _run_pursue(engine: Any, goal: str) -> None:
             title="🎯 目标追踪报告",
         )
     )
+
+
+async def _run_self_review(engine: Any, arg: str) -> None:
+    """执行自我审查."""
+    tool = engine.tool_registry.get("self_review")
+    if not tool:
+        console.print("[red]自我审查工具未注册[/red]")
+        return
+
+    parts = arg.strip().split(maxsplit=1) if arg else []
+    focus = parts[0] if parts else "all"
+    module = parts[1] if len(parts) > 1 else ""
+
+    console.print("[bold yellow]🔍 自我审查启动...[/bold yellow]")
+    with console.status("[bold green]扫描自身源码中...[/bold green]"):
+        result = await tool.execute(focus=focus, module=module)
+
+    console.print()
+    console.print(
+        Panel(
+            Markdown(result),
+            title="[bold yellow]🔍 自我审查报告[/bold yellow]",
+            border_style="yellow",
+            padding=(1, 2),
+        ),
+    )
+    console.print()
 
 
 async def _show_history(engine: Any) -> None:
