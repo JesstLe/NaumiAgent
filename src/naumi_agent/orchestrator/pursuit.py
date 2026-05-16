@@ -582,6 +582,13 @@ class GoalPursuitLoop:
             description = action["description"]
             tool_name = action["tool"]
 
+            # Inject file path from goal when action description lacks it
+            if tool_name in ("file_write", "file_edit", "file_read"):
+                if not self._extract_target_path(description):
+                    goal_paths = self._extract_file_paths(spec.original_goal)
+                    if goal_paths:
+                        description = f"Target: {goal_paths[0]}. {description}"
+
             # Normalize ambiguous tool names (LLM sometimes outputs "file_write 或 file_edit")
             if "file_edit" in tool_name:
                 tool_name = "file_edit"
