@@ -177,7 +177,7 @@ tools, you produce a concrete plan of 1-5 actions to close the gaps.
 - Use **file_write** to CREATE new files — the system generates complete content
 - Use **file_edit** to MODIFY existing files — the system generates search/replace
 - Use **bash_run** ONLY for: pytest, ruff check, pip install, cat/grep/ls, verification commands
-- NEVER use bash_run for creating or editing Python files — use file_write/file_edit instead
+- NEVER use bash_run for creating or editing source files — use file_write/file_edit instead
 - Do NOT plan actions that are already done
 - Focus on the BIGGEST gaps first
 
@@ -581,6 +581,16 @@ class GoalPursuitLoop:
             description = action["description"]
             tool_name = action["tool"]
 
+            # Normalize ambiguous tool names (LLM sometimes outputs "file_write 或 file_edit")
+            if "file_edit" in tool_name:
+                tool_name = "file_edit"
+            elif "file_write" in tool_name:
+                tool_name = "file_write"
+            elif "file_read" in tool_name:
+                tool_name = "file_read"
+            elif "bash" in tool_name:
+                tool_name = "bash_run"
+
             logger.info("Executing action %s: %s via %s", action_id, description, tool_name)
 
             result: dict[str, Any] | None = None
@@ -654,13 +664,27 @@ class GoalPursuitLoop:
     async def _execute_file_write(
         self, tool: Any, description: str, action_id: str,
     ) -> dict[str, Any]:
-        """Generate file content via LLM and write it."""
+        """Generate file content via LLM and write it.
+
+        If the file already exists, delegate to file_edit instead
+        to avoid losing existing content.
+        """
         import os
         import re
-        path_match = re.search(r'([\w/.]+\.py)', description)
+        path_match = re.search(r'([\w/.]+\.\w+)', description)
         path = path_match.group(1) if path_match else ""
 
-        # Read raw existing content if file exists
+        # If file already exists, use edit instead of overwrite
+        if path:
+            resolved = os.path.expanduser(path)
+            if os.path.isfile(resolved):
+                edit_tool = self._tools.get("file_edit")
+                if edit_tool:
+                    return await self._execute_file_edit(
+                        edit_tool, description, action_id,
+                    )
+
+        # File doesn't exist yet — generate from scratch
         existing = ""
         if path:
             resolved = os.path.expanduser(path)
@@ -680,17 +704,17 @@ class GoalPursuitLoop:
             prompt += f"## Current file content ({path})\n{existing}\n\n"
             prompt += (
                 "Generate the COMPLETE updated file content. "
-                "Output ONLY the Python code, no markdown fences, no explanation."
+                "Output ONLY the raw file content, no markdown fences, no explanation."
             )
         else:
             prompt += (
                 "Generate the COMPLETE file content. "
-                "Output ONLY the Python code, no markdown fences, no explanation."
+                "Output ONLY the raw file content, no markdown fences, no explanation."
             )
 
         content = await self._llm_call(
-            "You generate complete Python source files. "
-            "Output only valid Python code, no markdown.",
+            "You generate complete source files. "
+            "Output only the raw file content, no markdown.",
             prompt,
         )
         # Strip markdown fences if present
@@ -722,7 +746,7 @@ class GoalPursuitLoop:
         """
         import os
         import re
-        path_match = re.search(r'([\w/.]+\.py)', description)
+        path_match = re.search(r'([\w/.]+\.\w+)', description)
         path = path_match.group(1) if path_match else ""
         if not path:
             return {
@@ -778,13 +802,13 @@ class GoalPursuitLoop:
             f"```\n{existing}\n```\n\n"
             "Apply the described change to this file. "
             "Output the COMPLETE updated file content. "
-            "Output ONLY valid Python code — "
+            "Output ONLY the raw file content — "
             "no markdown fences, no explanation, no commentary."
         )
 
         content = await self._llm_call(
-            "You update Python source files. "
-            "Output only the complete updated file content as valid Python.",
+            "You update source files. "
+            "Output only the complete updated file content as raw text.",
             prompt,
         )
 
@@ -856,7 +880,7 @@ class GoalPursuitLoop:
         )
 
         response = await self._llm_call(
-            "You identify exact line ranges to edit in Python files.",
+            "You identify exact line ranges to edit in source files.",
             prompt,
         )
 
@@ -1173,33 +1197,29 @@ class GoalPursuitLoop:
                 except Exception:
                     pass
 
-            # Include Tool base class and existing tool pattern
-            try:
-                base_result = await bash_tool.execute(
-                    command="cat src/naumi_agent/tools/base.py | head -90",
-                )
-                evidence_parts.append(f"Tool 基类源码:\n{base_result}")
-            except Exception:
-                pass
-
-            try:
-                sample_result = await bash_tool.execute(
-                    command="cat src/naumi_agent/tools/builtin.py | head -60",
-                )
-                evidence_parts.append(f"已有工具模式(builtin.py):\n{sample_result}")
-            except Exception:
-                pass
-
             # Read files mentioned in the goal
             for path in self._extract_file_paths(spec.original_goal):
                 try:
                     file_result = await bash_tool.execute(
-                        command=f"cat {path} 2>/dev/null | head -50",
+                        command=f"cat {path} 2>/dev/null | head -80",
                     )
                     if file_result and "No such file" not in file_result:
                         evidence_parts.append(f"文件 {path}:\n{file_result}")
                 except Exception:
                     pass
+
+            # Read files mentioned in success criteria verification commands
+            for c in spec.success_criteria:
+                for path in self._extract_file_paths(c.verification_command):
+                    if path not in self._extract_file_paths(spec.original_goal):
+                        try:
+                            file_result = await bash_tool.execute(
+                                command=f"cat {path} 2>/dev/null | head -80",
+                            )
+                            if file_result and "No such file" not in file_result:
+                                evidence_parts.append(f"文件 {path}:\n{file_result}")
+                        except Exception:
+                            pass
 
             try:
                 test_result = await bash_tool.execute(
@@ -1229,9 +1249,12 @@ class GoalPursuitLoop:
 
     @staticmethod
     def _extract_file_paths(text: str) -> list[str]:
-        """Extract file paths mentioned in text (e.g. src/foo/bar.py)."""
+        """Extract file paths mentioned in text."""
         import re
-        return list(set(re.findall(r'(?:src/[\w/]+\.py|[\w/]+\.py)', text)))
+        return list(set(re.findall(
+            r'(?:src/[\w/.-]+|[\w/.-]+\.(?:py|yaml|yml|toml|json|md|txt|cfg|ini|sh))',
+            text,
+        )))
 
     def _build_codebase_context(self) -> str:
         """Build a concise context string with key codebase interfaces."""
@@ -1287,8 +1310,8 @@ class GoalPursuitLoop:
                 {"role": "user", "content": user_msg},
             ],
             tier=ModelTier.CAPABLE,
-            max_tokens=8192,
-            temperature=0.3,
+            max_tokens=16384,
+            temperature=1.0,
         )
         self._total_tokens += response.usage.total_tokens
         self._total_cost += response.usage.cost_usd
