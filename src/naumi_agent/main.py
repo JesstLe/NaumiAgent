@@ -70,7 +70,8 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
         name = data.get("name", "?")
         args = data.get("args", {})
         if isinstance(args, dict):
-            summary = " ".join(f"{k}={v}" for k, v in list(args.items())[:3])
+            parts = list(args.items())[:3]
+            summary = " ".join(f"{k}={v}" for k, v in parts)
             console.print(f"[cyan]🔧 {name}[/cyan] [dim]{summary}[/dim]")
         else:
             console.print(f"[cyan]🔧 {name}[/cyan]")
@@ -83,12 +84,8 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
             console.print(f"[red]  ✗ {name} 失败 ({duration:.0f}ms)[/red]")
         else:
             console.print(f"[green]  ✓ {name}[/green] [dim]({duration:.0f}ms)[/dim]")
-        if content and name in ("file_read", "file_edit", "file_write", "bash_run"):
-            lines = content.split("\n")
-            preview = "\n".join(lines[:12])
-            if len(lines) > 12:
-                preview += f"\n  ... ({len(lines) - 12} more lines)"
-            console.print(f"[dim]  {preview}[/dim]")
+        if content:
+            _print_tool_output(name, content)
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":
@@ -97,6 +94,32 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
         console.print()
     elif event == "error":
         console.print(f"[red]错误: {data.get('message', '')}[/red]")
+
+
+def _print_tool_output(name: str, content: str) -> None:
+    """Print tool result with diff highlighting for file edits."""
+    lines = content.split("\n")
+    is_diff = any(ln.startswith(("---", "+++", "@@", "- ", "+ ")) for ln in lines[:6])
+    if is_diff:
+        for line in lines:
+            if line.startswith("-") and not line.startswith("---"):
+                console.print(f"[red]{line}[/red]")
+            elif line.startswith("+") and not line.startswith("+++"):
+                console.print(f"[green]{line}[/green]")
+            elif line.startswith("@@"):
+                console.print(f"[blue]{line}[/blue]")
+            else:
+                console.print(f"[dim]{line}[/dim]")
+    elif name in ("file_read",):
+        preview = "\n".join(lines[:30])
+        if len(lines) > 30:
+            preview += f"\n  ... ({len(lines) - 30} more lines)"
+        console.print(f"[dim]{preview}[/dim]")
+    else:
+        preview = "\n".join(lines[:8])
+        if len(lines) > 8:
+            preview += f"\n  ... ({len(lines) - 8} more lines)"
+        console.print(f"[dim]{preview}[/dim]")
 
 
 async def _chat(config_path: str) -> None:
