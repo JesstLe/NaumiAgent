@@ -55,7 +55,7 @@ e2b = [
 ]
 
 [project.scripts]
-naumi = "naumi_agent.main:cli"
+naumi = "naumi_agent.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
