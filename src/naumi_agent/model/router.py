@@ -296,10 +296,16 @@ class ModelRouter:
             delta = chunk.choices[0].delta
             finish_reason = chunk.choices[0].finish_reason
 
-            # 思维链
+            # 思维链 — check multiple fields for thinking content
             thinking = ""
-            if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+            if getattr(delta, "reasoning_content", None):
                 thinking = delta.reasoning_content
+            elif getattr(delta, "thinking_blocks", None):
+                for block in delta.thinking_blocks:
+                    if isinstance(block, dict) and block.get("type") == "thinking":
+                        thinking += block.get("thinking", "")
+                    elif hasattr(block, "get") and block.get("type") == "thinking":
+                        thinking += block.get("thinking", "")
 
             # 文本内容
             token = delta.content or ""
@@ -345,7 +351,8 @@ class ModelRouter:
 
     def _is_kimi_thinking_model(self, model: str) -> bool:
         """Check if the model is a kimi thinking model that supports the thinking param."""
-        return "kimi" in model.lower()
+        model_lower = model.lower()
+        return "kimi-k2" in model_lower or "kimi-latest" in model_lower
 
     def _apply_thinking(
         self, kwargs: dict[str, Any], thinking: dict[str, str],

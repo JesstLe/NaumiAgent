@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -58,14 +59,24 @@ def _launch_tui(config_path: str) -> None:
     app.run()
 
 
+_thinking_started = False
+
+
 async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
     """实时显示 Agent 思考、工具调用过程."""
+    global _thinking_started
     if event == "thinking_delta":
-        console.print(f"[dim bright_black]{data.get('content', '')}[/dim bright_black]", end="")
+        content = data.get("content", "")
+        if content:
+            sys.stdout.write(content)
+            sys.stdout.flush()
     elif event == "thinking_start":
-        console.print("[dim]💭 思考中...[/dim]")
+        _thinking_started = True
+        sys.stdout.write("\n\033[2m💭 思考中...\033[0m\n")
+        sys.stdout.flush()
     elif event == "thinking_end":
-        console.print()
+        sys.stdout.write("\033[0m\n")
+        sys.stdout.flush()
     elif event == "tool_start":
         name = data.get("name", "?")
         args = data.get("args", {})
@@ -138,7 +149,7 @@ async def _chat(config_path: str) -> None:
         try:
             from naumi_agent.cli_completer import prompt_with_completion
 
-            user_input = prompt_with_completion()
+            user_input = await prompt_with_completion()
         except (EOFError, KeyboardInterrupt):
             await engine.shutdown()
             console.print("\n[green]再见！[/green]")
@@ -156,8 +167,11 @@ async def _chat(config_path: str) -> None:
             await _handle_command(engine, user_input)
             continue
 
-        with console.status("[bold green]NaumiAgent 思考中...[/bold green]"):
-            result = await engine.run_streaming(user_input, _cli_event_handler)
+        result = await engine.run_streaming(user_input, _cli_event_handler)
+
+        if not _thinking_started:
+            sys.stdout.write("\r\033[K")
+            sys.stdout.flush()
 
         if result.status == "error" and result.error:
             console.print(f"[red]错误: {result.error}[/red]")
