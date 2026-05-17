@@ -12,7 +12,7 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.formatted_text import ANSI, FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Float, FloatContainer, HSplit, Window
-from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl, UIContent
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.layout.menus import CompletionsMenu
@@ -33,9 +33,19 @@ class _OutputWindow(Window):
             # Capture current bottom position before switching to manual
             if self.render_info is not None:
                 self.vertical_scroll = self.render_info.vertical_scroll
+            elif self.vertical_scroll > 10_000:
+                self.vertical_scroll = 0
             self.auto_scroll = False
-        else:
-            self.vertical_scroll = max(0, self.vertical_scroll - 1)
+
+        if self.vertical_scroll_2 > 0:
+            self.vertical_scroll_2 -= 1
+        elif self.vertical_scroll > 0:
+            self.vertical_scroll -= 1
+            if self.render_info is not None:
+                self.vertical_scroll_2 = max(
+                    0,
+                    self.render_info.get_height_for_line(self.vertical_scroll) - 1,
+                )
 
     def _scroll_down(self) -> None:
         if self.auto_scroll:
@@ -43,11 +53,24 @@ class _OutputWindow(Window):
         if self.render_info is not None and self.render_info.bottom_visible:
             self.auto_scroll = True
             return
-        self.vertical_scroll += 1
-        if self.render_info is not None and self.render_info.last_visible_line() >= (
-            self.render_info.content_height - 2
-        ):
-            self.auto_scroll = True
+        if self.render_info is None:
+            self.vertical_scroll += 1
+            return
+
+        line_height = self.render_info.get_height_for_line(self.vertical_scroll)
+        if self.vertical_scroll_2 < line_height - 1:
+            self.vertical_scroll_2 += 1
+        else:
+            self.vertical_scroll += 1
+            self.vertical_scroll_2 = 0
+
+        max_line, max_line_offset = self._bottom_scroll_position(
+            self.render_info.ui_content,
+            self.render_info.window_width,
+            self.render_info.window_height,
+        )
+        if (self.vertical_scroll, self.vertical_scroll_2) >= (max_line, max_line_offset):
+            self.scroll_to_bottom()
 
     def scroll_to_bottom(self) -> None:
         self.auto_scroll = True
@@ -57,6 +80,51 @@ class _OutputWindow(Window):
         """滚动到底部（仅在 auto_scroll 开启时）."""
         if self.auto_scroll:
             self.vertical_scroll = 99999
+
+    def _scroll(self, ui_content: UIContent, width: int, height: int) -> None:
+        """Scroll without cursor-snapping when the user is browsing history."""
+        if self.auto_scroll:
+            super()._scroll(ui_content, width, height)
+            return
+
+        self.horizontal_scroll = 0
+        if ui_content.line_count <= 0 or width <= 0 or height <= 0:
+            self.vertical_scroll = 0
+            self.vertical_scroll_2 = 0
+            return
+        self._clamp_manual_scroll(ui_content, width, height)
+
+    def _clamp_manual_scroll(self, ui_content: UIContent, width: int, height: int) -> None:
+        """Keep manual scroll coordinates inside the rendered content."""
+        max_line, max_line_offset = self._bottom_scroll_position(ui_content, width, height)
+        self.vertical_scroll = max(0, min(self.vertical_scroll, max_line))
+
+        line_height = self._line_height(ui_content, self.vertical_scroll, width)
+        max_offset = max(0, line_height - 1)
+        if self.vertical_scroll == max_line:
+            max_offset = min(max_offset, max_line_offset)
+        self.vertical_scroll_2 = max(0, min(self.vertical_scroll_2, max_offset))
+
+    def _bottom_scroll_position(
+        self,
+        ui_content: UIContent,
+        width: int,
+        height: int,
+    ) -> tuple[int, int]:
+        """Return the lowest top-of-window position that still shows content."""
+        used_height = 0
+        safe_width = max(1, width)
+        for lineno in range(ui_content.line_count - 1, -1, -1):
+            line_height = self._line_height(ui_content, lineno, safe_width)
+            if used_height + line_height > height:
+                return lineno, used_height + line_height - height
+            used_height += line_height
+        return 0, 0
+
+    def _line_height(self, ui_content: UIContent, lineno: int, width: int) -> int:
+        if self.wrap_lines():
+            return ui_content.get_height_for_line(lineno, width, self.get_line_prefix)
+        return 1
 
 _STYLE = Style.from_dict(
     {
@@ -126,7 +194,6 @@ class CLIApp:
         @self._kb.add("pageup")
         def _page_up(event: Any) -> None:
             if self._output_win:
-                self._output_win.auto_scroll = False
                 for _ in range(10):
                     self._output_win._scroll_up()
                 self._invalidate()
@@ -257,6 +324,7 @@ class CLIApp:
             key_bindings=self._kb,
             style=_STYLE,
             full_screen=True,
+            mouse_support=True,
         )
 
     async def run(self) -> None:

@@ -889,14 +889,18 @@ class GoalPursuitLoop:
                 applied += 1
             else:
                 # Try fuzzy: strip trailing whitespace per line
-                old_fuzzy = "\n".join(l.rstrip() for l in old_text.split("\n"))
-                updated_fuzzy = "\n".join(l.rstrip() for l in updated.split("\n"))
+                old_fuzzy = "\n".join(line.rstrip() for line in old_text.split("\n"))
+                updated_fuzzy = "\n".join(line.rstrip() for line in updated.split("\n"))
                 if old_fuzzy in updated_fuzzy:
                     # Find the position and replace
                     idx = updated_fuzzy.index(old_fuzzy)
-                    new_fuzzy = "\n".join(l.rstrip() for l in new_text.split("\n"))
-                    updated_fuzzy = updated_fuzzy[:idx] + new_fuzzy + updated_fuzzy[idx + len(old_fuzzy):]
-                    updated = "\n".join(l.rstrip() for l in updated.split("\n"))
+                    new_fuzzy = "\n".join(line.rstrip() for line in new_text.split("\n"))
+                    updated_fuzzy = (
+                        updated_fuzzy[:idx]
+                        + new_fuzzy
+                        + updated_fuzzy[idx + len(old_fuzzy):]
+                    )
+                    updated = "\n".join(line.rstrip() for line in updated.split("\n"))
                     idx = updated.index(old_fuzzy)
                     updated = updated[:idx] + new_text + updated[idx + len(old_fuzzy):]
                     applied += 1
@@ -1042,7 +1046,10 @@ class GoalPursuitLoop:
         with open(resolved, "w", encoding="utf-8") as f:
             f.write(updated)
 
-        msg = f"Applied {applied}/{len(replacements)} replacements in region L{show_start+1}-L{show_end}"
+        msg = (
+            f"Applied {applied}/{len(replacements)} replacements "
+            f"in region L{show_start + 1}-L{show_end}"
+        )
         if errors:
             msg += f" (errors: {'; '.join(errors)})"
         return {

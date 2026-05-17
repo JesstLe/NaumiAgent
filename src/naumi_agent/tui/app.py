@@ -1249,12 +1249,15 @@ class NaumiApp(App):
                     chat.mount(Markdown(content, classes="agent-msg"))
                 # Show tool calls from this assistant message
                 for tc in m.get("tool_calls", []):
-                    tc_name = tc.get("function", {}).get("name", "tool") if isinstance(tc, dict) else "tool"
+                    tc_name = (
+                        tc.get("function", {}).get("name", "tool")
+                        if isinstance(tc, dict)
+                        else "tool"
+                    )
                     chat.mount(
                         Static(f"  ⚙ [dim]{tc_name}[/dim]", classes="tool-done")
                     )
             elif role == "tool":
-                tool_call_id = m.get("tool_call_id", "")
                 is_placeholder = "工具调用结果缺失" in (content or "")
                 has_error = "error" in (content or "").lower()[:200]
                 if is_placeholder:
@@ -1263,7 +1266,11 @@ class NaumiApp(App):
                     icon = "❌"
                 else:
                     icon = "✅"
-                preview = (content[:120] + "…") if content and len(content) > 120 else (content or "")
+                preview = (
+                    (content[:120] + "…")
+                    if content and len(content) > 120
+                    else (content or "")
+                )
                 chat.mount(
                     Static(
                         f"  {icon} [dim]{preview}[/dim]",
