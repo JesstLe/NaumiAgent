@@ -23,8 +23,8 @@ class TestSmokeInit:
         assert "file_edit" in names
         assert "bash_run" in names
         # 浏览器工具
-        assert "browser_navigate" in names
-        assert "browser_extract" in names
+        assert "browser_goto" in names
+        assert "browser_observe" in names
         # 沙箱
         assert "code_execute" in names
         # 网络
