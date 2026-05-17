@@ -27,19 +27,32 @@ class _OutputWindow(Window):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.auto_scroll = True
+        self._user_scroll_pos = 0
+        # Use callback for reliable scroll-to-bottom on every render
+        self.get_vertical_scroll = self._scroll_callback
+
+    def _scroll_callback(self, window: Any) -> int:
+        if self.auto_scroll:
+            return 99999  # Clamped to max_scroll_y by prompt_toolkit
+        return self._user_scroll_pos
 
     def _scroll_up(self) -> None:
-        self.auto_scroll = False
-        super()._scroll_up()
+        if self.auto_scroll:
+            # Capture current bottom position before switching to manual
+            self._user_scroll_pos = max(0, self.max_scroll_y)
+            self.auto_scroll = False
+        else:
+            self._user_scroll_pos = max(0, self._user_scroll_pos - 1)
 
     def _scroll_down(self) -> None:
-        super()._scroll_down()
-        if self._vertical_scroll >= self.max_scroll_y:
+        if self.auto_scroll:
+            return
+        self._user_scroll_pos += 1
+        if self._user_scroll_pos >= self.max_scroll_y:
             self.auto_scroll = True
 
     def scroll_to_bottom(self) -> None:
         self.auto_scroll = True
-        self._vertical_scroll = 99999
 
 _STYLE = Style.from_dict(
     {
@@ -146,8 +159,6 @@ class CLIApp:
             self._app.exit()
 
     def _invalidate(self) -> None:
-        if self._output_win and self._output_win.auto_scroll:
-            self._output_win._vertical_scroll = 99999
         if self._app:
             self._app.invalidate()
 
@@ -167,8 +178,6 @@ class CLIApp:
     def clear_output(self) -> None:
         self._output.clear()
         self._live.clear()
-        if self._output_win:
-            self._output_win.scroll_to_bottom()
         self._invalidate()
 
     def _render_output(self) -> list:
