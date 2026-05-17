@@ -227,6 +227,7 @@ class AgentEngine:
         self._mcp_manager: MCPClientManager | None = None
 
         self._task_runner: Any | None = None
+        self._security_auditor: Any | None = None
 
         self.skill_loader = SkillLoader()
 
@@ -403,9 +404,13 @@ class AgentEngine:
 
     @property
     def security_auditor(self) -> Any:
-        from naumi_agent.tools.browser.security import SecurityAuditor
+        if self._security_auditor is None:
+            from naumi_agent.tools.browser.security import SecurityAuditor
 
-        return SecurityAuditor(self._browser_session)
+            self._security_auditor = SecurityAuditor(
+                self._browser_session
+            )
+        return self._security_auditor
 
     def reset(self) -> None:
         self._messages.clear()
