@@ -468,13 +468,12 @@ class InputBar(Horizontal):
 
     DEFAULT_CSS = """
     InputBar {
-        height: 3;
+        height: auto;
         padding: 0 1;
         border-top: solid green;
     }
     InputBar Input {
         width: 1fr;
-        height: 1fr;
     }
     InputBar Button {
         width: auto;
