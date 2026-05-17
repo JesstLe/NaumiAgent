@@ -23,7 +23,6 @@ from textual.widgets import (
     Input,
     Markdown,
     Static,
-    TextArea,
 )
 
 from naumi_agent.cli_completer import COMMANDS
@@ -1021,7 +1020,7 @@ class NaumiApp(App):
 
     def _set_input_enabled(self, enabled: bool) -> None:
         input_bar = self.query_one(InputBar)
-        msg_input = input_bar.query_one("#msg-input", TextArea)
+        msg_input = input_bar.query_one("#msg-input", Input)
         send_btn = input_bar.query_one("#send-btn", Button)
         msg_input.disabled = not enabled
         send_btn.disabled = not enabled
@@ -1307,7 +1306,7 @@ class NaumiApp(App):
         finally:
             status.status_text = "就绪"
             input_bar = self.query_one(InputBar)
-            msg_input = input_bar.query_one("#msg-input", TextArea)
+            msg_input = input_bar.query_one("#msg-input", Input)
             msg_input.focus()
 
     def action_show_tools(self) -> None:
