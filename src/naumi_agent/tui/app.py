@@ -695,11 +695,11 @@ class NaumiApp(App):
         status = self.query_one(StatusBar)
 
         match cmd:
-            case "/clear":
+            case "/clear" | "/c":
                 chat.clear()
                 self.engine.reset()
                 status.status_text = "会话已清除"
-            case "/new":
+            case "/new" | "/n":
                 if self.engine._messages and any(
                     m.get("role") == "user" for m in self.engine._messages
                 ):
@@ -712,7 +712,7 @@ class NaumiApp(App):
                 self.engine.reset()
                 chat.clear()
                 status.status_text = "新会话已开始"
-            case "/help":
+            case "/help" | "/h":
                 help_text = (
                     "## 可用命令\n"
                     "- `/help` — 显示帮助\n"
@@ -759,13 +759,13 @@ class NaumiApp(App):
                     "- `/quit` — 退出\n"
                 )
                 chat.mount(Markdown(help_text, classes="agent-msg"))
-            case "/tools":
+            case "/tools" | "/t":
                 tools = self.engine.tool_registry.all()
                 lines = ["## 可用工具\n"]
                 for t in tools:
                     lines.append(f"- **{t.name}** — {t.description}")
                 chat.mount(Markdown("\n".join(lines), classes="agent-msg"))
-            case "/model":
+            case "/model" | "/m":
                 info = (
                     f"## 模型配置\n"
                     f"- 默认: `{self.engine.router.resolve_model('capable')}`\n"
@@ -773,7 +773,7 @@ class NaumiApp(App):
                     f"- 推理: `{self.engine.router.resolve_model('reasoning')}`\n"
                 )
                 chat.mount(Markdown(info, classes="agent-msg"))
-            case "/usage":
+            case "/usage" | "/u":
                 u = self.engine.usage
                 total_tok = u.total_input_tokens + u.total_output_tokens
                 info = (
