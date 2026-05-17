@@ -1,16 +1,22 @@
-"""代码沙箱 — Docker 容器内执行."""
+"""代码沙箱 — Docker 容器内执行，降级到受限本地执行."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import sys
 import tempfile
 from typing import Any
 
 from naumi_agent.tools.base import Tool
 
 logger = logging.getLogger(__name__)
+
+_MAX_OUTPUT_BYTES = 100_000
+
+# Cache docker availability to avoid repeated checks.
+_docker_available_cache: bool | None = None
 
 
 class CodeExecuteTool(Tool):
@@ -25,7 +31,7 @@ class CodeExecuteTool(Tool):
         return (
             "在隔离的 Docker 容器中执行代码。"
             "支持 python、javascript、bash。自动安装依赖。"
-            "如果 Docker 不可用，则在本地临时目录执行。"
+            "如果 Docker 不可用，则在本地临时目录执行（受限模式）。"
         )
 
     @property
@@ -49,13 +55,22 @@ class CodeExecuteTool(Tool):
         }
 
     async def execute(
-        self, *, code: str, language: str = "python", timeout: int = 30, **kwargs: Any
+        self,
+        *,
+        code: str,
+        language: str = "python",
+        timeout: int = 30,
+        **kwargs: Any,
     ) -> str:
-        if await self._docker_available():
+        if await self._check_docker():
             return await self._run_in_docker(code, language, timeout)
         return await self._run_local(code, language, timeout)
 
-    async def _docker_available(self) -> bool:
+    async def _check_docker(self) -> bool:
+        global _docker_available_cache
+        if _docker_available_cache is not None:
+            return _docker_available_cache
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 "docker",
@@ -64,9 +79,11 @@ class CodeExecuteTool(Tool):
                 stderr=asyncio.subprocess.DEVNULL,
             )
             await asyncio.wait_for(proc.wait(), timeout=5)
-            return proc.returncode == 0
+            _docker_available_cache = proc.returncode == 0
         except (TimeoutError, FileNotFoundError):
-            return False
+            _docker_available_cache = False
+
+        return _docker_available_cache
 
     async def _run_in_docker(self, code: str, language: str, timeout: int) -> str:
         image_map = {
@@ -76,11 +93,12 @@ class CodeExecuteTool(Tool):
         }
         image = image_map.get(language, "python:3.12-slim")
 
-        # 写入临时文件
         ext_map = {"python": ".py", "javascript": ".js", "bash": ".sh"}
         ext = ext_map.get(language, ".txt")
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=ext, delete=False, encoding="utf-8") as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=ext, delete=False, encoding="utf-8",
+        ) as f:
             f.write(code)
             host_path = f.name
 
@@ -111,11 +129,18 @@ class CodeExecuteTool(Tool):
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            out = stdout.decode("utf-8", errors="replace")
-            err = stderr.decode("utf-8", errors="replace")
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=timeout,
+                )
+            except TimeoutError:
+                await _kill_process(proc)
+                return f"Error: Execution timed out after {timeout}s"
 
-            parts = []
+            out = _truncate(stdout.decode("utf-8", errors="replace"))
+            err = _truncate(stderr.decode("utf-8", errors="replace"))
+
+            parts: list[str] = []
             if out.strip():
                 parts.append(out)
             if err.strip():
@@ -124,15 +149,13 @@ class CodeExecuteTool(Tool):
                 parts.append(f"[exit code: {proc.returncode}]")
 
             return "\n".join(parts) if parts else "(no output)"
-        except TimeoutError:
-            return f"Error: Execution timed out after {timeout}s"
         except Exception as e:
             return f"Error: {type(e).__name__}: {e}"
         finally:
             os.unlink(host_path)
 
     async def _run_local(self, code: str, language: str, timeout: int) -> str:
-        """Docker 不可用时，在本地临时目录执行（降级方案）."""
+        """Docker 不可用时，在本地临时目录执行（受限降级方案）."""
         with tempfile.TemporaryDirectory() as tmpdir:
             ext_map = {"python": ".py", "javascript": ".js", "bash": ".sh"}
             ext = ext_map.get(language, ".txt")
@@ -142,11 +165,11 @@ class CodeExecuteTool(Tool):
                 f.write(code)
 
             cmd_map = {
-                "python": ["python3", file_path],
+                "python": [sys.executable, file_path],
                 "javascript": ["node", file_path],
                 "bash": ["bash", file_path],
             }
-            cmd = cmd_map.get(language, ["python3", file_path])
+            cmd = cmd_map.get(language, [sys.executable, file_path])
 
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -155,11 +178,22 @@ class CodeExecuteTool(Tool):
                     stderr=asyncio.subprocess.PIPE,
                     cwd=tmpdir,
                 )
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-                out = stdout.decode("utf-8", errors="replace")
-                err = stderr.decode("utf-8", errors="replace")
 
-                parts = []
+                try:
+                    stdout, stderr = await asyncio.wait_for(
+                        proc.communicate(), timeout=timeout,
+                    )
+                except TimeoutError:
+                    await _kill_process(proc)
+                    return (
+                        f"Error: Execution timed out after {timeout}s "
+                        "(本地模式，无资源隔离)"
+                    )
+
+                out = _truncate(stdout.decode("utf-8", errors="replace"))
+                err = _truncate(stderr.decode("utf-8", errors="replace"))
+
+                parts: list[str] = []
                 if out.strip():
                     parts.append(out)
                 if err.strip():
@@ -168,10 +202,25 @@ class CodeExecuteTool(Tool):
                     parts.append(f"[exit code: {proc.returncode}]")
 
                 return "\n".join(parts) if parts else "(no output)"
-            except TimeoutError:
-                return f"Error: Execution timed out after {timeout}s"
             except Exception as e:
                 return f"Error: {type(e).__name__}: {e}"
+
+
+async def _kill_process(proc: asyncio.subprocess.Process) -> None:
+    """Kill a subprocess, best-effort."""
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass
+
+
+def _truncate(text: str, max_bytes: int = _MAX_OUTPUT_BYTES) -> str:
+    """Truncate text if it exceeds max_bytes."""
+    encoded = text.encode("utf-8", errors="replace")
+    if len(encoded) <= max_bytes:
+        return text
+    truncated = encoded[:max_bytes].decode("utf-8", errors="replace")
+    return truncated + f"\n... (输出已截断，原始大小 {len(encoded)} 字节)"
 
 
 def create_sandbox_tools() -> list[Tool]:
