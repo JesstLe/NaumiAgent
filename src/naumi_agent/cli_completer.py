@@ -93,17 +93,21 @@ class SlashCommandCompleter(Completer):
         return results
 
 
-def prompt_with_completion() -> str:
+async def prompt_with_completion() -> str:
     """Read user input with slash command autocomplete. Falls back to console.input()."""
     from naumi_agent.main import console
 
     try:
-        from prompt_toolkit import prompt as pt_prompt
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.patch_stdout import patch_stdout as _patch_stdout
 
-        return pt_prompt(
+        session: PromptSession[str] = PromptSession(
             "你> ",
             completer=SlashCommandCompleter(),
             complete_while_typing=True,
-        ).strip()
-    except (RuntimeError, OSError):
+        )
+        with _patch_stdout():
+            result = await session.prompt_async()
+        return result.strip()
+    except (RuntimeError, OSError, EOFError):
         return console.input("[bold blue]你>[/bold blue] ").strip()
