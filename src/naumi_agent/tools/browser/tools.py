@@ -68,24 +68,19 @@ def _format_goto_result(result: dict[str, Any]) -> str:
         parts.append(
             f"# Page Metadata\n{json.dumps(metadata, indent=2)}"
         )
-    elements = result.get("elements", [])
-    if elements:
-        summary = [
-            {
-                "id": e.get("id"),
-                "tag": e.get("tag"),
-                "label": (e.get("label") or e.get("text") or "")[:40],
-            }
-            for e in elements[:30]
-        ]
+    tree = result.get("accessibilityTree")
+    if tree:
+        parts.append(f"# Accessibility Tree (YAML)\n{tree}")
+    content = result.get("pageContent")
+    if content and isinstance(content, dict) and content:
         parts.append(
-            f"# Interactive Elements ({len(elements)} total, showing {len(summary)})\n"
-            f"{json.dumps(summary, indent=2, ensure_ascii=False)}"
+            f"# Page Content\n{json.dumps(content, indent=2)}"
         )
-        if len(elements) > 30:
-            parts.append(
-                f"... and {len(elements) - 30} more elements"
-            )
+    elements = result.get("elements", [])
+    parts.append(
+        f"# Interactive Elements (SoM)\n"
+        f"{json.dumps(elements, indent=2)}"
+    )
     tabs = result.get("tabs")
     if tabs and len(tabs) > 1:
         parts.append(f"# Open Tabs\n{json.dumps(tabs, indent=2)}")
@@ -102,6 +97,14 @@ def _format_observe_result(result: dict[str, Any]) -> str:
     parts: list[str] = [
         f"Observation complete. Screenshot: {result.get('screenshotPath', 'N/A')}"
     ]
+    tree = result.get("accessibilityTree")
+    if tree:
+        parts.append(f"# Accessibility Tree (YAML)\n{tree}")
+    content = result.get("pageContent")
+    if content and isinstance(content, dict) and content:
+        parts.append(
+            f"# Page Content\n{json.dumps(content, indent=2)}"
+        )
     errors = result.get("recentErrors")
     if errors:
         parts.append(
@@ -109,19 +112,10 @@ def _format_observe_result(result: dict[str, Any]) -> str:
             f"{json.dumps(errors, indent=2)}"
         )
     elements = result.get("elements", [])
-    if elements:
-        summary = [
-            {
-                "id": e.get("id"),
-                "tag": e.get("tag"),
-                "label": (e.get("label") or e.get("text") or "")[:40],
-            }
-            for e in elements[:30]
-        ]
-        parts.append(
-            f"# Interactive Elements ({len(elements)} total)\n"
-            f"{json.dumps(summary, indent=2, ensure_ascii=False)}"
-        )
+    parts.append(
+        f"# Interactive Elements (SoM)\n"
+        f"{json.dumps(elements, indent=2)}"
+    )
     tabs = result.get("tabs")
     if tabs and len(tabs) > 1:
         parts.append(f"# Open Tabs\n{json.dumps(tabs, indent=2)}")
