@@ -143,7 +143,12 @@ class BrowserGotoTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Navigate the persistent browser to a specified URL."
+        return (
+            "Navigate the browser to a URL. Returns SoM elements, "
+            "accessibility tree, and page content. Call ONCE per URL — "
+            "do NOT repeat for the same URL. Use browser_observe to "
+            "refresh page state after interactions."
+        )
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
