@@ -83,8 +83,10 @@ class CLIApp:
             if self._on_submit:
                 await self._on_submit(text)
         finally:
-            self._output.extend(self._live)
-            self._live = []
+            # Any remaining live content not yet finalized
+            if self._live:
+                self._output.extend(self._live)
+                self._live = []
             self._processing = False
             self._invalidate()
 
@@ -98,6 +100,11 @@ class CLIApp:
 
     def append_live(self, text: str) -> None:
         self._live.append(text)
+        self._invalidate()
+
+    def finalize_live(self) -> None:
+        self._output.extend(self._live)
+        self._live = []
         self._invalidate()
 
     def _render_output(self) -> list:
