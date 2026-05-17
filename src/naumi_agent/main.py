@@ -1589,9 +1589,12 @@ async def _load_session(engine: Any, session_id: str) -> None:
             console.print("[dim]--- 最近对话 ---[/dim]")
             for m in user_msgs[-6:]:
                 role = m.get("role", "")
-                content = m.get("content", "")
+                content = m.get("content") or ""
                 if len(content) > 100:
                     content = content[:97] + "..."
+                if not content:
+                    tool_names = [tc.get("function", {}).get("name", "") for tc in m.get("tool_calls", []) if isinstance(tc, dict)]
+                    content = f"[调用工具: {', '.join(tool_names)}]" if tool_names else "[无文本内容]"
                 label = "[blue]你[/blue]" if role == "user" else "[green]Naumi[/green]"
                 console.print(f"  {label}: {content}")
         console.print()
