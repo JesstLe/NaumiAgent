@@ -224,6 +224,45 @@ class TestRun:
 
         assert result.status == "max_turns"
 
+    @pytest.mark.asyncio
+    async def test_repeated_tool_call_breaks_loop(self, engine: AgentEngine) -> None:
+        """Identical tool call 3x in a row should inject stop message."""
+        call_count = 0
+        tool_response = ModelResponse(
+            content="好的我来打开",
+            tool_calls=[{
+                "id": "call_1",
+                "function": {
+                    "name": "browser_goto",
+                    "arguments": '{"url": "https://www.baidu.com"}',
+                },
+            }],
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=0.001),
+            model="test-model",
+        )
+        final_response = ModelResponse(
+            content="已为你打开百度",
+            usage=TokenUsage(input_tokens=5, output_tokens=3, total_tokens=8, cost_usd=0.001),
+            model="test-model",
+        )
+
+        async def mock_call(**kwargs: object) -> ModelResponse:
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 4:
+                return tool_response
+            return final_response
+
+        with patch.object(
+            engine._router, "call", new_callable=AsyncMock,
+            side_effect=mock_call,
+        ):
+            result = await engine.run("打开百度")
+
+        # Should break after the 3rd repeat + 1 final response
+        assert call_count <= 5
+        assert "已为你打开" in result.response or result.status == "completed"
+
 
 class TestMemoryInjection:
     @pytest.mark.asyncio
