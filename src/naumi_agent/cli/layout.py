@@ -20,6 +20,27 @@ from prompt_toolkit.styles import Style
 
 from naumi_agent.cli_completer import SlashCommandCompleter
 
+
+class _OutputWindow(Window):
+    """Auto-scrolling output window — scrolls to bottom on new content, allows manual scroll."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.auto_scroll = True
+
+    def _scroll_up(self) -> None:
+        self.auto_scroll = False
+        super()._scroll_up()
+
+    def _scroll_down(self) -> None:
+        super()._scroll_down()
+        if self._vertical_scroll >= self.max_scroll_y:
+            self.auto_scroll = True
+
+    def scroll_to_bottom(self) -> None:
+        self.auto_scroll = True
+        self._vertical_scroll = 99999
+
 _STYLE = Style.from_dict(
     {
         "border": "#444444",
@@ -53,6 +74,7 @@ class CLIApp:
         )
         self._kb = KeyBindings()
         self._on_submit: Callable[[str], Awaitable[None]] | None = None
+        self._output_win: _OutputWindow | None = None
 
         self._last_esc_time = 0.0
 
@@ -84,12 +106,29 @@ class CLIApp:
             if not self._processing:
                 event.app.exit()
 
+        @self._kb.add("pageup")
+        def _page_up(event: Any) -> None:
+            if self._output_win:
+                self._output_win.auto_scroll = False
+                for _ in range(10):
+                    self._output_win._scroll_up()
+                self._invalidate()
+
+        @self._kb.add("pagedown")
+        def _page_down(event: Any) -> None:
+            if self._output_win:
+                for _ in range(10):
+                    self._output_win._scroll_down()
+                self._invalidate()
+
     def set_submit_handler(self, handler: Callable[[str], Awaitable[None]]) -> None:
         self._on_submit = handler
 
     async def _run_submit(self, text: str) -> None:
         self._processing = True
         self._live = []
+        if self._output_win:
+            self._output_win.scroll_to_bottom()
         self._invalidate()
         try:
             if self._on_submit:
@@ -107,6 +146,8 @@ class CLIApp:
             self._app.exit()
 
     def _invalidate(self) -> None:
+        if self._output_win and self._output_win.auto_scroll:
+            self._output_win._vertical_scroll = 99999
         if self._app:
             self._app.invalidate()
 
@@ -123,6 +164,13 @@ class CLIApp:
         self._live = []
         self._invalidate()
 
+    def clear_output(self) -> None:
+        self._output.clear()
+        self._live.clear()
+        if self._output_win:
+            self._output_win.scroll_to_bottom()
+        self._invalidate()
+
     def _render_output(self) -> list:
         result: list = []
         for text in self._output:
@@ -134,12 +182,13 @@ class CLIApp:
     def _build_app(self) -> Application:
         cols = shutil.get_terminal_size().columns
 
-        output_win = Window(
+        self._output_win = _OutputWindow(
             content=FormattedTextControl(self._render_output),
             wrap_lines=True,
             always_hide_cursor=True,
             height=Dimension(min=1, weight=1),
         )
+        self._output_win.scroll_to_bottom()
 
         input_win = Window(
             height=1,
@@ -169,7 +218,7 @@ class CLIApp:
             ),
         )
 
-        body = HSplit([output_win, border_top, input_win, border_bot])
+        body = HSplit([self._output_win, border_top, input_win, border_bot])
         root = FloatContainer(
             content=body,
             floats=[

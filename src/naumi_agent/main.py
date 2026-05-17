@@ -128,9 +128,10 @@ _active_cli: Any = None
 def _cli_event_factory(cli: Any):
     """Create event handler that writes to CLIApp instead of stdout."""
     thinking_started = False
+    has_streamed_tokens = False
 
     async def handler(event: str, data: dict[str, Any]) -> None:
-        nonlocal thinking_started
+        nonlocal thinking_started, has_streamed_tokens
         if event == "thinking_delta":
             content = data.get("content", "")
             if content:
@@ -142,14 +143,27 @@ def _cli_event_factory(cli: Any):
             cli.append_live("\033[0m\n")
         elif event == "tool_start":
             name = data.get("name", "?")
-            cli.append_live(f"\033[36m🔧 {name}\033[0m\n")
+            cli.append_live(f"\033[36m  ⏳ {name}\033[0m\n")
         elif event == "tool_end":
-            pass
+            name = data.get("name", "?")
+            status = data.get("status", "unknown")
+            dur = data.get("duration_ms", 0)
+            if status == "success":
+                cli.append_live(f"\033[32m  ✓ {name} ({dur}ms)\033[0m\n")
+            else:
+                cli.append_live(f"\033[31m  ✗ {name} 失败 ({dur}ms)\033[0m\n")
         elif event == "response_start":
-            pass
+            cli.finalize_live()
         elif event == "token":
-            pass
+            has_streamed_tokens = True
+            content = data.get("content", "")
+            if content:
+                cli.append_live(content)
+        elif event == "error":
+            cli.finalize_live()
+            cli.append_live(f"\033[31m错误: {data.get('message', '')}\033[0m\n")
 
+    handler._has_streamed_tokens = lambda: has_streamed_tokens
     return handler
 
 
@@ -179,7 +193,11 @@ async def _chat(config_path: str) -> None:
         cli.append_output(f"\033[32m❯\033[0m {text}\n")
 
         if text.startswith("/"):
-            await _handle_command(engine, text)
+            async def _run_cmd() -> None:
+                await _handle_command(engine, text)
+
+            output = await _capture_async(_run_cmd)
+            cli.append_output(output)
             return
 
         # Suppress log noise during streaming
@@ -187,16 +205,19 @@ async def _chat(config_path: str) -> None:
         logging.getLogger("LiteLLM").setLevel(logging.ERROR)
         logging.getLogger("naumi_agent").setLevel(logging.ERROR)
 
-        result = await engine.run_streaming(text, _cli_event_factory(cli))
+        event_handler = _cli_event_factory(cli)
+        result = await engine.run_streaming(text, event_handler)
 
         # Restore log levels
         logging.getLogger("litellm").setLevel(logging.WARNING)
         logging.getLogger("LiteLLM").setLevel(logging.WARNING)
         logging.getLogger("naumi_agent").setLevel(logging.INFO)
 
-        # Move live content (thinking/tools) to permanent output first
+        # Finalize any remaining live content
         cli.finalize_live()
-        cli.append_output(_capture(lambda: _render_result(console, result)))
+        cli.append_output(
+            _capture(lambda: _render_result(console, result, skip_response=event_handler._has_streamed_tokens()))
+        )
 
     cli.set_submit_handler(on_submit)
     await cli.run()
@@ -272,6 +293,24 @@ def _capture(func: Any) -> str:
     return buf.getvalue()
 
 
+async def _capture_async(func: Any) -> str:
+    """Capture console output from an async function as ANSI text."""
+    buf = io.StringIO()
+    width = shutil.get_terminal_size().columns
+    c = Console(
+        file=buf, force_terminal=True, legacy_windows=False, width=width
+    )
+    import naumi_agent.main as _self
+
+    orig = _self.console
+    _self.console = c
+    try:
+        await func()
+    finally:
+        _self.console = orig
+    return buf.getvalue()
+
+
 def _print_banner_to(c: Console, engine: Any) -> None:
     from naumi_agent import __version__
     from naumi_agent.assets import BANNER_TEXT
@@ -288,12 +327,12 @@ def _print_banner_to(c: Console, engine: Any) -> None:
     )
 
 
-def _render_result(c: Console, result: Any) -> None:
+def _render_result(c: Console, result: Any, *, skip_response: bool = False) -> None:
     if result.status == "error" and result.error:
         c.print(f"[red]错误: {result.error}[/red]")
         return
 
-    if result.response:
+    if result.response and not skip_response:
         c.print()
         c.print(
             Panel(
@@ -337,6 +376,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 console.print(f"  • [cyan]{t.name}[/cyan] — {t.description}")
         case "/clear" | "/c":
             engine.reset()
+            if _active_cli:
+                _active_cli.clear_output()
             console.print("[green]会话已清除[/green]")
         case "/new" | "/n":
             await _new_conversation(engine)
@@ -1355,9 +1396,6 @@ def _run_forge_remove(arg: str) -> None:
     else:
         console.print(f"[red]未找到工具: {tool_name}[/red]")
 
-async def _show_history(engine: Any) -> None:
-    """显示历史会话列表."""
-
 
 def _show_hooks(engine: Any) -> None:
     """显示已注册的钩子."""
@@ -1581,8 +1619,9 @@ async def _new_conversation(engine: Any) -> None:
         except Exception:
             pass
     engine.reset()
-    # Reset session so next interaction creates a fresh one
     engine._session = None
+    if _active_cli:
+        _active_cli.clear_output()
     console.print("[green]新对话已开始[/green]")
 
 
