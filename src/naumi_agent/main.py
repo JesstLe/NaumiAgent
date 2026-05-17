@@ -158,7 +158,7 @@ async def _chat(config_path: str) -> None:
         if not user_input:
             continue
 
-        if user_input in ("/quit", "/exit", "exit"):
+        if user_input in ("/quit", "/q", "/exit", "exit"):
             await engine.shutdown()
             console.print("[green]再见！[/green]")
             break
@@ -262,32 +262,34 @@ async def _handle_command(engine: Any, cmd: str) -> None:
     arg = parts[1] if len(parts) > 1 else ""
 
     match command:
+        case "/h" | "/help":
+            _print_help()
         case "/hooks":
             _show_hooks(engine)
         case "/skills":
             _show_skills(engine)
-        case "/tools":
+        case "/tools" | "/t":
             tools = engine.tool_registry.all()
             console.print("[bold]可用工具:[/bold]")
             for t in tools:
                 console.print(f"  • [cyan]{t.name}[/cyan] — {t.description}")
-        case "/clear":
+        case "/clear" | "/c":
             engine.reset()
             console.print("[green]会话已清除[/green]")
-        case "/new":
+        case "/new" | "/n":
             await _new_conversation(engine)
-        case "/usage":
+        case "/usage" | "/u":
             u = engine.usage
             console.print(
                 f"Token: {u.total_input_tokens + u.total_output_tokens} | "
                 f"费用: ${u.total_cost_usd:.4f} | "
                 f"轮次: {u.turns}"
             )
-        case "/model":
+        case "/model" | "/m":
             console.print(f"默认模型: {engine.router.resolve_model('capable')}")
             console.print(f"快速模型: {engine.router.resolve_model('fast')}")
             console.print(f"推理模型: {engine.router.resolve_model('reasoning')}")
-        case "/version":
+        case "/version" | "/v":
             from naumi_agent import __version__
 
             console.print(f"[bold green]NaumiAgent[/bold green] v{__version__}")
@@ -570,8 +572,6 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             _show_forge_list()
         case "/forge-remove":
             _run_forge_remove(arg)
-        case "/help":
-            _print_help()
         case _:
             # 尝试匹配已加载的 Skill
             skill_name = command.lstrip("/")
