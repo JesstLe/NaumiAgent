@@ -54,7 +54,8 @@ class TestBaseAgent:
         agent = BaseAgent(BROWSER_CONFIG, engine)
         tool_names = agent._tool_names
 
-        assert "browser_navigate" in tool_names
+        assert "browser_goto" in tool_names
+        assert "browser_click" in tool_names
         assert "browser_click" in tool_names
         assert "web_search" in tool_names
 

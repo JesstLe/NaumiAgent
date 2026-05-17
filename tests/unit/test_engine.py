@@ -42,7 +42,7 @@ class TestEngineInit:
         assert "bash_run" in names
 
     def test_has_browser_tools(self, engine: AgentEngine) -> None:
-        assert "browser_navigate" in engine.tool_registry.names
+        assert "browser_goto" in engine.tool_registry.names
 
     def test_has_memory_tools(self, engine: AgentEngine) -> None:
         assert "memory_store" in engine.tool_registry.names
