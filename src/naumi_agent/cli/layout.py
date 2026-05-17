@@ -106,7 +106,7 @@ class CLIApp:
     def _render_output(self) -> list:
         result: list = []
         for text in self._output:
-            result.extend(ANSI(text).formatted_text)
+            result.extend(ANSI(text).__pt_formatted_text__())
         return result
 
     def add_output(self, ansi_text: str) -> None:
