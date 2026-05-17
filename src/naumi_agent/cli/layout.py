@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import shutil
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from prompt_toolkit import Application
@@ -20,45 +22,91 @@ from naumi_agent.cli_completer import SlashCommandCompleter
 _STYLE = Style.from_dict(
     {
         "border": "#444444",
+        "border-active": "#00aa00",
         "prompt": "#00aa00 bold",
+        "processing": "#888888",
     }
 )
 
 
-def _border_line(cols: int, left: str, mid: str, right: str) -> list:
+def _border_line(cols: int, left: str, mid: str, right: str, cls: str = "border") -> list:
     return [
-        ("class:border", f" {left}"),
-        ("class:border", mid * (cols - 2)),
-        ("class:border", right),
+        ("class:" + cls, f" {left}"),
+        ("class:" + cls, mid * (cols - 2)),
+        ("class:" + cls, right),
     ]
 
 
 class CLIApp:
-    """Full-screen CLI: scrollable output + fixed input bar."""
+    """Full-screen CLI: scrollable output + fixed input bar, no screen switching."""
 
     def __init__(self) -> None:
         self._output: list[str] = []
-        self._kb = KeyBindings()
+        self._live: list[str] = []
+        self._processing = False
+        self._app: Application | None = None
         self._input_buf = Buffer(
             multiline=False,
             completer=SlashCommandCompleter(),
             complete_while_typing=True,
         )
+        self._kb = KeyBindings()
+        self._on_submit: Callable[[str], Awaitable[None]] | None = None
 
         @self._kb.add("enter")
         def _submit(event: Any) -> None:
-            text = self._input_buf.text
-            if text.strip():
+            if self._processing:
+                return
+            text = self._input_buf.text.strip()
+            if text and self._on_submit:
                 self._input_buf.text = ""
-                event.app.exit(result=text.strip())
+                asyncio.ensure_future(self._run_submit(text))
 
         @self._kb.add("c-c")
         def _cancel(event: Any) -> None:
-            event.app.exit(result=None)
+            if not self._processing:
+                event.app.exit()
 
         @self._kb.add("c-d")
         def _eof(event: Any) -> None:
-            event.app.exit(result=None)
+            if not self._processing:
+                event.app.exit()
+
+    def set_submit_handler(self, handler: Callable[[str], Awaitable[None]]) -> None:
+        self._on_submit = handler
+
+    async def _run_submit(self, text: str) -> None:
+        self._processing = True
+        self._live = []
+        self._invalidate()
+        try:
+            if self._on_submit:
+                await self._on_submit(text)
+        finally:
+            self._output.extend(self._live)
+            self._live = []
+            self._processing = False
+            self._invalidate()
+
+    def _invalidate(self) -> None:
+        if self._app:
+            self._app.invalidate()
+
+    def append_output(self, ansi_text: str) -> None:
+        self._output.append(ansi_text)
+        self._invalidate()
+
+    def append_live(self, text: str) -> None:
+        self._live.append(text)
+        self._invalidate()
+
+    def _render_output(self) -> list:
+        result: list = []
+        for text in self._output:
+            result.extend(ANSI(text).__pt_formatted_text__())
+        for text in self._live:
+            result.extend(ANSI(text).__pt_formatted_text__())
+        return result
 
     def _build_app(self) -> Application:
         cols = shutil.get_terminal_size().columns
@@ -76,22 +124,25 @@ class CLIApp:
                 buffer=self._input_buf,
                 focus_on_click=True,
             ),
-            get_line_prefix=lambda *_: FormattedText(
-                [("class:prompt", " ❯ ")],
+            get_line_prefix=lambda *_: (
+                FormattedText([("class:processing", " ⏳ ")])
+                if self._processing
+                else FormattedText([("class:prompt", " ❯ ")])
             ),
         )
 
+        border_cls = "border" if not self._processing else "border-active"
         border_top = Window(
             height=1,
             content=FormattedTextControl(
-                lambda: _border_line(cols, "╭", "─", "╮"),
+                lambda: _border_line(cols, "╭", "─", "╮", border_cls),
             ),
         )
 
         border_bot = Window(
             height=1,
             content=FormattedTextControl(
-                lambda: _border_line(cols, "╰", "─", "╯"),
+                lambda: _border_line(cols, "╰", "─", "╯", border_cls),
             ),
         )
 
@@ -103,16 +154,6 @@ class CLIApp:
             full_screen=True,
         )
 
-    def _render_output(self) -> list:
-        result: list = []
-        for text in self._output:
-            result.extend(ANSI(text).__pt_formatted_text__())
-        return result
-
-    def add_output(self, ansi_text: str) -> None:
-        self._output.append(ansi_text)
-
-    async def get_input(self) -> str | None:
-        app = self._build_app()
-        result = await app.run_async()
-        return result
+    async def run(self) -> None:
+        self._app = self._build_app()
+        await self._app.run_async()
