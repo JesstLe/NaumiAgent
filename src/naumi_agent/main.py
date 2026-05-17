@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -134,6 +136,7 @@ def _print_tool_output(name: str, content: str) -> None:
 
 
 async def _chat(config_path: str) -> None:
+    from naumi_agent.cli.layout import CLIApp
     from naumi_agent.log_setup import setup_logging
     from naumi_agent.orchestrator.engine import AgentEngine
 
@@ -143,64 +146,44 @@ async def _chat(config_path: str) -> None:
     _check_api_key(config)
     engine = AgentEngine(config)
 
-    _print_banner(engine)
+    cli = CLIApp()
+
+    # Capture banner
+    cli.add_output(_capture(lambda: _print_banner(engine)))
 
     while True:
-        try:
-            from naumi_agent.cli_completer import prompt_with_completion
-
-            user_input = await prompt_with_completion()
-        except (EOFError, KeyboardInterrupt):
+        user_input = await cli.get_input()
+        if user_input is None:
             await engine.shutdown()
-            console.print("\n[green]再见！[/green]")
             break
 
         if not user_input:
             continue
 
+        cli.add_output(_capture(lambda: console.print(f"[bold green]❯[/bold green] {user_input}")))
+
         if user_input in ("/quit", "/q", "/exit", "exit"):
             await engine.shutdown()
-            console.print("[green]再见！[/green]")
             break
 
         if user_input.startswith("/"):
             await _handle_command(engine, user_input)
             continue
 
+        # Stream response on primary screen (rich renders directly)
         result = await engine.run_streaming(user_input, _cli_event_handler)
 
         if not _thinking_started:
             sys.stdout.write("\r\033[K")
             sys.stdout.flush()
 
-        if result.status == "error" and result.error:
-            console.print(f"[red]错误: {result.error}[/red]")
-            continue
+        # Capture response for history
+        _last_result = result
 
-        # 渲染 Markdown 响应
-        if result.response:
-            console.print()
-            console.print(
-                Panel(
-                    Markdown(result.response),
-                    title="[bold green]NaumiAgent[/bold green]",
-                    border_style="green",
-                    padding=(1, 2),
-                )
-            )
+        def _cap() -> None:
+            _render_result(console, _last_result)
 
-        # 显示统计
-        stats = Text()
-        stats.append(f"轮次: {result.usage.turns}", style="dim")
-        stats.append(" | ", style="dim")
-        total_tok = result.usage.total_input_tokens + result.usage.total_output_tokens
-        stats.append(f"Token: {total_tok}", style="dim")
-        stats.append(" | ", style="dim")
-        stats.append(f"费用: ${result.usage.total_cost_usd:.4f}", style="dim")
-        if result.status != "completed":
-            stats.append(f" | 状态: {result.status}", style="yellow")
-        console.print(stats)
-        console.print()
+        cli.add_output(_capture(_cap))
 
 
 @app.command()
@@ -253,6 +236,66 @@ def serve(
             workers=1,
             log_level="info",
         )
+
+
+def _capture(func: Any) -> str:
+    """Capture console output as ANSI text."""
+    buf = io.StringIO()
+    c = Console(file=buf, force_terminal=True, legacy_windows=False, width=shutil.get_terminal_size().columns)
+    import naumi_agent.main as _self
+
+    orig = _self.console
+    _self.console = c
+    try:
+        func()
+    finally:
+        _self.console = orig
+    return buf.getvalue()
+
+
+def _print_banner_to(c: Console, engine: Any) -> None:
+    from naumi_agent import __version__
+    from naumi_agent.assets import BANNER_TEXT
+
+    model = engine.router.resolve_model("capable")
+    c.print(
+        Panel(
+            BANNER_TEXT,
+            title=f"[bold]v{__version__}[/bold]",
+            subtitle=f"[dim]{model}[/dim]",
+            border_style="green",
+            padding=(1, 2),
+        )
+    )
+
+
+def _render_result(c: Console, result: Any) -> None:
+    if result.status == "error" and result.error:
+        c.print(f"[red]错误: {result.error}[/red]")
+        return
+
+    if result.response:
+        c.print()
+        c.print(
+            Panel(
+                Markdown(result.response),
+                title="[bold green]NaumiAgent[/bold green]",
+                border_style="green",
+                padding=(1, 2),
+            )
+        )
+
+    stats = Text()
+    stats.append(f"轮次: {result.usage.turns}", style="dim")
+    stats.append(" | ", style="dim")
+    total_tok = result.usage.total_input_tokens + result.usage.total_output_tokens
+    stats.append(f"Token: {total_tok}", style="dim")
+    stats.append(" | ", style="dim")
+    stats.append(f"费用: ${result.usage.total_cost_usd:.4f}", style="dim")
+    if result.status != "completed":
+        stats.append(f" | 状态: {result.status}", style="yellow")
+    c.print(stats)
+    c.print()
 
 
 async def _handle_command(engine: Any, cmd: str) -> None:
