@@ -25,7 +25,8 @@ from naumi_agent.skills.loader import SkillLoader
 from naumi_agent.skills.tool import create_skill_tools
 from naumi_agent.streaming.event_bus import EventEmitter
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
-from naumi_agent.tools.browser import BrowserSession, create_browser_tools
+from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
+from naumi_agent.tools.browser.tools import create_browser_tools
 from naumi_agent.tools.builtin import create_builtin_tools
 from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
@@ -207,7 +208,9 @@ class AgentEngine:
         self.emitter = EventEmitter()
         self.hooks = HookManager()
         self._session: Session | None = None
-        self._browser_session = BrowserSession()
+        self._browser_session = BrowserRuntime(
+            Path(config.memory.session_db_path).parent / "browser"
+        )
         self._planner = AdaptivePlanner(self._router)
 
         self._mcp_manager: MCPClientManager | None = None
@@ -379,7 +382,7 @@ class AgentEngine:
         if hasattr(self, "subagent_manager"):
             await self.subagent_manager.stop_reaper()
             self.subagent_manager.destroy_all_dynamic()
-        await self._browser_session.close()
+        await self._browser_session.stop()
         if self._mcp_manager:
             await self._mcp_manager.disconnect_all()
         await self.session_store.close()
