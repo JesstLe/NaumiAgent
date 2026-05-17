@@ -148,13 +148,24 @@ or use analysis_eval after implementing a feature to generate tests).
 
 ## Guidelines
 1. Break complex tasks into steps
-2. Verify results after each action
+2. Verify results after each action — but do NOT repeat the same action \
+to verify. If a tool returns "Successfully", the action is done. Move on.
 3. Use tools precisely — provide exact file paths and commands
 4. Explain what you're doing before taking actions
 5. If something fails, analyze the error and try a different approach
 6. Use memory_store to save important user preferences, facts, or decisions
 7. Use memory_recall to check if relevant information was discussed before
 8. For complex subtasks (coding, research, browsing), consider delegating to specialized agents
+
+## Browser Tool Usage
+- **browser_goto**: Navigate to a URL. Call ONCE per URL. Returns SoM elements \
+and page data. Do NOT call again for the same URL.
+- **browser_observe**: Re-examine the current page without navigating. Use this \
+to refresh after clicks, scrolls, or dynamic content changes.
+- **browser_click/type/hover/scroll**: Interact with elements by their SoM ID \
+(from goto or observe results).
+- After a user asks to "open a website" or "go to a URL", call browser_goto \
+ONCE, then immediately respond to the user. Do NOT call goto again.
 """
 
 
