@@ -31,7 +31,8 @@ class _OutputWindow(Window):
     def _scroll_up(self) -> None:
         if self.auto_scroll:
             # Capture current bottom position before switching to manual
-            self.vertical_scroll = max(0, self.max_scroll_y)
+            if self.render_info is not None:
+                self.vertical_scroll = self.render_info.vertical_scroll
             self.auto_scroll = False
         else:
             self.vertical_scroll = max(0, self.vertical_scroll - 1)
@@ -39,8 +40,13 @@ class _OutputWindow(Window):
     def _scroll_down(self) -> None:
         if self.auto_scroll:
             return
+        if self.render_info is not None and self.render_info.bottom_visible:
+            self.auto_scroll = True
+            return
         self.vertical_scroll += 1
-        if self.vertical_scroll >= self.max_scroll_y:
+        if self.render_info is not None and self.render_info.last_visible_line() >= (
+            self.render_info.content_height - 2
+        ):
             self.auto_scroll = True
 
     def scroll_to_bottom(self) -> None:
@@ -175,11 +181,15 @@ class CLIApp:
     def finalize_live(self) -> None:
         self._output.extend(self._live)
         self._live = []
+        if self._output_win:
+            self._output_win.ensure_at_bottom()
         self._invalidate()
 
     def clear_output(self) -> None:
         self._output.clear()
         self._live.clear()
+        if self._output_win:
+            self._output_win.scroll_to_bottom()
         self._invalidate()
 
     def _render_output(self) -> list:
@@ -188,6 +198,12 @@ class CLIApp:
             result.extend(ANSI(text).__pt_formatted_text__())
         for text in self._live:
             result.extend(ANSI(text).__pt_formatted_text__())
+        # Pin the cursor to the last line so the Window's scroll algorithm
+        # tracks the newest content. Only add when auto_scroll is on —
+        # without this guard, manual scroll-up is impossible because the
+        # cursor anchor forces the view back to the bottom every render.
+        if self._output_win and self._output_win.auto_scroll:
+            result.append(("[SetCursorPosition]", ""))
         return result
 
     def _build_app(self) -> Application:
