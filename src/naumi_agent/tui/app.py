@@ -1795,6 +1795,7 @@ class NaumiApp(App):
                 )
             await self.engine._browser_session.goto(url.strip())
             auditor = self.engine.security_auditor
+            auditor.clear()
             await auditor.full_audit(profile=profile)
             summary = auditor.get_summary()
             total = summary.get("totalFindings", 0)
