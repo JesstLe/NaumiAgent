@@ -130,3 +130,30 @@ class TestBaseKwargs:
         r = ModelRouter(config)
         kw = r._base_kwargs()
         assert kw["extra_headers"]["User-Agent"] == "Kilo-Code/1.0"
+
+
+class TestKimiThinkingModel:
+    def test_kimi_k2_detected(self) -> None:
+        config = ModelConfig(default_model="openai/kimi-k2.6")
+        r = ModelRouter(config)
+        assert r._is_kimi_thinking_model("openai/kimi-k2.6")
+
+    def test_kimi_k25_detected(self) -> None:
+        config = ModelConfig(default_model="openai/kimi-k2.5")
+        r = ModelRouter(config)
+        assert r._is_kimi_thinking_model("openai/kimi-k2.5")
+
+    def test_kimi_latest_detected(self) -> None:
+        config = ModelConfig(default_model="openai/kimi-latest")
+        r = ModelRouter(config)
+        assert r._is_kimi_thinking_model("openai/kimi-latest")
+
+    def test_kimi_for_coding_not_detected(self) -> None:
+        config = ModelConfig(default_model="openai/kimi-for-coding")
+        r = ModelRouter(config)
+        assert not r._is_kimi_thinking_model("openai/kimi-for-coding")
+
+    def test_non_kimi_not_detected(self) -> None:
+        config = ModelConfig(default_model="claude-sonnet-4-6")
+        r = ModelRouter(config)
+        assert not r._is_kimi_thinking_model("claude-sonnet-4-6")

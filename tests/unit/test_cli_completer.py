@@ -48,17 +48,16 @@ class TestSlashCommandCompleter:
         assert "/quit" in results
         assert "/exit" in results
 
-    def test_prompt_with_completion_fallback(self):
+    async def test_prompt_with_completion_fallback(self):
         with patch(
             "naumi_agent.main.console"
         ) as mock_console, patch(
-            "prompt_toolkit.prompt",
+            "prompt_toolkit.PromptSession",
             side_effect=RuntimeError("no tty"),
-            create=True,
         ):
             mock_console.input.return_value = "  hello  "
             from naumi_agent.cli_completer import prompt_with_completion
 
-            result = prompt_with_completion()
+            result = await prompt_with_completion()
             mock_console.input.assert_called_once()
             assert result == "hello"
