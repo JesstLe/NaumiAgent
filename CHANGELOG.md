@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2025-05-17
+
+### Added
+- **浏览器调试系统全量移植** — 从 browser-debugging-daemon 移植 8 个阶段：
+  - Phase 1: SoM (Set-of-Mark) 交互元素标注系统
+  - Phase 2: BrowserRuntime — CDP 连接、截图、网络录制、下载管理
+  - Phase 3: 25 个 SoM 浏览器工具（goto/observe/click/type/hover/scroll 等）
+  - Phase 4: 浏览器子 Agent — LLM 规划、CAPTCHA 处理、自动任务执行
+  - Phase 5: TaskRunner — 队列化任务运行器、状态机、模板、断点恢复
+  - Phase 6: 25 模块安全扫描器 + 多 Agent 并行扫描协调器
+  - Phase 7: Engine 集成 — task_runner/security_auditor 懒加载、17 个浏览器/安全/任务斜杠命令
+  - Phase 8: TUI 集成 — BrowserPanel、Ctrl+B 切换、18 个斜杠命令
+- **会话自动恢复** — 启动时自动加载最近会话，完整回放所有消息到显示区，像从未关过一样
+  - CLI: 启动自动恢复 + `/load` 完整回放
+  - TUI: 启动自动恢复 + 历史面板点击加载
+- **浏览器工具循环检测** — 三层防御：系统提示引导 → 工具描述约束 → 引擎层重复调用检测
+- **CLI 手动滚动** — PageUp/PageDown 浏览历史输出，自动滚动到底部智能恢复
+
+### Fixed
+- browser_goto 无限循环 — LLM 反复调用同一工具，三层防御机制彻底解决
+- security_auditor 每次调用创建新实例导致 /scan-report 拿不到结果
+- 安全扫描结果累积 — 第二次扫描合并第一次结果，每次扫描前 clear
+- main.py 119 行重复函数定义（_run_forge/_show_forge_list/_run_forge_remove）
+- CLI 输出不自动滚动到底部
+
 ## [0.1.1] - 2025-05-17
 
 ### Added
