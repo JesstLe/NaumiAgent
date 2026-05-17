@@ -14,19 +14,27 @@ from textual.containers import Container, Horizontal, VerticalScroll
 from textual.message import Message
 from textual.reactive import reactive
 from textual.screen import ModalScreen
+from textual.suggester import SuggestFromList
 from textual.widgets import (
     Button,
     Collapsible,
     Footer,
     Header,
+    Input,
     Markdown,
     Static,
     TextArea,
 )
 
+from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.orchestrator.engine import AgentEngine
 
 logger = logging.getLogger(__name__)
+
+_SLASH_SUGGESTIONS = SuggestFromList(
+    [cmd for cmd, _, _ in COMMANDS],
+    case_sensitive=True,
+)
 
 
 class LoadSessionMessage(Message):
@@ -456,15 +464,15 @@ class SessionEntry(Static):
 
 
 class InputBar(Horizontal):
-    """输入栏 — 多行输入 + 发送按钮."""
+    """输入栏 — 输入框 + 发送按钮，斜杠命令自动补全."""
 
     DEFAULT_CSS = """
     InputBar {
-        height: 5;
+        height: 3;
         padding: 0 1;
         border-top: solid green;
     }
-    InputBar TextArea {
+    InputBar Input {
         width: 1fr;
         height: 1fr;
     }
@@ -474,24 +482,29 @@ class InputBar(Horizontal):
     }
     """
 
-    BINDINGS = [
-        Binding("ctrl+enter", "send", "发送"),
-    ]
-
     def compose(self) -> ComposeResult:
-        yield TextArea(id="msg-input")
+        yield Input(
+            placeholder="输入消息或 / 命令…",
+            id="msg-input",
+            suggester=_SLASH_SUGGESTIONS,
+        )
         yield Button("发送", variant="primary", id="send-btn")
 
-    def action_send(self) -> None:
-        textarea = self.query_one("#msg-input", TextArea)
-        text = textarea.text.strip()
+    @on(Input.Submitted)
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        text = event.value.strip()
         if text:
             self.app.post_message(UserInputMessage(text))
-            textarea.clear()
+            input_widget = self.query_one("#msg-input", Input)
+            input_widget.value = ""
 
     @on(Button.Pressed)
     def on_send_pressed(self) -> None:
-        self.action_send()
+        input_widget = self.query_one("#msg-input", Input)
+        text = input_widget.value.strip()
+        if text:
+            self.app.post_message(UserInputMessage(text))
+            input_widget.value = ""
 
 
 class UserInputMessage(Message):
