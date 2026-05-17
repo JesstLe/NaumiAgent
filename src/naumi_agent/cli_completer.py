@@ -13,6 +13,7 @@ COMMANDS: list[tuple[str, str, bool]] = [
     ("/help", "显示帮助", False),
     ("/tools", "列出可用工具", False),
     ("/model", "显示模型配置", False),
+    ("/version", "显示版本号", False),
     ("/usage", "显示 token 用量", False),
     ("/hooks", "显示已注册的钩子", False),
     ("/skills", "列出已加载的 Skill", False),

@@ -287,6 +287,10 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             console.print(f"默认模型: {engine.router.resolve_model('capable')}")
             console.print(f"快速模型: {engine.router.resolve_model('fast')}")
             console.print(f"推理模型: {engine.router.resolve_model('reasoning')}")
+        case "/version":
+            from naumi_agent import __version__
+
+            console.print(f"[bold green]NaumiAgent[/bold green] v{__version__}")
         case "/history":
             await _show_history(engine)
         case "/memory":
@@ -580,11 +584,13 @@ async def _handle_command(engine: Any, cmd: str) -> None:
 
 
 def _print_banner() -> None:
+    from naumi_agent import __version__
     from naumi_agent.assets import BANNER_TEXT
 
     console.print(
         Panel(
             BANNER_TEXT,
+            title=f"[bold]v{__version__}[/bold]",
             border_style="green",
             padding=(1, 2),
         )
