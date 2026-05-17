@@ -700,6 +700,19 @@ class NaumiApp(App):
                 chat.clear()
                 self.engine.reset()
                 status.status_text = "会话已清除"
+            case "/new":
+                if self.engine._messages and any(
+                    m.get("role") == "user" for m in self.engine._messages
+                ):
+                    try:
+                        import asyncio
+
+                        asyncio.get_event_loop().run_until_complete(self.engine._save_session())
+                    except Exception:
+                        pass
+                self.engine.reset()
+                chat.clear()
+                status.status_text = "新会话已开始"
             case "/help":
                 help_text = (
                     "## 可用命令\n"
