@@ -61,34 +61,20 @@ def _launch_tui(config_path: str) -> None:
     app.run()
 
 
-_thinking_started = False
-
-
 async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
-    """实时显示 Agent 思考、工具调用过程."""
-    global _thinking_started
+    """实时显示 Agent 思考、工具调用过程（fallback for non-CLIApp modes）."""
     if event == "thinking_delta":
         content = data.get("content", "")
         if content:
             sys.stdout.write(content)
             sys.stdout.flush()
     elif event == "thinking_start":
-        _thinking_started = True
         sys.stdout.write("\n\033[2m💭 思考中...\033[0m\n")
         sys.stdout.flush()
     elif event == "thinking_end":
         sys.stdout.write("\033[0m\n")
         sys.stdout.flush()
     elif event == "tool_start":
-        name = data.get("name", "?")
-        args = data.get("args", {})
-        if isinstance(args, dict):
-            parts = list(args.items())[:3]
-            summary = " ".join(f"{k}={v}" for k, v in parts)
-            console.print(f"[cyan]🔧 {name}[/cyan] [dim]{summary}[/dim]")
-        else:
-            console.print(f"[cyan]🔧 {name}[/cyan]")
-    elif event == "tool_end":
         name = data.get("name", "?")
         status = data.get("status", "?")
         content = data.get("content", "")
@@ -135,6 +121,37 @@ def _print_tool_output(name: str, content: str) -> None:
         console.print(f"[dim]{preview}[/dim]")
 
 
+_active_cli: Any = None
+
+
+def _cli_event_factory(cli: Any):
+    """Create event handler that writes to CLIApp instead of stdout."""
+    thinking_started = False
+
+    async def handler(event: str, data: dict[str, Any]) -> None:
+        nonlocal thinking_started
+        if event == "thinking_delta":
+            content = data.get("content", "")
+            if content:
+                cli.append_live(f"\033[2m{content}\033[0m")
+        elif event == "thinking_start":
+            thinking_started = True
+            cli.append_live("\033[2m💭 思考中...\033[0m\n")
+        elif event == "thinking_end":
+            cli.append_live("\033[0m\n")
+        elif event == "tool_start":
+            name = data.get("name", "?")
+            cli.append_live(f"\033[36m🔧 {name}\033[0m\n")
+        elif event == "tool_end":
+            pass
+        elif event == "response_start":
+            pass
+        elif event == "token":
+            pass
+
+    return handler
+
+
 async def _chat(config_path: str) -> None:
     from naumi_agent.cli.layout import CLIApp
     from naumi_agent.log_setup import setup_logging
@@ -147,43 +164,28 @@ async def _chat(config_path: str) -> None:
     engine = AgentEngine(config)
 
     cli = CLIApp()
+    global _active_cli
+    _active_cli = cli
 
-    # Capture banner
-    cli.add_output(_capture(lambda: _print_banner(engine)))
+    cli.append_output(_capture(lambda: _print_banner(engine)))
 
-    while True:
-        user_input = await cli.get_input()
-        if user_input is None:
+    async def on_submit(text: str) -> None:
+        if text in ("/quit", "/q", "/exit", "exit"):
             await engine.shutdown()
-            break
+            return
 
-        if not user_input:
-            continue
+        cli.append_output(f"\033[32m❯\033[0m {text}\n")
 
-        cli.add_output(_capture(lambda: console.print(f"[bold green]❯[/bold green] {user_input}")))
+        if text.startswith("/"):
+            await _handle_command(engine, text)
+            return
 
-        if user_input in ("/quit", "/q", "/exit", "exit"):
-            await engine.shutdown()
-            break
+        result = await engine.run_streaming(text, _cli_event_factory(cli))
 
-        if user_input.startswith("/"):
-            await _handle_command(engine, user_input)
-            continue
+        cli.append_output(_capture(lambda: _render_result(console, result)))
 
-        # Stream response on primary screen (rich renders directly)
-        result = await engine.run_streaming(user_input, _cli_event_handler)
-
-        if not _thinking_started:
-            sys.stdout.write("\r\033[K")
-            sys.stdout.flush()
-
-        # Capture response for history
-        _last_result = result
-
-        def _cap() -> None:
-            _render_result(console, _last_result)
-
-        cli.add_output(_capture(_cap))
+    cli.set_submit_handler(on_submit)
+    await cli.run()
 
 
 @app.command()
@@ -241,7 +243,10 @@ def serve(
 def _capture(func: Any) -> str:
     """Capture console output as ANSI text."""
     buf = io.StringIO()
-    c = Console(file=buf, force_terminal=True, legacy_windows=False, width=shutil.get_terminal_size().columns)
+    width = shutil.get_terminal_size().columns
+    c = Console(
+        file=buf, force_terminal=True, legacy_windows=False, width=width
+    )
     import naumi_agent.main as _self
 
     orig = _self.console
