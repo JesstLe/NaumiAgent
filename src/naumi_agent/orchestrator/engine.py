@@ -252,6 +252,11 @@ class AgentEngine:
 
         self._tool_registry.register(HotReloadTool())
 
+        # Self-modification tool
+        from naumi_agent.tools.self_modify import SelfModifyTool
+
+        self._tool_registry.register(SelfModifyTool())
+
     def _register_subagent_manager(self) -> None:
         from naumi_agent.orchestrator.subagent_manager import SubAgentManager
         from naumi_agent.tools.analysis import set_analysis_subagent_manager

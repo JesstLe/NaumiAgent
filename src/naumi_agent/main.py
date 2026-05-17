@@ -540,6 +540,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _run_self_review(engine, arg)
         case "/reload":
             await _run_reload(engine, arg)
+        case "/evolve":
+            await _run_evolve(engine, arg)
         case "/help":
             _print_help()
         case _:
@@ -615,6 +617,7 @@ def _print_help() -> None:
         ("/pursue <目标>", "目标追踪 — 自主循环执行直至真正达成"),
         ("/self-review [模块]", "自我审查 — 扫描自身源码质量与架构"),
         ("/reload [域]", "热重载 — 重载模块无需重启 (tools/memory/skills/all)"),
+        ("/evolve <描述>", "自我进化 — 修改自身工具代码并验证"),
         ("/new", "保存当前会话并开始新对话"),
         ("/clear", "清除当前会话（不保存）"),
         ("/quit", "退出"),
@@ -878,6 +881,152 @@ async def _run_reload(engine: Any, arg: str) -> None:
     console.print()
 
 
+
+async def _run_evolve(engine: Any, arg: str) -> None:
+    """执行自我进化 — Agent 修改自身工具代码并验证."""
+    import json
+    import re
+
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+
+    description = arg.strip()
+    if not description:
+        console.print("[yellow]用法: /evolve <修改描述>[/yellow]")
+        console.print("[dim]例: /evolve 优化 analysis.py 中的 _scan_chaos 函数性能[/dim]")
+        return
+
+    self_modify = engine.tool_registry.get("self_modify")
+    if not self_modify:
+        console.print("[red]自我修改工具未注册[/red]")
+        return
+
+    console.print(f"[bold yellow]🧬 自我进化: {description}[/bold yellow]")
+
+    # Phase 1: Identify target and generate modification via LLM
+    console.print("[dim]Phase 1: 分析目标并生成修改方案...[/dim]")
+
+    with console.status("[bold green]分析中...[/bold green]"):
+        from naumi_agent.tools.self_modify import (
+            _find_agent_source_dir,
+            _is_protected_file,
+        )
+
+        source_dir = _find_agent_source_dir()
+
+        prompt = (
+            f"Agent 自我进化请求: {description}\n\n"
+            "请分析以下请求，确定需要修改的目标文件，并生成完整的修改后文件内容。\n\n"
+            "要求:\n"
+            "1. 只能修改 tools/memory/skills 目录下的模块\n"
+            "2. 不能修改 engine/safety/config 等核心模块\n"
+            "3. 修改后的代码必须保持所有现有接口兼容\n"
+            '4. 输出 JSON 格式: {"target_file": "相对路径", '
+            '"new_content": "完整文件内容", "description": "修改说明"}\n'
+        )
+
+        modifiable_files = []
+        for domain_dir in ["tools", "memory", "skills"]:
+            domain_path = source_dir / domain_dir
+            if domain_path.is_dir():
+                for py_file in domain_path.glob("*.py"):
+                    if py_file.name != "__init__.py" and not _is_protected_file(py_file):
+                        modifiable_files.append(
+                            str(py_file.relative_to(source_dir))
+                        )
+
+        file_list = "\n".join(f"- {f}" for f in modifiable_files)
+        prompt += f"\n可修改的文件列表:\n{file_list}"
+
+        file_contexts = []
+        for f in modifiable_files[:10]:
+            fp = source_dir / f
+            try:
+                content = fp.read_text(encoding="utf-8")
+                if len(content) > 5000:
+                    content = content[:5000] + "\n... (truncated)"
+                file_contexts.append(f"### {f}\n```python\n{content}\n```")
+            except Exception:
+                pass
+
+        prompt += "\n\n当前源码上下文:\n" + "\n".join(file_contexts[:5])
+
+    try:
+        response = await engine._router.call(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "你是 Agent 自我进化系统。根据修改请求生成代码修改方案。"
+                        "只输出 JSON，不要其他内容。"
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            tier="capable",
+        )
+        llm_output = response.content.strip()
+    except Exception as e:
+        console.print(f"[red]LLM 调用失败: {e}[/red]")
+        return
+
+    json_match = re.search(
+        r"```(?:json)?\s*\n?(.*?)\n?```", llm_output, re.DOTALL
+    )
+    json_str = json_match.group(1) if json_match else llm_output
+
+    try:
+        proposal = json.loads(json_str)
+    except json.JSONDecodeError:
+        console.print("[red]无法解析 LLM 输出的修改方案[/red]")
+        console.print(Panel(llm_output[:2000], title="[red]LLM 输出[/red]"))
+        return
+
+    target_file = proposal.get("target_file", "")
+    new_content = proposal.get("new_content", "")
+    change_desc = proposal.get("description", description)
+
+    if not target_file or not new_content:
+        console.print("[red]修改方案缺少 target_file 或 new_content[/red]")
+        return
+
+    console.print(f"[dim]目标文件: {target_file}[/dim]")
+    console.print(f"[dim]修改说明: {change_desc}[/dim]")
+
+    # Phase 2: Validate and apply
+    console.print("[dim]Phase 2: 验证并应用修改...[/dim]")
+
+    with console.status("[bold green]验证中...[/bold green]"):
+        result = await self_modify.execute(
+            target_file=target_file,
+            new_content=new_content,
+            description=change_desc,
+        )
+
+    console.print()
+    console.print(
+        Panel(
+            Markdown(result),
+            title="[bold yellow]🧬 自我进化结果[/bold yellow]",
+            border_style="yellow",
+            padding=(1, 2),
+        ),
+    )
+
+    # Phase 3: Hot-reload if applied
+    if "已应用" in result:
+        console.print("[bold yellow]🔄 正在热重载修改后的模块...[/bold yellow]")
+        try:
+            reload_result = await engine.reload_tools("tools")
+            msg = f"✅ 重载完成: {reload_result['reloaded']} 个模块"
+            console.print(f"[green]{msg}[/green]")
+        except Exception as e:
+            console.print(f"[yellow]⚠️ 热重载失败: {e}[/yellow]")
+
+    console.print()
+
+
+
 async def _show_history(engine: Any) -> None:
     """显示历史会话列表."""
 
@@ -901,8 +1050,6 @@ def _show_hooks(engine: Any) -> None:
         for cb in callbacks:
             console.print(f"    • {cb}")
     console.print()
-
-
 async def _show_history(engine: Any) -> None:
     """显示历史会话列表."""
     from rich.table import Table
