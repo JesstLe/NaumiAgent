@@ -21,6 +21,7 @@ dependencies = [
     # 接口
     "typer>=0.15",
     "rich>=14.0",
+    "prompt-toolkit>=3.0",
     "fastapi>=0.115",
     "uvicorn>=0.34",
     "websockets>=14.0",
