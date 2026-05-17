@@ -459,8 +459,9 @@ class AgentEngine:
         if session is None:
             return False
         self._session = session
-        self._messages = self._sanitize_messages(session.messages)
-        self._full_history = list(session.messages)
+        cleaned_messages = self._sanitize_messages(session.messages)
+        self._messages = cleaned_messages
+        self._full_history = list(cleaned_messages)
         self._usage = AgentUsage(
             total_input_tokens=session.total_tokens,
             total_cost_usd=session.total_cost_usd,

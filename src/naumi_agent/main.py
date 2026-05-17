@@ -215,8 +215,9 @@ async def _chat(config_path: str) -> None:
 
         # Finalize any remaining live content
         cli.finalize_live()
+        skip_response = event_handler._has_streamed_tokens()
         cli.append_output(
-            _capture(lambda: _render_result(console, result, skip_response=event_handler._has_streamed_tokens()))
+            _capture(lambda: _render_result(console, result, skip_response=skip_response))
         )
 
     cli.set_submit_handler(on_submit)
@@ -1592,8 +1593,16 @@ async def _load_session(engine: Any, session_id: str) -> None:
                 if len(content) > 100:
                     content = content[:97] + "..."
                 if not content:
-                    tool_names = [tc.get("function", {}).get("name", "") for tc in m.get("tool_calls", []) if isinstance(tc, dict)]
-                    content = f"[调用工具: {', '.join(tool_names)}]" if tool_names else "[无文本内容]"
+                    tool_names = [
+                        tc.get("function", {}).get("name", "")
+                        for tc in m.get("tool_calls", [])
+                        if isinstance(tc, dict)
+                    ]
+                    content = (
+                        f"[调用工具: {', '.join(tool_names)}]"
+                        if tool_names
+                        else "[无文本内容]"
+                    )
                 label = "[blue]你[/blue]" if role == "user" else "[green]Naumi[/green]"
                 console.print(f"  {label}: {content}")
         console.print()
@@ -1604,11 +1613,31 @@ async def _load_session(engine: Any, session_id: str) -> None:
 
 async def _resume_latest(engine: Any) -> None:
     """加载最近一个历史会话并继续对话."""
-    sessions, total = await engine.list_sessions(page=1, page_size=1)
-    if not sessions:
-        console.print("[dim]暂无历史会话[/dim]")
-        return
-    await _load_session(engine, sessions[0].id)
+    page = 1
+    page_size = 20
+    checked = 0
+
+    while True:
+        sessions, total = await engine.list_sessions(page=page, page_size=page_size)
+        if not sessions:
+            break
+
+        for session in sessions:
+            if _has_user_conversation(session):
+                await _load_session(engine, session.id)
+                return
+
+        checked += len(sessions)
+        if checked >= total:
+            break
+        page += 1
+
+    console.print("[dim]暂无可继续的历史对话[/dim]")
+
+
+def _has_user_conversation(session: Any) -> bool:
+    """判断会话是否包含真实用户对话，跳过仅 system prompt 的空会话."""
+    return any(m.get("role") == "user" for m in session.messages)
 
 
 async def _interactive_load(engine: Any, arg: str) -> None:

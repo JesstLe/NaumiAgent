@@ -12,7 +12,7 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.formatted_text import ANSI, FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Float, FloatContainer, HSplit, Window
-from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl, UIContent
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.layout.menus import CompletionsMenu
@@ -27,32 +27,104 @@ class _OutputWindow(Window):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.auto_scroll = True
-        self._user_scroll_pos = 0
-        # Use callback for reliable scroll-to-bottom on every render
-        self.get_vertical_scroll = self._scroll_callback
-
-    def _scroll_callback(self, window: Any) -> int:
-        if self.auto_scroll:
-            return 99999  # Clamped to max_scroll_y by prompt_toolkit
-        return self._user_scroll_pos
 
     def _scroll_up(self) -> None:
         if self.auto_scroll:
             # Capture current bottom position before switching to manual
-            self._user_scroll_pos = max(0, self.max_scroll_y)
+            if self.render_info is not None:
+                self.vertical_scroll = self.render_info.vertical_scroll
+            elif self.vertical_scroll > 10_000:
+                self.vertical_scroll = 0
             self.auto_scroll = False
-        else:
-            self._user_scroll_pos = max(0, self._user_scroll_pos - 1)
+
+        if self.vertical_scroll_2 > 0:
+            self.vertical_scroll_2 -= 1
+        elif self.vertical_scroll > 0:
+            self.vertical_scroll -= 1
+            if self.render_info is not None:
+                self.vertical_scroll_2 = max(
+                    0,
+                    self.render_info.get_height_for_line(self.vertical_scroll) - 1,
+                )
 
     def _scroll_down(self) -> None:
         if self.auto_scroll:
             return
-        self._user_scroll_pos += 1
-        if self._user_scroll_pos >= self.max_scroll_y:
+        if self.render_info is not None and self.render_info.bottom_visible:
             self.auto_scroll = True
+            return
+        if self.render_info is None:
+            self.vertical_scroll += 1
+            return
+
+        line_height = self.render_info.get_height_for_line(self.vertical_scroll)
+        if self.vertical_scroll_2 < line_height - 1:
+            self.vertical_scroll_2 += 1
+        else:
+            self.vertical_scroll += 1
+            self.vertical_scroll_2 = 0
+
+        max_line, max_line_offset = self._bottom_scroll_position(
+            self.render_info.ui_content,
+            self.render_info.window_width,
+            self.render_info.window_height,
+        )
+        if (self.vertical_scroll, self.vertical_scroll_2) >= (max_line, max_line_offset):
+            self.scroll_to_bottom()
 
     def scroll_to_bottom(self) -> None:
         self.auto_scroll = True
+        self.vertical_scroll = 99999
+
+    def ensure_at_bottom(self) -> None:
+        """滚动到底部（仅在 auto_scroll 开启时）."""
+        if self.auto_scroll:
+            self.vertical_scroll = 99999
+
+    def _scroll(self, ui_content: UIContent, width: int, height: int) -> None:
+        """Scroll without cursor-snapping when the user is browsing history."""
+        if self.auto_scroll:
+            super()._scroll(ui_content, width, height)
+            return
+
+        self.horizontal_scroll = 0
+        if ui_content.line_count <= 0 or width <= 0 or height <= 0:
+            self.vertical_scroll = 0
+            self.vertical_scroll_2 = 0
+            return
+        self._clamp_manual_scroll(ui_content, width, height)
+
+    def _clamp_manual_scroll(self, ui_content: UIContent, width: int, height: int) -> None:
+        """Keep manual scroll coordinates inside the rendered content."""
+        max_line, max_line_offset = self._bottom_scroll_position(ui_content, width, height)
+        self.vertical_scroll = max(0, min(self.vertical_scroll, max_line))
+
+        line_height = self._line_height(ui_content, self.vertical_scroll, width)
+        max_offset = max(0, line_height - 1)
+        if self.vertical_scroll == max_line:
+            max_offset = min(max_offset, max_line_offset)
+        self.vertical_scroll_2 = max(0, min(self.vertical_scroll_2, max_offset))
+
+    def _bottom_scroll_position(
+        self,
+        ui_content: UIContent,
+        width: int,
+        height: int,
+    ) -> tuple[int, int]:
+        """Return the lowest top-of-window position that still shows content."""
+        used_height = 0
+        safe_width = max(1, width)
+        for lineno in range(ui_content.line_count - 1, -1, -1):
+            line_height = self._line_height(ui_content, lineno, safe_width)
+            if used_height + line_height > height:
+                return lineno, used_height + line_height - height
+            used_height += line_height
+        return 0, 0
+
+    def _line_height(self, ui_content: UIContent, lineno: int, width: int) -> int:
+        if self.wrap_lines():
+            return ui_content.get_height_for_line(lineno, width, self.get_line_prefix)
+        return 1
 
 _STYLE = Style.from_dict(
     {
@@ -122,7 +194,6 @@ class CLIApp:
         @self._kb.add("pageup")
         def _page_up(event: Any) -> None:
             if self._output_win:
-                self._output_win.auto_scroll = False
                 for _ in range(10):
                     self._output_win._scroll_up()
                 self._invalidate()
@@ -164,20 +235,28 @@ class CLIApp:
 
     def append_output(self, ansi_text: str) -> None:
         self._output.append(ansi_text)
+        if self._output_win:
+            self._output_win.ensure_at_bottom()
         self._invalidate()
 
     def append_live(self, text: str) -> None:
         self._live.append(text)
+        if self._output_win:
+            self._output_win.ensure_at_bottom()
         self._invalidate()
 
     def finalize_live(self) -> None:
         self._output.extend(self._live)
         self._live = []
+        if self._output_win:
+            self._output_win.ensure_at_bottom()
         self._invalidate()
 
     def clear_output(self) -> None:
         self._output.clear()
         self._live.clear()
+        if self._output_win:
+            self._output_win.scroll_to_bottom()
         self._invalidate()
 
     def _render_output(self) -> list:
@@ -186,6 +265,12 @@ class CLIApp:
             result.extend(ANSI(text).__pt_formatted_text__())
         for text in self._live:
             result.extend(ANSI(text).__pt_formatted_text__())
+        # Pin the cursor to the last line so the Window's scroll algorithm
+        # tracks the newest content. Only add when auto_scroll is on —
+        # without this guard, manual scroll-up is impossible because the
+        # cursor anchor forces the view back to the bottom every render.
+        if self._output_win and self._output_win.auto_scroll:
+            result.append(("[SetCursorPosition]", ""))
         return result
 
     def _build_app(self) -> Application:
@@ -239,6 +324,7 @@ class CLIApp:
             key_bindings=self._kb,
             style=_STYLE,
             full_screen=True,
+            mouse_support=True,
         )
 
     async def run(self) -> None:
