@@ -121,7 +121,7 @@ Agent 的"大脑"，基于 **Orchestrator-Workers** 模式（Anthropic 推荐）
 **内置工具集**：
 - `file_read` / `file_write` / `file_edit` — 文件系统操作
 - `bash_execute` — Shell 命令执行（沙箱内）
-- `browser_navigate` / `browser_click` / `browser_screenshot` — 浏览器自动化
+- `browser_goto` / `browser_click` / `browser_screenshot` / `browser_observe` — 浏览器自动化
 - `code_execute` — 代码沙箱执行（Python/JS）
 - `web_search` / `web_fetch` — 网络信息获取
 

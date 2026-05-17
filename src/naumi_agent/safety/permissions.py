@@ -80,8 +80,8 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         requires_confirmation=True,
         max_calls_per_session=20,
     ),
-    "browser_navigate": PermissionRule(
-        tool_name="browser_navigate",
+    "browser_goto": PermissionRule(
+        tool_name="browser_goto",
         allowed_modes=[
             PermissionMode.BYPASS,
             PermissionMode.PERMISSIVE,
@@ -100,8 +100,8 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
         requires_confirmation=False,
     ),
-    "browser_extract": PermissionRule(
-        tool_name="browser_extract",
+    "browser_observe": PermissionRule(
+        tool_name="browser_observe",
         allowed_modes=[
             PermissionMode.BYPASS,
             PermissionMode.PERMISSIVE,
@@ -121,8 +121,8 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         ],
         requires_confirmation=False,
     ),
-    "browser_get_html": PermissionRule(
-        tool_name="browser_get_html",
+    "browser_evaluate": PermissionRule(
+        tool_name="browser_evaluate",
         allowed_modes=[
             PermissionMode.BYPASS,
             PermissionMode.PERMISSIVE,

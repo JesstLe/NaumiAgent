@@ -58,7 +58,7 @@ class BaseAgent:
         tool_map = {
             AgentCapability.FILE_OPS: ["file_read", "file_write", "file_edit", "file_list", "file_search"],
             AgentCapability.CODE_EXEC: ["code_execute", "code_install"],
-            AgentCapability.WEB_BROWSE: ["browser_navigate", "browser_click", "browser_screenshot", "browser_extract"],
+            AgentCapability.WEB_BROWSE: ["browser_goto", "browser_click", "browser_screenshot", "browser_observe"],
             AgentCapability.WEB_SEARCH: ["web_search", "web_fetch"],
             AgentCapability.SHELL_EXEC: ["bash_run"],
             AgentCapability.DATA_ANALYSIS: ["code_execute", "file_read", "file_write"],
