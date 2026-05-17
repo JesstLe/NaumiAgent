@@ -173,6 +173,7 @@ async def _chat(config_path: str) -> None:
     async def on_submit(text: str) -> None:
         if text in ("/quit", "/q", "/exit", "exit"):
             await engine.shutdown()
+            cli.exit()
             return
 
         cli.append_output(f"\033[32m❯\033[0m {text}\n")
