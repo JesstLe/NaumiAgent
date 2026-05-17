@@ -169,6 +169,7 @@ class ModelRouter:
 
         - assistant + tool_calls: content 不能是空字符串，必须为 None
         - reasoning_content: Kimi API 不接受此字段，必须移除
+        - 移除引用了不存在 tool_call_id 的 tool 消息
         - 裁剪末尾不完整的 assistant/tool 序列
         """
         sanitized: list[dict[str, Any]] = []
@@ -180,6 +181,22 @@ class ModelRouter:
                 # reasoning_content is not accepted by Kimi API
                 m.pop("reasoning_content", None)
             sanitized.append(m)
+
+        # 收集所有有效的 tool_call_id
+        valid_tool_call_ids = {
+            tc.get("id")
+            for msg in sanitized
+            if msg.get("role") == "assistant" and "tool_calls" in msg
+            for tc in msg.get("tool_calls", [])
+            if isinstance(tc, dict) and tc.get("id")
+        }
+
+        # 移除引用了无效 tool_call_id 的 tool 消息
+        sanitized = [
+            msg
+            for msg in sanitized
+            if msg.get("role") != "tool" or msg.get("tool_call_id") in valid_tool_call_ids
+        ]
 
         # Trim trailing incomplete assistant/tool sequences
         while sanitized:

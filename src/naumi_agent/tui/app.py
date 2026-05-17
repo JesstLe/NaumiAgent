@@ -82,6 +82,7 @@ class ChatPanel(VerticalScroll):
         height: 1fr;
         padding: 0 1;
         scrollbar-size: 1 1;
+        overflow-y: auto;
     }
     """
 
@@ -126,6 +127,21 @@ class ChatPanel(VerticalScroll):
         self._thinking_text = ""
         self._thinking_content_widget = None
         self._thinking_collapsible = None
+
+    def add_completed_thinking(self, content: str) -> None:
+        """从历史消息中恢复已完成的思考过程."""
+        if not content:
+            return
+        thinking_widget = Static(_THINKING_LABEL, classes="thinking-content")
+        collapsible = Collapsible(
+            thinking_widget,
+            title="💭 思考过程",
+            classes="thinking-block",
+        )
+        self.mount(collapsible)
+        thinking_widget.update(RichMarkdown(content))
+        collapsible.collapsed = True
+        self.scroll_end(animate=False)
 
     # --- 流式响应 ---
 
@@ -175,6 +191,7 @@ class ChatPanel(VerticalScroll):
         self._thinking_content_widget = None
         self._thinking_collapsible = None
         self._current_tool_widget = None
+        self.scroll_to(0, animate=False)
 
     # --- 结束 ---
 
@@ -1215,14 +1232,46 @@ class NaumiApp(App):
         session = self.engine._session
         chat.clear()
 
-        # 回放历史消息
-        for m in session.messages:
+        # 回放历史消息 — 用 _full_history（原始未截断数据）展示
+        display_messages = self.engine._full_history or session.messages
+        for m in display_messages:
             role = m.get("role", "")
             content = m.get("content", "")
             if role == "user":
                 chat.add_user_message(content)
             elif role == "assistant":
-                chat.mount(Markdown(content, classes="agent-msg"))
+                reasoning = m.get("reasoning_content", "")
+                if reasoning:
+                    chat.add_completed_thinking(reasoning)
+                if content:
+                    chat.mount(Markdown(content, classes="agent-msg"))
+                # Show tool calls from this assistant message
+                for tc in m.get("tool_calls", []):
+                    tc_name = tc.get("function", {}).get("name", "tool") if isinstance(tc, dict) else "tool"
+                    chat.mount(
+                        Static(f"  ⚙ [dim]{tc_name}[/dim]", classes="tool-done")
+                    )
+            elif role == "tool":
+                tool_call_id = m.get("tool_call_id", "")
+                is_placeholder = "工具调用结果缺失" in (content or "")
+                has_error = "error" in (content or "").lower()[:200]
+                if is_placeholder:
+                    icon = "⚠️"
+                elif has_error:
+                    icon = "❌"
+                else:
+                    icon = "✅"
+                preview = (content[:120] + "…") if content and len(content) > 120 else (content or "")
+                chat.mount(
+                    Static(
+                        f"  {icon} [dim]{preview}[/dim]",
+                        classes="tool-done",
+                    )
+                )
+
+        # 等待 Textual 完成布局计算后再滚动到底部
+        self.call_after_refresh(chat._refresh_scroll)
+        self.call_after_refresh(chat.scroll_end, animate=False)
 
         title = session.title or session_id
         msg_count = len(session.messages)
@@ -1288,7 +1337,7 @@ class NaumiApp(App):
 
         try:
             result = await tool.execute(goal=goal)
-            chat.stop_thinking()
+            chat.end_thinking()
             chat.mount(
                 Markdown(
                     f"## 🎯 目标追踪报告\n\n{result}",
@@ -1296,7 +1345,7 @@ class NaumiApp(App):
                 )
             )
         except Exception as e:
-            chat.stop_thinking()
+            chat.end_thinking()
             chat.mount(
                 Markdown(
                     f"⚠️ 目标追踪异常: {type(e).__name__}: {e}",

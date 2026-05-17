@@ -181,6 +181,7 @@ class AgentEngine:
         self._router = ModelRouter(config.models)
         self._tool_registry = ToolRegistry()
         self._messages: list[dict[str, Any]] = []
+        self._full_history: list[dict[str, Any]] = []  # untruncated display history
         self._usage = AgentUsage()
         self._budget_tracker = BudgetTracker(
             TokenBudget(
@@ -367,6 +368,7 @@ class AgentEngine:
 
     def reset(self) -> None:
         self._messages.clear()
+        self._full_history.clear()
         self._usage = AgentUsage()
         self._session = None
         self._behavior_monitor.reset()
@@ -449,17 +451,75 @@ class AgentEngine:
         return self._session
 
     async def load_session(self, session_id: str) -> bool:
-        """加载已有会话，恢复上下文."""
+        """加载已有会话，恢复上下文.
+
+        清理不完整的工具调用序列，避免 LLM API 拒绝续接。
+        """
         session = await self.session_store.load(session_id)
         if session is None:
             return False
         self._session = session
-        self._messages = list(session.messages)
+        self._messages = self._sanitize_messages(session.messages)
+        self._full_history = list(session.messages)
         self._usage = AgentUsage(
             total_input_tokens=session.total_tokens,
             total_cost_usd=session.total_cost_usd,
         )
         return True
+
+    @staticmethod
+    def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """修复消息序列中的不完整工具调用对.
+
+        保留所有 tool_calls 和已有的 tool 结果（包括报错信息），
+        对缺失的 tool 结果补一条占位消息，确保 LLM API 不会拒绝。
+        """
+        cleaned: list[dict[str, Any]] = []
+        i = 0
+        while i < len(messages):
+            msg = messages[i]
+            role = msg.get("role", "")
+
+            if role == "assistant" and msg.get("tool_calls"):
+                tool_call_ids = []
+                for tc in msg["tool_calls"]:
+                    tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                    if tc_id:
+                        tool_call_ids.append(tc_id)
+
+                # Collect matching tool results into a dict keyed by tool_call_id
+                tool_results: dict[str, dict[str, Any]] = {}
+                j = i + 1
+                while j < len(messages) and messages[j].get("role") == "tool":
+                    r = messages[j]
+                    tc_id = r.get("tool_call_id")
+                    if tc_id:
+                        tool_results[tc_id] = r
+                    j += 1
+
+                # Always keep the assistant message with tool_calls
+                cleaned.append(msg)
+
+                # Emit results: existing ones preserved, missing ones get a placeholder
+                for tc_id in tool_call_ids:
+                    if tc_id in tool_results:
+                        cleaned.append(tool_results[tc_id])
+                    else:
+                        cleaned.append({
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": "[工具调用结果缺失 — 会话恢复时未能找到对应结果]",
+                        })
+
+                i = j
+            elif role == "tool":
+                # Orphan tool result without preceding assistant tool_calls — skip
+                i += 1
+            else:
+                cleaned.append(msg)
+                i += 1
+
+        return cleaned
 
     async def list_sessions(self, page: int = 1, page_size: int = 20) -> tuple[list[Session], int]:
         """列出历史会话."""
@@ -470,9 +530,9 @@ class AgentEngine:
         return await self.session_store.delete(session_id)
 
     async def _save_session(self) -> None:
-        """将当前上下文写入持久化存储."""
+        """将完整历史写入持久化存储（不丢失压缩前的消息）."""
         session = await self.get_or_create_session()
-        session.messages = list(self._messages)
+        session.messages = list(self._full_history) if self._full_history else list(self._messages)
         session.total_tokens = self._usage.total_input_tokens + self._usage.total_output_tokens
         session.total_cost_usd = self._usage.total_cost_usd
 
@@ -518,6 +578,11 @@ class AgentEngine:
         logger.info("Injected %d relevant memories into context", len(results))
 
     # --- 上下文压缩 ---
+
+    def _append_message(self, msg: dict[str, Any]) -> None:
+        """Append to both _messages and _full_history."""
+        self._messages.append(msg)
+        self._full_history.append(msg)
 
     async def _maybe_compact(self, on_event: EventCallback | None = None) -> None:
         """检查并执行上下文压缩."""
@@ -565,7 +630,7 @@ class AgentEngine:
         if not any(m.get("role") == "system" for m in self._messages):
             self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
-        self._messages.append({"role": "user", "content": task})
+        self._append_message({"role": "user", "content": task})
         await self._inject_relevant_memories(task)
         tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
 
@@ -605,7 +670,7 @@ class AgentEngine:
         if not any(m.get("role") == "system" for m in self._messages):
             self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
-        self._messages.append({"role": "user", "content": task})
+        self._append_message({"role": "user", "content": task})
         await self._inject_relevant_memories(task)
         tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
 
@@ -675,7 +740,7 @@ class AgentEngine:
         )
 
         response = "\n\n".join(combined_parts)
-        self._messages.append({"role": "assistant", "content": response})
+        self._append_message({"role": "assistant", "content": response})
         return AgentResult(
             status="completed",
             response=response,
@@ -735,7 +800,7 @@ class AgentEngine:
                 }
                 if response.reasoning_content:
                     assistant_msg["reasoning_content"] = response.reasoning_content
-                self._messages.append(assistant_msg)
+                self._append_message(assistant_msg)
 
                 for tc_raw in response.tool_calls:
                     tc = self._parse_tool_call(tc_raw)
@@ -748,7 +813,7 @@ class AgentEngine:
                         session_id=session_id,
                     ))
                     if hook_ctx.should_abort:
-                        self._messages.append(
+                        self._append_message(
                             {
                                 "role": "tool",
                                 "tool_call_id": tc.id,
@@ -774,7 +839,7 @@ class AgentEngine:
                     self._behavior_monitor.record_tool_call(
                         tc.name, is_error=(result.status == "error")
                     )
-                    self._messages.append(
+                    self._append_message(
                         {
                             "role": "tool",
                             "tool_call_id": tc.id,
@@ -790,7 +855,7 @@ class AgentEngine:
 
             # --- 无工具调用：最终回答 ---
             safe_content = self._output_guardrail.redact(response.content)
-            self._messages.append({"role": "assistant", "content": response.content})
+            self._append_message({"role": "assistant", "content": response.content})
             return AgentResult(
                 status="completed",
                 response=safe_content,
@@ -911,7 +976,7 @@ class AgentEngine:
                 }
                 if thinking_content:
                     assistant_msg["reasoning_content"] = thinking_content
-                self._messages.append(assistant_msg)
+                self._append_message(assistant_msg)
 
                 for tc_raw in collected_tool_calls.values():
                     tc = self._parse_tool_call(tc_raw)
@@ -933,7 +998,7 @@ class AgentEngine:
                             "duration_ms": 0,
                             "content": f"Aborted by hook: {abort_reason}",
                         })
-                        self._messages.append(
+                        self._append_message(
                             {
                                 "role": "tool",
                                 "tool_call_id": tc.id,
@@ -965,7 +1030,7 @@ class AgentEngine:
                     self._behavior_monitor.record_tool_call(
                         tc.name, is_error=(result.status == "error")
                     )
-                    self._messages.append(
+                    self._append_message(
                         {
                             "role": "tool",
                             "tool_call_id": tc.id,
@@ -981,7 +1046,7 @@ class AgentEngine:
             # --- 最终回答 ---
             if got_response:
                 await on_event("response_end", {})
-            self._messages.append({"role": "assistant", "content": text_content})
+            self._append_message({"role": "assistant", "content": text_content})
             safe_content = self._output_guardrail.redact(text_content)
             return AgentResult(
                 status="completed",
