@@ -401,11 +401,9 @@ async def _handle_command(engine: Any, cmd: str) -> None:
         case "/memory":
             await _handle_memory(engine, arg)
         case "/load":
-            if not arg:
-                console.print("[yellow]用法: /load <session_id>[/yellow]")
-                console.print("[dim]使用 /history 查看会话列表[/dim]")
-            else:
-                await _load_session(engine, arg)
+            await _interactive_load(engine, arg)
+        case "/resume" | "/r":
+            await _resume_latest(engine)
         case "/delete":
             if not arg:
                 console.print("[yellow]用法: /delete <session_id>[/yellow]")
@@ -714,7 +712,8 @@ def _print_help() -> None:
         ("/skills", "列出已加载的 Skill"),
         ("/history", "查看历史会话列表"),
         ("/memory [子命令]", "记忆管理 (stats/search/clean/export)"),
-        ("/load <id>", "加载指定会话并继续对话"),
+        ("/load <编号或id>", "加载会话 (无参数显示列表)"),
+        ("/resume", "继续最近的对话 (/r)"),
         ("/delete <id>", "删除指定会话"),
         ("/chaos [目标]", "灾难演练 — SPOF 分析"),
         ("/scale [QPS]", "并发海啸 — 高并发分析"),
@@ -1601,6 +1600,59 @@ async def _load_session(engine: Any, session_id: str) -> None:
     else:
         console.print(f"[red]会话 {session_id} 不存在[/red]")
         console.print("[dim]使用 /history 查看可用会话[/dim]")
+
+
+async def _resume_latest(engine: Any) -> None:
+    """加载最近一个历史会话并继续对话."""
+    sessions, total = await engine.list_sessions(page=1, page_size=1)
+    if not sessions:
+        console.print("[dim]暂无历史会话[/dim]")
+        return
+    await _load_session(engine, sessions[0].id)
+
+
+async def _interactive_load(engine: Any, arg: str) -> None:
+    """加载会话：支持 ID、编号选择，无参数时显示编号列表."""
+    if arg:
+        # Try as number from recent list first, then as session ID
+        if arg.isdigit():
+            sessions, _ = await engine.list_sessions(page=1, page_size=10)
+            idx = int(arg) - 1
+            if 0 <= idx < len(sessions):
+                await _load_session(engine, sessions[idx].id)
+                return
+        await _load_session(engine, arg)
+        return
+
+    # No arg: show numbered picker
+    sessions, total = await engine.list_sessions(page=1, page_size=10)
+    if not sessions:
+        console.print("[dim]暂无历史会话[/dim]")
+        return
+
+    from rich.table import Table
+
+    table = Table(title="选择会话", show_lines=False)
+    table.add_column("#", style="bold yellow", width=3)
+    table.add_column("ID", style="cyan", width=12)
+    table.add_column("标题", max_width=36)
+    table.add_column("消息数", justify="right", width=6)
+    table.add_column("更新时间", width=16)
+
+    for i, s in enumerate(sessions, 1):
+        title = s.title or "新会话"
+        if len(title) > 34:
+            title = title[:32] + "…"
+        table.add_row(
+            str(i),
+            s.id,
+            title,
+            str(len(s.messages)),
+            s.updated_at.strftime("%m-%d %H:%M"),
+        )
+
+    console.print(table)
+    console.print("[dim]输入 /load <编号或ID> 加载，或 /r 继续最近对话[/dim]")
 
 
 async def _delete_session(engine: Any, session_id: str) -> None:

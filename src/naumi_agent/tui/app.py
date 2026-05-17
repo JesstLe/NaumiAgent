@@ -738,6 +738,7 @@ class NaumiApp(App):
                     "- `/usage` — 显示 token 用量\n"
                     "- `/history` — 查看历史会话列表\n"
                     "- `/load <id>` — 加载指定会话\n"
+                    "- `/resume` — 继续最近的对话 (/r)\n"
                     "- `/chaos [目标]` — 灾难演练 (SPOF)\n"
                     "- `/scale [QPS]` — 并发海啸测试\n"
                     "- `/state` — 云原生状态审查\n"
@@ -804,10 +805,11 @@ class NaumiApp(App):
                 self.action_toggle_history()
             case "/load":
                 if not arg:
-                    status.status_text = "用法: /load <session_id>"
                     self.action_toggle_history()
                 else:
                     self._load_and_show_session(arg)
+            case "/resume" | "/r":
+                self._resume_latest()
             case "/chaos":
                 self._run_analysis_mode("chaos", arg or "当前项目")
             case "/scale":
@@ -1284,6 +1286,20 @@ class NaumiApp(App):
         history = self.query_one(HistoryPanel)
         if history.show_panel:
             history.refresh_sessions()
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _resume_latest(self) -> None:
+        """加载最近一个历史会话."""
+        status = self.query_one(StatusBar)
+        try:
+            sessions, _ = await self.engine.list_sessions(page=1, page_size=1)
+        except Exception:
+            status.status_text = "加载失败"
+            return
+        if not sessions:
+            status.status_text = "暂无历史会话"
+            return
+        await self._load_and_show_session(sessions[0].id)
 
     def action_clear_chat(self) -> None:
         chat = self.query_one(ChatPanel)
