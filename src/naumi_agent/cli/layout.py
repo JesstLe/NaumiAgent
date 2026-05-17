@@ -27,32 +27,30 @@ class _OutputWindow(Window):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.auto_scroll = True
-        self._user_scroll_pos = 0
-        # Use callback for reliable scroll-to-bottom on every render
-        self.get_vertical_scroll = self._scroll_callback
-
-    def _scroll_callback(self, window: Any) -> int:
-        if self.auto_scroll:
-            return 99999  # Clamped to max_scroll_y by prompt_toolkit
-        return self._user_scroll_pos
 
     def _scroll_up(self) -> None:
         if self.auto_scroll:
             # Capture current bottom position before switching to manual
-            self._user_scroll_pos = max(0, self.max_scroll_y)
+            self.vertical_scroll = max(0, self.max_scroll_y)
             self.auto_scroll = False
         else:
-            self._user_scroll_pos = max(0, self._user_scroll_pos - 1)
+            self.vertical_scroll = max(0, self.vertical_scroll - 1)
 
     def _scroll_down(self) -> None:
         if self.auto_scroll:
             return
-        self._user_scroll_pos += 1
-        if self._user_scroll_pos >= self.max_scroll_y:
+        self.vertical_scroll += 1
+        if self.vertical_scroll >= self.max_scroll_y:
             self.auto_scroll = True
 
     def scroll_to_bottom(self) -> None:
         self.auto_scroll = True
+        self.vertical_scroll = 99999
+
+    def ensure_at_bottom(self) -> None:
+        """滚动到底部（仅在 auto_scroll 开启时）."""
+        if self.auto_scroll:
+            self.vertical_scroll = 99999
 
 _STYLE = Style.from_dict(
     {
@@ -164,10 +162,14 @@ class CLIApp:
 
     def append_output(self, ansi_text: str) -> None:
         self._output.append(ansi_text)
+        if self._output_win:
+            self._output_win.ensure_at_bottom()
         self._invalidate()
 
     def append_live(self, text: str) -> None:
         self._live.append(text)
+        if self._output_win:
+            self._output_win.ensure_at_bottom()
         self._invalidate()
 
     def finalize_live(self) -> None:
