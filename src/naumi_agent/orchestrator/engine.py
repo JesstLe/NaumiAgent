@@ -215,6 +215,8 @@ class AgentEngine:
 
         self._mcp_manager: MCPClientManager | None = None
 
+        self._task_runner: Any | None = None
+
         self.skill_loader = SkillLoader()
 
         self._register_builtin_tools()
@@ -369,6 +371,31 @@ class AgentEngine:
     def usage(self) -> AgentUsage:
         return self._usage
 
+    @property
+    def task_runner(self) -> Any:
+        if self._task_runner is None:
+            from naumi_agent.tools.browser.orchestrator.task_runner import (
+                TaskRunner,
+            )
+
+            browser_dir = str(
+                Path(self._config.memory.session_db_path).parent / "browser"
+            )
+            self._task_runner = TaskRunner(
+                base_dir=browser_dir,
+                options={
+                    "runtime": self._browser_session,
+                    "model_router": self._router,
+                },
+            )
+        return self._task_runner
+
+    @property
+    def security_auditor(self) -> Any:
+        from naumi_agent.tools.browser.security import SecurityAuditor
+
+        return SecurityAuditor(self._browser_session)
+
     def reset(self) -> None:
         self._messages.clear()
         self._full_history.clear()
@@ -382,6 +409,12 @@ class AgentEngine:
         if hasattr(self, "subagent_manager"):
             await self.subagent_manager.stop_reaper()
             self.subagent_manager.destroy_all_dynamic()
+        if self._task_runner is not None:
+            for run in self._task_runner.runs:
+                if run.get("status") in ("running", "queued"):
+                    self._task_runner.abort_run(
+                        run["id"], reason="Engine shutdown"
+                    )
         await self._browser_session.stop()
         if self._mcp_manager:
             await self._mcp_manager.disconnect_all()

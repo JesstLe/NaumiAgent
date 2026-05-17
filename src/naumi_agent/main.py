@@ -674,6 +674,40 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             _show_forge_list()
         case "/forge-remove":
             _run_forge_remove(arg)
+        case "/browse":
+            await _run_browse(engine, arg)
+        case "/autobrowse":
+            await _run_autobrowse(engine, arg)
+        case "/browser-stop":
+            await _run_browser_stop(engine)
+        case "/browser-state":
+            await _run_browser_state(engine)
+        case "/browser-screenshot":
+            await _run_browser_screenshot(engine)
+        case "/tasks":
+            await _run_tasks_list(engine)
+        case "/task":
+            await _run_task_detail(engine, arg)
+        case "/task-reply":
+            await _run_task_reply(engine, arg)
+        case "/task-abort":
+            await _run_task_abort(engine, arg)
+        case "/task-resume":
+            await _run_task_resume(engine, arg)
+        case "/scan":
+            await _run_security_scan(engine, arg, profile="quick")
+        case "/scan-full":
+            await _run_security_scan(engine, arg, profile="full")
+        case "/scan-report":
+            await _run_scan_report(engine, arg)
+        case "/scan-baseline":
+            await _run_scan_baseline(engine, arg)
+        case "/btemplate-list":
+            _run_btemplate_list(engine)
+        case "/btemplate-run":
+            await _run_btemplate_run(engine, arg)
+        case "/btemplate-compare":
+            await _run_btemplate_compare(engine, arg)
         case _:
             # 尝试匹配已加载的 Skill
             skill_name = command.lstrip("/")
@@ -757,6 +791,23 @@ def _print_help() -> None:
         ("/forge <描述>", "工具锻造 — 自主生成新工具并注册"),
         ("/forge-list", "列出所有已锻造的工具"),
         ("/forge-remove <名称>", "移除已锻造的工具"),
+        ("/browse <url>", "打开 URL 并显示 SoM 元素"),
+        ("/autobrowse <任务>", "自主浏览器任务"),
+        ("/browser-stop", "停止浏览器会话"),
+        ("/browser-state", "显示浏览器调试状态"),
+        ("/browser-screenshot", "截取当前页面截图"),
+        ("/tasks", "列出浏览器任务运行"),
+        ("/task <id>", "查看任务运行详情"),
+        ("/task-reply <id> <指令>", "回复等待中的任务"),
+        ("/task-abort <id>", "中止运行中的任务"),
+        ("/task-resume <id>", "从手动控制中恢复"),
+        ("/scan <url>", "快速安全扫描"),
+        ("/scan-full <url>", "完整 25 模块安全扫描"),
+        ("/scan-report [format]", "导出最新扫描报告"),
+        ("/scan-baseline <url>", "保存扫描为基线"),
+        ("/btemplate-list", "列出浏览器任务模板"),
+        ("/btemplate-run <id>", "从模板创建运行"),
+        ("/btemplate-compare <id>", "比较模板运行结果"),
         ("/new", "保存当前会话并开始新对话"),
         ("/clear", "清除当前会话（不保存）"),
         ("/quit", "退出"),
@@ -1870,6 +1921,422 @@ async def _memory_export(engine: Any) -> None:
     export_path.write_text(data, encoding="utf-8")
     count = data.count('"id"')
     console.print(f"[green]已导出 {count} 条记忆到 {export_path}[/green]")
+
+
+async def _run_browse(engine: Any, arg: str) -> None:
+    """打开 URL 并显示 SoM 交互元素."""
+    if not arg:
+        console.print("[yellow]用法: /browse <url>[/yellow]")
+        return
+
+    console.print(f"[bold cyan]🌐 导航到 {arg}...[/bold cyan]")
+    try:
+        result = await engine._browser_session.goto(arg.strip())
+        elements = result.get("elements", [])
+        console.print(f"[green]✅ 页面已加载，发现 {len(elements)} 个交互元素[/green]")
+        if elements:
+            from rich.table import Table
+
+            table = Table(title="交互元素 (SoM)", show_lines=False)
+            table.add_column("ID", style="bold yellow", width=4)
+            table.add_column("标签", max_width=30)
+            table.add_column("类型", style="cyan", width=12)
+            table.add_column("操作", style="dim", max_width=40)
+            for el in elements[:20]:
+                tag = el.get("tag", "?")
+                label = el.get("label", el.get("text", ""))[:30]
+                action = el.get("action", "")
+                if isinstance(action, dict):
+                    action = action.get("type", "")
+                table.add_row(str(el.get("id", "")), label, tag, str(action)[:40])
+            console.print(table)
+            if len(elements) > 20:
+                console.print(f"[dim]... 还有 {len(elements) - 20} 个元素[/dim]")
+    except Exception as exc:
+        console.print(f"[red]导航失败: {exc}[/red]")
+
+
+async def _run_autobrowse(engine: Any, arg: str) -> None:
+    """启动自主浏览器任务."""
+    if not arg:
+        console.print("[yellow]用法: /autobrowse <任务描述>[/yellow]")
+        return
+
+    console.print(f"[bold cyan]🤖 启动自主浏览器任务: {arg}[/bold cyan]")
+    try:
+        runner = engine.task_runner
+        run = runner.create_run(instruction=arg.strip())
+        run_id = run["id"]
+        console.print(f"[green]任务已创建: {run_id}[/green]")
+
+        with console.status("[bold green]执行中...[/bold green]"):
+            await runner.process_queue()
+
+        updated = runner.get_run(run_id)
+        if updated:
+            status = updated.get("status", "unknown")
+            summary = updated.get("summary", "")
+            if status == "completed":
+                console.print("[green]✅ 任务完成[/green]")
+                if summary:
+                    console.print(
+                        Panel(
+                            summary,
+                            title="[bold green]结果[/bold green]",
+                            border_style="green",
+                        )
+                    )
+            elif status == "waiting_for_instruction":
+                console.print("[yellow]⏸ 任务等待指令[/yellow]")
+                console.print(f"[dim]使用 /task-reply {run_id} <指令> 回复[/dim]")
+            elif status == "failed":
+                error = updated.get("error", {})
+                msg = error.get("message", summary) if isinstance(error, dict) else str(error)
+                console.print(f"[red]❌ 任务失败: {msg}[/red]")
+            else:
+                console.print(f"[dim]状态: {status}[/dim]")
+                if summary:
+                    console.print(summary[:500])
+    except Exception as exc:
+        console.print(f"[red]任务执行失败: {exc}[/red]")
+
+
+async def _run_browser_stop(engine: Any) -> None:
+    """停止浏览器会话."""
+    console.print("[bold yellow]🛑 停止浏览器...[/bold yellow]")
+    try:
+        await engine._browser_session.stop()
+        console.print("[green]✅ 浏览器已停止[/green]")
+    except Exception as exc:
+        console.print(f"[red]停止失败: {exc}[/red]")
+
+
+async def _run_browser_state(engine: Any) -> None:
+    """显示浏览器调试状态."""
+    import json
+
+    try:
+        state = engine._browser_session.get_debug_state(20)
+        console.print(json.dumps(state, indent=2, default=str))
+    except Exception as exc:
+        console.print(f"[red]获取状态失败: {exc}[/red]")
+
+
+async def _run_browser_screenshot(engine: Any) -> None:
+    """截取当前页面截图."""
+    try:
+        b64 = await engine._browser_session.screenshot_base64()
+        out = Path("screenshot.png")
+        import base64
+
+        out.write_bytes(base64.b64decode(b64))
+        console.print(f"[green]✅ 截图已保存到 {out}[/green]")
+    except Exception as exc:
+        console.print(f"[red]截图失败: {exc}[/red]")
+
+
+async def _run_tasks_list(engine: Any) -> None:
+    """列出浏览器任务运行."""
+    from rich.table import Table
+
+    runner = engine.task_runner
+    runs = runner.list_runs(limit=20)
+    if not runs:
+        console.print("[dim]暂无浏览器任务运行[/dim]")
+        return
+
+    table = Table(title="浏览器任务", show_lines=False)
+    table.add_column("ID", style="cyan", width=8)
+    table.add_column("指令", max_width=30)
+    table.add_column("状态", width=15)
+    table.add_column("步骤", justify="right", width=4)
+    table.add_column("创建时间", width=16)
+
+    for r in runs:
+        instruction = (r.get("instruction") or "")[:30]
+        status = r.get("status", "?")
+        steps = str(r.get("stepCount", r.get("steps", 0)))
+        created = (r.get("createdAt") or "")[:16]
+        style = "green" if status == "completed" else "red" if status == "failed" else "yellow"
+        table.add_row(
+            (r.get("id") or "")[:8],
+            instruction,
+            f"[{style}]{status}[/{style}]",
+            steps,
+            created,
+        )
+
+    console.print(table)
+
+
+async def _run_task_detail(engine: Any, arg: str) -> None:
+    """查看任务运行详情."""
+    if not arg:
+        console.print("[yellow]用法: /task <id>[/yellow]")
+        return
+    runner = engine.task_runner
+    run = runner.get_run(arg.strip())
+    if not run:
+        console.print(f"[red]任务 {arg} 不存在[/red]")
+        return
+
+    import json
+
+    console.print(json.dumps(run, indent=2, default=str, ensure_ascii=False)[:2000])
+
+
+async def _run_task_reply(engine: Any, arg: str) -> None:
+    """回复等待中的任务."""
+    parts = arg.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        console.print("[yellow]用法: /task-reply <id> <指令>[/yellow]")
+        return
+    run_id, instruction = parts
+    runner = engine.task_runner
+    try:
+        await runner.reply_to_run(run_id, instruction)
+        console.print(f"[green]✅ 已回复任务 {run_id}[/green]")
+        with console.status("[bold green]继续执行中...[/bold green]"):
+            await runner.process_queue()
+        updated = runner.get_run(run_id)
+        if updated:
+            console.print(f"[dim]状态: {updated.get('status')}[/dim]")
+    except Exception as exc:
+        console.print(f"[red]回复失败: {exc}[/red]")
+
+
+async def _run_task_abort(engine: Any, arg: str) -> None:
+    """中止运行中的任务."""
+    if not arg:
+        console.print("[yellow]用法: /task-abort <id>[/yellow]")
+        return
+    runner = engine.task_runner
+    run = runner.get_run(arg.strip())
+    if not run:
+        console.print(f"[red]任务 {arg} 不存在[/red]")
+        return
+    runner.abort_run(arg.strip(), reason="User requested")
+    console.print(f"[green]✅ 已中止任务 {arg}[/green]")
+
+
+async def _run_task_resume(engine: Any, arg: str) -> None:
+    """从手动控制中恢复任务."""
+    if not arg:
+        console.print("[yellow]用法: /task-resume <id>[/yellow]")
+        return
+    runner = engine.task_runner
+    try:
+        await runner.resume_run(arg.strip())
+        console.print(f"[green]✅ 已恢复任务 {arg}[/green]")
+        with console.status("[bold green]继续执行中...[/bold green]"):
+            await runner.process_queue()
+    except Exception as exc:
+        console.print(f"[red]恢复失败: {exc}[/red]")
+
+
+async def _run_security_scan(engine: Any, arg: str, profile: str = "quick") -> None:
+    """执行安全扫描."""
+    if not arg:
+        console.print(f"[yellow]用法: /scan{'-full' if profile == 'full' else ''} <url>[/yellow]")
+        return
+
+    url = arg.strip()
+    label = "完整" if profile == "full" else "快速"
+    console.print(f"[bold red]🔒 {label}安全扫描: {url}[/bold red]")
+
+    try:
+        if not engine._browser_session.page:
+            await engine._browser_session.start({"source": "auto"})
+        await engine._browser_session.goto(url)
+    except Exception as exc:
+        console.print(f"[red]无法导航到 {url}: {exc}[/red]")
+        return
+
+    auditor = engine.security_auditor
+    console.print(f"[dim]扫描中 (profile={profile})...[/dim]")
+
+    with console.status("[bold red]安全扫描中...[/bold red]"):
+        try:
+            result = await auditor.full_audit(profile=profile)
+        except Exception as exc:
+            console.print(f"[red]扫描失败: {exc}[/red]")
+            return
+
+    summary = result.get("summary", {})
+    total = summary.get("totalFindings", 0)
+    critical = summary.get("criticalCount", 0)
+    high = summary.get("highCount", 0)
+    medium = summary.get("mediumCount", 0)
+    low = summary.get("lowCount", 0)
+
+    console.print(
+        Panel(
+            f"[bold]扫描完成[/bold]\n\n"
+            f"总发现: {total}\n"
+            f"[red]严重: {critical}[/red] | "
+            f"[yellow]高危: {high}[/yellow] | "
+            f"[cyan]中危: {medium}[/cyan] | "
+            f"[dim]低危: {low}[/dim]",
+            title=f"[bold red]🔒 {label}安全扫描[/bold red]",
+            border_style="red",
+        )
+    )
+
+    findings = auditor.get_results(min_severity="high")
+    if findings:
+        console.print("[bold]高/严重发现:[/bold]")
+        for f in findings[:15]:
+            severity = f.get("severity", "?")
+            title = f.get("title", "?")
+            cat = f.get("category", "?")
+            style = "red" if severity == "critical" else "yellow"
+            console.print(f"  [{style}][{severity}][/{style}] [{cat}] {title}")
+        if len(findings) > 15:
+            console.print(f"[dim]... 还有 {len(findings) - 15} 个发现[/dim]")
+
+
+async def _run_scan_report(engine: Any, arg: str) -> None:
+    """导出最新扫描报告."""
+    fmt = arg.strip() or "json"
+    if fmt not in ("json", "sarif", "html"):
+        console.print("[yellow]格式: json, sarif, html[/yellow]")
+        return
+
+    auditor = engine.security_auditor
+    if not auditor.results:
+        console.print("[dim]暂无扫描结果，先执行 /scan <url>[/dim]")
+        return
+
+    try:
+        result = await auditor.export_report(fmt=fmt)
+    except Exception as exc:
+        console.print(f"[red]导出失败: {exc}[/red]")
+        return
+
+    if fmt == "json":
+        import json
+
+        out = Path("security_report.json")
+        out.write_text(
+            json.dumps(
+                result.get("data"), indent=2, ensure_ascii=False
+            ),
+            encoding="utf-8",
+        )
+        console.print(f"[green]✅ JSON 报告已保存到 {out}[/green]")
+    elif fmt == "sarif":
+        import json
+
+        out = Path("security_report.sarif")
+        out.write_text(json.dumps(result.get("sarif"), indent=2), encoding="utf-8")
+        console.print(f"[green]✅ SARIF 报告已保存到 {out}[/green]")
+    elif fmt == "html":
+        out = Path("security_report.html")
+        out.write_text(result.get("html", ""), encoding="utf-8")
+        console.print(f"[green]✅ HTML 报告已保存到 {out}[/green]")
+
+
+async def _run_scan_baseline(engine: Any, arg: str) -> None:
+    """保存扫描为基线."""
+    if not arg:
+        console.print("[yellow]用法: /scan-baseline <url>[/yellow]")
+        return
+
+    url = arg.strip()
+    console.print(f"[bold cyan]📊 保存基线: {url}[/bold cyan]")
+
+    try:
+        if not engine._browser_session.page:
+            await engine._browser_session.start({"source": "auto"})
+        await engine._browser_session.goto(url)
+    except Exception as exc:
+        console.print(f"[red]无法导航到 {url}: {exc}[/red]")
+        return
+
+    auditor = engine.security_auditor
+    with console.status("[bold green]扫描并保存基线...[/bold green]"):
+        await auditor.full_audit(profile="standard")
+
+    baseline_path = Path("security_baseline.json")
+    auditor.save_baseline(str(baseline_path))
+    console.print(
+        f"[green]✅ 基线已保存到 {baseline_path} "
+        f"({len(auditor.results)} 个发现)[/green]"
+    )
+
+
+def _run_btemplate_list(engine: Any) -> None:
+    """列出浏览器任务模板."""
+    from rich.table import Table
+
+    runner = engine.task_runner
+    templates = runner.list_templates()
+    if not templates:
+        console.print("[dim]暂无浏览器任务模板[/dim]")
+        return
+
+    table = Table(title="浏览器任务模板", show_lines=False)
+    table.add_column("ID", style="cyan", width=8)
+    table.add_column("名称", max_width=30)
+    table.add_column("超时", justify="right", width=8)
+    table.add_column("规则数", justify="right", width=6)
+
+    for t in templates:
+        tid = (t.get("id") or "")[:8]
+        name = (t.get("name") or "")[:30]
+        tp = t.get("timeoutPolicy", {})
+        max_steps = tp.get("maxSteps", "?")
+        rules = len(t.get("successRules", []))
+        table.add_row(tid, name, str(max_steps), str(rules))
+
+    console.print(table)
+
+
+async def _run_btemplate_run(engine: Any, arg: str) -> None:
+    """从模板创建运行."""
+    if not arg:
+        console.print("[yellow]用法: /btemplate-run <template_id>[/yellow]")
+        return
+
+    runner = engine.task_runner
+    template = runner.get_template(arg.strip())
+    if not template:
+        console.print(f"[red]模板 {arg} 不存在[/red]")
+        return
+
+    try:
+        run = runner.create_run_from_template(arg.strip())
+        run_id = run["id"]
+        console.print(f"[green]任务已创建: {run_id}[/green]")
+
+        with console.status("[bold green]执行中...[/bold green]"):
+            await runner.process_queue()
+
+        updated = runner.get_run(run_id)
+        if updated:
+            console.print(f"[dim]状态: {updated.get('status')}[/dim]")
+            summary = updated.get("summary", "")
+            if summary:
+                console.print(summary[:500])
+    except Exception as exc:
+        console.print(f"[red]执行失败: {exc}[/red]")
+
+
+async def _run_btemplate_compare(engine: Any, arg: str) -> None:
+    """比较模板运行结果."""
+    if not arg:
+        console.print("[yellow]用法: /btemplate-compare <template_id>[/yellow]")
+        return
+
+    runner = engine.task_runner
+    comparison = runner.compare_template_runs(arg.strip())
+    if not comparison:
+        console.print("[dim]没有可比较的运行结果[/dim]")
+        return
+
+    import json
+
+    console.print(json.dumps(comparison, indent=2, default=str, ensure_ascii=False)[:2000])
 
 
 def _check_api_key(config: AppConfig) -> None:
