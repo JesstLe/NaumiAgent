@@ -784,9 +784,19 @@ class AgentEngine:
             usage=self._usage,
         )
 
+    def _is_repeated_tool_call(
+        self, tool_name: str, args: str, history: list[str]
+    ) -> bool:
+        """Detect if the same tool+args has been called 3+ consecutive times."""
+        sig = f"{tool_name}:{args}"
+        if len(history) < 2:
+            return False
+        return history[-1] == sig and history[-2] == sig
+
     async def _react_loop(self, tools: list[dict[str, Any]] | None) -> AgentResult:
         """ReAct 循环：推理 → 行动 → 观察."""
         max_turns = self._config.safety.max_turns
+        tool_call_history: list[str] = []
 
         for turn in range(max_turns):
             self._usage.turns = turn + 1
@@ -839,10 +849,33 @@ class AgentEngine:
                     assistant_msg["reasoning_content"] = response.reasoning_content
                 self._append_message(assistant_msg)
 
+                cur_calls: list[str] = []
                 for tc_raw in response.tool_calls:
                     tc = self._parse_tool_call(tc_raw)
                     if tc is None:
                         continue
+
+                    call_sig = f"{tc.name}:{tc.arguments}"
+                    cur_calls.append(call_sig)
+
+                    if self._is_repeated_tool_call(
+                        tc.name, tc.arguments, tool_call_history
+                    ):
+                        logger.warning(
+                            "Repeated tool call detected: %s, injecting stop",
+                            tc.name,
+                        )
+                        self._append_message(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": (
+                                    "This action has already been completed successfully. "
+                                    "Do NOT repeat it. Provide your final response to the user now."
+                                ),
+                            }
+                        )
+                        break
 
                     hook_ctx = await self.hooks.fire(HookContext(
                         point=HookPoint.TOOL_EXECUTE_START,
@@ -884,6 +917,8 @@ class AgentEngine:
                         }
                     )
 
+                tool_call_history.extend(cur_calls)
+
                 exceeded = self._check_budget()
                 if exceeded:
                     return exceeded
@@ -891,6 +926,7 @@ class AgentEngine:
                 continue
 
             # --- 无工具调用：最终回答 ---
+            tool_call_history.clear()
             safe_content = self._output_guardrail.redact(response.content)
             self._append_message({"role": "assistant", "content": response.content})
             return AgentResult(
@@ -914,6 +950,7 @@ class AgentEngine:
         max_turns = self._config.safety.max_turns
         model_str = self._router.resolve_model(ModelTier.CAPABLE)
         session_id = self._session.id if self._session else ""
+        tool_call_history: list[str] = []
 
         for turn in range(max_turns):
             self._usage.turns = turn + 1
@@ -1015,10 +1052,33 @@ class AgentEngine:
                     assistant_msg["reasoning_content"] = thinking_content
                 self._append_message(assistant_msg)
 
+                cur_calls: list[str] = []
                 for tc_raw in collected_tool_calls.values():
                     tc = self._parse_tool_call(tc_raw)
                     if tc is None:
                         continue
+
+                    call_sig = f"{tc.name}:{tc.arguments}"
+                    cur_calls.append(call_sig)
+
+                    if self._is_repeated_tool_call(
+                        tc.name, tc.arguments, tool_call_history
+                    ):
+                        logger.warning(
+                            "Repeated tool call detected: %s, injecting stop",
+                            tc.name,
+                        )
+                        self._append_message(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": (
+                                    "This action has already been completed successfully. "
+                                    "Do NOT repeat it. Provide your final response to the user now."
+                                ),
+                            }
+                        )
+                        break
 
                     await on_event("tool_start", {"name": tc.name, "args": tc.arguments})
 
@@ -1075,12 +1135,15 @@ class AgentEngine:
                         }
                     )
 
+                tool_call_history.extend(cur_calls)
+
                 exceeded = self._check_budget()
                 if exceeded:
                     return exceeded
                 continue
 
             # --- 最终回答 ---
+            tool_call_history.clear()
             if got_response:
                 await on_event("response_end", {})
             self._append_message({"role": "assistant", "content": text_content})
