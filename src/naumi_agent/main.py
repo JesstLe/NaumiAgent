@@ -136,7 +136,9 @@ async def _chat(config_path: str) -> None:
 
     while True:
         try:
-            user_input = console.input("[bold blue]你>[/bold blue] ").strip()
+            from naumi_agent.cli_completer import prompt_with_completion
+
+            user_input = prompt_with_completion()
         except (EOFError, KeyboardInterrupt):
             await engine.shutdown()
             console.print("\n[green]再见！[/green]")
