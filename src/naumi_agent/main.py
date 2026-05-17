@@ -544,6 +544,12 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _run_evolve(engine, arg)
         case "/evolve-history":
             _show_evolve_history()
+        case "/forge":
+            await _run_forge(engine, arg)
+        case "/forge-list":
+            _show_forge_list()
+        case "/forge-remove":
+            _run_forge_remove(arg)
         case "/help":
             _print_help()
         case _:
@@ -621,6 +627,9 @@ def _print_help() -> None:
         ("/reload [域]", "热重载 — 重载模块无需重启 (tools/memory/skills/all)"),
         ("/evolve <描述>", "自我进化 — 反思循环修改自身工具代码并验证"),
         ("/evolve-history", "查看自我进化历史记录"),
+        ("/forge <描述>", "工具锻造 — 自主生成新工具并注册"),
+        ("/forge-list", "列出所有已锻造的工具"),
+        ("/forge-remove <名称>", "移除已锻造的工具"),
         ("/new", "保存当前会话并开始新对话"),
         ("/clear", "清除当前会话（不保存）"),
         ("/quit", "退出"),
@@ -1139,6 +1148,127 @@ def _show_evolve_history() -> None:
 
 
 
+
+
+async def _run_forge(engine: Any, arg: str) -> None:
+    """执行工具锻造 — 根据描述生成新工具."""
+    import re
+
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+
+    description = arg.strip()
+    if not description:
+        console.print("[yellow]用法: /forge <工具功能描述>[/yellow]")
+        console.print("[dim]例: /forge 统计代码注释率的工具[/dim]")
+        return
+
+    forge_tool_instance = engine.tool_registry.get("forge_tool")
+    if not forge_tool_instance:
+        console.print("[red]锻造工具未注册[/red]")
+        return
+
+    console.print(f"[bold cyan]🔨 工具锻造: {description}[/bold cyan]")
+
+    # Phase 1: Generate tool code via LLM
+    console.print("[dim]Phase 1: LLM 生成工具代码...[/dim]")
+
+    from naumi_agent.tools.forge import _TOOL_GENERATION_SYSTEM
+
+    try:
+        response = await engine._router.call(
+            messages=[
+                {"role": "system", "content": _TOOL_GENERATION_SYSTEM},
+                {"role": "user", "content": f"请生成一个工具: {description}"},
+            ],
+            tier="capable",
+        )
+        llm_output = response.content.strip()
+    except Exception as e:
+        console.print(f"[red]LLM 调用失败: {e}[/red]")
+        return
+
+    # Phase 2: Validate and save
+    console.print("[dim]Phase 2: 验证并保存工具...[/dim]")
+
+    with console.status("[bold green]锻造中...[/bold green]"):
+        result_str = await forge_tool_instance.execute(
+            description=description,
+            llm_output=llm_output,
+        )
+
+    console.print()
+    console.print(
+        Panel(
+            Markdown(result_str),
+            title="[bold cyan]🔨 锻造结果[/bold cyan]",
+            border_style="cyan",
+            padding=(1, 2),
+        ),
+    )
+
+    # Phase 3: Register if forged
+    if "锻造成功" in result_str:
+        from naumi_agent.tools.forge import load_generated_tool
+
+        # Extract tool name from result
+        name_match = re.search(r"\*\*名称\*\*:\s*`(\w+)`", result_str)
+        if name_match:
+            tool_name = name_match.group(1)
+            new_tool = load_generated_tool(tool_name)
+            if new_tool:
+                engine.tool_registry.register(new_tool)
+                console.print(
+                    f"[green]✅ 工具 `{tool_name}` 已注册到工具表，立即可用[/green]"
+                )
+            else:
+                console.print(
+                    "[yellow]⚠️ 工具已保存但加载失败，请重启 Agent[/yellow]"
+                )
+
+    console.print()
+
+
+def _show_forge_list() -> None:
+    """列出所有已锻造的工具."""
+    from rich.table import Table
+
+    from naumi_agent.tools.forge import list_generated_tools
+
+    tools = list_generated_tools()
+    if not tools:
+        console.print("[dim]暂无锻造的工具[/dim]")
+        return
+
+    table = Table(
+        title="🔨 已锻造工具",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("名称", style="cyan")
+    table.add_column("描述")
+    table.add_column("路径", style="dim")
+
+    for t in tools:
+        table.add_row(t["name"], t["description"], t["path"])
+
+    console.print(table)
+
+
+def _run_forge_remove(arg: str) -> None:
+    """移除已锻造的工具."""
+    from naumi_agent.tools.forge import remove_generated_tool
+
+    tool_name = arg.strip()
+    if not tool_name:
+        console.print("[yellow]用法: /forge-remove <工具名称>[/yellow]")
+        return
+
+    if remove_generated_tool(tool_name):
+        console.print(f"[green]✅ 已移除工具: {tool_name}[/green]")
+    else:
+        console.print(f"[red]未找到工具: {tool_name}[/red]")
+
 async def _show_history(engine: Any) -> None:
     """显示历史会话列表."""
 
@@ -1162,6 +1292,127 @@ def _show_hooks(engine: Any) -> None:
         for cb in callbacks:
             console.print(f"    • {cb}")
     console.print()
+
+
+async def _run_forge(engine: Any, arg: str) -> None:
+    """执行工具锻造 — 根据描述生成新工具."""
+    import re
+
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+
+    description = arg.strip()
+    if not description:
+        console.print("[yellow]用法: /forge <工具功能描述>[/yellow]")
+        console.print("[dim]例: /forge 统计代码注释率的工具[/dim]")
+        return
+
+    forge_tool_instance = engine.tool_registry.get("forge_tool")
+    if not forge_tool_instance:
+        console.print("[red]锻造工具未注册[/red]")
+        return
+
+    console.print(f"[bold cyan]🔨 工具锻造: {description}[/bold cyan]")
+
+    # Phase 1: Generate tool code via LLM
+    console.print("[dim]Phase 1: LLM 生成工具代码...[/dim]")
+
+    from naumi_agent.tools.forge import _TOOL_GENERATION_SYSTEM
+
+    try:
+        response = await engine._router.call(
+            messages=[
+                {"role": "system", "content": _TOOL_GENERATION_SYSTEM},
+                {"role": "user", "content": f"请生成一个工具: {description}"},
+            ],
+            tier="capable",
+        )
+        llm_output = response.content.strip()
+    except Exception as e:
+        console.print(f"[red]LLM 调用失败: {e}[/red]")
+        return
+
+    # Phase 2: Validate and save
+    console.print("[dim]Phase 2: 验证并保存工具...[/dim]")
+
+    with console.status("[bold green]锻造中...[/bold green]"):
+        result_str = await forge_tool_instance.execute(
+            description=description,
+            llm_output=llm_output,
+        )
+
+    console.print()
+    console.print(
+        Panel(
+            Markdown(result_str),
+            title="[bold cyan]🔨 锻造结果[/bold cyan]",
+            border_style="cyan",
+            padding=(1, 2),
+        ),
+    )
+
+    # Phase 3: Register if forged
+    if "锻造成功" in result_str:
+        from naumi_agent.tools.forge import load_generated_tool
+
+        # Extract tool name from result
+        name_match = re.search(r"\*\*名称\*\*:\s*`(\w+)`", result_str)
+        if name_match:
+            tool_name = name_match.group(1)
+            new_tool = load_generated_tool(tool_name)
+            if new_tool:
+                engine.tool_registry.register(new_tool)
+                console.print(
+                    f"[green]✅ 工具 `{tool_name}` 已注册到工具表，立即可用[/green]"
+                )
+            else:
+                console.print(
+                    "[yellow]⚠️ 工具已保存但加载失败，请重启 Agent[/yellow]"
+                )
+
+    console.print()
+
+
+def _show_forge_list() -> None:
+    """列出所有已锻造的工具."""
+    from rich.table import Table
+
+    from naumi_agent.tools.forge import list_generated_tools
+
+    tools = list_generated_tools()
+    if not tools:
+        console.print("[dim]暂无锻造的工具[/dim]")
+        return
+
+    table = Table(
+        title="🔨 已锻造工具",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("名称", style="cyan")
+    table.add_column("描述")
+    table.add_column("路径", style="dim")
+
+    for t in tools:
+        table.add_row(t["name"], t["description"], t["path"])
+
+    console.print(table)
+
+
+def _run_forge_remove(arg: str) -> None:
+    """移除已锻造的工具."""
+    from naumi_agent.tools.forge import remove_generated_tool
+
+    tool_name = arg.strip()
+    if not tool_name:
+        console.print("[yellow]用法: /forge-remove <工具名称>[/yellow]")
+        return
+
+    if remove_generated_tool(tool_name):
+        console.print(f"[green]✅ 已移除工具: {tool_name}[/green]")
+    else:
+        console.print(f"[red]未找到工具: {tool_name}[/red]")
+
 async def _show_history(engine: Any) -> None:
     """显示历史会话列表."""
     from rich.table import Table
