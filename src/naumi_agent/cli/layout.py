@@ -101,6 +101,10 @@ class CLIApp:
             self._processing = False
             self._invalidate()
 
+    def exit(self) -> None:
+        if self._app:
+            self._app.exit()
+
     def _invalidate(self) -> None:
         if self._app:
             self._app.invalidate()
