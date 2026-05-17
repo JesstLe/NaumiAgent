@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import shutil
 import sys
 from pathlib import Path
@@ -180,8 +181,20 @@ async def _chat(config_path: str) -> None:
             await _handle_command(engine, text)
             return
 
+        # Suppress log noise during streaming
+        logging.getLogger("litellm").setLevel(logging.ERROR)
+        logging.getLogger("LiteLLM").setLevel(logging.ERROR)
+        logging.getLogger("naumi_agent").setLevel(logging.ERROR)
+
         result = await engine.run_streaming(text, _cli_event_factory(cli))
 
+        # Restore log levels
+        logging.getLogger("litellm").setLevel(logging.WARNING)
+        logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+        logging.getLogger("naumi_agent").setLevel(logging.INFO)
+
+        # Move live content (thinking/tools) to permanent output first
+        cli.finalize_live()
         cli.append_output(_capture(lambda: _render_result(console, result)))
 
     cli.set_submit_handler(on_submit)
