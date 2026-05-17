@@ -148,8 +148,8 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         requires_confirmation=True,
         max_calls_per_session=50,
     ),
-    "browser_navigate": PermissionRule(
-        tool_name="browser_navigate",
+    "browser_goto": PermissionRule(
+        tool_name="browser_goto",
         allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE, PermissionMode.STRICT],
         requires_confirmation=False,
     ),

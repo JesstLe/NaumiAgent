@@ -254,12 +254,12 @@ BLOCKED_COMMANDS = {
 
 | 工具名 | 权限 | 功能 |
 |--------|------|------|
-| `browser_navigate` | safe | 打开网页 |
+| `browser_goto` | safe | 打开网页 |
+| `browser_observe` | safe | SoM 观察页面元素 |
 | `browser_screenshot` | safe | 截取当前页面 |
 | `browser_click` | moderate | 点击元素 |
 | `browser_type` | moderate | 输入文字 |
 | `browser_scroll` | safe | 滚动页面 |
-| `browser_extract` | safe | 提取页面文本/结构 |
 | `browser_evaluate` | dangerous | 执行 JavaScript |
 
 ```python
