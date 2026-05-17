@@ -11,10 +11,11 @@ from prompt_toolkit import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.formatted_text import ANSI, FormattedText
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import FloatContainer, HSplit, Window
+from prompt_toolkit.layout import Float, FloatContainer, HSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.layout import Layout
+from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.styles import Style
 
 from naumi_agent.cli_completer import SlashCommandCompleter
@@ -169,7 +170,12 @@ class CLIApp:
         )
 
         body = HSplit([output_win, border_top, input_win, border_bot])
-        root = FloatContainer(content=body, floats=[])
+        root = FloatContainer(
+            content=body,
+            floats=[
+                Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=12)),
+            ],
+        )
         return Application(
             layout=Layout(root, focused_element=input_win),
             key_bindings=self._kb,
