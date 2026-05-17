@@ -262,6 +262,16 @@ class AgentEngine:
 
         self._tool_registry.register(SelfEvolveTool())
 
+        # Tool forge
+        from naumi_agent.tools.forge import ForgeTool, load_all_generated_tools
+
+        self._tool_registry.register(ForgeTool())
+
+        # Load previously generated tools
+        for tool in load_all_generated_tools():
+            self._tool_registry.register(tool)
+            logger.info("Loaded generated tool: %s", tool.name)
+
     def _register_subagent_manager(self) -> None:
         from naumi_agent.orchestrator.subagent_manager import SubAgentManager
         from naumi_agent.tools.analysis import set_analysis_subagent_manager
