@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from naumi_agent.config.settings import AppConfig
+from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.tools.base import ToolCall
@@ -69,6 +70,39 @@ class TestSetSystemPrompt:
         engine.set_system_prompt("new prompt")
         assert engine._messages[0]["content"] == "new prompt"
         assert len([m for m in engine._messages if m["role"] == "system"]) == 1
+
+
+class TestSessionLoading:
+    @pytest.mark.asyncio
+    async def test_load_session_keeps_sanitized_full_history(self, tmp_path) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        session = Session(title="缺失工具结果")
+        session.messages = [
+            {"role": "system", "content": "prompt"},
+            {"role": "user", "content": "读文件"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {"name": "file_read", "arguments": "{}"},
+                    }
+                ],
+            },
+        ]
+        await engine.session_store.save(session)
+
+        loaded = await engine.load_session(session.id)
+
+        assert loaded is True
+        assert engine._messages == engine._full_history
+        assert engine._messages[-1]["role"] == "tool"
+        assert engine._messages[-1]["tool_call_id"] == "call_1"
+        await engine.shutdown()
 
 
 class TestToolCallParsing:
