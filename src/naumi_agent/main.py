@@ -542,6 +542,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _run_reload(engine, arg)
         case "/evolve":
             await _run_evolve(engine, arg)
+        case "/evolve-history":
+            _show_evolve_history()
         case "/help":
             _print_help()
         case _:
@@ -617,7 +619,8 @@ def _print_help() -> None:
         ("/pursue <目标>", "目标追踪 — 自主循环执行直至真正达成"),
         ("/self-review [模块]", "自我审查 — 扫描自身源码质量与架构"),
         ("/reload [域]", "热重载 — 重载模块无需重启 (tools/memory/skills/all)"),
-        ("/evolve <描述>", "自我进化 — 修改自身工具代码并验证"),
+        ("/evolve <描述>", "自我进化 — 反思循环修改自身工具代码并验证"),
+        ("/evolve-history", "查看自我进化历史记录"),
         ("/new", "保存当前会话并开始新对话"),
         ("/clear", "清除当前会话（不保存）"),
         ("/quit", "退出"),
@@ -883,7 +886,7 @@ async def _run_reload(engine: Any, arg: str) -> None:
 
 
 async def _run_evolve(engine: Any, arg: str) -> None:
-    """执行自我进化 — Agent 修改自身工具代码并验证."""
+    """执行自我进化 — 反思循环: LLM生成方案 → 验证修改 → 质量评估 → 采纳/回滚."""
     import json
     import re
 
@@ -897,13 +900,14 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         return
 
     self_modify = engine.tool_registry.get("self_modify")
+    self_evolve = engine.tool_registry.get("self_evolve")
     if not self_modify:
         console.print("[red]自我修改工具未注册[/red]")
         return
 
     console.print(f"[bold yellow]🧬 自我进化: {description}[/bold yellow]")
 
-    # Phase 1: Identify target and generate modification via LLM
+    # Phase 1: Generate modification via LLM
     console.print("[dim]Phase 1: 分析目标并生成修改方案...[/dim]")
 
     with console.status("[bold green]分析中...[/bold green]"):
@@ -921,8 +925,8 @@ async def _run_evolve(engine: Any, arg: str) -> None:
             "1. 只能修改 tools/memory/skills 目录下的模块\n"
             "2. 不能修改 engine/safety/config 等核心模块\n"
             "3. 修改后的代码必须保持所有现有接口兼容\n"
-            '4. 输出 JSON 格式: {"target_file": "相对路径", '
-            '"new_content": "完整文件内容", "description": "修改说明"}\n'
+            '4. 输出 JSON: {"target_file": "路径", '
+            '"new_content": "内容", "description": "说明"}\n'
         )
 
         modifiable_files = []
@@ -930,7 +934,10 @@ async def _run_evolve(engine: Any, arg: str) -> None:
             domain_path = source_dir / domain_dir
             if domain_path.is_dir():
                 for py_file in domain_path.glob("*.py"):
-                    if py_file.name != "__init__.py" and not _is_protected_file(py_file):
+                    if (
+                        py_file.name != "__init__.py"
+                        and not _is_protected_file(py_file)
+                    ):
                         modifiable_files.append(
                             str(py_file.relative_to(source_dir))
                         )
@@ -993,37 +1000,142 @@ async def _run_evolve(engine: Any, arg: str) -> None:
     console.print(f"[dim]目标文件: {target_file}[/dim]")
     console.print(f"[dim]修改说明: {change_desc}[/dim]")
 
-    # Phase 2: Validate and apply
+    # Read original content for evolution evaluation
+    from naumi_agent.tools.self_modify import _resolve_target_path
+
+    try:
+        original_path = _resolve_target_path(target_file)
+        original_content = original_path.read_text(encoding="utf-8")
+    except Exception as e:
+        console.print(f"[red]无法读取原始文件: {e}[/red]")
+        return
+
+    # Phase 2: Validate and apply modification
     console.print("[dim]Phase 2: 验证并应用修改...[/dim]")
 
     with console.status("[bold green]验证中...[/bold green]"):
-        result = await self_modify.execute(
+        modify_result_str = await self_modify.execute(
             target_file=target_file,
             new_content=new_content,
             description=change_desc,
         )
 
+    # Check if modification was applied
+    if "已应用" not in modify_result_str:
+        console.print()
+        console.print(
+            Panel(
+                Markdown(modify_result_str),
+                title="[bold red]❌ 修改未通过验证[/bold red]",
+                border_style="red",
+                padding=(1, 2),
+            ),
+        )
+        return
+
+    # Phase 3: Reflective evaluation
+    console.print("[dim]Phase 3: 反思评估 — 对比修改前后质量...[/dim]")
+
+    if self_evolve:
+        with console.status("[bold green]评估质量变化...[/bold green]"):
+            from naumi_agent.tools.self_evolve import (
+                format_evolution_report,
+                run_evolution_cycle,
+            )
+
+            cycle_result = run_evolution_cycle(
+                target_file=target_file,
+                original_content=original_content,
+                new_content=new_content,
+                description=change_desc,
+            )
+
+        eval_report = format_evolution_report(
+            cycle_result["eval_result"]
+        )
+
+        action = cycle_result["action"]
+        console.print()
+        console.print(
+            Panel(
+                Markdown(eval_report),
+                title="[bold yellow]🧬 自我进化报告[/bold yellow]",
+                border_style="yellow",
+                padding=(1, 2),
+            ),
+        )
+
+        # Phase 4: Act on decision
+        if action == "rollback":
+            console.print("[bold red]🔄 质量下降，正在回滚...[/bold red]")
+            from naumi_agent.tools.self_modify import _rollback_file
+
+            rolled_back = _rollback_file(original_path)
+            if rolled_back:
+                console.print("[green]✅ 已回滚到修改前的状态[/green]")
+            else:
+                console.print(
+                    "[yellow]⚠️ 自动回滚失败，请手动 git checkout[/yellow]"
+                )
+            console.print()
+            return
+
+        if action == "iterate":
+            console.print(
+                "[yellow]🔄 效果不明确，修改已保留但建议继续迭代优化[/yellow]"
+            )
+        else:
+            console.print("[green]✅ 质量提升，采纳修改[/green]")
+
+    # Phase 5: Hot-reload
+    console.print("[bold yellow]🔄 正在热重载修改后的模块...[/bold yellow]")
+    try:
+        reload_result = await engine.reload_tools("tools")
+        msg = f"✅ 重载完成: {reload_result['reloaded']} 个模块"
+        console.print(f"[green]{msg}[/green]")
+    except Exception as e:
+        console.print(f"[yellow]⚠️ 热重载失败: {e}[/yellow]")
+
     console.print()
-    console.print(
-        Panel(
-            Markdown(result),
-            title="[bold yellow]🧬 自我进化结果[/bold yellow]",
-            border_style="yellow",
-            padding=(1, 2),
-        ),
+
+
+def _show_evolve_history() -> None:
+    """显示自我进化历史记录."""
+    from rich.table import Table
+
+    from naumi_agent.tools.self_evolve import get_evolution_history
+
+    history = get_evolution_history()
+    if not history:
+        console.print("[dim]暂无进化记录[/dim]")
+        return
+
+    table = Table(
+        title="🧬 自我进化历史",
+        show_header=True,
+        header_style="bold cyan",
     )
+    table.add_column("ID", style="dim")
+    table.add_column("文件")
+    table.add_column("轮次", justify="center")
+    table.add_column("评分变化", justify="right")
+    table.add_column("说明")
 
-    # Phase 3: Hot-reload if applied
-    if "已应用" in result:
-        console.print("[bold yellow]🔄 正在热重载修改后的模块...[/bold yellow]")
-        try:
-            reload_result = await engine.reload_tools("tools")
-            msg = f"✅ 重载完成: {reload_result['reloaded']} 个模块"
-            console.print(f"[green]{msg}[/green]")
-        except Exception as e:
-            console.print(f"[yellow]⚠️ 热重载失败: {e}[/yellow]")
+    for step in history:
+        delta = step.score_delta
+        delta_str = f"{delta:+.1f}" if delta else "-"
+        style = "green" if delta and delta > 0 else "red" if delta and delta < 0 else None
+        table.add_row(
+            step.step_id,
+            step.target_file,
+            str(step.round_number),
+            f"[{style}]{delta_str}[/{style}]" if style else delta_str,
+            step.description[:40],
+        )
 
-    console.print()
+    console.print(table)
+
+
 
 
 
