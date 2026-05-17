@@ -522,6 +522,125 @@ class InputBar(Horizontal):
             input_widget.value = ""
 
 
+class BrowserPanel(VerticalScroll):
+    """浏览器面板 — 显示浏览器状态、任务列表、扫描结果."""
+
+    DEFAULT_CSS = """
+    BrowserPanel {
+        width: 40;
+        height: 1fr;
+        padding: 0 1;
+        border-left: solid green;
+        background: $surface;
+        display: none;
+    }
+
+    BrowserPanel .browser-section-title {
+        padding: 1 0;
+        text-style: bold;
+        color: $text;
+    }
+
+    BrowserPanel .browser-status {
+        padding: 0 1;
+        margin: 0 0 1 0;
+    }
+
+    BrowserPanel .task-entry {
+        padding: 0 1;
+        margin: 0 0 1 0;
+        background: $boost;
+        width: 1fr;
+    }
+
+    BrowserPanel .finding-entry {
+        padding: 0 1;
+        margin: 0 0 1 0;
+    }
+    """
+
+    show_panel: reactive[bool] = reactive(False)
+
+    def watch_show_panel(self, show: bool) -> None:
+        self.display = show
+
+    def refresh_browser_state(self, engine: Any) -> None:
+        for child in list(self.children):
+            child.remove()
+
+        self.mount(Static("🌐 浏览器", classes="browser-section-title"))
+        runtime = engine._browser_session
+        active = runtime.page is not None
+        status_text = "✅ 活跃" if active else "⬜ 未启动"
+        self.mount(Static(status_text, classes="browser-status"))
+        if active:
+            try:
+                url = runtime.page.url
+                title = runtime.page.title
+                self.mount(
+                    Static(
+                        f"[dim]{url[:50]}[/dim]\n[bold]{title[:30]}[/bold]",
+                        classes="browser-status",
+                    )
+                )
+            except Exception:
+                pass
+
+    def refresh_tasks(self, engine: Any) -> None:
+        for child in list(self.children):
+            child.remove()
+
+        self.mount(Static("📋 浏览器任务", classes="browser-section-title"))
+        runner = engine.task_runner
+        runs = runner.list_runs(limit=15)
+        if not runs:
+            self.mount(Static("[dim]暂无任务[/dim]", classes="browser-status"))
+            return
+        for r in runs:
+            status = r.get("status", "?")
+            instruction = (r.get("instruction") or "")[:25]
+            style = "green" if status == "completed" else "red" if status == "failed" else "yellow"
+            self.mount(
+                Static(
+                    f"[{style}]●[/{style}] {instruction}\n"
+                    f"[dim]{status} · {(r.get('createdAt') or '')[:16]}[/dim]",
+                    classes="task-entry",
+                )
+            )
+
+    def show_scan_results(self, auditor: Any) -> None:
+        for child in list(self.children):
+            child.remove()
+
+        self.mount(Static("🔒 安全扫描结果", classes="browser-section-title"))
+        summary = auditor.get_summary()
+        total = summary.get("totalFindings", 0)
+        if total == 0:
+            self.mount(Static("[green]✅ 未发现问题[/green]", classes="browser-status"))
+            return
+
+        lines = [f"总发现: {total}"]
+        for sev in ("criticalCount", "highCount", "mediumCount", "lowCount"):
+            label = sev.replace("Count", "")
+            count = summary.get(sev, 0)
+            if count:
+                color = {"critical": "red", "high": "yellow", "medium": "cyan"}.get(label, "dim")
+                lines.append(f"[{color}]{label}: {count}[/{color}]")
+        self.mount(Static("\n".join(lines), classes="browser-status"))
+
+        for f in auditor.get_results(min_severity="high")[:10]:
+            severity = f.get("severity", "?")
+            title = f.get("title", "?")
+            cat = f.get("category", "?")
+            color = "red" if severity == "critical" else "yellow"
+            self.mount(
+                Static(
+                    f"[{color}][{severity}][/{color}] [{cat}] {title}",
+                    classes="finding-entry",
+                )
+            )
+
+
 class UserInputMessage(Message):
     def __init__(self, content: str) -> None:
         super().__init__()
@@ -668,6 +787,7 @@ class NaumiApp(App):
         Binding("ctrl+h", "toggle_history", "历史"),
         Binding("ctrl+l", "clear_chat", "清空"),
         Binding("ctrl+t", "show_tools", "工具列表"),
+        Binding("ctrl+b", "toggle_browser", "浏览器"),
     ]
 
     def __init__(self, engine: AgentEngine, **kwargs: Any) -> None:
@@ -679,6 +799,7 @@ class NaumiApp(App):
         with Container(id="main-area"):
             yield ChatPanel()
             yield HistoryPanel()
+            yield BrowserPanel()
             yield ActivityPanel()
         yield InputBar()
         yield Spinner()
@@ -773,6 +894,23 @@ class NaumiApp(App):
                     "- `/supervisor <目标>` — Erlang 守护者树\n"
                     "- `/autopsy <目标>` — 执行迹切片与 Bug 解剖\n"
                     "- `/pursue <目标>` — 目标追踪（自主循环直至达成）\n"
+                    "- `/browse <url>` — 打开 URL 并显示 SoM 元素\n"
+                    "- `/autobrowse <任务>` — 自主浏览器任务\n"
+                    "- `/browser-stop` — 停止浏览器\n"
+                    "- `/browser-state` — 显示浏览器状态\n"
+                    "- `/browser-screenshot` — 截取页面截图\n"
+                    "- `/tasks` — 列出浏览器任务\n"
+                    "- `/task <id>` — 查看任务详情\n"
+                    "- `/task-reply <id> <指令>` — 回复等待中的任务\n"
+                    "- `/task-abort <id>` — 中止任务\n"
+                    "- `/task-resume <id>` — 恢复手动控制任务\n"
+                    "- `/scan <url>` — 快速安全扫描\n"
+                    "- `/scan-full <url>` — 完整 25 模块安全扫描\n"
+                    "- `/scan-report [format]` — 导出扫描报告\n"
+                    "- `/scan-baseline <url>` — 保存扫描为基线\n"
+                    "- `/btemplate-list` — 列出浏览器任务模板\n"
+                    "- `/btemplate-run <id>` — 从模板创建运行\n"
+                    "- `/btemplate-compare <id>` — 比较模板运行结果\n"
                     "- `/clear` — 清除当前会话\n"
                     "- `/quit` — 退出\n"
                 )
@@ -959,6 +1097,73 @@ class NaumiApp(App):
                     status.status_text = "用法: /pursue <目标描述>"
                 else:
                     self._run_pursue(arg)
+            case "/browse":
+                if not arg:
+                    status.status_text = "用法: /browse <url>"
+                else:
+                    self._run_browse(arg)
+            case "/autobrowse":
+                if not arg:
+                    status.status_text = "用法: /autobrowse <任务描述>"
+                else:
+                    self._run_autobrowse(arg)
+            case "/browser-stop":
+                self._run_browser_stop()
+            case "/browser-state":
+                self._run_browser_state()
+            case "/browser-screenshot":
+                self._run_browser_screenshot()
+            case "/tasks":
+                self._show_tasks()
+            case "/task":
+                if not arg:
+                    status.status_text = "用法: /task <id>"
+                else:
+                    self._show_task_detail(arg)
+            case "/task-reply":
+                if not arg:
+                    status.status_text = "用法: /task-reply <id> <指令>"
+                else:
+                    self._run_task_reply(arg)
+            case "/task-abort":
+                if not arg:
+                    status.status_text = "用法: /task-abort <id>"
+                else:
+                    self._run_task_abort(arg)
+            case "/task-resume":
+                if not arg:
+                    status.status_text = "用法: /task-resume <id>"
+                else:
+                    self._run_task_resume(arg)
+            case "/scan":
+                if not arg:
+                    status.status_text = "用法: /scan <url>"
+                else:
+                    self._run_security_scan(arg, profile="quick")
+            case "/scan-full":
+                if not arg:
+                    status.status_text = "用法: /scan-full <url>"
+                else:
+                    self._run_security_scan(arg, profile="full")
+            case "/scan-report":
+                self._run_scan_report(arg)
+            case "/scan-baseline":
+                if not arg:
+                    status.status_text = "用法: /scan-baseline <url>"
+                else:
+                    self._run_scan_baseline(arg)
+            case "/btemplate-list":
+                self._show_btemplate_list()
+            case "/btemplate-run":
+                if not arg:
+                    status.status_text = "用法: /btemplate-run <id>"
+                else:
+                    self._run_btemplate_run(arg)
+            case "/btemplate-compare":
+                if not arg:
+                    status.status_text = "用法: /btemplate-compare <id>"
+                else:
+                    self._show_btemplate_compare(arg)
             case "/quit" | "/exit":
                 self.exit()
             case _:
@@ -1212,6 +1417,12 @@ class NaumiApp(App):
         activity = self.query_one(ActivityPanel)
         activity.show_panel = not activity.show_panel
 
+    def action_toggle_browser(self) -> None:
+        browser = self.query_one(BrowserPanel)
+        browser.show_panel = not browser.show_panel
+        if browser.show_panel:
+            browser.refresh_browser_state(self.engine)
+
     def action_toggle_history(self) -> None:
         history = self.query_one(HistoryPanel)
         history.show_panel = not history.show_panel
@@ -1388,3 +1599,380 @@ class NaumiApp(App):
         for t in tools:
             lines.append(f"- **{t.name}** — {t.description}")
         chat.mount(Markdown("\n".join(lines), classes="agent-msg"))
+
+    # --- Browser commands ---
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_browse(self, url: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        status.status_text = f"🌐 导航到 {url}..."
+        self._set_input_enabled(False)
+        self.query_one(Spinner)._active = True
+        try:
+            result = await self.engine._browser_session.goto(url.strip())
+            elements = result.get("elements", [])
+            lines = [f"## 🌐 页面已加载\n发现 {len(elements)} 个交互元素\n"]
+            for el in elements[:20]:
+                tag = el.get("tag", "?")
+                label = el.get("label", el.get("text", ""))[:30]
+                eid = el.get("id", "?")
+                lines.append(f"- **[{eid}]** `{tag}` {label}")
+            if len(elements) > 20:
+                lines.append(f"\n... 还有 {len(elements) - 20} 个元素")
+            chat.mount(Markdown("\n".join(lines), classes="agent-msg"))
+            browser = self.query_one(BrowserPanel)
+            if browser.show_panel:
+                browser.refresh_browser_state(self.engine)
+        except Exception as e:
+            chat.mount(Markdown(f"**导航失败**: {e}", classes="agent-msg"))
+        finally:
+            self.query_one(Spinner)._active = False
+            self._set_input_enabled(True)
+            status.status_text = "就绪"
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_autobrowse(self, task: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        status.status_text = f"🤖 自主浏览: {task[:30]}..."
+        self._set_input_enabled(False)
+        self.query_one(Spinner)._active = True
+        try:
+            runner = self.engine.task_runner
+            run = runner.create_run(instruction=task.strip())
+            run_id = run["id"]
+            await runner.process_queue()
+            updated = runner.get_run(run_id)
+            if updated:
+                s = updated.get("status", "unknown")
+                summary = updated.get("summary", "")
+                icon = "✅" if s == "completed" else "⚠️" if s == "failed" else "⏸"
+                chat.mount(
+                    Markdown(
+                        f"## {icon} 任务 {s}\n\n{summary or '无摘要'}",
+                        classes="agent-msg",
+                    )
+                )
+            browser = self.query_one(BrowserPanel)
+            if browser.show_panel:
+                browser.refresh_tasks(self.engine)
+        except Exception as e:
+            chat.mount(Markdown(f"**任务失败**: {e}", classes="agent-msg"))
+        finally:
+            self.query_one(Spinner)._active = False
+            self._set_input_enabled(True)
+            status.status_text = "就绪"
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_browser_stop(self) -> None:
+        status = self.query_one(StatusBar)
+        status.status_text = "🛑 停止浏览器..."
+        try:
+            await self.engine._browser_session.stop()
+            status.status_text = "✅ 浏览器已停止"
+        except Exception as e:
+            status.status_text = f"❌ 停止失败: {e}"
+
+    def _run_browser_state(self) -> None:
+        browser = self.query_one(BrowserPanel)
+        browser.show_panel = True
+        browser.refresh_browser_state(self.engine)
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_browser_screenshot(self) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        status.status_text = "📸 截图中..."
+        try:
+            b64 = await self.engine._browser_session.screenshot_base64()
+            import base64
+            from pathlib import Path
+
+            out = Path("screenshot.png")
+            out.write_bytes(base64.b64decode(b64))
+            chat.mount(
+                Markdown(f"📸 截图已保存到 `{out}`", classes="agent-msg")
+            )
+        except Exception as e:
+            chat.mount(Markdown(f"**截图失败**: {e}", classes="agent-msg"))
+        finally:
+            status.status_text = "就绪"
+
+    def _show_tasks(self) -> None:
+        browser = self.query_one(BrowserPanel)
+        browser.show_panel = True
+        browser.refresh_tasks(self.engine)
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _show_task_detail(self, task_id: str) -> None:
+        import json
+
+        chat = self.query_one(ChatPanel)
+        runner = self.engine.task_runner
+        run = runner.get_run(task_id.strip())
+        if not run:
+            chat.mount(Markdown(f"**任务不存在**: {task_id}", classes="agent-msg"))
+            return
+        detail = json.dumps(run, indent=2, default=str, ensure_ascii=False)
+        chat.mount(Markdown(f"```\n{detail[:1500]}\n```", classes="agent-msg"))
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_task_reply(self, arg: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        parts = arg.strip().split(maxsplit=1)
+        if len(parts) < 2:
+            status.status_text = "用法: /task-reply <id> <指令>"
+            return
+        run_id, instruction = parts
+        status.status_text = f"回复任务 {run_id}..."
+        self._set_input_enabled(False)
+        self.query_one(Spinner)._active = True
+        try:
+            runner = self.engine.task_runner
+            await runner.reply_to_run(run_id, instruction)
+            await runner.process_queue()
+            updated = runner.get_run(run_id)
+            s = updated.get("status", "?") if updated else "?"
+            chat.mount(
+                Markdown(f"**任务 {run_id}**: {s}", classes="agent-msg")
+            )
+        except Exception as e:
+            chat.mount(Markdown(f"**回复失败**: {e}", classes="agent-msg"))
+        finally:
+            self.query_one(Spinner)._active = False
+            self._set_input_enabled(True)
+            status.status_text = "就绪"
+
+    def _run_task_abort(self, task_id: str) -> None:
+        chat = self.query_one(ChatPanel)
+        runner = self.engine.task_runner
+        run = runner.get_run(task_id.strip())
+        if not run:
+            chat.mount(Markdown(f"**任务不存在**: {task_id}", classes="agent-msg"))
+            return
+        runner.abort_run(task_id.strip(), reason="User requested")
+        chat.mount(
+            Markdown(f"**已中止任务**: {task_id}", classes="agent-msg")
+        )
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_task_resume(self, task_id: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        status.status_text = f"恢复任务 {task_id}..."
+        self._set_input_enabled(False)
+        self.query_one(Spinner)._active = True
+        try:
+            runner = self.engine.task_runner
+            await runner.resume_run(task_id.strip())
+            await runner.process_queue()
+            chat.mount(
+                Markdown(f"**任务已恢复**: {task_id}", classes="agent-msg")
+            )
+        except Exception as e:
+            chat.mount(Markdown(f"**恢复失败**: {e}", classes="agent-msg"))
+        finally:
+            self.query_one(Spinner)._active = False
+            self._set_input_enabled(True)
+            status.status_text = "就绪"
+
+    # --- Security scan commands ---
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_security_scan(self, url: str, profile: str = "quick") -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        label = "完整" if profile == "full" else "快速"
+        status.status_text = f"🔒 {label}安全扫描: {url[:30]}..."
+        self._set_input_enabled(False)
+        self.query_one(Spinner)._active = True
+        try:
+            if not self.engine._browser_session.page:
+                await self.engine._browser_session.start(
+                    {"source": "auto"}
+                )
+            await self.engine._browser_session.goto(url.strip())
+            auditor = self.engine.security_auditor
+            await auditor.full_audit(profile=profile)
+            summary = auditor.get_summary()
+            total = summary.get("totalFindings", 0)
+            critical = summary.get("criticalCount", 0)
+            high = summary.get("highCount", 0)
+            lines = [
+                f"## 🔒 {label}安全扫描完成\n",
+                f"- 总发现: **{total}**",
+                f"- [red]严重: {critical}[/red]",
+                f"- [yellow]高危: {high}[/yellow]",
+                f"- 中危: {summary.get('mediumCount', 0)}",
+                f"- 低危: {summary.get('lowCount', 0)}",
+                "\n### 高危发现\n",
+            ]
+            for f in auditor.get_results(min_severity="high")[:15]:
+                sev = f.get("severity", "?")
+                title = f.get("title", "?")
+                cat = f.get("category", "?")
+                color = "red" if sev == "critical" else "yellow"
+                lines.append(
+                    f"- [{color}][{sev}][/{color}] [{cat}] {title}"
+                )
+            chat.mount(Markdown("\n".join(lines), classes="agent-msg"))
+            browser = self.query_one(BrowserPanel)
+            if browser.show_panel:
+                browser.show_scan_results(auditor)
+        except Exception as e:
+            chat.mount(Markdown(f"**扫描失败**: {e}", classes="agent-msg"))
+        finally:
+            self.query_one(Spinner)._active = False
+            self._set_input_enabled(True)
+            status.status_text = "就绪"
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_scan_report(self, arg: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        fmt = arg.strip() or "json"
+        if fmt not in ("json", "sarif", "html"):
+            status.status_text = "格式: json, sarif, html"
+            return
+        auditor = self.engine.security_auditor
+        if not auditor.results:
+            chat.mount(
+                Markdown("**暂无扫描结果**，先执行 `/scan <url>`", classes="agent-msg")
+            )
+            return
+        status.status_text = f"导出 {fmt} 报告..."
+        try:
+            import json
+            from pathlib import Path
+
+            result = await auditor.export_report(fmt=fmt)
+            if fmt == "json":
+                out = Path("security_report.json")
+                out.write_text(
+                    json.dumps(
+                        result.get("data"), indent=2, ensure_ascii=False
+                    ),
+                    encoding="utf-8",
+                )
+            elif fmt == "sarif":
+                out = Path("security_report.sarif")
+                out.write_text(
+                    json.dumps(result.get("sarif"), indent=2),
+                    encoding="utf-8",
+                )
+            else:
+                out = Path("security_report.html")
+                out.write_text(
+                    result.get("html", ""), encoding="utf-8"
+                )
+            chat.mount(
+                Markdown(f"✅ 报告已保存到 `{out}`", classes="agent-msg")
+            )
+        except Exception as e:
+            chat.mount(Markdown(f"**导出失败**: {e}", classes="agent-msg"))
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_scan_baseline(self, url: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        status.status_text = f"📊 基线扫描: {url[:30]}..."
+        self._set_input_enabled(False)
+        self.query_one(Spinner)._active = True
+        try:
+            if not self.engine._browser_session.page:
+                await self.engine._browser_session.start(
+                    {"source": "auto"}
+                )
+            await self.engine._browser_session.goto(url.strip())
+            auditor = self.engine.security_auditor
+            await auditor.full_audit(profile="standard")
+            from pathlib import Path
+
+            baseline_path = Path("security_baseline.json")
+            auditor.save_baseline(str(baseline_path))
+            chat.mount(
+                Markdown(
+                    f"✅ 基线已保存到 `{baseline_path}` "
+                    f"({len(auditor.results)} 个发现)",
+                    classes="agent-msg",
+                )
+            )
+        except Exception as e:
+            chat.mount(Markdown(f"**基线扫描失败**: {e}", classes="agent-msg"))
+        finally:
+            self.query_one(Spinner)._active = False
+            self._set_input_enabled(True)
+            status.status_text = "就绪"
+
+    # --- Template commands ---
+
+    def _show_btemplate_list(self) -> None:
+        chat = self.query_one(ChatPanel)
+        runner = self.engine.task_runner
+        templates = runner.list_templates()
+        if not templates:
+            chat.mount(Markdown("**暂无浏览器任务模板**", classes="agent-msg"))
+            return
+        lines = ["## 浏览器任务模板\n"]
+        for t in templates:
+            tid = (t.get("id") or "")[:8]
+            name = t.get("name", "")
+            tp = t.get("timeoutPolicy", {})
+            max_steps = tp.get("maxSteps", "?")
+            rules = len(t.get("successRules", []))
+            lines.append(
+                f"- **{tid}** {name} (步骤:{max_steps} 规则:{rules})"
+            )
+        chat.mount(Markdown("\n".join(lines), classes="agent-msg"))
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_btemplate_run(self, template_id: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        runner = self.engine.task_runner
+        template = runner.get_template(template_id.strip())
+        if not template:
+            chat.mount(
+                Markdown(f"**模板不存在**: {template_id}", classes="agent-msg")
+            )
+            return
+        status.status_text = f"执行模板 {template_id}..."
+        self._set_input_enabled(False)
+        self.query_one(Spinner)._active = True
+        try:
+            run = runner.create_run_from_template(template_id.strip())
+            run_id = run["id"]
+            await runner.process_queue()
+            updated = runner.get_run(run_id)
+            s = updated.get("status", "?") if updated else "?"
+            summary = updated.get("summary", "") if updated else ""
+            chat.mount(
+                Markdown(
+                    f"**模板运行**: {s}\n\n{summary[:500]}",
+                    classes="agent-msg",
+                )
+            )
+        except Exception as e:
+            chat.mount(Markdown(f"**模板运行失败**: {e}", classes="agent-msg"))
+        finally:
+            self.query_one(Spinner)._active = False
+            self._set_input_enabled(True)
+            status.status_text = "就绪"
+
+    def _show_btemplate_compare(self, template_id: str) -> None:
+        import json
+
+        chat = self.query_one(ChatPanel)
+        runner = self.engine.task_runner
+        comparison = runner.compare_template_runs(template_id.strip())
+        if not comparison:
+            chat.mount(Markdown("**无比较数据**", classes="agent-msg"))
+            return
+        detail = json.dumps(
+            comparison, indent=2, default=str, ensure_ascii=False
+        )
+        chat.mount(
+            Markdown(f"```\n{detail[:1500]}\n```", classes="agent-msg")
+        )
