@@ -53,6 +53,8 @@ class CLIApp:
         self._kb = KeyBindings()
         self._on_submit: Callable[[str], Awaitable[None]] | None = None
 
+        self._last_esc_time = 0.0
+
         @self._kb.add("enter")
         def _submit(event: Any) -> None:
             if self._processing:
@@ -61,6 +63,15 @@ class CLIApp:
             if text and self._on_submit:
                 self._input_buf.text = ""
                 asyncio.ensure_future(self._run_submit(text))
+
+        @self._kb.add("escape")
+        def _escape(event: Any) -> None:
+            import time
+
+            now = time.monotonic()
+            if self._processing and now - self._last_esc_time < 0.5:
+                self._processing = False
+            self._last_esc_time = now
 
         @self._kb.add("c-c")
         def _cancel(event: Any) -> None:
