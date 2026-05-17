@@ -143,7 +143,7 @@ async def _chat(config_path: str) -> None:
     _check_api_key(config)
     engine = AgentEngine(config)
 
-    _print_banner()
+    _print_banner(engine)
 
     while True:
         try:
@@ -583,14 +583,16 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 _print_help()
 
 
-def _print_banner() -> None:
+def _print_banner(engine: Any) -> None:
     from naumi_agent import __version__
     from naumi_agent.assets import BANNER_TEXT
 
+    model = engine.router.resolve_model("capable")
     console.print(
         Panel(
             BANNER_TEXT,
             title=f"[bold]v{__version__}[/bold]",
+            subtitle=f"[dim]{model}[/dim]",
             border_style="green",
             padding=(1, 2),
         )
