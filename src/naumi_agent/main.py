@@ -184,6 +184,17 @@ async def _chat(config_path: str) -> None:
 
     cli.append_output(_capture(lambda: _print_banner(engine)))
 
+    # Auto-resume: load latest session on startup (like Claude Code)
+    try:
+        sessions, _ = await engine.list_sessions(page=1, page_size=1)
+        if sessions and _has_user_conversation(sessions[0]):
+            await engine.load_session(sessions[0].id)
+            session = engine._session
+            if session:
+                _replay_session_to_cli(cli, session)
+    except Exception:
+        pass  # silently continue if auto-resume fails
+
     async def on_submit(text: str) -> None:
         if text in ("/quit", "/q", "/exit", "exit"):
             await engine.shutdown()
@@ -1502,42 +1513,121 @@ async def _show_history(engine: Any) -> None:
     console.print()
 
 
+def _replay_session_to_cli(cli: Any, session: Any) -> None:
+    """将会话的所有消息完整回放到 CLI 输出区，像从未关过一样."""
+    title = session.title or session.id
+    msg_count = len(session.messages)
+    cli.append_output(
+        f"\033[2m━━━ 恢复会话: {title} ({msg_count}条消息) ━━━\033[0m\n"
+    )
+
+    for m in session.messages:
+        role = m.get("role", "")
+        content = m.get("content") or ""
+
+        if role == "system":
+            continue  # 不回放系统消息
+
+        if role == "user":
+            cli.append_output(f"\033[32m❯\033[0m {content}\n")
+
+        elif role == "assistant":
+            tool_calls = m.get("tool_calls", [])
+            # Show text content
+            if content:
+                cli.append_output(
+                    _capture(lambda c=content: console.print(c))
+                )
+            # Show tool calls
+            for tc in tool_calls:
+                tc_dict = tc if isinstance(tc, dict) else {}
+                tc_name = tc_dict.get("function", {}).get("name", "tool")
+                cli.append_output(f"\033[36m  ⏳ {tc_name}\033[0m\n")
+
+        elif role == "tool":
+            is_placeholder = "工具调用结果缺失" in content
+            has_error = "error" in content.lower()[:200] if content else False
+            if is_placeholder:
+                icon = "⚠️"
+            elif has_error:
+                icon = "❌"
+            else:
+                icon = "✅"
+            # Show tool result preview (like _print_tool_output)
+            if content:
+                lines = content.split("\n")
+                is_diff = any(
+                    ln.startswith(("---", "+++", "@@", "- ", "+ "))
+                    for ln in lines[:6]
+                )
+                if is_diff:
+                    preview_lines = []
+                    for line in lines:
+                        if line.startswith("-") and not line.startswith("---"):
+                            preview_lines.append(f"\033[31m{line}\033[0m")
+                        elif line.startswith("+") and not line.startswith("+++"):
+                            preview_lines.append(f"\033[32m{line}\033[0m")
+                        elif line.startswith("@@"):
+                            preview_lines.append(f"\033[34m{line}\033[0m")
+                        else:
+                            preview_lines.append(f"\033[2m{line}\033[0m")
+                    preview = "\n".join(preview_lines[:30])
+                    if len(preview_lines) > 30:
+                        preview += f"\n  ... ({len(preview_lines) - 30} more lines)"
+                else:
+                    preview = "\n".join(lines[:8])
+                    if len(lines) > 8:
+                        preview += f"\n  ... ({len(lines) - 8} more lines)"
+                    preview = f"\033[2m{preview}\033[0m"
+                cli.append_output(f"  {icon} {preview}\n")
+            else:
+                cli.append_output(f"  {icon}\n")
+
+    cli.append_output(
+        "\033[2m━━━ 会话已恢复，继续对话或 /new 开始新会话 ━━━\033[0m\n\n"
+    )
+
+
 async def _load_session(engine: Any, session_id: str) -> None:
-    """加载历史会话."""
+    """加载历史会话 — 完整回放到显示区."""
     loaded = await engine.load_session(session_id)
     if loaded:
         session = engine._session
-        title = session.title if session else session_id
-        msg_count = len(session.messages) if session else 0
-        console.print(f"[green]已加载会话:[/green] {title}")
-        console.print(
-            f"[dim]消息数: {msg_count} | Token: {session.total_tokens} | "
-            f"费用: ${session.total_cost_usd:.4f}[/dim]"
-        )
-
-        # 显示最近几条对话
-        user_msgs = [m for m in session.messages if m.get("role") in ("user", "assistant")]
-        if user_msgs:
-            console.print("[dim]--- 最近对话 ---[/dim]")
-            for m in user_msgs[-6:]:
-                role = m.get("role", "")
-                content = m.get("content") or ""
-                if len(content) > 100:
-                    content = content[:97] + "..."
-                if not content:
-                    tool_names = [
-                        tc.get("function", {}).get("name", "")
-                        for tc in m.get("tool_calls", [])
-                        if isinstance(tc, dict)
-                    ]
-                    content = (
-                        f"[调用工具: {', '.join(tool_names)}]"
-                        if tool_names
-                        else "[无文本内容]"
-                    )
-                label = "[blue]你[/blue]" if role == "user" else "[green]Naumi[/green]"
-                console.print(f"  {label}: {content}")
-        console.print()
+        if session:
+            # For CLI: show stats, then replay via _capture
+            console.print(
+                f"[green]已加载会话:[/green] {session.title or session_id} "
+                f"({len(session.messages)}条消息)"
+            )
+            if _active_cli:
+                _replay_session_to_cli(_active_cli, session)
+            else:
+                # Non-interactive mode fallback: brief summary
+                user_msgs = [
+                    m for m in session.messages
+                    if m.get("role") in ("user", "assistant")
+                ]
+                if user_msgs:
+                    console.print("[dim]--- 最近对话 ---[/dim]")
+                    for m in user_msgs[-6:]:
+                        role = m.get("role", "")
+                        content = m.get("content") or ""
+                        if len(content) > 100:
+                            content = content[:97] + "..."
+                        if not content:
+                            tool_names = [
+                                tc.get("function", {}).get("name", "")
+                                for tc in m.get("tool_calls", [])
+                                if isinstance(tc, dict)
+                            ]
+                            content = (
+                                f"[调用工具: {', '.join(tool_names)}]"
+                                if tool_names
+                                else "[无文本内容]"
+                            )
+                        label = "[blue]你[/blue]" if role == "user" else "[green]Naumi[/green]"
+                        console.print(f"  {label}: {content}")
+                console.print()
     else:
         console.print(f"[red]会话 {session_id} 不存在[/red]")
         console.print("[dim]使用 /history 查看可用会话[/dim]")

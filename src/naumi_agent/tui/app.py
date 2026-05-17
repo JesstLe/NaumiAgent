@@ -809,6 +809,24 @@ class NaumiApp(App):
     async def on_unmount(self) -> None:
         await self.engine.shutdown()
 
+    def on_mount(self) -> None:
+        """Auto-resume latest session on startup (like Claude Code)."""
+        self._auto_resume_latest()
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _auto_resume_latest(self) -> None:
+        """Auto-load the most recent session with user conversation."""
+        try:
+            sessions, _ = await self.engine.list_sessions(page=1, page_size=1)
+        except Exception:
+            return
+        if not sessions:
+            return
+        session = sessions[0]
+        if not any(m.get("role") == "user" for m in session.messages):
+            return
+        await self._load_and_show_session(session.id)
+
     def on_user_input_message(self, msg: UserInputMessage) -> None:
         text = msg.content.strip()
 
