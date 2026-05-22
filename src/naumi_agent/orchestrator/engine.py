@@ -16,7 +16,7 @@ from naumi_agent.memory.compactor import ContextCompactor
 from naumi_agent.memory.long_term import LongTermMemory
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.router import ModelRouter, ModelTier, TokenUsage
-from naumi_agent.orchestrator.planner import AdaptivePlanner, ExecutionMode
+from naumi_agent.orchestrator.planner import AdaptivePlanner, ExecutionMode, Plan
 from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
@@ -152,7 +152,8 @@ or use analysis_eval after implementing a feature to generate tests).
 to verify. If a tool returns "Successfully", the action is done. Move on.
 3. Use tools precisely — provide exact file paths and commands
 4. Explain what you're doing before taking actions
-5. If something fails, analyze the error and try a different approach
+5. If something fails, analyze the error and fix it within the current \
+approach. Only switch approaches if the current one is provably impossible.
 6. Use memory_store to save important user preferences, facts, or decisions
 7. Use memory_recall to check if relevant information was discussed before
 8. For complex subtasks (coding, research, browsing), consider delegating to specialized agents
@@ -166,6 +167,21 @@ to refresh after clicks, scrolls, or dynamic content changes.
 (from goto or observe results).
 - After a user asks to "open a website" or "go to a URL", call browser_goto \
 ONCE, then immediately respond to the user. Do NOT call goto again.
+
+## Decision Commitment (CRITICAL — obey strictly)
+
+1. Once you choose an approach, COMMIT to it. Do NOT switch to a different \
+approach mid-execution.
+2. If something fails, fix it within the current approach — do NOT start over \
+with a new approach.
+3. "Done and good enough" is ALWAYS better than "perfect but never finished". \
+Complete your current work and present it.
+4. After completing the task, STOP. Do not add extra polish, try alternatives, \
+or explore tangential ideas.
+5. If you catch yourself thinking "let me try X instead", STOP — finish your \
+current approach first.
+6. One complete solution > three half-finished attempts. Always prefer \
+completing what you started over starting something new.
 """
 
 
@@ -699,7 +715,7 @@ class AgentEngine:
             if plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
                 result = await self._run_orchestrated(plan, tools)
             else:
-                result = await self._react_loop(tools)
+                result = await self._react_loop(tools, plan=plan)
         except Exception as e:
             logger.exception("Agent loop failed")
             result = AgentResult(status="error", error=self._format_error(e))
@@ -735,7 +751,11 @@ class AgentEngine:
         ))
 
         try:
-            result = await self._react_loop_streaming(tools, on_event)
+            plan = await self._planner.plan(task)
+            if plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
+                result = await self._run_orchestrated(plan, tools)
+            else:
+                result = await self._react_loop_streaming(tools, on_event, plan=plan)
         except Exception as e:
             logger.exception("Agent streaming loop failed")
             error_msg = self._format_error(e)
@@ -809,12 +829,41 @@ class AgentEngine:
             return False
         return history[-1] == sig and history[-2] == sig
 
-    async def _react_loop(self, tools: list[dict[str, Any]] | None) -> AgentResult:
+    def _format_plan_as_guidance(self, plan: Plan) -> str | None:
+        """Format a plan as system message guidance for decision commitment."""
+        if plan.approach == "直接执行" or len(plan.steps) <= 1:
+            return None
+        lines = ["## 执行计划指导"]
+        lines.append(f"策略：{plan.approach}")
+        lines.append(f"任务理解：{plan.understanding}")
+        lines.append("执行步骤：")
+        for i, step in enumerate(plan.steps, 1):
+            tool_hint = f"（工具：{step.tool}）" if step.tool else ""
+            lines.append(f"  {i}. {step.description} {tool_hint}")
+        if plan.potential_issues:
+            lines.append(f"注意事项：{'、'.join(plan.potential_issues)}")
+        lines.append("")
+        lines.append("请按此计划逐步执行。一旦开始执行某一步骤，请完成它，不要中途切换到其他方案。")
+        return "\n".join(lines)
+
+    async def _react_loop(
+        self,
+        tools: list[dict[str, Any]] | None,
+        plan: Plan | None = None,
+    ) -> AgentResult:
         """ReAct 循环：推理 → 行动 → 观察."""
         max_turns = self._config.safety.max_turns
         tool_call_history: list[str] = []
+        convergence_injected = False
+
+        # Inject plan as guidance to prevent approach oscillation
+        if plan:
+            plan_guidance = self._format_plan_as_guidance(plan)
+            if plan_guidance:
+                self._append_message({"role": "system", "content": plan_guidance})
 
         for turn in range(max_turns):
+            self._behavior_monitor.begin_turn(turn)
             self._usage.turns = turn + 1
 
             exceeded = self._check_budget()
@@ -935,6 +984,29 @@ class AgentEngine:
 
                 tool_call_history.extend(cur_calls)
 
+                # Active intervention: break approach oscillation
+                intervention = self._behavior_monitor.check_intervention()
+                if intervention is not None:
+                    self._append_message({
+                        "role": "system",
+                        "content": intervention.message,
+                    })
+                    if intervention.action == "force_converge":
+                        if convergence_injected:
+                            last_text = ""
+                            for m in reversed(self._messages):
+                                if m.get("role") == "assistant" and m.get("content"):
+                                    last_text = m["content"]
+                                    break
+                            return AgentResult(
+                                status="completed",
+                                response=self._output_guardrail.redact(
+                                    last_text or "任务执行被强制收敛（检测到方案振荡）。"
+                                ),
+                                usage=self._usage,
+                            )
+                        convergence_injected = True
+
                 exceeded = self._check_budget()
                 if exceeded:
                     return exceeded
@@ -961,14 +1033,23 @@ class AgentEngine:
         self,
         tools: list[dict[str, Any]] | None,
         on_event: EventCallback,
+        plan: Plan | None = None,
     ) -> AgentResult:
         """流式 ReAct 循环：通过 router.stream() 逐 token 输出."""
         max_turns = self._config.safety.max_turns
         model_str = self._router.resolve_model(ModelTier.CAPABLE)
         session_id = self._session.id if self._session else ""
         tool_call_history: list[str] = []
+        convergence_injected = False
+
+        # Inject plan as guidance to prevent approach oscillation
+        if plan:
+            plan_guidance = self._format_plan_as_guidance(plan)
+            if plan_guidance:
+                self._append_message({"role": "system", "content": plan_guidance})
 
         for turn in range(max_turns):
+            self._behavior_monitor.begin_turn(turn)
             self._usage.turns = turn + 1
 
             exceeded = self._check_budget()
@@ -1152,6 +1233,31 @@ class AgentEngine:
                     )
 
                 tool_call_history.extend(cur_calls)
+
+                # Active intervention: break approach oscillation
+                intervention = self._behavior_monitor.check_intervention()
+                if intervention is not None:
+                    self._append_message({
+                        "role": "system",
+                        "content": intervention.message,
+                    })
+                    if intervention.action == "force_converge":
+                        if convergence_injected:
+                            last_text = ""
+                            for m in reversed(self._messages):
+                                if m.get("role") == "assistant" and m.get("content"):
+                                    last_text = m["content"]
+                                    break
+                            await on_event("response_start", {})
+                            force_msg = last_text or "任务执行被强制收敛（检测到方案振荡）。"
+                            await on_event("token", {"content": force_msg})
+                            await on_event("response_end", {})
+                            return AgentResult(
+                                status="completed",
+                                response=self._output_guardrail.redact(force_msg),
+                                usage=self._usage,
+                            )
+                        convergence_injected = True
 
                 exceeded = self._check_budget()
                 if exceeded:

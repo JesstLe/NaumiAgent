@@ -90,6 +90,147 @@ class TestBehaviorMonitor:
         assert len(warnings) == 0
 
 
+class TestBehaviorMonitorTurnTracking:
+    """Tests for turn-level tracking and begin_turn()."""
+
+    def test_begin_turn_saves_previous_tools(self) -> None:
+        monitor = BehaviorMonitor()
+        monitor.begin_turn(0)
+        monitor.record_tool_call("tool_a")
+        monitor.record_tool_call("tool_b")
+        monitor.begin_turn(1)
+        assert len(monitor._turn_records) == 1
+        assert monitor._turn_records[0].tools == ["tool_a", "tool_b"]
+
+    def test_begin_turn_resets_current_tools(self) -> None:
+        monitor = BehaviorMonitor()
+        monitor.begin_turn(0)
+        monitor.record_tool_call("tool_a")
+        monitor.begin_turn(1)
+        assert monitor._current_turn_tools == []
+
+    def test_begin_turn_empty_turn_not_saved(self) -> None:
+        monitor = BehaviorMonitor()
+        monitor.begin_turn(0)
+        # No tools recorded in turn 0
+        monitor.begin_turn(1)
+        assert len(monitor._turn_records) == 0
+
+    def test_reset_clears_turn_state(self) -> None:
+        monitor = BehaviorMonitor()
+        monitor.begin_turn(0)
+        monitor.record_tool_call("tool_a")
+        monitor.begin_turn(1)
+        assert len(monitor._turn_records) == 1
+        monitor.reset()
+        assert len(monitor._turn_records) == 0
+        assert monitor._current_turn_tools == []
+        assert monitor._intervention_count == 0
+
+
+class TestBehaviorMonitorIntervention:
+    """Tests for approach oscillation detection and intervention."""
+
+    def test_no_intervention_few_turns(self) -> None:
+        monitor = BehaviorMonitor()
+        monitor.begin_turn(0)
+        monitor.record_tool_call("tool_a")
+        monitor.begin_turn(1)
+        monitor.record_tool_call("tool_b")
+        assert monitor.check_intervention() is None
+
+    def test_no_intervention_consistent_tools(self) -> None:
+        """Same tool every turn = no oscillation."""
+        monitor = BehaviorMonitor()
+        for i in range(5):
+            monitor.begin_turn(i)
+            monitor.record_tool_call("tool_a")
+            if i < 4:
+                monitor.begin_turn(i + 1)
+        # Current turn tools are ["tool_a"], turn_records have 4 entries all ["tool_a"]
+        assert monitor.check_intervention() is None
+
+    def test_oscillation_detected_different_tools(self) -> None:
+        """Completely different tools each turn = oscillation."""
+        monitor = BehaviorMonitor(
+            approach_overlap_threshold=0.3,
+            approach_diversity_window=6,
+        )
+        tools = ["analysis_chaos", "analysis_scale", "analysis_state", "analysis_eval"]
+        for i, tool in enumerate(tools):
+            monitor.begin_turn(i)
+            monitor.record_tool_call(tool)
+
+        intervention = monitor.check_intervention()
+        assert intervention is not None
+        assert intervention.action in ("inject_message", "force_converge")
+
+    def test_progressive_intervention(self) -> None:
+        """First oscillation → inject_message, second → force_converge."""
+        monitor = BehaviorMonitor(max_interventions=2)
+
+        # Build 3 turns with different tools
+        for i, tool in enumerate(["analysis_chaos", "analysis_scale", "analysis_state"]):
+            monitor.begin_turn(i)
+            monitor.record_tool_call(tool)
+
+        i1 = monitor.check_intervention()
+        assert i1 is not None
+        assert i1.action == "inject_message"
+        assert i1.severity == 2
+
+        # Continue oscillating
+        monitor.begin_turn(3)
+        monitor.record_tool_call("analysis_eval")
+        monitor.begin_turn(4)
+        monitor.record_tool_call("analysis_graph")
+
+        i2 = monitor.check_intervention()
+        assert i2 is not None
+        assert i2.action == "force_converge"
+        assert i2.severity == 3
+
+    def test_force_converge_immediate_with_low_max(self) -> None:
+        """With max_interventions=1, first oscillation triggers force_converge."""
+        monitor = BehaviorMonitor(max_interventions=1)
+        for i, tool in enumerate(["tool_a", "tool_b", "tool_c", "tool_d"]):
+            monitor.begin_turn(i)
+            monitor.record_tool_call(tool)
+
+        intervention = monitor.check_intervention()
+        assert intervention is not None
+        assert intervention.action == "force_converge"
+
+    def test_partial_overlap_not_oscillation(self) -> None:
+        """50% tool overlap between turns is stable, not oscillation."""
+        monitor = BehaviorMonitor(approach_overlap_threshold=0.3)
+        # Turn 0: tool_a, tool_b
+        monitor.begin_turn(0)
+        monitor.record_tool_call("tool_a")
+        monitor.record_tool_call("tool_b")
+        # Turn 1: tool_b, tool_c (50% overlap with turn 0)
+        monitor.begin_turn(1)
+        monitor.record_tool_call("tool_b")
+        monitor.record_tool_call("tool_c")
+        # Turn 2: tool_c, tool_d (50% overlap with turn 1)
+        monitor.begin_turn(2)
+        monitor.record_tool_call("tool_c")
+        monitor.record_tool_call("tool_d")
+
+        assert monitor.check_intervention() is None
+
+    def test_reset_clears_intervention_history(self) -> None:
+        monitor = BehaviorMonitor()
+        for i, tool in enumerate(["tool_a", "tool_b", "tool_c"]):
+            monitor.begin_turn(i)
+            monitor.record_tool_call(tool)
+        monitor.check_intervention()  # Triggers first intervention
+
+        monitor.reset()
+        # After reset, no turn data → no intervention
+        assert monitor.check_intervention() is None
+
+
 class TestOutputGuardrail:
     def test_redact_api_key(self) -> None:
         guardrail = OutputGuardrail()
