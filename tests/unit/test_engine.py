@@ -10,7 +10,9 @@ from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.orchestrator.engine import AgentEngine
-from naumi_agent.tools.base import ToolCall
+from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
+from naumi_agent.safety.behavior import BehaviorMonitor
+from naumi_agent.tools.base import ToolCall, ToolResult
 
 
 @pytest.fixture
@@ -364,3 +366,205 @@ class TestMemoryInjection:
             await engine.run("do something")
 
         mock_recall.assert_called_once()
+
+
+class TestPlanInjection:
+    """Tests for plan guidance injection into the ReAct loop."""
+
+    @pytest.mark.asyncio
+    async def test_multi_step_plan_injected(self, engine: AgentEngine) -> None:
+        plan = Plan(
+            understanding="analyze code",
+            approach="multi-step analysis",
+            steps=[
+                Step(
+                    id="s1", description="read files", tool="file_read",
+                    depends_on=[], parallelizable=False, complexity=Complexity.SIMPLE,
+                ),
+                Step(
+                    id="s2", description="write report", tool="file_write",
+                    depends_on=["s1"], parallelizable=False, complexity=Complexity.SIMPLE,
+                ),
+            ],
+            mode=ExecutionMode.PROMPT_CHAIN,
+        )
+
+        mock_response = ModelResponse(
+            content="Done!",
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=0.001),
+            model="test-model",
+        )
+        with patch.object(
+            engine._router, "call", new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await engine._react_loop(
+                engine.tool_registry.get_openai_tools(), plan=plan,
+            )
+
+        assert result.status == "completed"
+        system_msgs = [
+            m for m in engine._messages
+            if m.get("role") == "system" and "执行计划指导" in m.get("content", "")
+        ]
+        assert len(system_msgs) == 1
+        assert "multi-step analysis" in system_msgs[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_simple_plan_not_injected(self, engine: AgentEngine) -> None:
+        plan = Plan(
+            understanding="simple task",
+            approach="直接执行",
+            steps=[
+                Step(
+                    id="s1", description="do it", tool=None,
+                    depends_on=[], parallelizable=False, complexity=Complexity.SIMPLE,
+                ),
+            ],
+            mode=ExecutionMode.SINGLE_TURN,
+        )
+
+        mock_response = ModelResponse(
+            content="Done!",
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=0.001),
+            model="test-model",
+        )
+        with patch.object(
+            engine._router, "call", new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await engine._react_loop(
+                engine.tool_registry.get_openai_tools(), plan=plan,
+            )
+
+        assert result.status == "completed"
+        system_msgs = [
+            m for m in engine._messages
+            if m.get("role") == "system" and "执行计划指导" in m.get("content", "")
+        ]
+        assert len(system_msgs) == 0
+
+    @pytest.mark.asyncio
+    async def test_no_plan_no_injection(self, engine: AgentEngine) -> None:
+        mock_response = ModelResponse(
+            content="Done!",
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=0.001),
+            model="test-model",
+        )
+        with patch.object(
+            engine._router, "call", new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await engine._react_loop(
+                engine.tool_registry.get_openai_tools(), plan=None,
+            )
+
+        assert result.status == "completed"
+        system_msgs = [
+            m for m in engine._messages
+            if m.get("role") == "system" and "执行计划指导" in m.get("content", "")
+        ]
+        assert len(system_msgs) == 0
+
+
+class TestOscillationBreaking:
+    """Tests for force-converge termination when approach oscillation is detected."""
+
+    @pytest.mark.asyncio
+    async def test_force_converge_terminates_loop(self, engine: AgentEngine) -> None:
+        """After max interventions, force_converge should terminate the loop."""
+        engine._behavior_monitor = BehaviorMonitor(max_interventions=1)
+
+        call_count = 0
+        tool_names = [
+            "analysis_chaos", "analysis_scale", "analysis_state",
+            "analysis_eval", "analysis_graph", "analysis_mcts",
+        ]
+
+        async def mock_call(**kwargs: object) -> ModelResponse:
+            nonlocal call_count
+            name = tool_names[call_count % len(tool_names)]
+            call_count += 1
+            return ModelResponse(
+                content="",
+                tool_calls=[{
+                    "id": f"c{call_count}",
+                    "function": {"name": name, "arguments": "{}"},
+                }],
+                usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=0.001),
+                model="test-model",
+            )
+
+        async def mock_execute(tc: ToolCall) -> ToolResult:
+            return ToolResult(
+                call_id=tc.id, status="success", content="mocked",
+            )
+
+        engine._config.safety.max_turns = 20
+
+        with (
+            patch.object(
+                engine._router, "call", new_callable=AsyncMock,
+                side_effect=mock_call,
+            ),
+            patch.object(
+                engine, "_execute_tool", new_callable=AsyncMock,
+                side_effect=mock_execute,
+            ),
+        ):
+            result = await engine.run("展示一项能力")
+
+        assert result.status == "completed"
+        assert call_count < 20  # Terminated early by force_converge
+
+    @pytest.mark.asyncio
+    async def test_intervention_message_injected(self, engine: AgentEngine) -> None:
+        """Oscillating tools should cause an intervention system message."""
+        engine._behavior_monitor = BehaviorMonitor(max_interventions=3)
+
+        call_count = 0
+        tool_names = ["analysis_chaos", "analysis_scale", "analysis_state"]
+
+        final_response = ModelResponse(
+            content="最终结果",
+            usage=TokenUsage(input_tokens=5, output_tokens=3, total_tokens=8, cost_usd=0.001),
+            model="test-model",
+        )
+
+        async def mock_call(**kwargs: object) -> ModelResponse:
+            nonlocal call_count
+            if call_count >= 4:
+                return final_response
+            name = tool_names[call_count % len(tool_names)]
+            call_count += 1
+            return ModelResponse(
+                content="",
+                tool_calls=[{
+                    "id": f"c{call_count}",
+                    "function": {"name": name, "arguments": "{}"},
+                }],
+                usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=0.001),
+                model="test-model",
+            )
+
+        async def mock_execute(tc: ToolCall) -> ToolResult:
+            return ToolResult(call_id=tc.id, status="success", content="mocked")
+
+        with (
+            patch.object(
+                engine._router, "call", new_callable=AsyncMock,
+                side_effect=mock_call,
+            ),
+            patch.object(
+                engine, "_execute_tool", new_callable=AsyncMock,
+                side_effect=mock_execute,
+            ),
+        ):
+            result = await engine.run("test oscillation")
+
+        # Check that intervention messages were injected
+        intervention_msgs = [
+            m for m in engine._messages
+            if m.get("role") == "system" and "频繁切换执行方案" in m.get("content", "")
+        ]
+        assert len(intervention_msgs) >= 1
