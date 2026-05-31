@@ -16,6 +16,7 @@ from prompt_toolkit.layout import Float, FloatContainer, HSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl, UIContent
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.layout import Layout
+from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.styles import Style
 
@@ -134,6 +135,7 @@ _STYLE = Style.from_dict(
         "border-active": "#00aa00",
         "prompt": "#00aa00 bold",
         "processing": "#888888",
+        "status": "#888888",
     }
 )
 
@@ -164,6 +166,7 @@ class CLIApp:
         self._output_win: _OutputWindow | None = None
         self._git_branch: str = ""
         self._git_dirty: bool = False
+        self._status_text = "就绪"
 
         self._last_esc_time = 0.0
 
@@ -267,6 +270,11 @@ class CLIApp:
             self._output_win.scroll_to_bottom()
         self._invalidate()
 
+    def set_status(self, text: str) -> None:
+        """Update fixed bottom status text without adding it to chat history."""
+        self._status_text = text
+        self._invalidate()
+
     def get_transcript(self) -> str:
         """Return the complete visible transcript, including live output."""
         return "".join([*self._output, *self._live])
@@ -301,6 +309,13 @@ class CLIApp:
             result.append(("[SetCursorPosition]", ""))
         return result
 
+    def _render_status(self) -> FormattedText:
+        cols = shutil.get_terminal_size().columns
+        text = f" {self._status_text}"
+        if len(text) > cols:
+            text = text[: max(0, cols - 1)] + "…"
+        return FormattedText([("class:status", text)])
+
     def _build_app(self) -> Application:
         cols = shutil.get_terminal_size().columns
 
@@ -309,6 +324,7 @@ class CLIApp:
             wrap_lines=True,
             always_hide_cursor=True,
             height=Dimension(min=1, weight=1),
+            right_margins=[ScrollbarMargin(display_arrows=False)],
         )
         self._output_win.scroll_to_bottom()
 
@@ -347,7 +363,12 @@ class CLIApp:
             ),
         )
 
-        body = HSplit([self._output_win, border_top, input_win, border_bot])
+        status_win = Window(
+            height=1,
+            content=FormattedTextControl(self._render_status),
+        )
+
+        body = HSplit([self._output_win, status_win, border_top, input_win, border_bot])
         root = FloatContainer(
             content=body,
             floats=[
