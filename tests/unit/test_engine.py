@@ -470,6 +470,34 @@ class TestHookIntegration:
         assert stops == ["completed"]
 
 
+class TestTaskVisualization:
+    @pytest.mark.asyncio
+    async def test_task_tool_emits_snapshot_event(self, engine: AgentEngine) -> None:
+        session = await engine.get_or_create_session()
+        engine.task_store.set_session(session.id)
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        result = await engine._execute_tool(ToolCall(
+            id="todo-1",
+            name="todo_write",
+            arguments=json.dumps({
+                "todos": [
+                    {"content": "读取实现", "status": "completed"},
+                    {"content": "补测试", "status": "pending", "blocked_by": ["1"]},
+                ],
+            }, ensure_ascii=False),
+        ), on_event=on_event)
+
+        assert result.status == "success"
+        snapshots = [data for event, data in events if event == "task_snapshot"]
+        assert snapshots
+        assert snapshots[-1]["source"] == "todo_write"
+        assert "补测试" in str(snapshots[-1]["summary"])
+
+
 class TestBudgetCheck:
     def test_budget_exceeded_returns_stop_result(self, engine: AgentEngine) -> None:
         engine._budget_tracker._total_input = 999_999_999

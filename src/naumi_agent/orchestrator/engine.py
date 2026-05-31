@@ -48,6 +48,14 @@ EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 
+_TASK_EVENT_TOOLS = {
+    "todo_write",
+    "task_create",
+    "task_update",
+    "task_list",
+    "task_delete",
+}
+
 SYSTEM_PROMPT = """\
 You are NaumiAgent, a general-purpose AI assistant with tool access.
 
@@ -171,12 +179,13 @@ approach. Only switch approaches if the current one is provably impossible.
 8. For complex subtasks (coding, research, browsing), consider delegating to specialized agents
 
 ## Task Management (use tools to self-track progress)
+- **todo_write**: Batch-sync the todo list before complex work and after each step.
 - **task_create**: Create a task with subject and optional dependencies.
 - **task_update**: Mark a task in_progress (with active_form) or completed.
 - **task_list**: View all tasks and their status.
 - **task_delete**: Remove a task that's no longer needed.
 - Always create tasks BEFORE starting work on multi-step problems.
-- Mark tasks completed immediately when done — do not batch updates.
+- Mark tasks completed immediately when done; use todo_write for multiple related changes.
 
 ## Browser Tool Usage
 - **browser_goto**: Navigate to a URL. Call ONCE per URL. Returns SoM elements \
@@ -900,6 +909,27 @@ class AgentEngine:
             },
             session_id=session_id,
         ), on_event)
+
+    async def _emit_task_snapshot(
+        self,
+        on_event: EventCallback | None,
+        *,
+        source: str,
+    ) -> None:
+        """Emit a user-visible task list after task tools mutate state."""
+        if on_event is None or source not in _TASK_EVENT_TOOLS:
+            return
+        try:
+            from naumi_agent.tasks.store import format_task_list
+
+            tasks = await self.task_store.list_tasks()
+            await on_event("task_snapshot", {
+                "source": source,
+                "count": len(tasks),
+                "summary": format_task_list(tasks),
+            })
+        except Exception as e:
+            logger.debug("Task snapshot event failed: %s", e)
 
     def _check_budget(self) -> AgentResult | None:
         if PermissionMode(self._config.safety.permission_mode) == PermissionMode.BYPASS:
@@ -1780,6 +1810,7 @@ class AgentEngine:
             duration = int((time.time() - start) * 1000)
 
             logger.info("Tool %s executed in %dms", tc.name, duration)
+            await self._emit_task_snapshot(on_event, source=tc.name)
             return ToolResult(
                 call_id=tc.id,
                 status="success",

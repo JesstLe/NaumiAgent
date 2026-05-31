@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, cast
 
@@ -29,6 +30,29 @@ CREATE TABLE IF NOT EXISTS tasks (
     PRIMARY KEY (session_id, id)
 )
 """
+
+
+@dataclass(frozen=True)
+class TaskWriteItem:
+    """Normalized input for batch task writes."""
+
+    subject: str
+    status: TaskStatus = TaskStatus.PENDING
+    id: str | None = None
+    description: str = ""
+    active_form: str | None = None
+    owner: str | None = None
+    blocked_by: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class TaskWriteResult:
+    """Result of a batch task write."""
+
+    tasks: list[Task]
+    created: list[str] = field(default_factory=list)
+    updated: list[str] = field(default_factory=list)
+    deleted: list[str] = field(default_factory=list)
 
 
 def _task_to_row(task: Task) -> dict[str, Any]:
@@ -268,6 +292,114 @@ class TaskStore:
             await db.commit()
             return True
 
+    async def write_tasks(
+        self,
+        items: list[TaskWriteItem],
+        *,
+        replace: bool = False,
+    ) -> TaskWriteResult:
+        """Batch-create/update tasks, optionally replacing the visible task list."""
+        if not self._session_id:
+            raise ValueError("当前没有活跃会话")
+
+        now = datetime.now().isoformat()
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_table(db)
+            existing_tasks = await self._list_tasks(db)
+            existing = {task.id: task for task in existing_tasks}
+            final = dict(existing)
+            touched: set[str] = set()
+            created: list[str] = []
+            updated: list[str] = []
+            seen_ids: set[str] = set()
+
+            highest = _highest_task_id(existing_tasks)
+            for item in items:
+                subject = item.subject.strip()
+                if not subject:
+                    raise ValueError("任务标题不能为空")
+
+                if item.id:
+                    task_id = item.id.strip()
+                    if not task_id:
+                        raise ValueError("任务 ID 不能为空")
+                    if task_id in seen_ids:
+                        raise ValueError(f"任务 #{task_id} 在 todo 列表中重复出现")
+                    if task_id not in existing:
+                        raise ValueError(f"任务 #{task_id} 不存在，新增任务请省略 id")
+                    previous = existing[task_id]
+                    if (
+                        previous.status == TaskStatus.COMPLETED
+                        and item.status != TaskStatus.COMPLETED
+                    ):
+                        raise ValueError(f"任务 #{task_id} 已完成，不能回退状态")
+                    created_at = previous.created_at
+                    updated.append(task_id)
+                else:
+                    highest += 1
+                    task_id = str(highest)
+                    created_at = now
+                    created.append(task_id)
+
+                seen_ids.add(task_id)
+                touched.add(task_id)
+                active_form = item.active_form if item.status == TaskStatus.IN_PROGRESS else None
+                final[task_id] = Task(
+                    id=task_id,
+                    session_id=self._session_id,
+                    subject=subject,
+                    description=item.description,
+                    status=item.status,
+                    active_form=active_form,
+                    owner=item.owner,
+                    blocked_by=list(dict.fromkeys(item.blocked_by)),
+                    created_at=created_at,
+                    updated_at=now,
+                )
+
+            deleted: list[str] = []
+            if replace:
+                deleted = [task_id for task_id in existing if task_id not in touched]
+                for task_id in deleted:
+                    final.pop(task_id, None)
+
+            _validate_task_dependencies(final)
+            _rebuild_reverse_edges(final)
+            for task_id, task in final.items():
+                previous = existing.get(task_id)
+                if previous is not None and previous.blocks != task.blocks:
+                    task.updated_at = now
+
+            for task_id in deleted:
+                await db.execute(
+                    "DELETE FROM tasks WHERE id = ? AND session_id = ?",
+                    (task_id, self._session_id),
+                )
+
+            for task in final.values():
+                row = _task_to_row(task)
+                await db.execute(
+                    """INSERT OR REPLACE INTO tasks
+                       (id, session_id, subject, description, status, active_form,
+                        owner, blocks, blocked_by, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        row["id"], row["session_id"], row["subject"], row["description"],
+                        row["status"], row["active_form"], row["owner"],
+                        row["blocks"], row["blocked_by"], row["created_at"], row["updated_at"],
+                    ),
+                )
+
+            await db.commit()
+            tasks = await self._list_tasks(db)
+
+        return TaskWriteResult(
+            tasks=tasks,
+            created=created,
+            updated=updated,
+            deleted=deleted,
+        )
+
     async def list_tasks(self) -> list[Task]:
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_table(db)
@@ -319,3 +451,32 @@ def format_task_list(tasks: list[Task], all_tasks: list[Task] | None = None) -> 
         f"({len(tasks)} 项：{completed} 完成，{in_progress} 进行中，{pending} 待处理)"
     )
     return header + "\n" + "\n".join(lines)
+
+
+def _highest_task_id(tasks: list[Task]) -> int:
+    highest = 0
+    for task in tasks:
+        try:
+            highest = max(highest, int(task.id))
+        except ValueError:
+            continue
+    return highest
+
+
+def _validate_task_dependencies(tasks: dict[str, Task]) -> None:
+    ids = set(tasks)
+    for task in tasks.values():
+        for blocker_id in task.blocked_by:
+            if blocker_id not in ids:
+                raise ValueError(f"依赖任务 #{blocker_id} 不存在")
+            if blocker_id == task.id:
+                raise ValueError(f"任务 #{task.id} 不能依赖自身")
+
+
+def _rebuild_reverse_edges(tasks: dict[str, Task]) -> None:
+    blocks = {task_id: [] for task_id in tasks}
+    for task in tasks.values():
+        for blocker_id in task.blocked_by:
+            blocks[blocker_id].append(task.id)
+    for task_id, task in tasks.items():
+        task.blocks = blocks[task_id]
