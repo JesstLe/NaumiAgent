@@ -1684,6 +1684,35 @@ class NaumiApp(App):
         self.call_after_refresh(chat._refresh_scroll)
         self.call_after_refresh(chat.scroll_end, animate=False)
 
+        # --- Show session stats immediately in chat panel ---
+        stats_parts: list[str] = []
+        model = getattr(session, "model", "")
+        if model:
+            stats_parts.append(model)
+        user_msgs = sum(1 for m in session.messages if m.get("role") == "user")
+        stats_parts.append(f"消息: {user_msgs}条")
+        if session.total_tokens:
+            stats_parts.append(f"Token: {session.total_tokens}")
+        if session.total_cost_usd > 0:
+            stats_parts.append(f"费用: ${session.total_cost_usd:.4f}")
+        ctx = self.engine.get_context_info()
+        ctx_pct = ctx["percentage"]
+        used_k = ctx["used"] / 1000
+        window_k = ctx["window"] / 1000
+        stats_parts.append(f"上下文: {used_k:.0f}K/{window_k:.0f}K ({ctx_pct}%)")
+        budget = self.engine.get_budget_info()
+        stats_parts.append(
+            f"预算: ${budget['used_usd']:.4f}/${budget['max_usd']:.2f}"
+        )
+        stats_line = " | ".join(stats_parts)
+        chat.mount(
+            Static(
+                Text.from_markup(f"[dim]  {stats_line}[/dim]"),
+                classes="usage-info",
+            )
+        )
+        chat.scroll_end(animate=False)
+
         title = session.title or session_id
         msg_count = len(session.messages)
         status.status_text = (
