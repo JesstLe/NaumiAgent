@@ -99,6 +99,9 @@ class TestPermissionChecker:
             "self_review",
             "forge_tool",
             "pursue_goal",
+            "pursuit_list",
+            "pursuit_status",
+            "pursuit_resume",
             "yaml_validate",
         ]:
             result = checker.check(tool_name, {})

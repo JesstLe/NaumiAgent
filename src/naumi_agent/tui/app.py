@@ -1864,6 +1864,11 @@ class NaumiApp(App):
         chat = self.query_one(ChatPanel)
         status = self.query_one(StatusBar)
 
+        parts = goal.strip().split(maxsplit=1)
+        if parts and parts[0] in {"list", "status", "resume"}:
+            await self._run_pursue_meta(parts[0], parts[1] if len(parts) > 1 else "")
+            return
+
         chat.mount(
             Markdown(
                 f"**🎯 目标追踪启动**\n\n{goal}",
@@ -1906,6 +1911,38 @@ class NaumiApp(App):
             input_bar = self.query_one(InputBar)
             msg_input = input_bar.query_one("#msg-input", Input)
             msg_input.focus()
+
+    async def _run_pursue_meta(self, subcommand: str, arg: str) -> None:
+        """执行 pursuit 持久化状态命令."""
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        tool_map = {
+            "list": "pursuit_list",
+            "status": "pursuit_status",
+            "resume": "pursuit_resume",
+        }
+        tool_name = tool_map[subcommand]
+        tool = self.engine.tool_registry.get(tool_name)
+        if tool is None:
+            chat.mount(Markdown(f"**工具未注册**: `{tool_name}`", classes="agent-msg"))
+            return
+        if subcommand in {"status", "resume"} and not arg:
+            status.status_text = f"用法: /pursue {subcommand} <运行ID>"
+            return
+        status.status_text = "目标追踪状态处理中..."
+        try:
+            if subcommand == "list":
+                result = await tool.execute(active_only="--active" in arg.split())
+            else:
+                result = await tool.execute(run_id=arg.strip())
+            chat.mount(
+                Markdown(
+                    f"## 目标追踪状态\n\n{result}",
+                    classes="agent-msg",
+                )
+            )
+        finally:
+            status.status_text = "就绪"
 
     @work(exclusive=True, exit_on_error=False)
     async def _run_worktree_command(self, arg: str) -> None:

@@ -20,6 +20,7 @@ from naumi_agent.orchestrator.pursuit import (
     PursuitRunStatus,
     SuccessCriterion,
 )
+from naumi_agent.orchestrator.pursuit_store import PursuitStore, format_run
 from naumi_agent.orchestrator.subagent_manager import SubAgentManager
 
 
@@ -498,6 +499,101 @@ class TestPursuitExecutionStrategy:
         )
 
 
+class TestPursuitPersistence:
+    def test_store_round_trips_run_evidence_and_waits(self, tmp_path) -> None:
+        store = PursuitStore(tmp_path / "pursuit")
+        now = time.time()
+        run = PursuitRun(
+            id="pursuit_1",
+            goal="持久化目标",
+            status=PursuitRunStatus.WAITING,
+            phase="waiting",
+            started_at=now,
+            updated_at=now,
+            iteration=2,
+            criteria_total=3,
+            criteria_verified=1,
+            worktree_name="pursue-demo",
+            worktree_path="/tmp/pursue-demo",
+            waiting_on=[
+                PursuitBackgroundWait(
+                    task_id="bg_0001",
+                    action_id="a1",
+                    command="python -m pytest tests/ -q",
+                    created_at=now,
+                )
+            ],
+            evidence=[
+                PursuitEvidence(
+                    kind="background",
+                    source="bg_0001",
+                    summary="后台任务已启动",
+                    is_hard=True,
+                    timestamp=now,
+                )
+            ],
+        )
+
+        store.save_run(run)
+        restored = store.get_run("pursuit_1")
+
+        assert restored is not None
+        assert restored.status == PursuitRunStatus.WAITING
+        assert restored.waiting_on[0].task_id == "bg_0001"
+        assert restored.evidence[0].summary == "后台任务已启动"
+        assert "持久化目标" in format_run(restored)
+
+    @pytest.mark.asyncio
+    async def test_loop_persists_waiting_state_and_resume_collects_output(self, tmp_path) -> None:
+        store = PursuitStore(tmp_path / "pursuit")
+        engine = _make_engine()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            store=store,
+        )
+        now = time.time()
+        run = PursuitRun(
+            id="pursuit_wait",
+            goal="等待后台任务",
+            status=PursuitRunStatus.WAITING,
+            phase="waiting",
+            started_at=now,
+            updated_at=now,
+            waiting_on=[
+                PursuitBackgroundWait(
+                    task_id="bg_0001",
+                    action_id="a1",
+                    command="echo done",
+                    created_at=now,
+                )
+            ],
+        )
+        store.save_run(run)
+
+        status = MagicMock()
+        status.execute = AsyncMock(return_value="### 后台任务 bg_0001\n- 状态：已完成")
+        output = MagicMock()
+        output.execute = AsyncMock(return_value="done")
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(
+            side_effect=lambda name: {
+                "background_status": status,
+                "background_read_output": output,
+            }.get(name)
+        )
+
+        result = await loop.resume_persisted("pursuit_wait")
+        restored = store.get_run("pursuit_wait")
+
+        assert "目标追踪状态已恢复" in result
+        assert restored is not None
+        assert restored.status == PursuitRunStatus.RUNNING
+        assert restored.waiting_on == []
+        assert any(item.kind == "background" and item.is_hard for item in restored.evidence)
+
+
 class TestCancel:
     @pytest.mark.asyncio
     async def test_cancel_sets_flag(self) -> None:
@@ -518,6 +614,10 @@ class TestPursueToolRegistration:
         tool = engine.tool_registry.get("pursue_goal")
         assert tool is not None
         assert tool.name == "pursue_goal"
+        assert engine.tool_registry.get("pursuit_list") is not None
+        assert engine.tool_registry.get("pursuit_status") is not None
+        assert engine.tool_registry.get("pursuit_resume") is not None
+        assert hasattr(engine, "pursuit_store")
 
     @pytest.mark.asyncio
     async def test_tool_execute_without_init(self) -> None:
@@ -529,3 +629,30 @@ class TestPursueToolRegistration:
         tool = PursueTool()
         result = await tool.execute(goal="test")
         assert "尚未初始化" in result
+
+    @pytest.mark.asyncio
+    async def test_pursuit_status_tool_reads_store(self, tmp_path) -> None:
+        import naumi_agent.tools.pursuit as pursuit_mod
+        from naumi_agent.tools.pursuit import PursuitStatusTool
+
+        store = PursuitStore(tmp_path / "pursuit")
+        now = time.time()
+        store.save_run(PursuitRun(
+            id="pursuit_status",
+            goal="查询状态",
+            status=PursuitRunStatus.RUNNING,
+            phase="assess",
+            started_at=now,
+            updated_at=now,
+        ))
+        pursuit_mod._global_pursuit_loop = GoalPursuitLoop(
+            router=MagicMock(),
+            tool_registry=MagicMock(),
+            subagent_manager=MagicMock(),
+            store=store,
+        )
+
+        result = await PursuitStatusTool().execute(run_id="pursuit_status")
+
+        assert "PursuitRun pursuit_status" in result
+        assert "查询状态" in result

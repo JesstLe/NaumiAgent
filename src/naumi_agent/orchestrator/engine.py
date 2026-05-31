@@ -18,6 +18,7 @@ from naumi_agent.memory.long_term import LongTermMemory
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.router import ModelRouter, ModelTier, TokenUsage
 from naumi_agent.orchestrator.planner import AdaptivePlanner, ExecutionMode, Plan
+from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
@@ -266,6 +267,9 @@ class AgentEngine:
         self.scheduler_runner = SchedulerRunner(
             SchedulerStore(Path(config.memory.session_db_path).parent / "scheduler")
         )
+        self.pursuit_store = PursuitStore(
+            Path(config.memory.session_db_path).parent / "pursuit"
+        )
         self.worktree_manager = WorktreeManager(
             repo_root=self.workspace_root,
             storage_dir=Path(config.memory.session_db_path).parent / "worktrees",
@@ -372,6 +376,7 @@ class AgentEngine:
             router=self._router,
             tool_registry=self._tool_registry,
             subagent_manager=self.subagent_manager,
+            store=self.pursuit_store,
         )
         from naumi_agent.tools.pursuit import create_pursuit_tool
         for tool in create_pursuit_tool():
