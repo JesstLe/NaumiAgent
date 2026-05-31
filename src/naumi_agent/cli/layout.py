@@ -23,6 +23,7 @@ from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.styles import Style
+from prompt_toolkit.utils import get_cwidth
 
 from naumi_agent.cli_completer import SlashCommandCompleter
 from naumi_agent.clipboard import copy_or_save_transcript
@@ -151,6 +152,30 @@ def _border_line(cols: int, left: str, mid: str, right: str, cls: str = "border"
     if safe_cols == 1:
         return [("class:" + cls, left)]
     return [("class:" + cls, left + (mid * max(0, safe_cols - 2)) + right)]
+
+
+def _fit_text_to_width(text: str, cols: int) -> str:
+    """Return text padded or truncated to exactly *cols* terminal cells."""
+    if cols <= 0:
+        return ""
+    if get_cwidth(text) <= cols:
+        return text + (" " * (cols - get_cwidth(text)))
+
+    marker = "…"
+    marker_width = get_cwidth(marker)
+    if cols <= marker_width:
+        return marker[:cols]
+
+    target = cols - marker_width
+    out: list[str] = []
+    width = 0
+    for char in text:
+        char_width = get_cwidth(char)
+        if width + char_width > target:
+            break
+        out.append(char)
+        width += char_width
+    return "".join(out) + (" " * max(0, target - width)) + marker
 
 
 class _DynamicLineControl(UIControl):
@@ -289,6 +314,10 @@ class CLIApp:
             self._output_win.scroll_to_bottom()
         self._invalidate()
 
+    def reset_output(self) -> None:
+        """Replace the transcript view with a fresh scroll state."""
+        self.clear_output()
+
     def set_status(self, text: str) -> None:
         """Update fixed bottom status text without adding it to chat history."""
         self._status_text = text
@@ -330,9 +359,7 @@ class CLIApp:
 
     def _render_status(self, cols: int) -> FormattedText:
         text = f" {self._status_text}"
-        if len(text) > cols:
-            text = text[: max(0, cols - 1)] + "…"
-        return FormattedText([("class:status", text)])
+        return FormattedText([("class:status", _fit_text_to_width(text, cols))])
 
     def _build_app(self) -> Application:
         self._output_win = _OutputWindow(

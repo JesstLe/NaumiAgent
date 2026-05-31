@@ -2072,6 +2072,11 @@ async def _show_history(engine: Any) -> None:
 
 def _replay_session_to_cli(cli: Any, session: Any, engine: Any = None) -> None:
     """将会话的所有消息完整回放到 CLI 输出区，像从未关过一样."""
+    if hasattr(cli, "reset_output"):
+        cli.reset_output()
+    elif hasattr(cli, "clear_output"):
+        cli.clear_output()
+
     title = session.title or session.id
     msg_count = len(session.messages)
     cli.append_output(
@@ -2119,14 +2124,11 @@ def _replay_session_to_cli(cli: Any, session: Any, engine: Any = None) -> None:
             else:
                 cli.append_output(f"  {icon}\n")
 
-    # --- Show session stats immediately ---
-    stats = _build_session_stats(session, engine)
-    if stats:
-        cli.append_output(stats)
-
     cli.append_output(
         "\033[2m━━━ 会话已恢复，继续对话或 /new 开始新会话 ━━━\033[0m\n\n"
     )
+    if engine is not None:
+        _show_cli_status(cli, engine)
 
 
 def _build_session_stats(session: Any, engine: Any = None) -> str:
@@ -2171,14 +2173,13 @@ async def _load_session(engine: Any, session_id: str) -> None:
     if loaded:
         session = engine._session
         if session:
-            # For CLI: show stats, then replay via _capture
-            console.print(
-                f"[green]已加载会话:[/green] {session.title or session_id} "
-                f"({len(session.messages)}条消息)"
-            )
             if _active_cli:
                 _replay_session_to_cli(_active_cli, session, engine=engine)
             else:
+                console.print(
+                    f"[green]已加载会话:[/green] {session.title or session_id} "
+                    f"({len(session.messages)}条消息)"
+                )
                 # Non-interactive mode fallback: brief summary
                 user_msgs = [
                     m for m in session.messages
