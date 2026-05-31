@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from rich.markdown import Markdown as RichMarkdown
@@ -26,6 +27,7 @@ from textual.widgets import (
 )
 
 from naumi_agent.cli_completer import COMMANDS
+from naumi_agent.clipboard import copy_or_save_transcript
 from naumi_agent.orchestrator.engine import AgentEngine
 
 logger = logging.getLogger(__name__)
@@ -853,6 +855,7 @@ class NaumiApp(App):
         Binding("tab", "toggle_activity", "活动面板"),
         Binding("ctrl+h", "toggle_history", "历史"),
         Binding("ctrl+l", "clear_chat", "清空"),
+        Binding("ctrl+y", "copy_transcript", "复制记录"),
         Binding("ctrl+t", "show_tools", "工具列表"),
         Binding("ctrl+b", "toggle_browser", "浏览器"),
     ]
@@ -891,6 +894,7 @@ class NaumiApp(App):
             window_k = ctx["window"] / 1000
             status.status_text = (
                 f"{model} | "
+                f"工作目录: {Path.cwd()} | "
                 f"上下文: 0K/{window_k:.0f}K | "
                 f"预算: $0.0000/${budget['max_usd']:.2f}"
             )
@@ -965,6 +969,8 @@ class NaumiApp(App):
                 help_text = (
                     "## 可用命令\n"
                     "- `/help` — 显示帮助\n"
+                    "- `/copy` — 复制/导出当前完整记录 (Ctrl+Y)\n"
+                    "- `/pwd` — 显示当前工作目录\n"
                     "- `/tools` — 列出可用工具\n"
                     "- `/model` — 显示模型配置\n"
                     "- `/usage` — 显示 token 用量\n"
@@ -1026,6 +1032,19 @@ class NaumiApp(App):
                     "- `/quit` — 退出\n"
                 )
                 chat.mount(Markdown(help_text, classes="agent-msg"))
+            case "/copy":
+                self.action_copy_transcript()
+            case "/pwd":
+                cwd = Path.cwd()
+                chat.mount(
+                    Markdown(
+                        f"## 当前工作目录\n\n`{cwd}`\n\n"
+                        f"相对路径 `workspace/showcase/index.html` 会写入：\n\n"
+                        f"`{cwd / 'workspace' / 'showcase' / 'index.html'}`",
+                        classes="agent-msg",
+                    )
+                )
+                status.status_text = f"工作目录: {cwd}"
             case "/tools" | "/t":
                 tools = self.engine.tool_registry.all()
                 lines = ["## 可用工具\n"]
@@ -1743,6 +1762,69 @@ class NaumiApp(App):
         chat = self.query_one(ChatPanel)
         chat.clear()
         self.engine.reset()
+        self._show_startup_status()
+
+    def action_copy_transcript(self) -> None:
+        """Copy or export the full diagnostic transcript."""
+        status = self.query_one(StatusBar)
+        result = copy_or_save_transcript(
+            self._build_session_transcript(),
+            base_dir=Path.cwd() / "data",
+            prefix="tui-transcript",
+        )
+        status.status_text = result.message
+
+    def _build_session_transcript(self) -> str:
+        """Build a plain-text transcript from the engine conversation state."""
+        lines = [
+            "NaumiAgent TUI 会话记录",
+            f"工作目录: {Path.cwd()}",
+        ]
+        session = getattr(self.engine, "_session", None)
+        if session is not None:
+            lines.append(f"会话ID: {session.id}")
+            if session.title:
+                lines.append(f"标题: {session.title}")
+        lines.append("")
+
+        messages = (
+            getattr(self.engine, "_full_history", None)
+            or getattr(self.engine, "_messages", [])
+            or []
+        )
+        if not messages:
+            lines.append("当前还没有可导出的会话消息。")
+            return "\n".join(lines)
+
+        for index, message in enumerate(messages, start=1):
+            role = message.get("role", "")
+            content = str(message.get("content") or "")
+            if role == "user":
+                lines.append(f"[{index}] 你\n{content}")
+            elif role == "assistant":
+                reasoning = str(message.get("reasoning_content") or "")
+                lines.append(f"[{index}] NaumiAgent")
+                if reasoning:
+                    lines.append(f"思考过程:\n{reasoning}")
+                if content:
+                    lines.append(content)
+                for tool_call in message.get("tool_calls", []) or []:
+                    function = (
+                        tool_call.get("function", {})
+                        if isinstance(tool_call, dict)
+                        else {}
+                    )
+                    name = function.get("name", "tool")
+                    args = function.get("arguments", "")
+                    lines.append(f"工具调用: {name}\n{args}")
+            elif role == "tool":
+                name = message.get("name") or message.get("tool_call_id") or "tool"
+                lines.append(f"[{index}] 工具结果 {name}\n{content}")
+            else:
+                lines.append(f"[{index}] {role or 'unknown'}\n{content}")
+            lines.append("")
+
+        return "\n".join(lines).rstrip() + "\n"
 
     @work(exclusive=True, exit_on_error=False)
     async def _delete_session(self, session_id: str, title: str) -> None:
