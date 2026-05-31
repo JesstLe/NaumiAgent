@@ -245,6 +245,8 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
         console.print(_format_hook_trace(data))
     elif event == "task_snapshot":
         console.print(_format_task_snapshot(data))
+    elif event == "subagent_event":
+        console.print(_format_subagent_event(data))
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":
@@ -309,6 +311,17 @@ def _format_task_snapshot(data: dict[str, Any]) -> str:
     source = str(data.get("source", "todo"))
     summary = str(data.get("summary", "当前没有任务。"))
     return f"\033[36m  todo 更新: {source}\033[0m\n{summary}"
+
+
+def _format_subagent_event(data: dict[str, Any]) -> str:
+    """Format subagent lifecycle events for user-visible output."""
+    status = str(data.get("status", "?"))
+    agent = str(data.get("agent_name", "") or "未匹配")
+    task_id = str(data.get("task_id", "?"))
+    message = str(data.get("message", "") or "")
+    color = "32" if status == "completed" else "31" if status in {"error", "failed"} else "36"
+    suffix = f" · {message}" if message else ""
+    return f"\033[{color}m  subagent {status}: {agent} / {task_id}{suffix}\033[0m"
 
 
 def _extract_diff_block(content: str) -> tuple[str, str, str] | None:
@@ -393,6 +406,8 @@ def _cli_event_factory(cli: Any):
             cli.append_live(_format_hook_trace(data) + "\n")
         elif event == "task_snapshot":
             cli.append_live(_format_task_snapshot(data) + "\n")
+        elif event == "subagent_event":
+            cli.append_live(_format_subagent_event(data) + "\n")
         elif event == "response_start":
             cli.finalize_live()
             cli.append_output(f"{_sep(thin=False)}\n")

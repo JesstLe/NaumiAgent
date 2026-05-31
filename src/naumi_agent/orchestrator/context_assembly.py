@@ -105,6 +105,7 @@ class HarnessContextAssembler:
             "- 汇总："
             f"{counts[TaskStatus.COMPLETED]} 完成，"
             f"{counts[TaskStatus.IN_PROGRESS]} 进行中，"
+            f"{counts[TaskStatus.BLOCKED]} 阻塞，"
             f"{counts[TaskStatus.PENDING]} 待处理"
         ]
         for task in tasks[:_MAX_LINES_PER_SECTION]:

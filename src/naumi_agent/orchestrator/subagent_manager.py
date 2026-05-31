@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult, BaseAgent
 from naumi_agent.agents.factory import DynamicAgentFactory
@@ -19,6 +20,8 @@ if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
 
 logger = logging.getLogger(__name__)
+
+EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 _IDLE_TIMEOUT_SECONDS = 300  # 5 minutes
 _REAPER_INTERVAL_SECONDS = 30
@@ -319,10 +322,23 @@ class SubAgentManager:
 
         return best_match
 
-    async def delegate(self, task: SubTask, extra_context: str = "") -> AgentResult:
+    async def delegate(
+        self,
+        task: SubTask,
+        extra_context: str = "",
+        event_callback: EventCallback | None = None,
+    ) -> AgentResult:
         """将子任务委派给合适的 Agent."""
         agent_name = task.agent_name or self.select_agent(task.description)
         if not agent_name:
+            await _emit_subagent_event(
+                event_callback,
+                status="failed",
+                task_id=task.id,
+                agent_name="",
+                description=task.description,
+                message="没有找到合适的子 Agent。",
+            )
             return AgentResult(
                 status="error",
                 error=f"No suitable agent for: {task.description[:100]}",
@@ -330,6 +346,14 @@ class SubAgentManager:
 
         agent = self.get_agent(agent_name)
         if not agent:
+            await _emit_subagent_event(
+                event_callback,
+                status="failed",
+                task_id=task.id,
+                agent_name=agent_name,
+                description=task.description,
+                message=f"Agent {agent_name} 不存在。",
+            )
             return AgentResult(status="error", error=f"Agent not found: {agent_name}")
 
         context_parts = []
@@ -374,12 +398,21 @@ class SubAgentManager:
         logger.info("Delegating task %s to agent %s", task.id, agent_name)
         self._ensure_lifecycle(agent_name)
         self._transition(agent_name, AgentState.RUNNING)
+        await _emit_subagent_event(
+            event_callback,
+            status="started",
+            task_id=task.id,
+            agent_name=agent_name,
+            description=task.description,
+            message="子 Agent 已开始执行。",
+        )
 
         await self._hooks.fire(HookContext(
             point=HookPoint.DELEGATE_START,
             data={"task_id": task.id, "agent_name": agent_name, "description": task.description},
             agent_name=agent_name,
         ))
+        result: AgentResult
         try:
             await self._hooks.fire(HookContext(
                 point=HookPoint.AGENT_EXECUTE_START,
@@ -398,8 +431,34 @@ class SubAgentManager:
                 },
                 agent_name=agent_name,
             ))
+        except Exception as exc:
+            logger.exception("Agent %s failed while executing task %s", agent_name, task.id)
+            result = AgentResult(status="error", error=f"{type(exc).__name__}: {exc}")
+            await self._hooks.fire(HookContext(
+                point=HookPoint.AGENT_EXECUTE_END,
+                data={
+                    "task_id": task.id,
+                    "agent_name": agent_name,
+                    "status": result.status,
+                    "tokens": result.total_tokens,
+                    "cost": result.total_cost_usd,
+                    "error": result.error,
+                },
+                agent_name=agent_name,
+            ))
         finally:
             self._transition(agent_name, AgentState.IDLE)
+
+        await _emit_subagent_event(
+            event_callback,
+            status=result.status,
+            task_id=task.id,
+            agent_name=agent_name,
+            description=task.description,
+            message=_agent_result_message(result),
+            tokens=result.total_tokens,
+            cost=result.total_cost_usd,
+        )
 
         await self._hooks.fire(HookContext(
             point=HookPoint.DELEGATE_END,
@@ -589,3 +648,33 @@ class SubAgentManager:
                 entry["state"] = "uninitialized"
             result.append(entry)
         return result
+
+
+async def _emit_subagent_event(
+    callback: EventCallback | None,
+    *,
+    status: str,
+    task_id: str,
+    agent_name: str,
+    description: str,
+    message: str,
+    tokens: int = 0,
+    cost: float = 0.0,
+) -> None:
+    if callback is None:
+        return
+    await callback("subagent_event", {
+        "status": status,
+        "task_id": task_id,
+        "agent_name": agent_name,
+        "description": description,
+        "message": message,
+        "tokens": tokens,
+        "cost": cost,
+    })
+
+
+def _agent_result_message(result: AgentResult) -> str:
+    if result.status == "completed":
+        return "子 Agent 已完成任务。"
+    return result.error or result.response[:300] or "子 Agent 未完成任务。"

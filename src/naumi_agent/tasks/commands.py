@@ -57,6 +57,20 @@ async def run_todo_command(store: TaskStore, arg: str) -> str:
             return f"todo #{task.id} 已恢复为待处理。\n\n" + format_task_list(
                 await store.list_tasks()
             )
+        case "blocked":
+            task_id, reason = _split_id_and_tail(rest)
+            if not task_id:
+                return "用法：/todo blocked <id> <阻塞原因>"
+            task = await store.update_task(
+                task_id,
+                status=TaskStatus.BLOCKED,
+                active_form=f"阻塞：{reason}" if reason else "阻塞：等待外部条件",
+            )
+            if task is None:
+                return f"错误：todo #{task_id} 不存在。"
+            return f"todo #{task.id} 已标记为阻塞。\n\n" + format_task_list(
+                await store.list_tasks()
+            )
         case "delete":
             task_id = rest.strip()
             if not task_id:
@@ -77,6 +91,7 @@ async def run_todo_command(store: TaskStore, arg: str) -> str:
                 "/todo add <任务标题>\n"
                 "/todo start <id> [当前动作]\n"
                 "/todo done <id>\n"
+                "/todo blocked <id> <阻塞原因>\n"
                 "/todo pending <id>\n"
                 "/todo delete <id>\n"
                 "/todo clear"

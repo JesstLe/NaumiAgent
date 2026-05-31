@@ -1415,6 +1415,29 @@ class NaumiApp(App):
                         )
                     )
                     status.status_text = f"todo 已更新：{source}"
+                case "subagent_event":
+                    event_status = str(data.get("status", "?"))
+                    agent = str(data.get("agent_name", "") or "未匹配")
+                    task_id = str(data.get("task_id", "?"))
+                    message = str(data.get("message", "") or "")
+                    style = (
+                        "green"
+                        if event_status == "completed"
+                        else "red"
+                        if event_status in {"error", "failed"}
+                        else "cyan"
+                    )
+                    suffix = f" · {message}" if message else ""
+                    chat.mount(
+                        Static(
+                            Text.from_markup(
+                                f"  [{style}]subagent {event_status}: "
+                                f"{agent} / {task_id}{suffix}[/{style}]"
+                            ),
+                            classes="tool-done",
+                        )
+                    )
+                    status.status_text = f"subagent {event_status}: {agent}"
                 case "context_compacted":
                     logger.info(
                         "Context compacted: %d → %d messages",

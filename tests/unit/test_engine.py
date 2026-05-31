@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from naumi_agent.agents.base import AgentResult
 from naumi_agent.config.settings import AppConfig, MemoryConfig, SafetyConfig
 from naumi_agent.hooks import HookContext, HookPoint
 from naumi_agent.memory.session import Session
@@ -496,6 +497,158 @@ class TestTaskVisualization:
         assert snapshots
         assert snapshots[-1]["source"] == "todo_write"
         assert "补测试" in str(snapshots[-1]["summary"])
+
+
+class TestSubagentVisualization:
+    @pytest.mark.asyncio
+    async def test_delegate_task_emits_events_and_completes_linked_todo(
+        self,
+        tmp_path,
+    ) -> None:
+        engine = AgentEngine(AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db"))
+        ))
+        try:
+            await self._assert_delegate_task_emits_events_and_completes_linked_todo(engine)
+        finally:
+            await engine.shutdown()
+
+    async def _assert_delegate_task_emits_events_and_completes_linked_todo(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        engine.task_store.set_session(session.id)
+        task = await engine.task_store.create_task(subject="让 coder 检查实现")
+        coder = engine.subagent_manager.get_agent("coder")
+        assert coder is not None
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        with patch.object(
+            coder,
+            "execute",
+            new_callable=AsyncMock,
+            return_value=AgentResult(status="completed", response="检查完成"),
+        ):
+            result = await engine._execute_tool(ToolCall(
+                id="delegate-1",
+                name="delegate_task",
+                arguments=json.dumps({
+                    "task": "检查实现是否完整",
+                    "agent": "coder",
+                    "task_id": task.id,
+                    "success_criteria": "给出明确结论",
+                }, ensure_ascii=False),
+            ), on_event=on_event)
+
+        assert result.status == "success"
+        refreshed = await engine.task_store.get_task(task.id)
+        assert refreshed is not None
+        assert refreshed.status.value == "completed"
+        subagent_events = [data for event, data in events if event == "subagent_event"]
+        assert [event["status"] for event in subagent_events] == ["started", "completed"]
+        assert any(event == "task_snapshot" for event, _ in events)
+
+    @pytest.mark.asyncio
+    async def test_delegate_task_blocks_linked_todo_on_failure(
+        self,
+        tmp_path,
+    ) -> None:
+        engine = AgentEngine(AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db"))
+        ))
+        try:
+            await self._assert_delegate_task_blocks_linked_todo_on_failure(engine)
+        finally:
+            await engine.shutdown()
+
+    async def _assert_delegate_task_blocks_linked_todo_on_failure(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        engine.task_store.set_session(session.id)
+        task = await engine.task_store.create_task(subject="让 coder 处理失败用例")
+        coder = engine.subagent_manager.get_agent("coder")
+        assert coder is not None
+
+        with patch.object(
+            coder,
+            "execute",
+            new_callable=AsyncMock,
+            return_value=AgentResult(status="error", error="缺少输入"),
+        ):
+            result = await engine._execute_tool(ToolCall(
+                id="delegate-2",
+                name="delegate_task",
+                arguments=json.dumps({
+                    "task": "处理失败用例",
+                    "agent": "coder",
+                    "task_id": task.id,
+                }, ensure_ascii=False),
+            ))
+
+        assert result.status == "success"
+        refreshed = await engine.task_store.get_task(task.id)
+        assert refreshed is not None
+        assert refreshed.status.value == "blocked"
+        assert refreshed.active_form is not None
+        assert "缺少输入" in refreshed.active_form
+
+    @pytest.mark.asyncio
+    async def test_delegate_task_blocks_linked_todo_on_agent_exception(
+        self,
+        tmp_path,
+    ) -> None:
+        engine = AgentEngine(AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db"))
+        ))
+        try:
+            await self._assert_delegate_task_blocks_linked_todo_on_agent_exception(engine)
+        finally:
+            await engine.shutdown()
+
+    async def _assert_delegate_task_blocks_linked_todo_on_agent_exception(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        engine.task_store.set_session(session.id)
+        task = await engine.task_store.create_task(subject="让 coder 处理异常")
+        coder = engine.subagent_manager.get_agent("coder")
+        assert coder is not None
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        with patch.object(
+            coder,
+            "execute",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("执行器崩溃"),
+        ):
+            result = await engine._execute_tool(ToolCall(
+                id="delegate-3",
+                name="delegate_task",
+                arguments=json.dumps({
+                    "task": "处理异常",
+                    "agent": "coder",
+                    "task_id": task.id,
+                }, ensure_ascii=False),
+            ), on_event=on_event)
+
+        assert result.status == "success"
+        refreshed = await engine.task_store.get_task(task.id)
+        assert refreshed is not None
+        assert refreshed.status.value == "blocked"
+        assert refreshed.active_form is not None
+        assert "执行器崩溃" in refreshed.active_form
+        subagent_events = [data for event, data in events if event == "subagent_event"]
+        assert [event["status"] for event in subagent_events] == ["started", "error"]
 
 
 class TestBudgetCheck:

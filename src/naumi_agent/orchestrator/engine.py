@@ -6,6 +6,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from inspect import signature
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,7 @@ EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 logger = logging.getLogger(__name__)
 
 _TASK_EVENT_TOOLS = {
+    "delegate_task",
     "todo_write",
     "task_create",
     "task_update",
@@ -1806,6 +1808,8 @@ class AgentEngine:
 
         try:
             start = time.time()
+            if on_event is not None and "event_callback" in signature(tool.execute).parameters:
+                args["event_callback"] = on_event
             output = await tool.execute(**args)
             duration = int((time.time() - start) * 1000)
 
