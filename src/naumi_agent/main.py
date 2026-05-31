@@ -22,30 +22,37 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _get_git_info() -> dict[str, str | bool]:
-    """Get current git branch and dirty status."""
+    """Get current git branch and dirty status (cached per process)."""
     import subprocess
 
+    # Cache result for process lifetime
+    if hasattr(_get_git_info, "_cache"):
+        return _get_git_info._cache  # type: ignore[attr-defined]
+
+    result: dict[str, str | bool] = {"branch": "", "dirty": False}
     try:
         branch = subprocess.check_output(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             stderr=subprocess.DEVNULL,
             cwd=str(Path.cwd()),
         ).decode().strip()
+        if branch:
+            result["branch"] = branch
+            try:
+                result["dirty"] = bool(
+                    subprocess.check_output(
+                        ["git", "status", "--porcelain"],
+                        stderr=subprocess.DEVNULL,
+                        cwd=str(Path.cwd()),
+                    ).decode().strip()
+                )
+            except Exception:
+                pass
     except Exception:
-        return {"branch": "", "dirty": False}
-    if not branch:
-        return {"branch": "", "dirty": False}
-    try:
-        dirty = bool(
-            subprocess.check_output(
-                ["git", "status", "--porcelain"],
-                stderr=subprocess.DEVNULL,
-                cwd=str(Path.cwd()),
-            ).decode().strip()
-        )
-    except Exception:
-        dirty = False
-    return {"branch": branch, "dirty": dirty}
+        pass
+
+    _get_git_info._cache = result  # type: ignore[attr-defined]
+    return result
 
 app = typer.Typer(
     name="naumi",
@@ -112,6 +119,29 @@ def _tool_label(name: str, args: str = "") -> str:
     return f"{icon} {label}{hint}"
 
 
+def _show_cli_status(cli: Any, engine: Any) -> None:
+    """Show model, context, budget, git stats in the CLI output area."""
+    parts: list[str] = []
+    model = engine.router.resolve_model("capable")
+    parts.append(model)
+    u = engine.usage
+    total_tok = u.total_input_tokens + u.total_output_tokens
+    parts.append(f"Token: {total_tok}")
+    ctx = engine.get_context_info()
+    used_k = ctx["used"] / 1000
+    window_k = ctx["window"] / 1000
+    parts.append(f"上下文: {used_k:.0f}K/{window_k:.0f}K ({ctx['percentage']}%)")
+    budget = engine.get_budget_info()
+    parts.append(f"预算: ${budget['used_usd']:.4f}/${budget['max_usd']:.2f}")
+    git = _get_git_info()
+    if git["branch"]:
+        tag = git["branch"] + ("*" if git["dirty"] else "")
+        parts.append(f"📂 {tag}")
+    cli.append_output(
+        "\033[2m  " + " | ".join(parts) + "\033[0m\n\n"
+    )
+
+
 def _resolve_config_path(path: str) -> str:
     """如果指定路径存在就直接用，否则回退到项目根目录的 config.yaml."""
     if Path(path).exists():
@@ -169,7 +199,6 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
         args = data.get("args", "")
         label = _tool_label(name, args)
         sys.stdout.write(f"  {_sep()}\n\033[36m  ⏳ {label}\033[0m\n")
-        sys.stdout.flush()
         sys.stdout.flush()
     elif event == "tool_end":
         name = data.get("name", "?")
@@ -347,19 +376,7 @@ async def _chat(config_path: str) -> None:
         cli.set_git_info(git["branch"], git["dirty"])
 
     # Show startup stats line immediately
-    startup_parts: list[str] = []
-    model = engine.router.resolve_model("capable")
-    startup_parts.append(model)
-    ctx = engine.get_context_info()
-    startup_parts.append(f"上下文: 0K/{ctx['window'] / 1000:.0f}K")
-    budget = engine.get_budget_info()
-    startup_parts.append(f"预算: $0.0000/${budget['max_usd']:.2f}")
-    if git["branch"]:
-        tag = git["branch"] + ("*" if git["dirty"] else "")
-        startup_parts.append(f"📂 {tag}")
-    cli.append_output(
-        "\033[2m  " + " | ".join(startup_parts) + "\033[0m\n\n"
-    )
+    _show_cli_status(cli, engine)
 
     async def on_submit(text: str) -> None:
         if text in ("/quit", "/q", "/exit", "exit"):
@@ -434,6 +451,24 @@ async def _run_task(task: str, config_path: str) -> None:
         result = await engine.run(task)
 
     console.print(Markdown(result.response))
+    console.print()
+
+    # Show stats line
+    stats = Text()
+    model = engine.router.resolve_model("capable")
+    stats.append(f"{model}", style="dim")
+    stats.append(" | ", style="dim")
+    u = result.usage
+    total_tok = u.total_input_tokens + u.total_output_tokens
+    stats.append(f"Token: {total_tok}", style="dim")
+    stats.append(" | ", style="dim")
+    stats.append(f"费用: ${u.total_cost_usd:.4f}", style="dim")
+    stats.append(" | ", style="dim")
+    stats.append(f"轮次: {u.turns}", style="dim")
+    if result.status != "completed":
+        stats.append(f" | 状态: {result.status}", style="yellow")
+    console.print(stats)
+    console.print()
 
 
 @app.command()
@@ -620,9 +655,12 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             engine.reset()
             if _active_cli:
                 _active_cli.clear_output()
+                _show_cli_status(_active_cli, engine)
             console.print("[green]会话已清除[/green]")
         case "/new" | "/n":
             await _new_conversation(engine)
+            if _active_cli:
+                _show_cli_status(_active_cli, engine)
         case "/usage" | "/u":
             u = engine.usage
             console.print(
