@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 import asyncio
-import os
+from pathlib import Path
 from typing import Any
 
 from naumi_agent.tools.base import Tool
 
 
+def _resolve_workspace_path(path: str, workspace_root: Path) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = workspace_root / candidate
+    return candidate.resolve()
+
+
 class FileReadTool(Tool):
     """读取文件内容."""
+
+    def __init__(self, workspace_root: str | Path | None = None) -> None:
+        root = Path.cwd() if workspace_root is None else Path(workspace_root)
+        self._workspace_root = root.expanduser().resolve()
 
     @property
     def name(self) -> str:
@@ -44,12 +55,12 @@ class FileReadTool(Tool):
         }
 
     async def execute(self, *, path: str, offset: int = 0, limit: int = -1, **kwargs: Any) -> str:
-        resolved = os.path.expanduser(path)
-        if not os.path.isfile(resolved):
-            return f"Error: File not found: {path}"
+        resolved = _resolve_workspace_path(path, self._workspace_root)
+        if not resolved.is_file():
+            return f"Error: File not found: {path} (resolved: {resolved})"
 
         try:
-            with open(resolved, encoding="utf-8", errors="replace") as f:
+            with resolved.open(encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
 
             total = len(lines)
@@ -57,7 +68,7 @@ class FileReadTool(Tool):
             selected = lines[offset:end]
 
             result = "".join(selected)
-            header = f"📄 {path} ({total} 行"
+            header = f"📄 {resolved} ({total} 行"
             if offset > 0 or limit > 0:
                 header += f"，显示第 {offset + 1}-{end} 行"
             header += ")\n"
@@ -70,6 +81,10 @@ class FileReadTool(Tool):
 
 class FileWriteTool(Tool):
     """写入文件."""
+
+    def __init__(self, workspace_root: str | Path | None = None) -> None:
+        root = Path.cwd() if workspace_root is None else Path(workspace_root)
+        self._workspace_root = root.expanduser().resolve()
 
     @property
     def name(self) -> str:
@@ -97,17 +112,17 @@ class FileWriteTool(Tool):
         }
 
     async def execute(self, *, path: str, content: str, **kwargs: Any) -> str:
-        resolved = os.path.expanduser(path)
-        is_new = not os.path.isfile(resolved)
+        resolved = _resolve_workspace_path(path, self._workspace_root)
+        is_new = not resolved.is_file()
 
         try:
             old_content = ""
             if not is_new:
-                with open(resolved, encoding="utf-8") as f:
+                with resolved.open(encoding="utf-8") as f:
                     old_content = f.read()
 
-            os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
-            with open(resolved, "w", encoding="utf-8") as f:
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+            with resolved.open("w", encoding="utf-8") as f:
                 f.write(content)
 
             lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
@@ -115,16 +130,16 @@ class FileWriteTool(Tool):
             if is_new:
                 preview = self._preview_content(content, max_lines=15)
                 return (
-                    f"✅ 已创建 {path} ({lines} 行, {len(content)} 字符)\n\n"
+                    f"✅ 已创建 {resolved} ({lines} 行, {len(content)} 字符)\n\n"
                     f"```{self._guess_lang(path)}\n{preview}\n```"
                 )
 
             if old_content == content:
-                return f"ℹ️ {path} 内容未变化"
+                return f"ℹ️ {resolved} 内容未变化"
 
-            diff = self._make_diff(old_content, content, path)
+            diff = self._make_diff(old_content, content, str(resolved))
             return (
-                f"✅ 已覆写 {path} ({lines} 行, {len(content)} 字符)\n\n"
+                f"✅ 已覆写 {resolved} ({lines} 行, {len(content)} 字符)\n\n"
                 f"{diff}"
             )
         except Exception as e:
@@ -179,6 +194,10 @@ class FileWriteTool(Tool):
 class FileEditTool(Tool):
     """编辑文件 — 搜索替换."""
 
+    def __init__(self, workspace_root: str | Path | None = None) -> None:
+        root = Path.cwd() if workspace_root is None else Path(workspace_root)
+        self._workspace_root = root.expanduser().resolve()
+
     @property
     def name(self) -> str:
         return "file_edit"
@@ -212,31 +231,31 @@ class FileEditTool(Tool):
         }
 
     async def execute(self, *, path: str, old_text: str, new_text: str, **kwargs: Any) -> str:
-        resolved = os.path.expanduser(path)
+        resolved = _resolve_workspace_path(path, self._workspace_root)
 
-        if not os.path.isfile(resolved):
-            return f"Error: File not found: {path}"
+        if not resolved.is_file():
+            return f"Error: File not found: {path} (resolved: {resolved})"
 
         try:
-            with open(resolved, encoding="utf-8") as f:
+            with resolved.open(encoding="utf-8") as f:
                 content = f.read()
 
             count = content.count(old_text)
             if count == 0:
-                return f"Error: old_text not found in {path}"
+                return f"Error: old_text not found in {resolved}"
             if count > 1:
                 return (
-                    f"Error: old_text appears {count} times in {path}."
+                    f"Error: old_text appears {count} times in {resolved}."
                     " Please provide more context to make it unique."
                 )
 
             new_content = content.replace(old_text, new_text, 1)
-            with open(resolved, "w", encoding="utf-8") as f:
+            with resolved.open("w", encoding="utf-8") as f:
                 f.write(new_content)
 
-            diff = FileWriteTool._make_diff(content, new_content, path)
+            diff = FileWriteTool._make_diff(content, new_content, str(resolved))
             return (
-                f"✅ 已编辑 {path} (替换 1 处)\n\n{diff}"
+                f"✅ 已编辑 {resolved} (替换 1 处)\n\n{diff}"
             )
         except Exception as e:
             return f"Error editing file: {type(e).__name__}: {e}"
@@ -301,6 +320,10 @@ class YamlMicroVerifyTool(Tool):
 class BashRunTool(Tool):
     """执行 shell 命令."""
 
+    def __init__(self, workspace_root: str | Path | None = None) -> None:
+        root = Path.cwd() if workspace_root is None else Path(workspace_root)
+        self._workspace_root = root.expanduser().resolve()
+
     @property
     def name(self) -> str:
         return "bash_run"
@@ -335,15 +358,23 @@ class BashRunTool(Tool):
         self, *, command: str, timeout: int = 30, cwd: str | None = None, **kwargs: Any
     ) -> str:
         try:
+            workdir = (
+                _resolve_workspace_path(cwd, self._workspace_root)
+                if cwd
+                else self._workspace_root
+            )
+            if not workdir.is_dir():
+                return f"Error: 工作目录不存在: {workdir}"
+
             proc = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
+                cwd=str(workdir),
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
 
-            output_parts = []
+            output_parts = [f"工作目录: {workdir}"]
             if stdout:
                 output_parts.append(stdout.decode("utf-8", errors="replace"))
             if stderr:
@@ -365,14 +396,14 @@ class BashRunTool(Tool):
             return f"Error executing command: {type(e).__name__}: {e}"
 
 
-def create_builtin_tools() -> list[Tool]:
+def create_builtin_tools(workspace_root: str | Path | None = None) -> list[Tool]:
     """创建所有内置工具实例."""
     return [
-        FileReadTool(),
-        FileWriteTool(),
-        FileEditTool(),
+        FileReadTool(workspace_root),
+        FileWriteTool(workspace_root),
+        FileEditTool(workspace_root),
         YamlMicroVerifyTool(),
-        BashRunTool(),
+        BashRunTool(workspace_root),
         YamlValidateTool(),
     ]
 

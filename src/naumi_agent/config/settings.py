@@ -131,8 +131,16 @@ class AppConfig(BaseSettings):
     api: APIConfig = Field(default_factory=APIConfig)
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    workspace_root: str = Field(default_factory=lambda: str(Path.cwd()))
     custom_tools_dir: str | None = None
     log_level: str = "INFO"
+
+    def resolve_workspace_root(self) -> Path:
+        """Return the absolute workspace root used by relative file and shell tools."""
+        root = Path(self.workspace_root).expanduser()
+        if not root.is_absolute():
+            root = Path.cwd() / root
+        return root.resolve()
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> AppConfig:

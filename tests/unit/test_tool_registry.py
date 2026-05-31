@@ -84,6 +84,15 @@ class TestFileWriteTool:
         assert "已创建" in result or "Successfully" in result
         assert f.read_text() == "nested"
 
+    async def test_relative_write_uses_workspace_root(self, tmp_path) -> None:
+        tool = FileWriteTool(workspace_root=tmp_path)
+
+        result = await tool.execute(path="workspace/showcase/index.html", content="<h1>Hi</h1>")
+
+        target = tmp_path / "workspace" / "showcase" / "index.html"
+        assert target.read_text() == "<h1>Hi</h1>"
+        assert str(target) in result
+
 
 class TestFileEditTool:
     @pytest.fixture
@@ -101,6 +110,16 @@ class TestFileEditTool:
         )
         assert "已编辑" in result or "Successfully" in result
         assert f.read_text() == "foo BAR baz"
+
+    async def test_relative_edit_uses_workspace_root(self, tmp_path) -> None:
+        f = tmp_path / "edit.txt"
+        f.write_text("foo bar baz")
+        tool = FileEditTool(workspace_root=tmp_path)
+
+        result = await tool.execute(path="edit.txt", old_text="bar", new_text="BAR")
+
+        assert f.read_text() == "foo BAR baz"
+        assert str(f) in result
 
     async def test_edit_not_found(self, edit_tool: FileEditTool, tmp_path) -> None:
         f = tmp_path / "edit.txt"
@@ -141,3 +160,11 @@ class TestBashRunTool:
     async def test_command_failure(self, bash_tool: BashRunTool) -> None:
         result = await bash_tool.execute(command="exit 1")
         assert "exit code: 1" in result
+
+    async def test_default_cwd_uses_workspace_root(self, tmp_path) -> None:
+        tool = BashRunTool(workspace_root=tmp_path)
+
+        result = await tool.execute(command="pwd")
+
+        assert f"工作目录: {tmp_path}" in result
+        assert str(tmp_path) in result
