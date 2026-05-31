@@ -91,7 +91,10 @@ def _tool_label(name: str, args: str = "") -> str:
             d = json.loads(args) if isinstance(args, str) else args
             if isinstance(d, dict):
                 # Pick the most informative arg
-                for key in ("path", "file_path", "command", "query", "url", "task", "description", "goal"):
+                for key in (
+                    "path", "file_path", "command",
+                    "query", "url", "task", "description", "goal",
+                ):
                     if key in d:
                         val = str(d[key])
                         if len(val) > 50:
@@ -251,22 +254,26 @@ def _cli_event_factory(cli: Any):
                 cli.append_live(f"\033[2m{content}\033[0m")
         elif event == "thinking_start":
             thinking_started = True
-            cli.append_live("\033[2m💭 思考中...\033[0m\n")
+            cli.append_live(f"\033[2m{_SEP_THIN}\033[0m\n\033[2m💭 思考中...\033[0m\n")
         elif event == "thinking_end":
-            cli.append_live("\033[0m\n")
+            cli.append_live(f"\033[0m\n\033[2m{_SEP_THIN}\033[0m\n")
         elif event == "tool_start":
             name = data.get("name", "?")
-            cli.append_live(f"\033[36m  ⏳ {name}\033[0m\n")
+            args = data.get("args", "")
+            label = _tool_label(name, args)
+            cli.append_live(f"\033[2m{_SEP_THIN}\033[0m\n\033[36m  ⏳ {label}\033[0m\n")
         elif event == "tool_end":
             name = data.get("name", "?")
             status = data.get("status", "unknown")
             dur = data.get("duration_ms", 0)
+            label = _tool_label(name)
             if status == "success":
-                cli.append_live(f"\033[32m  ✓ {name} ({dur}ms)\033[0m\n")
+                cli.append_live(f"\033[32m  ✓ {label}\033[0m \033[2m({dur}ms)\033[0m\n")
             else:
-                cli.append_live(f"\033[31m  ✗ {name} 失败 ({dur}ms)\033[0m\n")
+                cli.append_live(f"\033[31m  ✗ {label} 失败 ({dur}ms)\033[0m\n")
         elif event == "response_start":
             cli.finalize_live()
+            cli.append_output(f"\033[2m{_SEP_THICK}\033[0m\n")
         elif event == "token":
             has_streamed_tokens = True
             content = data.get("content", "")
