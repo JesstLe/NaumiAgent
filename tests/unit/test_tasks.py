@@ -155,9 +155,9 @@ class TestFormatTaskList:
 
     def test_basic_format(self) -> None:
         tasks = [
-            Task(id="1", session_id="s", subject="Read files", status=TaskStatus.COMPLETED),
-            Task(id="2", session_id="s", subject="Analyze", status=TaskStatus.IN_PROGRESS),
-            Task(id="3", session_id="s", subject="Report", status=TaskStatus.PENDING),
+            Task(id="1", session_id="s", subject="Read files", description="", status=TaskStatus.COMPLETED),
+            Task(id="2", session_id="s", subject="Analyze", description="", status=TaskStatus.IN_PROGRESS),
+            Task(id="3", session_id="s", subject="Report", description="", status=TaskStatus.PENDING),
         ]
         result = format_task_list(tasks)
         assert "✓" in result
@@ -170,8 +170,8 @@ class TestFormatTaskList:
 
     def test_blocked_task_shows_dependency(self) -> None:
         tasks = [
-            Task(id="1", session_id="s", subject="A", status=TaskStatus.PENDING),
-            Task(id="2", session_id="s", subject="B", blocked_by=["1"]),
+            Task(id="1", session_id="s", subject="A", description="", status=TaskStatus.PENDING),
+            Task(id="2", session_id="s", subject="B", description="", blocked_by=["1"]),
         ]
         result = format_task_list(tasks)
         assert "blocked by #1" in result
@@ -182,6 +182,7 @@ class TestFormatTaskList:
                 id="1",
                 session_id="s",
                 subject="Test",
+                description="",
                 status=TaskStatus.IN_PROGRESS,
                 active_form="正在运行测试",
             ),

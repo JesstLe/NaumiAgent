@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS tasks (
-    id TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
     session_id TEXT NOT NULL,
     subject TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     blocks TEXT NOT NULL DEFAULT '[]',
     blocked_by TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, id)
 )
 """
 
