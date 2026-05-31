@@ -76,8 +76,14 @@ _TOOL_LABELS: dict[str, tuple[str, str]] = {
 }
 
 # ANSI separators for visual hierarchy
-_SEP_THIN = "\033[2m─" + "─" * 40 + "\033[0m"
-_SEP_THICK = "\033[2m━" + "━" * 40 + "\033[0m"
+def _sep(thin: bool = True) -> str:
+    """Build a terminal-width separator line."""
+    char = "─" if thin else "━"
+    try:
+        width = shutil.get_terminal_size().columns
+    except Exception:
+        width = 80
+    return f"\033[2m{char * width}\033[0m"
 
 
 def _tool_label(name: str, args: str = "") -> str:
@@ -153,17 +159,17 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
             sys.stdout.write(content)
             sys.stdout.flush()
     elif event == "thinking_start":
-        sys.stdout.write(f"\n{_SEP_THIN}\n\033[2m💭 思考中...\033[0m\n")
+        sys.stdout.write(f"\n{_sep()}\n\033[2m💭 思考中...\033[0m\n")
         sys.stdout.flush()
     elif event == "thinking_end":
-        sys.stdout.write(f"\033[0m\n{_SEP_THIN}\n")
+        sys.stdout.write(f"\033[0m\n{_sep()}\n")
         sys.stdout.flush()
     elif event == "tool_start":
         name = data.get("name", "?")
         args = data.get("args", "")
         label = _tool_label(name, args)
-        console.print(f"  \033[2m{_SEP_THIN}\033[0m")
-        sys.stdout.write(f"\033[36m  ⏳ {label}\033[0m\n")
+        sys.stdout.write(f"  {_sep()}\n\033[36m  ⏳ {label}\033[0m\n")
+        sys.stdout.flush()
         sys.stdout.flush()
     elif event == "tool_end":
         name = data.get("name", "?")
@@ -180,7 +186,8 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":
-        console.print(f"\033[2m{_SEP_THICK}\033[0m")
+        sys.stdout.write(f"{_sep(thin=False)}\n")
+        sys.stdout.flush()
     elif event == "response_end":
         console.print()
     elif event == "error":
@@ -254,14 +261,14 @@ def _cli_event_factory(cli: Any):
                 cli.append_live(f"\033[2m{content}\033[0m")
         elif event == "thinking_start":
             thinking_started = True
-            cli.append_live(f"\033[2m{_SEP_THIN}\033[0m\n\033[2m💭 思考中...\033[0m\n")
+            cli.append_live(f"{_sep()}\n\033[2m💭 思考中...\033[0m\n")
         elif event == "thinking_end":
-            cli.append_live(f"\033[0m\n\033[2m{_SEP_THIN}\033[0m\n")
+            cli.append_live(f"\033[0m\n{_sep()}\n")
         elif event == "tool_start":
             name = data.get("name", "?")
             args = data.get("args", "")
             label = _tool_label(name, args)
-            cli.append_live(f"\033[2m{_SEP_THIN}\033[0m\n\033[36m  ⏳ {label}\033[0m\n")
+            cli.append_live(f"{_sep()}\n\033[36m  ⏳ {label}\033[0m\n")
         elif event == "tool_end":
             name = data.get("name", "?")
             status = data.get("status", "unknown")
@@ -273,7 +280,7 @@ def _cli_event_factory(cli: Any):
                 cli.append_live(f"\033[31m  ✗ {label} 失败 ({dur}ms)\033[0m\n")
         elif event == "response_start":
             cli.finalize_live()
-            cli.append_output(f"\033[2m{_SEP_THICK}\033[0m\n")
+            cli.append_output(f"{_sep(thin=False)}\n")
         elif event == "token":
             has_streamed_tokens = True
             content = data.get("content", "")
@@ -314,7 +321,6 @@ def _cli_event_factory(cli: Any):
     handler._get_token_speed = _get_token_speed
     handler._get_ttft = _get_ttft
     handler._get_duration = _get_duration
-    handler._get_token_speed = _get_token_speed
     return handler
 
 
@@ -488,22 +494,6 @@ async def _capture_async(func: Any) -> str:
     finally:
         _self.console = orig
     return buf.getvalue()
-
-
-def _print_banner_to(c: Console, engine: Any) -> None:
-    from naumi_agent import __version__
-    from naumi_agent.assets import BANNER_TEXT
-
-    model = engine.router.resolve_model("capable")
-    c.print(
-        Panel(
-            BANNER_TEXT,
-            title=f"[bold]v{__version__}[/bold]",
-            subtitle=f"[dim]{model}[/dim]",
-            border_style="green",
-            padding=(1, 2),
-        )
-    )
 
 
 def _render_result(
@@ -1778,7 +1768,9 @@ def _replay_session_to_cli(cli: Any, session: Any) -> None:
             for tc in tool_calls:
                 tc_dict = tc if isinstance(tc, dict) else {}
                 tc_name = tc_dict.get("function", {}).get("name", "tool")
-                cli.append_output(f"\033[36m  ⏳ {tc_name}\033[0m\n")
+                tc_args = tc_dict.get("function", {}).get("arguments", "")
+                label = _tool_label(tc_name, tc_args)
+                cli.append_output(f"\033[36m  ✓ {label}\033[0m\n")
 
         elif role == "tool":
             is_placeholder = "工具调用结果缺失" in content
@@ -1811,9 +1803,10 @@ def _replay_session_to_cli(cli: Any, session: Any) -> None:
                     if len(preview_lines) > 30:
                         preview += f"\n  ... ({len(preview_lines) - 30} more lines)"
                 else:
-                    preview = "\n".join(lines[:8])
-                    if len(lines) > 8:
-                        preview += f"\n  ... ({len(lines) - 8} more lines)"
+                    max_lines = 80 if "```" in content else 30
+                    preview = "\n".join(lines[:max_lines])
+                    if len(lines) > max_lines:
+                        preview += f"\n  ... ({len(lines) - max_lines} more lines)"
                     preview = f"\033[2m{preview}\033[0m"
                 cli.append_output(f"  {icon} {preview}\n")
             else:

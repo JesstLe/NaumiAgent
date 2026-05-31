@@ -1289,6 +1289,8 @@ class NaumiApp(App):
     async def _run_agent(self, task: str) -> None:
         import time
 
+        from naumi_agent.main import _tool_label
+
         chat = self.query_one(ChatPanel)
         status = self.query_one(StatusBar)
 
@@ -1340,13 +1342,11 @@ class NaumiApp(App):
                     pass
                 case "tool_start":
                     tool_name = data["name"]
-                    from naumi_agent.main import _tool_label
                     label = _tool_label(tool_name, data.get("args", ""))
                     chat.start_tool(label)
                     status.status_text = f"{label}..."
                 case "tool_end":
                     tool_name = data["name"]
-                    from naumi_agent.main import _tool_label
                     label = _tool_label(tool_name)
                     chat.end_tool(label, data["status"], data["duration_ms"])
                 case "context_compacted":
