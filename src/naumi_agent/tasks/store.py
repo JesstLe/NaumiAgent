@@ -132,7 +132,7 @@ class TaskStore:
         blocked_by: list[str] | None = None,
     ) -> Task:
         now = datetime.now().isoformat()
-        blocked_by = blocked_by or []
+        blocked_by = list(dict.fromkeys(blocked_by or []))
 
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_table(db)
