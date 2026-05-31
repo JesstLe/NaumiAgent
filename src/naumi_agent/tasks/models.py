@@ -30,5 +30,8 @@ class Task:
 
     def is_blocked(self, all_tasks: list[Task]) -> bool:
         """Check if any blocking task is still unresolved."""
+        task_ids = {t.id for t in all_tasks}
         unresolved = {t.id for t in all_tasks if t.status != TaskStatus.COMPLETED}
-        return bool(set(self.blocked_by) & unresolved)
+        # Dangling references (deleted blockers) are treated as blocking
+        dangling = set(self.blocked_by) - task_ids
+        return bool((set(self.blocked_by) & unresolved) | dangling)

@@ -452,6 +452,7 @@ class AgentEngine:
         self._full_history.clear()
         self._usage = AgentUsage()
         self._session = None
+        self.task_store.set_session("")
         self._behavior_monitor.reset()
         self._permission_checker.reset_counts()
 
@@ -469,6 +470,8 @@ class AgentEngine:
         await self._browser_session.stop()
         if self._mcp_manager:
             await self._mcp_manager.disconnect_all()
+        if hasattr(self, "task_store"):
+            self.task_store.set_session("")
         await self.session_store.close()
 
     async def reload_tools(self, domain: str = "tools") -> dict[str, Any]:
