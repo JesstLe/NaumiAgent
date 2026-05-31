@@ -232,15 +232,22 @@ class TestFormatTaskList:
                 id="3", session_id="s", subject="Report",
                 description="", status=TaskStatus.PENDING,
             ),
+            Task(
+                id="4", session_id="s", subject="Blocked",
+                description="", status=TaskStatus.BLOCKED, active_form="阻塞：等待输入",
+            ),
         ]
         result = format_task_list(tasks)
         assert "✓" in result
         assert "●" in result
         assert "○" in result
-        assert "3 项" in result
+        assert "!" in result
+        assert "4 项" in result
         assert "1 完成" in result
         assert "1 进行中" in result
+        assert "1 阻塞" in result
         assert "1 待处理" in result
+        assert "阻塞：等待输入" in result
 
     def test_blocked_task_shows_dependency(self) -> None:
         tasks = [
@@ -403,10 +410,12 @@ class TestTodoCommand:
     async def test_manual_todo_command_uses_store(self, store: TaskStore) -> None:
         added = await run_todo_command(store, "add 读取实现")
         started = await run_todo_command(store, "start 1 正在读取实现")
+        blocked = await run_todo_command(store, "blocked 1 等待用户确认")
         done = await run_todo_command(store, "done 1")
 
         assert "已添加" in added
         assert "进行中" in started
+        assert "阻塞" in blocked
         assert "已完成" in done
         tasks = await store.list_tasks()
         assert tasks[0].status == TaskStatus.COMPLETED

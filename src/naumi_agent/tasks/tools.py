@@ -61,7 +61,7 @@ class TodoWriteTool(Tool):
                             },
                             "status": {
                                 "type": "string",
-                                "enum": ["pending", "in_progress", "completed"],
+                                "enum": ["pending", "in_progress", "blocked", "completed"],
                                 "description": "任务状态。",
                             },
                             "active_form": {
@@ -238,10 +238,10 @@ class TaskUpdateTool(Tool):
                 },
                 "status": {
                     "type": "string",
-                    "enum": ["pending", "in_progress", "completed"],
+                    "enum": ["pending", "in_progress", "blocked", "completed"],
                     "description": (
                         "新状态：pending（待处理）、"
-                        "in_progress（进行中）、completed（已完成）"
+                        "in_progress（进行中）、blocked（阻塞）、completed（已完成）"
                     ),
                 },
                 "active_form": {
@@ -257,8 +257,24 @@ class TaskUpdateTool(Tool):
 
     # 允许的状态转换（completed 为终止态，不可回退）
     _VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
-        TaskStatus.PENDING: {TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED},
-        TaskStatus.IN_PROGRESS: {TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED, TaskStatus.PENDING},
+        TaskStatus.PENDING: {
+            TaskStatus.PENDING,
+            TaskStatus.IN_PROGRESS,
+            TaskStatus.BLOCKED,
+            TaskStatus.COMPLETED,
+        },
+        TaskStatus.IN_PROGRESS: {
+            TaskStatus.IN_PROGRESS,
+            TaskStatus.BLOCKED,
+            TaskStatus.COMPLETED,
+            TaskStatus.PENDING,
+        },
+        TaskStatus.BLOCKED: {
+            TaskStatus.BLOCKED,
+            TaskStatus.IN_PROGRESS,
+            TaskStatus.COMPLETED,
+            TaskStatus.PENDING,
+        },
         TaskStatus.COMPLETED: {TaskStatus.COMPLETED},
     }
 
@@ -276,7 +292,7 @@ class TaskUpdateTool(Tool):
         try:
             new_status = TaskStatus(status)
         except ValueError:
-            return f"错误：无效状态 '{status}'。有效值：pending, in_progress, completed"
+            return f"错误：无效状态 '{status}'。有效值：pending, in_progress, blocked, completed"
 
         existing = await self._store.get_task(task_id)
         if existing is None:
@@ -299,6 +315,7 @@ class TaskUpdateTool(Tool):
         status_text = {
             TaskStatus.PENDING: "待处理",
             TaskStatus.IN_PROGRESS: "进行中",
+            TaskStatus.BLOCKED: "阻塞",
             TaskStatus.COMPLETED: "已完成",
         }[new_status]
         active_text = f"（{active_form}）" if active_form else ""
@@ -390,7 +407,7 @@ def _normalize_todo_items(raw_items: list[dict[str, Any]]) -> list[TaskWriteItem
             status = TaskStatus(str(raw.get("status", "")).strip())
         except ValueError as e:
             raise ValueError(
-                f"第 {index} 项 status 无效，必须是 pending、in_progress 或 completed"
+                f"第 {index} 项 status 无效，必须是 pending、in_progress、blocked 或 completed"
             ) from e
         blocked_by = raw.get("blocked_by", [])
         if blocked_by is None:

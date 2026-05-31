@@ -160,6 +160,22 @@ async def cli_event_handler(event: str, data: dict[str, Any]) -> None:
         summary = str(data.get("summary", "当前没有任务。"))
         console.print(f"[cyan]todo 更新: {source}[/cyan]")
         console.print(summary)
+    elif event == "subagent_event":
+        status = str(data.get("status", "?"))
+        agent = str(data.get("agent_name", "") or "未匹配")
+        task_id = str(data.get("task_id", "?"))
+        message = str(data.get("message", "") or "")
+        style = (
+            "green"
+            if status == "completed"
+            else "red"
+            if status in {"error", "failed"}
+            else "cyan"
+        )
+        suffix = f" · {message}" if message else ""
+        console.print(
+            f"[{style}]subagent {status}: {agent} / {task_id}{suffix}[/{style}]"
+        )
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":

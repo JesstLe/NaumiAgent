@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
+from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tools.base import Tool
 
 logger = logging.getLogger(__name__)
+
+EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 def create_subagent_tools(manager: Any) -> list[Tool]:
@@ -52,25 +56,62 @@ class DelegateTaskTool(Tool):
                     "type": "string",
                     "description": "Agent: coder | researcher | browser (optional)",
                 },
+                "task_id": {
+                    "type": "string",
+                    "description": "要回写状态的 todo ID（可选）。",
+                },
+                "success_criteria": {
+                    "type": "string",
+                    "description": "子任务成功标准（可选，会追加给子 Agent）。",
+                },
+                "context": {
+                    "type": "string",
+                    "description": "额外上下文（可选）。",
+                },
             },
             "required": ["task"],
         }
 
-    async def execute(self, *, task: str, agent: str | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        *,
+        task: str,
+        agent: str | None = None,
+        task_id: str | None = None,
+        success_criteria: str = "",
+        context: str = "",
+        event_callback: EventCallback | None = None,
+        **kwargs: Any,
+    ) -> str:
         from naumi_agent.orchestrator.subagent_manager import SubTask
 
+        linked_task_id = (task_id or "").strip()
+        if linked_task_id:
+            status_error = await _mark_linked_task_started(self._manager, linked_task_id)
+            if status_error:
+                return status_error
+
+        description = _build_delegation_prompt(task, success_criteria)
         subtask = SubTask(
-            id=f"sub_{task[:20]}",
-            description=task,
+            id=linked_task_id or f"sub_{task[:20]}",
+            description=description,
             agent_name=agent,
+            context=context,
         )
 
         try:
-            result = await self._manager.delegate(subtask)
+            result = await self._manager.delegate(
+                subtask,
+                event_callback=event_callback,
+            )
+            if linked_task_id:
+                await _mark_linked_task_finished(self._manager, linked_task_id, result)
             if result.status == "completed":
                 return result.response
             return f"子任务失败 ({result.status}): {result.error or result.response[:500]}"
         except Exception as e:
+            if linked_task_id:
+                await _mark_linked_task_exception(self._manager, linked_task_id, e)
             return f"委派任务出错: {type(e).__name__}: {e}"
 
 
@@ -327,3 +368,47 @@ class BlackboardWriteTool(Tool):
             f"✅ 已写入共享状态 '{key}' "
             f"(版本: {entry.version})"
         )
+
+
+def _build_delegation_prompt(task: str, success_criteria: str) -> str:
+    text = task.strip()
+    criteria = success_criteria.strip()
+    if not criteria:
+        return text
+    return f"{text}\n\n成功标准：{criteria}"
+
+
+async def _mark_linked_task_started(manager: Any, task_id: str) -> str:
+    store = manager._engine.task_store
+    task = await store.get_task(task_id)
+    if task is None:
+        return f"错误：todo #{task_id} 不存在，无法委派并回写。"
+    if task.status == TaskStatus.COMPLETED:
+        return f"错误：todo #{task_id} 已完成，不能再次委派。"
+    await store.update_task(
+        task_id,
+        status=TaskStatus.IN_PROGRESS,
+        active_form=f"子 Agent 执行中：{task.subject}",
+    )
+    return ""
+
+
+async def _mark_linked_task_finished(manager: Any, task_id: str, result: Any) -> None:
+    store = manager._engine.task_store
+    if result.status == "completed":
+        await store.update_task(task_id, status=TaskStatus.COMPLETED)
+        return
+    reason = result.error or result.response[:200] or result.status
+    await store.update_task(
+        task_id,
+        status=TaskStatus.BLOCKED,
+        active_form=f"阻塞：子 Agent {result.status} - {reason[:160]}",
+    )
+
+
+async def _mark_linked_task_exception(manager: Any, task_id: str, error: Exception) -> None:
+    await manager._engine.task_store.update_task(
+        task_id,
+        status=TaskStatus.BLOCKED,
+        active_form=f"阻塞：委派异常 - {type(error).__name__}: {str(error)[:140]}",
+    )

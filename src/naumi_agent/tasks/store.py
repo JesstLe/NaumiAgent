@@ -343,7 +343,11 @@ class TaskStore:
 
                 seen_ids.add(task_id)
                 touched.add(task_id)
-                active_form = item.active_form if item.status == TaskStatus.IN_PROGRESS else None
+                active_form = (
+                    item.active_form
+                    if item.status in {TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED}
+                    else None
+                )
                 final[task_id] = Task(
                     id=task_id,
                     session_id=self._session_id,
@@ -427,11 +431,12 @@ def format_task_list(tasks: list[Task], all_tasks: list[Task] | None = None) -> 
         icon = {
             TaskStatus.PENDING: "○",
             TaskStatus.IN_PROGRESS: "●",
+            TaskStatus.BLOCKED: "!",
             TaskStatus.COMPLETED: "✓",
         }[t.status]
 
         subject = t.subject
-        if t.status == TaskStatus.IN_PROGRESS and t.active_form:
+        if t.status in {TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED} and t.active_form:
             subject = t.active_form
 
         blocked = t.is_blocked(reference)
@@ -444,11 +449,13 @@ def format_task_list(tasks: list[Task], all_tasks: list[Task] | None = None) -> 
 
     completed = sum(1 for t in tasks if t.status == TaskStatus.COMPLETED)
     in_progress = sum(1 for t in tasks if t.status == TaskStatus.IN_PROGRESS)
+    blocked_count = sum(1 for t in tasks if t.status == TaskStatus.BLOCKED)
     pending = sum(1 for t in tasks if t.status == TaskStatus.PENDING)
 
     header = (
         f"📋 任务进度 "
-        f"({len(tasks)} 项：{completed} 完成，{in_progress} 进行中，{pending} 待处理)"
+        f"({len(tasks)} 项：{completed} 完成，{in_progress} 进行中，"
+        f"{blocked_count} 阻塞，{pending} 待处理)"
     )
     return header + "\n" + "\n".join(lines)
 
