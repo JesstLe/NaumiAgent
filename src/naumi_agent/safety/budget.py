@@ -77,6 +77,7 @@ class BudgetTracker:
     def is_exceeded(self) -> bool:
         return (
             self._total_input > self.budget.max_input_tokens
+            or self._total_output > self.budget.max_output_tokens
             or self._total_cost > self.budget.max_usd
         )
 

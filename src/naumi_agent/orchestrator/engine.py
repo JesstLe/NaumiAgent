@@ -249,7 +249,10 @@ class AgentEngine:
         self._browser_session = BrowserRuntime(
             Path(config.memory.session_db_path).parent / "browser"
         )
-        self._planner = AdaptivePlanner(self._router)
+        self._planner = AdaptivePlanner(
+            self._router,
+            usage_callback=self._track_model_usage,
+        )
 
         self.task_store = TaskStore(config.memory.session_db_path)
 
@@ -709,7 +712,34 @@ class AgentEngine:
                 )
 
     def _check_budget(self) -> AgentResult | None:
-        return None
+        if not self._budget_tracker.is_exceeded():
+            return None
+
+        summary = self._budget_tracker.get_summary()
+        budget = self._budget_tracker.budget
+        reasons: list[str] = []
+        if summary.total_input_tokens > budget.max_input_tokens:
+            reasons.append(
+                f"输入 token {summary.total_input_tokens:,}/{budget.max_input_tokens:,}"
+            )
+        if summary.total_output_tokens > budget.max_output_tokens:
+            reasons.append(
+                f"输出 token {summary.total_output_tokens:,}/{budget.max_output_tokens:,}"
+            )
+        if summary.total_cost_usd > budget.max_usd:
+            reasons.append(f"费用 ${summary.total_cost_usd:.4f}/${budget.max_usd:.2f}")
+
+        detail = "，".join(reasons) if reasons else "已超过配置上限"
+        message = (
+            "预算已耗尽，已停止继续执行，避免产生额外消耗。\n\n"
+            f"超限项：{detail}"
+        )
+        logger.warning("Budget exceeded: %s", detail)
+        return AgentResult(
+            status="budget_exceeded",
+            response=message,
+            usage=self._usage,
+        )
 
     async def _ensure_reaper(self) -> None:
         if not self._reaper_started and hasattr(self, "subagent_manager"):
@@ -738,7 +768,10 @@ class AgentEngine:
 
         try:
             plan = await self._planner.plan(task)
-            if plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
+            exceeded = self._check_budget()
+            if exceeded:
+                result = exceeded
+            elif plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
                 result = await self._run_orchestrated(plan, tools)
             else:
                 result = await self._react_loop(tools, plan=plan)
@@ -788,7 +821,10 @@ class AgentEngine:
 
         try:
             plan = await self._planner.plan(task)
-            if plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
+            exceeded = self._check_budget()
+            if exceeded:
+                result = exceeded
+            elif plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
                 result = await self._run_orchestrated(plan, tools)
             else:
                 result = await self._react_loop_streaming(tools, on_event, plan=plan)
@@ -927,8 +963,7 @@ class AgentEngine:
                 tier=ModelTier.CAPABLE,
                 tools=tools,
             )
-            self._accumulate_usage(response.usage)
-            self._budget_tracker.track(response.usage, response.model)
+            self._track_model_usage(response.usage, response.model)
             await self.hooks.fire(HookContext(
                 point=HookPoint.LLM_CALL_END,
                 data={
@@ -945,6 +980,10 @@ class AgentEngine:
             warnings = self._behavior_monitor.check_anomalous_behavior()
             if warnings:
                 logger.warning("Behavior warnings: %s", warnings)
+
+            exceeded = self._check_budget()
+            if exceeded:
+                return exceeded
 
             # --- 行动：处理工具调用 ---
             if response.tool_calls:
@@ -1122,8 +1161,7 @@ class AgentEngine:
                     tools=tools,
                 ):
                     if chunk.usage:
-                        self._accumulate_usage(chunk.usage)
-                        self._budget_tracker.track(chunk.usage, model_str)
+                        self._track_model_usage(chunk.usage, model_str)
                         stream_tokens = chunk.usage.total_tokens
 
                     if chunk.thinking:
@@ -1149,8 +1187,7 @@ class AgentEngine:
                     tier=ModelTier.CAPABLE,
                     tools=tools,
                 )
-                self._accumulate_usage(response.usage)
-                self._budget_tracker.track(response.usage, model_str)
+                self._track_model_usage(response.usage, model_str)
                 stream_tokens = response.usage.total_tokens
                 if response.content:
                     if not got_response:
@@ -1180,6 +1217,11 @@ class AgentEngine:
 
             text_content = "".join(text_parts)
             thinking_content = "".join(thinking_parts)
+
+            exceeded = self._check_budget()
+            if exceeded:
+                await on_event("error", {"message": exceeded.response})
+                return exceeded
 
             # --- 工具调用 ---
             if collected_tool_calls:
@@ -1388,6 +1430,11 @@ class AgentEngine:
         self._usage.total_output_tokens += usage.output_tokens
         self._usage.total_cost_usd += usage.cost_usd
         self._usage.cache_tokens += usage.cache_tokens
+
+    def _track_model_usage(self, usage: TokenUsage, model: str) -> None:
+        """Record model usage in both user-facing stats and budget enforcement."""
+        self._accumulate_usage(usage)
+        self._budget_tracker.track(usage, model)
 
     def get_context_info(self) -> dict[str, Any]:
         """Return context window usage estimate."""
