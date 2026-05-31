@@ -1,0 +1,42 @@
+# NaumiAgent container configuration.
+# Runtime secrets are injected through environment variables from .env.
+
+models:
+  default_model: "openai/kimi-for-coding"
+  fast_model: "openai/kimi-for-coding"
+  reasoning_model: "openai/kimi-for-coding"
+  max_tokens: 4096
+  temperature: 0.7
+
+memory:
+  session_db_path: "/app/data/sessions.db"
+  vector_db_path: "/app/data/chroma"
+  compaction_threshold: 0.75
+
+workspace_root: "/workspace"
+
+safety:
+  permission_mode: "moderate"
+  allowed_dirs:
+    - "/workspace"
+    - "/app/data"
+  max_turns: 30
+  max_input_tokens: 500000
+
+mcp:
+  servers: {}
+
+api:
+  host: "0.0.0.0"
+  port: 8080
+  workers: 1
+  cors_origins:
+    - "*"
+  rate_limit_rpm: 60
+
+browser_daemon:
+  enabled: false
+  base_url: "http://127.0.0.1:3005"
+  project_dir: "/workspace/browser-debugging-daemon"
+
+log_level: "INFO"

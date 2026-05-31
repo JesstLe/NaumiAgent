@@ -8,7 +8,8 @@ models:
   max_tokens: 4096
   temperature: 0.7
   api_base: "https://api.kimi.com/coding/v1"
-  api_key: "your-api-key-here"
+  # 推荐通过环境变量 NAUMI_MODELS__API_KEY 注入，避免把密钥写进文件。
+  # api_key: "your-api-key-here"
 
 memory:
   session_db_path: "data/sessions.db"
@@ -33,7 +34,14 @@ mcp:
 api:
   host: "0.0.0.0"
   port: 8080
+  # 公开部署请配置，例如：["naumi-local-key-please-change"]
   api_keys: []
   cors_origins: ["*"]
+
+browser_daemon:
+  # 容器内默认关闭外部 daemon 适配；需要时可指向单独运行的服务。
+  enabled: false
+  base_url: "http://127.0.0.1:3005"
+  project_dir: "/workspace/browser-debugging-daemon"
 
 log_level: "INFO"

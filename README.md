@@ -85,9 +85,14 @@ mypy src/naumi_agent --ignore-missing-imports
 ## Docker
 
 ```bash
-docker build -t naumi-agent .
-docker run -e NAUMI_MODELS__API_KEY=your-key -p 8080:8080 naumi-agent
+cp .env.example .env
+# 编辑 .env，填入 NAUMI_MODELS__API_KEY
+mkdir -p workspace
+docker compose up --build
 ```
+
+启动后访问 `http://127.0.0.1:8080/docs`。完整部署说明见
+[docs/deployment.md](docs/deployment.md)。
 
 ## License
 

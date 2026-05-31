@@ -1,18 +1,69 @@
 services:
-  naumi-api:
+  naumi-bootstrap:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
+      args:
+        UID: ${HOST_UID:-1000}
+        GID: ${HOST_GID:-1000}
+    image: naumi-agent:local
+    user: "0:0"
+    environment:
+      NAUMI_CONFIG: /app/config.yaml
+      NAUMI_BOOTSTRAP: "0"
+      NAUMI_MODELS__API_KEY: ${NAUMI_MODELS__API_KEY:?Copy .env.example to .env and set NAUMI_MODELS__API_KEY}
+      NAUMI_MODELS__API_BASE: ${NAUMI_MODELS__API_BASE:-https://api.kimi.com/coding/v1}
+      NAUMI_API__API_KEYS: ${NAUMI_API__API_KEYS:-[]}
+      NAUMI_WORKSPACE_ROOT: /workspace
     volumes:
-      - ./data:/app/data
-      - ./config.yaml:/app/config.yaml:ro
-    env_file:
-      - .env
+      - naumi-data:/app/data
+      - ./workspace:/workspace
+      - ./deploy/config.container.yaml:/app/config.yaml:ro
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      - >
+        mkdir -p /app/data /workspace &&
+        chown -R ${HOST_UID:-1000}:${HOST_GID:-1000} /app/data /workspace &&
+        naumi-deploy validate --config /app/config.yaml --create-dirs --require-api-key
+    restart: "no"
+
+  naumi-api:
+    image: naumi-agent:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UID: ${HOST_UID:-1000}
+        GID: ${HOST_GID:-1000}
+    depends_on:
+      naumi-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      NAUMI_CONFIG: /app/config.yaml
+      NAUMI_MODELS__API_KEY: ${NAUMI_MODELS__API_KEY:?Copy .env.example to .env and set NAUMI_MODELS__API_KEY}
+      NAUMI_MODELS__API_BASE: ${NAUMI_MODELS__API_BASE:-https://api.kimi.com/coding/v1}
+      NAUMI_API__API_KEYS: ${NAUMI_API__API_KEYS:-[]}
+      NAUMI_SAFETY__MAX_BUDGET_USD: ${NAUMI_SAFETY__MAX_BUDGET_USD:-5.0}
+      NAUMI_WORKSPACE_ROOT: /workspace
+    ports:
+      - "${NAUMI_API_PORT:-8080}:8080"
+    volumes:
+      - naumi-data:/app/data
+      - ./workspace:/workspace
+      - ./deploy/config.container.yaml:/app/config.yaml:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/api/v1/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/v1/health', timeout=3)",
+        ]
       interval: 30s
       timeout: 5s
+      start_period: 30s
       retries: 3
+
+volumes:
+  naumi-data:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 import shlex
 import shutil
 import sys
@@ -539,6 +540,8 @@ def serve(
 ) -> None:
     """启动 REST API 服务."""
     import uvicorn
+
+    os.environ["NAUMI_CONFIG"] = _resolve_config_path(config)
 
     if reload:
         uvicorn.run(
