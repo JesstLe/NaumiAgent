@@ -17,6 +17,11 @@ from naumi_agent.memory.compactor import ContextCompactor
 from naumi_agent.memory.long_term import LongTermMemory
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.router import ModelRouter, ModelTier, TokenUsage
+from naumi_agent.orchestrator.context_assembly import (
+    HarnessContextAssembler,
+    HarnessContextInput,
+    is_harness_context_message,
+)
 from naumi_agent.orchestrator.planner import AdaptivePlanner, ExecutionMode, Plan
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.safety.behavior import BehaviorMonitor
@@ -264,6 +269,7 @@ class AgentEngine:
             self._router,
             usage_callback=self._track_model_usage,
         )
+        self._harness_context = HarnessContextAssembler()
 
         self.task_store = TaskStore(config.memory.session_db_path)
         self.background_runner = BackgroundRunner(
@@ -785,6 +791,28 @@ class AgentEngine:
                     },
                 )
 
+    async def _inject_harness_context_snapshot(self) -> None:
+        """Inject one ephemeral system snapshot of current harness state."""
+        self._messages = [
+            message for message in self._messages
+            if not is_harness_context_message(message)
+        ]
+        snapshot = await self._harness_context.assemble(
+            HarnessContextInput(
+                tool_registry=self._tool_registry,
+                skill_loader=self.skill_loader,
+                task_store=self.task_store,
+                background_runner=self.background_runner,
+                scheduler_runner=self.scheduler_runner,
+                worktree_manager=self.worktree_manager,
+                pursuit_store=self.pursuit_store,
+                mcp_manager=self._mcp_manager,
+                context_info=self.get_context_info(),
+                budget_info=self.get_budget_info(),
+            )
+        )
+        self._messages.append({"role": "system", "content": snapshot})
+
     def _check_budget(self) -> AgentResult | None:
         if PermissionMode(self._config.safety.permission_mode) == PermissionMode.BYPASS:
             return None
@@ -1019,6 +1047,7 @@ class AgentEngine:
                 return exceeded
 
             await self._maybe_compact()
+            await self._inject_harness_context_snapshot()
 
             # --- 推理：调用 LLM ---
             session_id = self._session.id if self._session else ""
@@ -1231,6 +1260,7 @@ class AgentEngine:
                 return exceeded
 
             await self._maybe_compact(on_event)
+            await self._inject_harness_context_snapshot()
             await on_event("turn_start", {"turn": turn + 1, "model": model_str})
 
             text_parts: list[str] = []
