@@ -1,7 +1,5 @@
 """Shell hook 单元测试."""
 
-import asyncio
-import json
 
 import pytest
 

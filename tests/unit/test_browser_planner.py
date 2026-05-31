@@ -14,7 +14,6 @@ from naumi_agent.tools.browser.subagent.planner import (
     _try_parse_json,
 )
 
-
 # ---------------------------------------------------------------------------
 # JSON extraction helpers
 # ---------------------------------------------------------------------------

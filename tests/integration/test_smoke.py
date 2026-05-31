@@ -71,7 +71,7 @@ class TestSmokeInit:
 
     @pytest.mark.asyncio
     async def test_shutdown_cleans_up(self, engine: AgentEngine) -> None:
-        session = await engine.get_or_create_session()
+        await engine.get_or_create_session()
         await engine.shutdown()
         assert engine.session_store._db is None
 

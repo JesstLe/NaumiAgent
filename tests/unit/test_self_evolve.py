@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -11,8 +10,8 @@ from naumi_agent.tools.self_evolve import (
     EvolutionStep,
     QualityMetrics,
     SelfEvolveTool,
-    _reset_history,
     _metrics_summary,
+    _reset_history,
     compare_metrics,
     docstring_coverage_weight,
     format_evolution_report,
