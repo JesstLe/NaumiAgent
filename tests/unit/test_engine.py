@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig, SafetyConfig
+from naumi_agent.hooks import HookContext, HookPoint
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.orchestrator.engine import AgentEngine
@@ -316,6 +317,157 @@ class TestUsageAccumulation:
         engine._accumulate_usage(u2)
         assert engine._usage.total_input_tokens == 300
         assert engine._usage.total_output_tokens == 150
+
+
+class TestHookIntegration:
+    @pytest.mark.asyncio
+    async def test_user_prompt_hook_can_rewrite_prompt(self, engine: AgentEngine) -> None:
+        @engine.hooks.on(HookPoint.USER_PROMPT_SUBMIT)
+        def rewrite(ctx: HookContext) -> None:
+            ctx.data["prompt"] = "rewritten prompt"
+
+        mock_response = ModelResponse(
+            content="ok",
+            usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+            model="test-model",
+        )
+
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await engine.run("original prompt")
+
+        assert result.status == "completed"
+        assert {"role": "user", "content": "rewritten prompt"} in engine._messages
+        assert engine.hooks.get_trace()[0].point == "user_prompt_submit"
+
+    @pytest.mark.asyncio
+    async def test_context_assembly_hook_appends_visible_section(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        @engine.hooks.on(HookPoint.CONTEXT_ASSEMBLE_END)
+        def append_section(ctx: HookContext) -> None:
+            ctx.data["extra_sections"] = ["### Hook 注入\n- 已触发"]
+
+        await engine._inject_harness_context_snapshot()
+
+        assert "### Hook 注入" in engine._messages[-1]["content"]
+        assert any(
+            entry.point == "context_assemble_end"
+            for entry in engine.hooks.get_trace()
+        )
+
+    @pytest.mark.asyncio
+    async def test_tool_permission_hook_can_block_tool(self, engine: AgentEngine) -> None:
+        @engine.hooks.on(HookPoint.TOOL_PERMISSION_CHECK)
+        def block_after(ctx: HookContext) -> None:
+            if ctx.data.get("phase") == "after":
+                ctx.data["abort"] = True
+                ctx.data["abort_reason"] = "测试策略拒绝"
+
+        result = await engine._execute_tool(ToolCall(
+            id="x",
+            name="file_read",
+            arguments='{"path": "pyproject.toml"}',
+        ))
+
+        assert result.status == "error"
+        assert "测试策略拒绝" in result.content
+        assert any(
+            entry.point == "tool_permission_check" and entry.aborted
+            for entry in engine.hooks.get_trace()
+        )
+
+    @pytest.mark.asyncio
+    async def test_streaming_emits_hook_trace_events(self, engine: AgentEngine) -> None:
+        @engine.hooks.on(HookPoint.USER_PROMPT_SUBMIT)
+        def mark_prompt(ctx: HookContext) -> None:
+            ctx.data["prompt"] = ctx.data["prompt"] + " hooked"
+
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        mock_response = ModelResponse(
+            content="ok",
+            usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+            model="test-model",
+        )
+
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await engine.run_streaming("hello", on_event)
+
+        assert result.status == "completed"
+        hook_events = [data for event, data in events if event == "hook_trace"]
+        assert hook_events
+        assert hook_events[0]["point"] == "user_prompt_submit"
+
+    @pytest.mark.asyncio
+    async def test_hook_trace_event_emits_when_trace_is_capped(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        engine.hooks._max_trace_entries = 1
+
+        @engine.hooks.on(HookPoint.USER_PROMPT_SUBMIT)
+        def mark_prompt(ctx: HookContext) -> None:
+            ctx.data["seen"] = True
+
+        await engine._fire_hook(HookContext(point=HookPoint.USER_PROMPT_SUBMIT))
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        await engine._fire_hook(
+            HookContext(point=HookPoint.USER_PROMPT_SUBMIT),
+            on_event,
+        )
+
+        assert len(events) == 1
+        assert events[0][0] == "hook_trace"
+        assert events[0][1]["point"] == "user_prompt_submit"
+        assert str(events[0][1]["callback"]).endswith("mark_prompt")
+        assert events[0][1]["aborted"] is False
+        assert events[0][1]["error"] == ""
+
+    @pytest.mark.asyncio
+    async def test_agent_stop_hook_fires_on_final_response(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        stops: list[str] = []
+
+        @engine.hooks.on(HookPoint.AGENT_STOP)
+        def on_stop(ctx: HookContext) -> None:
+            stops.append(str(ctx.data["status"]))
+
+        mock_response = ModelResponse(
+            content="done",
+            usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+            model="test-model",
+        )
+
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await engine._react_loop(engine.tool_registry.get_openai_tools())
+
+        assert result.status == "completed"
+        assert stops == ["completed"]
 
 
 class TestBudgetCheck:

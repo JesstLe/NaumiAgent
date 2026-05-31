@@ -240,6 +240,8 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
             console.print(f"\033[32m  ✓ {label}\033[0m \033[2m({duration:.0f}ms)\033[0m")
         if content:
             _print_tool_output(name, content)
+    elif event == "hook_trace":
+        console.print(_format_hook_trace(data))
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":
@@ -281,6 +283,22 @@ def _print_tool_output(name: str, content: str) -> None:
         if len(lines) > 30:
             preview += f"\n  ... ({len(lines) - 30} more lines)"
         console.print(f"[dim]{preview}[/dim]")
+
+
+def _format_hook_trace(data: dict[str, Any]) -> str:
+    """Format one hook trace event for user-visible output."""
+    point = str(data.get("point", "?"))
+    callback = str(data.get("callback", "?"))
+    duration = int(data.get("duration_ms", 0) or 0)
+    error = str(data.get("error", "") or "")
+    aborted = bool(data.get("aborted", False))
+    status = "拦截" if aborted else "异常" if error else "触发"
+    color = "33" if aborted else "31" if error else "35"
+    suffix = f" · {error}" if error else ""
+    return (
+        f"\033[{color}m  hook {status}: "
+        f"{point} → {callback} ({duration}ms){suffix}\033[0m"
+    )
 
 
 def _extract_diff_block(content: str) -> tuple[str, str, str] | None:
@@ -361,6 +379,8 @@ def _cli_event_factory(cli: Any):
                 cli.append_live(f"\033[31m  ✗ {label} 失败 ({dur}ms)\033[0m\n")
             if content:
                 cli.append_live(_capture(lambda: _print_tool_output(name, content)))
+        elif event == "hook_trace":
+            cli.append_live(_format_hook_trace(data) + "\n")
         elif event == "response_start":
             cli.finalize_live()
             cli.append_output(f"{_sep(thin=False)}\n")
@@ -1904,17 +1924,27 @@ def _show_hooks(engine: Any) -> None:
     hooks = engine.hooks.list_hooks()
     if not hooks:
         console.print("[dim]没有已注册的钩子[/dim]")
-        return
+    else:
+        console.print("[bold]已注册钩子:[/bold]")
+        for point, callbacks in hooks.items():
+            try:
+                label = HookPoint(point).value
+            except ValueError:
+                label = point
+            console.print(f"  [cyan]{label}[/cyan]")
+            for cb in callbacks:
+                console.print(f"    • {cb}")
 
-    console.print("[bold]已注册钩子:[/bold]")
-    for point, callbacks in hooks.items():
-        try:
-            label = HookPoint(point).value
-        except ValueError:
-            label = point
-        console.print(f"  [cyan]{label}[/cyan]")
-        for cb in callbacks:
-            console.print(f"    • {cb}")
+    trace = engine.hooks.get_trace()[-10:]
+    if trace:
+        console.print("\n[bold]最近触发:[/bold]")
+        for entry in trace:
+            suffix = " [yellow]拦截[/yellow]" if entry.aborted else ""
+            error = f" [red]{entry.error}[/red]" if entry.error else ""
+            console.print(
+                f"  [magenta]{entry.point}[/magenta] → {entry.callback} "
+                f"({entry.duration_ms}ms){suffix}{error}"
+            )
     console.print()
 
 

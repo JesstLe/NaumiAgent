@@ -142,6 +142,18 @@ async def cli_event_handler(event: str, data: dict[str, Any]) -> None:
         content = data.get("content", "")
         if content:
             print_tool_output(name, content)
+    elif event == "hook_trace":
+        point = str(data.get("point", "?"))
+        callback = str(data.get("callback", "?"))
+        duration = int(data.get("duration_ms", 0) or 0)
+        error = str(data.get("error", "") or "")
+        aborted = bool(data.get("aborted", False))
+        style = "yellow" if aborted else "red" if error else "magenta"
+        status = "拦截" if aborted else "异常" if error else "触发"
+        suffix = f" · {error}" if error else ""
+        console.print(
+            f"[{style}]hook {status}: {point} → {callback} ({duration}ms){suffix}[/{style}]"
+        )
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":
