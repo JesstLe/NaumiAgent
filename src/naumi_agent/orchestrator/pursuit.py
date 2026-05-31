@@ -48,6 +48,18 @@ class CriterionStatus(StrEnum):
     FAILED = "failed"
 
 
+class PursuitRunStatus(StrEnum):
+    """Durable status for one pursuit run."""
+
+    RUNNING = "running"
+    WAITING = "waiting"
+    BLOCKED = "blocked"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    BUDGET_EXCEEDED = "budget_exceeded"
+
+
 @dataclass
 class SuccessCriterion:
     """One measurable success criterion."""
@@ -86,6 +98,51 @@ class IterationCheckpoint:
     convergence_score: float  # 0.0-1.0
     tokens_used: int = 0
     cost_usd: float = 0.0
+
+
+@dataclass
+class PursuitEvidence:
+    """One concrete evidence item collected during pursuit."""
+
+    kind: str
+    source: str
+    summary: str
+    is_hard: bool
+    timestamp: float = 0.0
+
+
+@dataclass
+class PursuitStopDecision:
+    """Programmatic stop decision for a pursuit run."""
+
+    status: PursuitRunStatus
+    reason: str
+    evidence: list[PursuitEvidence]
+
+
+@dataclass
+class PursuitRun:
+    """Live state snapshot for a pursuit execution."""
+
+    id: str
+    goal: str
+    status: PursuitRunStatus
+    phase: str
+    started_at: float
+    updated_at: float
+    iteration: int = 0
+    criteria_total: int = 0
+    criteria_verified: int = 0
+    failure_count: int = 0
+    blocked_reason: str = ""
+    next_action: str = ""
+    evidence: list[PursuitEvidence] | None = None
+
+    def add_evidence(self, item: PursuitEvidence) -> None:
+        if self.evidence is None:
+            self.evidence = []
+        self.evidence.append(item)
+        self.updated_at = time.time()
 
 
 @dataclass
@@ -253,10 +310,152 @@ class GoalPursuitLoop:
         self._total_tokens = 0
         self._total_cost = 0.0
         self._cancelled = False
+        self._run: PursuitRun | None = None
+        self._last_stop_decision: PursuitStopDecision | None = None
 
     def cancel(self) -> None:
         """Request cancellation of the running loop."""
         self._cancelled = True
+
+    def _update_run(
+        self,
+        *,
+        phase: str,
+        iteration: int | None = None,
+        spec: GoalSpec | None = None,
+        blocked_reason: str = "",
+        next_action: str = "",
+    ) -> None:
+        """Update the live pursuit state snapshot."""
+        if self._run is None:
+            return
+        self._run.phase = phase
+        self._run.updated_at = time.time()
+        if iteration is not None:
+            self._run.iteration = iteration
+        if spec is not None:
+            self._run.criteria_total = len(spec.success_criteria)
+            self._run.criteria_verified = sum(
+                1 for c in spec.success_criteria
+                if c.status == CriterionStatus.VERIFIED
+                and self._criterion_has_hard_evidence(c)
+            )
+        if blocked_reason:
+            self._run.blocked_reason = blocked_reason
+        if next_action:
+            self._run.next_action = next_action
+
+    def _record_stop(
+        self,
+        status: PursuitRunStatus,
+        reason: str,
+        evidence: list[PursuitEvidence] | None = None,
+    ) -> None:
+        """Persist a stop decision into the live run snapshot."""
+        decision = PursuitStopDecision(
+            status=status,
+            reason=reason,
+            evidence=evidence or [],
+        )
+        self._last_stop_decision = decision
+        self._apply_stop_decision(decision)
+
+    def _apply_stop_decision(self, decision: PursuitStopDecision) -> None:
+        if self._run is None:
+            return
+        self._run.status = decision.status
+        self._run.blocked_reason = (
+            decision.reason
+            if decision.status == PursuitRunStatus.BLOCKED
+            else ""
+        )
+        self._run.updated_at = time.time()
+        for item in decision.evidence:
+            self._run.add_evidence(item)
+
+    def _record_checkpoint_evidence(self, checkpoint: IterationCheckpoint) -> None:
+        """Record concrete assessment facts in the live state."""
+        if self._run is None:
+            return
+        summary = (
+            f"收敛度 {checkpoint.convergence_score:.2f}，"
+            f"差距 {len(checkpoint.gaps_found)} 个"
+        )
+        self._run.add_evidence(PursuitEvidence(
+            kind="assessment",
+            source=f"iteration:{checkpoint.iteration}",
+            summary=summary,
+            is_hard=False,
+            timestamp=time.time(),
+        ))
+
+    def _record_action_evidence(self, results: list[dict[str, Any]]) -> None:
+        """Record action execution results in the live state."""
+        if self._run is None:
+            return
+        for result in results:
+            status = str(result.get("status", ""))
+            self._run.add_evidence(PursuitEvidence(
+                kind="action",
+                source=str(result.get("action_id", "?")),
+                summary=f"[{status}] {str(result.get('output', ''))[:300]}",
+                is_hard=status == "completed",
+                timestamp=time.time(),
+            ))
+            if status != "completed":
+                self._run.failure_count += 1
+
+    async def _completion_decision(self, spec: GoalSpec) -> PursuitStopDecision:
+        """Decide whether the goal is objectively complete."""
+        hard_evidence = self._collect_hard_evidence(spec)
+        all_verified = all(
+            c.status == CriterionStatus.VERIFIED
+            for c in spec.success_criteria
+        )
+        all_hard = all(
+            self._criterion_has_hard_evidence(c)
+            for c in spec.success_criteria
+        )
+        if all_verified and all_hard:
+            return PursuitStopDecision(
+                status=PursuitRunStatus.COMPLETED,
+                reason="所有成功标准都有强证据",
+                evidence=hard_evidence,
+            )
+        return PursuitStopDecision(
+            status=PursuitRunStatus.RUNNING,
+            reason="仍有成功标准未通过强证据验证",
+            evidence=hard_evidence,
+        )
+
+    def _collect_hard_evidence(self, spec: GoalSpec) -> list[PursuitEvidence]:
+        evidence: list[PursuitEvidence] = []
+        for criterion in spec.success_criteria:
+            if not self._criterion_has_hard_evidence(criterion):
+                continue
+            evidence.append(PursuitEvidence(
+                kind="criterion",
+                source=criterion.id,
+                summary=criterion.evidence[:500],
+                is_hard=True,
+                timestamp=criterion.last_checked or time.time(),
+            ))
+        return evidence
+
+    @staticmethod
+    def _criterion_has_hard_evidence(criterion: SuccessCriterion) -> bool:
+        """Return true when a verified criterion has tool/command evidence."""
+        if criterion.status != CriterionStatus.VERIFIED:
+            return False
+        evidence = criterion.evidence.strip()
+        if not evidence:
+            return False
+        hard_prefixes = (
+            "Command output:",
+            "Tool output:",
+            "Verification output:",
+        )
+        return evidence.startswith(hard_prefixes)
 
     async def pursue(self, goal: str) -> str:
         """Execute the full goal pursuit loop.
@@ -268,9 +467,19 @@ class GoalPursuitLoop:
         self._total_tokens = 0
         self._total_cost = 0.0
         self._cancelled = False
+        self._last_stop_decision = None
+        self._run = PursuitRun(
+            id=f"pursuit_{int(self._start_time)}",
+            goal=goal,
+            status=PursuitRunStatus.RUNNING,
+            phase="parse_goal",
+            started_at=self._start_time,
+            updated_at=self._start_time,
+        )
 
         # Phase 0: Parse the goal
         spec = await self._parse_goal(goal)
+        self._update_run(phase="assess", spec=spec)
         logger.info(
             "Goal parsed: %d criteria, complexity=%s",
             len(spec.success_criteria), spec.estimated_complexity,
@@ -285,25 +494,31 @@ class GoalPursuitLoop:
             # Safety checks
             if self._cancelled:
                 status = GoalStatus.CANCELLED
+                self._record_stop(PursuitRunStatus.CANCELLED, "用户取消了目标追踪")
                 break
 
             elapsed = time.time() - self._start_time
             if elapsed > self._config.max_time_seconds:
                 status = GoalStatus.BUDGET_EXCEEDED
+                self._record_stop(PursuitRunStatus.BUDGET_EXCEEDED, "目标追踪超过最大运行时间")
                 break
 
             if self._total_cost >= self._config.max_budget_usd:
                 status = GoalStatus.BUDGET_EXCEEDED
+                self._record_stop(PursuitRunStatus.BUDGET_EXCEEDED, "目标追踪超过预算上限")
                 break
 
             if iteration > self._config.max_iterations:
                 status = GoalStatus.BUDGET_EXCEEDED
+                self._record_stop(PursuitRunStatus.BUDGET_EXCEEDED, "目标追踪超过最大迭代次数")
                 break
 
             # Phase 1: Assess current state
+            self._update_run(phase="assess", iteration=iteration, spec=spec)
             assessment = await self._assess(spec)
             checkpoint = assessment["checkpoint"]
             self._history.append(checkpoint)
+            self._record_checkpoint_evidence(checkpoint)
 
             logger.info(
                 "Iteration %d: convergence=%.2f, gaps=%d, tokens=%d",
@@ -311,42 +526,70 @@ class GoalPursuitLoop:
                 len(checkpoint.gaps_found), self._total_tokens,
             )
 
-            # Check if all criteria are verified
-            all_verified = all(
-                c.status == CriterionStatus.VERIFIED
-                for c in spec.success_criteria
-            )
-            if all_verified:
-                # Final verification pass — double check
+            # Check if all criteria are verified with hard evidence.
+            stop_decision = await self._completion_decision(spec)
+            if stop_decision.status == PursuitRunStatus.COMPLETED:
+                self._last_stop_decision = stop_decision
+                self._apply_stop_decision(stop_decision)
                 if await self._final_verification(spec):
+                    self._record_stop(
+                        PursuitRunStatus.COMPLETED,
+                        "所有成功标准已通过强制验证",
+                        self._collect_hard_evidence(spec),
+                    )
                     status = GoalStatus.ACHIEVED
                     break
 
             # Check convergence (are we making progress?)
             if self._is_stagnant():
                 if self._config.replan_on_stagnation:
+                    self._update_run(
+                        phase="recover",
+                        iteration=iteration,
+                        spec=spec,
+                        blocked_reason="连续多轮没有可观测进展，正在切换恢复策略",
+                    )
                     logger.warning(
                         "Stagnation detected at iteration %d", iteration,
                     )
                     recovery = await self._recover_from_stagnation(
                         spec, checkpoint,
                     )
+                    if not recovery:
+                        status = GoalStatus.STUCK
+                        self._record_stop(
+                            PursuitRunStatus.BLOCKED,
+                            "检测到停滞，但没有生成可执行的恢复行动",
+                        )
+                        break
                     await self._execute_actions(spec, recovery)
                     continue
                 else:
                     status = GoalStatus.STUCK
+                    self._record_stop(PursuitRunStatus.BLOCKED, "连续多轮没有可观测进展")
                     break
 
             # Phase 2: Plan next actions
+            self._update_run(phase="plan", iteration=iteration, spec=spec)
             actions = await self._plan(spec, checkpoint)
             if not actions:
                 status = GoalStatus.STUCK
+                self._record_stop(
+                    PursuitRunStatus.BLOCKED,
+                    "规划器没有给出下一步可执行行动",
+                )
                 break
 
             # Store plan in checkpoint
             checkpoint.actions_planned = [
                 f"{a['id']}: {a['description']}" for a in actions
             ]
+            self._update_run(
+                phase="execute",
+                iteration=iteration,
+                spec=spec,
+                next_action=checkpoint.actions_planned[0],
+            )
 
             # Phase 3: Execute actions
             results = await self._execute_actions(spec, actions)
@@ -357,9 +600,11 @@ class GoalPursuitLoop:
                 f"{str(r.get('output', ''))[:200]}"
                 for r in results
             ]
+            self._record_action_evidence(results)
 
             # Phase 4: Verify (if interval matches)
             if iteration % self._config.verify_interval == 0:
+                self._update_run(phase="verify", iteration=iteration, spec=spec)
                 await self._verify_criteria(spec)
 
         # Generate final report
@@ -1228,10 +1473,14 @@ class GoalPursuitLoop:
     #  Phase 4: Verification
     # ------------------------------------------------------------------
 
-    async def _verify_criteria(self, spec: GoalSpec) -> None:
+    async def _verify_criteria(self, spec: GoalSpec, *, force: bool = False) -> None:
         """Run verification commands for each criterion."""
         for criterion in spec.success_criteria:
-            if criterion.status == CriterionStatus.VERIFIED:
+            if (
+                not force
+                and criterion.status == CriterionStatus.VERIFIED
+                and self._criterion_has_hard_evidence(criterion)
+            ):
                 continue
 
             cmd = criterion.verification_command
@@ -1254,16 +1503,19 @@ class GoalPursuitLoop:
                         criterion.status = CriterionStatus.VERIFIED
                         criterion.evidence = f"Command output: {str(output)[:500]}"
                     else:
+                        criterion.status = CriterionStatus.FAILED
                         criterion.evidence = f"Failed: {str(output)[:500]}"
                     criterion.last_checked = time.time()
             except Exception as e:
+                criterion.status = CriterionStatus.FAILED
                 criterion.evidence = f"Verification error: {e}"
 
     async def _final_verification(self, spec: GoalSpec) -> bool:
         """Double-check all criteria are truly met."""
-        await self._verify_criteria(spec)
+        await self._verify_criteria(spec, force=True)
         return all(
             c.status == CriterionStatus.VERIFIED
+            and self._criterion_has_hard_evidence(c)
             for c in spec.success_criteria
         )
 

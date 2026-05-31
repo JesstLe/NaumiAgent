@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -86,6 +87,21 @@ _TOOL_LABELS: dict[str, tuple[str, str]] = {
     "task_update": ("🔄", "更新任务"),
     "task_list": ("📋", "查看任务"),
     "task_delete": ("🗑️", "删除任务"),
+    "background_run": ("⏱️", "后台执行"),
+    "background_status": ("⏱️", "查看后台任务"),
+    "background_list": ("📋", "列出后台任务"),
+    "background_cancel": ("⏹️", "取消后台任务"),
+    "background_read_output": ("📄", "读取后台输出"),
+    "schedule_create": ("⏰", "创建调度提醒"),
+    "schedule_list": ("📋", "列出调度提醒"),
+    "schedule_cancel": ("⏹️", "取消调度提醒"),
+    "schedule_pause": ("⏸️", "暂停调度提醒"),
+    "schedule_resume": ("▶️", "恢复调度提醒"),
+    "worktree_create": ("🌿", "创建隔离区"),
+    "worktree_status": ("🌿", "查看隔离区"),
+    "worktree_bind_task": ("🔗", "绑定隔离区任务"),
+    "worktree_keep": ("📦", "保留隔离区"),
+    "worktree_remove": ("🧹", "删除隔离区"),
 }
 
 # ANSI separators for visual hierarchy
@@ -958,6 +974,12 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             else:
                 await _run_pursue(engine, arg)
+        case "/worktree":
+            await _run_worktree(engine, arg)
+        case "/background":
+            await _run_background(engine, arg)
+        case "/schedule":
+            await _run_schedule(engine, arg)
         case "/self-review":
             await _run_self_review(engine, arg)
         case "/reload":
@@ -1084,6 +1106,9 @@ def _print_help() -> None:
         ("/vision <目标>", "AI 视觉数据提取 — 反封锁视觉管线"),
         ("/hook <目标>", "逆向插桩 — 黑盒解剖"),
         ("/pursue <目标>", "目标追踪 — 自主循环执行直至真正达成"),
+        ("/worktree <子命令>", "隔离执行区 — create/status/bind/keep/remove"),
+        ("/background <子命令>", "后台任务 — run/status/list/cancel/output"),
+        ("/schedule <子命令>", "调度提醒 — create/list/cancel/pause/resume"),
         ("/self-review [模块]", "自我审查 — 扫描自身源码质量与架构"),
         ("/reload [域]", "热重载 — 重载模块无需重启 (tools/memory/skills/all)"),
         ("/evolve <描述>", "自我进化 — 反思循环修改自身工具代码并验证"),
@@ -1316,6 +1341,173 @@ async def _run_pursue(engine: Any, goal: str) -> None:
             title="🎯 目标追踪报告",
         )
     )
+
+
+async def _run_worktree(engine: Any, arg: str) -> None:
+    """执行 worktree 隔离区命令."""
+    parts = arg.strip().split()
+    subcommand = parts[0] if parts else "status"
+
+    async def _execute(tool_name: str, **kwargs: Any) -> None:
+        tool = engine.tool_registry.get(tool_name)
+        if not tool:
+            console.print(f"[red]工具未注册: {tool_name}[/red]")
+            return
+        result = await tool.execute(**kwargs)
+        console.print(
+            Panel(
+                Markdown(result),
+                title="[bold cyan]Worktree 隔离区[/bold cyan]",
+                border_style="cyan",
+                padding=(1, 2),
+            )
+        )
+
+    match subcommand:
+        case "status" | "list":
+            name = parts[1] if len(parts) > 1 else ""
+            await _execute("worktree_status", name=name)
+        case "create":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /worktree create <名称> [任务ID][/yellow]")
+                return
+            task_id = parts[2] if len(parts) > 2 else ""
+            await _execute("worktree_create", name=parts[1], task_id=task_id)
+        case "bind":
+            if len(parts) < 3:
+                console.print("[yellow]用法: /worktree bind <名称> <任务ID>[/yellow]")
+                return
+            await _execute("worktree_bind_task", name=parts[1], task_id=parts[2])
+        case "keep":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /worktree keep <名称> [原因][/yellow]")
+                return
+            reason = " ".join(parts[2:]) if len(parts) > 2 else ""
+            await _execute("worktree_keep", name=parts[1], reason=reason)
+        case "remove":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /worktree remove <名称> [--discard][/yellow]")
+                return
+            discard = "--discard" in parts[2:] or "--force" in parts[2:]
+            await _execute("worktree_remove", name=parts[1], discard_changes=discard)
+        case _:
+            console.print(
+                "[yellow]未知 worktree 子命令[/yellow]\n"
+                "[dim]可用: status/list/create/bind/keep/remove[/dim]"
+            )
+
+
+async def _run_background(engine: Any, arg: str) -> None:
+    """执行后台任务命令."""
+    parts = arg.strip().split(maxsplit=2)
+    subcommand = parts[0] if parts else "list"
+
+    async def _execute(tool_name: str, **kwargs: Any) -> None:
+        tool = engine.tool_registry.get(tool_name)
+        if not tool:
+            console.print(f"[red]工具未注册: {tool_name}[/red]")
+            return
+        result = await tool.execute(**kwargs)
+        console.print(
+            Panel(
+                Markdown(result),
+                title="[bold cyan]后台任务[/bold cyan]",
+                border_style="cyan",
+                padding=(1, 2),
+            )
+        )
+
+    match subcommand:
+        case "run":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /background run <命令>[/yellow]")
+                return
+            command = arg.strip()[len("run"):].strip()
+            await _execute("background_run", command=command)
+        case "status":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /background status <任务ID>[/yellow]")
+                return
+            await _execute("background_status", task_id=parts[1])
+        case "list":
+            await _execute("background_list")
+        case "cancel":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /background cancel <任务ID>[/yellow]")
+                return
+            await _execute("background_cancel", task_id=parts[1])
+        case "output":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /background output <任务ID>[/yellow]")
+                return
+            await _execute("background_read_output", task_id=parts[1])
+        case _:
+            console.print(
+                "[yellow]未知后台任务子命令[/yellow]\n"
+                "[dim]可用: run/status/list/cancel/output[/dim]"
+            )
+
+
+async def _run_schedule(engine: Any, arg: str) -> None:
+    """执行调度/提醒命令."""
+    try:
+        parts = shlex.split(arg.strip())
+    except ValueError as e:
+        console.print(f"[yellow]参数解析失败：{e}[/yellow]")
+        return
+    subcommand = parts[0] if parts else "list"
+
+    async def _execute(tool_name: str, **kwargs: Any) -> None:
+        tool = engine.tool_registry.get(tool_name)
+        if not tool:
+            console.print(f"[red]工具未注册: {tool_name}[/red]")
+            return
+        result = await tool.execute(**kwargs)
+        console.print(
+            Panel(
+                Markdown(result),
+                title="[bold cyan]调度提醒[/bold cyan]",
+                border_style="cyan",
+                padding=(1, 2),
+            )
+        )
+
+    match subcommand:
+        case "create":
+            if len(parts) < 4:
+                console.print(
+                    "[yellow]用法: /schedule create once <ISO时间> <提醒内容>[/yellow]\n"
+                    "[dim]或: /schedule create cron \"*/15 * * * *\" <提醒内容>[/dim]"
+                )
+                return
+            await _execute(
+                "schedule_create",
+                kind=parts[1],
+                expression=parts[2],
+                prompt=" ".join(parts[3:]),
+            )
+        case "list":
+            await _execute("schedule_list", active_only="--active" in parts[1:])
+        case "cancel":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /schedule cancel <调度ID>[/yellow]")
+                return
+            await _execute("schedule_cancel", schedule_id=parts[1])
+        case "pause":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /schedule pause <调度ID>[/yellow]")
+                return
+            await _execute("schedule_pause", schedule_id=parts[1])
+        case "resume":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /schedule resume <调度ID>[/yellow]")
+                return
+            await _execute("schedule_resume", schedule_id=parts[1])
+        case _:
+            console.print(
+                "[yellow]未知调度子命令[/yellow]\n"
+                "[dim]可用: create/list/cancel/pause/resume[/dim]"
+            )
 
 
 async def _run_self_review(engine: Any, arg: str) -> None:
