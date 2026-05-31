@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -41,13 +41,13 @@ class TestTruncate:
 class TestKillProcess:
     @pytest.mark.asyncio
     async def test_kill_calls_proc_kill(self):
-        mock_proc = AsyncMock()
+        mock_proc = Mock()
         await _kill_process(mock_proc)
         mock_proc.kill.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_kill_ignores_process_lookup_error(self):
-        mock_proc = AsyncMock()
+        mock_proc = Mock()
         mock_proc.kill.side_effect = ProcessLookupError
         await _kill_process(mock_proc)
 

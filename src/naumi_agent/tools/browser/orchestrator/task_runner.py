@@ -34,12 +34,12 @@ _INTERRUPTED_STATUSES = frozenset({
 _RULE_KINDS = frozenset({"url_includes", "title_includes", "text_includes"})
 
 
-def _safe_create_task(coro: Any) -> None:
+def _safe_create_task(coro_factory: Callable[[], Any]) -> None:
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(coro)
     except RuntimeError:
-        pass
+        return
+    loop.create_task(coro_factory())
 
 
 def _now_iso() -> str:
@@ -315,9 +315,10 @@ class TaskRunner:
 
         planner = options.get("planner")
         if planner is None:
+            from naumi_agent.config.settings import ModelConfig
             from naumi_agent.model.router import ModelRouter
 
-            router = options.get("model_router") or ModelRouter()
+            router = options.get("model_router") or ModelRouter(ModelConfig())
             planner = LLMPlanner(router)
         self.subagent = BrowserSubagent(self.runtime, planner)
 
@@ -426,7 +427,7 @@ class TaskRunner:
             self._store.persist(self.runs)
 
         if any(r["status"] == "queued" for r in self.runs):
-            _safe_create_task(self.process_queue())
+            _safe_create_task(lambda: self.process_queue())
 
     # ── Run CRUD ──
 
@@ -517,7 +518,7 @@ class TaskRunner:
         }
         self._store.persist(self.runs)
         self._emit_update("run_created", run)
-        _safe_create_task(self.process_queue())
+        _safe_create_task(lambda: self.process_queue())
         return run
 
     def list_runs(self, limit: int = 20) -> list[dict[str, Any]]:
@@ -752,7 +753,7 @@ class TaskRunner:
                 if not next_run:
                     break
                 self._active_slots += 1
-                _safe_create_task(self._execute_run(next_run))
+                _safe_create_task(lambda: self._execute_run(next_run))
         finally:
             self._processing = False
 
@@ -982,7 +983,9 @@ class TaskRunner:
     def list_templates(
         self, limit: int = 100
     ) -> list[dict[str, Any]]:
-        return self.templates[: max(1, limit)]
+        if limit <= 0:
+            return []
+        return self.templates[:limit]
 
     def get_template(
         self, template_id: str

@@ -49,7 +49,7 @@ class ModelResponse:
 @dataclass(frozen=True)
 class StreamChunk:
     token: str = ""
-    tool_call: dict[str, Any] | None = None
+    tool_call: Any = None
     thinking: str = ""
     finish_reason: str | None = None
     usage: TokenUsage | None = None
@@ -315,15 +315,15 @@ class ModelRouter:
             finish_reason = chunk.choices[0].finish_reason
 
             # 思维链 — check multiple fields for thinking content
-            thinking = ""
+            thinking_text = ""
             if getattr(delta, "reasoning_content", None):
-                thinking = delta.reasoning_content
+                thinking_text = delta.reasoning_content
             elif getattr(delta, "thinking_blocks", None):
                 for block in delta.thinking_blocks:
                     if isinstance(block, dict) and block.get("type") == "thinking":
-                        thinking += block.get("thinking", "")
+                        thinking_text += block.get("thinking", "")
                     elif hasattr(block, "get") and block.get("type") == "thinking":
-                        thinking += block.get("thinking", "")
+                        thinking_text += block.get("thinking", "")
 
             # 文本内容
             token = delta.content or ""
@@ -352,12 +352,12 @@ class ModelRouter:
 
             tool_call = None
             if finish_reason == "tool_calls" and collected_tool_calls:
-                tool_call = collected_tool_calls  # type: ignore[assignment]
+                tool_call = collected_tool_calls
 
-            if token or thinking or tool_call or finish_reason:
+            if token or thinking_text or tool_call or finish_reason:
                 yield StreamChunk(
                     token=token,
-                    thinking=thinking,
+                    thinking=thinking_text,
                     tool_call=tool_call,
                     finish_reason=finish_reason,
                     usage=None,

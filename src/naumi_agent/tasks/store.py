@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import aiosqlite
 
@@ -119,7 +119,7 @@ class TaskStore:
         if row is None:
             return []
         raw = row["blocks"]
-        return json.loads(raw) if isinstance(raw, str) else raw
+        return cast(list[str], json.loads(raw)) if isinstance(raw, str) else raw
 
     async def create_task(
         self,
@@ -132,6 +132,12 @@ class TaskStore:
 
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_table(db)
+
+            # Validate blocker IDs exist (same connection, best-effort isolation)
+            for bid in blocked_by:
+                existing = await self._get_task(db, bid)
+                if existing is None:
+                    raise ValueError(f"依赖任务 #{bid} 不存在")
 
             cursor = await db.execute(
                 "SELECT MAX(CAST(id AS INTEGER)) FROM tasks WHERE session_id = ?",
