@@ -173,6 +173,15 @@ def _rollback_file(file_path: Path) -> bool:
         return False
 
 
+def _restore_original_content(file_path: Path, original_content: str) -> bool:
+    """Restore the exact pre-modification content, preserving uncommitted user edits."""
+    try:
+        file_path.write_text(original_content, encoding="utf-8")
+        return True
+    except Exception:
+        return _rollback_file(file_path)
+
+
 def _run_ruff(file_path: Path) -> tuple[bool, str]:
     """Run ruff check on the file.
 
@@ -328,10 +337,10 @@ def validate_and_apply(
     5. Write to temp file for validation
     6. Run ruff check
     7. Run ruff format check
-    8. Run import test
-    9. Write to actual file
+    8. Write to actual file
+    9. Run import test against the real package module
     10. Run pytest on corresponding test file
-    11. If tests fail → rollback
+    11. If import/tests fail → restore original content
 
     Returns:
         Dict with status, diff, validation results.
@@ -413,21 +422,6 @@ def validate_and_apply(
             "output": fmt_output,
         }
 
-        # Import test on temp file
-        import_passed, import_output = _run_import_test(tmp_path)
-        validation_results["import_test"] = {
-            "passed": import_passed,
-            "output": import_output,
-        }
-
-        if not import_passed:
-            return {
-                "status": "rejected",
-                "file": target_file,
-                "error": "导入测试失败 — 修改后的文件存在语法或导入错误",
-                "validation": validation_results,
-                "diff": diff,
-            }
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -445,7 +439,25 @@ def validate_and_apply(
             "diff": diff,
         }
 
-    # 9. Run tests
+    # 9. Import test against the actual package path.
+    import_passed, import_output = _run_import_test(file_path)
+    validation_results["import_test"] = {
+        "passed": import_passed,
+        "output": import_output,
+    }
+
+    if not import_passed:
+        restored = _restore_original_content(file_path, original_content)
+        return {
+            "status": "rolled_back",
+            "file": target_file,
+            "error": "导入测试失败，已恢复修改前内容",
+            "rollback_success": restored,
+            "validation": validation_results,
+            "diff": diff,
+        }
+
+    # 10. Run tests
     test_passed, test_output = _run_tests(file_path)
     validation_results["pytest"] = {
         "passed": test_passed,
@@ -453,12 +465,11 @@ def validate_and_apply(
     }
 
     if not test_passed:
-        # Rollback
-        rolled_back = _rollback_file(file_path)
+        rolled_back = _restore_original_content(file_path, original_content)
         return {
             "status": "rolled_back",
             "file": target_file,
-            "error": "测试未通过，已自动回滚",
+            "error": "测试未通过，已恢复修改前内容",
             "rollback_success": rolled_back,
             "validation": validation_results,
             "diff": diff,

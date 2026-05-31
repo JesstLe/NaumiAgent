@@ -11,6 +11,8 @@ from prompt_toolkit.document import Document
 # (command, description, takes_argument)
 COMMANDS: list[tuple[str, str, bool]] = [
     ("/help", "显示帮助", False),
+    ("/copy", "复制/导出当前完整记录", False),
+    ("/pwd", "显示当前工作目录", False),
     ("/tools", "列出可用工具", False),
     ("/model", "显示模型配置", False),
     ("/version", "显示版本号", False),
@@ -56,6 +58,9 @@ COMMANDS: list[tuple[str, str, bool]] = [
     ("/vision", "AI 视觉数据提取 — 反封锁视觉管线", True),
     ("/hook", "逆向插桩 — 黑盒解剖", True),
     ("/pursue", "目标追踪 — 自主循环执行直至真正达成", True),
+    ("/worktree", "隔离执行区 — create/status/bind/keep/remove", True),
+    ("/background", "后台任务 — run/status/list/cancel/output", True),
+    ("/schedule", "调度提醒 — create/list/cancel/pause/resume", True),
     ("/self-review", "自我审查 — 扫描自身源码质量与架构", True),
     ("/reload", "热重载 — 重载模块无需重启", True),
     ("/evolve", "自我进化 — 反思循环修改自身工具代码并验证", True),

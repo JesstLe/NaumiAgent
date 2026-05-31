@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from naumi_agent.tools.browser.security.coordinator import (
     AGENT_ROLES,
     ALL_ROLE_NAMES,

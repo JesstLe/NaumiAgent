@@ -66,7 +66,7 @@ class TaskCreateTool(Tool):
             "required": ["subject"],
         }
 
-    async def execute(
+    async def execute(  # type: ignore[override]
         self,
         *,
         subject: str,
@@ -77,19 +77,21 @@ class TaskCreateTool(Tool):
         if not self._store.session_id:
             return "错误：当前没有活跃会话，无法创建任务。"
 
+        subject = subject.strip()
+        if not subject:
+            return "错误：任务标题不能为空。"
+
         blocked_by = blocked_by or []
 
-        # Validate blocker IDs exist
-        for bid in blocked_by:
-            existing = await self._store.get_task(bid)
-            if existing is None:
-                return f"错误：依赖任务 #{bid} 不存在。"
+        try:
+            task = await self._store.create_task(
+                subject=subject,
+                description=description,
+                blocked_by=blocked_by,
+            )
+        except ValueError as e:
+            return f"错误：{e}"
 
-        task = await self._store.create_task(
-            subject=subject,
-            description=description,
-            blocked_by=blocked_by,
-        )
         block_info = f"（依赖 #{', #'.join(blocked_by)}）" if blocked_by else ""
         return f"已创建任务 #{task.id}：{subject} {block_info}"
 
@@ -139,7 +141,14 @@ class TaskUpdateTool(Tool):
             "required": ["task_id", "status"],
         }
 
-    async def execute(
+    # 允许的状态转换（completed 为终止态，不可回退）
+    _VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
+        TaskStatus.PENDING: {TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED},
+        TaskStatus.IN_PROGRESS: {TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED, TaskStatus.PENDING},
+        TaskStatus.COMPLETED: {TaskStatus.COMPLETED},
+    }
+
+    async def execute(  # type: ignore[override]
         self,
         *,
         task_id: str,
@@ -154,6 +163,16 @@ class TaskUpdateTool(Tool):
             new_status = TaskStatus(status)
         except ValueError:
             return f"错误：无效状态 '{status}'。有效值：pending, in_progress, completed"
+
+        existing = await self._store.get_task(task_id)
+        if existing is None:
+            return f"错误：任务 #{task_id} 不存在。"
+
+        if new_status not in self._VALID_TRANSITIONS.get(existing.status, set()):
+            return (
+                f"错误：无效的状态转换 {existing.status.value} → {new_status.value}。"
+                f"已完成任务不可回退。"
+            )
 
         task = await self._store.update_task(
             task_id=task_id,
@@ -231,7 +250,7 @@ class TaskDeleteTool(Tool):
             "required": ["task_id"],
         }
 
-    async def execute(self, *, task_id: str, **kwargs: Any) -> str:
+    async def execute(self, *, task_id: str, **kwargs: Any) -> str:  # type: ignore[override]
         if not self._store.session_id:
             return "错误：当前没有活跃会话。"
 

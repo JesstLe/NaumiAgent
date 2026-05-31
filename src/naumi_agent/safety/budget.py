@@ -77,6 +77,7 @@ class BudgetTracker:
     def is_exceeded(self) -> bool:
         return (
             self._total_input > self.budget.max_input_tokens
+            or self._total_output > self.budget.max_output_tokens
             or self._total_cost > self.budget.max_usd
         )
 
@@ -95,6 +96,13 @@ class BudgetTracker:
     @property
     def remaining_usd(self) -> float:
         return max(0, self.budget.max_usd - self._total_cost)
+
+    def reset(self) -> None:
+        """Reset all tracked usage (for new session)."""
+        self._records.clear()
+        self._total_input = 0
+        self._total_output = 0
+        self._total_cost = 0.0
 
     def get_summary(self) -> BudgetSummary:
         breakdown: dict[str, dict[str, float]] = {}

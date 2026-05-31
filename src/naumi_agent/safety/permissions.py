@@ -194,6 +194,354 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         ],
         requires_confirmation=False,
     ),
+    "spawn_agent": PermissionRule(
+        tool_name="spawn_agent",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "destroy_agent": PermissionRule(
+        tool_name="destroy_agent",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "blackboard_read": PermissionRule(
+        tool_name="blackboard_read",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "blackboard_write": PermissionRule(
+        tool_name="blackboard_write",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "task_create": PermissionRule(
+        tool_name="task_create",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "task_update": PermissionRule(
+        tool_name="task_update",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "task_list": PermissionRule(
+        tool_name="task_list",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "task_delete": PermissionRule(
+        tool_name="task_delete",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "yaml_micro_verify": PermissionRule(
+        tool_name="yaml_micro_verify",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "yaml_validate": PermissionRule(
+        tool_name="yaml_validate",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "pursue_goal": PermissionRule(
+        tool_name="pursue_goal",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "hot_reload": PermissionRule(
+        tool_name="hot_reload",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+        ],
+        requires_confirmation=False,
+    ),
+    "self_modify": PermissionRule(
+        tool_name="self_modify",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+        ],
+        requires_confirmation=False,
+    ),
+    "self_evolve": PermissionRule(
+        tool_name="self_evolve",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+        ],
+        requires_confirmation=False,
+    ),
+    "self_review": PermissionRule(
+        tool_name="self_review",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "forge_tool": PermissionRule(
+        tool_name="forge_tool",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+        ],
+        requires_confirmation=False,
+    ),
+    "background_run": PermissionRule(
+        tool_name="background_run",
+        allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
+        requires_confirmation=True,
+        max_calls_per_session=50,
+    ),
+    "background_status": PermissionRule(
+        tool_name="background_status",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "background_list": PermissionRule(
+        tool_name="background_list",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "background_cancel": PermissionRule(
+        tool_name="background_cancel",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "background_read_output": PermissionRule(
+        tool_name="background_read_output",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "schedule_create": PermissionRule(
+        tool_name="schedule_create",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "schedule_list": PermissionRule(
+        tool_name="schedule_list",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "schedule_cancel": PermissionRule(
+        tool_name="schedule_cancel",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "schedule_pause": PermissionRule(
+        tool_name="schedule_pause",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "schedule_resume": PermissionRule(
+        tool_name="schedule_resume",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "worktree_create": PermissionRule(
+        tool_name="worktree_create",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "worktree_status": PermissionRule(
+        tool_name="worktree_status",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "worktree_bind_task": PermissionRule(
+        tool_name="worktree_bind_task",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "worktree_keep": PermissionRule(
+        tool_name="worktree_keep",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "worktree_remove": PermissionRule(
+        tool_name="worktree_remove",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+}
+
+PREFIX_PERMISSIONS: dict[str, PermissionRule] = {
+    "analysis_": PermissionRule(
+        tool_name="analysis_*",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "browser_": PermissionRule(
+        tool_name="browser_*",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "skill_": PermissionRule(
+        tool_name="skill_*",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
 }
 
 # 阻止的危险 shell 命令模式
@@ -218,21 +566,28 @@ class PermissionChecker:
         self._allowed_dirs = allowed_dirs or ["/workspace"]
         self._call_counts: dict[str, int] = {}
 
+    def _resolve_rule(self, tool_name: str) -> tuple[str, PermissionRule | None]:
+        """Resolve exact, namespaced, or prefix-based permission rules."""
+        candidates = [tool_name]
+        if "." in tool_name:
+            candidates.append(tool_name.split(".")[-1])
+        if "__" in tool_name:
+            candidates.append(tool_name.split("__")[-1])
+
+        for candidate in candidates:
+            rule = TOOL_PERMISSIONS.get(candidate)
+            if rule:
+                return candidate, rule
+
+            for prefix, prefix_rule in PREFIX_PERMISSIONS.items():
+                if candidate.startswith(prefix):
+                    return candidate, prefix_rule
+
+        return tool_name, None
+
     def check(self, tool_name: str, args: dict[str, Any]) -> PermissionDecision:
         """检查工具调用是否被允许."""
-        rule = TOOL_PERMISSIONS.get(tool_name)
-
-        # 某些 API（如 Kimi）返回的工具名可能带 namespace 前缀
-        if not rule:
-            normalized = tool_name
-            if "." in normalized:
-                normalized = normalized.split(".")[-1]
-            elif "__" in normalized:
-                normalized = normalized.split("__")[-1]
-            if normalized != tool_name:
-                rule = TOOL_PERMISSIONS.get(normalized)
-                if rule:
-                    tool_name = normalized
+        tool_name, rule = self._resolve_rule(tool_name)
 
         if not rule:
             # MCP tools are dynamic — allow based on mode
@@ -272,7 +627,7 @@ class PermissionChecker:
                 return path_check
 
         # 命令检查
-        if tool_name == "bash_run" and "command" in args:
+        if tool_name in {"bash_run", "background_run"} and "command" in args:
             cmd_check = self._check_command(args["command"])
             if not cmd_check.allowed:
                 return cmd_check

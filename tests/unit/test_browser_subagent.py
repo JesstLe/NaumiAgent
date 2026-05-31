@@ -2,27 +2,24 @@
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from naumi_agent.model.router import ModelResponse
 from naumi_agent.tools.browser.subagent.browser_subagent import (
     BrowserSubagent,
-    build_structured_timeline,
-    compact_debug_state,
-    compact_elements,
-    compact_operator_messages,
-    detect_guidance_request,
     _default_verification,
     _format_action,
     _format_duration_ms,
     _format_video_timestamp,
     _to_artifact_relative_path,
+    build_structured_timeline,
+    compact_debug_state,
+    compact_elements,
+    compact_operator_messages,
+    detect_guidance_request,
 )
 from naumi_agent.tools.browser.subagent.planner import LLMPlanner
-
 
 # ---------------------------------------------------------------------------
 # Compaction helpers
@@ -693,7 +690,7 @@ class TestActionExecution:
         }
 
         subagent = BrowserSubagent(rt, planner)
-        result = await subagent.delegate_task("Type hello")
+        await subagent.delegate_task("Type hello")
         rt.type_text.assert_called_once_with(3, "hello")
 
     @pytest.mark.asyncio

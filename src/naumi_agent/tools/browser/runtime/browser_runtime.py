@@ -850,10 +850,8 @@ class BrowserRuntime:
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "Chrome/121.0.0.0 Safari/537.36"
             ),
-            "record_video": {
-                "dir": str(self.artifacts.get_video_dir()),
-                "size": {"width": 1280, "height": 800},
-            },
+            "record_video_dir": str(self.artifacts.get_video_dir()),
+            "record_video_size": {"width": 1280, "height": 800},
         }
 
         storage_state = await load_storage_state(self.storage_state_path)
@@ -1826,9 +1824,9 @@ class BrowserRuntime:
     async def _install_active_border_init_script(self) -> None:
         if not self.context or self.session_source == "attached":
             return
-        styles = BROWSER_ACTIVE_BORDER_STYLES
-        await self.context.add_init_script(
-            """(css) => {
+        styles_json = json.dumps(BROWSER_ACTIVE_BORDER_STYLES)
+        script = """(() => {
+                const css = __CSS__;
                 if (!document.getElementById(
                     "agent-browser-active-styles"
                 )) {
@@ -1878,8 +1876,9 @@ class BrowserRuntime:
                         "DOMContentLoaded", addBorderElements
                     );
                 }
-            }""",
-            styles,
+            })()""".replace("__CSS__", styles_json)
+        await self.context.add_init_script(
+            script,
         )
 
     # ── Target resolution ──

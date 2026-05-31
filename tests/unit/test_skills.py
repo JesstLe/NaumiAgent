@@ -2,15 +2,13 @@
 
 import pytest
 
+from naumi_agent.skills.loader import SkillLoader
 from naumi_agent.skills.skill import (
     Skill,
-    SkillArgument,
     SkillError,
     parse_skill_md,
 )
-from naumi_agent.skills.loader import SkillLoader
-from naumi_agent.skills.tool import SkillTool, SkillDispatchTool, create_skill_tools
-
+from naumi_agent.skills.tool import SkillDispatchTool, SkillTool, create_skill_tools
 
 # ---------------------------------------------------------------------------
 #  Fixtures — 临时 Skill 目录
@@ -348,7 +346,7 @@ class TestSkillLoader:
         loader = SkillLoader(
             search_paths=[str(multi_skill_dir), str(dup_dir)]
         )
-        skills = loader.load_all()
+        loader.load_all()
         skill = loader.get("alpha")
 
         # First occurrence wins (from multi_skill_dir)

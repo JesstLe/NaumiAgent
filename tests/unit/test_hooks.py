@@ -1,6 +1,5 @@
 """Hook 系统单元测试."""
 
-import asyncio
 
 import pytest
 

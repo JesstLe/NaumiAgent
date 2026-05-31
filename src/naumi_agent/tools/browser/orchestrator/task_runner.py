@@ -34,12 +34,17 @@ _INTERRUPTED_STATUSES = frozenset({
 _RULE_KINDS = frozenset({"url_includes", "title_includes", "text_includes"})
 
 
-def _safe_create_task(coro: Any) -> None:
+def _safe_create_task(coro_factory: Callable[[], Any]) -> bool:
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(coro)
     except RuntimeError:
-        pass
+        return False
+    try:
+        loop.create_task(coro_factory())
+        return True
+    except Exception:
+        logger.exception("Failed to create background task")
+        return False
 
 
 def _now_iso() -> str:
@@ -315,9 +320,10 @@ class TaskRunner:
 
         planner = options.get("planner")
         if planner is None:
+            from naumi_agent.config.settings import ModelConfig
             from naumi_agent.model.router import ModelRouter
 
-            router = options.get("model_router") or ModelRouter()
+            router = options.get("model_router") or ModelRouter(ModelConfig())
             planner = LLMPlanner(router)
         self.subagent = BrowserSubagent(self.runtime, planner)
 
@@ -426,7 +432,7 @@ class TaskRunner:
             self._store.persist(self.runs)
 
         if any(r["status"] == "queued" for r in self.runs):
-            _safe_create_task(self.process_queue())
+            _safe_create_task(lambda: self.process_queue())
 
     # ── Run CRUD ──
 
@@ -517,7 +523,7 @@ class TaskRunner:
         }
         self._store.persist(self.runs)
         self._emit_update("run_created", run)
-        _safe_create_task(self.process_queue())
+        _safe_create_task(lambda: self.process_queue())
         return run
 
     def list_runs(self, limit: int = 20) -> list[dict[str, Any]]:
@@ -752,23 +758,22 @@ class TaskRunner:
                 if not next_run:
                     break
                 self._active_slots += 1
-                _safe_create_task(self._execute_run(next_run))
+                if not _safe_create_task(lambda: self._execute_run(next_run)):
+                    self._active_slots = max(0, self._active_slots - 1)
         finally:
             self._processing = False
 
     async def _execute_run(self, run: dict[str, Any]) -> None:
+        if self._get_run_control(run["id"]).get("aborted"):
+            self._active_slots = max(0, self._active_slots - 1)
+            await self.process_queue()
+            return
+
         is_parallel = (
             self._max_concurrent > 1 and self._active_slots > 1
         )
         run_runtime = self.runtime
         run_subagent = self.subagent
-
-        if is_parallel:
-            run_runtime = BrowserRuntime(self._base_dir)
-            run_subagent = BrowserSubagent(
-                run_runtime,
-                self.subagent.planner,
-            )
 
         run["status"] = "running"
         run["startedAt"] = _now_iso()
@@ -790,6 +795,12 @@ class TaskRunner:
         self._emit_update("run_started", run)
 
         try:
+            if is_parallel:
+                run_runtime = BrowserRuntime(self._base_dir)
+                run_subagent = BrowserSubagent(
+                    run_runtime,
+                    self.subagent.planner,
+                )
             effective_instruction = build_templated_instruction(
                 run["taskInstruction"], run.get("template")
             )
@@ -982,7 +993,9 @@ class TaskRunner:
     def list_templates(
         self, limit: int = 100
     ) -> list[dict[str, Any]]:
-        return self.templates[: max(1, limit)]
+        if limit <= 0:
+            return []
+        return self.templates[:limit]
 
     def get_template(
         self, template_id: str

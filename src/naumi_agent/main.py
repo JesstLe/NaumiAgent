@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -22,30 +23,43 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _get_git_info() -> dict[str, str | bool]:
-    """Get current git branch and dirty status."""
+    """Get current git branch and dirty status (TTL-cached 5s)."""
     import subprocess
+    import time
 
+    # TTL cache: refresh every 5 seconds so branch switches show up
+    now = time.monotonic()
+    if (
+        hasattr(_get_git_info, "_cache")
+        and now - _get_git_info._cache_time < 5  # type: ignore[attr-defined]
+    ):
+        return _get_git_info._cache.copy()  # type: ignore[attr-defined]
+
+    result: dict[str, str | bool] = {"branch": "", "dirty": False}
     try:
         branch = subprocess.check_output(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             stderr=subprocess.DEVNULL,
             cwd=str(Path.cwd()),
         ).decode().strip()
+        if branch:
+            result["branch"] = branch
+            try:
+                result["dirty"] = bool(
+                    subprocess.check_output(
+                        ["git", "status", "--porcelain"],
+                        stderr=subprocess.DEVNULL,
+                        cwd=str(Path.cwd()),
+                    ).decode().strip()
+                )
+            except Exception:
+                pass
     except Exception:
-        return {"branch": "", "dirty": False}
-    if not branch:
-        return {"branch": "", "dirty": False}
-    try:
-        dirty = bool(
-            subprocess.check_output(
-                ["git", "status", "--porcelain"],
-                stderr=subprocess.DEVNULL,
-                cwd=str(Path.cwd()),
-            ).decode().strip()
-        )
-    except Exception:
-        dirty = False
-    return {"branch": branch, "dirty": dirty}
+        pass
+
+    _get_git_info._cache = result  # type: ignore[attr-defined]
+    _get_git_info._cache_time = now  # type: ignore[attr-defined]
+    return result.copy()
 
 app = typer.Typer(
     name="naumi",
@@ -73,6 +87,21 @@ _TOOL_LABELS: dict[str, tuple[str, str]] = {
     "task_update": ("🔄", "更新任务"),
     "task_list": ("📋", "查看任务"),
     "task_delete": ("🗑️", "删除任务"),
+    "background_run": ("⏱️", "后台执行"),
+    "background_status": ("⏱️", "查看后台任务"),
+    "background_list": ("📋", "列出后台任务"),
+    "background_cancel": ("⏹️", "取消后台任务"),
+    "background_read_output": ("📄", "读取后台输出"),
+    "schedule_create": ("⏰", "创建调度提醒"),
+    "schedule_list": ("📋", "列出调度提醒"),
+    "schedule_cancel": ("⏹️", "取消调度提醒"),
+    "schedule_pause": ("⏸️", "暂停调度提醒"),
+    "schedule_resume": ("▶️", "恢复调度提醒"),
+    "worktree_create": ("🌿", "创建隔离区"),
+    "worktree_status": ("🌿", "查看隔离区"),
+    "worktree_bind_task": ("🔗", "绑定隔离区任务"),
+    "worktree_keep": ("📦", "保留隔离区"),
+    "worktree_remove": ("🧹", "删除隔离区"),
 }
 
 # ANSI separators for visual hierarchy
@@ -110,6 +139,30 @@ def _tool_label(name: str, args: str = "") -> str:
         except (json.JSONDecodeError, TypeError):
             pass
     return f"{icon} {label}{hint}"
+
+
+def _show_cli_status(cli: Any, engine: Any) -> None:
+    """Show model, context, budget, git stats in the CLI output area."""
+    parts: list[str] = []
+    model = engine.router.resolve_model("capable")
+    parts.append(model)
+    parts.append(f"工作目录: {Path.cwd()}")
+    u = engine.usage
+    total_tok = u.total_input_tokens + u.total_output_tokens
+    parts.append(f"Token: {total_tok}")
+    ctx = engine.get_context_info()
+    used_k = ctx["used"] / 1000
+    window_k = ctx["window"] / 1000
+    parts.append(f"上下文: {used_k:.0f}K/{window_k:.0f}K ({ctx['percentage']}%)")
+    budget = engine.get_budget_info()
+    parts.append(f"预算: ${budget['used_usd']:.4f}/${budget['max_usd']:.2f}")
+    git = _get_git_info()
+    if git["branch"]:
+        tag = git["branch"] + ("*" if git["dirty"] else "")
+        parts.append(f"📂 {tag}")
+    cli.append_output(
+        "\033[2m  " + " | ".join(parts) + "\033[0m\n\n"
+    )
 
 
 def _resolve_config_path(path: str) -> str:
@@ -169,7 +222,6 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
         args = data.get("args", "")
         label = _tool_label(name, args)
         sys.stdout.write(f"  {_sep()}\n\033[36m  ⏳ {label}\033[0m\n")
-        sys.stdout.flush()
         sys.stdout.flush()
     elif event == "tool_end":
         name = data.get("name", "?")
@@ -347,19 +399,7 @@ async def _chat(config_path: str) -> None:
         cli.set_git_info(git["branch"], git["dirty"])
 
     # Show startup stats line immediately
-    startup_parts: list[str] = []
-    model = engine.router.resolve_model("capable")
-    startup_parts.append(model)
-    ctx = engine.get_context_info()
-    startup_parts.append(f"上下文: 0K/{ctx['window'] / 1000:.0f}K")
-    budget = engine.get_budget_info()
-    startup_parts.append(f"预算: $0.0000/${budget['max_usd']:.2f}")
-    if git["branch"]:
-        tag = git["branch"] + ("*" if git["dirty"] else "")
-        startup_parts.append(f"📂 {tag}")
-    cli.append_output(
-        "\033[2m  " + " | ".join(startup_parts) + "\033[0m\n\n"
-    )
+    _show_cli_status(cli, engine)
 
     async def on_submit(text: str) -> None:
         if text in ("/quit", "/q", "/exit", "exit"):
@@ -428,12 +468,35 @@ async def _run_task(task: str, config_path: str) -> None:
     resolved = _resolve_config_path(config_path)
     config = AppConfig.from_yaml(resolved)
     setup_logging(config.log_level)
+    _check_api_key(config)
     engine = AgentEngine(config)
 
-    with console.status("[bold green]执行中...[/bold green]"):
-        result = await engine.run(task)
+    try:
+        with console.status("[bold green]执行中...[/bold green]"):
+            result = await engine.run(task)
+    except Exception as e:
+        console.print(f"[red]错误: {e}[/red]")
+        return
 
     console.print(Markdown(result.response))
+    console.print()
+
+    # Show stats line
+    stats = Text()
+    model = engine.router.resolve_model("capable")
+    stats.append(f"{model}", style="dim")
+    stats.append(" | ", style="dim")
+    u = result.usage
+    total_tok = u.total_input_tokens + u.total_output_tokens
+    stats.append(f"Token: {total_tok}", style="dim")
+    stats.append(" | ", style="dim")
+    stats.append(f"费用: ${u.total_cost_usd:.4f}", style="dim")
+    stats.append(" | ", style="dim")
+    stats.append(f"轮次: {u.turns}", style="dim")
+    if result.status != "completed":
+        stats.append(f" | 状态: {result.status}", style="yellow")
+    console.print(stats)
+    console.print()
 
 
 @app.command()
@@ -609,6 +672,13 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             _print_help()
         case "/hooks":
             _show_hooks(engine)
+        case "/copy":
+            if _active_cli:
+                _active_cli.copy_transcript()
+            else:
+                console.print("[yellow]当前界面不支持复制完整记录[/yellow]")
+        case "/pwd":
+            console.print(f"当前工作目录: [cyan]{Path.cwd()}[/cyan]")
         case "/skills":
             _show_skills(engine)
         case "/tools" | "/t":
@@ -620,9 +690,12 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             engine.reset()
             if _active_cli:
                 _active_cli.clear_output()
+                _show_cli_status(_active_cli, engine)
             console.print("[green]会话已清除[/green]")
         case "/new" | "/n":
             await _new_conversation(engine)
+            if _active_cli:
+                _show_cli_status(_active_cli, engine)
         case "/usage" | "/u":
             u = engine.usage
             console.print(
@@ -901,6 +974,12 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             else:
                 await _run_pursue(engine, arg)
+        case "/worktree":
+            await _run_worktree(engine, arg)
+        case "/background":
+            await _run_background(engine, arg)
+        case "/schedule":
+            await _run_schedule(engine, arg)
         case "/self-review":
             await _run_self_review(engine, arg)
         case "/reload":
@@ -981,6 +1060,8 @@ def _print_help() -> None:
     console.print("[bold]可用命令:[/bold]")
     commands = [
         ("/help", "显示帮助"),
+        ("/copy", "复制/导出当前完整记录 (Ctrl+Y)"),
+        ("/pwd", "显示当前工作目录"),
         ("/tools", "列出可用工具"),
         ("/model", "显示模型配置"),
         ("/usage", "显示 token 用量"),
@@ -1025,6 +1106,9 @@ def _print_help() -> None:
         ("/vision <目标>", "AI 视觉数据提取 — 反封锁视觉管线"),
         ("/hook <目标>", "逆向插桩 — 黑盒解剖"),
         ("/pursue <目标>", "目标追踪 — 自主循环执行直至真正达成"),
+        ("/worktree <子命令>", "隔离执行区 — create/status/bind/keep/remove"),
+        ("/background <子命令>", "后台任务 — run/status/list/cancel/output"),
+        ("/schedule <子命令>", "调度提醒 — create/list/cancel/pause/resume"),
         ("/self-review [模块]", "自我审查 — 扫描自身源码质量与架构"),
         ("/reload [域]", "热重载 — 重载模块无需重启 (tools/memory/skills/all)"),
         ("/evolve <描述>", "自我进化 — 反思循环修改自身工具代码并验证"),
@@ -1257,6 +1341,173 @@ async def _run_pursue(engine: Any, goal: str) -> None:
             title="🎯 目标追踪报告",
         )
     )
+
+
+async def _run_worktree(engine: Any, arg: str) -> None:
+    """执行 worktree 隔离区命令."""
+    parts = arg.strip().split()
+    subcommand = parts[0] if parts else "status"
+
+    async def _execute(tool_name: str, **kwargs: Any) -> None:
+        tool = engine.tool_registry.get(tool_name)
+        if not tool:
+            console.print(f"[red]工具未注册: {tool_name}[/red]")
+            return
+        result = await tool.execute(**kwargs)
+        console.print(
+            Panel(
+                Markdown(result),
+                title="[bold cyan]Worktree 隔离区[/bold cyan]",
+                border_style="cyan",
+                padding=(1, 2),
+            )
+        )
+
+    match subcommand:
+        case "status" | "list":
+            name = parts[1] if len(parts) > 1 else ""
+            await _execute("worktree_status", name=name)
+        case "create":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /worktree create <名称> [任务ID][/yellow]")
+                return
+            task_id = parts[2] if len(parts) > 2 else ""
+            await _execute("worktree_create", name=parts[1], task_id=task_id)
+        case "bind":
+            if len(parts) < 3:
+                console.print("[yellow]用法: /worktree bind <名称> <任务ID>[/yellow]")
+                return
+            await _execute("worktree_bind_task", name=parts[1], task_id=parts[2])
+        case "keep":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /worktree keep <名称> [原因][/yellow]")
+                return
+            reason = " ".join(parts[2:]) if len(parts) > 2 else ""
+            await _execute("worktree_keep", name=parts[1], reason=reason)
+        case "remove":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /worktree remove <名称> [--discard][/yellow]")
+                return
+            discard = "--discard" in parts[2:] or "--force" in parts[2:]
+            await _execute("worktree_remove", name=parts[1], discard_changes=discard)
+        case _:
+            console.print(
+                "[yellow]未知 worktree 子命令[/yellow]\n"
+                "[dim]可用: status/list/create/bind/keep/remove[/dim]"
+            )
+
+
+async def _run_background(engine: Any, arg: str) -> None:
+    """执行后台任务命令."""
+    parts = arg.strip().split(maxsplit=2)
+    subcommand = parts[0] if parts else "list"
+
+    async def _execute(tool_name: str, **kwargs: Any) -> None:
+        tool = engine.tool_registry.get(tool_name)
+        if not tool:
+            console.print(f"[red]工具未注册: {tool_name}[/red]")
+            return
+        result = await tool.execute(**kwargs)
+        console.print(
+            Panel(
+                Markdown(result),
+                title="[bold cyan]后台任务[/bold cyan]",
+                border_style="cyan",
+                padding=(1, 2),
+            )
+        )
+
+    match subcommand:
+        case "run":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /background run <命令>[/yellow]")
+                return
+            command = arg.strip()[len("run"):].strip()
+            await _execute("background_run", command=command)
+        case "status":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /background status <任务ID>[/yellow]")
+                return
+            await _execute("background_status", task_id=parts[1])
+        case "list":
+            await _execute("background_list")
+        case "cancel":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /background cancel <任务ID>[/yellow]")
+                return
+            await _execute("background_cancel", task_id=parts[1])
+        case "output":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /background output <任务ID>[/yellow]")
+                return
+            await _execute("background_read_output", task_id=parts[1])
+        case _:
+            console.print(
+                "[yellow]未知后台任务子命令[/yellow]\n"
+                "[dim]可用: run/status/list/cancel/output[/dim]"
+            )
+
+
+async def _run_schedule(engine: Any, arg: str) -> None:
+    """执行调度/提醒命令."""
+    try:
+        parts = shlex.split(arg.strip())
+    except ValueError as e:
+        console.print(f"[yellow]参数解析失败：{e}[/yellow]")
+        return
+    subcommand = parts[0] if parts else "list"
+
+    async def _execute(tool_name: str, **kwargs: Any) -> None:
+        tool = engine.tool_registry.get(tool_name)
+        if not tool:
+            console.print(f"[red]工具未注册: {tool_name}[/red]")
+            return
+        result = await tool.execute(**kwargs)
+        console.print(
+            Panel(
+                Markdown(result),
+                title="[bold cyan]调度提醒[/bold cyan]",
+                border_style="cyan",
+                padding=(1, 2),
+            )
+        )
+
+    match subcommand:
+        case "create":
+            if len(parts) < 4:
+                console.print(
+                    "[yellow]用法: /schedule create once <ISO时间> <提醒内容>[/yellow]\n"
+                    "[dim]或: /schedule create cron \"*/15 * * * *\" <提醒内容>[/dim]"
+                )
+                return
+            await _execute(
+                "schedule_create",
+                kind=parts[1],
+                expression=parts[2],
+                prompt=" ".join(parts[3:]),
+            )
+        case "list":
+            await _execute("schedule_list", active_only="--active" in parts[1:])
+        case "cancel":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /schedule cancel <调度ID>[/yellow]")
+                return
+            await _execute("schedule_cancel", schedule_id=parts[1])
+        case "pause":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /schedule pause <调度ID>[/yellow]")
+                return
+            await _execute("schedule_pause", schedule_id=parts[1])
+        case "resume":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /schedule resume <调度ID>[/yellow]")
+                return
+            await _execute("schedule_resume", schedule_id=parts[1])
+        case _:
+            console.print(
+                "[yellow]未知调度子命令[/yellow]\n"
+                "[dim]可用: create/list/cancel/pause/resume[/dim]"
+            )
 
 
 async def _run_self_review(engine: Any, arg: str) -> None:

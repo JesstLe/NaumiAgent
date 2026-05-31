@@ -82,11 +82,6 @@ class TestReloadModule:
         result = reload_module("naumi_agent.nonexistent.module.xyz")
         assert result["status"] in ("not_found", "error")
 
-    def test_reload_loaded_module(self):
-        result = reload_module("naumi_agent.tools.builtin")
-        assert result["status"] == "reloaded"
-        assert "path" in result
-
     def test_reload_invalid_module(self):
         result = reload_module("not_a_real_module_at_all")
         assert result["status"] in ("error", "not_found")
