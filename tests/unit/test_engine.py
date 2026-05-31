@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -54,6 +56,55 @@ class TestEngineInit:
 
     def test_has_subagent_tools(self, engine: AgentEngine) -> None:
         assert "delegate_task" in engine.tool_registry.names
+
+    @pytest.mark.asyncio
+    async def test_registered_tools_have_permission_rules(self) -> None:
+        engine = AgentEngine(AppConfig())
+        checker = PermissionChecker(PermissionMode.MODERATE, allowed_dirs=["/workspace"])
+
+        unknown = []
+        for name in engine.tool_registry.names:
+            decision = checker.check(name, {})
+            if not decision.allowed and "Unknown tool" in decision.reason:
+                unknown.append(name)
+
+        assert unknown == []
+        await engine.shutdown()
+
+    def test_registered_tools_have_openai_compatible_schemas(self) -> None:
+        engine = AgentEngine(AppConfig())
+        name_re = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+        errors: list[str] = []
+        seen: set[str] = set()
+
+        for tool in engine.tool_registry.all():
+            if tool.name in seen:
+                errors.append(f"{tool.name}: duplicate tool name")
+            seen.add(tool.name)
+
+            if not name_re.match(tool.name):
+                errors.append(f"{tool.name}: invalid function name")
+
+            schema = tool.to_openai_tool()
+            json.dumps(schema, ensure_ascii=False)
+            parameters = schema.get("function", {}).get("parameters", {})
+            properties = parameters.get("properties", {})
+            required = parameters.get("required", [])
+
+            if parameters.get("type") != "object":
+                errors.append(f"{tool.name}: parameters.type must be object")
+            if not isinstance(properties, dict):
+                errors.append(f"{tool.name}: properties must be object")
+            if not isinstance(required, list):
+                errors.append(f"{tool.name}: required must be list")
+            else:
+                for field in required:
+                    if field not in properties:
+                        errors.append(
+                            f"{tool.name}: required field missing from properties: {field}"
+                        )
+
+        assert errors == []
 
 
 class TestReset:
