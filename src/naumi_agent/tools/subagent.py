@@ -6,6 +6,11 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from naumi_agent.agents.team_protocol import (
+    execute_team_signal,
+    execute_team_status,
+    format_team_signal_result,
+)
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tools.base import Tool
 
@@ -20,6 +25,8 @@ def create_subagent_tools(manager: Any) -> list[Tool]:
         SpawnAgentTool(manager),
         DestroyAgentTool(manager),
         ListAgentsTool(manager),
+        TeamSignalTool(manager),
+        TeamStatusTool(manager),
         BlackboardReadTool(manager),
         BlackboardWriteTool(manager),
     ]
@@ -266,6 +273,144 @@ class ListAgentsTool(Tool):
             info += f")\n    {a['description']}"
             lines.append(info)
         return "\n".join(lines)
+
+
+class TeamSignalTool(Tool):
+    """发布团队协议事件."""
+
+    def __init__(self, manager: Any) -> None:
+        self._manager = manager
+
+    @property
+    def name(self) -> str:
+        return "team_signal"
+
+    @property
+    def description(self) -> str:
+        return (
+            "发布结构化团队协作事件，并同步到消息总线、共享黑板和用户界面。"
+            "用于 handoff、decision、blocker、update、request、result 等团队协议。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "event_type": {
+                    "type": "string",
+                    "enum": ["handoff", "decision", "blocker", "update", "request", "result"],
+                    "description": "团队事件类型。",
+                },
+                "sender": {
+                    "type": "string",
+                    "description": "发送方 Agent 名称。",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "事件正文。",
+                },
+                "recipient": {
+                    "type": "string",
+                    "description": "接收方 Agent 名称；留空表示广播。",
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "消息主题；留空自动使用 team.<event_type>。",
+                },
+                "priority": {
+                    "type": "string",
+                    "enum": ["low", "normal", "high", "critical"],
+                    "description": "事件优先级。",
+                    "default": "normal",
+                },
+                "task_id": {
+                    "type": "string",
+                    "description": "关联 todo 或子任务 ID（可选）。",
+                },
+                "blackboard_key": {
+                    "type": "string",
+                    "description": "写入共享黑板的 key；留空自动生成。",
+                },
+                "record_to_blackboard": {
+                    "type": "boolean",
+                    "description": "是否把团队事件写入共享黑板。",
+                    "default": True,
+                },
+            },
+            "required": ["event_type", "sender", "content"],
+        }
+
+    async def execute(
+        self,
+        *,
+        event_type: str,
+        sender: str,
+        content: str,
+        recipient: str = "",
+        topic: str = "",
+        priority: str = "normal",
+        task_id: str = "",
+        blackboard_key: str = "",
+        record_to_blackboard: bool = True,
+        event_callback: EventCallback | None = None,
+        **kwargs: Any,
+    ) -> str:
+        try:
+            result = await execute_team_signal(
+                self._manager,
+                event_type=event_type,
+                sender=sender,
+                content=content,
+                recipient=recipient,
+                topic=topic,
+                priority=priority,
+                task_id=task_id,
+                blackboard_key=blackboard_key,
+                record_to_blackboard=record_to_blackboard,
+                event_callback=event_callback,
+            )
+        except ValueError as e:
+            return f"错误：{e}"
+        return format_team_signal_result(result)
+
+
+class TeamStatusTool(Tool):
+    """读取团队协议状态."""
+
+    def __init__(self, manager: Any) -> None:
+        self._manager = manager
+
+    @property
+    def name(self) -> str:
+        return "team_status"
+
+    @property
+    def description(self) -> str:
+        return "查看团队协议状态，包括消息总览、指定 Agent 待处理消息和团队黑板。"
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "要查看待处理消息的 Agent 名称（可选）。",
+                    "default": "",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "description": "最多显示多少条历史/黑板记录。",
+                    "default": 10,
+                },
+            },
+        }
+
+    async def execute(self, *, agent: str = "", limit: int = 10, **kwargs: Any) -> str:
+        return await execute_team_status(self._manager, agent=agent, limit=limit)
 
 
 class BlackboardReadTool(Tool):

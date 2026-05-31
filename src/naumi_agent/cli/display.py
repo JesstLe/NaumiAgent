@@ -176,6 +176,18 @@ async def cli_event_handler(event: str, data: dict[str, Any]) -> None:
         console.print(
             f"[{style}]subagent {status}: {agent} / {task_id}{suffix}[/{style}]"
         )
+    elif event == "team_event":
+        event_type = str(data.get("event_type", "?"))
+        sender = str(data.get("sender", "?"))
+        recipient = str(data.get("recipient", "") or "广播")
+        priority = str(data.get("priority", "normal"))
+        message = str(data.get("message", "") or "")
+        style = "red" if priority == "critical" else "yellow" if priority == "high" else "cyan"
+        suffix = f" · {message[:120]}" if message else ""
+        console.print(
+            f"[{style}]team {event_type}: "
+            f"{sender} → {recipient} [{priority}]{suffix}[/{style}]"
+        )
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":

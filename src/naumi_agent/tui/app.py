@@ -1016,6 +1016,7 @@ class NaumiApp(App):
                     "- `/worktree <子命令>` — 隔离执行区 create/status/bind/keep/remove\n"
                     "- `/background <子命令>` — 后台任务 run/status/list/cancel/output\n"
                     "- `/todo <子命令>` — todo 清单 list/add/start/done/pending/delete/clear\n"
+                    "- `/team <子命令>` — 团队协议 status/handoff/blocker/decision/request/result\n"
                     "- `/browse <url>` — 打开 URL 并显示 SoM 元素\n"
                     "- `/autobrowse <任务>` — 自主浏览器任务\n"
                     "- `/browser-stop` — 停止浏览器\n"
@@ -1243,6 +1244,8 @@ class NaumiApp(App):
                 self._run_schedule_command(arg)
             case "/todo":
                 self._run_todo_command(arg)
+            case "/team":
+                self._run_team_command(arg)
             case "/browse":
                 if not arg:
                     status.status_text = "用法: /browse <url>"
@@ -1438,6 +1441,30 @@ class NaumiApp(App):
                         )
                     )
                     status.status_text = f"subagent {event_status}: {agent}"
+                case "team_event":
+                    event_type = str(data.get("event_type", "?"))
+                    sender = str(data.get("sender", "?"))
+                    recipient = str(data.get("recipient", "") or "广播")
+                    priority = str(data.get("priority", "normal"))
+                    message = str(data.get("message", "") or "")
+                    style = (
+                        "red"
+                        if priority == "critical"
+                        else "yellow"
+                        if priority == "high"
+                        else "cyan"
+                    )
+                    suffix = f" · {message[:120]}" if message else ""
+                    chat.mount(
+                        Static(
+                            Text.from_markup(
+                                f"  [{style}]team {event_type}: "
+                                f"{sender} → {recipient} [{priority}]{suffix}[/{style}]"
+                            ),
+                            classes="tool-done",
+                        )
+                    )
+                    status.status_text = f"team {event_type}: {sender} → {recipient}"
                 case "context_compacted":
                     logger.info(
                         "Context compacted: %d → %d messages",
@@ -2217,6 +2244,22 @@ class NaumiApp(App):
             chat.mount(Markdown(f"## todo\n\n{result}", classes="agent-msg"))
         except Exception as e:
             chat.mount(Markdown(f"**todo 命令失败**: {e}", classes="agent-msg"))
+        finally:
+            status.status_text = "就绪"
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_team_command(self, arg: str) -> None:
+        """执行 team protocol 命令."""
+        from naumi_agent.agents.team_commands import run_team_command
+
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        status.status_text = "team 协议处理中..."
+        try:
+            result = await run_team_command(self.engine.subagent_manager, arg)
+            chat.mount(Markdown(f"## team\n\n{result}", classes="agent-msg"))
+        except Exception as e:
+            chat.mount(Markdown(f"**team 命令失败**: {e}", classes="agent-msg"))
         finally:
             status.status_text = "就绪"
 
