@@ -12,6 +12,7 @@ from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.safety.behavior import BehaviorMonitor
+from naumi_agent.safety.budget import TokenBudget
 from naumi_agent.tools.base import ToolCall, ToolResult
 
 
@@ -180,11 +181,32 @@ class TestUsageAccumulation:
 
 
 class TestBudgetCheck:
-    def test_budget_disabled(self, engine: AgentEngine) -> None:
-        # Budget check is intentionally neutered — tracking only, no blocking
+    def test_budget_exceeded_returns_stop_result(self, engine: AgentEngine) -> None:
         engine._budget_tracker._total_input = 999_999_999
         result = engine._check_budget()
-        assert result is None
+        assert result is not None
+        assert result.status == "budget_exceeded"
+        assert "预算已耗尽" in result.response
+        assert "输入 token" in result.response
+
+    @pytest.mark.asyncio
+    async def test_react_loop_stops_after_budget_exceeded(self, engine: AgentEngine) -> None:
+        engine._budget_tracker.budget = TokenBudget(max_usd=0.001)
+        mock_response = ModelResponse(
+            content="This response should not be returned as completed.",
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=1.0),
+            model="test-model",
+        )
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await engine._react_loop(engine.tool_registry.get_openai_tools())
+
+        assert result.status == "budget_exceeded"
+        assert "费用" in result.response
 
 
 class TestRun:
@@ -203,7 +225,7 @@ class TestRun:
 
         assert result.status == "completed"
         assert result.response == "Hello!"
-        assert result.usage.total_input_tokens == 10
+        assert result.usage.total_input_tokens == 20
 
     @pytest.mark.asyncio
     async def test_max_turns(self, engine: AgentEngine) -> None:
@@ -560,7 +582,7 @@ class TestOscillationBreaking:
                 side_effect=mock_execute,
             ),
         ):
-            result = await engine.run("test oscillation")
+            await engine.run("test oscillation")
 
         # Check that intervention messages were injected
         intervention_msgs = [

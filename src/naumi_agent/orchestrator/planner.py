@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from naumi_agent.model.router import ModelRouter, ModelTier
+from naumi_agent.model.router import ModelRouter, ModelTier, TokenUsage
 
 logger = logging.getLogger(__name__)
+
+UsageCallback = Callable[[TokenUsage, str], None]
 
 
 class ExecutionMode(StrEnum):
@@ -101,8 +104,13 @@ PLANNER_PROMPT = """\
 
 
 class IntentClassifier:
-    def __init__(self, router: ModelRouter) -> None:
+    def __init__(
+        self,
+        router: ModelRouter,
+        usage_callback: UsageCallback | None = None,
+    ) -> None:
         self._router = router
+        self._usage_callback = usage_callback
 
     async def classify(self, user_input: str) -> Intent:
         prompt = INTENT_CLASSIFICATION_PROMPT.format(user_input=user_input[:2000])
@@ -112,6 +120,7 @@ class IntentClassifier:
                 tier=ModelTier.FAST,
                 max_tokens=200,
             )
+            self._record_usage(response.usage, response.model)
             return self._parse_intent(response.content)
         except Exception as e:
             logger.warning("Intent classification failed, defaulting to simple: %s", e)
@@ -124,6 +133,10 @@ class IntentClassifier:
                 estimated_steps=1,
                 confidence=0.0,
             )
+
+    def _record_usage(self, usage: TokenUsage, model: str) -> None:
+        if self._usage_callback is not None:
+            self._usage_callback(usage, model)
 
     def _parse_intent(self, content: str) -> Intent:
         try:
@@ -160,9 +173,14 @@ class IntentClassifier:
 class AdaptivePlanner:
     """根据任务复杂度选择不同粒度的规划策略."""
 
-    def __init__(self, router: ModelRouter) -> None:
+    def __init__(
+        self,
+        router: ModelRouter,
+        usage_callback: UsageCallback | None = None,
+    ) -> None:
         self._router = router
-        self._classifier = IntentClassifier(router)
+        self._usage_callback = usage_callback
+        self._classifier = IntentClassifier(router, usage_callback)
 
     async def plan(self, task: str, success_criteria: list[str] | None = None) -> Plan:
         intent = await self._classifier.classify(task)
@@ -204,6 +222,7 @@ class AdaptivePlanner:
                 tier=ModelTier.FAST,
                 max_tokens=1000,
             )
+            self._record_usage(response.usage, response.model)
             plan = self._parse_plan(response.content)
             plan.mode = ExecutionMode.PROMPT_CHAIN
             return plan
@@ -221,11 +240,16 @@ class AdaptivePlanner:
                 tier=ModelTier.CAPABLE,
                 max_tokens=2000,
             )
+            self._record_usage(response.usage, response.model)
             plan = self._parse_plan(response.content)
             plan.mode = ExecutionMode.ORCHESTRATOR
             return plan
         except Exception:
             return self._simple_plan(task, intent)
+
+    def _record_usage(self, usage: TokenUsage, model: str) -> None:
+        if self._usage_callback is not None:
+            self._usage_callback(usage, model)
 
     def _parse_plan(self, content: str) -> Plan:
         text = content.strip()
