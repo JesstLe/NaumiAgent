@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -17,6 +18,7 @@ async def lifespan(app: FastAPI):
     engine = AgentEngine(config)
     app.state.engine = engine
     app.state.config = config
+    app.state.engine_lock = asyncio.Lock()
     yield
     await engine.shutdown()
 
