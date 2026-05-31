@@ -15,7 +15,6 @@ from naumi_agent.tools.forge import (
     _to_class_name,
     _validate_tool_code,
     forge_tool,
-    get_generated_dir,
     list_generated_tools,
     load_all_generated_tools,
     load_generated_tool,

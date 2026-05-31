@@ -8,7 +8,6 @@ import pytest
 from naumi_agent.agents.message_bus import (
     AgentMessage,
     AgentMessageBus,
-    BlackboardEntry,
     MessagePriority,
 )
 
@@ -259,7 +258,6 @@ class TestBlackboard:
     async def test_updates_since(
         self, bus: AgentMessageBus,
     ) -> None:
-        before = time.time()
         await asyncio.sleep(0.01)
         await bus.blackboard_set("early", "v1", "a")
         mid = time.time()
@@ -388,7 +386,7 @@ class TestIntegrationWithSubAgentManager:
 
     @pytest.mark.asyncio
     async def test_delegate_auto_publishes_to_bus(self) -> None:
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import AsyncMock, MagicMock
 
         from naumi_agent.agents.base import AgentResult
         from naumi_agent.config.settings import AppConfig
@@ -431,7 +429,7 @@ class TestIntegrationWithSubAgentManager:
 
     @pytest.mark.asyncio
     async def test_delegate_injects_blackboard_into_context(self) -> None:
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import MagicMock
 
         from naumi_agent.agents.base import AgentResult
         from naumi_agent.config.settings import AppConfig

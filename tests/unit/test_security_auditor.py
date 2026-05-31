@@ -4,17 +4,13 @@
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 
 import pytest
 
 from naumi_agent.tools.browser.security.auditor import (
-    CONCURRENT_BATCH_SIZE,
-    SCAN_PROFILES,
     SEVERITY_LEVELS,
-    BaselineComparison,
     IgnoreRule,
     SecurityAuditor,
     finding_fingerprint,

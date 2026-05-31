@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import subprocess
-import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -278,7 +277,7 @@ class TestValidateAndApply:
         assert result["status"] == "noop"
 
     def test_rejects_invalid_syntax(self, tmp_path: Path):
-        src_file = self._create_modifiable_file(tmp_path)
+        self._create_modifiable_file(tmp_path)
 
         with (
             patch(
@@ -308,6 +307,7 @@ class TestValidateAndApply:
 
     def test_rolls_back_on_test_failure(self, tmp_path: Path):
         src_file = self._create_modifiable_file(tmp_path)
+        original = src_file.read_text(encoding="utf-8")
         new_content = '"""Dummy tool."""\n\nx = 2\n'
 
         with (
@@ -355,9 +355,56 @@ class TestValidateAndApply:
             )
         assert result["status"] == "rolled_back"
         assert result["rollback_success"] is True
+        assert src_file.read_text(encoding="utf-8") == original
+
+    def test_rolls_back_on_import_failure(self, tmp_path: Path):
+        src_file = self._create_modifiable_file(tmp_path)
+        original = src_file.read_text(encoding="utf-8")
+        new_content = '"""Dummy tool."""\n\nx = 2\n'
+
+        with (
+            patch(
+                "naumi_agent.tools.self_modify._find_agent_source_dir",
+                return_value=tmp_path,
+            ),
+            patch(
+                "naumi_agent.tools.self_modify._is_modifiable_file",
+                return_value=True,
+            ),
+            patch(
+                "naumi_agent.tools.self_modify._is_protected_file",
+                return_value=False,
+            ),
+            patch(
+                "naumi_agent.tools.self_modify._run_ruff",
+                return_value=(True, ""),
+            ),
+            patch(
+                "naumi_agent.tools.self_modify._run_ruff_format",
+                return_value=(True, ""),
+            ),
+            patch(
+                "naumi_agent.tools.self_modify._run_import_test",
+                return_value=(False, "ImportError: boom"),
+            ),
+            patch(
+                "naumi_agent.tools.self_modify._create_git_backup",
+                return_value="stash@{0}",
+            ),
+        ):
+            result = validate_and_apply(
+                "tools/dummy_tool.py",
+                new_content,
+                "change x to 2",
+            )
+
+        assert result["status"] == "rolled_back"
+        assert result["rollback_success"] is True
+        assert result["validation"]["import_test"]["passed"] is False
+        assert src_file.read_text(encoding="utf-8") == original
 
     def test_applies_when_all_pass(self, tmp_path: Path):
-        src_file = self._create_modifiable_file(tmp_path)
+        self._create_modifiable_file(tmp_path)
         new_content = '"""Dummy tool."""\n\nx = 2\n'
 
         with (

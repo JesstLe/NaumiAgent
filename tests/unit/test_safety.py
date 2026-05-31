@@ -31,6 +31,12 @@ class TestBudgetTracker:
         tracker.track(usage, "claude-sonnet-4-6")
         assert tracker.is_exceeded()
 
+    def test_output_budget_exceeded(self) -> None:
+        tracker = BudgetTracker(TokenBudget(max_output_tokens=100))
+        usage = TokenUsage(input_tokens=10, output_tokens=101, total_tokens=111, cost_usd=0.0)
+        tracker.track(usage, "claude-sonnet-4-6")
+        assert tracker.is_exceeded()
+
     def test_get_summary(self) -> None:
         tracker = BudgetTracker(TokenBudget(max_usd=5.0))
         tracker.track(

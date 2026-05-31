@@ -2,7 +2,7 @@
 
 import pytest
 
-from naumi_agent.agents.base import AgentCapability, AgentConfig
+from naumi_agent.agents.base import AgentCapability
 from naumi_agent.agents.factory import DynamicAgentFactory
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine

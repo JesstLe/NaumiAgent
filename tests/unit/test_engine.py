@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import json
+import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.config.settings import AppConfig, MemoryConfig, SafetyConfig
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.safety.behavior import BehaviorMonitor
+from naumi_agent.safety.budget import TokenBudget
+from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tools.base import ToolCall, ToolResult
 
 
@@ -53,6 +57,55 @@ class TestEngineInit:
     def test_has_subagent_tools(self, engine: AgentEngine) -> None:
         assert "delegate_task" in engine.tool_registry.names
 
+    @pytest.mark.asyncio
+    async def test_registered_tools_have_permission_rules(self) -> None:
+        engine = AgentEngine(AppConfig())
+        checker = PermissionChecker(PermissionMode.MODERATE, allowed_dirs=["/workspace"])
+
+        unknown = []
+        for name in engine.tool_registry.names:
+            decision = checker.check(name, {})
+            if not decision.allowed and "Unknown tool" in decision.reason:
+                unknown.append(name)
+
+        assert unknown == []
+        await engine.shutdown()
+
+    def test_registered_tools_have_openai_compatible_schemas(self) -> None:
+        engine = AgentEngine(AppConfig())
+        name_re = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+        errors: list[str] = []
+        seen: set[str] = set()
+
+        for tool in engine.tool_registry.all():
+            if tool.name in seen:
+                errors.append(f"{tool.name}: duplicate tool name")
+            seen.add(tool.name)
+
+            if not name_re.match(tool.name):
+                errors.append(f"{tool.name}: invalid function name")
+
+            schema = tool.to_openai_tool()
+            json.dumps(schema, ensure_ascii=False)
+            parameters = schema.get("function", {}).get("parameters", {})
+            properties = parameters.get("properties", {})
+            required = parameters.get("required", [])
+
+            if parameters.get("type") != "object":
+                errors.append(f"{tool.name}: parameters.type must be object")
+            if not isinstance(properties, dict):
+                errors.append(f"{tool.name}: properties must be object")
+            if not isinstance(required, list):
+                errors.append(f"{tool.name}: required must be list")
+            else:
+                for field in required:
+                    if field not in properties:
+                        errors.append(
+                            f"{tool.name}: required field missing from properties: {field}"
+                        )
+
+        assert errors == []
+
 
 class TestReset:
     def test_clears_messages(self, engine: AgentEngine) -> None:
@@ -72,6 +125,22 @@ class TestSetSystemPrompt:
         engine.set_system_prompt("new prompt")
         assert engine._messages[0]["content"] == "new prompt"
         assert len([m for m in engine._messages if m["role"] == "system"]) == 1
+
+    def test_updates_full_history(self, engine: AgentEngine) -> None:
+        engine._messages = [
+            {"role": "system", "content": "old active"},
+            {"role": "user", "content": "hi"},
+        ]
+        engine._full_history = [
+            {"role": "system", "content": "old persisted"},
+            {"role": "user", "content": "hi"},
+        ]
+
+        engine.set_system_prompt("new prompt")
+
+        assert engine._messages[0] == {"role": "system", "content": "new prompt"}
+        assert engine._full_history[0] == {"role": "system", "content": "new prompt"}
+        assert len([m for m in engine._full_history if m["role"] == "system"]) == 1
 
 
 class TestSessionLoading:
@@ -161,6 +230,42 @@ class TestToolExecution:
         # Should attempt read, fail with "File not found" not "Permission denied"
         assert "Error: File not found" in result.content or "Permission denied" in result.content
 
+    @pytest.mark.asyncio
+    async def test_confirmation_required_tool_blocked(self, engine: AgentEngine) -> None:
+        tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo should_not_run"}')
+        result = await engine._execute_tool(tc)
+        assert result.status == "error"
+        assert "需要用户确认" in result.content
+
+    @pytest.mark.asyncio
+    async def test_bypass_mode_runs_confirmation_tool(self, engine: AgentEngine) -> None:
+        engine._permission_checker = PermissionChecker(PermissionMode.BYPASS)
+        tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo bypass_ok"}')
+        result = await engine._execute_tool(tc)
+        assert result.status == "success"
+        assert "bypass_ok" in result.content
+
+    @pytest.mark.asyncio
+    async def test_task_create_tool_passes_permission_layer(self, tmp_path) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        session = await engine.get_or_create_session()
+        engine.task_store.set_session(session.id)
+
+        result = await engine._execute_tool(
+            ToolCall(
+                id="x",
+                name="task_create",
+                arguments='{"subject": "创建文件"}',
+            )
+        )
+
+        assert result.status == "success"
+        assert "已创建任务" in result.content
+        await engine.shutdown()
+
 
 class TestUsageAccumulation:
     def test_accumulate(self, engine: AgentEngine) -> None:
@@ -180,11 +285,38 @@ class TestUsageAccumulation:
 
 
 class TestBudgetCheck:
-    def test_budget_disabled(self, engine: AgentEngine) -> None:
-        # Budget check is intentionally neutered — tracking only, no blocking
+    def test_budget_exceeded_returns_stop_result(self, engine: AgentEngine) -> None:
         engine._budget_tracker._total_input = 999_999_999
         result = engine._check_budget()
-        assert result is None
+        assert result is not None
+        assert result.status == "budget_exceeded"
+        assert "预算已耗尽" in result.response
+        assert "输入 token" in result.response
+
+    def test_bypass_mode_tracks_budget_without_stopping(self) -> None:
+        config = AppConfig(safety=SafetyConfig(permission_mode="bypass"))
+        engine = AgentEngine(config)
+        engine._budget_tracker._total_input = 999_999_999
+        assert engine._check_budget() is None
+
+    @pytest.mark.asyncio
+    async def test_react_loop_stops_after_budget_exceeded(self, engine: AgentEngine) -> None:
+        engine._budget_tracker.budget = TokenBudget(max_usd=0.001)
+        mock_response = ModelResponse(
+            content="This response should not be returned as completed.",
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=1.0),
+            model="test-model",
+        )
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await engine._react_loop(engine.tool_registry.get_openai_tools())
+
+        assert result.status == "budget_exceeded"
+        assert "费用" in result.response
 
 
 class TestRun:
@@ -203,7 +335,36 @@ class TestRun:
 
         assert result.status == "completed"
         assert result.response == "Hello!"
-        assert result.usage.total_input_tokens == 10
+        assert result.usage.total_input_tokens == 20
+        assert engine.subagent_manager._reaper_task is None
+
+    @pytest.mark.asyncio
+    async def test_run_persists_system_prompt_in_full_history(self, tmp_path) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        mock_response = ModelResponse(
+            content="Hello!",
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=0.001),
+            model="test-model",
+        )
+
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await engine.run("hi")
+
+        saved = await engine.session_store.load(engine._session.id)
+
+        assert result.status == "completed"
+        assert saved is not None
+        assert saved.messages[0]["role"] == "system"
+        assert saved.messages[1] == {"role": "user", "content": "hi"}
+        await engine.shutdown()
 
     @pytest.mark.asyncio
     async def test_max_turns(self, engine: AgentEngine) -> None:
@@ -264,6 +425,69 @@ class TestRun:
         # Should break after the 3rd repeat + 1 final response
         assert call_count <= 5
         assert "已为你打开" in result.response or result.status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_repeated_multi_tool_call_keeps_protocol_complete(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        """Every assistant tool_call must receive a tool message, even when skipping repeats."""
+        repeated = {
+            "function": {
+                "name": "file_read",
+                "arguments": '{"path": "pyproject.toml"}',
+            },
+        }
+        responses = [
+            ModelResponse(
+                content="",
+                tool_calls=[{"id": "call_1", **repeated}],
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test-model",
+            ),
+            ModelResponse(
+                content="",
+                tool_calls=[{"id": "call_2", **repeated}],
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test-model",
+            ),
+            ModelResponse(
+                content="",
+                tool_calls=[
+                    {"id": "call_3a", **repeated},
+                    {
+                        "id": "call_3b",
+                        "function": {
+                            "name": "file_read",
+                            "arguments": '{"path": "README.md"}',
+                        },
+                    },
+                ],
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test-model",
+            ),
+            ModelResponse(
+                content="done",
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test-model",
+            ),
+        ]
+
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            side_effect=responses,
+        ):
+            result = await engine._react_loop(engine.tool_registry.get_openai_tools())
+
+        assert result.status == "completed"
+        tool_result_ids = {
+            m.get("tool_call_id")
+            for m in engine._messages
+            if m.get("role") == "tool"
+        }
+        assert {"call_3a", "call_3b"}.issubset(tool_result_ids)
 
 
 class TestMemoryInjection:
@@ -560,7 +784,7 @@ class TestOscillationBreaking:
                 side_effect=mock_execute,
             ),
         ):
-            result = await engine.run("test oscillation")
+            await engine.run("test oscillation")
 
         # Check that intervention messages were injected
         intervention_msgs = [

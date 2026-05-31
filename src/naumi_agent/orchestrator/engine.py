@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
 from naumi_agent.mcp.client import MCPClientManager, setup_mcp_servers
@@ -21,6 +22,7 @@ from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
+from naumi_agent.scheduler import SchedulerRunner, SchedulerStore, create_scheduler_tools
 from naumi_agent.skills.loader import SkillLoader
 from naumi_agent.skills.tool import create_skill_tools
 from naumi_agent.streaming.event_bus import EventEmitter
@@ -32,6 +34,7 @@ from naumi_agent.tools.builtin import create_builtin_tools
 from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
 from naumi_agent.tools.web import create_web_tools
+from naumi_agent.worktree import WorktreeManager, create_worktree_tools
 
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
@@ -249,9 +252,23 @@ class AgentEngine:
         self._browser_session = BrowserRuntime(
             Path(config.memory.session_db_path).parent / "browser"
         )
-        self._planner = AdaptivePlanner(self._router)
+        self._planner = AdaptivePlanner(
+            self._router,
+            usage_callback=self._track_model_usage,
+        )
 
         self.task_store = TaskStore(config.memory.session_db_path)
+        self.background_runner = BackgroundRunner(
+            BackgroundTaskStore(Path(config.memory.session_db_path).parent / "background")
+        )
+        self.scheduler_runner = SchedulerRunner(
+            SchedulerStore(Path(config.memory.session_db_path).parent / "scheduler")
+        )
+        self.worktree_manager = WorktreeManager(
+            repo_root=Path.cwd(),
+            storage_dir=Path(config.memory.session_db_path).parent / "worktrees",
+            task_store=self.task_store,
+        )
 
         self._mcp_manager: MCPClientManager | None = None
 
@@ -298,6 +315,18 @@ class AgentEngine:
         from naumi_agent.tasks.tools import create_task_tools
 
         for tool in create_task_tools(self.task_store):
+            self._tool_registry.register(tool)
+
+        # Background task tools
+        for tool in create_background_tools(self.background_runner):
+            self._tool_registry.register(tool)
+
+        # Scheduler / reminder tools
+        for tool in create_scheduler_tools(self.scheduler_runner):
+            self._tool_registry.register(tool)
+
+        # Worktree isolation tools
+        for tool in create_worktree_tools(self.worktree_manager):
             self._tool_registry.register(tool)
 
         # Hot-reload tool
@@ -451,7 +480,9 @@ class AgentEngine:
         self._messages.clear()
         self._full_history.clear()
         self._usage = AgentUsage()
+        self._budget_tracker.reset()
         self._session = None
+        self.task_store.set_session("")
         self._behavior_monitor.reset()
         self._permission_checker.reset_counts()
 
@@ -466,9 +497,15 @@ class AgentEngine:
                     self._task_runner.abort_run(
                         run["id"], reason="Engine shutdown"
                     )
+        if hasattr(self, "background_runner"):
+            await self.background_runner.shutdown()
+        if hasattr(self, "scheduler_runner"):
+            await self.scheduler_runner.shutdown()
         await self._browser_session.stop()
         if self._mcp_manager:
             await self._mcp_manager.disconnect_all()
+        if hasattr(self, "task_store"):
+            self.task_store.set_session("")
         await self.session_store.close()
 
     async def reload_tools(self, domain: str = "tools") -> dict[str, Any]:
@@ -519,7 +556,10 @@ class AgentEngine:
         """设置/更新系统提示词."""
         # 移除旧的 system message
         self._messages = [m for m in self._messages if m.get("role") != "system"]
-        self._messages.insert(0, {"role": "system", "content": prompt})
+        self._full_history = [m for m in self._full_history if m.get("role") != "system"]
+        msg = {"role": "system", "content": prompt}
+        self._messages.insert(0, msg)
+        self._full_history.insert(0, msg)
 
     # --- 会话持久化 ---
 
@@ -672,6 +712,33 @@ class AgentEngine:
         self._messages.append(msg)
         self._full_history.append(msg)
 
+    def _inject_background_notifications(self) -> None:
+        """Inject newly completed background task notifications into context."""
+        notifications = self.background_runner.collect_notifications()
+        if not notifications:
+            return
+        self._append_message({
+            "role": "user",
+            "content": "\n\n".join(notifications),
+        })
+
+    def _inject_scheduler_notifications(self) -> None:
+        """Inject due schedule notifications into context."""
+        self.scheduler_runner.start()
+        notifications = self.scheduler_runner.collect_notifications()
+        if not notifications:
+            return
+        self._append_message({
+            "role": "user",
+            "content": "\n\n".join(notifications),
+        })
+
+    def _ensure_system_prompt(self) -> None:
+        """Ensure the system prompt is present in active and persisted history."""
+        if any(m.get("role") == "system" for m in self._messages):
+            return
+        self._append_message({"role": "system", "content": SYSTEM_PROMPT})
+
     async def _maybe_compact(self, on_event: EventCallback | None = None) -> None:
         """检查并执行上下文压缩."""
         model = self._router.resolve_model(ModelTier.CAPABLE)
@@ -705,18 +772,40 @@ class AgentEngine:
                 )
 
     def _check_budget(self) -> AgentResult | None:
-        return None
+        if PermissionMode(self._config.safety.permission_mode) == PermissionMode.BYPASS:
+            return None
+        if not self._budget_tracker.is_exceeded():
+            return None
 
-    async def _ensure_reaper(self) -> None:
-        if not self._reaper_started and hasattr(self, "subagent_manager"):
-            self._reaper_started = True
-            await self.subagent_manager.start_reaper()
+        summary = self._budget_tracker.get_summary()
+        budget = self._budget_tracker.budget
+        reasons: list[str] = []
+        if summary.total_input_tokens > budget.max_input_tokens:
+            reasons.append(
+                f"输入 token {summary.total_input_tokens:,}/{budget.max_input_tokens:,}"
+            )
+        if summary.total_output_tokens > budget.max_output_tokens:
+            reasons.append(
+                f"输出 token {summary.total_output_tokens:,}/{budget.max_output_tokens:,}"
+            )
+        if summary.total_cost_usd > budget.max_usd:
+            reasons.append(f"费用 ${summary.total_cost_usd:.4f}/${budget.max_usd:.2f}")
+
+        detail = "，".join(reasons) if reasons else "已超过配置上限"
+        message = (
+            "预算已耗尽，已停止继续执行，避免产生额外消耗。\n\n"
+            f"超限项：{detail}"
+        )
+        logger.warning("Budget exceeded: %s", detail)
+        return AgentResult(
+            status="budget_exceeded",
+            response=message,
+            usage=self._usage,
+        )
 
     async def run(self, task: str) -> AgentResult:
         """执行任务 — 自适应规划 + ReAct 主循环."""
-        await self._ensure_reaper()
-        if not any(m.get("role") == "system" for m in self._messages):
-            self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
+        self._ensure_system_prompt()
 
         session = await self.get_or_create_session()
         self.task_store.set_session(session.id)
@@ -734,7 +823,10 @@ class AgentEngine:
 
         try:
             plan = await self._planner.plan(task)
-            if plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
+            exceeded = self._check_budget()
+            if exceeded:
+                result = exceeded
+            elif plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
                 result = await self._run_orchestrated(plan, tools)
             else:
                 result = await self._react_loop(tools, plan=plan)
@@ -764,9 +856,7 @@ class AgentEngine:
         on_event: EventCallback,
     ) -> AgentResult:
         """执行任务 — 流式 ReAct 主循环，通过回调实时推送事件."""
-        await self._ensure_reaper()
-        if not any(m.get("role") == "system" for m in self._messages):
-            self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
+        self._ensure_system_prompt()
 
         session = await self.get_or_create_session()
         self.task_store.set_session(session.id)
@@ -784,7 +874,10 @@ class AgentEngine:
 
         try:
             plan = await self._planner.plan(task)
-            if plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
+            exceeded = self._check_budget()
+            if exceeded:
+                result = exceeded
+            elif plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
                 result = await self._run_orchestrated(plan, tools)
             else:
                 result = await self._react_loop_streaming(tools, on_event, plan=plan)
@@ -904,6 +997,8 @@ class AgentEngine:
         for turn in range(max_turns):
             self._behavior_monitor.begin_turn(turn)
             self._usage.turns = turn + 1
+            self._inject_background_notifications()
+            self._inject_scheduler_notifications()
 
             exceeded = self._check_budget()
             if exceeded:
@@ -923,8 +1018,7 @@ class AgentEngine:
                 tier=ModelTier.CAPABLE,
                 tools=tools,
             )
-            self._accumulate_usage(response.usage)
-            self._budget_tracker.track(response.usage, response.model)
+            self._track_model_usage(response.usage, response.model)
             await self.hooks.fire(HookContext(
                 point=HookPoint.LLM_CALL_END,
                 data={
@@ -942,6 +1036,10 @@ class AgentEngine:
             if warnings:
                 logger.warning("Behavior warnings: %s", warnings)
 
+            exceeded = self._check_budget()
+            if exceeded:
+                return exceeded
+
             # --- 行动：处理工具调用 ---
             if response.tool_calls:
                 assistant_msg: dict[str, Any] = {
@@ -954,13 +1052,33 @@ class AgentEngine:
                 self._append_message(assistant_msg)
 
                 cur_calls: list[str] = []
+                skip_remaining_reason = ""
                 for tc_raw in response.tool_calls:
                     tc = self._parse_tool_call(tc_raw)
                     if tc is None:
+                        call_id = self._extract_tool_call_id(tc_raw)
+                        if call_id:
+                            self._append_message(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call_id,
+                                    "content": "工具调用格式无效，无法解析函数名称或参数。",
+                                }
+                            )
                         continue
 
                     call_sig = f"{tc.name}:{tc.arguments}"
                     cur_calls.append(call_sig)
+
+                    if skip_remaining_reason:
+                        self._append_message(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": skip_remaining_reason,
+                            }
+                        )
+                        continue
 
                     if self._is_repeated_tool_call(
                         tc.name, tc.arguments, tool_call_history
@@ -969,17 +1087,18 @@ class AgentEngine:
                             "Repeated tool call detected: %s, injecting stop",
                             tc.name,
                         )
+                        skip_remaining_reason = (
+                            "This action has already been completed successfully. "
+                            "Do NOT repeat it. Provide your final response to the user now."
+                        )
                         self._append_message(
                             {
                                 "role": "tool",
                                 "tool_call_id": tc.id,
-                                "content": (
-                                    "This action has already been completed successfully. "
-                                    "Do NOT repeat it. Provide your final response to the user now."
-                                ),
+                                "content": skip_remaining_reason,
                             }
                         )
-                        break
+                        continue
 
                     hook_ctx = await self.hooks.fire(HookContext(
                         point=HookPoint.TOOL_EXECUTE_START,
@@ -1090,6 +1209,8 @@ class AgentEngine:
         for turn in range(max_turns):
             self._behavior_monitor.begin_turn(turn)
             self._usage.turns = turn + 1
+            self._inject_background_notifications()
+            self._inject_scheduler_notifications()
 
             exceeded = self._check_budget()
             if exceeded:
@@ -1118,8 +1239,7 @@ class AgentEngine:
                     tools=tools,
                 ):
                     if chunk.usage:
-                        self._accumulate_usage(chunk.usage)
-                        self._budget_tracker.track(chunk.usage, model_str)
+                        self._track_model_usage(chunk.usage, model_str)
                         stream_tokens = chunk.usage.total_tokens
 
                     if chunk.thinking:
@@ -1145,8 +1265,7 @@ class AgentEngine:
                     tier=ModelTier.CAPABLE,
                     tools=tools,
                 )
-                self._accumulate_usage(response.usage)
-                self._budget_tracker.track(response.usage, model_str)
+                self._track_model_usage(response.usage, model_str)
                 stream_tokens = response.usage.total_tokens
                 if response.content:
                     if not got_response:
@@ -1177,6 +1296,11 @@ class AgentEngine:
             text_content = "".join(text_parts)
             thinking_content = "".join(thinking_parts)
 
+            exceeded = self._check_budget()
+            if exceeded:
+                await on_event("error", {"message": exceeded.response})
+                return exceeded
+
             # --- 工具调用 ---
             if collected_tool_calls:
                 assistant_msg: dict[str, Any] = {
@@ -1189,13 +1313,39 @@ class AgentEngine:
                 self._append_message(assistant_msg)
 
                 cur_calls: list[str] = []
+                skip_remaining_reason = ""
                 for tc_raw in collected_tool_calls.values():
                     tc = self._parse_tool_call(tc_raw)
                     if tc is None:
+                        call_id = self._extract_tool_call_id(tc_raw)
+                        if call_id:
+                            self._append_message(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call_id,
+                                    "content": "工具调用格式无效，无法解析函数名称或参数。",
+                                }
+                            )
                         continue
 
                     call_sig = f"{tc.name}:{tc.arguments}"
                     cur_calls.append(call_sig)
+
+                    if skip_remaining_reason:
+                        await on_event("tool_end", {
+                            "name": tc.name,
+                            "status": "skipped",
+                            "duration_ms": 0,
+                            "content": skip_remaining_reason,
+                        })
+                        self._append_message(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": skip_remaining_reason,
+                            }
+                        )
+                        continue
 
                     if self._is_repeated_tool_call(
                         tc.name, tc.arguments, tool_call_history
@@ -1204,17 +1354,18 @@ class AgentEngine:
                             "Repeated tool call detected: %s, injecting stop",
                             tc.name,
                         )
+                        skip_remaining_reason = (
+                            "This action has already been completed successfully. "
+                            "Do NOT repeat it. Provide your final response to the user now."
+                        )
                         self._append_message(
                             {
                                 "role": "tool",
                                 "tool_call_id": tc.id,
-                                "content": (
-                                    "This action has already been completed successfully. "
-                                    "Do NOT repeat it. Provide your final response to the user now."
-                                ),
+                                "content": skip_remaining_reason,
                             }
                         )
-                        break
+                        continue
 
                     await on_event("tool_start", {"name": tc.name, "args": tc.arguments})
 
@@ -1344,6 +1495,16 @@ class AgentEngine:
                 status="error",
                 content=f"Permission denied: {decision.reason}",
             )
+        if decision.requires_confirmation:
+            logger.warning("Tool %s requires confirmation and was blocked", tc.name)
+            return ToolResult(
+                call_id=tc.id,
+                status="error",
+                content=(
+                    "Permission denied: 该工具需要用户确认，当前自动执行链路未提供确认步骤。"
+                    "请在 bypass 模式下运行，或使用更安全的替代工具完成任务。"
+                ),
+            )
 
         try:
             start = time.time()
@@ -1378,12 +1539,25 @@ class AgentEngine:
             logger.warning("Failed to parse tool call: %s", raw)
             return None
 
+    @staticmethod
+    def _extract_tool_call_id(raw: dict[str, Any]) -> str:
+        """Best-effort extraction of tool_call id for protocol-complete error replies."""
+        try:
+            return str(raw.get("id") or "")
+        except Exception:
+            return ""
+
     def _accumulate_usage(self, usage: TokenUsage) -> None:
         """累加 token 用量."""
         self._usage.total_input_tokens += usage.input_tokens
         self._usage.total_output_tokens += usage.output_tokens
         self._usage.total_cost_usd += usage.cost_usd
         self._usage.cache_tokens += usage.cache_tokens
+
+    def _track_model_usage(self, usage: TokenUsage, model: str) -> None:
+        """Record model usage in both user-facing stats and budget enforcement."""
+        self._accumulate_usage(usage)
+        self._budget_tracker.track(usage, model)
 
     def get_context_info(self) -> dict[str, Any]:
         """Return context window usage estimate."""

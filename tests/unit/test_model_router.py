@@ -157,3 +157,142 @@ class TestKimiThinkingModel:
         config = ModelConfig(default_model="claude-sonnet-4-6")
         r = ModelRouter(config)
         assert not r._is_kimi_thinking_model("claude-sonnet-4-6")
+
+
+class TestSanitizeMessages:
+    def test_strips_reasoning_content_by_default(self) -> None:
+        messages = [
+            {
+                "role": "assistant",
+                "content": None,
+                "reasoning_content": "需要读文件",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "file_read", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "file content"},
+        ]
+
+        sanitized = ModelRouter._sanitize_messages(messages)
+
+        assert "reasoning_content" not in sanitized[0]
+
+    def test_preserves_reasoning_content_for_thinking_tool_history(self) -> None:
+        messages = [
+            {
+                "role": "assistant",
+                "content": None,
+                "reasoning_content": "需要读文件",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "file_read", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "file content"},
+        ]
+
+        sanitized = ModelRouter._sanitize_messages(
+            messages,
+            preserve_reasoning_content=True,
+        )
+
+        assert sanitized[0]["reasoning_content"] == "需要读文件"
+
+    def test_adds_blank_reasoning_content_for_thinking_tool_history(self) -> None:
+        messages = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "file_read", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "file content"},
+        ]
+
+        sanitized = ModelRouter._sanitize_messages(
+            messages,
+            preserve_reasoning_content=True,
+        )
+
+        assert sanitized[0]["reasoning_content"] == ""
+
+    def test_kimi_thinking_preserves_reasoning_content(self) -> None:
+        config = ModelConfig(default_model="openai/kimi-k2.6")
+        router = ModelRouter(config)
+
+        assert router._should_preserve_reasoning_content(
+            "openai/kimi-k2.6", None,
+        )
+        assert not router._should_preserve_reasoning_content(
+            "openai/kimi-k2.6", {"type": "disabled"},
+        )
+
+    def test_kimi_for_coding_preserves_reasoning_content(self) -> None:
+        config = ModelConfig(
+            default_model="openai/kimi-for-coding",
+            api_base="https://api.kimi.com/coding/v1",
+        )
+        router = ModelRouter(config)
+
+        assert router._should_preserve_reasoning_content(
+            "openai/kimi-for-coding", None,
+        )
+
+    def test_keeps_complete_trailing_tool_results(self) -> None:
+        messages = [
+            {"role": "user", "content": "read file"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "file_read", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "file content"},
+        ]
+
+        sanitized = ModelRouter._sanitize_messages(messages)
+
+        assert sanitized == messages
+
+    def test_drops_incomplete_trailing_tool_sequence(self) -> None:
+        messages = [
+            {"role": "user", "content": "read file"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "file_read", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call_2",
+                        "type": "function",
+                        "function": {"name": "file_read", "arguments": "{}"},
+                    },
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "file content"},
+        ]
+
+        sanitized = ModelRouter._sanitize_messages(messages)
+
+        assert sanitized == [{"role": "user", "content": "read file"}]

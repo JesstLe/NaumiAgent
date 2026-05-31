@@ -70,7 +70,9 @@ class TestTaskStore:
     @pytest.mark.asyncio
     async def test_update_status(self, store: TaskStore) -> None:
         await store.create_task(subject="A")
-        updated = await store.update_task("1", status=TaskStatus.IN_PROGRESS, active_form="正在执行")
+        updated = await store.update_task(
+            "1", status=TaskStatus.IN_PROGRESS, active_form="正在执行"
+        )
         assert updated is not None
         assert updated.status == TaskStatus.IN_PROGRESS
         assert updated.active_form == "正在执行"
@@ -155,9 +157,18 @@ class TestFormatTaskList:
 
     def test_basic_format(self) -> None:
         tasks = [
-            Task(id="1", session_id="s", subject="Read files", description="", status=TaskStatus.COMPLETED),
-            Task(id="2", session_id="s", subject="Analyze", description="", status=TaskStatus.IN_PROGRESS),
-            Task(id="3", session_id="s", subject="Report", description="", status=TaskStatus.PENDING),
+            Task(
+                id="1", session_id="s", subject="Read files",
+                description="", status=TaskStatus.COMPLETED,
+            ),
+            Task(
+                id="2", session_id="s", subject="Analyze",
+                description="", status=TaskStatus.IN_PROGRESS,
+            ),
+            Task(
+                id="3", session_id="s", subject="Report",
+                description="", status=TaskStatus.PENDING,
+            ),
         ]
         result = format_task_list(tasks)
         assert "✓" in result
@@ -248,3 +259,46 @@ class TestTaskTools:
         tool = TaskCreateTool(store)
         result = await tool.execute(subject="test")
         assert "错误" in result
+
+    @pytest.mark.asyncio
+    async def test_create_with_duplicate_blockers(self, store: TaskStore) -> None:
+        t1 = await store.create_task(subject="Base")
+        t2 = await store.create_task(subject="Dup", blocked_by=[t1.id, t1.id])
+        assert t2.blocked_by == ["1"]  # deduplicated
+        t1_refreshed = await store.get_task("1")
+        assert t1_refreshed is not None
+        assert t1_refreshed.blocks == ["2"]  # only one reverse edge
+
+    @pytest.mark.asyncio
+    async def test_delete_updates_reverse_edges_updated_at(self, store: TaskStore) -> None:
+        t1 = await store.create_task(subject="Blocker")
+        await store.create_task(subject="Blocked", blocked_by=[t1.id])
+        await store.delete_task("1")
+        t2_refreshed = await store.get_task("2")
+        assert t2_refreshed is not None
+        assert t2_refreshed.blocked_by == []
+        assert t2_refreshed.updated_at >= t2_refreshed.created_at
+
+    @pytest.mark.asyncio
+    async def test_update_invalid_transition(self, store: TaskStore) -> None:
+        await store.create_task(subject="A")
+        await store.update_task("1", status=TaskStatus.COMPLETED)
+        tool = TaskUpdateTool(store)
+        result = await tool.execute(task_id="1", status="pending")
+        assert "错误" in result
+        assert "不可回退" in result
+
+    @pytest.mark.asyncio
+    async def test_create_tool_rejects_empty_subject(self, store: TaskStore) -> None:
+        tool = TaskCreateTool(store)
+        result = await tool.execute(subject="   ")
+        assert "错误" in result
+        assert "不能为空" in result
+
+
+class TestDanglingReference:
+    def test_is_blocked_with_dangling_reference(self) -> None:
+        # dangling reference: task claims to be blocked by "99" which doesn't exist
+        task = Task(id="1", session_id="s", subject="A", description="", blocked_by=["99"])
+        # With no matching blocker in all_tasks, should still be treated as blocked
+        assert task.is_blocked([task])

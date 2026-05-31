@@ -164,6 +164,17 @@ class SubAgentManager:
             except Exception:
                 logger.exception("Reaper error")
 
+    def _start_reaper_if_possible(self) -> None:
+        """Start the dynamic-agent reaper from sync creation paths when a loop exists."""
+        if self._reaper_task and not self._reaper_task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._reaper_task = loop.create_task(self._reaper_loop())
+        logger.info("Agent reaper started lazily for dynamic agents")
+
     def get_agent(self, name: str) -> BaseAgent | None:
         """获取或创建 Agent 实例."""
         if name in self._agents:
@@ -194,6 +205,7 @@ class SubAgentManager:
         lc.spawned_at = time.monotonic()
         self._transition(name, AgentState.SPAWNED)
         self._transition(name, AgentState.READY)
+        self._start_reaper_if_possible()
         logger.info("Spawned dynamic agent: %s", name)
         return agent
 

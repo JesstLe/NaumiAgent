@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from naumi_agent.agents.base import AgentResult
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.pursuit import (
@@ -15,10 +14,11 @@ from naumi_agent.orchestrator.pursuit import (
     GoalStatus,
     IterationCheckpoint,
     PursuitConfig,
+    PursuitEvidence,
+    PursuitRunStatus,
     SuccessCriterion,
 )
 from naumi_agent.orchestrator.subagent_manager import SubAgentManager
-from naumi_agent.tools.base import ToolRegistry
 
 
 def _make_engine() -> AgentEngine:
@@ -92,6 +92,21 @@ class TestDataStructures:
         assert config.max_iterations == 1000
         assert config.max_budget_usd == float("inf")
         assert config.stagnation_threshold == 3
+
+    def test_pursuit_evidence_defaults(self) -> None:
+        evidence = PursuitEvidence(
+            kind="criterion",
+            source="c1",
+            summary="Command output: ok",
+            is_hard=True,
+        )
+        assert evidence.kind == "criterion"
+        assert evidence.is_hard
+
+    def test_pursuit_run_status_values(self) -> None:
+        assert PursuitRunStatus.RUNNING == "running"
+        assert PursuitRunStatus.BLOCKED == "blocked"
+        assert PursuitRunStatus.COMPLETED == "completed"
 
 
 class TestStagnationDetection:
@@ -279,6 +294,72 @@ class TestVerification:
         result = await loop._final_verification(spec)
         assert result is True
 
+    @pytest.mark.asyncio
+    async def test_completion_requires_hard_evidence(self) -> None:
+        engine = _make_engine()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+        )
+
+        spec = _make_spec()
+        spec.success_criteria[0].status = CriterionStatus.VERIFIED
+        spec.success_criteria[0].evidence = "看起来已经完成"
+
+        decision = await loop._completion_decision(spec)
+
+        assert decision.status == PursuitRunStatus.RUNNING
+        assert "强证据" in decision.reason
+
+    @pytest.mark.asyncio
+    async def test_final_verification_reruns_llm_verified_criterion(self) -> None:
+        engine = _make_engine()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+        )
+
+        spec = _make_spec()
+        spec.success_criteria[0].status = CriterionStatus.VERIFIED
+        spec.success_criteria[0].evidence = "评估器声称完成"
+
+        mock_bash = MagicMock()
+        mock_bash.execute = AsyncMock(return_value="FAIL AssertionError")
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=mock_bash)
+
+        result = await loop._final_verification(spec)
+
+        assert result is False
+        assert spec.success_criteria[0].status == CriterionStatus.FAILED
+        mock_bash.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_pursue_records_blocked_when_no_actions(self) -> None:
+        engine = _make_engine()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            config=PursuitConfig(max_iterations=3),
+        )
+        spec = _make_spec()
+        checkpoint = _make_checkpoint()
+
+        loop._parse_goal = AsyncMock(return_value=spec)  # type: ignore[method-assign]
+        loop._assess = AsyncMock(return_value={"checkpoint": checkpoint, "gaps": ["gap"]})  # type: ignore[method-assign]
+        loop._plan = AsyncMock(return_value=[])  # type: ignore[method-assign]
+        loop._generate_report = AsyncMock(return_value="报告")  # type: ignore[method-assign]
+
+        result = await loop.pursue("需要明确阻塞的目标")
+
+        assert result == "报告"
+        assert loop._run is not None
+        assert loop._run.status == PursuitRunStatus.BLOCKED
+        assert "没有给出下一步" in loop._run.blocked_reason
+
 
 class TestCancel:
     @pytest.mark.asyncio
@@ -303,10 +384,9 @@ class TestPursueToolRegistration:
 
     @pytest.mark.asyncio
     async def test_tool_execute_without_init(self) -> None:
-        from naumi_agent.tools.pursuit import PursueTool
-
         # Reset global
         import naumi_agent.tools.pursuit as pursuit_mod
+        from naumi_agent.tools.pursuit import PursueTool
         pursuit_mod._global_pursuit_loop = None
 
         tool = PursueTool()

@@ -15,6 +15,8 @@ from prompt_toolkit.document import Document
 COMMANDS: list[tuple[str, str, bool]] = [
     # 基础
     ("/help", "显示帮助", False),
+    ("/copy", "复制/导出当前完整记录", False),
+    ("/pwd", "显示当前工作目录", False),
     ("/quit", "退出", False),
     ("/exit", "退出", False),
     ("/tools", "列出可用工具", False),
@@ -68,6 +70,9 @@ COMMANDS: list[tuple[str, str, bool]] = [
     ("/autopsy", "执行迹切片 — SWE-bench 级 Bug 解剖", True),
     # 元命令
     ("/pursue", "目标追踪 — 自主循环执行直至真正达成", True),
+    ("/worktree", "隔离执行区 — create/status/bind/keep/remove", True),
+    ("/background", "后台任务 — run/status/list/cancel/output", True),
+    ("/schedule", "调度提醒 — create/list/cancel/pause/resume", True),
     ("/reload", "热重载 — 重载模块无需重启", False),
     ("/evolve", "自我进化 — 反思循环修改自身工具代码并验证", True),
     ("/forge", "工具锻造 — 自主生成新工具并注册", True),
