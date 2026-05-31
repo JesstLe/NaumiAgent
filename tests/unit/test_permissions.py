@@ -71,6 +71,13 @@ class TestPermissionChecker:
         assert result.allowed
         assert not result.requires_confirmation
 
+    def test_task_tracking_tools_allowed_without_confirmation(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+        for tool_name in ["task_create", "task_update", "task_list", "task_delete"]:
+            result = checker.check(tool_name, {})
+            assert result.allowed, tool_name
+            assert not result.requires_confirmation, tool_name
+
     def test_reset_counts(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
         checker.check("file_read", {"path": "/workspace/test.txt"})
