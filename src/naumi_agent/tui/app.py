@@ -877,9 +877,8 @@ class NaumiApp(App):
         await self.engine.shutdown()
 
     def on_mount(self) -> None:
-        """Auto-resume latest session on startup (like Claude Code)."""
+        """Initialize UI on startup."""
         self._update_git_title()
-        self._auto_resume_latest()
 
     def _update_git_title(self) -> None:
         """Update sub-title with git branch info."""
