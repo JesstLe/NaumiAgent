@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -18,6 +19,7 @@ from naumi_agent.api.schemas import (
     SessionListResponse,
     SessionResponse,
 )
+from naumi_agent.streaming.events import EventType, StreamEvent
 
 router = APIRouter(tags=["sessions", "messages"])
 
@@ -92,7 +94,10 @@ async def send_message(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    result = await engine.run(body.content)
+    async with _engine_lock(request):
+        if not await engine.load_session(session_id):
+            raise HTTPException(status_code=404, detail="Session not found")
+        result = await engine.run(body.content)
     return MessageResponse(
         id=uuid.uuid4().hex[:12],
         role="assistant",
@@ -137,25 +142,48 @@ async def list_messages(
 
 
 async def _stream_response(engine, session_id: str, content: str, request: Request):
+    queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
 
-    sub_id = f"sse_{session_id}_{uuid.uuid4().hex[:8]}"
-    queue = engine.emitter.subscribe(sub_id)
+    async def on_event(event: str, data: dict[str, Any]) -> None:
+        await queue.put(_engine_event_to_stream_event(event, data, session_id=session_id))
 
-    agent_task = asyncio.create_task(engine.run(content))
+    async def run_agent() -> None:
+        async with _engine_lock(request):
+            if not await engine.load_session(session_id):
+                await queue.put(
+                    StreamEvent(
+                        type=EventType.AGENT_ERROR,
+                        data={"message": "Session not found"},
+                        session_id=session_id,
+                    )
+                )
+                return
+            result = await engine.run_streaming(content, on_event)
+            await queue.put(
+                StreamEvent(
+                    type=EventType.AGENT_END,
+                    data={
+                        "status": result.status,
+                        "turns": result.usage.turns,
+                        "cost_usd": result.usage.total_cost_usd,
+                    },
+                    session_id=session_id,
+                )
+            )
 
+    agent_task = asyncio.create_task(run_agent())
     try:
-        while not agent_task.done():
+        while True:
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                if event is None:
+                    break
                 yield event.to_sse()
             except TimeoutError:
                 yield ": keepalive\n\n"
-
-        while not queue.empty():
-            event = queue.get_nowait()
-            yield event.to_sse()
+            if agent_task.done() and queue.empty():
+                break
     finally:
-        engine.emitter.unsubscribe(sub_id)
         try:
             await agent_task
         except Exception:
@@ -177,3 +205,41 @@ def _session_to_response(session) -> SessionResponse:
         total_cost_usd=session.total_cost_usd,
         status=session.status,
     )
+
+
+def _engine_lock(request: Request):
+    lock = getattr(request.app.state, "engine_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        request.app.state.engine_lock = lock
+    return lock
+
+
+def _engine_event_to_stream_event(
+    event: str,
+    data: dict[str, Any],
+    *,
+    session_id: str,
+) -> StreamEvent:
+    event_type = {
+        "turn_start": EventType.TURN_START,
+        "thinking_start": EventType.THINKING_START,
+        "thinking_delta": EventType.THINKING_DELTA,
+        "thinking_end": EventType.THINKING_END,
+        "tool_start": EventType.TOOL_CALL_START,
+        "tool_end": (
+            EventType.TOOL_CALL_END
+            if data.get("status") in (None, "success")
+            else EventType.TOOL_CALL_ERROR
+        ),
+        "token": EventType.TOKEN_DELTA,
+        "context_compacted": EventType.CONTEXT_COMPACTED,
+        "error": EventType.AGENT_ERROR,
+        "response_start": EventType.AGENT_START,
+        "response_end": EventType.AGENT_END,
+    }.get(event, EventType.TURN_END)
+
+    payload = dict(data)
+    if event == "token" and "content" in payload:
+        payload["token"] = payload.pop("content")
+    return StreamEvent(type=event_type, data=payload, session_id=session_id)

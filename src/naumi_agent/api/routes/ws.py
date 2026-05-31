@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import uuid
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+from naumi_agent.api.routes.messages import _engine_event_to_stream_event
+from naumi_agent.streaming.events import EventType, StreamEvent
 
 router = APIRouter(tags=["websocket"])
 
@@ -22,12 +25,7 @@ async def websocket_session(websocket: WebSocket, session_id: str):
         await websocket.close()
         return
 
-    sub_id = f"ws_{session_id}_{uuid.uuid4().hex[:8]}"
-    queue = engine.emitter.subscribe(sub_id)
-
     await websocket.send_json({"type": "connected", "session_id": session_id})
-
-    push_task = asyncio.create_task(_push_events(websocket, queue))
 
     try:
         while True:
@@ -40,9 +38,13 @@ async def websocket_session(websocket: WebSocket, session_id: str):
                 if not content:
                     continue
                 await websocket.send_json({"type": "message_received"})
-                task = asyncio.create_task(engine.run(content))
                 try:
-                    result = await task
+                    result = await _run_streaming_to_websocket(
+                        websocket,
+                        engine,
+                        session_id,
+                        content,
+                    )
                     await websocket.send_json(
                         {
                             "type": "message_complete",
@@ -60,9 +62,6 @@ async def websocket_session(websocket: WebSocket, session_id: str):
 
     except WebSocketDisconnect:
         pass
-    finally:
-        engine.emitter.unsubscribe(sub_id)
-        push_task.cancel()
 
 
 @router.websocket("/ws/chat")
@@ -76,12 +75,7 @@ async def websocket_chat(websocket: WebSocket):
     session = Session(title="WebSocket Chat")
     await engine.session_store.save(session)
 
-    sub_id = f"ws_quick_{session.id}"
-    queue = engine.emitter.subscribe(sub_id)
-
     await websocket.send_json({"type": "connected", "session_id": session.id})
-
-    push_task = asyncio.create_task(_push_events(websocket, queue))
 
     try:
         while True:
@@ -94,7 +88,12 @@ async def websocket_chat(websocket: WebSocket):
                     continue
                 await websocket.send_json({"type": "message_received"})
                 try:
-                    result = await engine.run(content)
+                    result = await _run_streaming_to_websocket(
+                        websocket,
+                        engine,
+                        session.id,
+                        content,
+                    )
                     await websocket.send_json({"type": "message_complete", "status": result.status})
                 except Exception as e:
                     await websocket.send_json({"type": "error", "message": str(e)})
@@ -103,21 +102,31 @@ async def websocket_chat(websocket: WebSocket):
 
     except WebSocketDisconnect:
         pass
-    finally:
-        engine.emitter.unsubscribe(sub_id)
-        push_task.cancel()
-        await engine.session_store.save(session)
 
 
-async def _push_events(websocket: WebSocket, queue: asyncio.Queue):
-    while True:
-        try:
-            event = await asyncio.wait_for(queue.get(), timeout=30.0)
-            await websocket.send_text(event.to_ws())
-        except TimeoutError:
-            try:
-                await websocket.send_json({"type": "ping"})
-            except Exception:
-                break
-        except Exception:
-            break
+async def _run_streaming_to_websocket(
+    websocket: WebSocket,
+    engine: Any,
+    session_id: str,
+    content: str,
+):
+    lock = getattr(websocket.app.state, "engine_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        websocket.app.state.engine_lock = lock
+
+    async def on_event(event: str, data: dict[str, Any]) -> None:
+        stream_event = _engine_event_to_stream_event(event, data, session_id=session_id)
+        await websocket.send_text(stream_event.to_ws())
+
+    async with lock:
+        if not await engine.load_session(session_id):
+            await websocket.send_text(
+                StreamEvent(
+                    type=EventType.AGENT_ERROR,
+                    data={"message": "Session not found"},
+                    session_id=session_id,
+                ).to_ws()
+            )
+            raise RuntimeError("Session not found")
+        return await engine.run_streaming(content, on_event)
