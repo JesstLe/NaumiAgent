@@ -18,6 +18,7 @@ from naumi_agent.memory.long_term import LongTermMemory
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.router import ModelRouter, ModelTier, TokenUsage
 from naumi_agent.orchestrator.context_assembly import (
+    HARNESS_CONTEXT_MARKER,
     HarnessContextAssembler,
     HarnessContextInput,
     is_harness_context_message,
@@ -791,12 +792,45 @@ class AgentEngine:
                     },
                 )
 
-    async def _inject_harness_context_snapshot(self) -> None:
+    async def _fire_hook(
+        self,
+        ctx: HookContext,
+        on_event: EventCallback | None = None,
+    ) -> HookContext:
+        """Fire hooks and optionally emit user-visible trace events."""
+        trace = self.hooks.get_trace()
+        last_sequence = trace[-1].sequence if trace else 0
+        result = await self.hooks.fire(ctx)
+        if on_event is not None:
+            for entry in self.hooks.get_trace():
+                if entry.sequence <= last_sequence:
+                    continue
+                await on_event("hook_trace", {
+                    "point": entry.point,
+                    "callback": entry.callback,
+                    "duration_ms": entry.duration_ms,
+                    "aborted": entry.aborted,
+                    "error": entry.error,
+                })
+        return result
+
+    async def _inject_harness_context_snapshot(
+        self,
+        on_event: EventCallback | None = None,
+    ) -> None:
         """Inject one ephemeral system snapshot of current harness state."""
         self._messages = [
             message for message in self._messages
             if not is_harness_context_message(message)
         ]
+        session_id = self._session.id if self._session else ""
+        start_ctx = await self._fire_hook(HookContext(
+            point=HookPoint.CONTEXT_ASSEMBLE_START,
+            data={"message_count": len(self._messages)},
+            session_id=session_id,
+        ), on_event)
+        if start_ctx.should_abort:
+            return
         snapshot = await self._harness_context.assemble(
             HarnessContextInput(
                 tool_registry=self._tool_registry,
@@ -811,7 +845,61 @@ class AgentEngine:
                 budget_info=self.get_budget_info(),
             )
         )
+        end_ctx = await self._fire_hook(HookContext(
+            point=HookPoint.CONTEXT_ASSEMBLE_END,
+            data={"snapshot": snapshot, "extra_sections": []},
+            session_id=session_id,
+        ), on_event)
+        snapshot = str(end_ctx.data.get("snapshot", snapshot))
+        extra_sections = end_ctx.data.get("extra_sections", [])
+        if isinstance(extra_sections, str):
+            extra_sections = [extra_sections]
+        if isinstance(extra_sections, list) and extra_sections:
+            snapshot = _append_harness_context_sections(
+                snapshot,
+                [str(section) for section in extra_sections if str(section).strip()],
+            )
         self._messages.append({"role": "system", "content": snapshot})
+
+    async def _fire_user_prompt_submit(
+        self,
+        task: str,
+        *,
+        streaming: bool = False,
+        on_event: EventCallback | None = None,
+    ) -> str | None:
+        """Fire user prompt hook and return the possibly rewritten prompt."""
+        session_id = self._session.id if self._session else ""
+        ctx = await self._fire_hook(HookContext(
+            point=HookPoint.USER_PROMPT_SUBMIT,
+            data={"prompt": task, "streaming": streaming},
+            session_id=session_id,
+        ), on_event)
+        if ctx.should_abort:
+            return None
+        return str(ctx.data.get("prompt", task))
+
+    async def _fire_agent_stop(
+        self,
+        *,
+        status: str,
+        response: str,
+        reason: str = "",
+        streaming: bool = False,
+        on_event: EventCallback | None = None,
+    ) -> None:
+        """Fire agent stop hook with final status metadata."""
+        session_id = self._session.id if self._session else ""
+        await self._fire_hook(HookContext(
+            point=HookPoint.AGENT_STOP,
+            data={
+                "status": status,
+                "response_length": len(response or ""),
+                "reason": reason,
+                "streaming": streaming,
+            },
+            session_id=session_id,
+        ), on_event)
 
     def _check_budget(self) -> AgentResult | None:
         if PermissionMode(self._config.safety.permission_mode) == PermissionMode.BYPASS:
@@ -852,12 +940,24 @@ class AgentEngine:
         session = await self.get_or_create_session()
         self.task_store.set_session(session.id)
 
+        hooked_task = await self._fire_user_prompt_submit(task)
+        if hooked_task is None:
+            await self._fire_agent_stop(
+                status="error",
+                response="用户输入已被 hook 拦截。",
+                reason="user_prompt_submit_aborted",
+            )
+            return AgentResult(
+                status="error",
+                error="用户输入已被 hook 拦截。",
+            )
+        task = hooked_task
         self._append_message({"role": "user", "content": task})
         await self._inject_relevant_memories(task)
         tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
 
         session_id = self._session.id if self._session else ""
-        await self.hooks.fire(HookContext(
+        await self._fire_hook(HookContext(
             point=HookPoint.ENGINE_RUN_START,
             data={"task": task},
             session_id=session_id,
@@ -876,7 +976,7 @@ class AgentEngine:
             logger.exception("Agent loop failed")
             result = AgentResult(status="error", error=self._format_error(e))
 
-        await self.hooks.fire(HookContext(
+        await self._fire_hook(HookContext(
             point=HookPoint.ENGINE_RUN_END,
             data={"status": result.status, "task": task},
             session_id=session_id,
@@ -903,16 +1003,33 @@ class AgentEngine:
         session = await self.get_or_create_session()
         self.task_store.set_session(session.id)
 
+        hooked_task = await self._fire_user_prompt_submit(
+            task,
+            streaming=True,
+            on_event=on_event,
+        )
+        if hooked_task is None:
+            message = "用户输入已被 hook 拦截。"
+            await on_event("error", {"message": message})
+            await self._fire_agent_stop(
+                status="error",
+                response=message,
+                reason="user_prompt_submit_aborted",
+                streaming=True,
+                on_event=on_event,
+            )
+            return AgentResult(status="error", error=message)
+        task = hooked_task
         self._append_message({"role": "user", "content": task})
         await self._inject_relevant_memories(task)
         tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
 
         session_id = self._session.id if self._session else ""
-        await self.hooks.fire(HookContext(
+        await self._fire_hook(HookContext(
             point=HookPoint.ENGINE_RUN_START,
             data={"task": task, "streaming": True},
             session_id=session_id,
-        ))
+        ), on_event)
 
         try:
             plan = await self._planner.plan(task)
@@ -929,11 +1046,11 @@ class AgentEngine:
             await on_event("error", {"message": error_msg})
             result = AgentResult(status="error", error=error_msg)
 
-        await self.hooks.fire(HookContext(
+        await self._fire_hook(HookContext(
             point=HookPoint.ENGINE_RUN_END,
             data={"status": result.status, "task": task, "streaming": True},
             session_id=session_id,
-        ))
+        ), on_event)
 
         await self._save_session()
 
@@ -1044,6 +1161,11 @@ class AgentEngine:
 
             exceeded = self._check_budget()
             if exceeded:
+                await self._fire_agent_stop(
+                    status=exceeded.status,
+                    response=exceeded.response,
+                    reason="budget_exceeded",
+                )
                 return exceeded
 
             await self._maybe_compact()
@@ -1051,7 +1173,7 @@ class AgentEngine:
 
             # --- 推理：调用 LLM ---
             session_id = self._session.id if self._session else ""
-            await self.hooks.fire(HookContext(
+            await self._fire_hook(HookContext(
                 point=HookPoint.LLM_CALL_START,
                 data={"turn": turn + 1, "message_count": len(self._messages)},
                 session_id=session_id,
@@ -1062,7 +1184,7 @@ class AgentEngine:
                 tools=tools,
             )
             self._track_model_usage(response.usage, response.model)
-            await self.hooks.fire(HookContext(
+            await self._fire_hook(HookContext(
                 point=HookPoint.LLM_CALL_END,
                 data={
                     "turn": turn + 1,
@@ -1081,6 +1203,11 @@ class AgentEngine:
 
             exceeded = self._check_budget()
             if exceeded:
+                await self._fire_agent_stop(
+                    status=exceeded.status,
+                    response=exceeded.response,
+                    reason="budget_exceeded",
+                )
                 return exceeded
 
             # --- 行动：处理工具调用 ---
@@ -1143,7 +1270,7 @@ class AgentEngine:
                         )
                         continue
 
-                    hook_ctx = await self.hooks.fire(HookContext(
+                    hook_ctx = await self._fire_hook(HookContext(
                         point=HookPoint.TOOL_EXECUTE_START,
                         data={"tool_name": tc.name, "arguments": tc.arguments},
                         session_id=session_id,
@@ -1162,7 +1289,7 @@ class AgentEngine:
                         continue
 
                     result = await self._execute_tool(tc)
-                    await self.hooks.fire(HookContext(
+                    await self._fire_hook(HookContext(
                         point=HookPoint.TOOL_EXECUTE_END,
                         data={
                             "tool_name": tc.name,
@@ -1199,17 +1326,28 @@ class AgentEngine:
                                 if m.get("role") == "assistant" and m.get("content"):
                                     last_text = m["content"]
                                     break
+                            safe_text = self._output_guardrail.redact(
+                                last_text or "任务执行被强制收敛（检测到方案振荡）。"
+                            )
+                            await self._fire_agent_stop(
+                                status="completed",
+                                response=safe_text,
+                                reason="force_converge",
+                            )
                             return AgentResult(
                                 status="completed",
-                                response=self._output_guardrail.redact(
-                                    last_text or "任务执行被强制收敛（检测到方案振荡）。"
-                                ),
+                                response=safe_text,
                                 usage=self._usage,
                             )
                         convergence_injected = True
 
                 exceeded = self._check_budget()
                 if exceeded:
+                    await self._fire_agent_stop(
+                        status=exceeded.status,
+                        response=exceeded.response,
+                        reason="budget_exceeded",
+                    )
                     return exceeded
 
                 continue
@@ -1218,12 +1356,22 @@ class AgentEngine:
             tool_call_history.clear()
             safe_content = self._output_guardrail.redact(response.content)
             self._append_message({"role": "assistant", "content": response.content})
+            await self._fire_agent_stop(
+                status="completed",
+                response=safe_content,
+                reason="final_response",
+            )
             return AgentResult(
                 status="completed",
                 response=safe_content,
                 usage=self._usage,
             )
 
+        await self._fire_agent_stop(
+            status="max_turns",
+            response="已达到最大轮次限制，任务未完成。",
+            reason="max_turns",
+        )
         return AgentResult(
             status="max_turns",
             response="已达到最大轮次限制，任务未完成。",
@@ -1257,10 +1405,17 @@ class AgentEngine:
 
             exceeded = self._check_budget()
             if exceeded:
+                await self._fire_agent_stop(
+                    status=exceeded.status,
+                    response=exceeded.response,
+                    reason="budget_exceeded",
+                    streaming=True,
+                    on_event=on_event,
+                )
                 return exceeded
 
             await self._maybe_compact(on_event)
-            await self._inject_harness_context_snapshot()
+            await self._inject_harness_context_snapshot(on_event)
             await on_event("turn_start", {"turn": turn + 1, "model": model_str})
 
             text_parts: list[str] = []
@@ -1270,11 +1425,11 @@ class AgentEngine:
             got_thinking = False
             stream_tokens = 0
 
-            await self.hooks.fire(HookContext(
+            await self._fire_hook(HookContext(
                 point=HookPoint.LLM_CALL_START,
                 data={"turn": turn + 1, "streaming": True, "message_count": len(self._messages)},
                 session_id=session_id,
-            ))
+            ), on_event)
 
             try:
                 async for chunk in self._router.stream(
@@ -1322,7 +1477,7 @@ class AgentEngine:
                 if response.tool_calls:
                     collected_tool_calls = {i: tc for i, tc in enumerate(response.tool_calls)}
 
-            await self.hooks.fire(HookContext(
+            await self._fire_hook(HookContext(
                 point=HookPoint.LLM_CALL_END,
                 data={
                     "turn": turn + 1,
@@ -1332,7 +1487,7 @@ class AgentEngine:
                     "streaming": True,
                 },
                 session_id=session_id,
-            ))
+            ), on_event)
 
             if got_thinking:
                 await on_event("thinking_end", {"content": "".join(thinking_parts)})
@@ -1343,6 +1498,13 @@ class AgentEngine:
             exceeded = self._check_budget()
             if exceeded:
                 await on_event("error", {"message": exceeded.response})
+                await self._fire_agent_stop(
+                    status=exceeded.status,
+                    response=exceeded.response,
+                    reason="budget_exceeded",
+                    streaming=True,
+                    on_event=on_event,
+                )
                 return exceeded
 
             # --- 工具调用 ---
@@ -1413,11 +1575,11 @@ class AgentEngine:
 
                     await on_event("tool_start", {"name": tc.name, "args": tc.arguments})
 
-                    hook_ctx = await self.hooks.fire(HookContext(
+                    hook_ctx = await self._fire_hook(HookContext(
                         point=HookPoint.TOOL_EXECUTE_START,
                         data={"tool_name": tc.name, "arguments": tc.arguments},
                         session_id=session_id,
-                    ))
+                    ), on_event)
                     if hook_ctx.should_abort:
                         abort_reason = hook_ctx.data.get("abort_reason", "no reason")
                         await on_event("tool_end", {
@@ -1435,7 +1597,7 @@ class AgentEngine:
                         )
                         continue
 
-                    result = await self._execute_tool(tc)
+                    result = await self._execute_tool(tc, on_event=on_event)
                     await on_event(
                         "tool_end",
                         {
@@ -1445,7 +1607,7 @@ class AgentEngine:
                             "content": result.content[:2000] if result.content else "",
                         },
                     )
-                    await self.hooks.fire(HookContext(
+                    await self._fire_hook(HookContext(
                         point=HookPoint.TOOL_EXECUTE_END,
                         data={
                             "tool_name": tc.name,
@@ -1454,7 +1616,7 @@ class AgentEngine:
                             "content_length": len(result.content) if result.content else 0,
                         },
                         session_id=session_id,
-                    ))
+                    ), on_event)
                     self._behavior_monitor.record_tool_call(
                         tc.name, is_error=(result.status == "error")
                     )
@@ -1486,6 +1648,13 @@ class AgentEngine:
                             force_msg = last_text or "任务执行被强制收敛（检测到方案振荡）。"
                             await on_event("token", {"content": force_msg})
                             await on_event("response_end", {})
+                            await self._fire_agent_stop(
+                                status="completed",
+                                response=force_msg,
+                                reason="force_converge",
+                                streaming=True,
+                                on_event=on_event,
+                            )
                             return AgentResult(
                                 status="completed",
                                 response=self._output_guardrail.redact(force_msg),
@@ -1504,19 +1673,37 @@ class AgentEngine:
                 await on_event("response_end", {})
             self._append_message({"role": "assistant", "content": text_content})
             safe_content = self._output_guardrail.redact(text_content)
+            await self._fire_agent_stop(
+                status="completed",
+                response=safe_content,
+                reason="final_response",
+                streaming=True,
+                on_event=on_event,
+            )
             return AgentResult(
                 status="completed",
                 response=safe_content,
                 usage=self._usage,
             )
 
+        await self._fire_agent_stop(
+            status="max_turns",
+            response="已达到最大轮次限制，任务未完成。",
+            reason="max_turns",
+            streaming=True,
+            on_event=on_event,
+        )
         return AgentResult(
             status="max_turns",
             response="已达到最大轮次限制，任务未完成。",
             usage=self._usage,
         )
 
-    async def _execute_tool(self, tc: ToolCall) -> ToolResult:
+    async def _execute_tool(
+        self,
+        tc: ToolCall,
+        on_event: EventCallback | None = None,
+    ) -> ToolResult:
         """执行单个工具调用（含权限检查）."""
         tool = self._tool_registry.get(tc.name)
         if tool is None:
@@ -1531,7 +1718,44 @@ class AgentEngine:
         except ValueError as e:
             return ToolResult(call_id=tc.id, status="error", content=str(e))
 
+        session_id = self._session.id if self._session else ""
+        before_ctx = await self._fire_hook(HookContext(
+            point=HookPoint.TOOL_PERMISSION_CHECK,
+            data={
+                "phase": "before",
+                "tool_name": tc.name,
+                "arguments": args,
+            },
+            session_id=session_id,
+        ), on_event)
+        if before_ctx.should_abort:
+            reason = before_ctx.data.get("abort_reason", "hook policy")
+            return ToolResult(
+                call_id=tc.id,
+                status="error",
+                content=f"Permission denied by hook: {reason}",
+            )
+
         decision = self._permission_checker.check(tc.name, args)
+        after_ctx = await self._fire_hook(HookContext(
+            point=HookPoint.TOOL_PERMISSION_CHECK,
+            data={
+                "phase": "after",
+                "tool_name": tc.name,
+                "arguments": args,
+                "allowed": decision.allowed,
+                "requires_confirmation": decision.requires_confirmation,
+                "reason": decision.reason,
+            },
+            session_id=session_id,
+        ), on_event)
+        if after_ctx.should_abort:
+            reason = after_ctx.data.get("abort_reason", "hook policy")
+            return ToolResult(
+                call_id=tc.id,
+                status="error",
+                content=f"Permission denied by hook: {reason}",
+            )
         if not decision.allowed:
             logger.warning("Tool %s blocked: %s", tc.name, decision.reason)
             return ToolResult(
@@ -1641,3 +1865,14 @@ class AgentEngine:
         if "RateLimitError" in error_type:
             return "API 调用频率超限，请稍后重试。"
         return f"{error_type}: {msg}"
+
+
+def _append_harness_context_sections(snapshot: str, sections: list[str]) -> str:
+    """Append hook-provided sections before the closing harness marker."""
+    if not sections:
+        return snapshot
+    extra = "\n\n".join(sections)
+    closing = f"\n{HARNESS_CONTEXT_MARKER}"
+    if snapshot.endswith(closing):
+        return snapshot[: -len(closing)] + f"\n\n{extra}{closing}"
+    return f"{snapshot}\n\n{extra}"

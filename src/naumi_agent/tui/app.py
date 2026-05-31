@@ -1383,6 +1383,25 @@ class NaumiApp(App):
                     tool_name = data["name"]
                     label = _tool_label(tool_name)
                     chat.end_tool(label, data["status"], data["duration_ms"])
+                case "hook_trace":
+                    point = str(data.get("point", "?"))
+                    callback = str(data.get("callback", "?"))
+                    duration = int(data.get("duration_ms", 0) or 0)
+                    error = str(data.get("error", "") or "")
+                    aborted = bool(data.get("aborted", False))
+                    status_label = "拦截" if aborted else "异常" if error else "触发"
+                    style = "yellow" if aborted else "red" if error else "magenta"
+                    suffix = f" · {error}" if error else ""
+                    chat.mount(
+                        Static(
+                            Text.from_markup(
+                                f"  [{style}]hook {status_label}: "
+                                f"{point} → {callback} ({duration}ms){suffix}[/{style}]"
+                            ),
+                            classes="tool-done",
+                        )
+                    )
+                    status.status_text = f"hook {status_label}: {point}"
                 case "context_compacted":
                     logger.info(
                         "Context compacted: %d → %d messages",

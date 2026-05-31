@@ -5,13 +5,19 @@
 2. Shell 命令: 在 config.yaml 的 hooks 段配置
 """
 
-from naumi_agent.hooks.hook_manager import HookContext, HookManager, HookPoint
+from naumi_agent.hooks.hook_manager import (
+    HookContext,
+    HookManager,
+    HookPoint,
+    HookTraceEntry,
+)
 from naumi_agent.hooks.shell_hook import ShellHookConfig, create_shell_hook_runner
 
 __all__ = [
     "HookContext",
     "HookManager",
     "HookPoint",
+    "HookTraceEntry",
     "ShellHookConfig",
     "create_shell_hook_runner",
 ]

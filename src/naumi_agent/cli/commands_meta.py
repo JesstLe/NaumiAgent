@@ -711,17 +711,27 @@ def show_hooks(engine: Any) -> None:
     hooks = engine.hooks.list_hooks()
     if not hooks:
         console.print("[dim]没有已注册的钩子[/dim]")
-        return
+    else:
+        console.print("[bold]已注册钩子:[/bold]")
+        for point, callbacks in hooks.items():
+            try:
+                label = HookPoint(point).value
+            except ValueError:
+                label = point
+            console.print(f"  [cyan]{label}[/cyan]")
+            for cb in callbacks:
+                console.print(f"    • {cb}")
 
-    console.print("[bold]已注册钩子:[/bold]")
-    for point, callbacks in hooks.items():
-        try:
-            label = HookPoint(point).value
-        except ValueError:
-            label = point
-        console.print(f"  [cyan]{label}[/cyan]")
-        for cb in callbacks:
-            console.print(f"    • {cb}")
+    trace = engine.hooks.get_trace()[-10:]
+    if trace:
+        console.print("\n[bold]最近触发:[/bold]")
+        for entry in trace:
+            suffix = " [yellow]拦截[/yellow]" if entry.aborted else ""
+            error = f" [red]{entry.error}[/red]" if entry.error else ""
+            console.print(
+                f"  [magenta]{entry.point}[/magenta] → {entry.callback} "
+                f"({entry.duration_ms}ms){suffix}{error}"
+            )
     console.print()
 
 

@@ -18,7 +18,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
@@ -31,12 +31,18 @@ class HookPoint(StrEnum):
     # Engine lifecycle
     ENGINE_RUN_START = "engine_run_start"
     ENGINE_RUN_END = "engine_run_end"
+    AGENT_STOP = "agent_stop"
 
     # LLM calls
     LLM_CALL_START = "llm_call_start"
     LLM_CALL_END = "llm_call_end"
 
+    # Context assembly
+    CONTEXT_ASSEMBLE_START = "context_assemble_start"
+    CONTEXT_ASSEMBLE_END = "context_assemble_end"
+
     # Tool execution
+    TOOL_PERMISSION_CHECK = "tool_permission_check"
     TOOL_EXECUTE_START = "tool_execute_start"
     TOOL_EXECUTE_END = "tool_execute_end"
 
@@ -49,6 +55,7 @@ class HookPoint(StrEnum):
     DELEGATE_END = "delegate_end"
 
     # Message processing
+    USER_PROMPT_SUBMIT = "user_prompt_submit"
     MESSAGE_IN = "message_in"
     MESSAGE_OUT = "message_out"
 
@@ -75,6 +82,18 @@ class HookContext:
 HookCallback = Any
 
 
+@dataclass(frozen=True)
+class HookTraceEntry:
+    """One hook callback execution trace entry."""
+
+    point: str
+    callback: str
+    duration_ms: int
+    aborted: bool = False
+    error: str = ""
+    sequence: int = 0
+
+
 class HookManager:
     """Centralized hook registry with engine-level and scoped hooks.
 
@@ -94,6 +113,9 @@ class HookManager:
     def __init__(self) -> None:
         self._hooks: dict[str, list[HookCallback]] = {}
         self._scoped: list[tuple[str, HookCallback]] = []
+        self._trace: list[HookTraceEntry] = []
+        self._max_trace_entries = 200
+        self._trace_sequence = 0
 
     def on(self, point: HookPoint | str) -> Any:
         """Decorator to register a hook callback for a given point.
@@ -157,16 +179,27 @@ class HookManager:
             return ctx
 
         for callback in callbacks:
+            start = time.monotonic()
+            error = ""
             try:
                 result = callback(ctx)
                 if inspect.iscoroutine(result):
                     await result
-            except Exception:
+            except Exception as e:
+                error = f"{type(e).__name__}: {e}"
                 logger.exception(
                     "Hook %s for %s raised an error",
                     _func_name(callback),
                     ctx.point.value,
                 )
+            finally:
+                self._record_trace(HookTraceEntry(
+                    point=ctx.point.value,
+                    callback=_func_name(callback),
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                    aborted=ctx.should_abort,
+                    error=error,
+                ))
 
         return ctx
 
@@ -180,6 +213,8 @@ class HookManager:
             return ctx
 
         for callback in callbacks:
+            start = time.monotonic()
+            error = ""
             try:
                 if inspect.iscoroutinefunction(callback):
                     logger.warning(
@@ -193,12 +228,21 @@ class HookManager:
                         "Async hook %s called via fire_sync — skipped",
                         _func_name(callback),
                     )
-            except Exception:
+            except Exception as e:
+                error = f"{type(e).__name__}: {e}"
                 logger.exception(
                     "Hook %s for %s raised an error",
                     _func_name(callback),
                     ctx.point.value,
                 )
+            finally:
+                self._record_trace(HookTraceEntry(
+                    point=ctx.point.value,
+                    callback=_func_name(callback),
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                    aborted=ctx.should_abort,
+                    error=error,
+                ))
 
         return ctx
 
@@ -221,6 +265,20 @@ class HookManager:
             for point, callbacks in self._hooks.items()
             if callbacks
         }
+
+    def get_trace(self) -> list[HookTraceEntry]:
+        """Return hook execution trace entries."""
+        return list(self._trace)
+
+    def clear_trace(self) -> None:
+        """Clear hook execution trace entries."""
+        self._trace.clear()
+
+    def _record_trace(self, entry: HookTraceEntry) -> None:
+        self._trace_sequence += 1
+        self._trace.append(replace(entry, sequence=self._trace_sequence))
+        if len(self._trace) > self._max_trace_entries:
+            del self._trace[: len(self._trace) - self._max_trace_entries]
 
 
 def _func_name(func: Any) -> str:

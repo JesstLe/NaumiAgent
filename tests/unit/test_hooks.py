@@ -168,6 +168,11 @@ class TestHookManager:
         ctx = HookContext(point=HookPoint.LLM_CALL_START)
         result = await mgr.fire(ctx)  # should not raise
         assert result is ctx
+        trace = mgr.get_trace()
+        assert len(trace) == 1
+        assert trace[0].point == "llm_call_start"
+        assert trace[0].callback.endswith("bad_hook")
+        assert "RuntimeError: boom" in trace[0].error
 
     @pytest.mark.asyncio
     async def test_scope_auto_unregisters(self):
@@ -228,3 +233,24 @@ class TestHookManager:
         result = await mgr.fire(ctx)
         assert result is ctx
         assert result.data["key"] == "value"
+
+    @pytest.mark.asyncio
+    async def test_trace_records_abort_and_clear_trace(self):
+        mgr = HookManager()
+
+        @mgr.on(HookPoint.TOOL_PERMISSION_CHECK)
+        def aborter(ctx):
+            ctx.data["abort"] = True
+            ctx.data["abort_reason"] = "test policy"
+
+        ctx = HookContext(point=HookPoint.TOOL_PERMISSION_CHECK)
+        await mgr.fire(ctx)
+
+        trace = mgr.get_trace()
+        assert len(trace) == 1
+        assert trace[0].point == "tool_permission_check"
+        assert trace[0].aborted is True
+        assert trace[0].duration_ms >= 0
+
+        mgr.clear_trace()
+        assert mgr.get_trace() == []
