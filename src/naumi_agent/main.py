@@ -20,12 +20,87 @@ from naumi_agent.config.settings import AppConfig
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+
+def _get_git_info() -> dict[str, str | bool]:
+    """Get current git branch and dirty status."""
+    import subprocess
+
+    try:
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            cwd=str(Path.cwd()),
+        ).decode().strip()
+    except Exception:
+        return {"branch": "", "dirty": False}
+    if not branch:
+        return {"branch": "", "dirty": False}
+    try:
+        dirty = bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain"],
+                stderr=subprocess.DEVNULL,
+                cwd=str(Path.cwd()),
+            ).decode().strip()
+        )
+    except Exception:
+        dirty = False
+    return {"branch": branch, "dirty": dirty}
+
 app = typer.Typer(
     name="naumi",
     help="NaumiAgent — 通用智能 Agent",
     no_args_is_help=True,
 )
 console = Console()
+
+# Friendly tool name mapping for display
+_TOOL_LABELS: dict[str, tuple[str, str]] = {
+    "file_read": ("📖", "读取文件"),
+    "file_write": ("📝", "写入文件"),
+    "file_edit": ("✏️", "编辑文件"),
+    "bash_run": ("🖥️", "执行命令"),
+    "code_execute": ("⌨️", "执行代码"),
+    "web_search": ("🔍", "搜索"),
+    "web_fetch": ("🌐", "抓取网页"),
+    "memory_store": ("💾", "存储记忆"),
+    "memory_recall": ("🧠", "召回记忆"),
+    "delegate_task": ("👥", "委派任务"),
+    "spawn_agent": ("🚀", "启动Agent"),
+    "destroy_agent": ("🗑️", "销毁Agent"),
+    "list_agents": ("📋", "列出Agent"),
+    "task_create": ("📌", "创建任务"),
+    "task_update": ("🔄", "更新任务"),
+    "task_list": ("📋", "查看任务"),
+    "task_delete": ("🗑️", "删除任务"),
+}
+
+# ANSI separators for visual hierarchy
+_SEP_THIN = "\033[2m─" + "─" * 40 + "\033[0m"
+_SEP_THICK = "\033[2m━" + "━" * 40 + "\033[0m"
+
+
+def _tool_label(name: str, args: str = "") -> str:
+    """Return a friendly display string for a tool call."""
+    icon, label = _TOOL_LABELS.get(name, ("⚙️", name))
+    # Extract key argument for context
+    hint = ""
+    if args:
+        import json
+        try:
+            d = json.loads(args) if isinstance(args, str) else args
+            if isinstance(d, dict):
+                # Pick the most informative arg
+                for key in ("path", "file_path", "command", "query", "url", "task", "description", "goal"):
+                    if key in d:
+                        val = str(d[key])
+                        if len(val) > 50:
+                            val = val[:47] + "…"
+                        hint = f" {val}"
+                        break
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return f"{icon} {label}{hint}"
 
 
 def _resolve_config_path(path: str) -> str:
@@ -64,32 +139,45 @@ def _launch_tui(config_path: str) -> None:
 
 async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
     """实时显示 Agent 思考、工具调用过程（fallback for non-CLIApp modes）."""
-    if event == "thinking_delta":
+    if event == "turn_start":
+        model = data.get("model", "")
+        if model:
+            sys.stdout.write(f"\033[2m  ⚙ {model}\033[0m\n")
+            sys.stdout.flush()
+    elif event == "thinking_delta":
         content = data.get("content", "")
         if content:
             sys.stdout.write(content)
             sys.stdout.flush()
     elif event == "thinking_start":
-        sys.stdout.write("\n\033[2m💭 思考中...\033[0m\n")
+        sys.stdout.write(f"\n{_SEP_THIN}\n\033[2m💭 思考中...\033[0m\n")
         sys.stdout.flush()
     elif event == "thinking_end":
-        sys.stdout.write("\033[0m\n")
+        sys.stdout.write(f"\033[0m\n{_SEP_THIN}\n")
         sys.stdout.flush()
     elif event == "tool_start":
+        name = data.get("name", "?")
+        args = data.get("args", "")
+        label = _tool_label(name, args)
+        console.print(f"  \033[2m{_SEP_THIN}\033[0m")
+        sys.stdout.write(f"\033[36m  ⏳ {label}\033[0m\n")
+        sys.stdout.flush()
+    elif event == "tool_end":
         name = data.get("name", "?")
         status = data.get("status", "?")
         content = data.get("content", "")
         duration = data.get("duration_ms", 0)
+        label = _tool_label(name)
         if status == "error":
-            console.print(f"[red]  ✗ {name} 失败 ({duration:.0f}ms)[/red]")
+            console.print(f"\033[31m  ✗ {label} 失败 ({duration:.0f}ms)\033[0m")
         else:
-            console.print(f"[green]  ✓ {name}[/green] [dim]({duration:.0f}ms)[/dim]")
+            console.print(f"\033[32m  ✓ {label}\033[0m \033[2m({duration:.0f}ms)\033[0m")
         if content:
             _print_tool_output(name, content)
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":
-        console.print()
+        console.print(f"\033[2m{_SEP_THICK}\033[0m")
     elif event == "response_end":
         console.print()
     elif event == "error":
@@ -110,15 +198,22 @@ def _print_tool_output(name: str, content: str) -> None:
                 console.print(f"[blue]{line}[/blue]")
             else:
                 console.print(f"[dim]{line}[/dim]")
+    elif "```" in content:
+        # Code block — show the full block up to 80 lines
+        max_lines = 80
+        preview = "\n".join(lines[:max_lines])
+        if len(lines) > max_lines:
+            preview += f"\n  ... ({len(lines) - max_lines} more lines)"
+        console.print(f"[dim]{preview}[/dim]")
     elif name in ("file_read",):
+        preview = "\n".join(lines[:50])
+        if len(lines) > 50:
+            preview += f"\n  ... ({len(lines) - 50} more lines)"
+        console.print(f"[dim]{preview}[/dim]")
+    else:
         preview = "\n".join(lines[:30])
         if len(lines) > 30:
             preview += f"\n  ... ({len(lines) - 30} more lines)"
-        console.print(f"[dim]{preview}[/dim]")
-    else:
-        preview = "\n".join(lines[:8])
-        if len(lines) > 8:
-            preview += f"\n  ... ({len(lines) - 8} more lines)"
         console.print(f"[dim]{preview}[/dim]")
 
 
@@ -127,12 +222,30 @@ _active_cli: Any = None
 
 def _cli_event_factory(cli: Any):
     """Create event handler that writes to CLIApp instead of stdout."""
+    import time
+
     thinking_started = False
     has_streamed_tokens = False
+    model_name = ""
+    token_count = 0
+    first_token_time = 0.0
+    last_token_time = 0.0
+    turn_start_time = 0.0
 
     async def handler(event: str, data: dict[str, Any]) -> None:
         nonlocal thinking_started, has_streamed_tokens
-        if event == "thinking_delta":
+        nonlocal model_name, token_count, first_token_time, last_token_time
+        nonlocal turn_start_time
+
+        if event == "turn_start":
+            model_name = data.get("model", "")
+            token_count = 0
+            first_token_time = 0.0
+            last_token_time = 0.0
+            turn_start_time = time.monotonic()
+            if model_name:
+                cli.append_live(f"\033[2m  ⚙ {model_name}\033[0m\n")
+        elif event == "thinking_delta":
             content = data.get("content", "")
             if content:
                 cli.append_live(f"\033[2m{content}\033[0m")
@@ -158,12 +271,43 @@ def _cli_event_factory(cli: Any):
             has_streamed_tokens = True
             content = data.get("content", "")
             if content:
+                now = time.monotonic()
+                if first_token_time == 0.0:
+                    first_token_time = now
+                last_token_time = now
+                token_count += 1
                 cli.append_live(content)
         elif event == "error":
             cli.finalize_live()
             cli.append_live(f"\033[31m错误: {data.get('message', '')}\033[0m\n")
 
+    def _get_model() -> str:
+        return model_name
+
+    def _get_token_speed() -> float:
+        if token_count > 0 and first_token_time > 0 and last_token_time > first_token_time:
+            return token_count / (last_token_time - first_token_time)
+        return 0.0
+
+    def _get_ttft() -> float:
+        """Time to first token (seconds)."""
+        if first_token_time > 0 and turn_start_time > 0:
+            return first_token_time - turn_start_time
+        return 0.0
+
+    def _get_duration() -> float:
+        """Total response duration (seconds)."""
+        if turn_start_time > 0:
+            end = last_token_time if last_token_time > 0 else time.monotonic()
+            return end - turn_start_time
+        return 0.0
+
     handler._has_streamed_tokens = lambda: has_streamed_tokens
+    handler._get_model = _get_model
+    handler._get_token_speed = _get_token_speed
+    handler._get_ttft = _get_ttft
+    handler._get_duration = _get_duration
+    handler._get_token_speed = _get_token_speed
     return handler
 
 
@@ -183,6 +327,11 @@ async def _chat(config_path: str) -> None:
     _active_cli = cli
 
     cli.append_output(_capture(lambda: _print_banner(engine)))
+
+    # Inject git info into prompt prefix
+    git = _get_git_info()
+    if git["branch"]:
+        cli.set_git_info(git["branch"], git["dirty"])
 
     # Auto-resume: load latest session on startup (like Claude Code)
     try:
@@ -228,7 +377,18 @@ async def _chat(config_path: str) -> None:
         cli.finalize_live()
         skip_response = event_handler._has_streamed_tokens()
         cli.append_output(
-            _capture(lambda: _render_result(console, result, skip_response=skip_response))
+            _capture(
+                lambda: _render_result(
+                    console,
+                    result,
+                    skip_response=skip_response,
+                    model=event_handler._get_model(),
+                    token_speed=event_handler._get_token_speed(),
+                    ttft=event_handler._get_ttft(),
+                    duration=event_handler._get_duration(),
+                    engine=engine,
+                )
+            )
         )
 
     cli.set_submit_handler(on_submit)
@@ -339,7 +499,17 @@ def _print_banner_to(c: Console, engine: Any) -> None:
     )
 
 
-def _render_result(c: Console, result: Any, *, skip_response: bool = False) -> None:
+def _render_result(
+    c: Console,
+    result: Any,
+    *,
+    skip_response: bool = False,
+    model: str = "",
+    token_speed: float = 0.0,
+    ttft: float = 0.0,
+    duration: float = 0.0,
+    engine: Any = None,
+) -> None:
     if result.status == "error" and result.error:
         c.print(f"[red]错误: {result.error}[/red]")
         return
@@ -355,16 +525,75 @@ def _render_result(c: Console, result: Any, *, skip_response: bool = False) -> N
             )
         )
 
-    stats = Text()
-    stats.append(f"轮次: {result.usage.turns}", style="dim")
-    stats.append(" | ", style="dim")
-    total_tok = result.usage.total_input_tokens + result.usage.total_output_tokens
-    stats.append(f"Token: {total_tok}", style="dim")
-    stats.append(" | ", style="dim")
-    stats.append(f"费用: ${result.usage.total_cost_usd:.4f}", style="dim")
+    # --- Line 1: Model | Turns | Tokens (speed) | Cache | TTFT | Duration ---
+    line1 = Text()
+    if model:
+        line1.append(model, style="dim")
+        line1.append(" | ", style="dim")
+    line1.append(f"轮次: {result.usage.turns}", style="dim")
+    line1.append(" | ", style="dim")
+    inp = result.usage.total_input_tokens
+    out = result.usage.total_output_tokens
+    line1.append(f"↑{inp}", style="cyan")
+    line1.append(" ", style="dim")
+    line1.append(f"↓{out}", style="green")
+    if token_speed > 0:
+        line1.append(f" ({token_speed:.1f} tok/s)", style="dim")
+    if result.usage.cache_tokens > 0:
+        line1.append(" | ", style="dim")
+        line1.append(f"缓存: {result.usage.cache_tokens}", style="dim")
+    if ttft > 0:
+        line1.append(" | ", style="dim")
+        line1.append(f"首字: {ttft:.1f}s", style="dim")
+    if duration > 0:
+        line1.append(" | ", style="dim")
+        line1.append(f"耗时: {duration:.1f}s", style="dim")
     if result.status != "completed":
-        stats.append(f" | 状态: {result.status}", style="yellow")
-    c.print(stats)
+        line1.append(f" | 状态: {result.status}", style="yellow")
+    c.print(line1)
+
+    # --- Line 2: Context | Budget | Git ---
+    line2 = Text()
+    has_line2 = False
+
+    if engine:
+        # Context window
+        ctx = engine.get_context_info()
+        ctx_pct = ctx["percentage"]
+        used_k = ctx["used"] / 1000
+        window_k = ctx["window"] / 1000
+        ctx_style = "yellow" if ctx_pct > 80 else "dim"
+        line2.append(f"上下文: {used_k:.0f}K/{window_k:.0f}K ({ctx_pct}%)", style=ctx_style)
+        has_line2 = True
+
+        # Budget
+        budget = engine.get_budget_info()
+        budget_pct = budget["percentage"]
+        budget_style = "yellow" if budget_pct > 80 else "dim"
+        line2.append(" | ", style="dim")
+        line2.append(
+            f"预算: ${budget['used_usd']:.4f}/${budget['max_usd']:.2f} ({budget_pct}%)",
+            style=budget_style,
+        )
+        has_line2 = True
+
+    # Cost on line 2 as well
+    line2.append(" | ", style="dim")
+    line2.append(f"费用: ${result.usage.total_cost_usd:.4f}", style="dim")
+    has_line2 = True
+
+    # Git
+    git = _get_git_info()
+    if git["branch"]:
+        git_label = git["branch"]
+        if git["dirty"]:
+            git_label += "*"
+        line2.append(" | ", style="dim")
+        line2.append(f"📂 {git_label}", style="dim")
+        has_line2 = True
+
+    if has_line2:
+        c.print(line2)
     c.print()
 
 
