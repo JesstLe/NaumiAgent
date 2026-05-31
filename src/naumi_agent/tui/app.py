@@ -1339,10 +1339,16 @@ class NaumiApp(App):
                 case "response_end":
                     pass
                 case "tool_start":
-                    chat.start_tool(data["name"])
-                    status.status_text = f"⚙ {data['name']}..."
+                    tool_name = data["name"]
+                    from naumi_agent.main import _tool_label
+                    label = _tool_label(tool_name, data.get("args", ""))
+                    chat.start_tool(label)
+                    status.status_text = f"{label}..."
                 case "tool_end":
-                    chat.end_tool(data["name"], data["status"], data["duration_ms"])
+                    tool_name = data["name"]
+                    from naumi_agent.main import _tool_label
+                    label = _tool_label(tool_name)
+                    chat.end_tool(label, data["status"], data["duration_ms"])
                 case "context_compacted":
                     logger.info(
                         "Context compacted: %d → %d messages",
