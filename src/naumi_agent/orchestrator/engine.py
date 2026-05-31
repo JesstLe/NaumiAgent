@@ -1390,6 +1390,16 @@ class AgentEngine:
                 status="error",
                 content=f"Permission denied: {decision.reason}",
             )
+        if decision.requires_confirmation:
+            logger.warning("Tool %s requires confirmation and was blocked", tc.name)
+            return ToolResult(
+                call_id=tc.id,
+                status="error",
+                content=(
+                    "Permission denied: 该工具需要用户确认，当前自动执行链路未提供确认步骤。"
+                    "请在 bypass 模式下运行，或使用更安全的替代工具完成任务。"
+                ),
+            )
 
         try:
             start = time.time()

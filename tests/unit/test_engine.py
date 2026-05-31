@@ -13,6 +13,7 @@ from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import TokenBudget
+from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tools.base import ToolCall, ToolResult
 
 
@@ -161,6 +162,21 @@ class TestToolExecution:
         result = await engine._execute_tool(tc)
         # Should attempt read, fail with "File not found" not "Permission denied"
         assert "Error: File not found" in result.content or "Permission denied" in result.content
+
+    @pytest.mark.asyncio
+    async def test_confirmation_required_tool_blocked(self, engine: AgentEngine) -> None:
+        tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo should_not_run"}')
+        result = await engine._execute_tool(tc)
+        assert result.status == "error"
+        assert "需要用户确认" in result.content
+
+    @pytest.mark.asyncio
+    async def test_bypass_mode_runs_confirmation_tool(self, engine: AgentEngine) -> None:
+        engine._permission_checker = PermissionChecker(PermissionMode.BYPASS)
+        tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo bypass_ok"}')
+        result = await engine._execute_tool(tc)
+        assert result.status == "success"
+        assert "bypass_ok" in result.content
 
 
 class TestUsageAccumulation:
