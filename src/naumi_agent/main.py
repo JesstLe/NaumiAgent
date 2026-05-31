@@ -22,12 +22,17 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _get_git_info() -> dict[str, str | bool]:
-    """Get current git branch and dirty status (cached per process)."""
+    """Get current git branch and dirty status (TTL-cached 5s)."""
     import subprocess
+    import time
 
-    # Cache result for process lifetime
-    if hasattr(_get_git_info, "_cache"):
-        return _get_git_info._cache  # type: ignore[attr-defined]
+    # TTL cache: refresh every 5 seconds so branch switches show up
+    now = time.monotonic()
+    if (
+        hasattr(_get_git_info, "_cache")
+        and now - _get_git_info._cache_time < 5  # type: ignore[attr-defined]
+    ):
+        return _get_git_info._cache.copy()  # type: ignore[attr-defined]
 
     result: dict[str, str | bool] = {"branch": "", "dirty": False}
     try:
@@ -52,7 +57,8 @@ def _get_git_info() -> dict[str, str | bool]:
         pass
 
     _get_git_info._cache = result  # type: ignore[attr-defined]
-    return result
+    _get_git_info._cache_time = now  # type: ignore[attr-defined]
+    return result.copy()
 
 app = typer.Typer(
     name="naumi",
@@ -445,10 +451,15 @@ async def _run_task(task: str, config_path: str) -> None:
     resolved = _resolve_config_path(config_path)
     config = AppConfig.from_yaml(resolved)
     setup_logging(config.log_level)
+    _check_api_key(config)
     engine = AgentEngine(config)
 
-    with console.status("[bold green]执行中...[/bold green]"):
-        result = await engine.run(task)
+    try:
+        with console.status("[bold green]执行中...[/bold green]"):
+            result = await engine.run(task)
+    except Exception as e:
+        console.print(f"[red]错误: {e}[/red]")
+        return
 
     console.print(Markdown(result.response))
     console.print()

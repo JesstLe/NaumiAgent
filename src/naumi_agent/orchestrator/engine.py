@@ -451,6 +451,7 @@ class AgentEngine:
         self._messages.clear()
         self._full_history.clear()
         self._usage = AgentUsage()
+        self._budget_tracker.reset()
         self._session = None
         self.task_store.set_session("")
         self._behavior_monitor.reset()
