@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
 from naumi_agent.mcp.client import MCPClientManager, setup_mcp_servers
@@ -21,6 +22,7 @@ from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
+from naumi_agent.scheduler import SchedulerRunner, SchedulerStore, create_scheduler_tools
 from naumi_agent.skills.loader import SkillLoader
 from naumi_agent.skills.tool import create_skill_tools
 from naumi_agent.streaming.event_bus import EventEmitter
@@ -32,6 +34,7 @@ from naumi_agent.tools.builtin import create_builtin_tools
 from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
 from naumi_agent.tools.web import create_web_tools
+from naumi_agent.worktree import WorktreeManager, create_worktree_tools
 
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
@@ -255,6 +258,17 @@ class AgentEngine:
         )
 
         self.task_store = TaskStore(config.memory.session_db_path)
+        self.background_runner = BackgroundRunner(
+            BackgroundTaskStore(Path(config.memory.session_db_path).parent / "background")
+        )
+        self.scheduler_runner = SchedulerRunner(
+            SchedulerStore(Path(config.memory.session_db_path).parent / "scheduler")
+        )
+        self.worktree_manager = WorktreeManager(
+            repo_root=Path.cwd(),
+            storage_dir=Path(config.memory.session_db_path).parent / "worktrees",
+            task_store=self.task_store,
+        )
 
         self._mcp_manager: MCPClientManager | None = None
 
@@ -301,6 +315,18 @@ class AgentEngine:
         from naumi_agent.tasks.tools import create_task_tools
 
         for tool in create_task_tools(self.task_store):
+            self._tool_registry.register(tool)
+
+        # Background task tools
+        for tool in create_background_tools(self.background_runner):
+            self._tool_registry.register(tool)
+
+        # Scheduler / reminder tools
+        for tool in create_scheduler_tools(self.scheduler_runner):
+            self._tool_registry.register(tool)
+
+        # Worktree isolation tools
+        for tool in create_worktree_tools(self.worktree_manager):
             self._tool_registry.register(tool)
 
         # Hot-reload tool
@@ -471,6 +497,10 @@ class AgentEngine:
                     self._task_runner.abort_run(
                         run["id"], reason="Engine shutdown"
                     )
+        if hasattr(self, "background_runner"):
+            await self.background_runner.shutdown()
+        if hasattr(self, "scheduler_runner"):
+            await self.scheduler_runner.shutdown()
         await self._browser_session.stop()
         if self._mcp_manager:
             await self._mcp_manager.disconnect_all()
@@ -681,6 +711,27 @@ class AgentEngine:
         """Append to both _messages and _full_history."""
         self._messages.append(msg)
         self._full_history.append(msg)
+
+    def _inject_background_notifications(self) -> None:
+        """Inject newly completed background task notifications into context."""
+        notifications = self.background_runner.collect_notifications()
+        if not notifications:
+            return
+        self._append_message({
+            "role": "user",
+            "content": "\n\n".join(notifications),
+        })
+
+    def _inject_scheduler_notifications(self) -> None:
+        """Inject due schedule notifications into context."""
+        self.scheduler_runner.start()
+        notifications = self.scheduler_runner.collect_notifications()
+        if not notifications:
+            return
+        self._append_message({
+            "role": "user",
+            "content": "\n\n".join(notifications),
+        })
 
     def _ensure_system_prompt(self) -> None:
         """Ensure the system prompt is present in active and persisted history."""
@@ -946,6 +997,8 @@ class AgentEngine:
         for turn in range(max_turns):
             self._behavior_monitor.begin_turn(turn)
             self._usage.turns = turn + 1
+            self._inject_background_notifications()
+            self._inject_scheduler_notifications()
 
             exceeded = self._check_budget()
             if exceeded:
@@ -1156,6 +1209,8 @@ class AgentEngine:
         for turn in range(max_turns):
             self._behavior_monitor.begin_turn(turn)
             self._usage.turns = turn + 1
+            self._inject_background_notifications()
+            self._inject_scheduler_notifications()
 
             exceeded = self._check_budget()
             if exceeded:

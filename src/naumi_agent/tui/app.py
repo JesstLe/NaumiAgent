@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -1011,6 +1012,8 @@ class NaumiApp(App):
                     "- `/supervisor <目标>` — Erlang 守护者树\n"
                     "- `/autopsy <目标>` — 执行迹切片与 Bug 解剖\n"
                     "- `/pursue <目标>` — 目标追踪（自主循环直至达成）\n"
+                    "- `/worktree <子命令>` — 隔离执行区 create/status/bind/keep/remove\n"
+                    "- `/background <子命令>` — 后台任务 run/status/list/cancel/output\n"
                     "- `/browse <url>` — 打开 URL 并显示 SoM 元素\n"
                     "- `/autobrowse <任务>` — 自主浏览器任务\n"
                     "- `/browser-stop` — 停止浏览器\n"
@@ -1227,6 +1230,12 @@ class NaumiApp(App):
                     status.status_text = "用法: /pursue <目标描述>"
                 else:
                     self._run_pursue(arg)
+            case "/worktree":
+                self._run_worktree_command(arg)
+            case "/background":
+                self._run_background_command(arg)
+            case "/schedule":
+                self._run_schedule_command(arg)
             case "/browse":
                 if not arg:
                     status.status_text = "用法: /browse <url>"
@@ -1888,6 +1897,206 @@ class NaumiApp(App):
                     classes="agent-msg",
                 )
             )
+        finally:
+            status.status_text = "就绪"
+            input_bar = self.query_one(InputBar)
+            msg_input = input_bar.query_one("#msg-input", Input)
+            msg_input.focus()
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_worktree_command(self, arg: str) -> None:
+        """执行 worktree 隔离区命令."""
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        parts = arg.strip().split()
+        subcommand = parts[0] if parts else "status"
+
+        async def _execute(tool_name: str, **kwargs: Any) -> None:
+            tool = self.engine.tool_registry.get(tool_name)
+            if tool is None:
+                chat.mount(Markdown(f"**工具未注册**: `{tool_name}`", classes="agent-msg"))
+                return
+            status.status_text = "Worktree 操作中..."
+            result = await tool.execute(**kwargs)
+            chat.mount(
+                Markdown(
+                    f"## Worktree 隔离区\n\n{result}",
+                    classes="agent-msg",
+                )
+            )
+
+        try:
+            match subcommand:
+                case "status" | "list":
+                    name = parts[1] if len(parts) > 1 else ""
+                    await _execute("worktree_status", name=name)
+                case "create":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /worktree create <名称> [任务ID]"
+                        return
+                    task_id = parts[2] if len(parts) > 2 else ""
+                    await _execute("worktree_create", name=parts[1], task_id=task_id)
+                case "bind":
+                    if len(parts) < 3:
+                        status.status_text = "用法: /worktree bind <名称> <任务ID>"
+                        return
+                    await _execute("worktree_bind_task", name=parts[1], task_id=parts[2])
+                case "keep":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /worktree keep <名称> [原因]"
+                        return
+                    reason = " ".join(parts[2:]) if len(parts) > 2 else ""
+                    await _execute("worktree_keep", name=parts[1], reason=reason)
+                case "remove":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /worktree remove <名称> [--discard]"
+                        return
+                    discard = "--discard" in parts[2:] or "--force" in parts[2:]
+                    await _execute("worktree_remove", name=parts[1], discard_changes=discard)
+                case _:
+                    status.status_text = "未知 worktree 子命令"
+                    chat.mount(
+                        Markdown(
+                            "可用子命令：`status`、`list`、`create`、`bind`、`keep`、`remove`",
+                            classes="agent-msg",
+                        )
+                    )
+        finally:
+            status.status_text = "就绪"
+            input_bar = self.query_one(InputBar)
+            msg_input = input_bar.query_one("#msg-input", Input)
+            msg_input.focus()
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_background_command(self, arg: str) -> None:
+        """执行后台任务命令."""
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        parts = arg.strip().split(maxsplit=2)
+        subcommand = parts[0] if parts else "list"
+
+        async def _execute(tool_name: str, **kwargs: Any) -> None:
+            tool = self.engine.tool_registry.get(tool_name)
+            if tool is None:
+                chat.mount(Markdown(f"**工具未注册**: `{tool_name}`", classes="agent-msg"))
+                return
+            status.status_text = "后台任务处理中..."
+            result = await tool.execute(**kwargs)
+            chat.mount(
+                Markdown(
+                    f"## 后台任务\n\n{result}",
+                    classes="agent-msg",
+                )
+            )
+
+        try:
+            match subcommand:
+                case "run":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /background run <命令>"
+                        return
+                    command = arg.strip()[len("run"):].strip()
+                    await _execute("background_run", command=command)
+                case "status":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /background status <任务ID>"
+                        return
+                    await _execute("background_status", task_id=parts[1])
+                case "list":
+                    await _execute("background_list")
+                case "cancel":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /background cancel <任务ID>"
+                        return
+                    await _execute("background_cancel", task_id=parts[1])
+                case "output":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /background output <任务ID>"
+                        return
+                    await _execute("background_read_output", task_id=parts[1])
+                case _:
+                    status.status_text = "未知后台任务子命令"
+                    chat.mount(
+                        Markdown(
+                            "可用子命令：`run`、`status`、`list`、`cancel`、`output`",
+                            classes="agent-msg",
+                        )
+                    )
+        finally:
+            status.status_text = "就绪"
+            input_bar = self.query_one(InputBar)
+            msg_input = input_bar.query_one("#msg-input", Input)
+            msg_input.focus()
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_schedule_command(self, arg: str) -> None:
+        """执行调度/提醒命令."""
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        try:
+            parts = shlex.split(arg.strip())
+        except ValueError as e:
+            status.status_text = f"参数解析失败：{e}"
+            return
+        subcommand = parts[0] if parts else "list"
+
+        async def _execute(tool_name: str, **kwargs: Any) -> None:
+            tool = self.engine.tool_registry.get(tool_name)
+            if tool is None:
+                chat.mount(Markdown(f"**工具未注册**: `{tool_name}`", classes="agent-msg"))
+                return
+            status.status_text = "调度提醒处理中..."
+            result = await tool.execute(**kwargs)
+            chat.mount(
+                Markdown(
+                    f"## 调度提醒\n\n{result}",
+                    classes="agent-msg",
+                )
+            )
+
+        try:
+            match subcommand:
+                case "create":
+                    if len(parts) < 4:
+                        status.status_text = "用法: /schedule create once <ISO时间> <提醒内容>"
+                        chat.mount(
+                            Markdown(
+                                '或：`/schedule create cron "*/15 * * * *" <提醒内容>`',
+                                classes="agent-msg",
+                            )
+                        )
+                        return
+                    await _execute(
+                        "schedule_create",
+                        kind=parts[1],
+                        expression=parts[2],
+                        prompt=" ".join(parts[3:]),
+                    )
+                case "list":
+                    await _execute("schedule_list", active_only="--active" in parts[1:])
+                case "cancel":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /schedule cancel <调度ID>"
+                        return
+                    await _execute("schedule_cancel", schedule_id=parts[1])
+                case "pause":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /schedule pause <调度ID>"
+                        return
+                    await _execute("schedule_pause", schedule_id=parts[1])
+                case "resume":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /schedule resume <调度ID>"
+                        return
+                    await _execute("schedule_resume", schedule_id=parts[1])
+                case _:
+                    status.status_text = "未知调度子命令"
+                    chat.mount(
+                        Markdown(
+                            "可用子命令：`create`、`list`、`cancel`、`pause`、`resume`",
+                            classes="agent-msg",
+                        )
+                    )
         finally:
             status.status_text = "就绪"
             input_bar = self.query_one(InputBar)
