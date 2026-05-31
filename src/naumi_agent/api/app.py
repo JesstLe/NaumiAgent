@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -12,9 +13,14 @@ from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 
 
+def resolve_config_path() -> str:
+    """Return the API config path, allowing container entrypoints to override it."""
+    return os.environ.get("NAUMI_CONFIG", "config.yaml")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    config = AppConfig.from_yaml("config.yaml")
+    config = AppConfig.from_yaml(resolve_config_path())
     engine = AgentEngine(config)
     app.state.engine = engine
     app.state.config = config
