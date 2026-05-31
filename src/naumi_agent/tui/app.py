@@ -899,28 +899,12 @@ class NaumiApp(App):
 
     def _update_git_title(self) -> None:
         """Update sub-title with git branch info."""
-        import subprocess
+        from naumi_agent.main import _get_git_info
 
-        try:
-            branch = subprocess.check_output(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                stderr=subprocess.DEVNULL,
-            ).decode().strip()
-            if not branch:
-                return
-            try:
-                dirty = bool(
-                    subprocess.check_output(
-                        ["git", "status", "--porcelain"],
-                        stderr=subprocess.DEVNULL,
-                    ).decode().strip()
-                )
-            except Exception:
-                dirty = False
-            tag = branch + ("*" if dirty else "")
+        git = _get_git_info()
+        if git["branch"]:
+            tag = git["branch"] + ("*" if git["dirty"] else "")
             self.sub_title = f"📂 {tag} — 通用智能 Agent"
-        except Exception:
-            pass
 
     @work(exclusive=True, exit_on_error=False)
     async def _auto_resume_latest(self) -> None:
@@ -1374,7 +1358,7 @@ class NaumiApp(App):
                 case "error":
                     chat.start_response()
                     chat.add_response_token(f"**错误**: {data['message']}")
-                    chat.finalize(0, 0.0)
+                    chat.finalize(0, 0.0, engine=self.engine)
 
         # Calculate token speed
         def _get_token_speed() -> float:
@@ -1443,7 +1427,7 @@ class NaumiApp(App):
             logger.exception("Agent run failed")
             chat.start_response()
             chat.add_response_token(f"**错误**: {e}")
-            chat.finalize(0, 0.0)
+            chat.finalize(0, 0.0, engine=self.engine)
             status.status_text = f"❌ 错误: {e}"
         finally:
             self.query_one(Spinner)._active = False
