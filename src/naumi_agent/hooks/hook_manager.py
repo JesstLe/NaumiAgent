@@ -13,9 +13,10 @@ Supports:
 
 from __future__ import annotations
 
-import asyncio
+import inspect
 import logging
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -127,7 +128,9 @@ class HookManager:
             pass
 
     @asynccontextmanager
-    async def scope(self, point: HookPoint | str, callback: HookCallback):
+    async def scope(
+        self, point: HookPoint | str, callback: HookCallback
+    ) -> AsyncIterator[None]:
         """Context manager: register a hook, auto-unregister on scope exit."""
         point_str = point if isinstance(point, str) else point.value
         self.register(point_str, callback)
@@ -156,7 +159,7 @@ class HookManager:
         for callback in callbacks:
             try:
                 result = callback(ctx)
-                if asyncio.iscoroutine(result):
+                if inspect.iscoroutine(result):
                     await result
             except Exception:
                 logger.exception(
@@ -178,8 +181,14 @@ class HookManager:
 
         for callback in callbacks:
             try:
+                if inspect.iscoroutinefunction(callback):
+                    logger.warning(
+                        "Async hook %s called via fire_sync — skipped",
+                        _func_name(callback),
+                    )
+                    continue
                 result = callback(ctx)
-                if asyncio.iscoroutine(result):
+                if inspect.iscoroutine(result):
                     logger.warning(
                         "Async hook %s called via fire_sync — skipped",
                         _func_name(callback),
@@ -215,8 +224,10 @@ class HookManager:
 
 
 def _func_name(func: Any) -> str:
-    if hasattr(func, "__qualname__"):
-        return func.__qualname__
-    if hasattr(func, "__name__"):
-        return func.__name__
+    qual: str | None = getattr(func, "__qualname__", None)
+    if qual is not None:
+        return qual
+    name: str | None = getattr(func, "__name__", None)
+    if name is not None:
+        return name
     return repr(func)
