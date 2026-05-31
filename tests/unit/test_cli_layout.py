@@ -3,6 +3,7 @@
 from prompt_toolkit.application.current import create_app_session
 from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
+from prompt_toolkit.utils import get_cwidth
 
 from naumi_agent.cli.layout import CLIApp, _border_line
 
@@ -154,6 +155,31 @@ class TestCLIAppScrolling:
                 assert len(small) == 10
                 assert small.endswith("…")
                 assert large.strip() == "abcdefghijklmnopqrstuvwxyz"
+
+    def test_status_bar_truncates_wide_text_to_render_width(self) -> None:
+        with create_pipe_input() as pipe_input:
+            with create_app_session(input=pipe_input, output=DummyOutput()):
+                cli = _build_cli_app()
+                cli.set_status("上下文: 263K/256K | 预算: $0.5008/$5.00 | 📂 main*")
+
+                rendered = cli._render_status(24).__pt_formatted_text__()[0][1]
+
+                assert get_cwidth(rendered) == 24
+                assert rendered.endswith("…")
+
+    def test_reset_output_replaces_transcript_and_scroll_state(self) -> None:
+        with create_pipe_input() as pipe_input:
+            with create_app_session(input=pipe_input, output=DummyOutput()):
+                cli = _build_cli_app()
+                cli.append_output("old\n")
+                assert "old" in cli.get_transcript()
+
+                cli.reset_output()
+                cli.append_output("new\n")
+
+                assert cli.get_transcript() == "new\n"
+                assert cli._output_win is not None
+                assert cli._output_win.auto_scroll is True
 
     def test_border_line_uses_exact_render_width(self) -> None:
         assert _border_line(1, "╭", "─", "╮")[0][1] == "╭"
