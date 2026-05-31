@@ -7,7 +7,7 @@ import os
 import platform
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -435,6 +435,35 @@ class TestBrowserRuntimeInit:
         rt = BrowserRuntime(tmp_path)
         info = rt.get_chrome_launcher_info()
         assert "platform" in info
+
+    @pytest.mark.asyncio
+    async def test_managed_launch_uses_python_playwright_video_options(
+        self, tmp_path: Path,
+    ) -> None:
+        from naumi_agent.tools.browser.runtime.browser_runtime import (
+            BrowserRuntime,
+        )
+
+        rt = BrowserRuntime(tmp_path)
+        rt.artifacts.start_session()
+        fake_page = MagicMock()
+        fake_context = MagicMock()
+        fake_context.tracing.start = AsyncMock()
+        fake_context.new_page = AsyncMock(return_value=fake_page)
+        fake_context.add_init_script = AsyncMock()
+        fake_browser = MagicMock()
+        fake_browser.new_context = AsyncMock(return_value=fake_context)
+        fake_chromium = MagicMock()
+        fake_chromium.launch = AsyncMock(return_value=fake_browser)
+        rt._playwright = MagicMock(chromium=fake_chromium)
+
+        await rt._launch_browser_session(headless=True)
+
+        context_kwargs = fake_browser.new_context.await_args.kwargs
+        assert "record_video" not in context_kwargs
+        assert context_kwargs["record_video_dir"]
+        assert context_kwargs["record_video_size"] == {"width": 1280, "height": 800}
+        fake_context.add_init_script.assert_awaited_once()
 
 
 class TestNormalizeBrowserSource:
