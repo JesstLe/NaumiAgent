@@ -4,7 +4,7 @@ from prompt_toolkit.application.current import create_app_session
 from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
-from naumi_agent.cli.layout import CLIApp
+from naumi_agent.cli.layout import CLIApp, _border_line
 
 
 def _build_cli_app() -> CLIApp:
@@ -129,7 +129,7 @@ class TestCLIAppScrolling:
 
                 assert "hello" in cli.get_transcript()
                 assert "model | workspace | token" not in cli.get_transcript()
-                assert cli._render_status().__pt_formatted_text__()[0][1].strip().startswith(
+                assert cli._render_status(80).__pt_formatted_text__()[0][1].strip().startswith(
                     "model"
                 )
 
@@ -141,3 +141,21 @@ class TestCLIAppScrolling:
                 window = cli._output_win
                 assert window is not None
                 assert window.right_margins
+
+    def test_status_bar_uses_render_width(self) -> None:
+        with create_pipe_input() as pipe_input:
+            with create_app_session(input=pipe_input, output=DummyOutput()):
+                cli = _build_cli_app()
+                cli.set_status("abcdefghijklmnopqrstuvwxyz")
+
+                small = cli._render_status(10).__pt_formatted_text__()[0][1]
+                large = cli._render_status(30).__pt_formatted_text__()[0][1]
+
+                assert len(small) == 10
+                assert small.endswith("…")
+                assert large.strip() == "abcdefghijklmnopqrstuvwxyz"
+
+    def test_border_line_uses_exact_render_width(self) -> None:
+        assert _border_line(1, "╭", "─", "╮")[0][1] == "╭"
+        assert _border_line(2, "╭", "─", "╮")[0][1] == "╭╮"
+        assert _border_line(10, "╭", "─", "╮")[0][1] == "╭────────╮"

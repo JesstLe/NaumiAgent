@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -13,7 +12,12 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.formatted_text import ANSI, FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Float, FloatContainer, HSplit, Window
-from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl, UIContent
+from prompt_toolkit.layout.controls import (
+    BufferControl,
+    FormattedTextControl,
+    UIContent,
+    UIControl,
+)
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.layout.margins import ScrollbarMargin
@@ -141,11 +145,26 @@ _STYLE = Style.from_dict(
 
 
 def _border_line(cols: int, left: str, mid: str, right: str, cls: str = "border") -> list:
-    return [
-        ("class:" + cls, f" {left}"),
-        ("class:" + cls, mid * (cols - 2)),
-        ("class:" + cls, right),
-    ]
+    safe_cols = max(0, cols)
+    if safe_cols == 0:
+        return []
+    if safe_cols == 1:
+        return [("class:" + cls, left)]
+    return [("class:" + cls, left + (mid * max(0, safe_cols - 2)) + right)]
+
+
+class _DynamicLineControl(UIControl):
+    """Single-line control that redraws from the current render width."""
+
+    def __init__(self, get_line: Callable[[int], list[tuple[str, str]]]) -> None:
+        self._get_line = get_line
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        return UIContent(
+            get_line=lambda _lineno: self._get_line(width),
+            line_count=1,
+            show_cursor=False,
+        )
 
 
 class CLIApp:
@@ -309,16 +328,13 @@ class CLIApp:
             result.append(("[SetCursorPosition]", ""))
         return result
 
-    def _render_status(self) -> FormattedText:
-        cols = shutil.get_terminal_size().columns
+    def _render_status(self, cols: int) -> FormattedText:
         text = f" {self._status_text}"
         if len(text) > cols:
             text = text[: max(0, cols - 1)] + "…"
         return FormattedText([("class:status", text)])
 
     def _build_app(self) -> Application:
-        cols = shutil.get_terminal_size().columns
-
         self._output_win = _OutputWindow(
             content=FormattedTextControl(self._render_output),
             wrap_lines=True,
@@ -351,21 +367,21 @@ class CLIApp:
         border_cls = "border" if not self._processing else "border-active"
         border_top = Window(
             height=1,
-            content=FormattedTextControl(
-                lambda: _border_line(cols, "╭", "─", "╮", border_cls),
+            content=_DynamicLineControl(
+                lambda width: _border_line(width, "╭", "─", "╮", border_cls),
             ),
         )
 
         border_bot = Window(
             height=1,
-            content=FormattedTextControl(
-                lambda: _border_line(cols, "╰", "─", "╯", border_cls),
+            content=_DynamicLineControl(
+                lambda width: _border_line(width, "╰", "─", "╯", border_cls),
             ),
         )
 
         status_win = Window(
             height=1,
-            content=FormattedTextControl(self._render_status),
+            content=_DynamicLineControl(lambda width: self._render_status(width)),
         )
 
         body = HSplit([self._output_win, status_win, border_top, input_win, border_bot])
