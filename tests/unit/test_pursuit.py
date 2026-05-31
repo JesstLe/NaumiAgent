@@ -13,8 +13,10 @@ from naumi_agent.orchestrator.pursuit import (
     GoalSpec,
     GoalStatus,
     IterationCheckpoint,
+    PursuitBackgroundWait,
     PursuitConfig,
     PursuitEvidence,
+    PursuitRun,
     PursuitRunStatus,
     SuccessCriterion,
 )
@@ -359,6 +361,141 @@ class TestVerification:
         assert loop._run is not None
         assert loop._run.status == PursuitRunStatus.BLOCKED
         assert "没有给出下一步" in loop._run.blocked_reason
+
+
+class TestPursuitExecutionStrategy:
+    @pytest.mark.asyncio
+    async def test_code_goal_creates_worktree_when_available(self) -> None:
+        engine = _make_engine()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+        )
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="修改 src/demo.py 并添加 tests/test_demo.py",
+            status=PursuitRunStatus.RUNNING,
+            phase="test",
+            started_at=time.time(),
+            updated_at=time.time(),
+        )
+        spec = _make_spec(
+            goal="修改 src/demo.py 并添加 tests/test_demo.py",
+            criteria=[
+                SuccessCriterion(
+                    id="c1",
+                    description="代码和测试已更新",
+                    verification_command="pytest tests/test_demo.py",
+                )
+            ],
+        )
+        worktree = MagicMock()
+        worktree.execute = AsyncMock(
+            return_value=(
+                "已创建隔离 worktree。\n\n"
+                "### Worktree: pursue-demo\n"
+                "- 路径：`/tmp/pursue-demo`\n"
+            )
+        )
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=worktree)
+
+        await loop._ensure_worktree_for_code_goal(spec)
+
+        assert loop._run.worktree_name.startswith("pursue-")
+        assert loop._run.worktree_path == "/tmp/pursue-demo"
+        worktree.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_long_bash_action_runs_in_background_and_schedules_followup(self) -> None:
+        engine = _make_engine()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+        )
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="运行完整测试",
+            status=PursuitRunStatus.RUNNING,
+            phase="execute",
+            started_at=time.time(),
+            updated_at=time.time(),
+        )
+        loop._llm_call = AsyncMock(return_value="python -m pytest tests/ -q")  # type: ignore[method-assign]
+
+        bash = MagicMock()
+        bash.execute = AsyncMock(return_value="should not run synchronously")
+        background = MagicMock()
+        background.execute = AsyncMock(return_value="后台任务已启动。\n\n- 任务 ID：`bg_0001`")
+        schedule = MagicMock()
+        schedule.execute = AsyncMock(return_value="调度任务已创建。")
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(
+            side_effect=lambda name: {
+                "background_run": background,
+                "schedule_create": schedule,
+            }.get(name)
+        )
+
+        result = await loop._execute_via_bash(bash, "Run pytest tests/ slowly", "a1")
+
+        assert result["status"] == "waiting"
+        assert result["background_task_id"] == "bg_0001"
+        assert loop._pending_background[0].task_id == "bg_0001"
+        assert loop._run.waiting_on[0].task_id == "bg_0001"
+        loop._record_action_evidence([result])
+        assert loop._run.failure_count == 0
+        bash.execute.assert_not_awaited()
+        background.execute.assert_awaited_once()
+        schedule.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_collect_background_results_records_hard_evidence(self) -> None:
+        engine = _make_engine()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+        )
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="等待后台任务",
+            status=PursuitRunStatus.WAITING,
+            phase="waiting",
+            started_at=time.time(),
+            updated_at=time.time(),
+        )
+        loop._pending_background = [
+            PursuitBackgroundWait(
+                task_id="bg_0001",
+                action_id="a1",
+                command="python -m pytest tests/ -q",
+                created_at=time.time(),
+            )
+        ]
+
+        status = MagicMock()
+        status.execute = AsyncMock(return_value="### 后台任务 bg_0001\n- 状态：已完成")
+        output = MagicMock()
+        output.execute = AsyncMock(return_value="1089 passed")
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(
+            side_effect=lambda name: {
+                "background_status": status,
+                "background_read_output": output,
+            }.get(name)
+        )
+
+        await loop._collect_background_results()
+
+        assert loop._pending_background == []
+        assert loop._run.status == PursuitRunStatus.RUNNING
+        assert any(
+            evidence.kind == "background" and evidence.is_hard
+            for evidence in loop._run.evidence
+        )
 
 
 class TestCancel:

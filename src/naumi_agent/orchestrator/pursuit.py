@@ -36,6 +36,7 @@ class GoalStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     ACHIEVED = "achieved"
     FAILED = "failed"
+    WAITING = "waiting"
     BUDGET_EXCEEDED = "budget_exceeded"
     STUCK = "stuck"
     CANCELLED = "cancelled"
@@ -112,6 +113,16 @@ class PursuitEvidence:
 
 
 @dataclass
+class PursuitBackgroundWait:
+    """One background task the pursuit loop is waiting on."""
+
+    task_id: str
+    action_id: str
+    command: str
+    created_at: float
+
+
+@dataclass
 class PursuitStopDecision:
     """Programmatic stop decision for a pursuit run."""
 
@@ -136,6 +147,9 @@ class PursuitRun:
     failure_count: int = 0
     blocked_reason: str = ""
     next_action: str = ""
+    worktree_name: str = ""
+    worktree_path: str = ""
+    waiting_on: list[PursuitBackgroundWait] | None = None
     evidence: list[PursuitEvidence] | None = None
 
     def add_evidence(self, item: PursuitEvidence) -> None:
@@ -312,6 +326,7 @@ class GoalPursuitLoop:
         self._cancelled = False
         self._run: PursuitRun | None = None
         self._last_stop_decision: PursuitStopDecision | None = None
+        self._pending_background: list[PursuitBackgroundWait] = []
 
     def cancel(self) -> None:
         """Request cancellation of the running loop."""
@@ -360,6 +375,23 @@ class GoalPursuitLoop:
         self._last_stop_decision = decision
         self._apply_stop_decision(decision)
 
+    def _record_waiting(self, reason: str) -> None:
+        """Mark the run as waiting for asynchronous work."""
+        if self._run is None:
+            return
+        self._run.status = PursuitRunStatus.WAITING
+        self._run.phase = "waiting"
+        self._run.blocked_reason = ""
+        self._run.waiting_on = list(self._pending_background)
+        self._run.updated_at = time.time()
+        self._run.add_evidence(PursuitEvidence(
+            kind="waiting",
+            source="background",
+            summary=reason,
+            is_hard=False,
+            timestamp=time.time(),
+        ))
+
     def _apply_stop_decision(self, decision: PursuitStopDecision) -> None:
         if self._run is None:
             return
@@ -402,8 +434,91 @@ class GoalPursuitLoop:
                 is_hard=status == "completed",
                 timestamp=time.time(),
             ))
-            if status != "completed":
+            if status not in {"completed", "waiting"}:
                 self._run.failure_count += 1
+
+    async def _ensure_worktree_for_code_goal(self, spec: GoalSpec) -> None:
+        """Create an isolated worktree for code-heavy pursuit goals when possible."""
+        if self._run is None or self._run.worktree_name:
+            return
+        if not self._looks_like_code_goal(spec):
+            return
+        tool = self._tools.get("worktree_create")
+        if tool is None:
+            return
+
+        name = self._make_worktree_name(spec.original_goal)
+        try:
+            output = await tool.execute(name=name)
+        except Exception as e:
+            self._run.add_evidence(PursuitEvidence(
+                kind="worktree",
+                source=name,
+                summary=f"创建隔离 worktree 失败：{type(e).__name__}: {e}",
+                is_hard=False,
+                timestamp=time.time(),
+            ))
+            return
+
+        path = self._extract_markdown_field(str(output), "路径")
+        self._run.worktree_name = name
+        self._run.worktree_path = path
+        self._run.add_evidence(PursuitEvidence(
+            kind="worktree",
+            source=name,
+            summary=str(output)[:500],
+            is_hard="已创建隔离 worktree" in str(output) or "Worktree:" in str(output),
+            timestamp=time.time(),
+        ))
+
+    async def _collect_background_results(self) -> None:
+        """Collect finished background task results as hard pursuit evidence."""
+        if not self._pending_background or self._run is None:
+            return
+        status_tool = self._tools.get("background_status")
+        output_tool = self._tools.get("background_read_output")
+        if status_tool is None:
+            return
+
+        still_waiting: list[PursuitBackgroundWait] = []
+        for pending in self._pending_background:
+            try:
+                status_text = str(await status_tool.execute(task_id=pending.task_id))
+            except Exception as e:
+                self._run.add_evidence(PursuitEvidence(
+                    kind="background",
+                    source=pending.task_id,
+                    summary=f"读取后台任务状态失败：{type(e).__name__}: {e}",
+                    is_hard=False,
+                    timestamp=time.time(),
+                ))
+                still_waiting.append(pending)
+                continue
+
+            if "运行中" in status_text:
+                still_waiting.append(pending)
+                continue
+
+            output_text = ""
+            if output_tool is not None:
+                try:
+                    output_text = str(await output_tool.execute(task_id=pending.task_id))
+                except Exception as e:
+                    output_text = f"读取输出失败：{type(e).__name__}: {e}"
+
+            self._run.add_evidence(PursuitEvidence(
+                kind="background",
+                source=pending.task_id,
+                summary=(status_text + "\n" + output_text)[:1000],
+                is_hard=True,
+                timestamp=time.time(),
+            ))
+
+        self._pending_background = still_waiting
+        self._run.waiting_on = list(still_waiting)
+        if not still_waiting and self._run.status == PursuitRunStatus.WAITING:
+            self._run.status = PursuitRunStatus.RUNNING
+            self._run.phase = "assess"
 
     async def _completion_decision(self, spec: GoalSpec) -> PursuitStopDecision:
         """Decide whether the goal is objectively complete."""
@@ -468,6 +583,7 @@ class GoalPursuitLoop:
         self._total_cost = 0.0
         self._cancelled = False
         self._last_stop_decision = None
+        self._pending_background = []
         self._run = PursuitRun(
             id=f"pursuit_{int(self._start_time)}",
             goal=goal,
@@ -480,6 +596,7 @@ class GoalPursuitLoop:
         # Phase 0: Parse the goal
         spec = await self._parse_goal(goal)
         self._update_run(phase="assess", spec=spec)
+        await self._ensure_worktree_for_code_goal(spec)
         logger.info(
             "Goal parsed: %d criteria, complexity=%s",
             len(spec.success_criteria), spec.estimated_complexity,
@@ -512,6 +629,8 @@ class GoalPursuitLoop:
                 status = GoalStatus.BUDGET_EXCEEDED
                 self._record_stop(PursuitRunStatus.BUDGET_EXCEEDED, "目标追踪超过最大迭代次数")
                 break
+
+            await self._collect_background_results()
 
             # Phase 1: Assess current state
             self._update_run(phase="assess", iteration=iteration, spec=spec)
@@ -601,6 +720,10 @@ class GoalPursuitLoop:
                 for r in results
             ]
             self._record_action_evidence(results)
+            if any(result.get("status") == "waiting" for result in results):
+                status = GoalStatus.WAITING
+                self._record_waiting("后台任务仍在运行，已安排后续复查")
+                break
 
             # Phase 4: Verify (if interval matches)
             if iteration % self._config.verify_interval == 0:
@@ -1413,6 +1536,15 @@ class GoalPursuitLoop:
                 command = command.split("\n", 1)[-1].rsplit("```", 1)[0]
             command = command.strip()
 
+            if self._should_run_in_background(command, description):
+                background = await self._start_background_action(
+                    command=command,
+                    description=description,
+                    action_id=action_id,
+                )
+                if background is not None:
+                    return background
+
             output = await bash_tool.execute(command=command)
             status = "completed"
             if "[exit code:" in str(output) and "0" not in str(output).split("[exit code:")[-1][:3]:
@@ -1428,6 +1560,94 @@ class GoalPursuitLoop:
                 "status": "error",
                 "output": f"{type(e).__name__}: {e}",
             }
+
+    async def _start_background_action(
+        self,
+        *,
+        command: str,
+        description: str,
+        action_id: str,
+    ) -> dict[str, Any] | None:
+        """Start a long-running command through background tools."""
+        background_tool = self._tools.get("background_run")
+        if background_tool is None:
+            return None
+
+        cwd = self._run.worktree_path if self._run and self._run.worktree_path else ""
+        try:
+            output = str(await background_tool.execute(
+                command=command,
+                cwd=cwd,
+                timeout_seconds=1800,
+            ))
+        except Exception as e:
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": f"启动后台任务失败：{type(e).__name__}: {e}",
+            }
+
+        task_id = self._extract_background_task_id(output)
+        if not task_id:
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": f"后台任务启动后未返回任务 ID：{output[:500]}",
+            }
+
+        pending = PursuitBackgroundWait(
+            task_id=task_id,
+            action_id=action_id,
+            command=command,
+            created_at=time.time(),
+        )
+        self._pending_background.append(pending)
+        if self._run is not None:
+            self._run.waiting_on = list(self._pending_background)
+            self._run.add_evidence(PursuitEvidence(
+                kind="background",
+                source=task_id,
+                summary=f"后台执行：{description}\n命令：{command}",
+                is_hard=True,
+                timestamp=time.time(),
+            ))
+
+        await self._schedule_background_followup(task_id)
+        return {
+            "action_id": action_id,
+            "status": "waiting",
+            "background_task_id": task_id,
+            "output": output[:1000],
+        }
+
+    async def _schedule_background_followup(self, task_id: str) -> None:
+        """Schedule a reminder to revisit a pending background task."""
+        schedule_tool = self._tools.get("schedule_create")
+        if schedule_tool is None:
+            return
+        from datetime import datetime, timedelta
+
+        when = (datetime.now().astimezone() + timedelta(minutes=2)).replace(microsecond=0)
+        prompt = (
+            f"后台任务 {task_id} 可能已完成。请继续 /pursue，"
+            "读取 background_status 和 background_read_output 后判断下一步。"
+        )
+        try:
+            output = str(await schedule_tool.execute(
+                kind="once",
+                expression=when.isoformat(),
+                prompt=prompt,
+            ))
+        except Exception as e:
+            output = f"创建复查提醒失败：{type(e).__name__}: {e}"
+        if self._run is not None:
+            self._run.add_evidence(PursuitEvidence(
+                kind="schedule",
+                source=task_id,
+                summary=output[:500],
+                is_hard="调度任务已创建" in output,
+                timestamp=time.time(),
+            ))
 
     async def _execute_via_agent(
         self,
@@ -1540,6 +1760,83 @@ class GoalPursuitLoop:
             return True
 
         return False
+
+    @staticmethod
+    def _looks_like_code_goal(spec: GoalSpec) -> bool:
+        """Detect goals that should get an isolated code workspace."""
+        text = " ".join([
+            spec.original_goal,
+            spec.description,
+            " ".join(c.description for c in spec.success_criteria),
+            " ".join(c.verification_command for c in spec.success_criteria),
+        ]).lower()
+        code_markers = (
+            "src/",
+            "tests/",
+            ".py",
+            ".ts",
+            ".js",
+            ".tsx",
+            "pytest",
+            "ruff",
+            "实现",
+            "修改",
+            "代码",
+            "测试",
+            "工具",
+        )
+        return any(marker in text for marker in code_markers)
+
+    @staticmethod
+    def _make_worktree_name(goal: str) -> str:
+        """Create a stable-ish safe worktree name for a pursuit goal."""
+        import hashlib
+        import re
+
+        ascii_goal = re.sub(r"[^a-zA-Z0-9]+", "-", goal.lower()).strip("-")
+        prefix = ascii_goal[:32].strip("-") or "goal"
+        digest = hashlib.sha1(goal.encode("utf-8")).hexdigest()[:8]
+        return f"pursue-{prefix}-{digest}"[:64].strip("-")
+
+    @staticmethod
+    def _extract_markdown_field(text: str, label: str) -> str:
+        """Extract a markdown bullet field such as '- 路径：`...`'."""
+        import re
+
+        pattern = rf"- {re.escape(label)}：`?([^`\n]+)`?"
+        match = re.search(pattern, text)
+        return match.group(1).strip() if match else ""
+
+    @staticmethod
+    def _extract_background_task_id(text: str) -> str:
+        """Extract bg_XXXX from background tool output."""
+        import re
+
+        match = re.search(r"\b(bg_\d{4,})\b", text)
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _should_run_in_background(command: str, description: str) -> bool:
+        """Return true for commands that are likely to be slow or long-running."""
+        text = f"{command}\n{description}".lower()
+        long_markers = (
+            "pytest tests/",
+            "pytest tests ",
+            "pytest .",
+            "ruff check src/ tests",
+            "npm run build",
+            "npm test",
+            "pnpm test",
+            "pnpm build",
+            "yarn test",
+            "yarn build",
+            "cargo test",
+            "go test ./...",
+            "mvn test",
+            "gradle test",
+            "sleep ",
+        )
+        return any(marker in text for marker in long_markers)
 
     async def _recover_from_stagnation(
         self, spec: GoalSpec, checkpoint: IterationCheckpoint,
