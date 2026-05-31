@@ -220,6 +220,7 @@ class AgentEngine:
 
     def __init__(self, config: AppConfig) -> None:
         self._config = config
+        self.workspace_root = config.resolve_workspace_root()
         self._router = ModelRouter(config.models)
         self._tool_registry = ToolRegistry()
         self._messages: list[dict[str, Any]] = []
@@ -235,7 +236,8 @@ class AgentEngine:
         self._output_guardrail = OutputGuardrail()
         self._permission_checker = PermissionChecker(
             mode=PermissionMode(config.safety.permission_mode),
-            allowed_dirs=config.safety.allowed_dirs,
+            allowed_dirs=[*config.safety.allowed_dirs, str(self.workspace_root)],
+            workspace_root=str(self.workspace_root),
         )
         self.session_store = SessionStore(config.memory)
         self.long_term_memory = LongTermMemory(config.memory)
@@ -265,7 +267,7 @@ class AgentEngine:
             SchedulerStore(Path(config.memory.session_db_path).parent / "scheduler")
         )
         self.worktree_manager = WorktreeManager(
-            repo_root=Path.cwd(),
+            repo_root=self.workspace_root,
             storage_dir=Path(config.memory.session_db_path).parent / "worktrees",
             task_store=self.task_store,
         )
@@ -283,7 +285,7 @@ class AgentEngine:
         self._register_skills()
 
     def _register_builtin_tools(self) -> None:
-        for tool in create_builtin_tools():
+        for tool in create_builtin_tools(self.workspace_root):
             self._tool_registry.register(tool)
         for tool in create_browser_tools(self._browser_session):
             self._tool_registry.register(tool)

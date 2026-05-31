@@ -561,10 +561,26 @@ BLOCKED_COMMANDS = [
 class PermissionChecker:
     """工具调用权限检查器."""
 
-    def __init__(self, mode: PermissionMode, allowed_dirs: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        mode: PermissionMode,
+        allowed_dirs: list[str] | None = None,
+        workspace_root: str | None = None,
+    ) -> None:
         self._mode = mode
-        self._allowed_dirs = allowed_dirs or ["/workspace"]
+        self._workspace_root = os.path.abspath(
+            os.path.expanduser(workspace_root or os.getcwd())
+        )
+        self._allowed_dirs = [
+            self._resolve_path_for_sandbox(path) for path in (allowed_dirs or ["/workspace"])
+        ]
         self._call_counts: dict[str, int] = {}
+
+    def _resolve_path_for_sandbox(self, path: str) -> str:
+        expanded = os.path.expanduser(path)
+        if os.path.isabs(expanded):
+            return os.path.abspath(expanded)
+        return os.path.abspath(os.path.join(self._workspace_root, expanded))
 
     def _resolve_rule(self, tool_name: str) -> tuple[str, PermissionRule | None]:
         """Resolve exact, namespaced, or prefix-based permission rules."""
@@ -625,6 +641,10 @@ class PermissionChecker:
             path_check = self._check_path_sandbox(args["path"])
             if not path_check.allowed:
                 return path_check
+        if "cwd" in args and args["cwd"]:
+            cwd_check = self._check_path_sandbox(args["cwd"])
+            if not cwd_check.allowed:
+                return cwd_check
 
         # 命令检查
         if tool_name in {"bash_run", "background_run"} and "command" in args:
@@ -647,8 +667,11 @@ class PermissionChecker:
         if self._mode == PermissionMode.BYPASS:
             return PermissionDecision(allowed=True)
 
-        abs_path = os.path.abspath(os.path.expanduser(path))
-        if any(abs_path.startswith(allowed) for allowed in self._allowed_dirs):
+        abs_path = self._resolve_path_for_sandbox(path)
+        if any(
+            os.path.commonpath([abs_path, allowed]) == allowed
+            for allowed in self._allowed_dirs
+        ):
             return PermissionDecision(allowed=True)
 
         return PermissionDecision(

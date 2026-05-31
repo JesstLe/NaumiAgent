@@ -40,6 +40,15 @@ class TestPermissionChecker:
         assert checker.check("file_read", {"path": "/workspace/file.txt"}).allowed
         assert not checker.check("file_read", {"path": "/etc/passwd"}).allowed
 
+    def test_relative_path_uses_workspace_root(self, tmp_path) -> None:
+        checker = PermissionChecker(
+            PermissionMode.MODERATE,
+            allowed_dirs=[str(tmp_path)],
+            workspace_root=str(tmp_path),
+        )
+
+        assert checker.check("file_write", {"path": "workspace/showcase/index.html"}).allowed
+
     def test_blocked_commands(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
         for cmd in ["rm -rf /", "sudo rm -rf /home", "mkfs.ext4 /dev/sda"]:

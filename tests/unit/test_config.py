@@ -43,3 +43,10 @@ class TestAppConfig:
 
         config = AppConfig.from_yaml(yaml_path)
         assert config.models.default_model == "claude-sonnet-4-6"
+
+    def test_resolve_workspace_root(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+
+        config = AppConfig(workspace_root="workspace")
+
+        assert config.resolve_workspace_root() == tmp_path / "workspace"

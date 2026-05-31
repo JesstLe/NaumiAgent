@@ -893,9 +893,10 @@ class NaumiApp(App):
             budget = self.engine.get_budget_info()
             ctx = self.engine.get_context_info()
             window_k = ctx["window"] / 1000
+            workspace_root = getattr(self.engine, "workspace_root", Path.cwd())
             status.status_text = (
                 f"{model} | "
-                f"工作目录: {Path.cwd()} | "
+                f"工作区: {workspace_root} | "
                 f"上下文: 0K/{window_k:.0f}K | "
                 f"预算: $0.0000/${budget['max_usd']:.2f}"
             )
@@ -1039,15 +1040,17 @@ class NaumiApp(App):
                 self.action_copy_transcript()
             case "/pwd":
                 cwd = Path.cwd()
+                workspace_root = getattr(self.engine, "workspace_root", cwd)
                 chat.mount(
                     Markdown(
-                        f"## 当前工作目录\n\n`{cwd}`\n\n"
+                        f"## 当前路径\n\n工作区根目录：`{workspace_root}`\n\n"
+                        f"启动目录：`{cwd}`\n\n"
                         f"相对路径 `workspace/showcase/index.html` 会写入：\n\n"
-                        f"`{cwd / 'workspace' / 'showcase' / 'index.html'}`",
+                        f"`{workspace_root / 'workspace' / 'showcase' / 'index.html'}`",
                         classes="agent-msg",
                     )
                 )
-                status.status_text = f"工作目录: {cwd}"
+                status.status_text = f"工作区: {workspace_root}"
             case "/tools" | "/t":
                 tools = self.engine.tool_registry.all()
                 lines = ["## 可用工具\n"]
@@ -1787,7 +1790,8 @@ class NaumiApp(App):
         """Build a plain-text transcript from the engine conversation state."""
         lines = [
             "NaumiAgent TUI 会话记录",
-            f"工作目录: {Path.cwd()}",
+            f"工作区根目录: {getattr(self.engine, 'workspace_root', Path.cwd())}",
+            f"启动目录: {Path.cwd()}",
         ]
         session = getattr(self.engine, "_session", None)
         if session is not None:

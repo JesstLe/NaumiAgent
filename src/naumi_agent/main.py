@@ -146,7 +146,8 @@ def _show_cli_status(cli: Any, engine: Any) -> None:
     parts: list[str] = []
     model = engine.router.resolve_model("capable")
     parts.append(model)
-    parts.append(f"工作目录: {Path.cwd()}")
+    workspace_root = getattr(engine, "workspace_root", Path.cwd())
+    parts.append(f"工作区: {workspace_root}")
     u = engine.usage
     total_tok = u.total_input_tokens + u.total_output_tokens
     parts.append(f"Token: {total_tok}")
@@ -678,7 +679,9 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             else:
                 console.print("[yellow]当前界面不支持复制完整记录[/yellow]")
         case "/pwd":
-            console.print(f"当前工作目录: [cyan]{Path.cwd()}[/cyan]")
+            workspace_root = getattr(engine, "workspace_root", Path.cwd())
+            console.print(f"工作区根目录: [cyan]{workspace_root}[/cyan]")
+            console.print(f"启动目录: [dim]{Path.cwd()}[/dim]")
         case "/skills":
             _show_skills(engine)
         case "/tools" | "/t":
