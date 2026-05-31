@@ -247,6 +247,8 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
         console.print(_format_task_snapshot(data))
     elif event == "subagent_event":
         console.print(_format_subagent_event(data))
+    elif event == "team_event":
+        console.print(_format_team_event(data))
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":
@@ -322,6 +324,21 @@ def _format_subagent_event(data: dict[str, Any]) -> str:
     color = "32" if status == "completed" else "31" if status in {"error", "failed"} else "36"
     suffix = f" · {message}" if message else ""
     return f"\033[{color}m  subagent {status}: {agent} / {task_id}{suffix}\033[0m"
+
+
+def _format_team_event(data: dict[str, Any]) -> str:
+    """Format team protocol events for user-visible output."""
+    event_type = str(data.get("event_type", "?"))
+    sender = str(data.get("sender", "?"))
+    recipient = str(data.get("recipient", "") or "广播")
+    priority = str(data.get("priority", "normal"))
+    message = str(data.get("message", "") or "")
+    color = "31" if priority == "critical" else "33" if priority == "high" else "36"
+    suffix = f" · {message[:120]}" if message else ""
+    return (
+        f"\033[{color}m  team {event_type}: "
+        f"{sender} → {recipient} [{priority}]{suffix}\033[0m"
+    )
 
 
 def _extract_diff_block(content: str) -> tuple[str, str, str] | None:
@@ -408,6 +425,8 @@ def _cli_event_factory(cli: Any):
             cli.append_live(_format_task_snapshot(data) + "\n")
         elif event == "subagent_event":
             cli.append_live(_format_subagent_event(data) + "\n")
+        elif event == "team_event":
+            cli.append_live(_format_team_event(data) + "\n")
         elif event == "response_start":
             cli.finalize_live()
             cli.append_output(f"{_sep(thin=False)}\n")
@@ -1065,6 +1084,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _run_schedule(engine, arg)
         case "/todo":
             await _run_todo(engine, arg)
+        case "/team":
+            await _run_team(engine, arg)
         case "/self-review":
             await _run_self_review(engine, arg)
         case "/reload":
@@ -1197,6 +1218,7 @@ def _print_help() -> None:
         ("/background <子命令>", "后台任务 — run/status/list/cancel/output"),
         ("/schedule <子命令>", "调度提醒 — create/list/cancel/pause/resume"),
         ("/todo <子命令>", "todo 清单 — list/add/start/done/pending/delete/clear"),
+        ("/team <子命令>", "团队协议 — status/handoff/blocker/decision/request/result"),
         ("/self-review [模块]", "自我审查 — 扫描自身源码质量与架构"),
         ("/reload [域]", "热重载 — 重载模块无需重启 (tools/memory/skills/all)"),
         ("/evolve <描述>", "自我进化 — 反思循环修改自身工具代码并验证"),
@@ -1647,6 +1669,21 @@ async def _run_todo(engine: Any, arg: str) -> None:
         Panel(
             Markdown(result),
             title="[bold cyan]todo[/bold cyan]",
+            border_style="cyan",
+            padding=(1, 2),
+        )
+    )
+
+
+async def _run_team(engine: Any, arg: str) -> None:
+    """执行 team protocol 命令."""
+    from naumi_agent.agents.team_commands import run_team_command
+
+    result = await run_team_command(engine.subagent_manager, arg)
+    console.print(
+        Panel(
+            Markdown(result),
+            title="[bold cyan]team[/bold cyan]",
             border_style="cyan",
             padding=(1, 2),
         )

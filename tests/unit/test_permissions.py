@@ -100,6 +100,8 @@ class TestPermissionChecker:
             "browser_scroll",
             "skill_code-review",
             "spawn_agent",
+            "team_signal",
+            "team_status",
             "blackboard_write",
             "self_modify",
             "self_review",

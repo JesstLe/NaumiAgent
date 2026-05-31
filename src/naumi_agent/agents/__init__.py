@@ -4,6 +4,7 @@ from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult, B
 from naumi_agent.agents.factory import DynamicAgentFactory
 from naumi_agent.agents.message_bus import AgentMessage, AgentMessageBus, MessagePriority
 from naumi_agent.agents.presets import BROWSER_CONFIG, CODER_CONFIG, RESEARCHER_CONFIG
+from naumi_agent.agents.team_protocol import TeamEventType
 
 __all__ = [
     "BaseAgent",
@@ -14,6 +15,7 @@ __all__ = [
     "AgentMessageBus",
     "DynamicAgentFactory",
     "MessagePriority",
+    "TeamEventType",
     "CODER_CONFIG",
     "RESEARCHER_CONFIG",
     "BROWSER_CONFIG",
