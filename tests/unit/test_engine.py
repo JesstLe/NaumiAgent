@@ -75,6 +75,22 @@ class TestSetSystemPrompt:
         assert engine._messages[0]["content"] == "new prompt"
         assert len([m for m in engine._messages if m["role"] == "system"]) == 1
 
+    def test_updates_full_history(self, engine: AgentEngine) -> None:
+        engine._messages = [
+            {"role": "system", "content": "old active"},
+            {"role": "user", "content": "hi"},
+        ]
+        engine._full_history = [
+            {"role": "system", "content": "old persisted"},
+            {"role": "user", "content": "hi"},
+        ]
+
+        engine.set_system_prompt("new prompt")
+
+        assert engine._messages[0] == {"role": "system", "content": "new prompt"}
+        assert engine._full_history[0] == {"role": "system", "content": "new prompt"}
+        assert len([m for m in engine._full_history if m["role"] == "system"]) == 1
+
 
 class TestSessionLoading:
     @pytest.mark.asyncio
@@ -248,6 +264,35 @@ class TestRun:
         assert result.status == "completed"
         assert result.response == "Hello!"
         assert result.usage.total_input_tokens == 20
+        assert engine.subagent_manager._reaper_task is None
+
+    @pytest.mark.asyncio
+    async def test_run_persists_system_prompt_in_full_history(self, tmp_path) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        mock_response = ModelResponse(
+            content="Hello!",
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15, cost_usd=0.001),
+            model="test-model",
+        )
+
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await engine.run("hi")
+
+        saved = await engine.session_store.load(engine._session.id)
+
+        assert result.status == "completed"
+        assert saved is not None
+        assert saved.messages[0]["role"] == "system"
+        assert saved.messages[1] == {"role": "user", "content": "hi"}
+        await engine.shutdown()
 
     @pytest.mark.asyncio
     async def test_max_turns(self, engine: AgentEngine) -> None:
@@ -308,6 +353,69 @@ class TestRun:
         # Should break after the 3rd repeat + 1 final response
         assert call_count <= 5
         assert "已为你打开" in result.response or result.status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_repeated_multi_tool_call_keeps_protocol_complete(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        """Every assistant tool_call must receive a tool message, even when skipping repeats."""
+        repeated = {
+            "function": {
+                "name": "file_read",
+                "arguments": '{"path": "pyproject.toml"}',
+            },
+        }
+        responses = [
+            ModelResponse(
+                content="",
+                tool_calls=[{"id": "call_1", **repeated}],
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test-model",
+            ),
+            ModelResponse(
+                content="",
+                tool_calls=[{"id": "call_2", **repeated}],
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test-model",
+            ),
+            ModelResponse(
+                content="",
+                tool_calls=[
+                    {"id": "call_3a", **repeated},
+                    {
+                        "id": "call_3b",
+                        "function": {
+                            "name": "file_read",
+                            "arguments": '{"path": "README.md"}',
+                        },
+                    },
+                ],
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test-model",
+            ),
+            ModelResponse(
+                content="done",
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test-model",
+            ),
+        ]
+
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            side_effect=responses,
+        ):
+            result = await engine._react_loop(engine.tool_registry.get_openai_tools())
+
+        assert result.status == "completed"
+        tool_result_ids = {
+            m.get("tool_call_id")
+            for m in engine._messages
+            if m.get("role") == "tool"
+        }
+        assert {"call_3a", "call_3b"}.issubset(tool_result_ids)
 
 
 class TestMemoryInjection:
