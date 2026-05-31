@@ -119,3 +119,25 @@ class TestCLIAppScrolling:
 
                 window._scroll_down()
                 assert window.vertical_scroll == 1
+
+    def test_status_bar_is_not_part_of_transcript(self) -> None:
+        with create_pipe_input() as pipe_input:
+            with create_app_session(input=pipe_input, output=DummyOutput()):
+                cli = _build_cli_app()
+                cli.append_output("hello\n")
+                cli.set_status("model | workspace | token")
+
+                assert "hello" in cli.get_transcript()
+                assert "model | workspace | token" not in cli.get_transcript()
+                assert cli._render_status().__pt_formatted_text__()[0][1].strip().startswith(
+                    "model"
+                )
+
+    def test_output_window_has_scrollbar_margin(self) -> None:
+        with create_pipe_input() as pipe_input:
+            with create_app_session(input=pipe_input, output=DummyOutput()):
+                cli = _build_cli_app()
+
+                window = cli._output_win
+                assert window is not None
+                assert window.right_margins

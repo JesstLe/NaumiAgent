@@ -15,6 +15,7 @@ import typer
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.text import Text
 
 from naumi_agent.config.settings import AppConfig
@@ -69,39 +70,39 @@ app = typer.Typer(
 console = Console()
 
 # Friendly tool name mapping for display
-_TOOL_LABELS: dict[str, tuple[str, str]] = {
-    "file_read": ("📖", "读取文件"),
-    "file_write": ("📝", "写入文件"),
-    "file_edit": ("✏️", "编辑文件"),
-    "bash_run": ("🖥️", "执行命令"),
-    "code_execute": ("⌨️", "执行代码"),
-    "web_search": ("🔍", "搜索"),
-    "web_fetch": ("🌐", "抓取网页"),
-    "memory_store": ("💾", "存储记忆"),
-    "memory_recall": ("🧠", "召回记忆"),
-    "delegate_task": ("👥", "委派任务"),
-    "spawn_agent": ("🚀", "启动Agent"),
-    "destroy_agent": ("🗑️", "销毁Agent"),
-    "list_agents": ("📋", "列出Agent"),
-    "task_create": ("📌", "创建任务"),
-    "task_update": ("🔄", "更新任务"),
-    "task_list": ("📋", "查看任务"),
-    "task_delete": ("🗑️", "删除任务"),
-    "background_run": ("⏱️", "后台执行"),
-    "background_status": ("⏱️", "查看后台任务"),
-    "background_list": ("📋", "列出后台任务"),
-    "background_cancel": ("⏹️", "取消后台任务"),
-    "background_read_output": ("📄", "读取后台输出"),
-    "schedule_create": ("⏰", "创建调度提醒"),
-    "schedule_list": ("📋", "列出调度提醒"),
-    "schedule_cancel": ("⏹️", "取消调度提醒"),
-    "schedule_pause": ("⏸️", "暂停调度提醒"),
-    "schedule_resume": ("▶️", "恢复调度提醒"),
-    "worktree_create": ("🌿", "创建隔离区"),
-    "worktree_status": ("🌿", "查看隔离区"),
-    "worktree_bind_task": ("🔗", "绑定隔离区任务"),
-    "worktree_keep": ("📦", "保留隔离区"),
-    "worktree_remove": ("🧹", "删除隔离区"),
+_TOOL_ICONS: dict[str, str] = {
+    "file_read": "📖",
+    "file_write": "📝",
+    "file_edit": "✏️",
+    "bash_run": "🖥️",
+    "code_execute": "⌨️",
+    "web_search": "🔍",
+    "web_fetch": "🌐",
+    "memory_store": "💾",
+    "memory_recall": "🧠",
+    "delegate_task": "👥",
+    "spawn_agent": "🚀",
+    "destroy_agent": "🗑️",
+    "list_agents": "📋",
+    "task_create": "📌",
+    "task_update": "🔄",
+    "task_list": "📋",
+    "task_delete": "🗑️",
+    "background_run": "⏱️",
+    "background_status": "⏱️",
+    "background_list": "📋",
+    "background_cancel": "⏹️",
+    "background_read_output": "📄",
+    "schedule_create": "⏰",
+    "schedule_list": "📋",
+    "schedule_cancel": "⏹️",
+    "schedule_pause": "⏸️",
+    "schedule_resume": "▶️",
+    "worktree_create": "🌿",
+    "worktree_status": "🌿",
+    "worktree_bind_task": "🔗",
+    "worktree_keep": "📦",
+    "worktree_remove": "🧹",
 }
 
 # ANSI separators for visual hierarchy
@@ -117,7 +118,7 @@ def _sep(thin: bool = True) -> str:
 
 def _tool_label(name: str, args: str = "") -> str:
     """Return a friendly display string for a tool call."""
-    icon, label = _TOOL_LABELS.get(name, ("⚙️", name))
+    icon = _TOOL_ICONS.get(name, "⚙️")
     # Extract key argument for context
     hint = ""
     if args:
@@ -138,7 +139,7 @@ def _tool_label(name: str, args: str = "") -> str:
                         break
         except (json.JSONDecodeError, TypeError):
             pass
-    return f"{icon} {label}{hint}"
+    return f"{icon} {name}{hint}"
 
 
 def _show_cli_status(cli: Any, engine: Any) -> None:
@@ -161,9 +162,11 @@ def _show_cli_status(cli: Any, engine: Any) -> None:
     if git["branch"]:
         tag = git["branch"] + ("*" if git["dirty"] else "")
         parts.append(f"📂 {tag}")
-    cli.append_output(
-        "\033[2m  " + " | ".join(parts) + "\033[0m\n\n"
-    )
+    status = " | ".join(parts)
+    if hasattr(cli, "set_status"):
+        cli.set_status(status)
+    else:
+        cli.append_output("\033[2m  " + status + "\033[0m\n\n")
 
 
 def _resolve_config_path(path: str) -> str:
@@ -250,17 +253,16 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
 def _print_tool_output(name: str, content: str) -> None:
     """Print tool result with diff highlighting for file edits."""
     lines = content.split("\n")
-    is_diff = any(ln.startswith(("---", "+++", "@@", "- ", "+ ")) for ln in lines[:6])
-    if is_diff:
-        for line in lines:
-            if line.startswith("-") and not line.startswith("---"):
-                console.print(f"[red]{line}[/red]")
-            elif line.startswith("+") and not line.startswith("+++"):
-                console.print(f"[green]{line}[/green]")
-            elif line.startswith("@@"):
-                console.print(f"[blue]{line}[/blue]")
-            else:
-                console.print(f"[dim]{line}[/dim]")
+    diff_block = _extract_diff_block(content)
+    if diff_block is not None:
+        prefix, diff_text, suffix = diff_block
+        if prefix:
+            console.print(f"[dim]{prefix.rstrip()}[/dim]")
+        console.print(Syntax(diff_text, "diff", theme="ansi_dark", line_numbers=False))
+        if suffix:
+            console.print(f"[dim]{suffix.lstrip()}[/dim]")
+    elif _looks_like_diff(lines):
+        console.print(Syntax(content, "diff", theme="ansi_dark", line_numbers=False))
     elif "```" in content:
         # Code block — show the full block up to 80 lines
         max_lines = 80
@@ -278,6 +280,30 @@ def _print_tool_output(name: str, content: str) -> None:
         if len(lines) > 30:
             preview += f"\n  ... ({len(lines) - 30} more lines)"
         console.print(f"[dim]{preview}[/dim]")
+
+
+def _extract_diff_block(content: str) -> tuple[str, str, str] | None:
+    """Return prefix, fenced diff body, suffix when content contains ```diff."""
+    start = content.find("```diff")
+    if start < 0:
+        return None
+    body_start = content.find("\n", start)
+    if body_start < 0:
+        return None
+    body_start += 1
+    end = content.find("```", body_start)
+    if end < 0:
+        return None
+    return content[:start], content[body_start:end].rstrip("\n"), content[end + 3 :]
+
+
+def _looks_like_diff(lines: list[str]) -> bool:
+    """Detect raw unified diff output, including +foo/-foo lines."""
+    sample = [line for line in lines[:12] if line.strip()]
+    return any(line.startswith(("---", "+++", "@@")) for line in sample) and any(
+        line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+        for line in sample
+    )
 
 
 _active_cli: Any = None
@@ -325,12 +351,15 @@ def _cli_event_factory(cli: Any):
         elif event == "tool_end":
             name = data.get("name", "?")
             status = data.get("status", "unknown")
+            content = data.get("content", "")
             dur = data.get("duration_ms", 0)
             label = _tool_label(name)
             if status == "success":
                 cli.append_live(f"\033[32m  ✓ {label}\033[0m \033[2m({dur}ms)\033[0m\n")
             else:
                 cli.append_live(f"\033[31m  ✗ {label} 失败 ({dur}ms)\033[0m\n")
+            if content:
+                cli.append_live(_capture(lambda: _print_tool_output(name, content)))
         elif event == "response_start":
             cli.finalize_live()
             cli.append_output(f"{_sep(thin=False)}\n")
@@ -448,6 +477,7 @@ async def _chat(config_path: str) -> None:
                 )
             )
         )
+        _show_cli_status(cli, engine)
 
     cli.set_submit_handler(on_submit)
     await cli.run()
@@ -2041,32 +2071,8 @@ def _replay_session_to_cli(cli: Any, session: Any, engine: Any = None) -> None:
                 icon = "✅"
             # Show tool result preview (like _print_tool_output)
             if content:
-                lines = content.split("\n")
-                is_diff = any(
-                    ln.startswith(("---", "+++", "@@", "- ", "+ "))
-                    for ln in lines[:6]
-                )
-                if is_diff:
-                    preview_lines = []
-                    for line in lines:
-                        if line.startswith("-") and not line.startswith("---"):
-                            preview_lines.append(f"\033[31m{line}\033[0m")
-                        elif line.startswith("+") and not line.startswith("+++"):
-                            preview_lines.append(f"\033[32m{line}\033[0m")
-                        elif line.startswith("@@"):
-                            preview_lines.append(f"\033[34m{line}\033[0m")
-                        else:
-                            preview_lines.append(f"\033[2m{line}\033[0m")
-                    preview = "\n".join(preview_lines[:30])
-                    if len(preview_lines) > 30:
-                        preview += f"\n  ... ({len(preview_lines) - 30} more lines)"
-                else:
-                    max_lines = 80 if "```" in content else 30
-                    preview = "\n".join(lines[:max_lines])
-                    if len(lines) > max_lines:
-                        preview += f"\n  ... ({len(lines) - max_lines} more lines)"
-                    preview = f"\033[2m{preview}\033[0m"
-                cli.append_output(f"  {icon} {preview}\n")
+                preview = _capture(lambda c=content: _print_tool_output("tool", c))
+                cli.append_output(f"  {icon} {preview}")
             else:
                 cli.append_output(f"  {icon}\n")
 
