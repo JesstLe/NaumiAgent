@@ -1020,6 +1020,7 @@ class NaumiApp(App):
                     "- `/browser-stop` — 停止浏览器\n"
                     "- `/browser-state` — 显示浏览器状态\n"
                     "- `/browser-screenshot` — 截取页面截图\n"
+                    "- `/bdaemon <子命令>` — 外部浏览器 daemon\n"
                     "- `/tasks` — 列出浏览器任务\n"
                     "- `/task <id>` — 查看任务详情\n"
                     "- `/task-reply <id> <指令>` — 回复等待中的任务\n"
@@ -1255,6 +1256,8 @@ class NaumiApp(App):
                 self._run_browser_state()
             case "/browser-screenshot":
                 self._run_browser_screenshot()
+            case "/bdaemon":
+                self._run_browser_daemon(arg)
             case "/tasks":
                 self._show_tasks()
             case "/task":
@@ -2250,6 +2253,95 @@ class NaumiApp(App):
             chat.mount(Markdown(f"**截图失败**: {e}", classes="agent-msg"))
         finally:
             status.status_text = "就绪"
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_browser_daemon(self, arg: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        parts = shlex.split(arg) if arg.strip() else []
+        subcommand = parts[0] if parts else "health"
+
+        async def _execute(tool_name: str, **kwargs: Any) -> None:
+            tool = self.engine.tool_registry.get(tool_name)
+            if not tool:
+                chat.mount(Markdown(f"**工具未注册**: `{tool_name}`", classes="agent-msg"))
+                return
+            result = await tool.execute(**kwargs)
+            chat.mount(Markdown(result, classes="agent-msg"))
+
+        status.status_text = f"browser daemon: {subcommand}"
+        self._set_input_enabled(False)
+        self.query_one(Spinner)._active = True
+        try:
+            match subcommand:
+                case "health":
+                    await _execute("browser_daemon_health")
+                case "start":
+                    await _execute("browser_daemon_start")
+                case "dashboard":
+                    await _execute("browser_daemon_dashboard")
+                case "run":
+                    task = " ".join(parts[1:]).strip()
+                    if not task:
+                        status.status_text = "用法: /bdaemon run <任务描述>"
+                        return
+                    await _execute("browser_daemon_run", task_instruction=task)
+                case "list" | "runs":
+                    limit = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 20
+                    await _execute("browser_daemon_list_runs", limit=limit)
+                case "status":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /bdaemon status <运行ID>"
+                        return
+                    await _execute("browser_daemon_run_status", run_id=parts[1])
+                case "reply":
+                    if len(parts) < 3:
+                        status.status_text = "用法: /bdaemon reply <运行ID> <指令>"
+                        return
+                    await _execute(
+                        "browser_daemon_reply",
+                        run_id=parts[1],
+                        instruction=" ".join(parts[2:]),
+                    )
+                case "resume":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /bdaemon resume <运行ID> [指令]"
+                        return
+                    instruction = " ".join(parts[2:]) if len(parts) > 2 else ""
+                    await _execute(
+                        "browser_daemon_resume",
+                        run_id=parts[1],
+                        instruction=instruction,
+                    )
+                case "abort":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /bdaemon abort <运行ID> [原因]"
+                        return
+                    reason = " ".join(parts[2:]) if len(parts) > 2 else ""
+                    await _execute("browser_daemon_abort", run_id=parts[1], reason=reason)
+                case "manual" | "manual-control":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /bdaemon manual <运行ID> [原因]"
+                        return
+                    reason = " ".join(parts[2:]) if len(parts) > 2 else ""
+                    await _execute("browser_daemon_manual_control", run_id=parts[1], reason=reason)
+                case _:
+                    status.status_text = "未知 bdaemon 子命令"
+                    chat.mount(
+                        Markdown(
+                            "可用子命令：`health`、`start`、`dashboard`、`run`、"
+                            "`list`、`status`、`reply`、`resume`、`abort`、`manual`",
+                            classes="agent-msg",
+                        )
+                    )
+        finally:
+            self.query_one(Spinner)._active = False
+            self._set_input_enabled(True)
+            if (
+                not status.status_text.startswith("用法")
+                and status.status_text != "未知 bdaemon 子命令"
+            ):
+                status.status_text = "就绪"
 
     def _show_tasks(self) -> None:
         browser = self.query_one(BrowserPanel)

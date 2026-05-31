@@ -1037,6 +1037,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _run_browser_state(engine)
         case "/browser-screenshot":
             await _run_browser_screenshot(engine)
+        case "/bdaemon":
+            await _run_browser_daemon(engine, arg)
         case "/tasks":
             await _run_tasks_list(engine)
         case "/task":
@@ -1154,6 +1156,10 @@ def _print_help() -> None:
         ("/browser-stop", "停止浏览器会话"),
         ("/browser-state", "显示浏览器调试状态"),
         ("/browser-screenshot", "截取当前页面截图"),
+        (
+            "/bdaemon <子命令>",
+            "外部浏览器 daemon — start/health/run/list/status/reply/resume/abort/manual",
+        ),
         ("/tasks", "列出浏览器任务运行"),
         ("/task <id>", "查看任务运行详情"),
         ("/task-reply <id> <指令>", "回复等待中的任务"),
@@ -2572,6 +2578,81 @@ async def _run_browser_screenshot(engine: Any) -> None:
         console.print(f"[green]✅ 截图已保存到 {out}[/green]")
     except Exception as exc:
         console.print(f"[red]截图失败: {exc}[/red]")
+
+
+async def _run_browser_daemon(engine: Any, arg: str) -> None:
+    """调用外部 browser-debugging-daemon."""
+    parts = shlex.split(arg) if arg.strip() else []
+    subcommand = parts[0] if parts else "health"
+
+    async def _execute(tool_name: str, **kwargs: Any) -> None:
+        tool = engine.tool_registry.get(tool_name)
+        if not tool:
+            console.print(f"[red]工具未注册: {tool_name}[/red]")
+            return
+        result = await tool.execute(**kwargs)
+        console.print(
+            Panel(
+                Markdown(result),
+                title="[bold cyan]browser-debugging-daemon[/bold cyan]",
+                border_style="cyan",
+                padding=(1, 2),
+            )
+        )
+
+    match subcommand:
+        case "health":
+            await _execute("browser_daemon_health")
+        case "start":
+            await _execute("browser_daemon_start")
+        case "dashboard":
+            await _execute("browser_daemon_dashboard")
+        case "run":
+            task = " ".join(parts[1:]).strip()
+            if not task:
+                console.print("[yellow]用法: /bdaemon run <任务描述>[/yellow]")
+                return
+            await _execute("browser_daemon_run", task_instruction=task)
+        case "list" | "runs":
+            limit = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 20
+            await _execute("browser_daemon_list_runs", limit=limit)
+        case "status":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /bdaemon status <运行ID>[/yellow]")
+                return
+            await _execute("browser_daemon_run_status", run_id=parts[1])
+        case "reply":
+            if len(parts) < 3:
+                console.print("[yellow]用法: /bdaemon reply <运行ID> <指令>[/yellow]")
+                return
+            await _execute(
+                "browser_daemon_reply",
+                run_id=parts[1],
+                instruction=" ".join(parts[2:]),
+            )
+        case "resume":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /bdaemon resume <运行ID> [指令][/yellow]")
+                return
+            instruction = " ".join(parts[2:]) if len(parts) > 2 else ""
+            await _execute("browser_daemon_resume", run_id=parts[1], instruction=instruction)
+        case "abort":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /bdaemon abort <运行ID> [原因][/yellow]")
+                return
+            reason = " ".join(parts[2:]) if len(parts) > 2 else ""
+            await _execute("browser_daemon_abort", run_id=parts[1], reason=reason)
+        case "manual" | "manual-control":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /bdaemon manual <运行ID> [原因][/yellow]")
+                return
+            reason = " ".join(parts[2:]) if len(parts) > 2 else ""
+            await _execute("browser_daemon_manual_control", run_id=parts[1], reason=reason)
+        case _:
+            console.print(
+                "[yellow]未知 bdaemon 子命令[/yellow]\n"
+                "[dim]可用: health/start/dashboard/run/list/status/reply/resume/abort/manual[/dim]"
+            )
 
 
 async def _run_tasks_list(engine: Any) -> None:

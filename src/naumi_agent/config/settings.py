@@ -116,6 +116,21 @@ class SkillsConfig(BaseSettings):
     search_paths: list[str] = Field(default_factory=lambda: [])
 
 
+class BrowserDaemonConfig(BaseSettings):
+    """browser-debugging-daemon HTTP adapter configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="NAUMI_BROWSER_DAEMON__")
+
+    enabled: bool = True
+    base_url: str = "http://127.0.0.1:3005"
+    token: str | None = None
+    project_dir: str = Field(
+        default_factory=lambda: str(Path.home() / "Workspace" / "browser-debugging-daemon")
+    )
+    request_timeout_seconds: float = 20.0
+    startup_timeout_seconds: float = 8.0
+
+
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NAUMI_",
@@ -131,6 +146,7 @@ class AppConfig(BaseSettings):
     api: APIConfig = Field(default_factory=APIConfig)
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    browser_daemon: BrowserDaemonConfig = Field(default_factory=BrowserDaemonConfig)
     workspace_root: str = Field(default_factory=lambda: str(Path.cwd()))
     custom_tools_dir: str | None = None
     log_level: str = "INFO"

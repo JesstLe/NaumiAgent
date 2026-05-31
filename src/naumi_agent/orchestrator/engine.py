@@ -31,6 +31,7 @@ from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
 from naumi_agent.tools.browser.tools import create_browser_tools
+from naumi_agent.tools.browser_daemon import BrowserDaemonClient, create_browser_daemon_tools
 from naumi_agent.tools.builtin import create_builtin_tools
 from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
@@ -255,6 +256,10 @@ class AgentEngine:
         self._browser_session = BrowserRuntime(
             Path(config.memory.session_db_path).parent / "browser"
         )
+        self.browser_daemon = BrowserDaemonClient(
+            config.browser_daemon,
+            log_dir=Path(config.memory.session_db_path).parent / "browser-daemon",
+        )
         self._planner = AdaptivePlanner(
             self._router,
             usage_callback=self._track_model_usage,
@@ -292,6 +297,8 @@ class AgentEngine:
         for tool in create_builtin_tools(self.workspace_root):
             self._tool_registry.register(tool)
         for tool in create_browser_tools(self._browser_session):
+            self._tool_registry.register(tool)
+        for tool in create_browser_daemon_tools(self.browser_daemon):
             self._tool_registry.register(tool)
         for tool in create_sandbox_tools():
             self._tool_registry.register(tool)
