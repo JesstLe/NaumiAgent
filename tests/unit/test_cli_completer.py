@@ -49,6 +49,9 @@ class TestSlashCommandCompleter:
         assert "/quit" in results
         assert "/exit" in results
 
+    def test_browser_daemon_registered(self):
+        assert "/bdaemon" in _complete("/")
+
     async def test_prompt_with_completion_fallback(self):
         with patch(
             "naumi_agent.main.console"
