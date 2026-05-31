@@ -78,6 +78,30 @@ class TestPermissionChecker:
             assert result.allowed, tool_name
             assert not result.requires_confirmation, tool_name
 
+    def test_tool_families_allowed_without_unknown_failures(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+        for tool_name in [
+            "analysis_chaos",
+            "browser_scroll",
+            "skill_code-review",
+            "spawn_agent",
+            "blackboard_write",
+            "self_modify",
+            "self_review",
+            "forge_tool",
+            "pursue_goal",
+            "yaml_validate",
+        ]:
+            result = checker.check(tool_name, {})
+            assert result.allowed, tool_name
+            assert "Unknown tool" not in result.reason
+
+    def test_namespaced_tool_family_allowed(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+        result = checker.check("default__browser_scroll", {})
+        assert result.allowed
+        assert "Unknown tool" not in result.reason
+
     def test_reset_counts(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
         checker.check("file_read", {"path": "/workspace/test.txt"})
