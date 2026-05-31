@@ -82,7 +82,13 @@ class TestPermissionChecker:
 
     def test_task_tracking_tools_allowed_without_confirmation(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
-        for tool_name in ["task_create", "task_update", "task_list", "task_delete"]:
+        for tool_name in [
+            "todo_write",
+            "task_create",
+            "task_update",
+            "task_list",
+            "task_delete",
+        ]:
             result = checker.check(tool_name, {})
             assert result.allowed, tool_name
             assert not result.requires_confirmation, tool_name

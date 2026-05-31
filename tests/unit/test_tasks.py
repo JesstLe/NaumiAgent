@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import pytest
 
+from naumi_agent.tasks.commands import run_todo_command
 from naumi_agent.tasks.models import Task, TaskStatus
-from naumi_agent.tasks.store import TaskStore, format_task_list
+from naumi_agent.tasks.store import TaskStore, TaskWriteItem, format_task_list
 from naumi_agent.tasks.tools import (
     TaskCreateTool,
     TaskDeleteTool,
     TaskListTool,
     TaskUpdateTool,
+    TodoWriteTool,
     create_task_tools,
 )
 
@@ -149,6 +151,67 @@ class TestTaskStore:
         tasks = await store.list_tasks()
         assert tasks == []
 
+    @pytest.mark.asyncio
+    async def test_write_tasks_creates_and_updates_in_batch(self, store: TaskStore) -> None:
+        base = await store.create_task(subject="读取代码")
+
+        result = await store.write_tasks([
+            TaskWriteItem(
+                id=base.id,
+                subject="读取代码",
+                status=TaskStatus.COMPLETED,
+            ),
+            TaskWriteItem(
+                subject="编写测试",
+                status=TaskStatus.IN_PROGRESS,
+                active_form="正在编写测试",
+                blocked_by=[base.id],
+            ),
+        ])
+
+        assert result.created == ["2"]
+        assert result.updated == ["1"]
+        tasks = await store.list_tasks()
+        assert tasks[0].status == TaskStatus.COMPLETED
+        assert tasks[1].active_form == "正在编写测试"
+        assert tasks[0].blocks == ["2"]
+
+    @pytest.mark.asyncio
+    async def test_write_tasks_replace_deletes_omitted_tasks(self, store: TaskStore) -> None:
+        first = await store.create_task(subject="A")
+        await store.create_task(subject="B")
+
+        result = await store.write_tasks([
+            TaskWriteItem(id=first.id, subject="A", status=TaskStatus.COMPLETED),
+        ], replace=True)
+
+        assert result.deleted == ["2"]
+        tasks = await store.list_tasks()
+        assert [task.id for task in tasks] == ["1"]
+
+    @pytest.mark.asyncio
+    async def test_write_tasks_rejects_completed_rollback(self, store: TaskStore) -> None:
+        task = await store.create_task(subject="A")
+        await store.update_task(task.id, status=TaskStatus.COMPLETED)
+
+        with pytest.raises(ValueError, match="不能回退"):
+            await store.write_tasks([
+                TaskWriteItem(id=task.id, subject="A", status=TaskStatus.PENDING),
+            ])
+
+    @pytest.mark.asyncio
+    async def test_write_tasks_updates_reverse_edge_timestamp(self, store: TaskStore) -> None:
+        blocker = await store.create_task(subject="Blocker")
+
+        await store.write_tasks([
+            TaskWriteItem(subject="Blocked", status=TaskStatus.PENDING, blocked_by=[blocker.id]),
+        ])
+
+        refreshed = await store.get_task(blocker.id)
+        assert refreshed is not None
+        assert refreshed.blocks == ["2"]
+        assert refreshed.updated_at >= blocker.updated_at
+
 
 class TestFormatTaskList:
     def test_empty_list(self) -> None:
@@ -248,9 +311,15 @@ class TestTaskTools:
     @pytest.mark.asyncio
     async def test_create_tool_returns_4_tools(self, store: TaskStore) -> None:
         tools = create_task_tools(store)
-        assert len(tools) == 4
+        assert len(tools) == 5
         names = {t.name for t in tools}
-        assert names == {"task_create", "task_update", "task_list", "task_delete"}
+        assert names == {
+            "todo_write",
+            "task_create",
+            "task_update",
+            "task_list",
+            "task_delete",
+        }
 
     @pytest.mark.asyncio
     async def test_no_session_error(self, tmp_path) -> None:
@@ -294,6 +363,53 @@ class TestTaskTools:
         result = await tool.execute(subject="   ")
         assert "错误" in result
         assert "不能为空" in result
+
+    @pytest.mark.asyncio
+    async def test_todo_write_tool_syncs_visible_list(self, store: TaskStore) -> None:
+        tool = TodoWriteTool(store)
+
+        result = await tool.execute(todos=[
+            {"content": "读取实现", "status": "completed"},
+            {
+                "content": "补测试",
+                "status": "in_progress",
+                "active_form": "正在补测试",
+                "blocked_by": ["1"],
+            },
+        ])
+
+        assert "todo 已同步" in result
+        assert "新增 2 项" in result
+        assert "正在补测试" in result
+
+    @pytest.mark.asyncio
+    async def test_todo_write_tool_rejects_multiple_in_progress(
+        self,
+        store: TaskStore,
+    ) -> None:
+        tool = TodoWriteTool(store)
+
+        result = await tool.execute(todos=[
+            {"content": "A", "status": "in_progress"},
+            {"content": "B", "status": "in_progress"},
+        ])
+
+        assert "错误" in result
+        assert "最多只能有一个" in result
+
+
+class TestTodoCommand:
+    @pytest.mark.asyncio
+    async def test_manual_todo_command_uses_store(self, store: TaskStore) -> None:
+        added = await run_todo_command(store, "add 读取实现")
+        started = await run_todo_command(store, "start 1 正在读取实现")
+        done = await run_todo_command(store, "done 1")
+
+        assert "已添加" in added
+        assert "进行中" in started
+        assert "已完成" in done
+        tasks = await store.list_tasks()
+        assert tasks[0].status == TaskStatus.COMPLETED
 
 
 class TestDanglingReference:

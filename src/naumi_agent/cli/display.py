@@ -75,6 +75,7 @@ def print_help() -> None:
         ("/worktree <子命令>", "隔离执行区 — create/status/bind/keep/remove"),
         ("/background <子命令>", "后台任务 — run/status/list/cancel/output"),
         ("/schedule <子命令>", "调度提醒 — create/list/cancel/pause/resume"),
+        ("/todo <子命令>", "todo 清单 — list/add/start/done/pending/delete/clear"),
         ("/self-review [模块]", "自我审查 — 扫描自身源码质量与架构"),
         ("/reload [域]", "热重载 — 重载模块无需重启 (tools/memory/skills/all)"),
         ("/evolve <描述>", "自我进化 — 反思循环修改自身工具代码并验证"),
@@ -154,6 +155,11 @@ async def cli_event_handler(event: str, data: dict[str, Any]) -> None:
         console.print(
             f"[{style}]hook {status}: {point} → {callback} ({duration}ms){suffix}[/{style}]"
         )
+    elif event == "task_snapshot":
+        source = str(data.get("source", "todo"))
+        summary = str(data.get("summary", "当前没有任务。"))
+        console.print(f"[cyan]todo 更新: {source}[/cyan]")
+        console.print(summary)
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":

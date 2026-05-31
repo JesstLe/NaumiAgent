@@ -246,6 +246,17 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         ],
         requires_confirmation=False,
     ),
+    "todo_write": PermissionRule(
+        tool_name="todo_write",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
     "task_update": PermissionRule(
         tool_name="task_update",
         allowed_modes=[

@@ -73,6 +73,7 @@ COMMANDS: list[tuple[str, str, bool]] = [
     ("/worktree", "隔离执行区 — create/status/bind/keep/remove", True),
     ("/background", "后台任务 — run/status/list/cancel/output", True),
     ("/schedule", "调度提醒 — create/list/cancel/pause/resume", True),
+    ("/todo", "todo 清单 — list/add/start/done/pending/delete/clear", True),
     ("/bdaemon", "外部浏览器 daemon — start/health/run/list/status", True),
     ("/reload", "热重载 — 重载模块无需重启", False),
     ("/evolve", "自我进化 — 反思循环修改自身工具代码并验证", True),

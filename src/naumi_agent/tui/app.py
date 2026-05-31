@@ -1015,6 +1015,7 @@ class NaumiApp(App):
                     "- `/pursue <目标>` — 目标追踪（自主循环直至达成）\n"
                     "- `/worktree <子命令>` — 隔离执行区 create/status/bind/keep/remove\n"
                     "- `/background <子命令>` — 后台任务 run/status/list/cancel/output\n"
+                    "- `/todo <子命令>` — todo 清单 list/add/start/done/pending/delete/clear\n"
                     "- `/browse <url>` — 打开 URL 并显示 SoM 元素\n"
                     "- `/autobrowse <任务>` — 自主浏览器任务\n"
                     "- `/browser-stop` — 停止浏览器\n"
@@ -1240,6 +1241,8 @@ class NaumiApp(App):
                 self._run_background_command(arg)
             case "/schedule":
                 self._run_schedule_command(arg)
+            case "/todo":
+                self._run_todo_command(arg)
             case "/browse":
                 if not arg:
                     status.status_text = "用法: /browse <url>"
@@ -1402,6 +1405,16 @@ class NaumiApp(App):
                         )
                     )
                     status.status_text = f"hook {status_label}: {point}"
+                case "task_snapshot":
+                    source = str(data.get("source", "todo"))
+                    summary = str(data.get("summary", "当前没有任务。"))
+                    chat.mount(
+                        Markdown(
+                            f"## todo 更新：{source}\n\n{summary}",
+                            classes="agent-msg",
+                        )
+                    )
+                    status.status_text = f"todo 已更新：{source}"
                 case "context_compacted":
                     logger.info(
                         "Context compacted: %d → %d messages",
@@ -2165,6 +2178,24 @@ class NaumiApp(App):
             input_bar = self.query_one(InputBar)
             msg_input = input_bar.query_one("#msg-input", Input)
             msg_input.focus()
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_todo_command(self, arg: str) -> None:
+        """执行 todo 命令."""
+        from naumi_agent.tasks.commands import run_todo_command
+
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        status.status_text = "todo 处理中..."
+        try:
+            session = await self.engine.get_or_create_session()
+            self.engine.task_store.set_session(session.id)
+            result = await run_todo_command(self.engine.task_store, arg)
+            chat.mount(Markdown(f"## todo\n\n{result}", classes="agent-msg"))
+        except Exception as e:
+            chat.mount(Markdown(f"**todo 命令失败**: {e}", classes="agent-msg"))
+        finally:
+            status.status_text = "就绪"
 
     def action_show_tools(self) -> None:
         chat = self.query_one(ChatPanel)

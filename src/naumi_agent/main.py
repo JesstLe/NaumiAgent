@@ -89,6 +89,7 @@ _TOOL_ICONS: dict[str, str] = {
     "task_update": "🔄",
     "task_list": "📋",
     "task_delete": "🗑️",
+    "todo_write": "📋",
     "background_run": "⏱️",
     "background_status": "⏱️",
     "background_list": "📋",
@@ -242,6 +243,8 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
             _print_tool_output(name, content)
     elif event == "hook_trace":
         console.print(_format_hook_trace(data))
+    elif event == "task_snapshot":
+        console.print(_format_task_snapshot(data))
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":
@@ -299,6 +302,13 @@ def _format_hook_trace(data: dict[str, Any]) -> str:
         f"\033[{color}m  hook {status}: "
         f"{point} → {callback} ({duration}ms){suffix}\033[0m"
     )
+
+
+def _format_task_snapshot(data: dict[str, Any]) -> str:
+    """Format a task snapshot event for user-visible output."""
+    source = str(data.get("source", "todo"))
+    summary = str(data.get("summary", "当前没有任务。"))
+    return f"\033[36m  todo 更新: {source}\033[0m\n{summary}"
 
 
 def _extract_diff_block(content: str) -> tuple[str, str, str] | None:
@@ -381,6 +391,8 @@ def _cli_event_factory(cli: Any):
                 cli.append_live(_capture(lambda: _print_tool_output(name, content)))
         elif event == "hook_trace":
             cli.append_live(_format_hook_trace(data) + "\n")
+        elif event == "task_snapshot":
+            cli.append_live(_format_task_snapshot(data) + "\n")
         elif event == "response_start":
             cli.finalize_live()
             cli.append_output(f"{_sep(thin=False)}\n")
@@ -1036,6 +1048,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _run_background(engine, arg)
         case "/schedule":
             await _run_schedule(engine, arg)
+        case "/todo":
+            await _run_todo(engine, arg)
         case "/self-review":
             await _run_self_review(engine, arg)
         case "/reload":
@@ -1167,6 +1181,7 @@ def _print_help() -> None:
         ("/worktree <子命令>", "隔离执行区 — create/status/bind/keep/remove"),
         ("/background <子命令>", "后台任务 — run/status/list/cancel/output"),
         ("/schedule <子命令>", "调度提醒 — create/list/cancel/pause/resume"),
+        ("/todo <子命令>", "todo 清单 — list/add/start/done/pending/delete/clear"),
         ("/self-review [模块]", "自我审查 — 扫描自身源码质量与架构"),
         ("/reload [域]", "热重载 — 重载模块无需重启 (tools/memory/skills/all)"),
         ("/evolve <描述>", "自我进化 — 反思循环修改自身工具代码并验证"),
@@ -1604,6 +1619,23 @@ async def _run_schedule(engine: Any, arg: str) -> None:
                 "[yellow]未知调度子命令[/yellow]\n"
                 "[dim]可用: create/list/cancel/pause/resume[/dim]"
             )
+
+
+async def _run_todo(engine: Any, arg: str) -> None:
+    """执行 todo 命令."""
+    from naumi_agent.tasks.commands import run_todo_command
+
+    session = await engine.get_or_create_session()
+    engine.task_store.set_session(session.id)
+    result = await run_todo_command(engine.task_store, arg)
+    console.print(
+        Panel(
+            Markdown(result),
+            title="[bold cyan]todo[/bold cyan]",
+            border_style="cyan",
+            padding=(1, 2),
+        )
+    )
 
 
 async def _run_self_review(engine: Any, arg: str) -> None:
