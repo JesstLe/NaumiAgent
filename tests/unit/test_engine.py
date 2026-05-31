@@ -194,6 +194,27 @@ class TestToolExecution:
         assert result.status == "success"
         assert "bypass_ok" in result.content
 
+    @pytest.mark.asyncio
+    async def test_task_create_tool_passes_permission_layer(self, tmp_path) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        session = await engine.get_or_create_session()
+        engine.task_store.set_session(session.id)
+
+        result = await engine._execute_tool(
+            ToolCall(
+                id="x",
+                name="task_create",
+                arguments='{"subject": "创建文件"}',
+            )
+        )
+
+        assert result.status == "success"
+        assert "已创建任务" in result.content
+        await engine.shutdown()
+
 
 class TestUsageAccumulation:
     def test_accumulate(self, engine: AgentEngine) -> None:
