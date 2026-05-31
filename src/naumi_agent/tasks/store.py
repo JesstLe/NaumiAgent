@@ -48,6 +48,8 @@ def _task_to_row(task: Task) -> dict[str, Any]:
 
 
 def _row_to_task(row: dict[str, Any]) -> Task:
+    raw_blocks = row.get("blocks")
+    raw_blocked_by = row.get("blocked_by")
     return Task(
         id=row["id"],
         session_id=row["session_id"],
@@ -56,11 +58,11 @@ def _row_to_task(row: dict[str, Any]) -> Task:
         status=TaskStatus(row["status"]),
         active_form=row.get("active_form"),
         owner=row.get("owner"),
-        blocks=json.loads(row["blocks"]) if isinstance(row["blocks"], str) else row["blocks"],
+        blocks=cast(list[str], json.loads(raw_blocks)) if isinstance(raw_blocks, str) else [],
         blocked_by=(
-            json.loads(row["blocked_by"])
-            if isinstance(row["blocked_by"], str)
-            else row["blocked_by"]
+            cast(list[str], json.loads(raw_blocked_by))
+            if isinstance(raw_blocked_by, str)
+            else []
         ),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -119,6 +121,8 @@ class TaskStore:
         if row is None:
             return []
         raw = row["blocks"]
+        if raw is None:
+            return []
         return cast(list[str], json.loads(raw)) if isinstance(raw, str) else raw
 
     async def create_task(
@@ -243,19 +247,22 @@ class TaskStore:
             )
 
             # Remove reverse blocking references from all other tasks
+            now = datetime.now().isoformat()
             all_tasks = await self._list_tasks(db)
             for t in all_tasks:
                 if task_id in t.blocks:
                     new_blocks = [b for b in t.blocks if b != task_id]
                     await db.execute(
-                        "UPDATE tasks SET blocks = ? WHERE id = ? AND session_id = ?",
-                        (json.dumps(new_blocks), t.id, self._session_id),
+                        "UPDATE tasks SET blocks = ?, updated_at = ? "
+                        "WHERE id = ? AND session_id = ?",
+                        (json.dumps(new_blocks), now, t.id, self._session_id),
                     )
                 if task_id in t.blocked_by:
                     new_blocked = [b for b in t.blocked_by if b != task_id]
                     await db.execute(
-                        "UPDATE tasks SET blocked_by = ? WHERE id = ? AND session_id = ?",
-                        (json.dumps(new_blocked), t.id, self._session_id),
+                        "UPDATE tasks SET blocked_by = ?, updated_at = ? "
+                        "WHERE id = ? AND session_id = ?",
+                        (json.dumps(new_blocked), now, t.id, self._session_id),
                     )
 
             await db.commit()

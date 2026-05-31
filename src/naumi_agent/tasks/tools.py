@@ -141,6 +141,13 @@ class TaskUpdateTool(Tool):
             "required": ["task_id", "status"],
         }
 
+    # 允许的状态转换（completed 为终止态，不可回退）
+    _VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
+        TaskStatus.PENDING: {TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED},
+        TaskStatus.IN_PROGRESS: {TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED, TaskStatus.PENDING},
+        TaskStatus.COMPLETED: {TaskStatus.COMPLETED},
+    }
+
     async def execute(  # type: ignore[override]
         self,
         *,
@@ -156,6 +163,16 @@ class TaskUpdateTool(Tool):
             new_status = TaskStatus(status)
         except ValueError:
             return f"错误：无效状态 '{status}'。有效值：pending, in_progress, completed"
+
+        existing = await self._store.get_task(task_id)
+        if existing is None:
+            return f"错误：任务 #{task_id} 不存在。"
+
+        if new_status not in self._VALID_TRANSITIONS.get(existing.status, set()):
+            return (
+                f"错误：无效的状态转换 {existing.status.value} → {new_status.value}。"
+                f"已完成任务不可回退。"
+            )
 
         task = await self._store.update_task(
             task_id=task_id,
