@@ -33,6 +33,7 @@ class TokenUsage:
     output_tokens: int = 0
     total_tokens: int = 0
     cost_usd: float = 0.0
+    cache_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -404,10 +405,16 @@ class ModelRouter:
             return TokenUsage()
         inp = usage.prompt_tokens or 0
         out = usage.completion_tokens or 0
+        # Extract cache tokens from prompt_tokens_details (OpenAI-compatible)
+        cache = 0
+        details = getattr(usage, "prompt_tokens_details", None)
+        if details:
+            cache = getattr(details, "cached_tokens", 0) or 0
         rates = self.get_cost_rates(model)
         return TokenUsage(
             input_tokens=inp,
             output_tokens=out,
             total_tokens=inp + out,
             cost_usd=round(_calculate_cost(model, inp, out, rates), 6),
+            cache_tokens=cache,
         )

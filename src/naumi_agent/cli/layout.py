@@ -160,6 +160,8 @@ class CLIApp:
         self._kb = KeyBindings()
         self._on_submit: Callable[[str], Awaitable[None]] | None = None
         self._output_win: _OutputWindow | None = None
+        self._git_branch: str = ""
+        self._git_dirty: bool = False
 
         self._last_esc_time = 0.0
 
@@ -259,6 +261,12 @@ class CLIApp:
             self._output_win.scroll_to_bottom()
         self._invalidate()
 
+    def set_git_info(self, branch: str, dirty: bool) -> None:
+        """Update git branch shown in the prompt prefix."""
+        self._git_branch = branch
+        self._git_dirty = dirty
+        self._invalidate()
+
     def _render_output(self) -> list:
         result: list = []
         for text in self._output:
@@ -284,17 +292,24 @@ class CLIApp:
         )
         self._output_win.scroll_to_bottom()
 
+        def _build_prefix() -> FormattedText:
+            parts: list[tuple[str, str]] = []
+            if self._git_branch:
+                tag = self._git_branch + ("*" if self._git_dirty else "")
+                parts.append(("class:border", f" {tag} "))
+            if self._processing:
+                parts.append(("class:processing", "⏳ "))
+            else:
+                parts.append(("class:prompt", "❯ "))
+            return FormattedText(parts)
+
         input_win = Window(
             height=1,
             content=BufferControl(
                 buffer=self._input_buf,
                 focus_on_click=True,
             ),
-            get_line_prefix=lambda *_: (
-                FormattedText([("class:processing", " ⏳ ")])
-                if self._processing
-                else FormattedText([("class:prompt", " ❯ ")])
-            ),
+            get_line_prefix=lambda *_: _build_prefix(),
         )
 
         border_cls = "border" if not self._processing else "border-active"

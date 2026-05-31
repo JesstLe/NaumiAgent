@@ -24,6 +24,7 @@ from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.skills.loader import SkillLoader
 from naumi_agent.skills.tool import create_skill_tools
 from naumi_agent.streaming.event_bus import EventEmitter
+from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
 from naumi_agent.tools.browser.tools import create_browser_tools
@@ -158,6 +159,14 @@ approach. Only switch approaches if the current one is provably impossible.
 7. Use memory_recall to check if relevant information was discussed before
 8. For complex subtasks (coding, research, browsing), consider delegating to specialized agents
 
+## Task Management (use tools to self-track progress)
+- **task_create**: Create a task with subject and optional dependencies.
+- **task_update**: Mark a task in_progress (with active_form) or completed.
+- **task_list**: View all tasks and their status.
+- **task_delete**: Remove a task that's no longer needed.
+- Always create tasks BEFORE starting work on multi-step problems.
+- Mark tasks completed immediately when done — do not batch updates.
+
 ## Browser Tool Usage
 - **browser_goto**: Navigate to a URL. Call ONCE per URL. Returns SoM elements \
 and page data. Do NOT call again for the same URL.
@@ -191,6 +200,7 @@ class AgentUsage:
     total_output_tokens: int = 0
     total_cost_usd: float = 0.0
     turns: int = 0
+    cache_tokens: int = 0
 
 
 @dataclass
@@ -199,6 +209,7 @@ class AgentResult:
     response: str = ""
     usage: AgentUsage = field(default_factory=AgentUsage)
     error: str | None = None
+    task_summary: str | None = None
 
 
 class AgentEngine:
@@ -240,6 +251,8 @@ class AgentEngine:
         )
         self._planner = AdaptivePlanner(self._router)
 
+        self.task_store = TaskStore(config.memory.session_db_path)
+
         self._mcp_manager: MCPClientManager | None = None
 
         self._task_runner: Any | None = None
@@ -280,6 +293,12 @@ class AgentEngine:
                 self._tool_registry.register(tool)
         except Exception:
             pass  # memory tools optional (chromadb may not be installed)
+
+        # Task management tools
+        from naumi_agent.tasks.tools import create_task_tools
+
+        for tool in create_task_tools(self.task_store):
+            self._tool_registry.register(tool)
 
         # Hot-reload tool
         from naumi_agent.tools.hotreload import HotReloadTool
@@ -699,6 +718,9 @@ class AgentEngine:
         if not any(m.get("role") == "system" for m in self._messages):
             self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
 
+        session = await self.get_or_create_session()
+        self.task_store.set_session(session.id)
+
         self._append_message({"role": "user", "content": task})
         await self._inject_relevant_memories(task)
         tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
@@ -727,6 +749,13 @@ class AgentEngine:
         ))
 
         await self._save_session()
+
+        # Attach task summary if tasks exist
+        tasks = await self.task_store.list_tasks()
+        if tasks:
+            from naumi_agent.tasks.store import format_task_list
+            result.task_summary = format_task_list(tasks)
+
         return result
 
     async def run_streaming(
@@ -738,6 +767,9 @@ class AgentEngine:
         await self._ensure_reaper()
         if not any(m.get("role") == "system" for m in self._messages):
             self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
+
+        session = await self.get_or_create_session()
+        self.task_store.set_session(session.id)
 
         self._append_message({"role": "user", "content": task})
         await self._inject_relevant_memories(task)
@@ -769,6 +801,13 @@ class AgentEngine:
         ))
 
         await self._save_session()
+
+        # Attach task summary if tasks exist
+        tasks = await self.task_store.list_tasks()
+        if tasks:
+            from naumi_agent.tasks.store import format_task_list
+            result.task_summary = format_task_list(tasks)
+
         return result
 
     async def _run_orchestrated(
@@ -1057,7 +1096,7 @@ class AgentEngine:
                 return exceeded
 
             await self._maybe_compact(on_event)
-            await on_event("turn_start", {"turn": turn + 1})
+            await on_event("turn_start", {"turn": turn + 1, "model": model_str})
 
             text_parts: list[str] = []
             thinking_parts: list[str] = []
@@ -1344,6 +1383,31 @@ class AgentEngine:
         self._usage.total_input_tokens += usage.input_tokens
         self._usage.total_output_tokens += usage.output_tokens
         self._usage.total_cost_usd += usage.cost_usd
+        self._usage.cache_tokens += usage.cache_tokens
+
+    def get_context_info(self) -> dict[str, Any]:
+        """Return context window usage estimate."""
+        model = self._router.resolve_model(ModelTier.CAPABLE)
+        window = self._router.get_context_window(model)
+        used = self._usage.total_input_tokens
+        return {
+            "model": model,
+            "window": window,
+            "used": used,
+            "percentage": min(100, round(used / window * 100, 1)) if window > 0 else 0,
+        }
+
+    def get_budget_info(self) -> dict[str, Any]:
+        """Return budget consumption info."""
+        summary = self._budget_tracker.get_summary()
+        return {
+            "max_usd": self._budget_tracker.budget.max_usd,
+            "used_usd": summary.total_cost_usd,
+            "remaining_usd": summary.remaining_usd,
+            "percentage": round(
+                summary.total_cost_usd / self._budget_tracker.budget.max_usd * 100, 1
+            ) if self._budget_tracker.budget.max_usd > 0 else 0,
+        }
 
     @staticmethod
     def _format_error(e: Exception) -> str:
