@@ -346,6 +346,21 @@ async def _chat(config_path: str) -> None:
     if git["branch"]:
         cli.set_git_info(git["branch"], git["dirty"])
 
+    # Show startup stats line immediately
+    startup_parts: list[str] = []
+    model = engine.router.resolve_model("capable")
+    startup_parts.append(model)
+    ctx = engine.get_context_info()
+    startup_parts.append(f"上下文: 0K/{ctx['window'] / 1000:.0f}K")
+    budget = engine.get_budget_info()
+    startup_parts.append(f"预算: $0.0000/${budget['max_usd']:.2f}")
+    if git["branch"]:
+        tag = git["branch"] + ("*" if git["dirty"] else "")
+        startup_parts.append(f"📂 {tag}")
+    cli.append_output(
+        "\033[2m  " + " | ".join(startup_parts) + "\033[0m\n\n"
+    )
+
     async def on_submit(text: str) -> None:
         if text in ("/quit", "/q", "/exit", "exit"):
             await engine.shutdown()

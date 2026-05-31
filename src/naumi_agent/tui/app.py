@@ -879,6 +879,23 @@ class NaumiApp(App):
     def on_mount(self) -> None:
         """Initialize UI on startup."""
         self._update_git_title()
+        self._show_startup_status()
+
+    def _show_startup_status(self) -> None:
+        """Show model, budget, and context info in status bar on startup."""
+        try:
+            status = self.query_one(StatusBar)
+            model = self.engine.router.resolve_model("capable")
+            budget = self.engine.get_budget_info()
+            ctx = self.engine.get_context_info()
+            window_k = ctx["window"] / 1000
+            status.status_text = (
+                f"{model} | "
+                f"上下文: 0K/{window_k:.0f}K | "
+                f"预算: $0.0000/${budget['max_usd']:.2f}"
+            )
+        except Exception:
+            pass
 
     def _update_git_title(self) -> None:
         """Update sub-title with git branch info."""
