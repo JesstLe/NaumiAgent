@@ -353,7 +353,7 @@ async def _chat(config_path: str) -> None:
             await engine.load_session(sessions[0].id)
             session = engine._session
             if session:
-                _replay_session_to_cli(cli, session)
+                _replay_session_to_cli(cli, session, engine=engine)
     except Exception:
         pass  # silently continue if auto-resume fails
 
@@ -1739,7 +1739,7 @@ async def _show_history(engine: Any) -> None:
     console.print()
 
 
-def _replay_session_to_cli(cli: Any, session: Any) -> None:
+def _replay_session_to_cli(cli: Any, session: Any, engine: Any = None) -> None:
     """将会话的所有消息完整回放到 CLI 输出区，像从未关过一样."""
     title = session.title or session.id
     msg_count = len(session.messages)
@@ -1812,9 +1812,50 @@ def _replay_session_to_cli(cli: Any, session: Any) -> None:
             else:
                 cli.append_output(f"  {icon}\n")
 
+    # --- Show session stats immediately ---
+    stats = _build_session_stats(session, engine)
+    if stats:
+        cli.append_output(stats)
+
     cli.append_output(
         "\033[2m━━━ 会话已恢复，继续对话或 /new 开始新会话 ━━━\033[0m\n\n"
     )
+
+
+def _build_session_stats(session: Any, engine: Any = None) -> str:
+    """Build ANSI stats text from session data for immediate display."""
+    parts: list[str] = []
+    # Model
+    model = getattr(session, "model", "")
+    if model:
+        parts.append(model)
+    # Messages
+    user_msgs = sum(1 for m in session.messages if m.get("role") == "user")
+    parts.append(f"消息: {user_msgs}条")
+    # Tokens & cost
+    tokens = getattr(session, "total_tokens", 0)
+    cost = getattr(session, "total_cost_usd", 0.0)
+    if tokens:
+        parts.append(f"Token: {tokens}")
+    if cost > 0:
+        parts.append(f"费用: ${cost:.4f}")
+    # Context window
+    if engine:
+        ctx = engine.get_context_info()
+        ctx_pct = ctx["percentage"]
+        used_k = ctx["used"] / 1000
+        window_k = ctx["window"] / 1000
+        parts.append(f"上下文: {used_k:.0f}K/{window_k:.0f}K ({ctx_pct}%)")
+        budget = engine.get_budget_info()
+        parts.append(f"预算: ${budget['used_usd']:.4f}/${budget['max_usd']:.2f}")
+    # Git
+    git = _get_git_info()
+    if git["branch"]:
+        tag = git["branch"] + ("*" if git["dirty"] else "")
+        parts.append(f"📂 {tag}")
+    if not parts:
+        return ""
+    return "\033[2m  " + " | ".join(parts) + "\033[0m\n"
 
 
 async def _load_session(engine: Any, session_id: str) -> None:
@@ -1829,7 +1870,7 @@ async def _load_session(engine: Any, session_id: str) -> None:
                 f"({len(session.messages)}条消息)"
             )
             if _active_cli:
-                _replay_session_to_cli(_active_cli, session)
+                _replay_session_to_cli(_active_cli, session, engine=engine)
             else:
                 # Non-interactive mode fallback: brief summary
                 user_msgs = [
