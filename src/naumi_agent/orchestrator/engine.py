@@ -526,7 +526,10 @@ class AgentEngine:
         """设置/更新系统提示词."""
         # 移除旧的 system message
         self._messages = [m for m in self._messages if m.get("role") != "system"]
-        self._messages.insert(0, {"role": "system", "content": prompt})
+        self._full_history = [m for m in self._full_history if m.get("role") != "system"]
+        msg = {"role": "system", "content": prompt}
+        self._messages.insert(0, msg)
+        self._full_history.insert(0, msg)
 
     # --- 会话持久化 ---
 
@@ -679,6 +682,12 @@ class AgentEngine:
         self._messages.append(msg)
         self._full_history.append(msg)
 
+    def _ensure_system_prompt(self) -> None:
+        """Ensure the system prompt is present in active and persisted history."""
+        if any(m.get("role") == "system" for m in self._messages):
+            return
+        self._append_message({"role": "system", "content": SYSTEM_PROMPT})
+
     async def _maybe_compact(self, on_event: EventCallback | None = None) -> None:
         """检查并执行上下文压缩."""
         model = self._router.resolve_model(ModelTier.CAPABLE)
@@ -743,16 +752,9 @@ class AgentEngine:
             usage=self._usage,
         )
 
-    async def _ensure_reaper(self) -> None:
-        if not self._reaper_started and hasattr(self, "subagent_manager"):
-            self._reaper_started = True
-            await self.subagent_manager.start_reaper()
-
     async def run(self, task: str) -> AgentResult:
         """执行任务 — 自适应规划 + ReAct 主循环."""
-        await self._ensure_reaper()
-        if not any(m.get("role") == "system" for m in self._messages):
-            self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
+        self._ensure_system_prompt()
 
         session = await self.get_or_create_session()
         self.task_store.set_session(session.id)
@@ -803,9 +805,7 @@ class AgentEngine:
         on_event: EventCallback,
     ) -> AgentResult:
         """执行任务 — 流式 ReAct 主循环，通过回调实时推送事件."""
-        await self._ensure_reaper()
-        if not any(m.get("role") == "system" for m in self._messages):
-            self._messages.append({"role": "system", "content": SYSTEM_PROMPT})
+        self._ensure_system_prompt()
 
         session = await self.get_or_create_session()
         self.task_store.set_session(session.id)
@@ -999,13 +999,33 @@ class AgentEngine:
                 self._append_message(assistant_msg)
 
                 cur_calls: list[str] = []
+                skip_remaining_reason = ""
                 for tc_raw in response.tool_calls:
                     tc = self._parse_tool_call(tc_raw)
                     if tc is None:
+                        call_id = self._extract_tool_call_id(tc_raw)
+                        if call_id:
+                            self._append_message(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call_id,
+                                    "content": "工具调用格式无效，无法解析函数名称或参数。",
+                                }
+                            )
                         continue
 
                     call_sig = f"{tc.name}:{tc.arguments}"
                     cur_calls.append(call_sig)
+
+                    if skip_remaining_reason:
+                        self._append_message(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": skip_remaining_reason,
+                            }
+                        )
+                        continue
 
                     if self._is_repeated_tool_call(
                         tc.name, tc.arguments, tool_call_history
@@ -1014,17 +1034,18 @@ class AgentEngine:
                             "Repeated tool call detected: %s, injecting stop",
                             tc.name,
                         )
+                        skip_remaining_reason = (
+                            "This action has already been completed successfully. "
+                            "Do NOT repeat it. Provide your final response to the user now."
+                        )
                         self._append_message(
                             {
                                 "role": "tool",
                                 "tool_call_id": tc.id,
-                                "content": (
-                                    "This action has already been completed successfully. "
-                                    "Do NOT repeat it. Provide your final response to the user now."
-                                ),
+                                "content": skip_remaining_reason,
                             }
                         )
-                        break
+                        continue
 
                     hook_ctx = await self.hooks.fire(HookContext(
                         point=HookPoint.TOOL_EXECUTE_START,
@@ -1237,13 +1258,39 @@ class AgentEngine:
                 self._append_message(assistant_msg)
 
                 cur_calls: list[str] = []
+                skip_remaining_reason = ""
                 for tc_raw in collected_tool_calls.values():
                     tc = self._parse_tool_call(tc_raw)
                     if tc is None:
+                        call_id = self._extract_tool_call_id(tc_raw)
+                        if call_id:
+                            self._append_message(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call_id,
+                                    "content": "工具调用格式无效，无法解析函数名称或参数。",
+                                }
+                            )
                         continue
 
                     call_sig = f"{tc.name}:{tc.arguments}"
                     cur_calls.append(call_sig)
+
+                    if skip_remaining_reason:
+                        await on_event("tool_end", {
+                            "name": tc.name,
+                            "status": "skipped",
+                            "duration_ms": 0,
+                            "content": skip_remaining_reason,
+                        })
+                        self._append_message(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": skip_remaining_reason,
+                            }
+                        )
+                        continue
 
                     if self._is_repeated_tool_call(
                         tc.name, tc.arguments, tool_call_history
@@ -1252,17 +1299,18 @@ class AgentEngine:
                             "Repeated tool call detected: %s, injecting stop",
                             tc.name,
                         )
+                        skip_remaining_reason = (
+                            "This action has already been completed successfully. "
+                            "Do NOT repeat it. Provide your final response to the user now."
+                        )
                         self._append_message(
                             {
                                 "role": "tool",
                                 "tool_call_id": tc.id,
-                                "content": (
-                                    "This action has already been completed successfully. "
-                                    "Do NOT repeat it. Provide your final response to the user now."
-                                ),
+                                "content": skip_remaining_reason,
                             }
                         )
-                        break
+                        continue
 
                     await on_event("tool_start", {"name": tc.name, "args": tc.arguments})
 
@@ -1435,6 +1483,14 @@ class AgentEngine:
         except Exception:
             logger.warning("Failed to parse tool call: %s", raw)
             return None
+
+    @staticmethod
+    def _extract_tool_call_id(raw: dict[str, Any]) -> str:
+        """Best-effort extraction of tool_call id for protocol-complete error replies."""
+        try:
+            return str(raw.get("id") or "")
+        except Exception:
+            return ""
 
     def _accumulate_usage(self, usage: TokenUsage) -> None:
         """累加 token 用量."""

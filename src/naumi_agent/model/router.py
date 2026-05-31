@@ -165,11 +165,15 @@ class ModelRouter:
         return min(config_val, model_limit)
 
     @staticmethod
-    def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _sanitize_messages(
+        messages: list[dict[str, Any]],
+        *,
+        preserve_reasoning_content: bool = False,
+    ) -> list[dict[str, Any]]:
         """清理消息列表中不合法的格式，避免 API 报错.
 
         - assistant + tool_calls: content 不能是空字符串，必须为 None
-        - reasoning_content: Kimi API 不接受此字段，必须移除
+        - reasoning_content: 普通兼容模型不接受此字段，Kimi thinking 工具续接必须保留
         - 移除引用了不存在 tool_call_id 的 tool 消息
         - 裁剪末尾不完整的 assistant/tool 序列
         """
@@ -179,8 +183,11 @@ class ModelRouter:
             if m.get("role") == "assistant":
                 if "tool_calls" in m and m.get("content") == "":
                     m["content"] = None
-                # reasoning_content is not accepted by Kimi API
-                m.pop("reasoning_content", None)
+                if preserve_reasoning_content:
+                    if "tool_calls" in m and "reasoning_content" not in m:
+                        m["reasoning_content"] = ""
+                else:
+                    m.pop("reasoning_content", None)
             sanitized.append(m)
 
         # 收集所有有效的 tool_call_id
@@ -199,12 +206,15 @@ class ModelRouter:
             if msg.get("role") != "tool" or msg.get("tool_call_id") in valid_tool_call_ids
         ]
 
-        # Trim trailing incomplete assistant/tool sequences
+        # Trim trailing incomplete assistant sequences, but keep complete
+        # assistant(tool_calls) -> tool(result) pairs. A valid ReAct turn often
+        # ends with tool messages right before the next LLM call.
         while sanitized:
             last = sanitized[-1]
             role = last.get("role", "")
-            # Remove trailing tool messages without a following user message
             if role == "tool":
+                if ModelRouter._has_complete_trailing_tool_results(sanitized):
+                    break
                 sanitized.pop()
                 continue
             # Remove trailing assistant with tool_calls but no tool responses
@@ -218,6 +228,45 @@ class ModelRouter:
             break
 
         return sanitized
+
+    @staticmethod
+    def _has_complete_trailing_tool_results(messages: list[dict[str, Any]]) -> bool:
+        """Return true when trailing tool messages complete the prior tool_calls."""
+        start = len(messages) - 1
+        while start >= 0 and messages[start].get("role") == "tool":
+            start -= 1
+
+        if start < 0:
+            return False
+
+        assistant_msg = messages[start]
+        if assistant_msg.get("role") != "assistant" or not assistant_msg.get("tool_calls"):
+            return False
+
+        expected_ids = {
+            tc.get("id")
+            for tc in assistant_msg.get("tool_calls", [])
+            if isinstance(tc, dict) and tc.get("id")
+        }
+        if not expected_ids:
+            return False
+
+        actual_ids = {
+            msg.get("tool_call_id")
+            for msg in messages[start + 1 :]
+            if msg.get("role") == "tool" and msg.get("tool_call_id")
+        }
+        return expected_ids.issubset(actual_ids)
+
+    def _should_preserve_reasoning_content(
+        self,
+        model: str,
+        thinking: dict[str, str] | None,
+    ) -> bool:
+        """Kimi thinking requires prior assistant tool-call messages to retain reasoning."""
+        if thinking is not None:
+            return thinking.get("type") != "disabled"
+        return self._uses_kimi_protocol(model)
 
     async def call(
         self,
@@ -233,9 +282,15 @@ class ModelRouter:
     ) -> ModelResponse:
         """非流式调用."""
         resolved = model or self.resolve_model(tier)
+        preserve_reasoning = self._should_preserve_reasoning_content(
+            resolved, thinking,
+        )
         kwargs: dict[str, Any] = {
             "model": resolved,
-            "messages": self._sanitize_messages(messages),
+            "messages": self._sanitize_messages(
+                messages,
+                preserve_reasoning_content=preserve_reasoning,
+            ),
             "max_tokens": self._resolve_max_tokens(resolved, max_tokens),
             "temperature": temperature if temperature is not None else self._config.temperature,
         }
@@ -281,9 +336,15 @@ class ModelRouter:
     ) -> AsyncIterator[StreamChunk]:
         """流式调用，yield StreamChunk."""
         resolved = model or self.resolve_model(tier)
+        preserve_reasoning = self._should_preserve_reasoning_content(
+            resolved, thinking,
+        )
         kwargs: dict[str, Any] = {
             "model": resolved,
-            "messages": self._sanitize_messages(messages),
+            "messages": self._sanitize_messages(
+                messages,
+                preserve_reasoning_content=preserve_reasoning,
+            ),
             "max_tokens": self._resolve_max_tokens(resolved, max_tokens),
             "temperature": temperature if temperature is not None else self._config.temperature,
             "stream": True,
@@ -371,6 +432,12 @@ class ModelRouter:
         """Check if the model is a kimi thinking model that supports the thinking param."""
         model_lower = model.lower()
         return "kimi-k2" in model_lower or "kimi-latest" in model_lower
+
+    def _uses_kimi_protocol(self, model: str) -> bool:
+        """Check whether requests go through Kimi's OpenAI-compatible protocol."""
+        model_lower = model.lower()
+        api_base = (self._config.api_base or "").lower()
+        return "kimi" in model_lower or "kimi.com" in api_base
 
     def _apply_thinking(
         self, kwargs: dict[str, Any], thinking: dict[str, str],

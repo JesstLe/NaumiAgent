@@ -2,6 +2,7 @@
 
 import pytest
 
+from naumi_agent.agents.base import AgentCapability, AgentConfig
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.subagent_manager import SubAgentManager, SubTask
@@ -42,6 +43,19 @@ class TestSubAgentManager:
         assert len(agents) == 3
         names = {a["name"] for a in agents}
         assert names == {"coder", "researcher", "browser"}
+
+    @pytest.mark.asyncio
+    async def test_dynamic_spawn_starts_reaper_lazily(self, manager: SubAgentManager) -> None:
+        assert manager._reaper_task is None
+        manager.spawn(
+            AgentConfig(
+                name="temp_agent",
+                description="temporary",
+                capabilities=[AgentCapability.FILE_OPS],
+            )
+        )
+        assert manager._reaper_task is not None
+        await manager.stop_reaper()
 
 
 class TestSubTask:
