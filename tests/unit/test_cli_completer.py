@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from naumi_agent.cli_completer import COMMANDS, SlashCommandCompleter
 from prompt_toolkit.document import Document
+
+from naumi_agent.cli_completer import COMMANDS, SlashCommandCompleter
 
 
 def _complete(text: str) -> list[str]:

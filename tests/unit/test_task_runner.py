@@ -2,33 +2,26 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-import os
-import shutil
-import tempfile
-from collections.abc import Callable
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from naumi_agent.tools.browser.orchestrator.run_template_store import (
+    RunTemplateStore,
+)
+from naumi_agent.tools.browser.orchestrator.task_run_store import TaskRunStore
 from naumi_agent.tools.browser.orchestrator.task_runner import (
     TaskRunner,
-    build_templated_instruction,
-    evaluate_rule,
-    evaluate_template,
+    _format_timeout_duration,
     _normalize_positive_int,
     _normalize_template_input,
     _normalize_template_rule,
     _normalize_template_rules,
-    _format_timeout_duration,
+    build_templated_instruction,
+    evaluate_rule,
+    evaluate_template,
 )
-from naumi_agent.tools.browser.orchestrator.task_run_store import TaskRunStore
-from naumi_agent.tools.browser.orchestrator.run_template_store import (
-    RunTemplateStore,
-)
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -256,35 +249,65 @@ class TestBuildTemplatedInstruction:
 class TestEvaluateRule:
     def test_url_includes_pass(self):
         result = evaluate_rule(
-            {"id": "r1", "name": "URL", "kind": "url_includes", "expected": "/dashboard", "required": True},
+            {
+                "id": "r1",
+                "name": "URL",
+                "kind": "url_includes",
+                "expected": "/dashboard",
+                "required": True,
+            },
             {"url": "https://example.com/dashboard"},
         )
         assert result["passed"] is True
 
     def test_url_includes_fail(self):
         result = evaluate_rule(
-            {"id": "r1", "name": "URL", "kind": "url_includes", "expected": "/dashboard", "required": True},
+            {
+                "id": "r1",
+                "name": "URL",
+                "kind": "url_includes",
+                "expected": "/dashboard",
+                "required": True,
+            },
             {"url": "https://example.com/home"},
         )
         assert result["passed"] is False
 
     def test_title_includes(self):
         result = evaluate_rule(
-            {"id": "r1", "name": "Title", "kind": "title_includes", "expected": "Welcome", "required": True},
+            {
+                "id": "r1",
+                "name": "Title",
+                "kind": "title_includes",
+                "expected": "Welcome",
+                "required": True,
+            },
             {"title": "Welcome to the app"},
         )
         assert result["passed"] is True
 
     def test_text_includes(self):
         result = evaluate_rule(
-            {"id": "r1", "name": "Text", "kind": "text_includes", "expected": "success", "required": True},
+            {
+                "id": "r1",
+                "name": "Text",
+                "kind": "text_includes",
+                "expected": "success",
+                "required": True,
+            },
             {"textPreview": "Operation was a success!"},
         )
         assert result["passed"] is True
 
     def test_case_insensitive(self):
         result = evaluate_rule(
-            {"id": "r1", "name": "X", "kind": "url_includes", "expected": "DASHBOARD", "required": True},
+            {
+                "id": "r1",
+                "name": "X",
+                "kind": "url_includes",
+                "expected": "DASHBOARD",
+                "required": True,
+            },
             {"url": "https://example.com/dashboard"},
         )
         assert result["passed"] is True
@@ -307,7 +330,13 @@ class TestEvaluateTemplate:
                 "id": "t1",
                 "name": "Test",
                 "assertionRules": [
-                    {"id": "r1", "name": "URL", "kind": "url_includes", "expected": "/done", "required": True},
+                    {
+                        "id": "r1",
+                        "name": "URL",
+                        "kind": "url_includes",
+                        "expected": "/done",
+                        "required": True,
+                    },
                 ],
             },
             {"page": {"url": "https://example.com/done"}},
@@ -321,7 +350,13 @@ class TestEvaluateTemplate:
                 "id": "t1",
                 "name": "Test",
                 "assertionRules": [
-                    {"id": "r1", "name": "URL", "kind": "url_includes", "expected": "/done", "required": True},
+                    {
+                        "id": "r1",
+                        "name": "URL",
+                        "kind": "url_includes",
+                        "expected": "/done",
+                        "required": True,
+                    },
                 ],
             },
             {"page": {"url": "https://example.com/other"}},
@@ -335,7 +370,13 @@ class TestEvaluateTemplate:
                 "id": "t1",
                 "name": "Test",
                 "assertionRules": [
-                    {"id": "r1", "name": "Optional", "kind": "url_includes", "expected": "/x", "required": False},
+                    {
+                        "id": "r1",
+                        "name": "Optional",
+                        "kind": "url_includes",
+                        "expected": "/x",
+                        "required": False,
+                    },
                 ],
             },
             {"page": {"url": "https://example.com/other"}},

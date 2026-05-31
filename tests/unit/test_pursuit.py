@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from naumi_agent.agents.base import AgentResult
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.pursuit import (
@@ -18,7 +17,6 @@ from naumi_agent.orchestrator.pursuit import (
     SuccessCriterion,
 )
 from naumi_agent.orchestrator.subagent_manager import SubAgentManager
-from naumi_agent.tools.base import ToolRegistry
 
 
 def _make_engine() -> AgentEngine:
@@ -303,10 +301,9 @@ class TestPursueToolRegistration:
 
     @pytest.mark.asyncio
     async def test_tool_execute_without_init(self) -> None:
-        from naumi_agent.tools.pursuit import PursueTool
-
         # Reset global
         import naumi_agent.tools.pursuit as pursuit_mod
+        from naumi_agent.tools.pursuit import PursueTool
         pursuit_mod._global_pursuit_loop = None
 
         tool = PursueTool()
