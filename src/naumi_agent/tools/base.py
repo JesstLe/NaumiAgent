@@ -78,12 +78,22 @@ class Tool(ABC):
         """执行工具，返回结果文本."""
         ...
 
-    def parse_arguments(self, raw: str) -> dict[str, Any]:
-        """解析 JSON 参数字符串."""
+    def parse_arguments(self, raw: Any) -> dict[str, Any]:
+        """Parse tool arguments from provider JSON strings or decoded objects."""
+        if isinstance(raw, dict):
+            return dict(raw)
+
         try:
-            return json.loads(raw)
-        except json.JSONDecodeError as e:
+            parsed = json.loads(raw)
+        except (TypeError, json.JSONDecodeError) as e:
             raise ValueError(f"Invalid JSON arguments for {self.name}: {e}") from e
+
+        if not isinstance(parsed, dict):
+            raise ValueError(
+                f"Invalid JSON arguments for {self.name}: expected object, "
+                f"got {type(parsed).__name__}"
+            )
+        return parsed
 
 
 class ToolRegistry:

@@ -50,9 +50,13 @@ class SchedulerRunner:
         """Stop the polling loop."""
         if self._loop_task is None:
             return
-        self._loop_task.cancel()
-        await asyncio.gather(self._loop_task, return_exceptions=True)
+        task = self._loop_task
         self._loop_task = None
+        if task.done():
+            return
+        task.cancel()
+        if task.get_loop() is asyncio.get_running_loop():
+            await asyncio.gather(task, return_exceptions=True)
 
     def create(
         self,

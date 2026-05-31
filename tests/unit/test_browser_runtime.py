@@ -15,6 +15,7 @@ from naumi_agent.tools.browser.runtime.artifact_store import (
     ArtifactStore,
     _sanitize_segment,
 )
+from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
 from naumi_agent.tools.browser.runtime.chrome_launcher import (
     ChromeLauncher,
     _expand_home,
@@ -338,6 +339,47 @@ class TestNetworkRecorder:
         rec.enabled = True
         rec.detach()
         assert not rec.enabled
+
+
+# ---------------------------------------------------------------------------
+# BrowserRuntime lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestBrowserRuntimeLifecycle:
+    @pytest.mark.asyncio
+    async def test_stop_releases_playwright_when_already_stopped(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = BrowserRuntime(tmp_path)
+        playwright = AsyncMock()
+        runtime._playwright = playwright
+
+        result = await runtime.stop()
+
+        assert result["alreadyStopped"] is True
+        playwright.stop.assert_awaited_once()
+        assert runtime._playwright is None
+
+    @pytest.mark.asyncio
+    async def test_stop_releases_playwright_after_browser_close(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = BrowserRuntime(tmp_path)
+        runtime.artifacts.start_session()
+        browser = AsyncMock()
+        runtime.browser = browser
+        runtime.context = AsyncMock()
+        runtime.context.storage_state.return_value = {"cookies": [], "origins": []}
+        playwright = AsyncMock()
+        runtime._playwright = playwright
+
+        result = await runtime.stop()
+
+        assert result["alreadyStopped"] is False
+        browser.close.assert_awaited_once()
+        playwright.stop.assert_awaited_once()
+        assert runtime._playwright is None
 
     def test_on_request_disabled(self) -> None:
         rec = NetworkRecorder()
