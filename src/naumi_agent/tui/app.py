@@ -94,6 +94,7 @@ class ChatPanel(VerticalScroll):
         self._thinking_content_widget: Static | None = None
         self._thinking_collapsible: Collapsible | None = None
         self._current_tool_widget: Static | None = None
+        self._model_widget: Static | None = None
 
     def add_user_message(self, content: str) -> None:
         self.mount(Markdown(f"**你** {content}", classes="user-msg"))
@@ -191,16 +192,82 @@ class ChatPanel(VerticalScroll):
         self._thinking_content_widget = None
         self._thinking_collapsible = None
         self._current_tool_widget = None
+        self._model_widget = None
         self.scroll_to(0, animate=False)
+
+    # --- 模型信息 ---
+
+    def show_model(self, model: str) -> None:
+        """Display the model name before response starts."""
+        self._model_widget = Static(
+            Text.from_markup(f"[dim]  ⚙ {model}[/dim]"),
+            classes="tool-done",
+        )
+        self.mount(self._model_widget)
+        self.scroll_end(animate=False)
 
     # --- 结束 ---
 
-    def finalize(self, turns: int, cost: float, tokens: int = 0) -> None:
+    def finalize(
+        self,
+        turns: int,
+        cost: float,
+        tokens: int = 0,
+        model: str = "",
+        token_speed: float = 0.0,
+        ttft: float = 0.0,
+        duration: float = 0.0,
+        cache_tokens: int = 0,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        engine: Any = None,
+    ) -> None:
         self._response_text = ""
         self._response_widget = None
+
+        # Line 1: Model | Turns | Tokens (speed) | Cache | TTFT | Duration
+        line1_parts: list[str] = []
+        if model:
+            line1_parts.append(model)
+        line1_parts.append(f"轮次: {turns}")
+        if input_tokens > 0 or output_tokens > 0:
+            tok_str = f"↑{input_tokens} ↓{output_tokens}"
+        else:
+            tok_str = f"Token: {tokens}"
+        if token_speed > 0:
+            tok_str += f" ({token_speed:.1f} tok/s)"
+        line1_parts.append(tok_str)
+        if cache_tokens > 0:
+            line1_parts.append(f"缓存: {cache_tokens}")
+        if ttft > 0:
+            line1_parts.append(f"首字: {ttft:.1f}s")
+        if duration > 0:
+            line1_parts.append(f"耗时: {duration:.1f}s")
         self.mount(
             Static(
-                Text.from_markup(f"[dim]轮次: {turns} | Token: {tokens} | 费用: ${cost:.4f}[/dim]"),
+                Text.from_markup(f"[dim]{' | '.join(line1_parts)}[/dim]"),
+                classes="usage-info",
+            )
+        )
+
+        # Line 2: Context | Budget | Cost
+        line2_parts: list[str] = []
+        if engine:
+            ctx = engine.get_context_info()
+            ctx_pct = ctx["percentage"]
+            used_k = ctx["used"] / 1000
+            window_k = ctx["window"] / 1000
+            line2_parts.append(f"上下文: {used_k:.0f}K/{window_k:.0f}K ({ctx_pct}%)")
+            budget = engine.get_budget_info()
+            line2_parts.append(
+                f"预算: ${budget['used_usd']:.4f}"
+                f"/${budget['max_usd']:.2f}"
+                f" ({budget['percentage']}%)"
+            )
+        line2_parts.append(f"费用: ${cost:.4f}")
+        self.mount(
+            Static(
+                Text.from_markup(f"[dim]{' | '.join(line2_parts)}[/dim]"),
                 classes="usage-info",
             )
         )
@@ -811,7 +878,33 @@ class NaumiApp(App):
 
     def on_mount(self) -> None:
         """Auto-resume latest session on startup (like Claude Code)."""
+        self._update_git_title()
         self._auto_resume_latest()
+
+    def _update_git_title(self) -> None:
+        """Update sub-title with git branch info."""
+        import subprocess
+
+        try:
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            ).decode().strip()
+            if not branch:
+                return
+            try:
+                dirty = bool(
+                    subprocess.check_output(
+                        ["git", "status", "--porcelain"],
+                        stderr=subprocess.DEVNULL,
+                    ).decode().strip()
+                )
+            except Exception:
+                dirty = False
+            tag = branch + ("*" if dirty else "")
+            self.sub_title = f"📂 {tag} — 通用智能 Agent"
+        except Exception:
+            pass
 
     @work(exclusive=True, exit_on_error=False)
     async def _auto_resume_latest(self) -> None:
@@ -1194,11 +1287,36 @@ class NaumiApp(App):
 
     @work(exclusive=True, exit_on_error=False)
     async def _run_agent(self, task: str) -> None:
+        import time
+
         chat = self.query_one(ChatPanel)
         status = self.query_one(StatusBar)
 
+        # Streaming state for metrics
+        streaming_model = ""
+        streaming_token_count = 0
+        streaming_first_time = 0.0
+        streaming_last_time = 0.0
+        streaming_turn_start = 0.0
+
         async def on_event(event_type: str, data: dict[str, Any]) -> None:
+            nonlocal streaming_model, streaming_token_count
+            nonlocal streaming_first_time, streaming_last_time
+            nonlocal streaming_turn_start
+
             match event_type:
+                case "turn_start":
+                    model_val = data.get("model", "")
+                    if model_val:
+                        streaming_model = model_val
+                        chat.show_model(model_val)
+                    turn = data["turn"]
+                    if turn > 1:
+                        status.status_text = f"🔄 第 {turn} 轮..."
+                    streaming_token_count = 0
+                    streaming_first_time = 0.0
+                    streaming_last_time = 0.0
+                    streaming_turn_start = time.monotonic()
                 case "thinking_start":
                     chat.start_thinking()
                     status.status_text = "💭 思考中..."
@@ -1210,13 +1328,16 @@ class NaumiApp(App):
                     chat.start_response()
                     status.status_text = "✍ 生成回复..."
                 case "token":
-                    chat.add_response_token(data["content"])
+                    content = data["content"]
+                    if content:
+                        now = time.monotonic()
+                        if streaming_first_time == 0.0:
+                            streaming_first_time = now
+                        streaming_last_time = now
+                        streaming_token_count += 1
+                    chat.add_response_token(content)
                 case "response_end":
                     pass
-                case "turn_start":
-                    turn = data["turn"]
-                    if turn > 1:
-                        status.status_text = f"🔄 第 {turn} 轮..."
                 case "tool_start":
                     chat.start_tool(data["name"])
                     status.status_text = f"⚙ {data['name']}..."
@@ -1233,6 +1354,27 @@ class NaumiApp(App):
                     chat.add_response_token(f"**错误**: {data['message']}")
                     chat.finalize(0, 0.0)
 
+        # Calculate token speed
+        def _get_token_speed() -> float:
+            if (
+                streaming_token_count > 0
+                and streaming_first_time > 0
+                and streaming_last_time > streaming_first_time
+            ):
+                return streaming_token_count / (streaming_last_time - streaming_first_time)
+            return 0.0
+
+        def _get_ttft() -> float:
+            if streaming_first_time > 0 and streaming_turn_start > 0:
+                return streaming_first_time - streaming_turn_start
+            return 0.0
+
+        def _get_duration() -> float:
+            if streaming_turn_start > 0:
+                end = streaming_last_time if streaming_last_time > 0 else time.monotonic()
+                return end - streaming_turn_start
+            return 0.0
+
         try:
             result = await self.engine.run_streaming(task, on_event)
 
@@ -1240,16 +1382,41 @@ class NaumiApp(App):
                 chat.start_response()
                 chat.add_response_token(f"**错误**: {result.error}")
 
+            token_speed = _get_token_speed()
+            ttft = _get_ttft()
+            duration = _get_duration()
+            total_tokens = result.usage.total_input_tokens + result.usage.total_output_tokens
+
             chat.finalize(
                 result.usage.turns,
                 result.usage.total_cost_usd,
-                result.usage.total_input_tokens + result.usage.total_output_tokens,
+                total_tokens,
+                model=streaming_model,
+                token_speed=token_speed,
+                ttft=ttft,
+                duration=duration,
+                cache_tokens=result.usage.cache_tokens,
+                engine=self.engine,
             )
-            status.status_text = (
-                f"✅ 完成 | 轮次: {result.usage.turns} | "
-                f"Token: {result.usage.total_input_tokens + result.usage.total_output_tokens} | "
-                f"费用: ${result.usage.total_cost_usd:.4f}"
-            )
+
+            # Build status bar text
+            status_parts: list[str] = []
+            if streaming_model:
+                status_parts.append(streaming_model)
+            status_parts.append(f"轮次: {result.usage.turns}")
+            tok_str = f"↑{result.usage.total_input_tokens} ↓{result.usage.total_output_tokens}"
+            if token_speed > 0:
+                tok_str += f" ({token_speed:.1f} tok/s)"
+            status_parts.append(tok_str)
+            if ttft > 0:
+                status_parts.append(f"首字: {ttft:.1f}s")
+            if duration > 0:
+                status_parts.append(f"耗时: {duration:.1f}s")
+            status_parts.append(f"费用: ${result.usage.total_cost_usd:.4f}")
+            ctx = self.engine.get_context_info()
+            ctx_pct = ctx["percentage"]
+            status_parts.append(f"上下文: {ctx_pct}%")
+            status.status_text = "✅ " + " | ".join(status_parts)
         except Exception as e:
             logger.exception("Agent run failed")
             chat.start_response()
