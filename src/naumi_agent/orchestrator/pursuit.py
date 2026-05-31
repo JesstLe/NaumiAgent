@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from naumi_agent.model.router import ModelRouter
+    from naumi_agent.orchestrator.pursuit_store import PursuitStore
     from naumi_agent.orchestrator.subagent_manager import SubAgentManager
     from naumi_agent.tools.base import ToolRegistry
 
@@ -313,11 +314,13 @@ class GoalPursuitLoop:
         router: ModelRouter,
         tool_registry: ToolRegistry,
         subagent_manager: SubAgentManager,
+        store: PursuitStore | None = None,
         config: PursuitConfig | None = None,
     ) -> None:
         self._router = router
         self._tools = tool_registry
         self._manager = subagent_manager
+        self._store = store
         self._config = config or PursuitConfig()
         self._history: list[IterationCheckpoint] = []
         self._start_time = 0.0
@@ -331,6 +334,53 @@ class GoalPursuitLoop:
     def cancel(self) -> None:
         """Request cancellation of the running loop."""
         self._cancelled = True
+        if self._run is not None:
+            self._run.status = PursuitRunStatus.CANCELLED
+            self._run.updated_at = time.time()
+            self._persist_run()
+
+    def _persist_run(self) -> None:
+        """Persist current run state if a store is configured."""
+        if self._store is None or self._run is None:
+            return
+        self._store.save_run(self._run)
+
+    def list_persisted_runs(self, *, include_finished: bool = True) -> list[PursuitRun]:
+        """List persisted pursuit runs."""
+        if self._store is None:
+            return []
+        return self._store.list_runs(include_finished=include_finished)
+
+    def get_persisted_run(self, run_id: str) -> PursuitRun | None:
+        """Return one persisted pursuit run."""
+        if self._store is None:
+            return None
+        return self._store.get_run(run_id)
+
+    async def resume_persisted(self, run_id: str) -> str:
+        """Restore a persisted run and collect finished background results."""
+        if self._store is None:
+            return "错误：目标追踪持久化存储未初始化。"
+        run = self._store.get_run(run_id)
+        if run is None:
+            return f"错误：目标追踪运行不存在：{run_id}"
+
+        self._run = run
+        self._pending_background = list(run.waiting_on or [])
+        if self._pending_background:
+            await self._collect_background_results()
+
+        if self._pending_background:
+            self._record_waiting("目标追踪仍在等待后台任务完成。")
+        elif self._run.status == PursuitRunStatus.WAITING:
+            self._run.status = PursuitRunStatus.RUNNING
+            self._run.phase = "assess"
+            self._run.waiting_on = []
+            self._persist_run()
+
+        from naumi_agent.orchestrator.pursuit_store import format_run
+
+        return "目标追踪状态已恢复。\n\n" + format_run(self._run)
 
     def _update_run(
         self,
@@ -359,6 +409,7 @@ class GoalPursuitLoop:
             self._run.blocked_reason = blocked_reason
         if next_action:
             self._run.next_action = next_action
+        self._persist_run()
 
     def _record_stop(
         self,
@@ -391,6 +442,7 @@ class GoalPursuitLoop:
             is_hard=False,
             timestamp=time.time(),
         ))
+        self._persist_run()
 
     def _apply_stop_decision(self, decision: PursuitStopDecision) -> None:
         if self._run is None:
@@ -404,6 +456,7 @@ class GoalPursuitLoop:
         self._run.updated_at = time.time()
         for item in decision.evidence:
             self._run.add_evidence(item)
+        self._persist_run()
 
     def _record_checkpoint_evidence(self, checkpoint: IterationCheckpoint) -> None:
         """Record concrete assessment facts in the live state."""
@@ -420,6 +473,7 @@ class GoalPursuitLoop:
             is_hard=False,
             timestamp=time.time(),
         ))
+        self._persist_run()
 
     def _record_action_evidence(self, results: list[dict[str, Any]]) -> None:
         """Record action execution results in the live state."""
@@ -436,6 +490,7 @@ class GoalPursuitLoop:
             ))
             if status not in {"completed", "waiting"}:
                 self._run.failure_count += 1
+        self._persist_run()
 
     async def _ensure_worktree_for_code_goal(self, spec: GoalSpec) -> None:
         """Create an isolated worktree for code-heavy pursuit goals when possible."""
@@ -458,6 +513,7 @@ class GoalPursuitLoop:
                 is_hard=False,
                 timestamp=time.time(),
             ))
+            self._persist_run()
             return
 
         path = self._extract_markdown_field(str(output), "路径")
@@ -470,6 +526,7 @@ class GoalPursuitLoop:
             is_hard="已创建隔离 worktree" in str(output) or "Worktree:" in str(output),
             timestamp=time.time(),
         ))
+        self._persist_run()
 
     async def _collect_background_results(self) -> None:
         """Collect finished background task results as hard pursuit evidence."""
@@ -519,6 +576,7 @@ class GoalPursuitLoop:
         if not still_waiting and self._run.status == PursuitRunStatus.WAITING:
             self._run.status = PursuitRunStatus.RUNNING
             self._run.phase = "assess"
+        self._persist_run()
 
     async def _completion_decision(self, spec: GoalSpec) -> PursuitStopDecision:
         """Decide whether the goal is objectively complete."""
@@ -592,6 +650,7 @@ class GoalPursuitLoop:
             started_at=self._start_time,
             updated_at=self._start_time,
         )
+        self._persist_run()
 
         # Phase 0: Parse the goal
         spec = await self._parse_goal(goal)
@@ -1611,6 +1670,7 @@ class GoalPursuitLoop:
                 is_hard=True,
                 timestamp=time.time(),
             ))
+            self._persist_run()
 
         await self._schedule_background_followup(task_id)
         return {
@@ -1629,7 +1689,8 @@ class GoalPursuitLoop:
 
         when = (datetime.now().astimezone() + timedelta(minutes=2)).replace(microsecond=0)
         prompt = (
-            f"后台任务 {task_id} 可能已完成。请继续 /pursue，"
+            f"后台任务 {task_id} 可能已完成。"
+            f"请继续 `/pursue resume {self._run.id if self._run else ''}`，"
             "读取 background_status 和 background_read_output 后判断下一步。"
         )
         try:
@@ -1648,6 +1709,7 @@ class GoalPursuitLoop:
                 is_hard="调度任务已创建" in output,
                 timestamp=time.time(),
             ))
+            self._persist_run()
 
     async def _execute_via_agent(
         self,

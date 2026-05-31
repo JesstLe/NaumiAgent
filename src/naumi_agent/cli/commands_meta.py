@@ -16,6 +16,11 @@ async def run_pursue(engine: Any, goal: str) -> None:
     """执行目标追踪循环."""
     from rich.progress import Progress, SpinnerColumn, TextColumn
 
+    parts = goal.strip().split(maxsplit=1)
+    if parts and parts[0] in {"list", "status", "resume"}:
+        await _run_pursue_meta(engine, parts[0], parts[1] if len(parts) > 1 else "")
+        return
+
     console.print(
         Panel(
             f"[bold green]目标追踪启动[/bold green]\n\n{goal}",
@@ -23,7 +28,6 @@ async def run_pursue(engine: Any, goal: str) -> None:
             title="🎯 /pursue",
         )
     )
-
     tool = engine.tool_registry.get("pursue_goal")
     if not tool:
         console.print("[red]目标追踪工具未注册[/red]")
@@ -48,6 +52,35 @@ async def run_pursue(engine: Any, goal: str) -> None:
             result,
             border_style="green" if "达成" in result else "yellow",
             title="🎯 目标追踪报告",
+        )
+    )
+
+
+async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
+    """执行 pursuit 持久化状态命令."""
+    tool_map = {
+        "list": "pursuit_list",
+        "status": "pursuit_status",
+        "resume": "pursuit_resume",
+    }
+    tool_name = tool_map[subcommand]
+    tool = engine.tool_registry.get(tool_name)
+    if not tool:
+        console.print(f"[red]工具未注册: {tool_name}[/red]")
+        return
+    if subcommand in {"status", "resume"} and not arg:
+        console.print(f"[yellow]用法: /pursue {subcommand} <运行ID>[/yellow]")
+        return
+    if subcommand == "list":
+        result = await tool.execute(active_only="--active" in arg.split())
+    else:
+        result = await tool.execute(run_id=arg.strip())
+    console.print(
+        Panel(
+            Markdown(result),
+            title="[bold cyan]目标追踪状态[/bold cyan]",
+            border_style="cyan",
+            padding=(1, 2),
         )
     )
 
