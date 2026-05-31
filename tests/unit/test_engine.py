@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.config.settings import AppConfig, MemoryConfig, SafetyConfig
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.orchestrator.engine import AgentEngine
@@ -204,6 +204,12 @@ class TestBudgetCheck:
         assert result.status == "budget_exceeded"
         assert "预算已耗尽" in result.response
         assert "输入 token" in result.response
+
+    def test_bypass_mode_tracks_budget_without_stopping(self) -> None:
+        config = AppConfig(safety=SafetyConfig(permission_mode="bypass"))
+        engine = AgentEngine(config)
+        engine._budget_tracker._total_input = 999_999_999
+        assert engine._check_budget() is None
 
     @pytest.mark.asyncio
     async def test_react_loop_stops_after_budget_exceeded(self, engine: AgentEngine) -> None:

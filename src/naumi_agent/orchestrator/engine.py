@@ -712,6 +712,8 @@ class AgentEngine:
                 )
 
     def _check_budget(self) -> AgentResult | None:
+        if PermissionMode(self._config.safety.permission_mode) == PermissionMode.BYPASS:
+            return None
         if not self._budget_tracker.is_exceeded():
             return None
 
