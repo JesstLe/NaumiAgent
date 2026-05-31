@@ -346,17 +346,6 @@ async def _chat(config_path: str) -> None:
     if git["branch"]:
         cli.set_git_info(git["branch"], git["dirty"])
 
-    # Auto-resume: load latest session on startup (like Claude Code)
-    try:
-        sessions, _ = await engine.list_sessions(page=1, page_size=1)
-        if sessions and _has_user_conversation(sessions[0]):
-            await engine.load_session(sessions[0].id)
-            session = engine._session
-            if session:
-                _replay_session_to_cli(cli, session, engine=engine)
-    except Exception:
-        pass  # silently continue if auto-resume fails
-
     async def on_submit(text: str) -> None:
         if text in ("/quit", "/q", "/exit", "exit"):
             await engine.shutdown()
