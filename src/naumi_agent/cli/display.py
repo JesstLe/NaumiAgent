@@ -27,6 +27,8 @@ def print_help() -> None:
     console.print("[bold]可用命令:[/bold]")
     commands = [
         ("/help", "显示帮助"),
+        ("/copy", "复制/导出当前完整记录 (Ctrl+Y)"),
+        ("/pwd", "显示当前工作目录"),
         ("/tools", "列出可用工具"),
         ("/model", "显示模型配置"),
         ("/usage", "显示 token 用量"),

@@ -130,6 +130,7 @@ def _show_cli_status(cli: Any, engine: Any) -> None:
     parts: list[str] = []
     model = engine.router.resolve_model("capable")
     parts.append(model)
+    parts.append(f"工作目录: {Path.cwd()}")
     u = engine.usage
     total_tok = u.total_input_tokens + u.total_output_tokens
     parts.append(f"Token: {total_tok}")
@@ -655,6 +656,13 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             _print_help()
         case "/hooks":
             _show_hooks(engine)
+        case "/copy":
+            if _active_cli:
+                _active_cli.copy_transcript()
+            else:
+                console.print("[yellow]当前界面不支持复制完整记录[/yellow]")
+        case "/pwd":
+            console.print(f"当前工作目录: [cyan]{Path.cwd()}[/cyan]")
         case "/skills":
             _show_skills(engine)
         case "/tools" | "/t":
@@ -1030,6 +1038,8 @@ def _print_help() -> None:
     console.print("[bold]可用命令:[/bold]")
     commands = [
         ("/help", "显示帮助"),
+        ("/copy", "复制/导出当前完整记录 (Ctrl+Y)"),
+        ("/pwd", "显示当前工作目录"),
         ("/tools", "列出可用工具"),
         ("/model", "显示模型配置"),
         ("/usage", "显示 token 用量"),

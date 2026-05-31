@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from prompt_toolkit import Application
@@ -19,6 +20,7 @@ from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.styles import Style
 
 from naumi_agent.cli_completer import SlashCommandCompleter
+from naumi_agent.clipboard import copy_or_save_transcript
 
 
 class _OutputWindow(Window):
@@ -207,6 +209,10 @@ class CLIApp:
                     self._output_win._scroll_down()
                 self._invalidate()
 
+        @self._kb.add("c-y")
+        def _copy_all(event: Any) -> None:
+            self.copy_transcript()
+
     def set_submit_handler(self, handler: Callable[[str], Awaitable[None]]) -> None:
         self._on_submit = handler
 
@@ -260,6 +266,20 @@ class CLIApp:
         if self._output_win:
             self._output_win.scroll_to_bottom()
         self._invalidate()
+
+    def get_transcript(self) -> str:
+        """Return the complete visible transcript, including live output."""
+        return "".join([*self._output, *self._live])
+
+    def copy_transcript(self) -> str:
+        """Copy or save the complete transcript and show a short status line."""
+        result = copy_or_save_transcript(
+            self.get_transcript(),
+            base_dir=Path.cwd() / "data",
+            prefix="cli-transcript",
+        )
+        self.append_output(f"\033[2m{result.message}\033[0m\n")
+        return result.message
 
     def set_git_info(self, branch: str, dirty: bool) -> None:
         """Update git branch shown in the prompt prefix."""

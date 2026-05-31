@@ -15,6 +15,8 @@ from prompt_toolkit.document import Document
 COMMANDS: list[tuple[str, str, bool]] = [
     # 基础
     ("/help", "显示帮助", False),
+    ("/copy", "复制/导出当前完整记录", False),
+    ("/pwd", "显示当前工作目录", False),
     ("/quit", "退出", False),
     ("/exit", "退出", False),
     ("/tools", "列出可用工具", False),

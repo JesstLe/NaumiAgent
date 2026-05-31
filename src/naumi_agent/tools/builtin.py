@@ -307,7 +307,7 @@ class BashRunTool(Tool):
 
     @property
     def description(self) -> str:
-        return "在 shell 中执行命令并返回输出。支持超时设置。工作目录默认为项目根目录。"
+        return "在 shell 中执行命令并返回输出。支持超时设置。工作目录默认为当前进程目录。"
 
     @property
     def parameters_schema(self) -> dict[str, Any]:

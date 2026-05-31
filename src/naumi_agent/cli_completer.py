@@ -11,6 +11,8 @@ from prompt_toolkit.document import Document
 # (command, description, takes_argument)
 COMMANDS: list[tuple[str, str, bool]] = [
     ("/help", "显示帮助", False),
+    ("/copy", "复制/导出当前完整记录", False),
+    ("/pwd", "显示当前工作目录", False),
     ("/tools", "列出可用工具", False),
     ("/model", "显示模型配置", False),
     ("/version", "显示版本号", False),
