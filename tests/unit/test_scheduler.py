@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -29,6 +30,11 @@ def runner(tmp_path: Path, fixed_now: list[datetime]) -> SchedulerRunner:
         now_fn=lambda: fixed_now[0],
         poll_seconds=0.01,
     )
+
+
+async def _start_runner(runner: SchedulerRunner) -> None:
+    runner.start()
+    await asyncio.sleep(0)
 
 
 class TestCronSchedule:
@@ -147,6 +153,23 @@ class TestSchedulerRunner:
                 prompt="坏目标",
                 target="task",
             )
+
+    def test_shutdown_from_different_loop_does_not_raise(
+        self,
+        runner: SchedulerRunner,
+    ) -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_start_runner(runner))
+            assert runner._loop_task is not None
+            assert runner._loop_task.get_loop() is loop
+
+            asyncio.run(runner.shutdown())
+
+            assert runner._loop_task is None
+            loop.run_until_complete(asyncio.sleep(0))
+        finally:
+            loop.close()
 
 
 class TestSchedulerTools:

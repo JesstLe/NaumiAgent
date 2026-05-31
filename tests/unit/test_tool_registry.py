@@ -40,6 +40,28 @@ class TestToolRegistry:
             assert "name" in t["function"]
             assert "parameters" in t["function"]
 
+    def test_parse_arguments_accepts_decoded_object(self, registry: ToolRegistry) -> None:
+        tool = registry.get("file_read")
+        assert tool is not None
+
+        assert tool.parse_arguments({"path": "pyproject.toml"}) == {
+            "path": "pyproject.toml",
+        }
+
+    def test_parse_arguments_rejects_non_object_json(self, registry: ToolRegistry) -> None:
+        tool = registry.get("file_read")
+        assert tool is not None
+
+        with pytest.raises(ValueError, match="expected object"):
+            tool.parse_arguments('["pyproject.toml"]')
+
+    def test_parse_arguments_rejects_non_json_value(self, registry: ToolRegistry) -> None:
+        tool = registry.get("file_read")
+        assert tool is not None
+
+        with pytest.raises(ValueError, match="Invalid JSON arguments"):
+            tool.parse_arguments(None)
+
 
 class TestFileReadTool:
     @pytest.fixture

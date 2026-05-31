@@ -771,8 +771,19 @@ class BrowserRuntime:
         self.trace_active = False
         self.attached_video_capability = False
 
+    async def _stop_playwright_driver(self) -> None:
+        if self._playwright is None:
+            return
+        try:
+            await self._playwright.stop()
+        except Exception as exc:
+            logger.warning("Failed to stop Playwright driver: %s", exc)
+        finally:
+            self._playwright = None
+
     async def stop(self) -> dict[str, Any]:
         if not self.browser:
+            await self._stop_playwright_driver()
             return {
                 "alreadyStopped": True,
                 "artifacts": self.last_session_summary,
@@ -804,6 +815,7 @@ class BrowserRuntime:
         await self._hide_browser_active_border()
         if self.browser:
             await self.browser.close()
+        await self._stop_playwright_driver()
 
         self._flush_logs_to_artifacts()
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -16,13 +17,19 @@ from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, St
 from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import TokenBudget
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
-from naumi_agent.tools.base import ToolCall, ToolResult
+from naumi_agent.tools.base import Tool, ToolCall, ToolResult
 
 
 @pytest.fixture
-def engine() -> AgentEngine:
+def engine(request: pytest.FixtureRequest) -> AgentEngine:
     config = AppConfig()
-    return AgentEngine(config)
+    instance = AgentEngine(config)
+
+    def cleanup() -> None:
+        asyncio.run(instance.shutdown())
+
+    request.addfinalizer(cleanup)
+    return instance
 
 
 @pytest.fixture
@@ -213,6 +220,33 @@ class TestToolExecution:
         assert result.status == "error"
 
     @pytest.mark.asyncio
+    async def test_decoded_dict_args_execute_normally(self, engine: AgentEngine) -> None:
+        engine._permission_checker = PermissionChecker(PermissionMode.BYPASS)
+        tc = ToolCall(
+            id="x",
+            name="file_read",
+            arguments={"path": "pyproject.toml"},  # type: ignore[arg-type]
+        )
+
+        result = await engine._execute_tool(tc)
+
+        assert result.status == "success"
+        assert "pyproject.toml" in result.content
+
+    @pytest.mark.asyncio
+    async def test_non_string_invalid_args_do_not_crash(self, engine: AgentEngine) -> None:
+        tc = ToolCall(
+            id="x",
+            name="file_read",
+            arguments=None,  # type: ignore[arg-type]
+        )
+
+        result = await engine._execute_tool(tc)
+
+        assert result.status == "error"
+        assert "Invalid JSON arguments" in result.content
+
+    @pytest.mark.asyncio
     async def test_path_sandbox_blocked(self, engine: AgentEngine) -> None:
         tc = ToolCall(id="x", name="file_read", arguments='{"path": "/etc/passwd"}')
         result = await engine._execute_tool(tc)
@@ -390,6 +424,27 @@ class TestRun:
     @pytest.mark.asyncio
     async def test_repeated_tool_call_breaks_loop(self, engine: AgentEngine) -> None:
         """Identical tool call 3x in a row should inject stop message."""
+        class FakeBrowserGotoTool(Tool):
+            @property
+            def name(self) -> str:
+                return "browser_goto"
+
+            @property
+            def description(self) -> str:
+                return "Fake browser navigation for unit tests."
+
+            @property
+            def parameters_schema(self) -> dict[str, object]:
+                return {
+                    "type": "object",
+                    "properties": {"url": {"type": "string"}},
+                    "required": ["url"],
+                }
+
+            async def execute(self, **kwargs: object) -> str:
+                return f"navigated: {kwargs.get('url', '')}"
+
+        engine.tool_registry.register(FakeBrowserGotoTool())
         call_count = 0
         tool_response = ModelResponse(
             content="好的我来打开",
