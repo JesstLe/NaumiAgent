@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2026-06-01
+
+### Added
+- **工具发现能力** — 新增 `tool_search`，基于真实 `ToolRegistry` 搜索工具名称、描述、参数和能力标签，支持精确选择与必选关键词。
+- **分析工具确定性落地** — `/vibe` 可生成并可选写入 Python/Node/static 可运行 Demo scaffold；`/entropy` 可在无模型时生成 3 句熵减锚点；`/eval` 可生成可运行的 baseline pytest；`/heal` 可从 traceback 生成确定性自愈诊断。
+- **无模型静态分析 fallback** — `/chaos`、`/scale`、`/state` 现在即使模型路由未初始化，也会返回真实静态扫描证据。
+
+### Changed
+- **权限决策结构化** — 权限拒绝原因增加结构化 code/risk level，用户可见错误提示改为中文。
+- **analysis 模块拆分起步** — 抽出 `analysis_common.py` 承载目标解析、源码读取、LLM 调用和 router fallback，降低后续按能力族拆分风险。
+
+### Fixed
+- scheduler 通知注入不再隐式启动后台 runner，避免异步副作用。
+
 ## [0.1.2] - 2025-05-17
 
 ### Added
