@@ -113,6 +113,7 @@ def test_context_compacted_rendering_includes_preserved_state_and_warnings() -> 
     rendered = _format_context_compacted({
         "before": 64,
         "after": 8,
+        "archived_tool_results": 2,
         "preserved_sections": ["todo", "team_protocol"],
         "warnings": ["有 1 个未完成/阻塞 todo"],
     })
@@ -122,6 +123,7 @@ def test_context_compacted_rendering_includes_preserved_state_and_warnings() -> 
     assert "todo" in rendered
     assert "team_protocol" in rendered
     assert "未完成/阻塞" in rendered
+    assert "大型工具结果" in rendered
 
 
 def test_recovery_event_rendering_includes_reason_and_action() -> None:

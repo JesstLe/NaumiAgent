@@ -1,5 +1,6 @@
 """上下文压缩器测试."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -58,6 +59,50 @@ class TestContextCompactor:
         assert "[User]" in text
         assert "[Assistant]" in text
         assert "[Tool Result" in text
+
+    def test_offload_large_tool_result_writes_artifact(self, tmp_path) -> None:
+        config = MemoryConfig(session_db_path=str(tmp_path / "sessions.db"))
+        router = ModelRouter(ModelConfig())
+        compactor = ContextCompactor(config, router)
+        large_content = "line\n" * 4000
+        messages = [
+            {"role": "user", "content": "run command"},
+            {"role": "tool", "tool_call_id": "call/1", "content": large_content},
+        ]
+
+        updated, archived = compactor.offload_large_tool_results(
+            messages,
+            min_chars=1_000,
+        )
+
+        assert len(archived) == 1
+        artifact_path = archived[0].path
+        assert "compaction-artifacts" in artifact_path
+        assert "call_1" in artifact_path
+        assert archived[0].chars == len(large_content)
+        assert Path(artifact_path).read_text(encoding="utf-8") == large_content
+        placeholder = updated[1]["content"]
+        assert "[大型工具结果已归档]" in placeholder
+        assert "artifact:" in placeholder
+        assert "预览：" in placeholder
+        assert len(placeholder) < len(large_content)
+
+    def test_offload_large_tool_result_is_idempotent(self, tmp_path) -> None:
+        config = MemoryConfig(session_db_path=str(tmp_path / "sessions.db"))
+        router = ModelRouter(ModelConfig())
+        compactor = ContextCompactor(config, router)
+        messages = [
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": "[大型工具结果已归档]\nartifact: /tmp/x",
+            },
+        ]
+
+        updated, archived = compactor.offload_large_tool_results(messages, min_chars=1)
+
+        assert archived == []
+        assert updated == messages
 
     async def test_compact_preserves_system(self, compactor: ContextCompactor) -> None:
         messages = [

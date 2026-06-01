@@ -816,7 +816,14 @@ class AgentEngine:
         hard_cap = self._config.safety.max_input_tokens
         max_tokens = min(context_window, hard_cap)
 
-        if not self._compactor.should_compact(self._messages, max_tokens):
+        self._messages, archived_tool_results = (
+            self._compactor.offload_large_tool_results(self._messages)
+        )
+
+        if (
+            not archived_tool_results
+            and not self._compactor.should_compact(self._messages, max_tokens)
+        ):
             return
 
         before = len(self._messages)
@@ -830,13 +837,14 @@ class AgentEngine:
         )
         after = len(self._messages)
 
-        if after < before:
+        if after < before or archived_tool_results:
             logger.info(
-                "Context compacted: %d → %d messages (window=%d, cap=%d)",
+                "Context compacted: %d → %d messages (window=%d, cap=%d, archived=%d)",
                 before,
                 after,
                 context_window,
                 hard_cap,
+                len(archived_tool_results),
             )
             if on_event:
                 await on_event(
@@ -844,6 +852,7 @@ class AgentEngine:
                     {
                         "before": before,
                         "after": after,
+                        "archived_tool_results": len(archived_tool_results),
                         "preserved_sections": preserved_sections,
                         "warnings": warnings,
                     },

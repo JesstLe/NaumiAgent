@@ -1498,6 +1498,12 @@ class NaumiApp(App):
                     )
                     preserved = data.get("preserved_sections", [])
                     warnings = data.get("warnings", [])
+                    archived = int(data.get("archived_tool_results", 0) or 0)
+                    archived_text = (
+                        f"；归档：{archived} 个大型工具结果"
+                        if archived
+                        else ""
+                    )
                     preserved_text = (
                         "；保留：" + "、".join(str(item) for item in preserved)
                         if isinstance(preserved, list) and preserved
@@ -1513,7 +1519,7 @@ class NaumiApp(App):
                             Text.from_markup(
                                 "[magenta]  context compacted: "
                                 f"{data['before']} → {data['after']} messages"
-                                f"{preserved_text}{warning_text}[/magenta]"
+                                f"{archived_text}{preserved_text}{warning_text}[/magenta]"
                             ),
                             classes="tool-done",
                         )

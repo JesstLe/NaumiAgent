@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -707,6 +708,53 @@ class TestBudgetCheck:
 
 
 class TestContextCompactionPreservation:
+    @pytest.mark.asyncio
+    async def test_maybe_compact_archives_large_tool_results(
+        self,
+        tmp_path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        try:
+            large_content = "tool-output\n" * 2000
+            engine._messages = [
+                {"role": "system", "content": "system prompt"},
+                {"role": "user", "content": "生成大输出"},
+                {"role": "tool", "tool_call_id": "call_big", "content": large_content},
+            ]
+
+            await engine._maybe_compact(on_event)
+
+            tool_message = next(
+                msg for msg in engine._messages
+                if msg.get("role") == "tool"
+            )
+            content = str(tool_message.get("content", ""))
+            assert "[大型工具结果已归档]" in content
+            assert "artifact:" in content
+            artifact_line = next(
+                line for line in content.splitlines()
+                if line.startswith("artifact: ")
+            )
+            artifact_path = artifact_line.removeprefix("artifact: ")
+            assert Path(artifact_path).read_text(encoding="utf-8") == large_content
+
+            compacted_events = [
+                data for event, data in events
+                if event == "context_compacted"
+            ]
+            assert compacted_events
+            assert compacted_events[-1]["archived_tool_results"] == 1
+        finally:
+            await engine.shutdown()
+
     @pytest.mark.asyncio
     async def test_maybe_compact_preserves_runtime_state(
         self,
