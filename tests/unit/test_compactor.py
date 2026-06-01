@@ -71,6 +71,41 @@ class TestContextCompactor:
         # 应保持原样
         assert len(result) == len(messages)
 
+    async def test_compact_appends_runtime_snapshot(
+        self,
+        compactor: ContextCompactor,
+    ) -> None:
+        messages = [
+            {"role": "system", "content": "system prompt"},
+            *[{"role": "user", "content": f"msg {i} " * 50} for i in range(8)],
+            {"role": "user", "content": "latest question"},
+            {"role": "assistant", "content": "latest answer"},
+        ]
+        summary_response = ModelResponse(
+            content="## 任务目标\n继续优化项目",
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+            model="test",
+        )
+
+        with patch.object(
+            compactor._router,
+            "call",
+            new_callable=AsyncMock,
+            return_value=summary_response,
+        ):
+            result = await compactor.compact(
+                messages,
+                max_tokens=1000,
+                runtime_snapshot="### Todo 状态\n- #1 [blocked] 等待用户确认",
+            )
+
+        summary_messages = [
+            msg for msg in result
+            if "压缩时保留的运行时状态" in str(msg.get("content", ""))
+        ]
+        assert summary_messages
+        assert "等待用户确认" in summary_messages[0]["content"]
+
 
 class TestParseExtractionResponse:
     def test_valid_json_array(self):

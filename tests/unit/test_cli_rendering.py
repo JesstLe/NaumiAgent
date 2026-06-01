@@ -7,6 +7,7 @@ import pytest
 from naumi_agent.main import (
     _capture,
     _cli_event_factory,
+    _format_context_compacted,
     _print_tool_output,
     _show_cli_status,
     _tool_label,
@@ -104,3 +105,18 @@ async def test_fullscreen_cli_tool_end_includes_tool_output() -> None:
     assert "file_edit" in text
     assert "-old" in text
     assert "+new" in text
+
+
+def test_context_compacted_rendering_includes_preserved_state_and_warnings() -> None:
+    rendered = _format_context_compacted({
+        "before": 64,
+        "after": 8,
+        "preserved_sections": ["todo", "team_protocol"],
+        "warnings": ["有 1 个未完成/阻塞 todo"],
+    })
+
+    assert "64" in rendered
+    assert "8" in rendered
+    assert "todo" in rendered
+    assert "team_protocol" in rendered
+    assert "未完成/阻塞" in rendered

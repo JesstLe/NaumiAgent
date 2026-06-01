@@ -95,6 +95,7 @@ class SubAgentManager:
         self._factory = DynamicAgentFactory(engine.router)
         self.message_bus = AgentMessageBus()
         self._lifecycle: dict[str, AgentLifecycle] = {}
+        self._event_history: list[dict[str, Any]] = []
         self._reaper_task: asyncio.Task[None] | None = None
         self._hooks: HookManager = engine.hooks
 
@@ -106,6 +107,11 @@ class SubAgentManager:
     def get_state(self, name: str) -> AgentState | None:
         lc = self._lifecycle.get(name)
         return lc.state if lc else None
+
+    def get_recent_events(self, limit: int = 8) -> list[dict[str, Any]]:
+        """Return recent subagent lifecycle events for context preservation."""
+        safe_limit = max(1, min(limit, 50))
+        return list(self._event_history[-safe_limit:])
 
     def _transition(self, name: str, new_state: AgentState) -> None:
         lc = self._lifecycle.get(name)
@@ -331,7 +337,7 @@ class SubAgentManager:
         """将子任务委派给合适的 Agent."""
         agent_name = task.agent_name or self.select_agent(task.description)
         if not agent_name:
-            await _emit_subagent_event(
+            await self._emit_subagent_event(
                 event_callback,
                 status="failed",
                 task_id=task.id,
@@ -346,7 +352,7 @@ class SubAgentManager:
 
         agent = self.get_agent(agent_name)
         if not agent:
-            await _emit_subagent_event(
+            await self._emit_subagent_event(
                 event_callback,
                 status="failed",
                 task_id=task.id,
@@ -398,7 +404,7 @@ class SubAgentManager:
         logger.info("Delegating task %s to agent %s", task.id, agent_name)
         self._ensure_lifecycle(agent_name)
         self._transition(agent_name, AgentState.RUNNING)
-        await _emit_subagent_event(
+        await self._emit_subagent_event(
             event_callback,
             status="started",
             task_id=task.id,
@@ -449,7 +455,7 @@ class SubAgentManager:
         finally:
             self._transition(agent_name, AgentState.IDLE)
 
-        await _emit_subagent_event(
+        await self._emit_subagent_event(
             event_callback,
             status=result.status,
             task_id=task.id,
@@ -488,6 +494,33 @@ class SubAgentManager:
             await self.message_bus.publish(bus_msg)
 
         return result
+
+    async def _emit_subagent_event(
+        self,
+        callback: EventCallback | None,
+        *,
+        status: str,
+        task_id: str,
+        agent_name: str,
+        description: str,
+        message: str,
+        tokens: int = 0,
+        cost: float = 0.0,
+    ) -> None:
+        payload = {
+            "status": status,
+            "task_id": task_id,
+            "agent_name": agent_name,
+            "description": description,
+            "message": message,
+            "tokens": tokens,
+            "cost": cost,
+            "timestamp": time.time(),
+        }
+        self._event_history.append(payload)
+        if len(self._event_history) > 100:
+            self._event_history = self._event_history[-100:]
+        await _emit_subagent_event_payload(callback, payload)
 
     async def execute_sequential(
         self,
@@ -661,9 +694,7 @@ async def _emit_subagent_event(
     tokens: int = 0,
     cost: float = 0.0,
 ) -> None:
-    if callback is None:
-        return
-    await callback("subagent_event", {
+    await _emit_subagent_event_payload(callback, {
         "status": status,
         "task_id": task_id,
         "agent_name": agent_name,
@@ -672,6 +703,15 @@ async def _emit_subagent_event(
         "tokens": tokens,
         "cost": cost,
     })
+
+
+async def _emit_subagent_event_payload(
+    callback: EventCallback | None,
+    payload: dict[str, Any],
+) -> None:
+    if callback is None:
+        return
+    await callback("subagent_event", payload)
 
 
 def _agent_result_message(result: AgentResult) -> str:

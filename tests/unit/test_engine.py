@@ -10,15 +10,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from naumi_agent.agents.base import AgentResult
+from naumi_agent.agents.team_protocol import execute_team_signal
 from naumi_agent.config.settings import AppConfig, MemoryConfig, SafetyConfig
 from naumi_agent.hooks import HookContext, HookPoint
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
+from naumi_agent.orchestrator.subagent_manager import SubTask
 from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import TokenBudget
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
+from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tools.base import Tool, ToolCall, ToolResult
 
 
@@ -684,6 +687,85 @@ class TestBudgetCheck:
 
         assert result.status == "budget_exceeded"
         assert "费用" in result.response
+
+
+class TestContextCompactionPreservation:
+    @pytest.mark.asyncio
+    async def test_maybe_compact_preserves_runtime_state(
+        self,
+        tmp_path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        try:
+            session = await engine.get_or_create_session()
+            engine.task_store.set_session(session.id)
+            task = await engine.task_store.create_task(subject="等待 team protocol 复核")
+            await engine.task_store.update_task(
+                task.id,
+                status=TaskStatus.BLOCKED,
+                active_form="阻塞：等待用户确认 API 范围",
+            )
+            await execute_team_signal(
+                engine.subagent_manager,
+                event_type="handoff",
+                sender="main_agent",
+                recipient="coder",
+                content="接手压缩保真验证。",
+                priority="high",
+            )
+            await engine.subagent_manager.delegate(
+                SubTask(id="sub-no-agent", description="没有明确关键词的任务"),
+            )
+            engine._messages = [
+                {"role": "system", "content": "system prompt"},
+                *[
+                    {"role": "user", "content": f"历史消息 {i} " * 60}
+                    for i in range(56)
+                ],
+                {"role": "user", "content": "先不要全量测试，目前比较耽误时间，可以最后做"},
+                {"role": "assistant", "content": "收到"},
+            ]
+
+            summary = ModelResponse(
+                content="## 任务目标\n继续优化运行时压缩",
+                usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+                model="test",
+            )
+            with (
+                patch.object(engine._compactor, "_extract_memories", new_callable=AsyncMock),
+                patch.object(engine._router, "call", new_callable=AsyncMock, return_value=summary),
+            ):
+                await engine._maybe_compact(on_event)
+
+            compacted_events = [
+                data for event, data in events
+                if event == "context_compacted"
+            ]
+            assert compacted_events
+            assert "todo" in compacted_events[-1]["preserved_sections"]
+            assert "team_protocol" in compacted_events[-1]["preserved_sections"]
+            assert "subagent_events" in compacted_events[-1]["preserved_sections"]
+            assert compacted_events[-1]["warnings"]
+
+            summary_text = "\n".join(
+                str(msg.get("content", "")) for msg in engine._messages
+                if msg.get("role") == "system"
+            )
+            assert "压缩时保留的运行时状态" in summary_text
+            assert "等待 team protocol 复核" in summary_text
+            assert "接手压缩保真验证" in summary_text
+            assert "没有找到合适的子 Agent" in summary_text
+            assert "先不要全量测试" in summary_text
+        finally:
+            await engine.shutdown()
 
 
 class TestRun:
