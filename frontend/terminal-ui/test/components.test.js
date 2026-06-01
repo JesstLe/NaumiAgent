@@ -4,6 +4,7 @@ import { ANSI, stripAnsi, visibleWidth } from "../src/ansi.js";
 import { boxComponent, line, renderComponent, stack } from "../src/components/core.js";
 import { Footer, PermissionFooter, TodoFooter } from "../src/components/footer.js";
 import { Message } from "../src/components/message.js";
+import { ActivityCard } from "../src/components/activity-card.js";
 import { ToolCard } from "../src/components/tool-card.js";
 import { createInitialState } from "../src/state.js";
 
@@ -54,7 +55,7 @@ test("footer components can render independently or as a full footer", () => {
 
   assert(stripAnsi(permission.join("\n")).includes("permission: bash_run"));
   assert(stripAnsi(todo.join("\n")).includes("todo: 1/2 完成"));
-  assert(stripAnsi(full.join("\n")).includes("Shift+Tab 切换模式"));
+  assert(stripAnsi(full.join("\n")).includes("Shift+Tab 模式"));
   assert(full.every((item) => visibleWidth(item) <= 80));
 });
 
@@ -73,4 +74,23 @@ test("tool card component preserves existing diff folding behavior", () => {
 
   assert(card.some((item) => stripAnsi(item).includes("file_write large.md")));
   assert(!stripAnsi(card.join("\n")).includes("+line 78"));
+});
+
+test("activity card renders live operation details within width", () => {
+  const card = renderComponent(
+    ActivityCard({
+      activity: {
+        status: "running",
+        title: "准备 file_write",
+        details: ["路径: showcase/index.html", "内容: 88 行", "参数: 4096 字符"],
+      },
+    }),
+    { width: 72 },
+  );
+  const plain = stripAnsi(card.join("\n"));
+
+  assert(plain.includes("activity"));
+  assert(plain.includes("running 准备 file_write"));
+  assert(plain.includes("路径: showcase/index.html"));
+  assert(card.every((item) => visibleWidth(item) <= 72));
 });

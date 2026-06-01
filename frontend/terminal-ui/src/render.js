@@ -67,9 +67,6 @@ export function renderBody(state, width, ctx = createRenderContext({ width, env:
 
 function renderBodyTail(state, width) {
   const lines = [];
-  if (state.activeToolPrepare) {
-    lines.push(color(ANSI.dim, `tool prepare: ${state.activeToolPrepare}`));
-  }
   if (state.running) {
     lines.push(color(ANSI.dim, "运行中..."));
   }

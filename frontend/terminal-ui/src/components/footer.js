@@ -9,6 +9,7 @@ import {
   truncateAnsi,
   wrapAnsiLine,
 } from "../ansi.js";
+import { renderInputWithCursor } from "../input-buffer.js";
 
 export function Footer({ state, env = {} }) {
   return {
@@ -64,7 +65,7 @@ export function StatusFooter({ state, env = {} }) {
 export function PromptFooter({ state }) {
   return {
     render(ctx) {
-      return wrapAnsiLine(`${color(ANSI.green, state.mode)} ${state.running ? color(ANSI.dim, "running") : ">"} ${state.input}`, ctx.width);
+      return wrapAnsiLine(`${color(ANSI.green, state.mode)} ${state.running ? color(ANSI.dim, "running") : ">"} ${renderInputWithCursor(state)}`, ctx.width);
     },
   };
 }
@@ -72,7 +73,7 @@ export function PromptFooter({ state }) {
 export function HelpFooter() {
   return {
     render(ctx) {
-      return wrapAnsiLine(color(ANSI.dim, "Shift+Tab 切换模式 · Enter 发送 · PageUp/PageDown 滚动 · Ctrl+C 退出"), ctx.width);
+      return wrapAnsiLine(color(ANSI.dim, "Shift+Tab 模式 · Enter 发送 · ↑/↓ 历史 · ←/→ 编辑 · PgUp/PgDn 滚动 · Ctrl+C 退出"), ctx.width);
     },
   };
 }

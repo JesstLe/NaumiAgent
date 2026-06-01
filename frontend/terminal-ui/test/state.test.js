@@ -59,6 +59,43 @@ test("tool results prefer stable call id before falling back to tool name", () =
   assert.equal(state.tools[1].status, "running");
 });
 
+test("tool prepare creates a durable activity message before tool cards", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: {
+      type: "tool_prepare",
+      phase: "snapshot",
+      tool_name: "file_write",
+      path: "showcase/index.html",
+      content_lines: 88,
+      argument_chars: 4096,
+    },
+  });
+
+  assert.equal(state.activeToolPrepare.kind, "activity");
+  assert.equal(state.messages.at(-1).kind, "activity");
+  assert.equal(state.messages.at(-1).status, "running");
+  assert.deepEqual(state.messages.at(-1).details, [
+    "路径: showcase/index.html",
+    "内容: 88 行",
+    "参数: 4096 字符",
+  ]);
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "tool_use", tool_call_id: "call-file", tool_name: "file_write", file_path: "showcase/index.html" },
+  });
+
+  assert.equal(state.activeToolPrepare, null);
+  assert.equal(state.messages[0].status, "done");
+  assert(state.messages[0].details.includes("已交给工具执行"));
+  assert.equal(state.messages.at(-1).kind, "tool");
+  assert.equal(state.messages.at(-1).prepareTitle, "准备 file_write");
+  assert(state.messages.at(-1).prepareDetails.includes("路径: showcase/index.html"));
+});
+
 test("todo footer state tracks open work and clears when complete", () => {
   const state = createInitialState();
 
