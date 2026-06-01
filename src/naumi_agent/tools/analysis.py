@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from naumi_agent.tools import analysis_common
+from naumi_agent.tools.analysis_support import consensus as _consensus_support
 from naumi_agent.tools.analysis_support import fusion as _fusion_support
 from naumi_agent.tools.analysis_support import hook as _hook_support
 from naumi_agent.tools.analysis_support import probe as _probe_support
@@ -45,6 +46,8 @@ _build_world_inventory_script = _world_support.build_world_inventory_script
 _build_world_report = _world_support.build_world_report
 _build_fusion_inventory_script = _fusion_support.build_fusion_inventory_script
 _build_fusion_report = _fusion_support.build_fusion_report
+_build_consensus_inventory_script = _consensus_support.build_consensus_inventory_script
+_build_consensus_report = _consensus_support.build_consensus_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -6689,7 +6692,7 @@ def _scan_consensus(target: str) -> str:
     """Scan codebase for consensus readiness — single-point-of-decision
     risks, high-risk operations without quorum, diversity gaps."""
     findings: list[str] = []
-    source = _read_sources(target)
+    source = _read_sources(_resolve_target(target))
 
     if not source.strip():
         return "⚠️ 未找到可分析的源代码。"
@@ -6893,15 +6896,20 @@ class ConsensusTool(Tool):
     async def execute(
         self, *, target: str, **kwargs: Any,
     ) -> str:
+        scan_evidence = _scan_consensus(target)
+        deterministic = _build_consensus_report(target, scan_evidence)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("consensus", target[:200])
-        scan_evidence = _scan_consensus(target)
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 Consensus 共识审计。"
+
         user_msg = (
             f"## 审计目标\n{target}\n\n"
             f"## 拜占庭共识扫描\n{scan_evidence}\n"
+            f"\n## 确定性 Consensus 共识审计\n{deterministic}\n"
         )
-        return await _run_analysis(router, _CONSENSUS_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _CONSENSUS_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM Consensus 增强\n" + enhanced
 
 
 # ===========================================================================
