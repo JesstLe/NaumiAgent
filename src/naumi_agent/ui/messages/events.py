@@ -101,6 +101,7 @@ class ToolUseMessage(UIMessage):
     """Tool execution has started."""
 
     tool_name: str = ""
+    tool_call_id: str = ""
     args_summary: str = ""  # condensed parameter preview
     args_raw: str = ""  # raw JSON arguments (may be large; renderers should truncate)
     # Structured fields extracted BEFORE truncation for reliable card display
@@ -120,6 +121,7 @@ class ToolResultMessage(UIMessage):
     """Tool execution has finished (success, error, skipped, or aborted)."""
 
     tool_name: str = ""
+    tool_call_id: str = ""
     status: str = ""  # "success" | "error" | "skipped" | "aborted" | "failed"
     duration_ms: int = 0
     content_preview: str = ""  # truncated output for display

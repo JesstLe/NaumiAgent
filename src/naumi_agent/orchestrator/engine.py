@@ -2295,6 +2295,7 @@ class AgentEngine:
                     if skip_remaining_reason:
                         await on_event("tool_end", {
                             "name": tc.name,
+                            "call_id": tc.id,
                             "status": "skipped",
                             "duration_ms": 0,
                             "content": skip_remaining_reason,
@@ -2328,7 +2329,10 @@ class AgentEngine:
                         )
                         continue
 
-                    await on_event("tool_start", {"name": tc.name, "args": tc.arguments})
+                    await on_event(
+                        "tool_start",
+                        {"name": tc.name, "call_id": tc.id, "args": tc.arguments},
+                    )
 
                     hook_ctx = await self._fire_hook(HookContext(
                         point=HookPoint.TOOL_EXECUTE_START,
@@ -2339,6 +2343,7 @@ class AgentEngine:
                         abort_reason = hook_ctx.data.get("abort_reason", "未提供原因")
                         await on_event("tool_end", {
                             "name": tc.name,
+                            "call_id": tc.id,
                             "status": "aborted",
                             "duration_ms": 0,
                             "content": f"被 Hook 中止：{abort_reason}",
@@ -2357,6 +2362,7 @@ class AgentEngine:
                         "tool_end",
                         {
                             "name": tc.name,
+                            "call_id": tc.id,
                             "status": result.status,
                             "duration_ms": result.duration_ms,
                             "content": result.content[:2000] if result.content else "",

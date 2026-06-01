@@ -91,6 +91,21 @@ class TestReplayConversion:
         assert result[0].status == "success"
         assert result[0].content_length == 18
 
+    def test_tool_result_replay_keeps_medium_output(self) -> None:
+        content = "x" * 700
+        result = replay_messages([{"role": "tool", "content": content}])
+        assert len(result) == 1
+        assert isinstance(result[0], ToolResultMessage)
+        assert result[0].content_preview == content
+
+    def test_tool_result_replay_closes_truncated_fence(self) -> None:
+        content = "```python\n" + "\n".join(f"print({i})" for i in range(300))
+        result = replay_messages([{"role": "tool", "content": content}])
+        assert len(result) == 1
+        assert isinstance(result[0], ToolResultMessage)
+        assert result[0].content_preview.count("```") % 2 == 0
+        assert "已隐藏" in result[0].content_preview
+
     def test_tool_result_error(self) -> None:
         msgs = [
             {"role": "tool", "content": "Error: file not found"},
