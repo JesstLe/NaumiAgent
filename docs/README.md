@@ -19,3 +19,6 @@
 - [第九部分：TUI 设计](./09-tui-design.md)
 - [第十部分：流式输出设计](./10-streaming-design.md)
 - [第十一部分：REST API 与 WebSocket](./11-api-websocket-design.md)
+- [第十二部分：优化路线图](./12-optimization-roadmap.md)
+- [第十三部分：CLI/TUI Claude Code 化路线图](./13-cli-tui-claude-code-roadmap.md)
+- [第十四部分：未来架构重构方案](./14-future-architecture-refactor-plan.md)
