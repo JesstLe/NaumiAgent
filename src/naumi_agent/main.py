@@ -453,6 +453,152 @@ def _looks_like_diff(lines: list[str]) -> bool:
     )
 
 
+def _ansi_syntax(code: str, language: str, *, theme: str = "ansi_dark") -> str:
+    """Render code as ANSI-highlighted text for prompt_toolkit's ANSI parser."""
+    lexer = (language or "text").strip().split()[0] or "text"
+    has_trailing_newline = code.endswith("\n")
+    source = code[:-1] if has_trailing_newline else code
+    try:
+        from pygments import highlight
+        from pygments.formatters import Terminal256Formatter
+        from pygments.lexers import get_lexer_by_name
+
+        highlighted = highlight(
+            code,
+            get_lexer_by_name(lexer, stripnl=False, ensurenl=False),
+            Terminal256Formatter(style="native"),
+        )
+        return highlighted
+    except Exception:
+        pass
+    try:
+        rendered = _capture(
+            lambda: console.print(
+                Syntax(
+                    source,
+                    lexer,
+                    theme=theme,
+                    line_numbers=False,
+                    word_wrap=False,
+                    background_color="default",
+                ),
+                end="",
+            )
+        )
+        if not has_trailing_newline and rendered.endswith("\n"):
+            return rendered[:-1]
+        return rendered
+    except Exception:
+        return code
+
+
+class _StreamingMarkdownHighlighter:
+    """Incrementally color fenced code blocks in streamed Markdown."""
+
+    def __init__(self) -> None:
+        self._state = "text"
+        self._text_buffer = ""
+        self._fence_header = ""
+        self._code_buffer = ""
+        self._language = "text"
+
+    def reset(self) -> None:
+        self.__init__()
+
+    def feed(self, text: str) -> str:
+        out: list[str] = []
+        remaining = text
+        while remaining:
+            if self._state == "text":
+                self._text_buffer += remaining
+                remaining = ""
+                out.append(self._drain_text_buffer(complete=False))
+            elif self._state == "fence_header":
+                newline = remaining.find("\n")
+                if newline < 0:
+                    self._fence_header += remaining
+                    remaining = ""
+                else:
+                    self._fence_header += remaining[:newline]
+                    remaining = remaining[newline + 1:]
+                    self._language = self._fence_header.strip() or "text"
+                    out.append(f"\033[2m```{self._fence_header}\033[0m\n")
+                    self._fence_header = ""
+                    self._state = "code"
+            else:
+                self._code_buffer += remaining
+                remaining = ""
+                out.append(self._drain_code_buffer(complete=False))
+        return "".join(out)
+
+    def flush(self) -> str:
+        out: list[str] = []
+        if self._state == "text":
+            out.append(self._drain_text_buffer(complete=True))
+        elif self._state == "fence_header":
+            out.append(f"```{self._fence_header}")
+            self._fence_header = ""
+            self._state = "text"
+        else:
+            out.append(self._drain_code_buffer(complete=True))
+        return "".join(out)
+
+    def _drain_text_buffer(self, *, complete: bool) -> str:
+        out: list[str] = []
+        while True:
+            fence = self._text_buffer.find("```")
+            if fence < 0:
+                if complete:
+                    safe_len = len(self._text_buffer)
+                else:
+                    trailing_ticks = len(self._text_buffer) - len(
+                        self._text_buffer.rstrip("`")
+                    )
+                    safe_len = max(0, len(self._text_buffer) - min(trailing_ticks, 2))
+                if safe_len:
+                    out.append(self._text_buffer[:safe_len])
+                    self._text_buffer = self._text_buffer[safe_len:]
+                return "".join(out)
+
+            out.append(self._text_buffer[:fence])
+            self._text_buffer = self._text_buffer[fence + 3:]
+            newline = self._text_buffer.find("\n")
+            if newline < 0:
+                self._fence_header = self._text_buffer
+                self._text_buffer = ""
+                self._state = "fence_header"
+                return "".join(out)
+
+            header = self._text_buffer[:newline]
+            self._code_buffer += self._text_buffer[newline + 1:]
+            self._text_buffer = ""
+            self._language = header.strip() or "text"
+            self._state = "code"
+            out.append(f"\033[2m```{header}\033[0m\n")
+            out.append(self._drain_code_buffer(complete=False))
+
+    def _drain_code_buffer(self, *, complete: bool) -> str:
+        out: list[str] = []
+        while "\n" in self._code_buffer:
+            line, self._code_buffer = self._code_buffer.split("\n", 1)
+            if line.strip() == "```":
+                out.append("\033[2m```\033[0m\n")
+                self._text_buffer += self._code_buffer
+                self._code_buffer = ""
+                self._state = "text"
+                out.append(self._drain_text_buffer(complete=False))
+                return "".join(out)
+            out.append(_ansi_syntax(line + "\n", self._language))
+        if complete and self._code_buffer:
+            if self._code_buffer.strip() == "```":
+                out.append("\033[2m```\033[0m")
+                self._state = "text"
+            else:
+                out.append(_ansi_syntax(self._code_buffer, self._language))
+            self._code_buffer = ""
+        return "".join(out)
+
+
 _active_cli: Any = None
 
 
@@ -467,6 +613,7 @@ def _cli_event_factory(cli: Any):
     first_token_time = 0.0
     last_token_time = 0.0
     turn_start_time = 0.0
+    markdown_highlighter = _StreamingMarkdownHighlighter()
 
     async def handler(event: str, data: dict[str, Any]) -> None:
         nonlocal thinking_started, has_streamed_tokens
@@ -532,6 +679,7 @@ def _cli_event_factory(cli: Any):
             duration = int(data.get("duration_ms", 0) or 0)
             cli.append_live(f"\033[2m  ⏱ {label}: {duration}ms\033[0m\n")
         elif event == "response_start":
+            markdown_highlighter.reset()
             cli.finalize_live()
             cli.append_output(f"{_sep(thin=False)}\n")
         elif event == "token":
@@ -543,7 +691,11 @@ def _cli_event_factory(cli: Any):
                     first_token_time = now
                 last_token_time = now
                 token_count += 1
-                cli.append_live(content)
+                cli.append_live(markdown_highlighter.feed(content))
+        elif event == "response_end":
+            tail = markdown_highlighter.flush()
+            if tail:
+                cli.append_live(tail)
         elif event == "error":
             cli.finalize_live()
             cli.append_live(f"\033[31m错误: {data.get('message', '')}\033[0m\n")
@@ -765,7 +917,11 @@ def _capture(func: Any) -> str:
     buf = io.StringIO()
     width = shutil.get_terminal_size().columns
     c = Console(
-        file=buf, force_terminal=True, legacy_windows=False, width=width
+        file=buf,
+        force_terminal=True,
+        color_system="standard",
+        legacy_windows=False,
+        width=width,
     )
     import naumi_agent.main as _self
 
@@ -783,7 +939,11 @@ async def _capture_async(func: Any) -> str:
     buf = io.StringIO()
     width = shutil.get_terminal_size().columns
     c = Console(
-        file=buf, force_terminal=True, legacy_windows=False, width=width
+        file=buf,
+        force_terminal=True,
+        color_system="standard",
+        legacy_windows=False,
+        width=width,
     )
     import naumi_agent.main as _self
 

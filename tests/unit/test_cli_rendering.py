@@ -18,6 +18,7 @@ from naumi_agent.main import (
     _print_tool_output,
     _render_result,
     _show_cli_status,
+    _StreamingMarkdownHighlighter,
     _tool_label,
 )
 
@@ -225,6 +226,40 @@ async def test_fullscreen_cli_runtime_notification_is_visible() -> None:
     assert "调度提醒" in text
     assert "schedule" in text
     assert "检查测试结果" in text
+
+
+def test_streaming_markdown_highlighter_colors_fenced_python() -> None:
+    highlighter = _StreamingMarkdownHighlighter()
+
+    rendered = "".join([
+        highlighter.feed("说明\n```py"),
+        highlighter.feed("thon\nfrom __future__ import annotations\n"),
+        highlighter.feed("class CircuitBreaker:\n"),
+        highlighter.feed("```\n结束"),
+        highlighter.flush(),
+    ])
+
+    assert "说明" in rendered
+    assert "结束" in rendered
+    assert "from" in rendered
+    assert "CircuitBreaker" in rendered
+    assert "\x1b[38;5;" in rendered
+
+
+@pytest.mark.asyncio
+async def test_fullscreen_cli_streaming_tokens_highlight_code_blocks() -> None:
+    cli = FakeCLI()
+    handler = _cli_event_factory(cli)
+
+    await handler("response_start", {})
+    await handler("token", {"content": "```python\n"})
+    await handler("token", {"content": "class CircuitBreaker:\n"})
+    await handler("token", {"content": "    pass\n```\n"})
+    await handler("response_end", {})
+
+    text = "".join([*cli.output, *cli.live])
+    assert "CircuitBreaker" in text
+    assert "\x1b[38;5;" in text
 
 
 @pytest.mark.asyncio
