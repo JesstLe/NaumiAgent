@@ -881,7 +881,7 @@ tests/e2e/ui_scenarios/
 当前分支：
 
 ```text
-feat/ui-message-adapter
+codex/docs-13-claude-code-roadmap
 ```
 
 已完成（阶段一）：
@@ -899,16 +899,10 @@ feat/ui-message-adapter
 
 - ✅ 结构化 Task Status Renderer：todo bar / agent status / background task / summary bar。
 - ✅ Command palette 增强：fuzzy search + category + readonly 标记 + arg hint。
+- ✅ Virtualized CLI message history：`VirtualizedCLIHistory` + `VirtualizedHistoryControl`，CLI 输出区按行懒渲染，保留 PageUp/PageDown、live/finalize、resume replay 行为。
 
 下一步：
 
 ```text
-feat: add virtualized cli message history
-```
-
-或
-
-```text
 feat: add debug log viewer
 ```
-

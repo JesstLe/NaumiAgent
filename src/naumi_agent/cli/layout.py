@@ -14,12 +14,11 @@ from typing import Any
 from prompt_toolkit import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.filters import Condition
-from prompt_toolkit.formatted_text import ANSI, FormattedText
+from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import ConditionalContainer, Float, FloatContainer, HSplit, Window
 from prompt_toolkit.layout.controls import (
     BufferControl,
-    FormattedTextControl,
     UIContent,
     UIControl,
 )
@@ -30,6 +29,7 @@ from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
 
+from naumi_agent.cli.history import VirtualizedCLIHistory, VirtualizedHistoryControl
 from naumi_agent.cli_completer import SlashCommandCompleter
 from naumi_agent.clipboard import copy_or_save_transcript
 
@@ -201,8 +201,7 @@ class CLIApp:
     """Full-screen CLI: scrollable output + fixed input bar, no screen switching."""
 
     def __init__(self, debug_trace: Any = None) -> None:
-        self._output: list[str] = []
-        self._live: list[str] = []
+        self._history = VirtualizedCLIHistory()
         self._processing = False
         self._debug_trace = debug_trace
         self._app: Application | None = None
@@ -301,7 +300,7 @@ class CLIApp:
 
     async def _run_submit(self, text: str) -> None:
         self._processing = True
-        self._live = []
+        self._history.clear_live()
         self._activity_text = ""
         self._debug_input("cli.input", text)
         if self._output_win:
@@ -323,9 +322,7 @@ class CLIApp:
         finally:
             self._append_captured_streams(stdout_buf, stderr_buf)
             # Any remaining live content not yet finalized
-            if self._live:
-                self._output.extend(self._live)
-                self._live = []
+            self._history.finalize_live()
             self._activity_text = ""
             self._processing = False
             self._invalidate()
@@ -338,7 +335,7 @@ class CLIApp:
         text = stdout_buf.getvalue() + stderr_buf.getvalue()
         if not text:
             return
-        self._output.append(text)
+        self._history.append_output(text)
         self._debug_output("cli.captured_stream", text)
         stdout_buf.seek(0)
         stdout_buf.truncate(0)
@@ -372,6 +369,16 @@ class CLIApp:
     def record_debug_event(self, name: str, data: dict[str, Any] | None = None) -> None:
         if self._debug_trace is not None:
             self._debug_trace.event(name, data or {})
+
+    @property
+    def _live(self) -> tuple[str, ...]:
+        """Compatibility view for tests and old private integrations."""
+        return self._history.live_text_chunks
+
+    @property
+    def _output(self) -> tuple[str, ...]:
+        """Compatibility view for tests and old private integrations."""
+        return self._history.output_text_chunks
 
     async def confirm_permission(self, payload: dict[str, Any]) -> str:
         """Ask for one-shot permission from the fixed CLI input area."""
@@ -446,24 +453,23 @@ class CLIApp:
             self._app.invalidate()
 
     def append_output(self, ansi_text: str) -> None:
-        self._output.append(ansi_text)
+        self._history.append_output(ansi_text)
         self._debug_output("cli.output", ansi_text)
         if self._output_win:
             self._output_win.ensure_at_bottom()
         self._invalidate()
 
     def append_live(self, text: str) -> None:
-        self._live.append(text)
+        self._history.append_live(text)
         self._debug_output("cli.live", text, live=True)
         if self._output_win:
             self._output_win.ensure_at_bottom()
         self._invalidate()
 
     def finalize_live(self) -> None:
-        if self._live:
-            self.record_debug_event("cli.live_finalized", {"chunks": len(self._live)})
-        self._output.extend(self._live)
-        self._live = []
+        chunks = self._history.finalize_live()
+        if chunks:
+            self.record_debug_event("cli.live_finalized", {"chunks": chunks})
         if self._output_win:
             self._output_win.ensure_at_bottom()
         self._invalidate()
@@ -471,10 +477,12 @@ class CLIApp:
     def clear_output(self) -> None:
         self.record_debug_event(
             "cli.output_cleared",
-            {"output_chunks": len(self._output), "live_chunks": len(self._live)},
+            {
+                "output_chunks": self._history.output_chunks,
+                "live_chunks": self._history.live_chunks,
+            },
         )
-        self._output.clear()
-        self._live.clear()
+        self._history.clear()
         if self._output_win:
             self._output_win.scroll_to_bottom()
         self._invalidate()
@@ -509,7 +517,7 @@ class CLIApp:
 
     def get_transcript(self) -> str:
         """Return the complete visible transcript, including live output."""
-        return "".join([*self._output, *self._live])
+        return self._history.transcript()
 
     def copy_transcript(self, scope: str = "all") -> str:
         """Copy or save transcript diagnostics and show a short status line."""
@@ -535,18 +543,23 @@ class CLIApp:
         self._invalidate()
 
     def _render_output(self) -> list:
-        result: list = []
-        for text in self._output:
-            result.extend(ANSI(text).__pt_formatted_text__())
-        for text in self._live:
-            result.extend(ANSI(text).__pt_formatted_text__())
-        # Pin the cursor to the last line so the Window's scroll algorithm
-        # tracks the newest content. Only add when auto_scroll is on —
-        # without this guard, manual scroll-up is impossible because the
-        # cursor anchor forces the view back to the bottom every render.
-        if self._output_win and self._output_win.auto_scroll:
-            result.append(("[SetCursorPosition]", ""))
-        return result
+        # Kept for tests and any external prompt_toolkit caller that still uses
+        # FormattedTextControl directly.  The real CLI output window is backed
+        # by VirtualizedHistoryControl, so visible lines are formatted lazily.
+        fragments: list = []
+        line_count = self._history.line_count()
+        for lineno in range(line_count):
+            pin = bool(self._output_win and self._output_win.auto_scroll)
+            fragments.extend(
+                self._history.get_line(
+                    lineno,
+                    width=80,
+                    pin_cursor=pin and lineno == line_count - 1,
+                )
+            )
+            if lineno < line_count - 1:
+                fragments.append(("", "\n"))
+        return fragments
 
     def _render_status(self, cols: int) -> FormattedText:
         text = f" mode: {self._mode_text} | {self._status_text}"
@@ -562,7 +575,12 @@ class CLIApp:
 
     def _build_app(self) -> Application:
         self._output_win = _OutputWindow(
-            content=FormattedTextControl(self._render_output),
+            content=VirtualizedHistoryControl(
+                self._history,
+                should_pin_cursor=lambda: bool(
+                    self._output_win and self._output_win.auto_scroll
+                ),
+            ),
             wrap_lines=True,
             always_hide_cursor=True,
             height=Dimension(min=1, weight=1),
