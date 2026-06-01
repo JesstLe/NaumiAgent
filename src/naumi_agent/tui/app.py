@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import shlex
 from pathlib import Path
@@ -570,6 +572,70 @@ class DeleteConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class PermissionConfirmScreen(ModalScreen[str]):
+    """工具权限确认弹窗."""
+
+    DEFAULT_CSS = """
+    PermissionConfirmScreen {
+        align: center middle;
+    }
+    PermissionConfirmScreen > Container {
+        width: 78;
+        max-width: 90%;
+        height: auto;
+        padding: 1 2;
+        border: thick $warning 80%;
+        background: $surface;
+    }
+    PermissionConfirmScreen Label {
+        width: 1fr;
+        margin: 0 0 1 0;
+    }
+    PermissionConfirmScreen .permission-preview {
+        width: 1fr;
+        max-height: 8;
+        overflow-y: auto;
+        margin: 0 0 1 0;
+        padding: 0 1;
+        border: round $surface-lighten-2;
+        background: $surface-darken-1;
+    }
+    PermissionConfirmScreen > Container > Horizontal {
+        width: auto;
+        height: auto;
+    }
+    PermissionConfirmScreen > Container > Horizontal > Button {
+        margin: 0 1 0 0;
+    }
+    """
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        super().__init__()
+        self.payload = payload
+
+    def compose(self) -> ComposeResult:
+        from textual.widgets import Label
+
+        tool_name = str(self.payload.get("tool_name", "?"))
+        reason = str(self.payload.get("reason", "") or "该工具需要用户确认。")
+        arguments = self.payload.get("arguments", {})
+        preview = json.dumps(arguments, ensure_ascii=False, indent=2, default=str)
+        if len(preview) > 1200:
+            preview = preview[:1200] + "\n..."
+        with Container():
+            yield Label(f"工具需要确认：[bold]{tool_name}[/bold]")
+            yield Label(reason)
+            yield Static(preview, classes="permission-preview")
+            with Horizontal():
+                yield Button("允许一次", variant="success", id="allow")
+                yield Button("拒绝", variant="error", id="deny")
+                yield Button("Bypass 并执行", variant="warning", id="bypass")
+
+    @on(Button.Pressed)
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(str(event.button.id or "deny"))
+
+
 class SessionEntry(Static):
     """单个会话条目 — 可点击加载，右侧删除按钮."""
 
@@ -973,6 +1039,7 @@ class NaumiApp(App):
         super().__init__(**kwargs)
         self.engine = engine
         self.debug_trace = debug_trace
+        self.engine.set_permission_confirmer(self.confirm_permission)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -1002,6 +1069,34 @@ class NaumiApp(App):
             self.debug_trace.event("tui.mount", {"title": self.TITLE})
         self._update_git_title()
         self._show_startup_status()
+
+    async def confirm_permission(self, payload: dict[str, Any]) -> str:
+        """Show a modal confirmation dialog for sensitive tools."""
+        if self.debug_trace is not None:
+            self.debug_trace.event(
+                "tui.permission_confirm_prompt",
+                {
+                    "tool_name": payload.get("tool_name"),
+                    "risk_level": payload.get("risk_level"),
+                    "permission_mode": payload.get("permission_mode"),
+                },
+            )
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[str] = loop.create_future()
+
+        def on_choice(choice: str | None) -> None:
+            if not future.done():
+                future.set_result(str(choice or "deny"))
+
+        self.push_screen(PermissionConfirmScreen(payload), on_choice)
+        result = await future
+        choice = str(result or "deny")
+        if self.debug_trace is not None:
+            self.debug_trace.event(
+                "tui.permission_confirm_choice",
+                {"tool_name": payload.get("tool_name"), "choice": choice},
+            )
+        return choice
 
     def _show_startup_status(self) -> None:
         """Show model, budget, and context info in status bar on startup."""
@@ -1620,7 +1715,14 @@ class NaumiApp(App):
                     reason = str(data.get("reason", "") or "")
                     style = (
                         "red"
-                        if bubble_status in {"blocked", "blocked_by_hook"}
+                        if bubble_status in {
+                            "blocked",
+                            "blocked_by_hook",
+                            "denied",
+                            "confirmation_error",
+                        }
+                        else "green"
+                        if bubble_status in {"confirmed", "bypass_enabled"}
                         else "yellow"
                     )
                     suffix = f" · {reason[:120]}" if reason else ""

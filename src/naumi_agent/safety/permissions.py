@@ -693,6 +693,15 @@ class PermissionChecker:
         ]
         self._call_counts: dict[str, int] = {}
 
+    @property
+    def mode(self) -> PermissionMode:
+        """Return the active permission mode."""
+        return self._mode
+
+    def set_mode(self, mode: PermissionMode) -> None:
+        """Switch permission mode for the current session."""
+        self._mode = mode
+
     @staticmethod
     def _deny(
         reason: str,

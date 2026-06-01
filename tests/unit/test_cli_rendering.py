@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -224,3 +225,34 @@ async def test_fullscreen_cli_runtime_notification_is_visible() -> None:
     assert "调度提醒" in text
     assert "schedule" in text
     assert "检查测试结果" in text
+
+
+@pytest.mark.asyncio
+async def test_fullscreen_cli_permission_confirmation_returns_choice() -> None:
+    cli_layout = pytest.importorskip("naumi_agent.cli.layout")
+    cli_app = cli_layout.CLIApp
+    cli = cli_app()
+
+    task = asyncio.create_task(
+        cli.confirm_permission(
+            {
+                "tool_name": "code_execute",
+                "reason": "该工具需要用户确认。",
+                "arguments": {"code": "print('ok')"},
+                "risk_level": "high",
+                "permission_mode": "moderate",
+            }
+        )
+    )
+    for _ in range(20):
+        if cli._pending_permission is not None:
+            break
+        await asyncio.sleep(0)
+
+    cli._resolve_pending_permission("allow")
+    choice = await task
+
+    assert choice == "allow"
+    text = "".join(cli._live)
+    assert "权限确认" in text
+    assert "code_execute" in text

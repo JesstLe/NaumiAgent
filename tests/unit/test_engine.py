@@ -389,6 +389,68 @@ class TestToolExecution:
         assert "需要用户确认" in result.content
 
     @pytest.mark.asyncio
+    async def test_confirmation_callback_allows_tool_once(self, engine: AgentEngine) -> None:
+        payloads: list[dict[str, object]] = []
+
+        async def confirm(payload: dict[str, object]) -> str:
+            payloads.append(payload)
+            return "allow"
+
+        engine.set_permission_confirmer(confirm)
+        tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo confirm_ok"}')
+        result = await engine._execute_tool(tc)
+
+        assert result.status == "success"
+        assert "confirm_ok" in result.content
+        assert payloads
+        assert payloads[0]["tool_name"] == "bash_run"
+
+    @pytest.mark.asyncio
+    async def test_confirmation_callback_can_enable_bypass(self, engine: AgentEngine) -> None:
+        async def confirm(payload: dict[str, object]) -> str:
+            return "bypass"
+
+        engine.set_permission_confirmer(confirm)
+        tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo bypass_now"}')
+        result = await engine._execute_tool(tc)
+
+        assert result.status == "success"
+        assert "bypass_now" in result.content
+        assert engine.permission_mode == PermissionMode.BYPASS
+
+    @pytest.mark.asyncio
+    async def test_confirmation_callback_denies_tool(self, engine: AgentEngine) -> None:
+        async def confirm(payload: dict[str, object]) -> str:
+            return "deny"
+
+        engine.set_permission_confirmer(confirm)
+        tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo denied"}')
+        result = await engine._execute_tool(tc)
+
+        assert result.status == "error"
+        assert "用户已拒绝" in result.content
+
+    @pytest.mark.asyncio
+    async def test_top_level_permission_bubble_emitted_for_confirmation(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo blocked"}')
+        result = await engine._execute_tool(tc, on_event=on_event)
+
+        assert result.status == "error"
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert bubbles
+        assert bubbles[0]["agent_name"] == "main"
+        assert bubbles[0]["tool_name"] == "bash_run"
+        assert bubbles[0]["status"] == "needs_confirmation"
+
+    @pytest.mark.asyncio
     async def test_bypass_mode_runs_confirmation_tool(self, engine: AgentEngine) -> None:
         engine._permission_checker = PermissionChecker(PermissionMode.BYPASS)
         tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo bypass_ok"}')

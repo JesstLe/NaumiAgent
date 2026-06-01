@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import json
 import traceback
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any
 
 from prompt_toolkit import Application
 from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI, FormattedText
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Float, FloatContainer, HSplit, Window
@@ -215,8 +217,22 @@ class CLIApp:
         self._git_branch: str = ""
         self._git_dirty: bool = False
         self._status_text = "就绪"
+        self._pending_permission: asyncio.Future[str] | None = None
 
         self._last_esc_time = 0.0
+        permission_pending = Condition(lambda: self._pending_permission is not None)
+
+        @self._kb.add("y", filter=permission_pending)
+        def _permission_allow(event: Any) -> None:
+            self._resolve_pending_permission("allow")
+
+        @self._kb.add("n", filter=permission_pending)
+        def _permission_deny(event: Any) -> None:
+            self._resolve_pending_permission("deny")
+
+        @self._kb.add("s-tab", filter=permission_pending)
+        def _permission_bypass(event: Any) -> None:
+            self._resolve_pending_permission("bypass")
 
         @self._kb.add("enter")
         def _submit(event: Any) -> None:
@@ -338,6 +354,63 @@ class CLIApp:
     def record_debug_event(self, name: str, data: dict[str, Any] | None = None) -> None:
         if self._debug_trace is not None:
             self._debug_trace.event(name, data or {})
+
+    async def confirm_permission(self, payload: dict[str, Any]) -> str:
+        """Ask for one-shot permission from the fixed CLI input area."""
+        if self._pending_permission is not None:
+            self.record_debug_event(
+                "cli.permission_confirm_busy",
+                {"tool_name": payload.get("tool_name")},
+            )
+            return "deny"
+
+        loop = asyncio.get_running_loop()
+        self._pending_permission = loop.create_future()
+        tool_name = str(payload.get("tool_name", "?"))
+        reason = str(payload.get("reason", "") or "该工具需要用户确认。")
+        arguments = payload.get("arguments", {})
+        args_preview = _fit_text_to_width(
+            json.dumps(arguments, ensure_ascii=False, default=str),
+            500,
+        ).rstrip()
+        self.record_debug_event(
+            "cli.permission_confirm_prompt",
+            {
+                "tool_name": tool_name,
+                "risk_level": payload.get("risk_level"),
+                "permission_mode": payload.get("permission_mode"),
+            },
+        )
+        self.set_status("权限确认: y 允许一次 | n 拒绝 | Shift+Tab 切换 bypass 并执行")
+        self.append_live(
+            "\n\033[33m权限确认\033[0m\n"
+            f"  工具: {tool_name}\n"
+            f"  原因: {reason}\n"
+            f"  参数: {args_preview}\n"
+            "  按 y 允许一次，按 n 拒绝，按 Shift+Tab 切换 bypass 并执行。\n"
+        )
+        try:
+            choice = await self._pending_permission
+        finally:
+            self._pending_permission = None
+            self.set_status("执行中")
+        self.record_debug_event(
+            "cli.permission_confirm_choice",
+            {"tool_name": tool_name, "choice": choice},
+        )
+        return choice
+
+    def _resolve_pending_permission(self, choice: str) -> None:
+        future = self._pending_permission
+        if future is None or future.done():
+            return
+        labels = {
+            "allow": "已允许本次工具执行",
+            "deny": "已拒绝本次工具执行",
+            "bypass": "已切换 bypass 并执行本次工具",
+        }
+        self.append_live(f"\033[2m{labels.get(choice, choice)}\033[0m\n")
+        future.set_result(choice)
 
     def debug_info(self) -> str:
         if self._debug_trace is None:
