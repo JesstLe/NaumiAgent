@@ -2,15 +2,40 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ANSI, stripAnsi, visibleWidth } from "../src/ansi.js";
 import { createInitialState } from "../src/state.js";
-import { renderFooter, renderMarkdownExcerpt, renderScreen, renderToolCard } from "../src/render.js";
+import { renderFooter, renderMarkdownExcerpt, renderScreen, renderToolCard, renderToolOutput } from "../src/render.js";
 
 test("markdown code blocks show a bounded excerpt with lightweight highlighting", () => {
   const codeLines = Array.from({ length: 45 }, (_, index) => `const value${index} = ${index};`);
   const rendered = renderMarkdownExcerpt(["```js", ...codeLines, "```"].join("\n"), 120);
   const plain = rendered.map(stripAnsi);
 
-  assert(plain.includes("... 已隐藏 5 行代码"));
+  assert(plain.includes("... 已折叠 5 行代码"));
   assert(rendered.some((line) => line.includes(`${ANSI.cyan}const${ANSI.reset}`)));
+});
+
+test("markdown and diff folds can be expanded through persisted fold state", () => {
+  const codeLines = Array.from({ length: 45 }, (_, index) => `const value${index} = ${index};`);
+  const collapsedCode = renderMarkdownExcerpt(["```js", ...codeLines, "```"].join("\n"), 120, {
+    foldKey: "message:a",
+    folds: {},
+  }).map(stripAnsi);
+  const expandedCode = renderMarkdownExcerpt(["```js", ...codeLines, "```"].join("\n"), 120, {
+    foldKey: "message:a",
+    folds: { "message:a:code:0": { expanded: true } },
+  }).map(stripAnsi);
+
+  assert(collapsedCode.includes("... 已折叠 5 行代码"));
+  assert(expandedCode.some((line) => line.includes("value44")));
+
+  const diff = ["@@", ...Array.from({ length: 65 }, (_, index) => `+line ${index}`)].join("\n");
+  const collapsedDiff = renderToolOutput(diff, 120, { foldKey: "tool:t", folds: {} }).map(stripAnsi);
+  const expandedDiff = renderToolOutput(diff, 120, {
+    foldKey: "tool:t",
+    folds: { "tool:t": { expanded: true } },
+  }).map(stripAnsi);
+
+  assert(collapsedDiff.includes("... 已折叠 6 行 diff"));
+  assert(expandedDiff.some((line) => line.includes("+line 64")));
 });
 
 test("tool card renders diff output inside a bounded card", () => {

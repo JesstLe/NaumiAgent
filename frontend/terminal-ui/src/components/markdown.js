@@ -1,29 +1,40 @@
 import { ANSI, color, colorCodeLine, colorDiffLine, looksLikeDiff, wrapAnsiLine } from "../ansi.js";
+import { CODE_FOLD_VISIBLE_LINES, DIFF_FOLD_VISIBLE_LINES, foldLines } from "./folds.js";
 
-export function MarkdownExcerpt({ text }) {
+export function MarkdownExcerpt({ text, foldKey = "" }) {
   return {
     render(ctx) {
-      return renderMarkdownExcerpt(text, ctx.width);
+      return renderMarkdownExcerpt(text, ctx.width, { foldKey, folds: ctx.state?.folds });
     },
   };
 }
 
-export function ToolOutput({ text }) {
+export function ToolOutput({ text, foldKey = "" }) {
   return {
     render(ctx) {
-      return renderToolOutput(text, ctx.width);
+      return renderToolOutput(text, ctx.width, { foldKey, folds: ctx.state?.folds });
     },
   };
 }
 
-export function renderToolOutput(text, width) {
+export function renderToolOutput(text, width, options = {}) {
   if (looksLikeDiff(text)) {
-    return text.split("\n").slice(0, 60).map(colorDiffLine);
+    const folded = foldLines(text.split("\n"), {
+      folds: options.folds,
+      key: options.foldKey,
+      visibleLines: DIFF_FOLD_VISIBLE_LINES,
+      hiddenLabel: " diff",
+    });
+    const lines = folded.lines.map(colorDiffLine);
+    if (folded.notice) {
+      lines.push(color(ANSI.dim, folded.notice));
+    }
+    return lines;
   }
-  return renderMarkdownExcerpt(text, width).slice(0, 60);
+  return renderMarkdownExcerpt(text, width, options).slice(0, DIFF_FOLD_VISIBLE_LINES);
 }
 
-export function renderMarkdownExcerpt(text, width) {
+export function renderMarkdownExcerpt(text, width, options = {}) {
   const lines = [];
   const raw = String(text ?? "").split("\n");
   let inCode = false;
@@ -41,11 +52,7 @@ export function renderMarkdownExcerpt(text, width) {
       continue;
     }
     if (inCode) {
-      if (codeLineCount < 40) {
-        lines.push(colorCodeLine(line));
-      } else {
-        omitted += 1;
-      }
+      lines.push(colorCodeLine(line));
       codeLineCount += 1;
       continue;
     }
@@ -54,5 +61,50 @@ export function renderMarkdownExcerpt(text, width) {
   if (omitted) {
     lines.push(color(ANSI.dim, `... 已隐藏 ${omitted} 行代码`));
   }
-  return lines.flatMap((line) => wrapAnsiLine(line, width));
+  return foldMarkdownCodeBlocks(lines, width, options);
+}
+
+function foldMarkdownCodeBlocks(lines, width, options) {
+  const result = [];
+  let inCode = false;
+  let codeBuffer = [];
+  let codeBlockIndex = 0;
+
+  const flushCode = () => {
+    if (!codeBuffer.length) return;
+    const key = options.foldKey ? `${options.foldKey}:code:${codeBlockIndex}` : "";
+    const folded = foldLines(codeBuffer, {
+      folds: options.folds,
+      key,
+      visibleLines: CODE_FOLD_VISIBLE_LINES,
+      hiddenLabel: "代码",
+    });
+    result.push(...folded.lines);
+    if (folded.notice) {
+      result.push(color(ANSI.dim, folded.notice));
+    }
+    codeBuffer = [];
+    codeBlockIndex += 1;
+  };
+
+  for (const line of lines) {
+    if (String(line).includes("```")) {
+      if (inCode) {
+        flushCode();
+        result.push(line);
+        inCode = false;
+      } else {
+        result.push(line);
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      codeBuffer.push(line);
+    } else {
+      result.push(line);
+    }
+  }
+  flushCode();
+  return result.flatMap((line) => wrapAnsiLine(line, width));
 }

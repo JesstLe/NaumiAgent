@@ -16,7 +16,7 @@ export function renderMessage(message, width) {
     return ["", `${color(ANSI.green, ">")} ${message.content}`];
   }
   if (message.kind === "assistant") {
-    return ["", ...renderComponent(MarkdownExcerpt({ text: message.content }), { width })];
+    return ["", ...renderComponent(MarkdownExcerpt({ text: message.content, foldKey: `message:${message.id ?? ""}` }), { width })];
   }
   if (message.kind === "thinking") {
     const content = compactText(message.content || "思考中...");
