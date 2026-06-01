@@ -20,6 +20,10 @@ from rich.syntax import Syntax
 from rich.text import Text
 
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.ui.code_excerpt import (
+    DEFAULT_CODE_BLOCK_MAX_LINES,
+    excerpt_markdown_code_blocks,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -549,6 +553,8 @@ class _StreamingMarkdownHighlighter:
         self._fence_header = ""
         self._code_buffer = ""
         self._language = "text"
+        self._code_line_count = 0
+        self._omitted_code_lines = 0
 
     def reset(self) -> None:
         self.__init__()
@@ -570,6 +576,8 @@ class _StreamingMarkdownHighlighter:
                     self._fence_header += remaining[:newline]
                     remaining = remaining[newline + 1:]
                     self._language = self._fence_header.strip() or "text"
+                    self._code_line_count = 0
+                    self._omitted_code_lines = 0
                     out.append(f"\033[2m```{self._fence_header}\033[0m\n")
                     self._fence_header = ""
                     self._state = "code"
@@ -621,6 +629,8 @@ class _StreamingMarkdownHighlighter:
             self._code_buffer += self._text_buffer[newline + 1:]
             self._text_buffer = ""
             self._language = header.strip() or "text"
+            self._code_line_count = 0
+            self._omitted_code_lines = 0
             self._state = "code"
             out.append(f"\033[2m```{header}\033[0m\n")
             out.append(self._drain_code_buffer(complete=False))
@@ -630,21 +640,47 @@ class _StreamingMarkdownHighlighter:
         while "\n" in self._code_buffer:
             line, self._code_buffer = self._code_buffer.split("\n", 1)
             if line.strip() == "```":
+                if self._omitted_code_lines:
+                    out.append(self._code_excerpt_marker())
                 out.append("\033[2m```\033[0m\n")
                 self._text_buffer += self._code_buffer
                 self._code_buffer = ""
                 self._state = "text"
+                self._code_line_count = 0
+                self._omitted_code_lines = 0
                 out.append(self._drain_text_buffer(complete=False))
                 return "".join(out)
-            out.append(_ansi_syntax(line + "\n", self._language))
+            if self._code_line_count < DEFAULT_CODE_BLOCK_MAX_LINES:
+                out.append(_ansi_syntax(line + "\n", self._language))
+            else:
+                self._omitted_code_lines += 1
+            self._code_line_count += 1
         if complete and self._code_buffer:
             if self._code_buffer.strip() == "```":
+                if self._omitted_code_lines:
+                    out.append(self._code_excerpt_marker())
                 out.append("\033[2m```\033[0m")
                 self._state = "text"
+                self._code_line_count = 0
+                self._omitted_code_lines = 0
             else:
-                out.append(_ansi_syntax(self._code_buffer, self._language))
+                if self._code_line_count < DEFAULT_CODE_BLOCK_MAX_LINES:
+                    out.append(_ansi_syntax(self._code_buffer, self._language))
+                else:
+                    self._omitted_code_lines += 1
             self._code_buffer = ""
+        if complete and self._omitted_code_lines:
+            out.append(self._code_excerpt_marker())
+            self._omitted_code_lines = 0
         return "".join(out)
+
+    def _code_excerpt_marker(self) -> str:
+        return (
+            "\033[2m"
+            f"... 已隐藏 {self._omitted_code_lines} 行代码，"
+            f"仅展示前 {DEFAULT_CODE_BLOCK_MAX_LINES} 行摘录。"
+            "\033[0m\n"
+        )
 
 
 _active_cli: Any = None
@@ -919,7 +955,7 @@ async def _run_task(task: str, config_path: str) -> None:
         console.print(f"[red]错误: {e}[/red]")
         return
 
-    console.print(Markdown(result.response))
+    console.print(Markdown(excerpt_markdown_code_blocks(result.response)))
     console.print()
 
     # Show stats line
@@ -1034,7 +1070,7 @@ def _render_result(
         c.print()
         c.print(
             Panel(
-                Markdown(result.response),
+                Markdown(excerpt_markdown_code_blocks(result.response)),
                 title="[bold green]NaumiAgent[/bold green]",
                 border_style="green",
                 padding=(1, 2),
@@ -2888,7 +2924,7 @@ async def _run_skill(engine: Any, skill_name: str, arguments: str) -> None:
         console.print()
         console.print(
             Panel(
-                Markdown(result.response),
+                Markdown(excerpt_markdown_code_blocks(result.response)),
                 title=f"[bold yellow]⚡ {skill_name}[/bold yellow]",
                 border_style="yellow",
                 padding=(1, 2),

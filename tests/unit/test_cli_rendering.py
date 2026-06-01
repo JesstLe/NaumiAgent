@@ -310,6 +310,41 @@ def test_streaming_markdown_highlighter_colors_fenced_python() -> None:
     assert "\x1b[38;5;" in rendered
 
 
+def test_streaming_markdown_highlighter_excerpts_long_code_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("naumi_agent.main.DEFAULT_CODE_BLOCK_MAX_LINES", 3)
+    highlighter = _StreamingMarkdownHighlighter()
+
+    rendered = "".join([
+        highlighter.feed("```python\n"),
+        highlighter.feed("line_1\nline_2\nline_3\nline_4\nline_5\n"),
+        highlighter.feed("```\n"),
+        highlighter.flush(),
+    ])
+
+    assert "line_1" in rendered
+    assert "line_3" in rendered
+    assert "line_4" not in rendered
+    assert "已隐藏 2 行代码" in rendered
+
+
+def test_streaming_markdown_highlighter_does_not_duplicate_flush_excerpt_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("naumi_agent.main.DEFAULT_CODE_BLOCK_MAX_LINES", 2)
+    highlighter = _StreamingMarkdownHighlighter()
+
+    rendered = "".join([
+        highlighter.feed("```python\n"),
+        highlighter.feed("line_1\nline_2\nline_3\n"),
+        highlighter.feed("```"),
+        highlighter.flush(),
+    ])
+
+    assert rendered.count("已隐藏 1 行代码") == 1
+
+
 @pytest.mark.asyncio
 async def test_fullscreen_cli_streaming_tokens_highlight_code_blocks() -> None:
     cli = FakeCLI()
