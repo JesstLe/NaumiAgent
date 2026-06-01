@@ -895,6 +895,15 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 console.print(_active_cli.debug_info())
             else:
                 console.print("[yellow]当前界面未暴露调试日志路径[/yellow]")
+        case "/debug-replay":
+            from naumi_agent.debug_trace import find_latest_run, render_debug_replay
+
+            if arg:
+                replay_target = Path(arg)
+            else:
+                replay_base = Path(engine._config.memory.session_db_path).parent / "debug-runs"
+                replay_target = find_latest_run(replay_base) or replay_base
+            console.print(render_debug_replay(replay_target))
         case "/hooks":
             _show_hooks(engine)
         case "/copy":
@@ -1297,6 +1306,7 @@ def _print_help() -> None:
         ("/help", "显示帮助"),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
+        ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),
         ("/pwd", "显示当前工作目录"),
         ("/tools", "列出可用工具"),
         ("/model", "显示模型配置"),

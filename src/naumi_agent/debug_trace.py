@@ -27,6 +27,57 @@ def _json_safe(value: Any) -> Any:
     return repr(value)
 
 
+def resolve_events_path(path: Path) -> Path:
+    """Resolve a debug run directory or events file to events.jsonl."""
+    candidate = path.expanduser()
+    if candidate.is_dir():
+        candidate = candidate / "events.jsonl"
+    return candidate.resolve()
+
+
+def find_latest_run(base_dir: Path) -> Path | None:
+    """Return the newest debug run directory under base_dir."""
+    root = base_dir.expanduser()
+    if not root.exists():
+        return None
+    runs = [
+        path for path in root.iterdir()
+        if path.is_dir() and (path / "events.jsonl").exists()
+    ]
+    if not runs:
+        return None
+    return max(runs, key=lambda path: (path / "events.jsonl").stat().st_mtime)
+
+
+def render_debug_replay(path: Path, *, max_events: int = 500) -> str:
+    """Render a structured debug trace as a readable event replay."""
+    events_path = resolve_events_path(path)
+    if not events_path.exists():
+        return f"未找到调试事件文件: {events_path}"
+
+    events: list[dict[str, Any]] = []
+    for line in events_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            events.append(item)
+
+    shown = events[-max_events:] if max_events > 0 else events
+    lines = [
+        "NaumiAgent Debug Replay",
+        f"events: {events_path}",
+        f"shown: {len(shown)}/{len(events)}",
+        "",
+    ]
+    for event in shown:
+        lines.extend(DebugTrace._format_event(event))
+    return "\n".join(lines).rstrip() + "\n"
+
+
 class DebugTrace:
     """Append-only JSONL trace plus plain transcript for one UI run."""
 
