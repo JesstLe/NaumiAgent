@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -102,6 +103,26 @@ PLANNER_PROMPT = """\
 }}
 """
 
+_FAST_PATH_MAX_CHARS = 160
+_SIMPLE_CHAT_PATTERNS = (
+    re.compile(r"^\s*(hi|hello|hey|yo|oi|你好|您好|嗨|哈喽|在吗)[!！。.\s]*$", re.I),
+    re.compile(r"^\s*(谢谢|多谢|thanks|thank you|ok|好的|好|嗯|行)[!！。.\s]*$", re.I),
+)
+_ACTION_HINT_RE = re.compile(
+    r"("
+    r"修复|修改|创建|新增|删除|重构|检查|排查|调试|运行|执行|安装|部署|提交|"
+    r"搜索|浏览|打开|读取|写入|生成|实现|测试|分析|审查|迁移|容器|docker|"
+    r"bug|error|traceback|exception|pytest|ruff|git|commit|branch|diff|"
+    r"https?://|/[\w.-]+|[\w.-]+\.(py|ts|tsx|js|jsx|json|ya?ml|toml|md|html|css)"
+    r")",
+    re.I,
+)
+_SIMPLE_QUESTION_RE = re.compile(
+    r"^\s*(什么|怎么|如何|为什么|是否|是不是|能不能|可以吗|"
+    r"what|why|how|can|could|should|is|are|do|does)\b",
+    re.I,
+)
+
 
 class IntentClassifier:
     def __init__(
@@ -183,6 +204,11 @@ class AdaptivePlanner:
         self._classifier = IntentClassifier(router, usage_callback)
 
     async def plan(self, task: str, success_criteria: list[str] | None = None) -> Plan:
+        local_intent = self._local_fast_path_intent(task)
+        if local_intent is not None:
+            logger.info("Task intent resolved locally: %s", local_intent.intent)
+            return self._simple_plan(task, local_intent)
+
         intent = await self._classifier.classify(task)
         logger.info("Task intent: %s, complexity: %s", intent.intent, intent.complexity)
 
@@ -193,6 +219,50 @@ class AdaptivePlanner:
                 return await self._medium_plan(task, success_criteria, intent)
             case Complexity.COMPLEX:
                 return await self._complex_plan(task, success_criteria, intent)
+
+    def _local_fast_path_intent(self, task: str) -> Intent | None:
+        """Resolve clearly simple turns without paying an extra LLM round-trip."""
+        text = task.strip()
+        if not text:
+            return Intent(
+                intent="闲聊",
+                complexity=Complexity.SIMPLE,
+                requires_tools=False,
+                requires_planning=False,
+                requires_subagents=False,
+                estimated_steps=1,
+                confidence=1.0,
+            )
+
+        if any(pattern.match(text) for pattern in _SIMPLE_CHAT_PATTERNS):
+            return Intent(
+                intent="闲聊",
+                complexity=Complexity.SIMPLE,
+                requires_tools=False,
+                requires_planning=False,
+                requires_subagents=False,
+                estimated_steps=1,
+                confidence=0.98,
+            )
+
+        if len(text) > _FAST_PATH_MAX_CHARS or _ACTION_HINT_RE.search(text):
+            return None
+
+        if (
+            text.endswith(("?", "？", "吗", "呢"))
+            or _SIMPLE_QUESTION_RE.match(text)
+        ):
+            return Intent(
+                intent="信息查询",
+                complexity=Complexity.SIMPLE,
+                requires_tools=False,
+                requires_planning=False,
+                requires_subagents=False,
+                estimated_steps=1,
+                confidence=0.85,
+            )
+
+        return None
 
     def _simple_plan(self, task: str, intent: Intent) -> Plan:
         return Plan(

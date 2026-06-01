@@ -524,6 +524,7 @@ class TestHookIntegration:
             result = await engine.run_streaming("hello", on_event)
 
         assert result.status == "completed"
+        assert events[0][0] == "run_started"
         hook_events = [data for event, data in events if event == "hook_trace"]
         assert hook_events
         assert hook_events[0]["point"] == "user_prompt_submit"
@@ -1310,12 +1311,13 @@ class TestRun:
         with patch.object(
             engine._router, "call", new_callable=AsyncMock,
             return_value=mock_response,
-        ):
+        ) as mock_call:
             result = await engine.run("hi")
 
         assert result.status == "completed"
         assert result.response == "Hello!"
-        assert result.usage.total_input_tokens == 20
+        assert result.usage.total_input_tokens == 10
+        assert mock_call.await_count == 1
         assert engine.subagent_manager._reaper_task is None
 
     @pytest.mark.asyncio
