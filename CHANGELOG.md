@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.24] - 2026-06-01
+
+### Added
+- **Watchdog 工具确定性落地** — `/watchdog` 在模型路由未初始化时也会返回灾难隔离审计、可运行 watchdog inventory、健康检查/回滚/隔离检测和 phoenix contract。
+
+### Fixed
+- **Watchdog 源码读取修复** — `_scan_watchdog` 现在会先解析目标路径再读取源码，避免路径字符串被逐字符处理导致扫描为空。
+- **Cosmos 源码读取预修复** — `_scan_cosmos` 现在会先解析目标路径再读取源码，为后续确定性落地扫清空扫描问题。
+
 ## [0.1.23] - 2026-06-01
 
 ### Added

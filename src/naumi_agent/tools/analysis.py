@@ -24,6 +24,7 @@ from naumi_agent.tools.analysis_support import pid as _pid_support
 from naumi_agent.tools.analysis_support import probe as _probe_support
 from naumi_agent.tools.analysis_support import spar as _spar_support
 from naumi_agent.tools.analysis_support import vision as _vision_support
+from naumi_agent.tools.analysis_support import watchdog as _watchdog_support
 from naumi_agent.tools.analysis_support import world as _world_support
 from naumi_agent.tools.analysis_support import zkp as _zkp_support
 from naumi_agent.tools.base import Tool, ToolMetadata
@@ -60,6 +61,8 @@ _build_genesis_inventory_script = _genesis_support.build_genesis_inventory_scrip
 _build_genesis_report = _genesis_support.build_genesis_report
 _build_macro_inventory_script = _macro_support.build_macro_inventory_script
 _build_macro_report = _macro_support.build_macro_report
+_build_watchdog_inventory_script = _watchdog_support.build_watchdog_inventory_script
+_build_watchdog_report = _watchdog_support.build_watchdog_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -8218,7 +8221,7 @@ def _scan_cosmos(target: str) -> str:
     """Scan system for world-creation potential — state richness, generative
     capacity, social simulation readiness, and observer-effect reactivity."""
     findings: list[str] = []
-    source = _read_sources(target)
+    source = _read_sources(_resolve_target(target))
 
     if not source.strip():
         return "⚠️ 未找到可分析的源代码。"
@@ -8546,7 +8549,7 @@ def _scan_watchdog(target: str) -> str:
     modification risks, health check gaps, missing rollback infrastructure,
     and isolation weaknesses."""
     findings: list[str] = []
-    source = _read_sources(target)
+    source = _read_sources(_resolve_target(target))
 
     if not source.strip():
         return "⚠️ 未找到可分析的源代码。"
@@ -8784,15 +8787,20 @@ class WatchdogTool(Tool):
     async def execute(
         self, *, target: str, **kwargs: Any,
     ) -> str:
+        scan_evidence = _scan_watchdog(target)
+        deterministic = _build_watchdog_report(target, scan_evidence)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("watchdog", target[:200])
-        scan_evidence = _scan_watchdog(target)
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 Watchdog 灾难隔离审计。"
+
         user_msg = (
             f"## 审计目标\n{target}\n\n"
             f"## 看门狗扫描\n{scan_evidence}\n"
+            f"\n## 确定性 Watchdog 灾难隔离审计\n{deterministic}\n"
         )
-        return await _run_analysis(router, _WATCHDOG_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _WATCHDOG_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM Watchdog 增强\n" + enhanced
 
 
 # ===========================================================================
