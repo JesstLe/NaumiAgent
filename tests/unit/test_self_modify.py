@@ -56,6 +56,19 @@ class TestResolveTargetPath:
         with pytest.raises(ValueError, match="路径越界"):
             _resolve_target_path("../../../etc/passwd")
 
+    def test_resolves_against_canonical_source_dir(self, tmp_path: Path):
+        source_dir = tmp_path / "src" / "naumi_agent"
+        tools_dir = source_dir / "tools"
+        tools_dir.mkdir(parents=True)
+        target = tools_dir / "case.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+
+        with patch(
+            "naumi_agent.tools.self_modify._AGENT_SOURCE_DIR",
+            source_dir,
+        ):
+            assert _resolve_target_path("tools/case.py") == target.resolve()
+
 
 class TestIsProtectedFile:
     def test_protects_engine(self):
@@ -82,6 +95,19 @@ class TestIsProtectedFile:
     def test_allows_memory(self):
         assert not _is_protected_file(SOURCE_DIR / "memory" / "long_term.py")
 
+    def test_uses_canonical_path_for_boundary_check(self, tmp_path: Path):
+        source_dir = tmp_path / "src" / "naumi_agent"
+        tools_dir = source_dir / "tools"
+        tools_dir.mkdir(parents=True)
+        target = tools_dir / "case.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+
+        with patch(
+            "naumi_agent.tools.self_modify._AGENT_SOURCE_DIR",
+            source_dir,
+        ):
+            assert not _is_protected_file(target.resolve())
+
 
 class TestIsModifiableFile:
     def test_tools_are_modifiable(self):
@@ -98,6 +124,19 @@ class TestIsModifiableFile:
 
     def test_config_is_not_modifiable(self):
         assert not _is_modifiable_file(SOURCE_DIR / "config" / "settings.py")
+
+    def test_uses_canonical_path_for_modifiable_check(self, tmp_path: Path):
+        source_dir = tmp_path / "src" / "naumi_agent"
+        tools_dir = source_dir / "tools"
+        tools_dir.mkdir(parents=True)
+        target = tools_dir / "case.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+
+        with patch(
+            "naumi_agent.tools.self_modify._AGENT_SOURCE_DIR",
+            source_dir,
+        ):
+            assert _is_modifiable_file(target.resolve())
 
 
 class TestComputeDiff:

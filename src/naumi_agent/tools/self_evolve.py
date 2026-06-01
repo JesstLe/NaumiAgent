@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -187,10 +188,16 @@ def _count_ruff_errors(file_path: Path) -> int:
         )
         if result.returncode == 0:
             return 0
-        # Count lines that look like error reports
+        found = re.search(r"Found\s+(\d+)\s+errors?", result.stdout)
+        if found:
+            return int(found.group(1))
+        # Count lines that look like ruff error headers. Ruff's output format
+        # has changed across versions, so support both legacy path:line:col
+        # reports and newer code-first reports.
         error_lines = [
             ln for ln in result.stdout.strip().split("\n")
             if re.match(r"^.*:\d+:\d+: [A-Z]\d+", ln)
+            or re.match(r"^[A-Z]\d{3}\b", ln)
         ]
         return len(error_lines)
     except Exception:
@@ -245,6 +252,19 @@ def _metrics_summary(m: QualityMetrics) -> str:
     )
 
 
+def _measure_quality_in_temp(source: str) -> QualityMetrics:
+    """Measure source quality, including lint, without reading target file state."""
+    with tempfile.NamedTemporaryFile(
+        suffix=".py", mode="w", encoding="utf-8", delete=False,
+    ) as tmp:
+        tmp.write(source)
+        tmp_path = Path(tmp.name)
+    try:
+        return measure_quality(source, tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def reflective_evaluate(
     target_file: str,
     original_content: str,
@@ -262,30 +282,8 @@ def reflective_evaluate(
     Returns:
         Evaluation result dict.
     """
-    # Measure before
-    file_path = None
-    try:
-        from naumi_agent.tools.self_modify import _resolve_target_path
-
-        file_path = _resolve_target_path(target_file)
-    except (ValueError, FileNotFoundError):
-        pass
-
-    before_metrics = measure_quality(original_content, file_path)
-
-    # Write new content to a temp location for measurement
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(
-        suffix=".py", mode="w", encoding="utf-8", delete=False,
-    ) as tmp:
-        tmp.write(new_content)
-        tmp_path = Path(tmp.name)
-
-    try:
-        after_metrics = measure_quality(new_content, tmp_path)
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    before_metrics = _measure_quality_in_temp(original_content)
+    after_metrics = _measure_quality_in_temp(new_content)
 
     # Compare
     comparison = compare_metrics(before_metrics, after_metrics)
@@ -348,9 +346,103 @@ def reflective_evaluate(
     }
 
 
+def _mark_history_step(step_id: str, status: str, reason: str = "") -> None:
+    """Update a recorded evolution step status."""
+    for step in _evolution_history:
+        if step.step_id == step_id:
+            step.status = status
+            if reason:
+                step.decision_reason = reason
+            return
+
+
+def apply_evolution_decision(
+    target_file: str,
+    original_content: str,
+    new_content: str,
+    eval_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply a reflective decision when it is safe to do so.
+
+    Only rollback writes to disk, and only when the current file content still
+    exactly matches the evaluated new_content. This prevents overwriting user
+    edits that happened after the evaluation.
+    """
+    decision = eval_result["decision"]
+    step_id = str(eval_result["step_id"])
+    if decision == "adopt":
+        _mark_history_step(step_id, "adopted")
+        return {
+            "applied": True,
+            "action": "adopted",
+            "message": "已记录采纳决策；提交仍需由调用方显式执行。",
+        }
+    if decision == "iterate":
+        _mark_history_step(step_id, "iteration_requested")
+        return {
+            "applied": False,
+            "action": "iteration_requested",
+            "message": "已记录迭代决策；等待下一轮修改方案。",
+        }
+
+    try:
+        from naumi_agent.tools.self_modify import (
+            _is_modifiable_file,
+            _is_protected_file,
+            _resolve_target_path,
+        )
+
+        file_path = _resolve_target_path(target_file)
+    except (ValueError, FileNotFoundError) as exc:
+        _mark_history_step(step_id, "rollback_failed", str(exc))
+        return {
+            "applied": False,
+            "action": "rollback_failed",
+            "message": f"无法解析回滚目标：{exc}",
+        }
+
+    if _is_protected_file(file_path) or not _is_modifiable_file(file_path):
+        message = "目标文件不在允许回滚范围，已拒绝写回。"
+        _mark_history_step(step_id, "rollback_failed", message)
+        return {"applied": False, "action": "rollback_failed", "message": message}
+
+    try:
+        current_content = file_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        _mark_history_step(step_id, "rollback_failed", str(exc))
+        return {
+            "applied": False,
+            "action": "rollback_failed",
+            "message": f"读取当前文件失败：{exc}",
+        }
+
+    if current_content != new_content:
+        message = "当前文件内容已不同于本轮评估的新内容，为避免覆盖后续改动，拒绝自动回滚。"
+        _mark_history_step(step_id, "rollback_blocked", message)
+        return {"applied": False, "action": "rollback_blocked", "message": message}
+
+    try:
+        file_path.write_text(original_content, encoding="utf-8")
+    except OSError as exc:
+        _mark_history_step(step_id, "rollback_failed", str(exc))
+        return {
+            "applied": False,
+            "action": "rollback_failed",
+            "message": f"写回原始内容失败：{exc}",
+        }
+
+    _mark_history_step(step_id, "reverted")
+    return {
+        "applied": True,
+        "action": "reverted",
+        "message": "已确认当前内容匹配本轮评估结果，并写回原始内容。",
+    }
+
+
 def format_evolution_report(
     eval_result: dict[str, Any],
     modify_result: dict[str, Any] | None = None,
+    apply_result: dict[str, Any] | None = None,
 ) -> str:
     """Format evolution results into a human-readable report."""
     parts: list[str] = ["## 🧬 自我进化报告"]
@@ -413,6 +505,12 @@ def format_evolution_report(
             status_str = "通过" if check_result["passed"] else "失败"
             parts.append(f"- {icon_str} {check_name}: {status_str}")
 
+    if apply_result is not None:
+        parts.append("")
+        parts.append("### 执行闭环")
+        icon_str = "✅" if apply_result.get("applied") else "⚠️"
+        parts.append(f"- {icon_str} {apply_result.get('message', '')}")
+
     return "\n".join(parts)
 
 
@@ -423,6 +521,7 @@ def run_evolution_cycle(
     description: str,
     current_round: int = 1,
     max_rounds: int = _MAX_REFLECTIVE_ROUNDS,
+    apply_decision: bool = False,
 ) -> dict[str, Any]:
     """Run a full evolution cycle: modify → validate → evaluate → decide.
 
@@ -442,12 +541,23 @@ def run_evolution_cycle(
     )
 
     decision = eval_result["decision"]
+    apply_result = (
+        apply_evolution_decision(
+            target_file=target_file,
+            original_content=original_content,
+            new_content=new_content,
+            eval_result=eval_result,
+        )
+        if apply_decision
+        else None
+    )
 
     # Step 2: If adopt — already applied by self_modify, just confirm
     if decision == "adopt":
         return {
             "action": "commit",
             "eval_result": eval_result,
+            "apply_result": apply_result,
             "message": "修改质量提升，建议提交。",
         }
 
@@ -456,6 +566,7 @@ def run_evolution_cycle(
         return {
             "action": "rollback",
             "eval_result": eval_result,
+            "apply_result": apply_result,
             "message": "修改质量下降，已回滚。",
         }
 
@@ -464,6 +575,7 @@ def run_evolution_cycle(
         return {
             "action": "iterate",
             "eval_result": eval_result,
+            "apply_result": apply_result,
             "message": (
                 f"效果不明确 (第 {current_round}/{max_rounds} 轮)，"
                 "建议调整修改方案后重试。"
@@ -475,6 +587,7 @@ def run_evolution_cycle(
     return {
         "action": "rollback",
         "eval_result": eval_result,
+        "apply_result": apply_result,
         "message": f"迭代 {max_rounds} 轮后效果仍不明确，建议回滚。",
     }
 
@@ -520,6 +633,11 @@ class SelfEvolveTool(Tool):
                     "type": "integer",
                     "description": "当前迭代轮次（从 1 开始）",
                 },
+                "apply_decision": {
+                    "type": "boolean",
+                    "description": "是否执行安全闭环：采纳仅记录，回滚仅在内容精确匹配时写回。",
+                    "default": False,
+                },
             },
             "required": ["target_file", "original_content", "new_content", "description"],
         }
@@ -532,6 +650,7 @@ class SelfEvolveTool(Tool):
         new_content: str,
         description: str,
         round: int = 1,
+        apply_decision: bool = False,
         **kwargs: Any,
     ) -> str:
         cycle_result = run_evolution_cycle(
@@ -540,9 +659,13 @@ class SelfEvolveTool(Tool):
             new_content=new_content,
             description=description,
             current_round=round,
+            apply_decision=apply_decision,
         )
 
-        report = format_evolution_report(cycle_result["eval_result"])
+        report = format_evolution_report(
+            cycle_result["eval_result"],
+            apply_result=cycle_result.get("apply_result"),
+        )
         report += f"\n\n**下一步**: {cycle_result['message']}"
 
         return report

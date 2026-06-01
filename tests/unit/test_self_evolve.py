@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -10,8 +11,10 @@ from naumi_agent.tools.self_evolve import (
     EvolutionStep,
     QualityMetrics,
     SelfEvolveTool,
+    _measure_quality_in_temp,
     _metrics_summary,
     _reset_history,
+    apply_evolution_decision,
     compare_metrics,
     docstring_coverage_weight,
     format_evolution_report,
@@ -174,6 +177,19 @@ class TestMeasureQuality:
         f.write_text(BETTER_SOURCE, encoding="utf-8")
         m = measure_quality(BETTER_SOURCE, file_path=f)
         assert isinstance(m.lint_errors, int)
+
+    def test_counts_modern_ruff_output(self, tmp_path: Path):
+        f = tmp_path / "bad.py"
+        f.write_text("import os\nimport os\nx=1\n", encoding="utf-8")
+        m = measure_quality(f.read_text(encoding="utf-8"), file_path=f)
+        assert m.lint_errors >= 1
+
+    def test_temp_measurement_uses_source_content_not_target_state(self):
+        clean = _measure_quality_in_temp(FULL_DOC_SOURCE)
+        dirty = _measure_quality_in_temp("import os\nimport os\nx=1\n")
+
+        assert clean.lint_errors == 0
+        assert dirty.lint_errors >= 1
 
     def test_empty_source(self):
         m = measure_quality("")
@@ -351,6 +367,61 @@ class TestRunEvolutionCycle:
         # Same content essentially → might rollback or iterate
         assert result["action"] in ("commit", "rollback", "iterate")
 
+    def test_apply_decision_rolls_back_when_current_content_matches(
+        self,
+        tmp_path: Path,
+    ):
+        target = tmp_path / "tools" / "evolve_case.py"
+        target.parent.mkdir()
+        target.write_text(WORSE_SOURCE, encoding="utf-8")
+
+        with patch(
+            "naumi_agent.tools.self_modify._find_agent_source_dir",
+            return_value=tmp_path,
+        ):
+            result = run_evolution_cycle(
+                target_file="tools/evolve_case.py",
+                original_content=BETTER_SOURCE,
+                new_content=WORSE_SOURCE,
+                description="rollback bad change",
+                apply_decision=True,
+            )
+
+        assert result["action"] == "rollback"
+        assert result["apply_result"]["action"] == "reverted"
+        assert target.read_text(encoding="utf-8") == BETTER_SOURCE
+        assert get_evolution_history()[-1].status == "reverted"
+
+    def test_apply_decision_blocks_rollback_when_file_changed(
+        self,
+        tmp_path: Path,
+    ):
+        target = tmp_path / "tools" / "evolve_case.py"
+        target.parent.mkdir()
+        target.write_text("# user edited after evaluation\n", encoding="utf-8")
+
+        eval_result = reflective_evaluate(
+            target_file="tools/evolve_case.py",
+            original_content=BETTER_SOURCE,
+            new_content=WORSE_SOURCE,
+            description="rollback bad change",
+        )
+
+        with patch(
+            "naumi_agent.tools.self_modify._find_agent_source_dir",
+            return_value=tmp_path,
+        ):
+            result = apply_evolution_decision(
+                target_file="tools/evolve_case.py",
+                original_content=BETTER_SOURCE,
+                new_content=WORSE_SOURCE,
+                eval_result=eval_result,
+            )
+
+        assert result["action"] == "rollback_blocked"
+        assert target.read_text(encoding="utf-8") == "# user edited after evaluation\n"
+        assert get_evolution_history()[-1].status == "rollback_blocked"
+
 
 class TestEvolutionStep:
     def test_auto_id(self):
@@ -414,6 +485,25 @@ class TestFormatEvolutionReport:
         report = format_evolution_report(eval_result, modify_result)
         assert "验证结果" in report
 
+    def test_report_with_apply_result(self):
+        eval_result = reflective_evaluate(
+            target_file="tools/test.py",
+            original_content=BETTER_SOURCE,
+            new_content=WORSE_SOURCE,
+            description="broke",
+        )
+        _reset_history()
+        report = format_evolution_report(
+            eval_result,
+            apply_result={
+                "applied": True,
+                "action": "reverted",
+                "message": "已写回原始内容。",
+            },
+        )
+        assert "执行闭环" in report
+        assert "已写回原始内容" in report
+
 
 class TestSelfEvolveTool:
     def test_tool_name(self):
@@ -429,6 +519,7 @@ class TestSelfEvolveTool:
         assert "original_content" in schema["properties"]
         assert "new_content" in schema["properties"]
         assert "round" in schema["properties"]
+        assert "apply_decision" in schema["properties"]
         assert len(schema["required"]) == 4
 
     @pytest.mark.asyncio
@@ -469,3 +560,26 @@ class TestSelfEvolveTool:
             round=2,
         )
         assert "进化" in result
+
+    @pytest.mark.asyncio
+    async def test_execute_apply_decision_includes_closed_loop(self, tmp_path: Path):
+        _reset_history()
+        target = tmp_path / "tools" / "evolve_case.py"
+        target.parent.mkdir()
+        target.write_text(WORSE_SOURCE, encoding="utf-8")
+
+        with patch(
+            "naumi_agent.tools.self_modify._find_agent_source_dir",
+            return_value=tmp_path,
+        ):
+            result = await SelfEvolveTool().execute(
+                target_file="tools/evolve_case.py",
+                original_content=BETTER_SOURCE,
+                new_content=WORSE_SOURCE,
+                description="rollback bad change",
+                apply_decision=True,
+            )
+
+        assert "执行闭环" in result
+        assert "写回原始内容" in result
+        assert target.read_text(encoding="utf-8") == BETTER_SOURCE

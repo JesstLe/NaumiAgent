@@ -75,10 +75,12 @@ def _resolve_target_path(target_file: str) -> Path:
     Raises:
         ValueError: If the path escapes the source directory.
     """
-    source_dir = _find_agent_source_dir()
+    source_dir = _find_agent_source_dir().resolve()
     resolved = (source_dir / target_file).resolve()
 
-    if not str(resolved).startswith(str(source_dir)):
+    try:
+        resolved.relative_to(source_dir)
+    except ValueError:
         raise ValueError(f"路径越界: {target_file}")
 
     if not resolved.suffix == ".py":
@@ -89,9 +91,9 @@ def _resolve_target_path(target_file: str) -> Path:
 
 def _is_protected_file(file_path: Path) -> bool:
     """Check if a file belongs to a protected module."""
-    source_dir = _find_agent_source_dir()
+    source_dir = _find_agent_source_dir().resolve()
     try:
-        relative = file_path.relative_to(source_dir)
+        relative = file_path.resolve().relative_to(source_dir)
     except ValueError:
         return True
 
@@ -105,9 +107,9 @@ def _is_protected_file(file_path: Path) -> bool:
 
 def _is_modifiable_file(file_path: Path) -> bool:
     """Check if a file belongs to a modifiable domain."""
-    source_dir = _find_agent_source_dir()
+    source_dir = _find_agent_source_dir().resolve()
     try:
-        relative = file_path.relative_to(source_dir)
+        relative = file_path.resolve().relative_to(source_dir)
     except ValueError:
         return False
 
