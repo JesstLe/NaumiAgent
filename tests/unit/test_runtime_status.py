@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -32,6 +33,7 @@ def engine(tmp_path, request) -> AgentEngine:
 class TestRuntimeStatus:
     def test_tool_is_registered(self, engine: AgentEngine) -> None:
         assert "runtime_status" in engine.tool_registry.names
+        assert "runtime_mcp_connect" in engine.tool_registry.names
 
     @pytest.mark.asyncio
     async def test_snapshot_includes_runtime_state(self, engine: AgentEngine) -> None:
@@ -95,3 +97,41 @@ class TestRuntimeStatus:
         assert "## Runtime 状态" in output
         assert "### 上下文与预算" in output
         assert "工作区" in output
+
+    @pytest.mark.asyncio
+    async def test_runtime_mcp_connect_registers_discovered_tools(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        with patch.object(
+            engine,
+            "connect_mcp_server",
+            new_callable=AsyncMock,
+            return_value=["mcp__demo__echo"],
+        ) as connect:
+            output = await run_runtime_command(engine, "connect demo python server.py")
+
+        connect.assert_awaited_once_with(
+            name="demo",
+            command="python",
+            args=["server.py"],
+            env=None,
+        )
+        assert "已连接 MCP server `demo`" in output
+        assert "mcp__demo__echo" in output
+
+    @pytest.mark.asyncio
+    async def test_runtime_mcp_connect_reports_empty_discovery(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        with patch.object(
+            engine,
+            "connect_mcp_server",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            output = await run_runtime_command(engine, "connect demo missing-command")
+
+        assert "未注册新工具" in output
+        assert "请检查命令是否可执行" in output

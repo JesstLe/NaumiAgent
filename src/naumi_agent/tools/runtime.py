@@ -25,7 +25,7 @@ _ALL_SECTIONS = {
 
 
 def create_runtime_tools(engine: AgentEngine) -> list[Tool]:
-    return [RuntimeStatusTool(engine)]
+    return [RuntimeStatusTool(engine), RuntimeMCPConnectTool(engine)]
 
 
 async def build_runtime_status(
@@ -67,11 +67,58 @@ async def run_runtime_command(engine: AgentEngine, arg: str) -> str:
         return (
             "用法：/runtime [all|context,todo,team,subagent,hooks,resources,recommendations] "
             "[limit]\n"
+            "      /runtime connect <名称> <命令> [参数...]\n"
             "示例：/runtime team,todo 12"
+        )
+    if parts[0] == "connect":
+        if len(parts) < 3:
+            return "用法：/runtime connect <名称> <命令> [参数...]"
+        return await connect_runtime_mcp(
+            engine,
+            name=parts[1],
+            command=parts[2],
+            args=parts[3:],
         )
     sections = parts[0]
     limit = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 8
     return await build_runtime_status(engine, sections=sections, limit=limit)
+
+
+async def connect_runtime_mcp(
+    engine: AgentEngine,
+    *,
+    name: str,
+    command: str,
+    args: list[str] | None = None,
+    env: dict[str, str] | None = None,
+) -> str:
+    """Connect one MCP server and register its tools in the active runtime."""
+    clean_name = name.strip()
+    clean_command = command.strip()
+    if not clean_name:
+        return "MCP 连接失败：名称不能为空。"
+    if not clean_command:
+        return "MCP 连接失败：命令不能为空。"
+
+    before = set(engine.tool_registry.names)
+    tool_names = await engine.connect_mcp_server(
+        name=clean_name,
+        command=clean_command,
+        args=args or [],
+        env=env or None,
+    )
+    new_names = [tool_name for tool_name in tool_names if tool_name not in before]
+    if not tool_names:
+        return (
+            f"MCP server `{clean_name}` 未注册新工具。"
+            "请检查命令是否可执行、server 是否正常返回 list_tools。"
+        )
+    lines = [
+        f"已连接 MCP server `{clean_name}`，注册 {len(new_names)} 个新工具。",
+        "工具：",
+    ]
+    lines.extend(f"- {tool_name}" for tool_name in tool_names)
+    return "\n".join(lines)
 
 
 class RuntimeStatusTool(Tool):
@@ -122,6 +169,70 @@ class RuntimeStatusTool(Tool):
         **kwargs: Any,
     ) -> str:
         return await build_runtime_status(self._engine, sections=sections, limit=limit)
+
+
+class RuntimeMCPConnectTool(Tool):
+    """运行时连接 MCP server."""
+
+    def __init__(self, engine: AgentEngine) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "runtime_mcp_connect"
+
+    @property
+    def description(self) -> str:
+        return (
+            "在当前会话中连接一个 MCP server，发现并注册 mcp__<server>__<tool> "
+            "命名空间工具。适合需要临时接入本地工具服务器时使用。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "MCP server 名称，会用于工具命名空间。",
+                },
+                "command": {
+                    "type": "string",
+                    "description": "启动 MCP server 的可执行命令。",
+                },
+                "args": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "传给 MCP server 命令的参数列表。",
+                    "default": [],
+                },
+                "env": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": "可选环境变量。",
+                    "default": {},
+                },
+            },
+            "required": ["name", "command"],
+        }
+
+    async def execute(
+        self,
+        *,
+        name: str,
+        command: str,
+        args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> str:
+        return await connect_runtime_mcp(
+            self._engine,
+            name=name,
+            command=command,
+            args=args,
+            env=env,
+        )
 
 
 class _RuntimeSnapshot:

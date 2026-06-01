@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import re
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
+from hashlib import sha1
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
@@ -13,6 +15,8 @@ from mcp.client.stdio import stdio_client
 from naumi_agent.tools.base import Tool
 
 logger = logging.getLogger(__name__)
+
+_TOOL_NAME_LIMIT = 64
 
 
 @dataclass
@@ -29,6 +33,11 @@ class MCPClientManager:
         self._sessions: dict[str, ClientSession] = {}
         self._exit_stacks: dict[str, AsyncExitStack] = {}
         self._tool_to_server: dict[str, str] = {}
+
+    @property
+    def connected_servers(self) -> list[str]:
+        """Return connected MCP server names."""
+        return sorted(self._sessions)
 
     async def connect(self, name: str, config: MCPServerConfig) -> list[Tool]:
         """连接到一个 MCP Server，返回其工具列表."""
@@ -56,14 +65,16 @@ class MCPClientManager:
             result = await session.list_tools()
             tools = []
             for t in result.tools:
+                public_name = _mcp_public_tool_name(name, t.name)
                 tool = MCPToolBridge(
                     server_name=name,
                     tool_name=t.name,
                     description=t.description or "",
                     parameters_schema=t.inputSchema or {"type": "object", "properties": {}},
                     session=session,
+                    public_name=public_name,
                 )
-                self._tool_to_server[t.name] = name
+                self._tool_to_server[public_name] = name
                 tools.append(tool)
 
             logger.info(
@@ -105,16 +116,18 @@ class MCPToolBridge(Tool):
         description: str,
         parameters_schema: dict[str, Any],
         session: ClientSession,
+        public_name: str | None = None,
     ) -> None:
         self._server_name = server_name
         self._tool_name = tool_name
+        self._public_name = public_name or tool_name
         self._description = description
         self._schema = parameters_schema
         self._session = session
 
     @property
     def name(self) -> str:
-        return self._tool_name
+        return self._public_name
 
     @property
     def description(self) -> str:
@@ -141,6 +154,27 @@ class MCPToolBridge(Tool):
                 f"MCP tool error ({self._server_name}"
                 f"/{self._tool_name}): {type(e).__name__}: {e}"
             )
+
+
+def _mcp_public_tool_name(server_name: str, tool_name: str) -> str:
+    """Build an OpenAI-compatible, permission-aware public MCP tool name."""
+    server = _sanitize_tool_name_part(server_name) or "server"
+    tool = _sanitize_tool_name_part(tool_name) or "tool"
+    name = f"mcp__{server}__{tool}"
+    if len(name) <= _TOOL_NAME_LIMIT:
+        return name
+
+    digest = sha1(name.encode("utf-8")).hexdigest()[:8]
+    budget = _TOOL_NAME_LIMIT - len("mcp__") - len("__") - len("_") - len(digest)
+    server_budget = max(8, budget // 3)
+    tool_budget = max(8, budget - server_budget)
+    return f"mcp__{server[:server_budget]}__{tool[:tool_budget]}_{digest}"
+
+
+def _sanitize_tool_name_part(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", value.strip())
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_-")
+    return cleaned
 
 
 async def setup_mcp_servers(

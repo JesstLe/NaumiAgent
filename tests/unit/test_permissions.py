@@ -104,6 +104,7 @@ class TestPermissionChecker:
             "team_status",
             "blackboard_write",
             "runtime_status",
+            "runtime_mcp_connect",
             "self_modify",
             "self_review",
             "forge_tool",
