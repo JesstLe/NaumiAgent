@@ -14,52 +14,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.tools import analysis_common
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-#  静态扫描引擎 — 所有工具共享
-# ---------------------------------------------------------------------------
-
-_SOURCE_EXTENSIONS = {
-    ".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".java", ".rb", ".rs", ".php",
-    ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt", ".scala",
-}
-
-
-def _resolve_target(target: str) -> list[Path]:
-    """将 target 字符串解析为文件列表（支持文件路径、目录路径、glob）."""
-    p = Path(os.path.expanduser(target))
-    if p.is_file():
-        return [p]
-    if p.is_dir():
-        files = []
-        for ext in _SOURCE_EXTENSIONS:
-            files.extend(p.rglob(f"*{ext}"))
-        return sorted(files)[:200]
-    return []
-
-
-def _read_sources(files: list[Path], max_chars: int = 80000) -> str:
-    """读取源文件内容，拼成一段文本（带文件名标注）."""
-    parts: list[str] = []
-    total = 0
-    for f in files:
-        try:
-            content = f.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
-        header = f"\n### {f}\n"
-        if total + len(header) + len(content) > max_chars:
-            remaining = max_chars - total
-            if remaining > len(header) + 200:
-                parts.append(header + content[: remaining - len(header)] + "\n... (truncated)")
-            break
-        parts.append(header + content)
-        total += len(header) + len(content)
-    return "".join(parts)
-
+_SOURCE_EXTENSIONS = analysis_common.SOURCE_EXTENSIONS
+_read_sources = analysis_common.read_sources
+_resolve_target = analysis_common.resolve_target
+_router_unavailable = analysis_common.router_unavailable
+_run_analysis = analysis_common.run_analysis
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -8831,35 +8795,6 @@ def set_analysis_subagent_manager(manager: Any) -> None:
     """注入 SubAgentManager 实例，供工具内部调度子 Agent."""
     global _global_subagent_manager
     _global_subagent_manager = manager
-
-
-async def _run_analysis(router: Any, system_prompt: str, user_msg: str) -> str:
-    """调用 LLM 综合分析并返回结果."""
-    from naumi_agent.model.router import ModelTier
-
-    try:
-        response = await router.call(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_msg},
-            ],
-            tier=ModelTier.CAPABLE,
-            max_tokens=16384,
-            temperature=1.0,
-        )
-        return response.content
-    except Exception as e:
-        return f"分析失败: {type(e).__name__}: {e}"
-
-
-def _router_unavailable(mode: str, target: str) -> str:
-    """Router 未注入时的错误提示."""
-    return (
-        f"⚠️ 分析工具尚未初始化（Router 未注入）。\n"
-        f"模式: {mode}\n"
-        f"目标: {target[:200]}\n\n"
-        f"请在 Agent 启动后使用。"
-    )
 
 
 # ---------------------------------------------------------------------------
