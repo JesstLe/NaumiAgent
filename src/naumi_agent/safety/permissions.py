@@ -298,6 +298,17 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         requires_confirmation=True,
         max_calls_per_session=10,
     ),
+    "tool_search": PermissionRule(
+        tool_name="tool_search",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
     "task_create": PermissionRule(
         tool_name="task_create",
         allowed_modes=[

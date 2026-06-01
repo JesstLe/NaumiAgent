@@ -57,6 +57,7 @@ class ToolMetadata:
     command_argument_names: tuple[str, ...] = ("command",)
     interrupt_behavior: InterruptBehavior = InterruptBehavior.BLOCK
     user_facing_name: str | None = None
+    search_hint: str = ""
 
 
 class Tool(ABC):
