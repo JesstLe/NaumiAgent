@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.25] - 2026-06-01
+
+### Added
+- **Cosmos 工具确定性落地** — `/cosmos` 在模型路由未初始化时也会返回创世引擎审计、可运行 cosmos inventory、状态/生成/社会/观测检测和 genesis contract。
+
 ## [0.1.24] - 2026-06-01
 
 ### Added

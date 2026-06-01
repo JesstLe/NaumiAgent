@@ -16,6 +16,7 @@ from typing import Any
 
 from naumi_agent.tools import analysis_common
 from naumi_agent.tools.analysis_support import consensus as _consensus_support
+from naumi_agent.tools.analysis_support import cosmos as _cosmos_support
 from naumi_agent.tools.analysis_support import fusion as _fusion_support
 from naumi_agent.tools.analysis_support import genesis as _genesis_support
 from naumi_agent.tools.analysis_support import hook as _hook_support
@@ -53,6 +54,8 @@ _build_fusion_inventory_script = _fusion_support.build_fusion_inventory_script
 _build_fusion_report = _fusion_support.build_fusion_report
 _build_consensus_inventory_script = _consensus_support.build_consensus_inventory_script
 _build_consensus_report = _consensus_support.build_consensus_report
+_build_cosmos_inventory_script = _cosmos_support.build_cosmos_inventory_script
+_build_cosmos_report = _cosmos_support.build_cosmos_report
 _build_pid_inventory_script = _pid_support.build_pid_inventory_script
 _build_pid_report = _pid_support.build_pid_report
 _build_zkp_trace_script = _zkp_support.build_zkp_trace_script
@@ -8468,15 +8471,20 @@ class CosmosTool(Tool):
     async def execute(
         self, *, target: str, **kwargs: Any,
     ) -> str:
+        scan_evidence = _scan_cosmos(target)
+        deterministic = _build_cosmos_report(target, scan_evidence)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("cosmos", target[:200])
-        scan_evidence = _scan_cosmos(target)
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 Cosmos 创世引擎审计。"
+
         user_msg = (
             f"## 创世目标\n{target}\n\n"
             f"## 创世扫描\n{scan_evidence}\n"
+            f"\n## 确定性 Cosmos 创世引擎审计\n{deterministic}\n"
         )
-        return await _run_analysis(router, _COSMOS_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _COSMOS_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM Cosmos 增强\n" + enhanced
 
 
 # ===========================================================================
