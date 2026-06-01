@@ -251,6 +251,8 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
         console.print(_format_team_event(data))
     elif event == "context_compacted":
         console.print(_format_context_compacted(data))
+    elif event == "recovery_event":
+        console.print(_format_recovery_event(data))
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":
@@ -361,6 +363,18 @@ def _format_context_compacted(data: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def _format_recovery_event(data: dict[str, Any]) -> str:
+    """Format model recovery events for user-visible output."""
+    reason = str(data.get("reason", "?"))
+    action = str(data.get("action", "?"))
+    phase = str(data.get("phase", "?"))
+    before = data.get("before", "?")
+    after = data.get("after", "?")
+    color = "32" if phase == "completed" else "31" if phase == "failed" else "33"
+    suffix = f" {before} → {after} messages" if after != "?" else f" before={before}"
+    return f"\033[{color}m  recovery {phase}: {action} ({reason}){suffix}\033[0m"
+
+
 def _extract_diff_block(content: str) -> tuple[str, str, str] | None:
     """Return prefix, fenced diff body, suffix when content contains ```diff."""
     start = content.find("```diff")
@@ -449,6 +463,8 @@ def _cli_event_factory(cli: Any):
             cli.append_live(_format_team_event(data) + "\n")
         elif event == "context_compacted":
             cli.append_live(_format_context_compacted(data) + "\n")
+        elif event == "recovery_event":
+            cli.append_live(_format_recovery_event(data) + "\n")
         elif event == "response_start":
             cli.finalize_live()
             cli.append_output(f"{_sep(thin=False)}\n")

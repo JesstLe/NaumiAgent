@@ -198,6 +198,15 @@ async def cli_event_handler(event: str, data: dict[str, Any]) -> None:
             console.print("[magenta]保留：[/magenta]" + "、".join(str(item) for item in preserved))
         if isinstance(warnings, list) and warnings:
             console.print("[yellow]风险：[/yellow]" + "；".join(str(item) for item in warnings))
+    elif event == "recovery_event":
+        reason = str(data.get("reason", "?"))
+        action = str(data.get("action", "?"))
+        phase = str(data.get("phase", "?"))
+        before = data.get("before", "?")
+        after = data.get("after", "?")
+        style = "green" if phase == "completed" else "red" if phase == "failed" else "yellow"
+        suffix = f" {before} → {after} messages" if after != "?" else f" before={before}"
+        console.print(f"[{style}]recovery {phase}: {action} ({reason}){suffix}[/{style}]")
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":
