@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createInitialState, handleSubmitText, reduceServerEvent } from "../src/state.js";
+import { createInitialState, createUiSnapshot, applyUiSnapshot, getFoldEntries, handleSubmitText, reduceServerEvent } from "../src/state.js";
 
 test("assistant stream updates one active message", () => {
   const state = createInitialState();
@@ -107,4 +107,38 @@ test("slash commands route through protocol without adding chat noise", () => {
   ]);
   assert.deepEqual(state.messages, []);
   assert.deepEqual(state.folds, {});
+});
+
+test("fold commands list and toggle fold entries without backend calls", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+  const codeLines = Array.from({ length: 45 }, (_, index) => `const value${index} = ${index};`).join("\n");
+
+  reduceServerEvent(state, { type: "ui/message", payload: { type: "assistant_stream", phase: "token", content: `\`\`\`js\n${codeLines}\n\`\`\`` } });
+  assert.equal(getFoldEntries(state).length, 1);
+
+  handleSubmitText(state, "/folds", send);
+  handleSubmitText(state, "/expand 1", send);
+  assert.equal(Object.values(state.folds)[0].expanded, true);
+  handleSubmitText(state, "/collapse all", send);
+  assert.equal(Object.values(state.folds)[0].expanded, false);
+  assert.deepEqual(sent, []);
+  assert(state.messages.some((message) => message.kind === "system" && String(message.content).includes("assistant code")));
+});
+
+test("ui snapshots persist folds and scroll offset only", () => {
+  const state = createInitialState();
+  state.scrollOffset = 9;
+  state.foldCursor = 2;
+  state.folds = { "message:assistant-1:code:0": { expanded: true } };
+  state.input = "不会持久化";
+
+  const restored = createInitialState();
+  applyUiSnapshot(restored, createUiSnapshot(state));
+
+  assert.equal(restored.scrollOffset, 9);
+  assert.equal(restored.foldCursor, 2);
+  assert.deepEqual(restored.folds, { "message:assistant-1:code:0": { expanded: true } });
+  assert.equal(restored.input, "");
 });

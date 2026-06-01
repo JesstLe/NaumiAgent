@@ -74,8 +74,8 @@ attachJsonlLineReader(process.stdin, (line) => {
       tool_name: "file_write",
       status: "success",
       duration_ms: 21,
-      content_preview: "--- a/showcase/index.html\n+++ b/showcase/index.html\n@@\n-old\n+new",
-      content_length: 64,
+      content_preview: ["--- a/showcase/index.html", "+++ b/showcase/index.html", "@@", "-old", "+new", ...Array.from({ length: 65 }, (_, index) => `+line ${index}`)].join("\n"),
+      content_length: 640,
     });
     emit("run/completed", {});
     return;
