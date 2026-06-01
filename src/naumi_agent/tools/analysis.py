@@ -4290,6 +4290,83 @@ def _scan_cooe(
     return "\n".join(findings)
 
 
+def _build_cooe_report(task: str, scan_evidence: str) -> str:
+    subtasks = _cooe_subtasks(task)
+    worker_count = min(max(2, len(subtasks)), 5)
+    sequential = sum(duration for _name, duration, _kind in subtasks)
+    critical = max((duration for _name, duration, _kind in subtasks[:-1]), default=1)
+    commit = subtasks[-1][1] if subtasks else 1
+    parallel = critical + commit
+    speedup = sequential / max(parallel, 1)
+    lines = [
+        "## COOE 确定性 DAG 调度",
+        f"- 任务：{task}",
+        f"- Reservation Stations：{worker_count}",
+        f"- Sequential Estimate：{sequential}s",
+        f"- COOE Estimate：{parallel}s",
+        f"- Speedup：{speedup:.1f}x",
+        "",
+        "## 扫描证据",
+        scan_evidence,
+        "",
+        "## Task Decomposition",
+    ]
+    for idx, (name, duration, kind) in enumerate(subtasks, 1):
+        deps = "none" if idx < len(subtasks) else ", ".join(f"T{i}" for i in range(1, idx))
+        lines.append(f"- T{idx} {name}: {duration}s, {kind}, deps={deps}")
+    lines.extend(
+        [
+            "",
+            "## DAG Visualization",
+            *_cooe_dag_lines(subtasks),
+            "",
+            "## Scheduler Design",
+            f"- Worker slots: {worker_count}",
+            "- Dispatch: ready-queue priority by I/O latency first, CPU work second.",
+            "- Failure: failed node blocks dependents; ROB commits completed predecessors only.",
+            "",
+            "## ROB Configuration",
+            f"- Buffer size: {max(4, len(subtasks) * 2)} entries",
+            "- Ordering policy: completion order in buffer, logical order on commit.",
+            "- Commit trigger: all dependencies for final aggregation are available.",
+            "- Backpressure: pause new dispatch when ROB usage exceeds 80%.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _cooe_subtasks(task: str) -> list[tuple[str, int, str]]:
+    chunks = [
+        chunk.strip()
+        for chunk in re.split(r"[，,;；、]|然后|并且|再|and then| then ", task)
+        if len(chunk.strip()) > 2
+    ]
+    if not chunks:
+        chunks = [task.strip() or "执行任务"]
+    subtasks: list[tuple[str, int, str]] = []
+    for chunk in chunks[:5]:
+        lowered = chunk.lower()
+        io_bound = any(
+            token in lowered
+            for token in ("fetch", "api", "http", "读取", "查询", "下载")
+        )
+        duration = 8 if io_bound else 3
+        kind = "I/O-bound" if io_bound else "CPU-bound"
+        subtasks.append((chunk[:40], duration, kind))
+    if len(subtasks) > 1:
+        subtasks.append(("汇总并按依赖顺序提交结果", 2, "commit"))
+    return subtasks
+
+
+def _cooe_dag_lines(subtasks: list[tuple[str, int, str]]) -> list[str]:
+    if len(subtasks) <= 1:
+        return ["T1 ──→ Commit"]
+    commit_id = f"T{len(subtasks)}"
+    return [f"T{idx} ──┐" for idx in range(1, len(subtasks))] + [
+        f"      ├──→ {commit_id} (ROB commit)"
+    ]
+
+
 _COOE_SYSTEM = """\
 You are a Cognitive Out-of-Order Execution (COOE) engine architect, \
 directly applying CPU pipeline design to AI agent workflows.
@@ -4407,10 +4484,6 @@ class COOETool(Tool):
         target: str = "",
         **kwargs: Any,
     ) -> str:
-        router = _global_router
-        if router is None:
-            return _router_unavailable("cooe", task[:200])
-
         source_text = ""
         files: list[Path] = []
         if target:
@@ -4419,13 +4492,20 @@ class COOETool(Tool):
                 source_text = _read_sources(files)
 
         scan_evidence = _scan_cooe(files, source_text, task)
+        deterministic = _build_cooe_report(task, scan_evidence)
+
+        router = _global_router
+        if router is None:
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 COOE 调度计划。"
 
         user_msg = f"## 任务描述\n{task}\n"
         user_msg += f"\n## COOE 扫描证据\n{scan_evidence}\n"
+        user_msg += f"\n## 确定性 COOE 计划\n{deterministic}\n"
         if source_text:
             user_msg += f"\n## 相关源代码\n{source_text[:40000]}\n"
 
-        return await _run_analysis(router, _COOE_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _COOE_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM COOE 架构增强\n" + enhanced
 
 
 # ===========================================================================

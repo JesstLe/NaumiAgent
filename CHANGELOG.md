@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.11] - 2026-06-01
+
+### Added
+- **COOE 工具确定性落地** — `/cooe` 在模型路由未初始化时也会生成 DAG 任务拆解、Reservation Stations、ROB 配置、顺序/并行耗时估算和加速比。
+
 ## [0.1.10] - 2026-06-01
 
 ### Added
