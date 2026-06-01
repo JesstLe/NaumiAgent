@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.45] - 2026-06-01
+
+### Changed
+- **Analysis Route 模块拆分** — 将 `/route` 的领域关键词扫描、确定性专家选择、专家冲突解析和 MoE 报告骨架迁移到 `analysis_support.route`，主 `analysis.py` 保留 SubAgent/LLM 执行编排路径。
+
 ## [0.1.44] - 2026-06-01
 
 ### Changed
