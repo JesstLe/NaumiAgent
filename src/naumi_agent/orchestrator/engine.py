@@ -1847,11 +1847,11 @@ class AgentEngine:
                         await on_event("thinking_delta", {"content": chunk.thinking})
 
                     if chunk.token:
-                        if not got_response:
-                            got_response = True
-                            await on_event("response_start", {})
+                        # Tool-capable streaming can emit text fragments before the final
+                        # finish_reason reveals that the same assistant turn is actually a
+                        # tool call. Buffer first so tool-call preambles or malformed
+                        # argument fragments never leak into the CLI/TUI transcript.
                         text_parts.append(chunk.token)
-                        await on_event("token", {"content": chunk.token})
 
                     if chunk.tool_call and isinstance(chunk.tool_call, dict):
                         collected_tool_calls.update(chunk.tool_call)
@@ -1868,9 +1868,6 @@ class AgentEngine:
                 self._track_model_usage(response.usage, model_str)
                 stream_tokens = response.usage.total_tokens
                 if response.content:
-                    if not got_response:
-                        got_response = True
-                        await on_event("response_start", {})
                     text_parts.append(response.content)
                 if response.reasoning_content:
                     got_thinking = True
@@ -1913,7 +1910,7 @@ class AgentEngine:
             if collected_tool_calls:
                 assistant_msg: dict[str, Any] = {
                     "role": "assistant",
-                    "content": text_content or None,
+                    "content": None,
                     "tool_calls": list(collected_tool_calls.values()),
                 }
                 if thinking_content:
@@ -2071,6 +2068,11 @@ class AgentEngine:
 
             # --- 最终回答 ---
             tool_call_history.clear()
+            if text_content and not got_response:
+                got_response = True
+                await on_event("response_start", {})
+                await on_event("token", {"content": text_content})
+
             if _is_output_truncated(finish_reason):
                 continued_content = await self._continue_truncated_final_response(
                     partial_content=text_content,
