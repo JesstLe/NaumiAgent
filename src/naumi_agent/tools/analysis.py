@@ -105,6 +105,8 @@ _build_self_review_inventory_script = (
     _self_review_support.build_self_review_inventory_script
 )
 _build_self_review_report = _self_review_support.build_self_review_report
+_scan_self_review = _self_review_support.scan_self_review
+_find_agent_source_dir = _self_review_support.find_agent_source_dir
 _build_page_inventory_script = _page_support.build_page_inventory_script
 _build_page_report = _page_support.build_page_report
 _scan_page = _page_support.scan_page
@@ -4261,112 +4263,6 @@ _SELF_REVIEW_SYSTEM = """\
 - **改进优先级**: 按影响力排序的 Top 5 改进建议
 - **自进化建议**: 哪些部分适合由 Agent 自己修改（Phase F 候选）
 """
-
-
-def _scan_self_review(files: list[Path], source_text: str) -> str:
-    """self-review 模式静态扫描：审查 Agent 自身代码."""
-    findings: list[str] = []
-    lines = source_text.split("\n")
-    total_lines = len(lines)
-
-    # 1. Architecture overview
-    findings.append(
-        f"- 源文件: {len(files)} 个 | 总行数: {total_lines}"
-    )
-
-    # 2. Tool registration count
-    tool_registrations = re.findall(r"register\((\w+)\)", source_text)
-    findings.append(f"- 工具注册调用: {len(tool_registrations)} 处")
-
-    # 3. Bare except (critical for agent reliability)
-    bare_excepts = re.findall(r"except\s*:", source_text)
-    if bare_excepts:
-        findings.append(f"- 🔴 裸 except (吞掉所有异常): {len(bare_excepts)} 处")
-    else:
-        findings.append("- ✅ 无裸 except")
-
-    # 4. Hardcoded secrets / API keys
-    secrets = re.findall(
-        r"(?:api_key|password|secret|token)\s*=\s*[\"'][^\"']{8,}",
-        source_text,
-        re.IGNORECASE,
-    )
-    if secrets:
-        findings.append(f"- 🔴 疑似硬编码密钥: {len(secrets)} 处")
-        for s in secrets[:5]:
-            findings.append(f"  - `{s[:60]}`")
-    else:
-        findings.append("- ✅ 无硬编码密钥")
-
-    # 5. Missing type annotations
-    no_return_type = re.findall(
-        r"def (\w+)\([^)]*\)\s*:",
-        source_text,
-    )
-    typed_returns = re.findall(
-        r"def \w+\([^)]*\)\s*->\s+\w+",
-        source_text,
-    )
-    untyped = len(no_return_type) - len(typed_returns)
-    if untyped > 0:
-        findings.append(f"- 🟡 缺少返回类型注解的函数: {untyped} 个")
-    else:
-        findings.append("- ✅ 所有函数都有返回类型注解")
-
-    # 6. Global mutable state
-    global_mutable = re.findall(
-        r"^(\w+)\s*=\s*\{[^}]*\}|\[\]",
-        source_text,
-        re.MULTILINE,
-    )
-    if global_mutable:
-        findings.append(f"- 🟡 模块级可变状态: {len(global_mutable)} 处")
-
-    # 7. Error handling coverage
-    try_blocks = re.findall(r"\btry\s*:", source_text)
-    if try_blocks:
-        findings.append(f"- try/except 块: {len(try_blocks)} 个")
-
-    # 8. Async consistency
-    async_defs = re.findall(r"\basync def ", source_text)
-    sync_defs = re.findall(r"\bdef ", source_text)
-    async_ratio = len(async_defs) / max(len(sync_defs), 1)
-    findings.append(
-        f"- async/sync 函数比: {len(async_defs)}/{len(sync_defs)}"
-        f" ({async_ratio:.0%} async)"
-    )
-
-    # 9. Test coverage indicator
-    test_mentions = re.findall(r"test_\w+", source_text)
-    findings.append(
-        f"- 代码中测试函数引用: {len(test_mentions)} 处"
-    )
-
-    # 10. Logging usage
-    log_calls = re.findall(r"logger\.\w+\(", source_text)
-    print_calls = re.findall(r"\bprint\(", source_text)
-    findings.append(
-        f"- logger 调用: {len(log_calls)} | print 调用: {len(print_calls)}"
-    )
-
-    # 11. TODO/FIXME/HACK markers
-    todos = re.findall(r"#\s*(?:TODO|FIXME|HACK|XXX)\b", source_text, re.IGNORECASE)
-    if todos:
-        findings.append(f"- 🟡 TODO/FIXME/HACK 标记: {len(todos)} 处")
-
-    return "\n".join(findings)
-
-
-def _find_agent_source_dir() -> str:
-    """Locate the naumi_agent source directory."""
-    # Try relative to this file first
-    this_file = Path(__file__).resolve()
-    pkg_dir = this_file.parent.parent  # tools/ -> naumi_agent/
-    if (pkg_dir / "__init__.py").exists() and pkg_dir.name == "naumi_agent":
-        return str(pkg_dir)
-    # Fallback: search in site-packages or common locations
-    import naumi_agent
-    return str(Path(naumi_agent.__file__).resolve().parent)
 
 
 class SelfReviewTool(Tool):
