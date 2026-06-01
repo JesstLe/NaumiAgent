@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.18] - 2026-06-01
+
+### Added
+- **Fusion 工具确定性落地** — `/fusion` 在模型路由未初始化时也会返回概率/决定论边界审计、可运行 fusion inventory 脚本、危险融合点和验证层契约。
+
+### Fixed
+- **Fusion 源码读取修复** — `_scan_fusion` 现在会先解析目标路径再读取源码，避免路径字符串被逐字符处理导致扫描为空。
+
 ## [0.1.17] - 2026-06-01
 
 ### Added

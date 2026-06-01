@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from naumi_agent.tools import analysis_common
+from naumi_agent.tools.analysis_support import fusion as _fusion_support
 from naumi_agent.tools.analysis_support import hook as _hook_support
 from naumi_agent.tools.analysis_support import probe as _probe_support
 from naumi_agent.tools.analysis_support import spar as _spar_support
@@ -42,6 +43,8 @@ _build_spar_harness_script = _spar_support.build_spar_harness_script
 _build_spar_report = _spar_support.build_spar_report
 _build_world_inventory_script = _world_support.build_world_inventory_script
 _build_world_report = _world_support.build_world_report
+_build_fusion_inventory_script = _fusion_support.build_fusion_inventory_script
+_build_fusion_report = _fusion_support.build_fusion_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -6388,7 +6391,7 @@ def _scan_fusion(target: str) -> str:
     identify AI call zones, precision-critical zones, dangerous fusion
     points, and over-determined code that could benefit from AI."""
     findings: list[str] = []
-    source = _read_sources(target)
+    source = _read_sources(_resolve_target(target))
 
     if not source.strip():
         return "⚠️ 未找到可分析的源代码。"
@@ -6621,15 +6624,20 @@ class FusionTool(Tool):
     async def execute(
         self, *, target: str, **kwargs: Any,
     ) -> str:
+        scan_evidence = _scan_fusion(target)
+        deterministic = _build_fusion_report(target, scan_evidence)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("fusion", target[:200])
-        scan_evidence = _scan_fusion(target)
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 Fusion 边界审计。"
+
         user_msg = (
             f"## 审计目标\n{target}\n\n"
             f"## 融合架构扫描\n{scan_evidence}\n"
+            f"\n## 确定性 Fusion 边界审计\n{deterministic}\n"
         )
-        return await _run_analysis(router, _FUSION_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _FUSION_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM Fusion 增强\n" + enhanced
 
 
 # ===========================================================================
