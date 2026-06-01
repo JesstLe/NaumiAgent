@@ -2,6 +2,7 @@ import { ANSI, color, compactText } from "../ansi.js";
 import { MarkdownExcerpt } from "./markdown.js";
 import { renderComponent } from "./core.js";
 import { ActivityCard } from "./activity-card.js";
+import { EventCard } from "./event-card.js";
 import { ToolCard } from "./tool-card.js";
 
 export function Message({ message }) {
@@ -36,6 +37,17 @@ export function renderMessage(message, width, ctx = { width }) {
   if (message.kind === "system") {
     const style = message.level === "error" ? ANSI.red : message.level === "warning" ? ANSI.yellow : ANSI.dim;
     return ["", color(style, `${message.title}: ${message.content}`)];
+  }
+  if ([
+    "runtime_notification",
+    "subagent_event",
+    "team_event",
+    "hook_trace",
+    "context_compact",
+    "recovery",
+    "error",
+  ].includes(message.kind)) {
+    return renderComponent(EventCard({ message }), ctx);
   }
   return ["", color(ANSI.dim, `${message.kind}: ${JSON.stringify(message.message ?? {})}`)];
 }
