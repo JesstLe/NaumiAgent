@@ -2641,7 +2641,7 @@ async def _show_history(engine: Any) -> None:
 
 
 def _replay_session_to_cli(cli: Any, session: Any, engine: Any = None) -> None:
-    """将会话的所有消息完整回放到 CLI 输出区，像从未关过一样."""
+    """将会话消息通过 UIMessage 适配器回放到 CLI 输出区."""
     if hasattr(cli, "reset_output"):
         cli.reset_output()
     elif hasattr(cli, "clear_output"):
@@ -2649,50 +2649,21 @@ def _replay_session_to_cli(cli: Any, session: Any, engine: Any = None) -> None:
 
     title = session.title or session.id
     msg_count = len(session.messages)
+
+    from naumi_agent.cli.renderers import CLIRenderer
+    from naumi_agent.ui.messages.replay import replay_messages
+
+    renderer = CLIRenderer()
+    ui_messages = replay_messages(session.messages)
+
     cli.append_output(
         f"\033[2m━━━ 恢复会话: {title} ({msg_count}条消息) ━━━\033[0m\n"
     )
 
-    for m in session.messages:
-        role = m.get("role", "")
-        content = m.get("content") or ""
-
-        if role == "system":
-            continue  # 不回放系统消息
-
-        if role == "user":
-            cli.append_output(f"\033[32m❯\033[0m {content}\n")
-
-        elif role == "assistant":
-            tool_calls = m.get("tool_calls", [])
-            # Show text content
-            if content:
-                cli.append_output(
-                    _capture(lambda c=content: console.print(c))
-                )
-            # Show tool calls
-            for tc in tool_calls:
-                tc_dict = tc if isinstance(tc, dict) else {}
-                tc_name = tc_dict.get("function", {}).get("name", "tool")
-                tc_args = tc_dict.get("function", {}).get("arguments", "")
-                label = _tool_label(tc_name, tc_args)
-                cli.append_output(f"\033[36m  ✓ {label}\033[0m\n")
-
-        elif role == "tool":
-            is_placeholder = "工具调用结果缺失" in content
-            has_error = "error" in content.lower()[:200] if content else False
-            if is_placeholder:
-                icon = "⚠️"
-            elif has_error:
-                icon = "❌"
-            else:
-                icon = "✅"
-            # Show tool result preview (like _print_tool_output)
-            if content:
-                preview = _capture(lambda c=content: _print_tool_output("tool", c))
-                cli.append_output(f"  {icon} {preview}")
-            else:
-                cli.append_output(f"  {icon}\n")
+    for msg in ui_messages:
+        ansi_text = renderer.render(msg)
+        if ansi_text is not None:
+            cli.append_output(ansi_text)
 
     cli.append_output(
         "\033[2m━━━ 会话已恢复，继续对话或 /new 开始新会话 ━━━\033[0m\n\n"

@@ -27,12 +27,14 @@ from naumi_agent.ui.messages.events import (
     RuntimeNotificationMessage,
     RuntimeStatusMessage,
     SubagentEventMessage,
+    SystemNoticeMessage,
     TeamEventMessage,
     ThinkingMessage,
     TodoStatusMessage,
     ToolPrepareMessage,
     ToolResultMessage,
     ToolUseMessage,
+    UserMessage,
 )
 
 # Separator helpers (matching existing main.py style)
@@ -55,6 +57,25 @@ def _sep(thin: bool = True) -> str:
 # ---------------------------------------------------------------------------
 # Individual renderers — one per message type
 # ---------------------------------------------------------------------------
+
+
+def _render_user(msg: UserMessage) -> str | None:
+    prompt = "\033[32m❯\033[0m"
+    if msg.content:
+        preview = msg.content
+        if msg.is_command:
+            prompt = "\033[33m❯\033[0m"
+    else:
+        preview = ""
+    return f"{prompt} {preview}\n"
+
+
+def _render_system_notice(msg: SystemNoticeMessage) -> str | None:
+    color = {
+        "warning": "33",
+        "debug": "2",
+    }.get(msg.level, "36")
+    return f"\033[{color}m{msg.content}\033[0m\n"
 
 
 def _render_thinking(msg: ThinkingMessage) -> str | None:
@@ -307,6 +328,8 @@ class CLIRenderer:
     def _register_defaults(self) -> None:
         """Register the default set of renderers."""
         self._registry.update({
+            MessageType.USER: _render_user,
+            MessageType.SYSTEM_NOTICE: _render_system_notice,
             MessageType.THINKING: _render_thinking,
             MessageType.ASSISTANT_STREAM: _render_assistant_stream,
             MessageType.TOOL_PREPARE: _render_tool_prepare,
