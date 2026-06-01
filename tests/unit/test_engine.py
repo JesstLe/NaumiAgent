@@ -1289,6 +1289,122 @@ class TestErrorRecovery:
             await engine.shutdown()
 
     @pytest.mark.asyncio
+    async def test_streaming_tool_call_emits_prepare_progress(
+        self,
+        tmp_path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        events: list[tuple[str, dict[str, object]]] = []
+        call_count = 0
+        large_content = "\n".join(f"line_{idx}" for idx in range(600))
+        final_args = json.dumps(
+            {
+                "file_path": "/tmp/showcase.html",
+                "content": large_content,
+            }
+        )
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        async def stream_response(**_: object):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                yield StreamChunk(
+                    tool_call_started=True,
+                    tool_call_snapshot={
+                        0: {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "file_write",
+                                "arguments": (
+                                    '{"file_path": "/tmp/showcase.html", '
+                                    '"content": "line_1'
+                                ),
+                            },
+                        }
+                    },
+                )
+                yield StreamChunk(
+                    tool_call_snapshot={
+                        0: {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "file_write",
+                                "arguments": final_args,
+                            },
+                        }
+                    }
+                )
+                yield StreamChunk(
+                    tool_call={
+                        0: {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "file_write",
+                                "arguments": final_args,
+                            },
+                        }
+                    },
+                    finish_reason="tool_calls",
+                )
+                return
+
+            yield StreamChunk(token="创建完成")
+            yield StreamChunk(finish_reason="stop")
+
+        try:
+            engine._messages = [
+                {"role": "system", "content": "system prompt"},
+                {"role": "user", "content": "创建网页"},
+            ]
+
+            with (
+                patch.object(engine._router, "stream", new=stream_response),
+                patch.object(
+                    engine,
+                    "_execute_tool",
+                    new_callable=AsyncMock,
+                    return_value=ToolResult(
+                        call_id="call_1",
+                        status="success",
+                        content="ok",
+                        duration_ms=1,
+                    ),
+                ),
+            ):
+                result = await engine._react_loop_streaming(
+                    tools=[FakeTool().to_openai_tool()],
+                    on_event=on_event,
+                )
+
+            assert result.status == "completed"
+            prepare_events = [
+                (event, data)
+                for event, data in events
+                if event.startswith("tool_prepare_")
+            ]
+            assert [event for event, _ in prepare_events] == [
+                "tool_prepare_start",
+                "tool_prepare_snapshot",
+                "tool_prepare_end",
+            ]
+            assert prepare_events[0][1]["name"] == "file_write"
+            assert prepare_events[0][1]["path"] == "/tmp/showcase.html"
+            assert prepare_events[1][1]["content_lines"] == 600
+            assert prepare_events[1][1]["argument_chars"] < len(final_args) + 1
+            assert prepare_events[-1][1]["content_lines"] == 600
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
     async def test_streaming_final_answer_flushes_after_tool_guard_window(
         self,
         tmp_path,

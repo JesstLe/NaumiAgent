@@ -33,6 +33,7 @@ from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.clipboard import copy_or_save_transcript
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
+from naumi_agent.ui.tool_activity import format_tool_prepare_status
 
 logger = logging.getLogger(__name__)
 
@@ -207,13 +208,27 @@ class ChatPanel(VerticalScroll):
 
     # --- 工具调用 ---
 
+    def update_tool_prepare(self, text: str) -> None:
+        self._trace_event("tui.tool_prepare", {"text": text})
+        rendered = Text(f"  {text}", style="dim")
+        if self._current_tool_widget is None:
+            self._current_tool_widget = Static(rendered, classes="tool-running")
+            self.mount(self._current_tool_widget)
+        else:
+            self._current_tool_widget.update(rendered)
+        self.scroll_end(animate=False)
+
+    def end_tool_prepare(self) -> None:
+        self._trace_event("tui.tool_prepare_end", {})
+
     def start_tool(self, name: str) -> None:
         self._trace_event("tui.tool_start", {"name": name})
-        self._current_tool_widget = Static(
-            Text.from_markup(f"  ⏳ [dim]{name}[/dim]"),
-            classes="tool-running",
-        )
-        self.mount(self._current_tool_widget)
+        text = Text.from_markup(f"  ⏳ [dim]{name}[/dim]")
+        if self._current_tool_widget is None:
+            self._current_tool_widget = Static(text, classes="tool-running")
+            self.mount(self._current_tool_widget)
+        else:
+            self._current_tool_widget.update(text)
         self.scroll_end(animate=False)
 
     def end_tool(
@@ -258,8 +273,8 @@ class ChatPanel(VerticalScroll):
         self._response_widget = None
         self._thinking_text = ""
         self._thinking_content_widget = None
-        self._thinking_collapsible = None
         self._current_tool_widget = None
+        self._thinking_collapsible = None
         self._model_widget = None
         self.scroll_to(0, animate=False)
 
@@ -1690,6 +1705,12 @@ class NaumiApp(App):
                     chat.add_response_token(content)
                 case "response_end":
                     pass
+                case "tool_prepare_start" | "tool_prepare_snapshot":
+                    prepare_text = format_tool_prepare_status(data)
+                    chat.update_tool_prepare(prepare_text)
+                    status.status_text = prepare_text
+                case "tool_prepare_end":
+                    chat.end_tool_prepare()
                 case "tool_start":
                     tool_name = data["name"]
                     label = _tool_label(tool_name, data.get("args", ""))

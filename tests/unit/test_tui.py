@@ -71,6 +71,29 @@ class TestNaumiApp:
         assert "line_81" not in widget.content
         assert "已隐藏 3 行代码" in widget.content
 
+    def test_chat_panel_reuses_prepare_widget_for_tool_start(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        chat = ChatPanel()
+        mounted: list[object] = []
+        updated: list[object] = []
+
+        class FakeToolWidget:
+            def update(self, content: object) -> None:
+                updated.append(content)
+
+        monkeypatch.setattr(chat, "mount", lambda widget: mounted.append(widget))
+        monkeypatch.setattr(chat, "scroll_end", lambda animate=False: None)
+
+        prepare_widget = FakeToolWidget()
+        chat._current_tool_widget = prepare_widget
+        chat.start_tool("📝 file_write showcase.html")
+
+        assert chat._current_tool_widget is prepare_widget
+        assert len(mounted) == 0
+        assert len(updated) == 1
+
     @pytest.mark.asyncio
     async def test_permission_confirmation_modal_returns_choice(self) -> None:
         engine = AgentEngine(AppConfig())

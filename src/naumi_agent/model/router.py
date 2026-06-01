@@ -50,6 +50,7 @@ class ModelResponse:
 class StreamChunk:
     token: str = ""
     tool_call: Any = None
+    tool_call_snapshot: Any = None
     tool_call_started: bool = False
     thinking: str = ""
     finish_reason: str | None = None
@@ -60,6 +61,23 @@ def _calculate_cost(
     model: str, input_tokens: int, output_tokens: int, rates: dict[str, float]
 ) -> float:
     return input_tokens * rates["input"] / 1_000_000 + output_tokens * rates["output"] / 1_000_000
+
+
+def _copy_tool_call_snapshot(
+    tool_calls: dict[int, dict[str, Any]],
+) -> dict[int, dict[str, Any]]:
+    """Return a detached snapshot of streamed tool-call arguments."""
+    return {
+        idx: {
+            "id": call.get("id", ""),
+            "type": call.get("type", "function"),
+            "function": {
+                "name": str((call.get("function") or {}).get("name", "")),
+                "arguments": str((call.get("function") or {}).get("arguments", "")),
+            },
+        }
+        for idx, call in tool_calls.items()
+    }
 
 
 class ModelRouter:
@@ -413,15 +431,27 @@ class ModelRouter:
                         if tc.function.arguments:
                             entry["function"]["arguments"] += tc.function.arguments
 
+            tool_call_snapshot = None
+            if delta.tool_calls and collected_tool_calls:
+                tool_call_snapshot = _copy_tool_call_snapshot(collected_tool_calls)
+
             tool_call = None
             if finish_reason == "tool_calls" and collected_tool_calls:
-                tool_call = collected_tool_calls
+                tool_call = _copy_tool_call_snapshot(collected_tool_calls)
 
-            if token or thinking_text or tool_call or tool_call_started or finish_reason:
+            if (
+                token
+                or thinking_text
+                or tool_call
+                or tool_call_snapshot
+                or tool_call_started
+                or finish_reason
+            ):
                 yield StreamChunk(
                     token=token,
                     thinking=thinking_text,
                     tool_call=tool_call,
+                    tool_call_snapshot=tool_call_snapshot,
                     tool_call_started=tool_call_started,
                     finish_reason=finish_reason,
                     usage=None,
