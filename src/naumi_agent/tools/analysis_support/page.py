@@ -26,6 +26,27 @@ def pressure_level(tokens: int, context_window: int) -> str:
     return "LOW"
 
 
+def scan_page(source_text: str) -> str:
+    """Summarize context size and role distribution for paging decisions."""
+    findings: list[str] = []
+
+    total_chars = len(source_text)
+    est_tokens = total_chars // 4
+    findings.append(f"- 当前对话估算 Token 数: ~{est_tokens:,}")
+    findings.append(f"- 对话字符数: {total_chars:,}")
+
+    user_msgs = len(re.findall(r'"role":\s*"user"', source_text))
+    assistant_msgs = len(re.findall(r'"role":\s*"assistant"', source_text))
+    system_msgs = len(re.findall(r'"role":\s*"system"', source_text))
+    tool_msgs = len(re.findall(r'"role":\s*"tool"', source_text))
+    findings.append(
+        f"- 消息分布: user={user_msgs}, assistant={assistant_msgs}, "
+        f"system={system_msgs}, tool={tool_msgs}"
+    )
+
+    return "\n".join(findings)
+
+
 def build_page_inventory_script(context_window: int) -> str:
     """Build a dependency-free context pressure scanner."""
     return f'''\

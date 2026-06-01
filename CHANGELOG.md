@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.50] - 2026-06-01
+
+### Changed
+- **Analysis Page 模块收拢** — 将 `/page` 的上下文 Token 粗估、角色分布扫描和分页压力证据生成迁移到 `analysis_support.page`，让 Page 的确定性扫描、inventory script 和报告渲染集中维护。
+
 ## [0.1.49] - 2026-06-01
 
 ### Changed
