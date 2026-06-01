@@ -22,6 +22,7 @@ from naumi_agent.tools.analysis_support import fusion as _fusion_support
 from naumi_agent.tools.analysis_support import genesis as _genesis_support
 from naumi_agent.tools.analysis_support import hook as _hook_support
 from naumi_agent.tools.analysis_support import macro as _macro_support
+from naumi_agent.tools.analysis_support import page as _page_support
 from naumi_agent.tools.analysis_support import pid as _pid_support
 from naumi_agent.tools.analysis_support import probe as _probe_support
 from naumi_agent.tools.analysis_support import self_review as _self_review_support
@@ -79,6 +80,8 @@ _build_self_review_inventory_script = (
     _self_review_support.build_self_review_inventory_script
 )
 _build_self_review_report = _self_review_support.build_self_review_report
+_build_page_inventory_script = _page_support.build_page_inventory_script
+_build_page_report = _page_support.build_page_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -1348,30 +1351,42 @@ class MemoryPageTool(Tool):
                     "description": "模型上下文窗口大小（Token），默认 128000",
                     "default": 128000,
                 },
+                "session_context": {
+                    "type": "string",
+                    "description": "可选：当前会话 transcript 或摘要，用于真实计算分页压力",
+                    "default": "",
+                },
             },
             "required": [],
         }
 
     async def execute(
-        self, *, context_window: int = 128000, **kwargs: Any
+        self, *, context_window: int = 128000, session_context: str = "", **kwargs: Any
     ) -> str:
+        window = context_window
+        scan_evidence = _scan_page(session_context)
+        deterministic = _build_page_report(scan_evidence, window, session_context)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("page", "memory")
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 Page 内存分页报告。"
 
         # 从 router 获取真实的上下文信息
         model = router.resolve_model("capable")
         real_window = router.get_context_window(model)
         window = min(context_window, real_window)
+        deterministic = _build_page_report(scan_evidence, window, session_context)
 
         user_msg = (
             f"## 系统信息\n"
             f"- 模型: {model}\n"
             f"- 上下文窗口: {window:,} tokens\n"
+            f"\n## 确定性分页报告\n{deterministic}\n"
             f"- 请分析当前对话的内存使用情况并给出分页建议。\n"
         )
 
-        return await _run_analysis(router, _PAGE_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _PAGE_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM Page 增强\n" + enhanced
 
 
 # ===========================================================================
