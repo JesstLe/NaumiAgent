@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.30] - 2026-06-01
+
+### Added
+- **Sleep 工具确定性落地** — `/sleep` 在模型路由未初始化时也会返回突触修剪报告、可运行 sleep inventory、保留/修剪候选和 evolution patch contract。
+
+### Fixed
+- **Sleep 执行顺序修复** — 突触修剪现在会先扫描会话与源码材料，再按需追加 LLM 增强，避免无模型时跳过确定性压缩能力。
+
 ## [0.1.29] - 2026-06-01
 
 ### Added

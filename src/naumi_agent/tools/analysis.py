@@ -26,6 +26,7 @@ from naumi_agent.tools.analysis_support import page as _page_support
 from naumi_agent.tools.analysis_support import pid as _pid_support
 from naumi_agent.tools.analysis_support import probe as _probe_support
 from naumi_agent.tools.analysis_support import self_review as _self_review_support
+from naumi_agent.tools.analysis_support import sleep as _sleep_support
 from naumi_agent.tools.analysis_support import spar as _spar_support
 from naumi_agent.tools.analysis_support import supervisor as _supervisor_support
 from naumi_agent.tools.analysis_support import vision as _vision_support
@@ -82,6 +83,8 @@ _build_self_review_inventory_script = (
 _build_self_review_report = _self_review_support.build_self_review_report
 _build_page_inventory_script = _page_support.build_page_inventory_script
 _build_page_report = _page_support.build_page_report
+_build_sleep_inventory_script = _sleep_support.build_sleep_inventory_script
+_build_sleep_report = _sleep_support.build_sleep_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -4686,9 +4689,6 @@ class SleepPruningTool(Tool):
         target: str = "",
         **kwargs: Any,
     ) -> str:
-        router = _global_router
-        if router is None:
-            return _router_unavailable("sleep", "session")
         source_text = ""
         files: list[Path] = []
         if target:
@@ -4704,11 +4704,19 @@ class SleepPruningTool(Tool):
         elif not source_text:
             combined = "（无会话上下文，将基于代码库进行分析）"
         scan_evidence = _scan_sleep(files, combined, session_context)
+        deterministic = _build_sleep_report(scan_evidence, session_context, combined)
+
+        router = _global_router
+        if router is None:
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 Sleep 突触修剪报告。"
+
         user_msg = (
             f"## 突触修剪扫描\n{scan_evidence}\n\n"
+            f"## 确定性 Sleep 突触修剪报告\n{deterministic}\n\n"
             f"## 完整内容\n{combined[:60000]}\n"
         )
-        return await _run_analysis(router, _SLEEP_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _SLEEP_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM Sleep 增强\n" + enhanced
 
 
 # ===========================================================================
