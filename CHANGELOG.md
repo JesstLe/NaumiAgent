@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.73] - 2026-06-01
+
+### Changed
+- **Hot Reload 工具域发现加固** — 将 `hot_reload` 标记为需要确认的运行时状态变更工具，并把 `tools` 域从硬编码短名单改为动态发现当前工具树，覆盖 `self_modify`、`self_evolve`、`forge` 与拆分后的 `analysis_support` 模块；同时为重载目标增加格式校验，拒绝非 `naumi_agent.*` 模块名。
+
 ## [0.1.72] - 2026-06-01
 
 ### Changed
