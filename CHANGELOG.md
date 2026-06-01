@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.38] - 2026-06-01
+
+### Changed
+- **Analysis Vibe 模块拆分** — 将 `/vibe` 的可运行 Demo scaffold 生成、文件写入、HTML 转义和请求扫描迁移到 `analysis_support.vibe`，主 `analysis.py` 仅保留工具编排、权限元数据和 LLM 增强路径。
+
 ## [0.1.37] - 2026-06-01
 
 ### Changed
