@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.64] - 2026-06-01
+
+### Changed
+- **Analysis Autopsy 模块拆分** — 将 `/autopsy` 的盲目读取风险、执行迹基础设施、假设验证能力、爆炸半径隔离和 DTS-CHE 就绪度评分迁移到 `analysis_support.autopsy`，主 `analysis.py` 保留工具编排、兼容入口与 LLM Autopsy 增强路径。
+
 ## [0.1.63] - 2026-06-01
 
 ### Changed

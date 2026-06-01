@@ -2,6 +2,199 @@
 
 from __future__ import annotations
 
+import re
+
+from naumi_agent.tools import analysis_common
+
+BLIND_READ_PATTERNS = [
+    (r"(?:grep|rg|ag|find)\s+[^|]+\s*\|\s*\w+", "管道式盲目搜索 (信息过载风险)"),
+    (r"(?:read_file|open)\s*\([^)]*(?:\*|\.\*)\s*", "通配符批量读取 (上下文爆炸)"),
+    (
+        r"(?:search|query|retrieve)\s*\([^)]*\).*top_k\s*=\s*\d{2,}",
+        "大范围 RAG 检索 (k>10，噪声过高)",
+    ),
+    (r"for\s+\w+\s+in\s+(?:glob|os\.walk)", "遍历式文件扫描 (效率极低)"),
+]
+
+TRACE_PATTERNS = [
+    (r"(?:sys\.settrace|sys\.setprofile|trace)\s*\(", "Python 调用追踪"),
+    (r"(?:cProfile|profile|line_profiler)\s*", "性能剖析工具"),
+    (r"(?:pdb|ipdb|breakpoint|debugger)\s*", "交互式调试器"),
+    (r"(?:strace|ltrace|dtrace|perf)\s*", "系统级调用追踪"),
+    (r"(?:logging|logger)\.\w+\s*\([^)]*(?:trace|debug|verbose)", "详细日志追踪"),
+    (r"(?:pytest|--tb|traceback|stack.?trace)\s*", "测试堆栈追踪"),
+    (r"(?:coverage|branch)\s*", "覆盖率追踪"),
+]
+
+SINGLE_HYPOTHESIS_PATTERNS = [
+    (
+        r"(?:fix|patch|hotfix)\s*\([^)]*\)\s*:\s*\n\s*(?:self\.\w+)\s*=\s*",
+        "直接赋值修复 (无假设验证)",
+    ),
+    (r"#\s*fix\s*:\s*\w+\s*", "注释式修复标记 (未经证伪)"),
+    (r"return\s+(?:True|False|None|0)\s*#\s*(?:fix|workaround)", "返回值绕过 (非真正修复)"),
+]
+
+HYPOTHESIS_PATTERNS = [
+    (r"(?:hypothesis|assume|conjecture|guess)\s*[:=]", "假设定义"),
+    (r"(?:assert|verify|check|confirm)\s*\([^)]*(?:hypothesis|assume)", "假设验证断言"),
+    (r"(?:probe|inject|instrument)\s*\(", "探测脚本注入"),
+    (r"(?:control|variable|experiment)\s*", "控制变量实验"),
+    (r"(?:reproduce|minimal|repro)\s*", "最小复现脚本"),
+    (r"(?:bisect|binary.?search|narrow)\s*", "二分定位法"),
+]
+
+BLAST_RADIUS_PATTERNS = [
+    (r"(?:caller|callee|dependency|dependents)\s*", "调用者/依赖者分析"),
+    (r"(?:ast|parse|syntax.?tree)\s*", "AST 解析"),
+    (r"(?:refactor|impact|risk|radius)\s*", "影响范围评估"),
+    (r"(?:backward.?compat|breaking.?change|migration)\s*", "向后兼容性检查"),
+    (r"(?:grep|find)\s+[^)]*(?:caller|usage|import|reference)", "引用搜索 (爆炸半径计算)"),
+    (r"(?:test|spec).*(?:run|execute|suite)\s*", "回归测试执行"),
+]
+
+
+def _collect_label_hits(
+    lines: list[str],
+    patterns: list[tuple[str, str]],
+) -> dict[str, list[int]]:
+    hits: dict[str, list[int]] = {}
+    for pattern, label in patterns:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                hits.setdefault(label, []).append(index)
+    return hits
+
+
+def _collect_line_hits(
+    lines: list[str],
+    patterns: list[tuple[str, str]],
+    *,
+    ignore_case: bool = False,
+) -> list[tuple[str, int]]:
+    flags = re.IGNORECASE if ignore_case else 0
+    hits: list[tuple[str, int]] = []
+    for pattern, desc in patterns:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line, flags):
+                hits.append((desc, index))
+    return hits
+
+
+def scan_autopsy(target: str) -> str:
+    """Scan DTS-CHE readiness across trace, hypothesis, and blast-radius controls."""
+    findings: list[str] = []
+    source = analysis_common.read_sources(analysis_common.resolve_target(target))
+
+    if not source.strip():
+        return "⚠️ 未找到可分析的源代码。"
+
+    lines = source.split("\n")
+
+    findings.append("## 1. 盲目读取风险 (Blind Code Reading)")
+    blind_hits = _collect_line_hits(lines, BLIND_READ_PATTERNS)
+    if blind_hits:
+        findings.append(
+            f"- ⚠️ 发现 **{len(blind_hits)}** 处盲目读取模式 — "
+            f"上下文可能被无关代码撑爆：",
+        )
+        for desc, line_no in blind_hits[:6]:
+            findings.append(f"  - L{line_no}: {desc}")
+        findings.append("- 💡 应改为: 只读取执行迹涉及的关键函数，压缩 99% 无效信息")
+    else:
+        findings.append("- ✅ 代码读取模式较为精准")
+    findings.append("")
+
+    findings.append("## 2. 执行迹基础设施 (Trace Infrastructure)")
+    trace_hits = _collect_label_hits(lines, TRACE_PATTERNS)
+    if trace_hits:
+        total_trace = sum(len(line_nos) for line_nos in trace_hits.values())
+        findings.append(
+            f"- 检测到 **{total_trace}** 处执行迹工具，"
+            f"**{len(trace_hits)}** 类：",
+        )
+        for label, line_nos in sorted(
+            trace_hits.items(),
+            key=lambda item: -len(item[1]),
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append("- ❌ 无执行迹工具 — 无法获取'死亡瞬间的解剖图'")
+    findings.append("")
+
+    findings.append("## 3. 假设验证能力 (Hypothesis Verification)")
+    hyp_hits = _collect_label_hits(lines, HYPOTHESIS_PATTERNS)
+    single_hits = _collect_line_hits(
+        lines,
+        SINGLE_HYPOTHESIS_PATTERNS,
+        ignore_case=True,
+    )
+
+    if hyp_hits:
+        total_hyp = sum(len(line_nos) for line_nos in hyp_hits.values())
+        findings.append(
+            f"- 检测到 **{total_hyp}** 处科学验证机制，"
+            f"**{len(hyp_hits)}** 类：",
+        )
+        for label, line_nos in hyp_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append("- ❌ 无假设验证机制 — Bug 修复可能基于幻觉")
+
+    if single_hits:
+        findings.append(
+            f"- ⚠️ 发现 **{len(single_hits)}** 处单假设直接修复 "
+            f"— 未经证伪，可能改错地方",
+        )
+    findings.append("")
+
+    findings.append("## 4. 爆炸半径隔离 (Blast-Radius Containment)")
+    blast_hits = _collect_label_hits(lines, BLAST_RADIUS_PATTERNS)
+    if blast_hits:
+        total_blast = sum(len(line_nos) for line_nos in blast_hits.values())
+        findings.append(
+            f"- 检测到 **{total_blast}** 处爆炸半径控制机制，"
+            f"**{len(blast_hits)}** 类：",
+        )
+        for label, line_nos in blast_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append("- ❌ 无爆炸半径控制 — 修复可能引发连锁崩溃")
+    findings.append("")
+
+    trace_score = min(len(trace_hits) / 4.0, 1.0)
+    hyp_score = min(len(hyp_hits) / 3.0, 1.0)
+    blast_score = min(len(blast_hits) / 4.0, 1.0)
+    blind_penalty = min(len(blind_hits) * 0.1, 0.3)
+    single_penalty = min(len(single_hits) * 0.1, 0.3)
+
+    dts_score = (
+        trace_score * 0.35
+        + hyp_score * 0.30
+        + blast_score * 0.25
+        - blind_penalty
+        - single_penalty
+        + 0.10
+    )
+    dts_score = max(0.0, min(1.0, dts_score))
+
+    findings.append("## 5. DTS-CHE 就绪度评分")
+    findings.append(f"- **综合评分: {dts_score:.0%}**")
+    findings.append(f"- 执行迹能力: {trace_score:.0%}")
+    findings.append(f"- 假设验证能力: {hyp_score:.0%}")
+    findings.append(f"- 爆炸半径控制: {blast_score:.0%}")
+    findings.append(f"- 盲目读取惩罚: -{blind_penalty:.0%}")
+    findings.append(f"- 单假设惩罚: -{single_penalty:.0%}")
+
+    if dts_score >= 0.7:
+        findings.append("- ✅ 系统具备 DTS-CHE 架构，可高效定位复杂 Bug")
+    elif dts_score >= 0.4:
+        findings.append("- ⚠️ 部分具备定位能力，需补强执行迹和假设验证")
+    else:
+        findings.append("- ❌ Bug 定位方式原始，建议引入 DTS-CHE 三刀锋架构")
+
+    return "\n".join(findings)
+
 
 def build_autopsy_inventory_script(target: str) -> str:
     """Build a dependency-free trace and blast-radius scanner."""
