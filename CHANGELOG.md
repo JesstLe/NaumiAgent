@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.49] - 2026-06-01
+
+### Changed
+- **Analysis COOE 模块拆分** — 将 `/cooe` 的 I/O 阻塞扫描、并行化检测、串行依赖分析、AST 调用图和确定性 DAG/ROB 调度报告迁移到 `analysis_support.cooe`，主 `analysis.py` 保留工具编排与 LLM 架构增强路径。
+
 ## [0.1.48] - 2026-06-01
 
 ### Changed
