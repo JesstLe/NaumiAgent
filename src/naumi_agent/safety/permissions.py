@@ -385,6 +385,17 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         ],
         requires_confirmation=False,
     ),
+    "doctor_diagnostics": PermissionRule(
+        tool_name="doctor_diagnostics",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
     "pursue_goal": PermissionRule(
         tool_name="pursue_goal",
         allowed_modes=[
