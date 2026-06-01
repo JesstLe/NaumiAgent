@@ -11,7 +11,23 @@ test("assistant stream updates one active message", () => {
   reduceServerEvent(state, { type: "ui/message", payload: { type: "assistant_stream", phase: "end" } });
 
   assert.equal(state.messages.length, 1);
-  assert.deepEqual(state.messages[0], { kind: "assistant", content: "你好" });
+  assert.equal(state.messages[0].kind, "assistant");
+  assert.equal(state.messages[0].content, "你好");
+  assert.equal(state.activeAssistant, null);
+});
+
+test("replayed assistant token messages stay independent outside a running turn", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, { type: "session/replayed", payload: { session_id: "s1", title: "旧会话", clear: true } });
+  reduceServerEvent(state, { type: "ui/message", payload: { type: "assistant_stream", phase: "token", content: "第一条回答" } });
+  reduceServerEvent(state, { type: "ui/message", payload: { type: "tool_use", tool_call_id: "call-1", tool_name: "file_read" } });
+  reduceServerEvent(state, { type: "ui/message", payload: { type: "assistant_stream", phase: "token", content: "第二条回答" } });
+
+  const assistants = state.messages.filter((message) => message.kind === "assistant");
+  assert.equal(assistants.length, 2);
+  assert.equal(assistants[0].content, "第一条回答");
+  assert.equal(assistants[1].content, "第二条回答");
   assert.equal(state.activeAssistant, null);
 });
 
@@ -80,6 +96,7 @@ test("slash commands route through protocol without adding chat noise", () => {
   handleSubmitText(state, "/mode bypass", send);
   handleSubmitText(state, "/load abc123", send);
   state.messages.push({ kind: "assistant", content: "old" });
+  state.folds["message:old:code:0"] = { expanded: true };
   handleSubmitText(state, "/clear", send);
   handleSubmitText(state, "你好", send);
 
@@ -89,4 +106,5 @@ test("slash commands route through protocol without adding chat noise", () => {
     { type: "submit", payload: { text: "你好" } },
   ]);
   assert.deepEqual(state.messages, []);
+  assert.deepEqual(state.folds, {});
 });

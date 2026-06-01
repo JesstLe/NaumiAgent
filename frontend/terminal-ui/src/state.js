@@ -1,5 +1,6 @@
 export function createInitialState() {
   return {
+    nextMessageId: 1,
     input: "",
     mode: "default",
     status: {},
@@ -14,6 +15,7 @@ export function createInitialState() {
     scrollOffset: 0,
     bridgeReady: false,
     debugTrace: null,
+    folds: {},
   };
 }
 
@@ -64,6 +66,7 @@ export function reduceServerEvent(state, record) {
         state.tools = [];
         state.activeAssistant = null;
         state.activeThinking = null;
+        state.folds = {};
       }
       pushSystemMessage(state, "resume", `已恢复会话: ${payload.title ?? payload.session_id}`, "info");
       break;
@@ -137,12 +140,16 @@ export function handleUiMessage(state, message) {
 
 export function handleAssistantStream(state, message) {
   if (message.phase === "start") {
-    state.activeAssistant = { kind: "assistant", content: "" };
+    state.activeAssistant = { kind: "assistant", id: nextMessageId(state, "assistant"), content: "" };
     state.messages.push(state.activeAssistant);
   } else if (message.phase === "token") {
     if (!state.activeAssistant) {
-      state.activeAssistant = { kind: "assistant", content: "" };
-      state.messages.push(state.activeAssistant);
+      const assistant = { kind: "assistant", id: nextMessageId(state, "assistant"), content: message.content ?? "" };
+      state.messages.push(assistant);
+      if (state.running) {
+        state.activeAssistant = assistant;
+      }
+      return;
     }
     state.activeAssistant.content += message.content ?? "";
   } else if (message.phase === "end") {
@@ -183,6 +190,7 @@ export function handleToolPrepare(state, message) {
 export function handleToolUse(state, message) {
   const tool = {
     kind: "tool",
+    id: nextMessageId(state, "tool"),
     callId: message.tool_call_id || "",
     name: message.tool_name,
     primary: message.primary_arg || message.file_path || message.command || message.query || message.url || "",
@@ -203,6 +211,7 @@ export function handleToolResult(state, message) {
   });
   const target = tool ?? {
     kind: "tool",
+    id: nextMessageId(state, "tool"),
     callId: message.tool_call_id || "",
     name: message.tool_name,
     primary: "",
@@ -253,6 +262,9 @@ export function handleSubmitText(state, text, send) {
   if (text === "/clear") {
     state.messages = [];
     state.tools = [];
+    state.activeAssistant = null;
+    state.activeThinking = null;
+    state.folds = {};
     return;
   }
   send("submit", { text });
@@ -260,5 +272,11 @@ export function handleSubmitText(state, text, send) {
 
 export function pushSystemMessage(state, title, content, level) {
   if (!content) return;
-  state.messages.push({ kind: "system", title, content, level });
+  state.messages.push({ kind: "system", id: nextMessageId(state, "system"), title, content, level });
+}
+
+function nextMessageId(state, prefix) {
+  const value = `${prefix}-${state.nextMessageId}`;
+  state.nextMessageId += 1;
+  return value;
 }
