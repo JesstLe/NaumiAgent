@@ -6,6 +6,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from naumi_agent.ui.theme import UIStyleConfig, build_ui_style_config
+
 _MAX_FILE_PREVIEW_LINES = 32
 
 
@@ -127,15 +129,25 @@ def parse_unified_diff(
     return tuple(files)
 
 
-def render_diff_snapshot(snapshot: DiffSnapshot, *, max_files: int = 20) -> str:
+def render_diff_snapshot(
+    snapshot: DiffSnapshot,
+    *,
+    max_files: int | None = None,
+    style_config: UIStyleConfig | None = None,
+) -> str:
     """Render a structured diff snapshot as ANSI text."""
+    style = style_config or build_ui_style_config()
+    file_limit = max_files if max_files is not None else style.output_style.diff_max_files
     if snapshot.error:
-        return f"\033[31mDiff 查看失败: {snapshot.error}\033[0m\n"
+        return style.ansi("danger", f"Diff 查看失败: {snapshot.error}") + "\n"
 
     if not snapshot.files and not snapshot.untracked_files:
         return (
-            "\033[2m当前没有 git diff。工作区没有已暂存/未暂存改动，"
-            "也没有未跟踪文件。\033[0m\n"
+            style.ansi(
+                "muted",
+                "当前没有 git diff。工作区没有已暂存/未暂存改动，也没有未跟踪文件。",
+            )
+            + "\n"
         )
 
     title = {
@@ -144,40 +156,50 @@ def render_diff_snapshot(snapshot: DiffSnapshot, *, max_files: int = 20) -> str:
         "staged": "已暂存改动",
     }.get(snapshot.scope, snapshot.scope)
     lines = [
-        "\033[1m结构化 Diff Viewer\033[0m",
-        f"\033[2m范围: {title} · 仓库: {snapshot.cwd}\033[0m",
+        style.ansi("title", "结构化 Diff Viewer"),
+        style.ansi("muted", f"范围: {title} · 仓库: {snapshot.cwd}"),
         (
-            f"\033[2m文件 {len(snapshot.files)} · "
-            f"hunk {snapshot.hunk_count} · "
-            f"\033[32m+{snapshot.additions}\033[0m"
-            f"\033[2m / \033[0m"
-            f"\033[31m-{snapshot.deletions}\033[0m"
+            style.ansi("muted", f"文件 {len(snapshot.files)} · hunk {snapshot.hunk_count} · ")
+            + style.ansi("diff_add", f"+{snapshot.additions}")
+            + style.ansi("muted", " / ")
+            + style.ansi("diff_delete", f"-{snapshot.deletions}")
         ),
         "",
     ]
+    if style.output_style.show_debug_metadata:
+        lines.append(style.ansi("muted", f"raw diff: {len(snapshot.raw_diff)} chars"))
+        lines.append("")
 
-    shown_files = snapshot.files[:max_files]
+    shown_files = snapshot.files[:file_limit]
     for file in shown_files:
-        lines.extend(_render_file_summary(file))
+        lines.extend(_render_file_summary(file, style_config=style))
         lines.append("")
     hidden_files = len(snapshot.files) - len(shown_files)
     if hidden_files > 0:
-        lines.append(f"\033[2m... 还有 {hidden_files} 个文件未展示\033[0m")
+        lines.append(style.ansi("muted", f"... 还有 {hidden_files} 个文件未展示"))
 
     if snapshot.untracked_files:
-        lines.append("\033[33m未跟踪文件\033[0m")
+        lines.append(style.ansi("warning", "未跟踪文件"))
         for path in snapshot.untracked_files[:20]:
             lines.append(f"  ? {path}")
         hidden = len(snapshot.untracked_files) - 20
         if hidden > 0:
-            lines.append(f"  \033[2m... 还有 {hidden} 个未跟踪文件\033[0m")
+            lines.append("  " + style.ansi("muted", f"... 还有 {hidden} 个未跟踪文件"))
 
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_git_diff_viewer(cwd: str | Path, *, scope: str = "all") -> str:
+def render_git_diff_viewer(
+    cwd: str | Path,
+    *,
+    scope: str = "all",
+    style_config: UIStyleConfig | None = None,
+) -> str:
     """Collect and render git diff for a worktree."""
-    return render_diff_snapshot(collect_git_diff_snapshot(cwd, scope=scope))
+    return render_diff_snapshot(
+        collect_git_diff_snapshot(cwd, scope=scope),
+        style_config=style_config,
+    )
 
 
 @dataclass(frozen=True)
@@ -256,7 +278,11 @@ def _summarize_file(
     )
 
 
-def _render_file_summary(file: DiffFileSummary) -> list[str]:
+def _render_file_summary(
+    file: DiffFileSummary,
+    *,
+    style_config: UIStyleConfig,
+) -> list[str]:
     status_label = {
         "added": "新增",
         "deleted": "删除",
@@ -265,17 +291,21 @@ def _render_file_summary(file: DiffFileSummary) -> list[str]:
     }.get(file.status, file.status)
     lines = [
         (
-            f"\033[1m{file.display_path}\033[0m "
-            f"\033[2m[{status_label}] hunk {file.hunk_count} · \033[0m"
-            f"\033[32m+{file.additions}\033[0m"
-            f"\033[2m / \033[0m"
-            f"\033[31m-{file.deletions}\033[0m"
+            style_config.ansi("title", file.display_path)
+            + " "
+            + style_config.ansi("muted", f"[{status_label}] hunk {file.hunk_count} · ")
+            + style_config.ansi("diff_add", f"+{file.additions}")
+            + style_config.ansi("muted", " / ")
+            + style_config.ansi("diff_delete", f"-{file.deletions}")
         )
     ]
-    for line in file.preview_lines:
-        lines.append("  " + _color_diff_line(line))
+    if style_config.output_style.show_diff_preview:
+        for line in file.preview_lines:
+            lines.append("  " + _color_diff_line(line, style_config=style_config))
     if file.hidden_lines:
-        lines.append(f"  \033[2m... 还有 {file.hidden_lines} 行 diff 已折叠\033[0m")
+        lines.append(
+            "  " + style_config.ansi("muted", f"... 还有 {file.hidden_lines} 行 diff 已折叠")
+        )
     return lines
 
 
@@ -302,14 +332,14 @@ def _is_hunk_body_line(line: str) -> bool:
     return line[0] in {" ", "+", "-"}
 
 
-def _color_diff_line(line: str) -> str:
+def _color_diff_line(line: str, *, style_config: UIStyleConfig) -> str:
     if line.startswith("@@"):
-        return f"\033[36m{line}\033[0m"
+        return style_config.ansi("diff_hunk", line)
     if line.startswith("+") and not line.startswith("+++"):
-        return f"\033[32m{line}\033[0m"
+        return style_config.ansi("diff_add", line)
     if line.startswith("-") and not line.startswith("---"):
-        return f"\033[31m{line}\033[0m"
-    return f"\033[2m{line}\033[0m"
+        return style_config.ansi("diff_delete", line)
+    return style_config.ansi("muted", line)
 
 
 def _parse_untracked_files(status_text: str) -> list[str]:

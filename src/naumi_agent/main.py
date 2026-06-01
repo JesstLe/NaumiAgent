@@ -25,6 +25,7 @@ from naumi_agent.ui.code_excerpt import (
     excerpt_markdown_code_blocks,
 )
 from naumi_agent.ui.keybindings import build_keybindings, render_keybinding_help
+from naumi_agent.ui.theme import build_ui_style_from_config, render_style_help
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -257,12 +258,18 @@ def _launch_tui(config_path: str) -> None:
     _check_api_key(config)
     engine = AgentEngine(config)
     keybindings = build_keybindings(config.keybindings)
+    style_config = build_ui_style_from_config(config)
     debug_trace = DebugTrace.create(
         interface="tui",
         base_dir=Path(config.memory.session_db_path).parent / "debug-runs",
         metadata=_runtime_debug_metadata(config, resolved, engine),
     )
-    app = NaumiApp(engine, debug_trace=debug_trace, keybindings=keybindings)
+    app = NaumiApp(
+        engine,
+        debug_trace=debug_trace,
+        keybindings=keybindings,
+        style_config=style_config,
+    )
     app.run()
 
 
@@ -883,13 +890,14 @@ async def _chat(config_path: str) -> None:
     _check_api_key(config)
     engine = AgentEngine(config)
     keybindings = build_keybindings(config.keybindings)
+    style_config = build_ui_style_from_config(config)
     debug_trace = DebugTrace.create(
         interface="cli",
         base_dir=Path(config.memory.session_db_path).parent / "debug-runs",
         metadata=_runtime_debug_metadata(config, resolved, engine),
     )
 
-    cli = CLIApp(debug_trace=debug_trace, keybindings=keybindings)
+    cli = CLIApp(debug_trace=debug_trace, keybindings=keybindings, style_config=style_config)
     engine.set_permission_confirmer(cli.confirm_permission)
 
     def toggle_runtime_mode() -> str:
@@ -1221,6 +1229,9 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                     getattr(config, "keybindings", {}) if config is not None else {}
                 )
                 console.print(Markdown(render_keybinding_help(keybindings, interface="cli")))
+        case "/style" | "/theme":
+            config = getattr(engine, "_config", None)
+            console.print(Markdown(render_style_help(build_ui_style_from_config(config))))
         case "/debug":
             if _active_cli and hasattr(_active_cli, "debug_info"):
                 console.print(_active_cli.debug_info())
@@ -1242,7 +1253,15 @@ async def _handle_command(engine: Any, cmd: str) -> None:
 
             scope = arg.strip() or "all"
             workspace_root = getattr(engine, "workspace_root", Path.cwd())
-            console.print(Text.from_ansi(render_git_diff_viewer(workspace_root, scope=scope)))
+            console.print(
+                Text.from_ansi(
+                    render_git_diff_viewer(
+                        workspace_root,
+                        scope=scope,
+                        style_config=build_ui_style_from_config(getattr(engine, "_config", None)),
+                    )
+                )
+            )
         case "/hooks":
             _show_hooks(engine)
         case "/copy":
@@ -1650,6 +1669,7 @@ def _print_help() -> None:
     commands = [
         ("/help", "显示帮助"),
         ("/keybindings", "显示当前快捷键配置"),
+        ("/style", "显示当前主题和输出风格"),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
         ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),

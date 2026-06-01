@@ -11,6 +11,7 @@ from naumi_agent.ui.diff_viewer import (
     render_diff_snapshot,
     render_git_diff_viewer,
 )
+from naumi_agent.ui.theme import build_ui_style_config
 
 SAMPLE_DIFF = """diff --git a/app.py b/app.py
 index 1111111..2222222 100644
@@ -72,6 +73,20 @@ def test_long_diff_is_folded_per_file() -> None:
     assert "已折叠" in text
     assert "+line 0" in text
     assert "+line 79" not in text
+
+
+def test_render_diff_snapshot_uses_theme_and_output_style() -> None:
+    snapshot = collect_snapshot_from_text(SAMPLE_DIFF)
+    high_contrast = build_ui_style_config(theme="high_contrast", output_style="debug")
+    silent = build_ui_style_config(theme="dark", output_style="silent_tools")
+
+    high_contrast_text = render_diff_snapshot(snapshot, style_config=high_contrast)
+    silent_text = render_diff_snapshot(snapshot, style_config=silent)
+
+    assert "\033[92;1m+import sys" in high_contrast_text
+    assert "raw diff:" in high_contrast_text
+    assert "+import sys" not in silent_text
+    assert "app.py" in silent_text
 
 
 def test_collect_git_diff_snapshot_reads_real_repo(tmp_path: Path) -> None:

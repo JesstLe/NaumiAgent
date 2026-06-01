@@ -11,6 +11,7 @@ from prompt_toolkit.utils import get_cwidth
 
 from naumi_agent.cli.layout import CLIApp, _border_line
 from naumi_agent.ui.keybindings import build_keybindings
+from naumi_agent.ui.theme import build_ui_style_config
 
 
 def _build_cli_app() -> CLIApp:
@@ -182,6 +183,12 @@ class TestCLIAppScrolling:
         assert "c-y" not in keys
         assert "f2" in keys
         assert "a" in keys
+
+    def test_cli_uses_configured_prompt_toolkit_theme(self) -> None:
+        cli = CLIApp(style_config=build_ui_style_config(theme="high_contrast"))
+
+        assert cli._style_config.theme.name.value == "high_contrast"
+        assert "00ff00" in str(cli._style_config.prompt_toolkit_style().style_rules)
 
     @pytest.mark.asyncio
     async def test_permission_prompt_uses_configured_key_labels(self) -> None:

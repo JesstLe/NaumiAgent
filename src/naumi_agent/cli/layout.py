@@ -26,7 +26,6 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.menus import CompletionsMenu
-from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
 
 from naumi_agent.cli.history import VirtualizedCLIHistory, VirtualizedHistoryControl
@@ -38,6 +37,7 @@ from naumi_agent.ui.keybindings import (
     build_keybindings,
     render_keybinding_help,
 )
+from naumi_agent.ui.theme import UIStyleConfig, build_ui_style_config
 
 
 class _OutputWindow(Window):
@@ -145,17 +145,6 @@ class _OutputWindow(Window):
             return ui_content.get_height_for_line(lineno, width, self.get_line_prefix)
         return 1
 
-_STYLE = Style.from_dict(
-    {
-        "border": "#444444",
-        "border-active": "#00aa00",
-        "prompt": "#00aa00 bold",
-        "processing": "#888888",
-        "status": "#888888",
-    }
-)
-
-
 def _border_line(cols: int, left: str, mid: str, right: str, cls: str = "border") -> list:
     safe_cols = max(0, cols)
     if safe_cols == 0:
@@ -206,11 +195,17 @@ class _DynamicLineControl(UIControl):
 class CLIApp:
     """Full-screen CLI: scrollable output + fixed input bar, no screen switching."""
 
-    def __init__(self, debug_trace: Any = None, keybindings: KeybindingSet | None = None) -> None:
+    def __init__(
+        self,
+        debug_trace: Any = None,
+        keybindings: KeybindingSet | None = None,
+        style_config: UIStyleConfig | None = None,
+    ) -> None:
         self._history = VirtualizedCLIHistory()
         self._processing = False
         self._debug_trace = debug_trace
         self._keybindings = keybindings or build_keybindings()
+        self._style_config = style_config or build_ui_style_config()
         self._app: Application | None = None
         self._input_buf = Buffer(
             multiline=False,
@@ -463,7 +458,9 @@ class CLIApp:
             f"{bypass_keys} 切换 bypass 并执行"
         )
         self.append_live(
-            "\n\033[33m权限确认\033[0m\n"
+            "\n"
+            + self._style_config.ansi("permission", "权限确认")
+            + "\n"
             f"  工具: {tool_name}\n"
             f"  原因: {reason}\n"
             f"  参数: {args_preview}\n"
@@ -492,7 +489,9 @@ class CLIApp:
         }
         if choice == "bypass":
             self.set_mode_status("bypass")
-        self.append_live(f"\033[2m{labels.get(choice, choice)}\033[0m\n")
+        self.append_live(
+            self._style_config.ansi("muted", labels.get(choice, choice)) + "\n"
+        )
         future.set_result(choice)
 
     def debug_info(self) -> str:
@@ -719,7 +718,7 @@ class CLIApp:
         return Application(
             layout=Layout(root, focused_element=input_win),
             key_bindings=self._kb,
-            style=_STYLE,
+            style=self._style_config.prompt_toolkit_style(),
             full_screen=True,
             mouse_support=True,
         )
