@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.37] - 2026-06-01
+
+### Changed
+- **Analysis JIT 模块拆分** — 将 `/jit` 的任务扫描、AST 安全算术求值、可运行脚本渲染和确定性报告迁移到 `analysis_support.jit`，主 `analysis.py` 仅保留工具编排与 LLM 增强路径。
+
 ## [0.1.36] - 2026-06-01
 
 ### Changed
