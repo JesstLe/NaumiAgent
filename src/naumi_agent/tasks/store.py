@@ -307,17 +307,32 @@ class TaskStore:
             await self._ensure_table(db)
             existing_tasks = await self._list_tasks(db)
             existing = {task.id: task for task in existing_tasks}
+            existing_by_subject: dict[str, Task] = {}
+            duplicate_subject_ids: dict[str, list[str]] = {}
+            for task in existing_tasks:
+                key = _task_subject_key(task.subject)
+                if key in existing_by_subject:
+                    duplicate_subject_ids.setdefault(key, []).append(task.id)
+                else:
+                    existing_by_subject[key] = task
             final = dict(existing)
             touched: set[str] = set()
+            touched_subjects: set[str] = set()
             created: list[str] = []
             updated: list[str] = []
+            deleted: list[str] = []
             seen_ids: set[str] = set()
+            seen_subjects: set[str] = set()
 
             highest = _highest_task_id(existing_tasks)
             for item in items:
                 subject = item.subject.strip()
                 if not subject:
                     raise ValueError("任务标题不能为空")
+                subject_key = _task_subject_key(subject)
+                if subject_key in seen_subjects:
+                    raise ValueError(f"todo 列表中存在重复任务：{subject}")
+                seen_subjects.add(subject_key)
 
                 if item.id:
                     task_id = item.id.strip()
@@ -335,6 +350,18 @@ class TaskStore:
                         raise ValueError(f"任务 #{task_id} 已完成，不能回退状态")
                     created_at = previous.created_at
                     updated.append(task_id)
+                elif subject_key in existing_by_subject:
+                    previous = existing_by_subject[subject_key]
+                    task_id = previous.id
+                    if task_id in seen_ids:
+                        raise ValueError(f"任务 #{task_id} 在 todo 列表中重复出现")
+                    if (
+                        previous.status == TaskStatus.COMPLETED
+                        and item.status != TaskStatus.COMPLETED
+                    ):
+                        raise ValueError(f"任务 #{task_id} 已完成，不能回退状态")
+                    created_at = previous.created_at
+                    updated.append(task_id)
                 else:
                     highest += 1
                     task_id = str(highest)
@@ -343,6 +370,7 @@ class TaskStore:
 
                 seen_ids.add(task_id)
                 touched.add(task_id)
+                touched_subjects.add(subject_key)
                 active_form = (
                     item.active_form
                     if item.status in {TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED}
@@ -361,11 +389,17 @@ class TaskStore:
                     updated_at=now,
                 )
 
-            deleted: list[str] = []
+            for subject_key in touched_subjects:
+                for duplicate_id in duplicate_subject_ids.get(subject_key, []):
+                    if duplicate_id not in touched and duplicate_id in final:
+                        final.pop(duplicate_id, None)
+                        deleted.append(duplicate_id)
+
             if replace:
-                deleted = [task_id for task_id in existing if task_id not in touched]
-                for task_id in deleted:
+                replaced = [task_id for task_id in existing if task_id not in touched]
+                for task_id in replaced:
                     final.pop(task_id, None)
+                deleted.extend(task_id for task_id in replaced if task_id not in deleted)
 
             _validate_task_dependencies(final)
             _rebuild_reverse_edges(final)
@@ -469,6 +503,10 @@ def _highest_task_id(tasks: list[Task]) -> int:
         except ValueError:
             continue
     return highest
+
+
+def _task_subject_key(subject: str) -> str:
+    return " ".join(subject.strip().lower().split())
 
 
 def _validate_task_dependencies(tasks: dict[str, Task]) -> None:

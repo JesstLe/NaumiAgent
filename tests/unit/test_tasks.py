@@ -390,6 +390,67 @@ class TestTaskTools:
         assert "正在补测试" in result
 
     @pytest.mark.asyncio
+    async def test_todo_write_merge_updates_existing_item_by_content(
+        self,
+        store: TaskStore,
+    ) -> None:
+        tool = TodoWriteTool(store)
+        await tool.execute(todos=[
+            {"content": "创建项目目录结构", "status": "pending"},
+            {"content": "编写 HTML 文件", "status": "pending"},
+        ])
+
+        result = await tool.execute(todos=[
+            {"content": "创建项目目录结构", "status": "completed"},
+        ])
+        tasks = await store.list_tasks()
+
+        assert "更新 1 项" in result
+        assert "新增" not in result
+        assert [task.subject for task in tasks] == ["创建项目目录结构", "编写 HTML 文件"]
+        assert tasks[0].status == TaskStatus.COMPLETED
+        assert tasks[1].status == TaskStatus.PENDING
+
+    @pytest.mark.asyncio
+    async def test_todo_write_merge_removes_existing_duplicate_subjects(
+        self,
+        store: TaskStore,
+    ) -> None:
+        tool = TodoWriteTool(store)
+        await store.create_task(subject="编写 HTML 文件")
+        await store.create_task(subject="编写 HTML 文件")
+
+        result = await tool.execute(todos=[
+            {
+                "content": "编写 HTML 文件",
+                "status": "in_progress",
+                "active_form": "正在编写 HTML 文件",
+            },
+        ])
+        tasks = await store.list_tasks()
+
+        assert "更新 1 项" in result
+        assert "删除 1 项" in result
+        assert len(tasks) == 1
+        assert tasks[0].id == "1"
+        assert tasks[0].status == TaskStatus.IN_PROGRESS
+
+    @pytest.mark.asyncio
+    async def test_todo_write_rejects_duplicate_content_in_payload(
+        self,
+        store: TaskStore,
+    ) -> None:
+        tool = TodoWriteTool(store)
+
+        result = await tool.execute(todos=[
+            {"content": "编写 HTML 文件", "status": "pending"},
+            {"content": " 编写   HTML 文件 ", "status": "pending"},
+        ])
+
+        assert "错误" in result
+        assert "重复任务" in result
+
+    @pytest.mark.asyncio
     async def test_todo_write_tool_rejects_multiple_in_progress(
         self,
         store: TaskStore,
