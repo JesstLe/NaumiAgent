@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.9] - 2026-06-01
+
+### Added
+- **Speculate 工具确定性落地** — `/speculate` 在模型路由未初始化时也会返回 Intern Draft 与 Architect Review 双阶段计划、风险文件列表和 diff 验证契约。
+
 ## [0.1.8] - 2026-06-01
 
 ### Added
