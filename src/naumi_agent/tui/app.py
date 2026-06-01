@@ -1017,6 +1017,8 @@ class NaumiApp(App):
                     "- `/background <子命令>` — 后台任务 run/status/list/cancel/output\n"
                     "- `/todo <子命令>` — todo 清单 list/add/start/done/pending/delete/clear\n"
                     "- `/team <子命令>` — 团队协议 status/handoff/blocker/decision/request/result\n"
+                    "- `/runtime [分区]` — 运行时状态 "
+                    "all/context/todo/team/subagent/hooks/resources\n"
                     "- `/browse <url>` — 打开 URL 并显示 SoM 元素\n"
                     "- `/autobrowse <任务>` — 自主浏览器任务\n"
                     "- `/browser-stop` — 停止浏览器\n"
@@ -1246,6 +1248,8 @@ class NaumiApp(App):
                 self._run_todo_command(arg)
             case "/team":
                 self._run_team_command(arg)
+            case "/runtime":
+                self._run_runtime_command(arg)
             case "/browse":
                 if not arg:
                     status.status_text = "用法: /browse <url>"
@@ -2283,6 +2287,22 @@ class NaumiApp(App):
             chat.mount(Markdown(f"## team\n\n{result}", classes="agent-msg"))
         except Exception as e:
             chat.mount(Markdown(f"**team 命令失败**: {e}", classes="agent-msg"))
+        finally:
+            status.status_text = "就绪"
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_runtime_command(self, arg: str) -> None:
+        """执行 runtime 状态命令."""
+        from naumi_agent.tools.runtime import run_runtime_command
+
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        status.status_text = "runtime 状态读取中..."
+        try:
+            result = await run_runtime_command(self.engine, arg)
+            chat.mount(Markdown(result, classes="agent-msg"))
+        except Exception as e:
+            chat.mount(Markdown(f"**runtime 命令失败**: {e}", classes="agent-msg"))
         finally:
             status.status_text = "就绪"
 

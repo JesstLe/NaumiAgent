@@ -361,6 +361,12 @@ class AgentEngine:
         for tool in create_worktree_tools(self.worktree_manager):
             self._tool_registry.register(tool)
 
+        # Runtime status tools
+        from naumi_agent.tools.runtime import create_runtime_tools
+
+        for tool in create_runtime_tools(self):
+            self._tool_registry.register(tool)
+
         # Hot-reload tool
         from naumi_agent.tools.hotreload import HotReloadTool
 
