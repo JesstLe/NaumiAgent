@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from naumi_agent.tools import analysis_common
+from naumi_agent.tools.analysis_support import probe as _probe_support
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,9 @@ _read_sources = analysis_common.read_sources
 _resolve_target = analysis_common.resolve_target
 _router_unavailable = analysis_common.router_unavailable
 _run_analysis = analysis_common.run_analysis
+_scan_probe = _probe_support.scan_probe
+_build_probe_script = _probe_support.build_probe_script
+_build_probe_report = _probe_support.build_probe_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -4990,116 +4994,6 @@ class OODATool(Tool):
 #  /probe — 黑盒探测与反幻觉协议
 # ===========================================================================
 
-# Known system/API indicators (low hallucination risk)
-_KNOWN_SYSTEMS = [
-    (r"(?:numpy|pandas|scipy|sklearn|tensorflow|pytorch)", "Python 数据科学栈"),
-    (r"(?:react|vue|angular|next\.js|express)", "主流 Web 框架"),
-    (r"(?:django|flask|fastapi|starlette)", "Python Web 框架"),
-    (r"(?:unity|unreal|godot)", "游戏引擎"),
-    (r"(?:win32|windows\.api|user32|kernel32)", "Windows API"),
-    (r"(?:pthread|epoll|libuv|boost)", "系统级库"),
-]
-
-# Unknown/closed-source indicators (high hallucination risk)
-_UNKNOWN_INDICATORS = [
-    (r"(?:内部|私有|自研|闭源|proprietary|internal|private)", "私有系统"),
-    (r"(?:某个|某款|某个游戏|specific game|this game)", "模糊目标引用"),
-    (r"(?:没有文档|没有API|no docs|no sdk|无SDK)", "缺少文档"),
-    (r"(?:逆向|反编译|reverse.?engineer|decompil)", "逆向工程"),
-    (r"(?:内存地址|基址|偏移|base.?address|offset)", "内存hack"),
-]
-
-# Probe type recommendations
-_PROBE_TYPES = {
-    "reflection": [
-        (r"(?:C#|csharp|\.NET|unity|mono)", "反射遍历对象树"),
-        (r"(?:java|kotlin|android)", "Java 反射"),
-        (r"(?:python|inspect|dir\(\))", "Python inspect 模块"),
-    ],
-    "memory": [
-        (r"(?:内存|memory|address|指针|pointer)", "内存特征码扫描"),
-        (r"(?:cheat.?engine|cheat.?table|trainer)", "CE 表扫描"),
-        (r"(?:hook|detour|inject)", "API Hook/注入"),
-    ],
-    "network": [
-        (r"(?:抓包|抓取|packet|wireshark|fiddler)", "网络抓包监听"),
-        (r"(?:API|接口|endpoint|REST|websocket)", "API 探测"),
-        (r"(?:protobuf|grpc|thrift)", "协议逆向"),
-    ],
-    "file": [
-        (r"(?:配置|config|ini|yaml|json|xml)", "配置文件扫描"),
-        (r"(?:存档|save|archive|pak|asset)", "资源文件解析"),
-        (r"(?:log|日志|debug|trace)", "日志分析"),
-    ],
-}
-
-
-def _scan_probe(task: str, context: str) -> str:
-    """probe 模式静态扫描：评估目标系统已知性和幻觉风险."""
-    findings: list[str] = []
-    combined = (task + " " + context).lower()
-
-    # 1. Check if target is a known system
-    known_matches: list[str] = []
-    for pattern, label in _KNOWN_SYSTEMS:
-        if re.search(pattern, combined, re.IGNORECASE):
-            known_matches.append(label)
-
-    if known_matches:
-        findings.append(
-            f"- 已知系统特征: {', '.join(known_matches)}"
-        )
-        findings.append("  → 幻觉风险: 低（有公开文档和 SDK）")
-    else:
-        findings.append("- 已知系统特征: 未匹配")
-        findings.append("  → 幻觉风险: 中-高（AI 可能编造 API）")
-
-    # 2. Check for unknown/closed-source indicators
-    unknown_matches: list[str] = []
-    for pattern, label in _UNKNOWN_INDICATORS:
-        if re.search(pattern, combined, re.IGNORECASE):
-            unknown_matches.append(label)
-
-    if unknown_matches:
-        findings.append(
-            f"- ⚠️ 未知系统特征: {', '.join(unknown_matches)}"
-        )
-        findings.append("  → 必须使用探测优先策略，禁止直接编写业务代码")
-    else:
-        findings.append("- 未知系统特征: 未检测到")
-
-    # 3. Recommend probe type
-    findings.append("- 推荐探测方式:")
-    for probe_type, patterns in _PROBE_TYPES.items():
-        for pattern, desc in patterns:
-            if re.search(pattern, combined, re.IGNORECASE):
-                findings.append(f"  - {probe_type}: {desc}")
-                break
-
-    # 4. Hallucination risk score
-    risk = 0
-    if not known_matches:
-        risk += 40
-    if unknown_matches:
-        risk += 30
-    if not context.strip():
-        risk += 20
-    level = (
-        "CRITICAL" if risk > 60
-        else "HIGH" if risk > 40
-        else "MEDIUM" if risk > 20
-        else "LOW"
-    )
-    findings.append(f"\n- 幻觉风险评分: {risk} ({level})")
-    if risk > 40:
-        findings.append(
-            "  → 强烈建议: 先运行探测脚本收集真实信息，"
-            "再基于实际返回结果开发"
-        )
-
-    return "\n".join(findings)
-
-
 _PROBE_SYSTEM = """\
 You are a Black-Box Probe architect implementing anti-hallucination \
 protocols for unknown/closed-source systems.
@@ -5190,15 +5084,20 @@ class ProbeTool(Tool):
     async def execute(
         self, *, task: str, context: str = "", **kwargs: Any,
     ) -> str:
+        scan_evidence = _scan_probe(task, context)
+        deterministic = _build_probe_report(task, context, scan_evidence)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("probe", task[:200])
-        scan_evidence = _scan_probe(task, context)
+            return deterministic + "\n\n模型路由未初始化，已返回确定性黑盒探测协议。"
+
         user_msg = f"## 开发任务\n{task}\n"
         user_msg += f"\n## 探测扫描\n{scan_evidence}\n"
+        user_msg += f"\n## 确定性探测协议\n{deterministic}\n"
         if context:
             user_msg += f"\n## 已知系统信息\n{context}\n"
-        return await _run_analysis(router, _PROBE_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _PROBE_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM 探测增强\n" + enhanced
 
 
 # ===========================================================================
