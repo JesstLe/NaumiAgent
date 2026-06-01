@@ -83,6 +83,7 @@ def test_fenced_diff_tool_output_renders_diff_body() -> None:
     assert "-old" in rendered
     assert "+new" in rendered
     assert "```diff" not in rendered
+    assert "tool output · file_edit" in rendered
 
 
 def test_cli_status_updates_fixed_status_not_output(monkeypatch) -> None:
@@ -141,6 +142,7 @@ async def test_fullscreen_cli_tool_end_includes_tool_output() -> None:
     assert "file_edit" in text
     assert "-old" in text
     assert "+new" in text
+    assert "tool output · file_edit" in text
 
 
 def test_context_compacted_rendering_includes_preserved_state_and_warnings() -> None:

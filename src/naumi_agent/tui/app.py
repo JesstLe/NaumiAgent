@@ -33,6 +33,27 @@ from naumi_agent.orchestrator.engine import AgentEngine
 
 logger = logging.getLogger(__name__)
 
+
+def _format_tool_output_markdown(content: str) -> str:
+    """Wrap tool output for TUI display while preserving diff/code fences."""
+    text = content.strip("\n")
+    if not text:
+        return ""
+    lines = text.splitlines()
+    if "```diff" in text or "```" in text:
+        return text
+    if _looks_like_diff(lines):
+        return f"```diff\n{text}\n```"
+    return f"```\n{text}\n```"
+
+
+def _looks_like_diff(lines: list[str]) -> bool:
+    sample = [line for line in lines[:12] if line.strip()]
+    return any(line.startswith(("---", "+++", "@@")) for line in sample) and any(
+        line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+        for line in sample
+    )
+
 _SLASH_SUGGESTIONS = SuggestFromList(
     [cmd for cmd, _, _ in COMMANDS],
     case_sensitive=True,
@@ -192,20 +213,35 @@ class ChatPanel(VerticalScroll):
         self.mount(self._current_tool_widget)
         self.scroll_end(animate=False)
 
-    def end_tool(self, name: str, status: str, duration_ms: int) -> None:
+    def end_tool(
+        self,
+        name: str,
+        status: str,
+        duration_ms: int,
+        content: str = "",
+    ) -> None:
         self._trace_event(
             "tui.tool_end",
-            {"name": name, "status": status, "duration_ms": duration_ms},
+            {
+                "name": name,
+                "status": status,
+                "duration_ms": duration_ms,
+                "content_chars": len(content),
+            },
         )
-        if self._current_tool_widget is None:
-            return
         icon = "✅" if status == "success" else "❌"
-        self._current_tool_widget.update(
-            Text.from_markup(f"  {icon} [dim]{name} ({duration_ms}ms)[/dim]")
-        )
-        self._current_tool_widget.set_class(False, "tool-running")
-        self._current_tool_widget.set_class(True, "tool-done")
-        self._current_tool_widget = None
+        done_text = Text.from_markup(f"  {icon} [dim]{name} ({duration_ms}ms)[/dim]")
+        if self._current_tool_widget is None:
+            self.mount(Static(done_text, classes="tool-done"))
+        else:
+            self._current_tool_widget.update(done_text)
+            self._current_tool_widget.set_class(False, "tool-running")
+            self._current_tool_widget.set_class(True, "tool-done")
+            self._current_tool_widget = None
+        if content:
+            self.mount(
+                Markdown(_format_tool_output_markdown(content), classes="tool-output")
+            )
         self.scroll_end(animate=False)
 
     # --- 清空 ---
@@ -894,6 +930,13 @@ class NaumiApp(App):
         margin: 0 0;
     }
 
+    .tool-output {
+        background: $surface-darken-1;
+        border: round cyan;
+        padding: 0 1;
+        margin: 0 2 1 2;
+    }
+
     .usage-info {
         padding: 0 2;
         margin-bottom: 1;
@@ -1512,7 +1555,12 @@ class NaumiApp(App):
                 case "tool_end":
                     tool_name = data["name"]
                     label = _tool_label(tool_name)
-                    chat.end_tool(label, data["status"], data["duration_ms"])
+                    chat.end_tool(
+                        label,
+                        data["status"],
+                        data["duration_ms"],
+                        str(data.get("content", "") or ""),
+                    )
                 case "hook_trace":
                     point = str(data.get("point", "?"))
                     callback = str(data.get("callback", "?"))

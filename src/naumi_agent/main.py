@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import typer
-from rich.console import Console
+from rich.console import Console, Group
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
@@ -280,34 +280,43 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
 
 def _print_tool_output(name: str, content: str) -> None:
     """Print tool result with diff highlighting for file edits."""
+    renderables: list[Any] = []
     lines = content.split("\n")
     diff_block = _extract_diff_block(content)
     if diff_block is not None:
         prefix, diff_text, suffix = diff_block
         if prefix:
-            console.print(f"[dim]{prefix.rstrip()}[/dim]")
-        console.print(Syntax(diff_text, "diff", theme="ansi_dark", line_numbers=False))
+            renderables.append(Text(prefix.rstrip(), style="dim"))
+        renderables.append(Syntax(diff_text, "diff", theme="ansi_dark", line_numbers=False))
         if suffix:
-            console.print(f"[dim]{suffix.lstrip()}[/dim]")
+            renderables.append(Text(suffix.lstrip(), style="dim"))
     elif _looks_like_diff(lines):
-        console.print(Syntax(content, "diff", theme="ansi_dark", line_numbers=False))
+        renderables.append(Syntax(content, "diff", theme="ansi_dark", line_numbers=False))
     elif "```" in content:
         # Code block — show the full block up to 80 lines
         max_lines = 80
         preview = "\n".join(lines[:max_lines])
         if len(lines) > max_lines:
             preview += f"\n  ... ({len(lines) - max_lines} more lines)"
-        console.print(f"[dim]{preview}[/dim]")
+        renderables.append(Text(preview, style="dim"))
     elif name in ("file_read",):
         preview = "\n".join(lines[:50])
         if len(lines) > 50:
             preview += f"\n  ... ({len(lines) - 50} more lines)"
-        console.print(f"[dim]{preview}[/dim]")
+        renderables.append(Text(preview, style="dim"))
     else:
         preview = "\n".join(lines[:30])
         if len(lines) > 30:
             preview += f"\n  ... ({len(lines) - 30} more lines)"
-        console.print(f"[dim]{preview}[/dim]")
+        renderables.append(Text(preview, style="dim"))
+    console.print(
+        Panel(
+            Group(*renderables),
+            title=f"tool output · {name}",
+            border_style="cyan",
+            padding=(0, 1),
+        )
+    )
 
 
 def _format_hook_trace(data: dict[str, Any]) -> str:
