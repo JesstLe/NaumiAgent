@@ -34,6 +34,7 @@ from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.clipboard import copy_or_save_transcript
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
+from naumi_agent.ui.doctor import render_doctor_report, run_doctor
 from naumi_agent.ui.history_screen import build_history_snapshot, render_history_preview
 from naumi_agent.ui.keybindings import (
     KEYBINDING_DEFINITIONS,
@@ -1309,6 +1310,7 @@ class NaumiApp(App):
                     "- `/help` — 显示帮助\n"
                     "- `/keybindings` — 显示当前快捷键配置\n"
                     "- `/style` — 显示当前主题和输出风格\n"
+                    "- `/doctor` — 运行环境诊断\n"
                     "- `/copy [all|last|error]` — 复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)\n"
                     "- `/debug` — 显示本次结构化调试日志位置\n"
                     "- `/debug-replay [路径]` — 回放 debug-runs 结构化事件\n"
@@ -1396,6 +1398,8 @@ class NaumiApp(App):
                         classes="agent-msg",
                     )
                 )
+            case "/doctor":
+                self._run_doctor()
             case "/debug":
                 info = (
                     self.debug_trace.describe()
@@ -2532,6 +2536,23 @@ class NaumiApp(App):
             return
         chat.mount(Markdown(render_history_preview(session), classes="agent-msg"))
         status.status_text = f"已预览: {session.title or session_id}"
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_doctor(self) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        status.status_text = "环境诊断中"
+        report = await run_doctor(
+            self.engine._config,
+            workspace_root=getattr(self.engine, "workspace_root", Path.cwd()),
+            mcp_manager=getattr(self.engine, "_mcp_manager", None),
+        )
+        chat.mount(Markdown(render_doctor_report(report), classes="agent-msg"))
+        status.status_text = {
+            "pass": "环境诊断通过",
+            "warn": "环境诊断存在提醒",
+            "error": "环境诊断发现错误",
+        }[report.status]
 
     @work(exclusive=True, exit_on_error=False)
     async def _archive_session(self, session_id: str) -> None:

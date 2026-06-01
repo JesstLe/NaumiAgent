@@ -909,9 +909,10 @@ codex/docs-13-claude-code-roadmap
 - ✅ Configurable keybindings：`ui.keybindings` 统一定义快捷键动作、默认值、配置覆盖、冲突检测和帮助渲染；CLI 的 prompt_toolkit `KeyBindings` 与 TUI 的 Textual `Binding` 均从同一配置生成，支持 `/keybindings` 查看当前生效按键。
 - ✅ Theme and output style system：`ui.theme` 提供 dark/minimal/high_contrast 主题、compact/detailed/debug/silent_tools 输出策略和语义色彩 token；CLI 状态/权限、TUI CSS、结构化 diff 和 `/style` 入口共用同一套配置。
 - ✅ Resume history screen：`ui.history_screen` 统一历史会话列表/预览渲染，Session 持久化 workspace/git/summary 元数据，`/history <关键词>` 支持搜索，`/history preview|archive|delete <id>` 支持预览、归档和删除；TUI 历史侧栏展示模型、token、cost、workspace、git、摘要并支持归档/删除。
+- ✅ Doctor diagnostics screen：`ui.doctor` 提供 Python/config/API key/model/workspace/git/rg/browser daemon/docker/MCP/debug log/terminal 的确定性检查，CLI/TUI `/doctor` 与 Agent 工具 `doctor_diagnostics` 共用同一套诊断与 Markdown 报告。
 
 下一步：
 
 ```text
-feat: add doctor diagnostics screen
+perf: cache message rendering
 ```

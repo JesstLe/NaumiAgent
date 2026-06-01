@@ -24,6 +24,7 @@ from naumi_agent.ui.code_excerpt import (
     DEFAULT_CODE_BLOCK_MAX_LINES,
     excerpt_markdown_code_blocks,
 )
+from naumi_agent.ui.doctor import render_doctor_report, run_doctor
 from naumi_agent.ui.keybindings import build_keybindings, render_keybinding_help
 from naumi_agent.ui.theme import build_ui_style_from_config, render_style_help
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
@@ -1232,6 +1233,13 @@ async def _handle_command(engine: Any, cmd: str) -> None:
         case "/style" | "/theme":
             config = getattr(engine, "_config", None)
             console.print(Markdown(render_style_help(build_ui_style_from_config(config))))
+        case "/doctor":
+            report = await run_doctor(
+                engine._config,
+                workspace_root=getattr(engine, "workspace_root", Path.cwd()),
+                mcp_manager=getattr(engine, "_mcp_manager", None),
+            )
+            console.print(Markdown(render_doctor_report(report)))
         case "/debug":
             if _active_cli and hasattr(_active_cli, "debug_info"):
                 console.print(_active_cli.debug_info())
@@ -1670,6 +1678,7 @@ def _print_help() -> None:
         ("/help", "显示帮助"),
         ("/keybindings", "显示当前快捷键配置"),
         ("/style", "显示当前主题和输出风格"),
+        ("/doctor", "运行环境诊断"),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
         ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),

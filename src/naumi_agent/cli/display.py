@@ -29,6 +29,7 @@ def print_help() -> None:
         ("/help", "显示帮助"),
         ("/keybindings", "显示当前快捷键配置"),
         ("/style", "显示当前主题和输出风格"),
+        ("/doctor", "运行环境诊断"),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次结构化调试日志位置"),
         ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),
