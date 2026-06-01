@@ -7,6 +7,7 @@ from naumi_agent.safety.permissions import (
     PermissionRiskLevel,
 )
 from naumi_agent.tools.builtin import YamlMicroVerifyTool, YamlValidateTool
+from naumi_agent.tools.forge import ForgeTool
 from naumi_agent.tools.self_modify import SelfModifyTool
 
 
@@ -121,20 +122,30 @@ class TestPermissionChecker:
 
     def test_tool_metadata_can_require_confirmation(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
-        tool = SelfModifyTool()
+        cases = [
+            (
+                "self_modify",
+                SelfModifyTool(),
+                {
+                    "target_file": "tools/example.py",
+                    "new_content": "x = 1\n",
+                    "description": "example",
+                },
+            ),
+            (
+                "forge_tool",
+                ForgeTool(),
+                {
+                    "description": "count comments",
+                    "tool_name": "comment_counter",
+                },
+            ),
+        ]
 
-        result = checker.check(
-            "self_modify",
-            {
-                "target_file": "tools/example.py",
-                "new_content": "x = 1\n",
-                "description": "example",
-            },
-            tool=tool,
-        )
-
-        assert result.allowed
-        assert result.requires_confirmation
+        for tool_name, tool, args in cases:
+            result = checker.check(tool_name, args, tool=tool)
+            assert result.allowed, tool_name
+            assert result.requires_confirmation, tool_name
 
     def test_bypass_no_confirmation(self) -> None:
         checker = PermissionChecker(PermissionMode.BYPASS)

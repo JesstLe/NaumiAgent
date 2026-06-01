@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.71] - 2026-06-01
+
+### Changed
+- **Forge Tool 写盘边界加固** — 将 `forge_tool` 标记为需要确认的破坏性工具，并为描述、显式工具名和 LLM 代码输出增加确定性校验；生成工具的保存、加载和删除现在统一使用安全工具名，拒绝路径片段，避免工具锻造流程写出 `generated/` 边界。
+
 ## [0.1.70] - 2026-06-01
 
 ### Changed

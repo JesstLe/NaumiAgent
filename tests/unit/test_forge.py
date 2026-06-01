@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from naumi_agent.tools.forge import (
+    MAX_FORGE_CODE_CHARS,
     ForgeTool,
     _extract_python_code,
     _import_test,
@@ -190,6 +191,15 @@ class TestImportTest:
         ok, msg = _import_test(bad_code, "Foo")
         assert not ok
 
+    def test_rejects_unsafe_instance_name(self):
+        bad_name_code = VALID_TOOL_CODE.replace(
+            'return "comment_counter"',
+            'return "../escape"',
+        )
+        ok, msg = _import_test(bad_name_code, "CommentCounterTool")
+        assert not ok
+        assert "生成工具实例名" in msg
+
 
 class TestSaveTool:
     def test_saves_to_generated_dir(self, tmp_path: Path):
@@ -208,6 +218,16 @@ class TestSaveTool:
         ):
             path = save_tool("my-cool-tool", "x = 1\n")
             assert path.name == "my_cool_tool.py"
+
+    def test_rejects_path_like_name(self, tmp_path: Path):
+        with (
+            patch(
+                "naumi_agent.tools.forge.get_generated_dir",
+                return_value=tmp_path,
+            ),
+            pytest.raises(ValueError, match="只能包含小写字母"),
+        ):
+            save_tool("../escape", "x = 1\n")
 
 
 class TestLoadGeneratedTool:
@@ -230,6 +250,29 @@ class TestLoadGeneratedTool:
         ):
             tool = load_generated_tool("nonexistent")
             assert tool is None
+
+    def test_rejects_path_like_name(self, tmp_path: Path):
+        with patch(
+            "naumi_agent.tools.forge.get_generated_dir",
+            return_value=tmp_path,
+        ):
+            assert load_generated_tool("../escape") is None
+
+    def test_rejects_generated_tool_with_unsafe_instance_name(self, tmp_path: Path):
+        unsafe_code = VALID_TOOL_CODE.replace(
+            'return "comment_counter"',
+            'return "../escape"',
+        )
+        (tmp_path / "comment_counter.py").write_text(
+            unsafe_code,
+            encoding="utf-8",
+        )
+
+        with patch(
+            "naumi_agent.tools.forge.get_generated_dir",
+            return_value=tmp_path,
+        ):
+            assert load_generated_tool("comment_counter") is None
 
 
 class TestListGeneratedTools:
@@ -282,6 +325,13 @@ class TestRemoveGeneratedTool:
             return_value=tmp_path,
         ):
             assert not remove_generated_tool("nonexistent")
+
+    def test_rejects_path_like_name(self, tmp_path: Path):
+        with patch(
+            "naumi_agent.tools.forge.get_generated_dir",
+            return_value=tmp_path,
+        ):
+            assert not remove_generated_tool("../escape")
 
 
 class TestLoadAllGeneratedTools:
@@ -361,6 +411,30 @@ class TestForgeTool:
         assert result["status"] == "forged"
         assert result["tool_name"] == "my_counter"
 
+    def test_rejects_invalid_explicit_tool_name_before_write(self, tmp_path: Path):
+        with patch(
+            "naumi_agent.tools.forge.get_generated_dir",
+            return_value=tmp_path,
+        ):
+            result = forge_tool(
+                description="统计代码注释率的工具",
+                tool_name="../escape",
+                llm_output=VALID_TOOL_CODE,
+            )
+
+        assert result["status"] == "rejected"
+        assert "只能包含小写字母" in result["error"]
+        assert list(tmp_path.glob("*.py")) == []
+
+    def test_rejects_oversized_llm_output_before_validation(self):
+        result = forge_tool(
+            description="bad",
+            llm_output="x" * (MAX_FORGE_CODE_CHARS + 1),
+        )
+
+        assert result["status"] == "rejected"
+        assert "llm_output 过大" in result["error"]
+
 
 class TestForgeToolClass:
     def test_tool_name(self):
@@ -376,6 +450,21 @@ class TestForgeToolClass:
         assert "tool_name" in schema["properties"]
         assert "llm_output" in schema["properties"]
         assert schema["required"] == ["description"]
+
+    def test_metadata_marks_forge_as_confirmed_state_change(self):
+        metadata = ForgeTool().metadata
+        assert metadata.destructive is True
+        assert metadata.requires_confirmation is True
+        assert metadata.user_facing_name == "工具锻造"
+
+    @pytest.mark.asyncio
+    async def test_execute_rejects_empty_description_before_forging(self):
+        tool = ForgeTool()
+
+        result = await tool.execute(description="")
+
+        assert "验证未通过" in result
+        assert "description 不能为空" in result
 
     @pytest.mark.asyncio
     async def test_execute_forges_deterministic_tool(self, tmp_path: Path):
