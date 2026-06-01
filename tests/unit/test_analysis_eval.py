@@ -10,7 +10,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from naumi_agent.model.router import ModelResponse, TokenUsage
-from naumi_agent.tools.analysis import EvalDrivenTool, _build_eval_baseline
+from naumi_agent.tools.analysis import EvalDrivenTool
+from naumi_agent.tools.analysis import _build_eval_baseline as analysis_build_eval_baseline
+from naumi_agent.tools.analysis_support.eval import build_eval_baseline
 
 
 def _write_eval_target(path: Path) -> None:
@@ -34,7 +36,7 @@ class Calculator:
 def test_build_eval_baseline_generates_runnable_pytest(tmp_path: Path) -> None:
     target = tmp_path / "sample_module.py"
     _write_eval_target(target)
-    baseline = _build_eval_baseline([target])
+    baseline = build_eval_baseline([target])
     test_file = tmp_path / "test_generated_baseline.py"
     test_file.write_text(baseline.test_code, encoding="utf-8")
 
@@ -49,13 +51,14 @@ def test_build_eval_baseline_generates_runnable_pytest(tmp_path: Path) -> None:
     assert baseline.function_count == 3
     assert baseline.class_count == 1
     assert result.returncode == 0, result.stdout + result.stderr
+    assert analysis_build_eval_baseline([target]) == baseline
 
 
 def test_build_eval_baseline_imports_module_without_public_targets(tmp_path: Path) -> None:
     target = tmp_path / "private_module.py"
     target.write_text("_VALUE = 1\n", encoding="utf-8")
 
-    baseline = _build_eval_baseline([target])
+    baseline = build_eval_baseline([target])
 
     assert f"TARGET_FILES = ['{target.resolve()}']" in baseline.test_code
     assert baseline.function_count == 0

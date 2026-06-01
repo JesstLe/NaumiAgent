@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.41] - 2026-06-01
+
+### Changed
+- **Analysis Eval 模块拆分** — 将 `/eval` 的 AST 签名扫描、公开函数/类目标提取、可运行 pytest baseline 渲染和确定性报告迁移到 `analysis_support.eval`，主 `analysis.py` 保留目标解析与 LLM 边界测试增强路径。
+
 ## [0.1.40] - 2026-06-01
 
 ### Changed
