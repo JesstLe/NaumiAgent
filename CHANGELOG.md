@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.66] - 2026-06-01
+
+### Changed
+- **Web 工具安全加固** — 为 `web_search` 和 `web_fetch` 增加只读工具元数据、查询/长度边界夹取、HTTP(S) URL 规范化、内网/本机/保留地址 SSRF 拦截、重定向后 URL 复验、内容类型检查和中文错误提示，使网络工具具备更清晰的安全执行边界。
+
 ## [0.1.65] - 2026-06-01
 
 ### Changed
