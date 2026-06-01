@@ -362,6 +362,7 @@ def _format_context_compacted(data: dict[str, Any]) -> str:
     """Format context compaction events for user-visible output."""
     before = data.get("before", "?")
     after = data.get("after", "?")
+    archived = int(data.get("archived_tool_results", 0) or 0)
     preserved = data.get("preserved_sections", [])
     warnings = data.get("warnings", [])
     if not isinstance(preserved, list):
@@ -369,6 +370,8 @@ def _format_context_compacted(data: dict[str, Any]) -> str:
     if not isinstance(warnings, list):
         warnings = []
     parts = [f"\033[35m  context compacted: {before} → {after} messages\033[0m"]
+    if archived:
+        parts.append(f"  归档：{archived} 个大型工具结果")
     if preserved:
         parts.append("  保留：" + "、".join(str(item) for item in preserved))
     if warnings:

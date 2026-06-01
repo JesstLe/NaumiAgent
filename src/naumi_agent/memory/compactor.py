@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime
+from hashlib import sha256
+from pathlib import Path
 from typing import Any
 
 import litellm
@@ -13,6 +16,10 @@ from naumi_agent.config.settings import MemoryConfig
 from naumi_agent.model.router import ModelRouter, ModelTier
 
 logger = logging.getLogger(__name__)
+
+_LARGE_TOOL_RESULT_CHARS = 12_000
+_TOOL_RESULT_PREVIEW_CHARS = 1_200
+_ARCHIVED_TOOL_RESULT_MARKER = "[大型工具结果已归档]"
 
 COMPACTION_PROMPT = """\
 请将以下对话历史压缩为简洁的摘要。保留关键信息：
@@ -89,6 +96,40 @@ class ContextCompactor:
         self._router = router
         self._long_term_memory = long_term_memory
 
+    def offload_large_tool_results(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        min_chars: int = _LARGE_TOOL_RESULT_CHARS,
+    ) -> tuple[list[dict[str, Any]], list[ToolResultArchive]]:
+        """Persist oversized tool results and leave compact placeholders."""
+        archived: list[ToolResultArchive] = []
+        updated: list[dict[str, Any]] = []
+
+        for message in messages:
+            if message.get("role") != "tool":
+                updated.append(message)
+                continue
+
+            content = message.get("content", "")
+            if not isinstance(content, str):
+                updated.append(message)
+                continue
+            if len(content) < min_chars or _ARCHIVED_TOOL_RESULT_MARKER in content:
+                updated.append(message)
+                continue
+
+            artifact = self._write_tool_result_artifact(message, content)
+            archived.append(artifact)
+            replacement = dict(message)
+            replacement["content"] = _format_archived_tool_result_placeholder(
+                artifact,
+                content,
+            )
+            updated.append(replacement)
+
+        return updated, archived
+
     def should_compact(self, messages: list[dict[str, Any]], max_tokens: int) -> bool:
         """判断是否需要压缩."""
         estimated = self._estimate_tokens(messages)
@@ -109,6 +150,7 @@ class ContextCompactor:
 
         保留 system prompt 和最近几轮，压缩中间历史。
         """
+        messages, _ = self.offload_large_tool_results(messages)
         if not self.should_compact(messages, max_tokens):
             return messages
 
@@ -269,6 +311,40 @@ class ContextCompactor:
         if stored:
             logger.info("Auto-extracted %d memories during compaction", stored)
 
+    def _write_tool_result_artifact(
+        self,
+        message: dict[str, Any],
+        content: str,
+    ) -> ToolResultArchive:
+        digest = sha256(content.encode("utf-8")).hexdigest()
+        tool_call_id = str(message.get("tool_call_id") or "unknown")
+        safe_tool_call_id = _safe_artifact_segment(tool_call_id)
+        artifacts_dir = (
+            Path(self._config.session_db_path).expanduser().resolve().parent
+            / "compaction-artifacts"
+            / "tool-results"
+        )
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        path = artifacts_dir / f"{safe_tool_call_id}-{digest[:12]}.txt"
+        if not path.exists():
+            path.write_text(content, encoding="utf-8")
+        return ToolResultArchive(
+            tool_call_id=tool_call_id,
+            path=str(path),
+            chars=len(content),
+            sha256=digest,
+        )
+
+
+@dataclass(frozen=True)
+class ToolResultArchive:
+    """Persisted oversized tool result metadata."""
+
+    tool_call_id: str
+    path: str
+    chars: int
+    sha256: str
+
 
 def _parse_extraction_response(text: str) -> list[dict[str, str]]:
     """Parse JSON array from LLM extraction response."""
@@ -290,3 +366,28 @@ def _parse_extraction_response(text: str) -> list[dict[str, str]]:
         pass
 
     return []
+
+
+def _format_archived_tool_result_placeholder(
+    archive: ToolResultArchive,
+    content: str,
+) -> str:
+    preview = content[:_TOOL_RESULT_PREVIEW_CHARS]
+    if len(content) > _TOOL_RESULT_PREVIEW_CHARS:
+        preview += "\n...（完整结果已归档，请按路径读取）"
+    return (
+        f"{_ARCHIVED_TOOL_RESULT_MARKER}\n"
+        f"tool_call_id: {archive.tool_call_id}\n"
+        f"chars: {archive.chars}\n"
+        f"sha256: {archive.sha256}\n"
+        f"artifact: {archive.path}\n\n"
+        "预览：\n"
+        f"{preview}"
+    )
+
+
+def _safe_artifact_segment(value: str) -> str:
+    import re
+
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
+    return cleaned.strip("._-") or "tool_result"
