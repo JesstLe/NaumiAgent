@@ -1057,6 +1057,86 @@ class TestErrorRecovery:
             await engine.shutdown()
 
     @pytest.mark.asyncio
+    async def test_streaming_tool_call_suppresses_buffered_text_fragments(
+        self,
+        tmp_path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        events: list[tuple[str, dict[str, object]]] = []
+        call_count = 0
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        async def stream_response(**_: object):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                yield StreamChunk(token=")")
+                yield StreamChunk(token="y")
+                yield StreamChunk(
+                    tool_call={
+                        0: {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "fake_tool",
+                                "arguments": "{}",
+                            },
+                        }
+                    },
+                    finish_reason="tool_calls",
+                )
+                return
+
+            yield StreamChunk(token="工具完成")
+            yield StreamChunk(finish_reason="stop")
+
+        try:
+            engine._messages = [
+                {"role": "system", "content": "system prompt"},
+                {"role": "user", "content": "调用工具"},
+            ]
+
+            with (
+                patch.object(engine._router, "stream", new=stream_response),
+                patch.object(
+                    engine,
+                    "_execute_tool",
+                    new_callable=AsyncMock,
+                    return_value=ToolResult(
+                        call_id="call_1",
+                        status="success",
+                        content="ok",
+                        duration_ms=1,
+                    ),
+                ),
+            ):
+                result = await engine._react_loop_streaming(
+                    tools=None,
+                    on_event=on_event,
+                )
+
+            assert result.status == "completed"
+            assert result.response == "工具完成"
+            token_text = "".join(
+                str(data.get("content", ""))
+                for event, data in events
+                if event == "token"
+            )
+            assert token_text == "工具完成"
+            tool_assistant_messages = [
+                msg for msg in engine._messages
+                if msg.get("role") == "assistant" and msg.get("tool_calls")
+            ]
+            assert tool_assistant_messages[-1]["content"] is None
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
     async def test_prompt_too_long_reactive_compacts_and_retries(
         self,
         tmp_path,
