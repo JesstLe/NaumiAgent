@@ -17,6 +17,7 @@ from typing import Any
 from naumi_agent.tools import analysis_common
 from naumi_agent.tools.analysis_support import consensus as _consensus_support
 from naumi_agent.tools.analysis_support import fusion as _fusion_support
+from naumi_agent.tools.analysis_support import genesis as _genesis_support
 from naumi_agent.tools.analysis_support import hook as _hook_support
 from naumi_agent.tools.analysis_support import pid as _pid_support
 from naumi_agent.tools.analysis_support import probe as _probe_support
@@ -54,6 +55,8 @@ _build_pid_inventory_script = _pid_support.build_pid_inventory_script
 _build_pid_report = _pid_support.build_pid_report
 _build_zkp_trace_script = _zkp_support.build_zkp_trace_script
 _build_zkp_report = _zkp_support.build_zkp_report
+_build_genesis_inventory_script = _genesis_support.build_genesis_inventory_script
+_build_genesis_report = _genesis_support.build_genesis_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -7586,7 +7589,7 @@ def _scan_genesis(target: str) -> str:
     patterns, meta-programming capabilities, reflection support, and
     architecture flexibility."""
     findings: list[str] = []
-    source = _read_sources(target)
+    source = _read_sources(_resolve_target(target))
 
     if not source.strip():
         return "⚠️ 未找到可分析的源代码。"
@@ -7804,15 +7807,20 @@ class GenesisTool(Tool):
     async def execute(
         self, *, target: str, **kwargs: Any,
     ) -> str:
+        scan_evidence = _scan_genesis(target)
+        deterministic = _build_genesis_report(target, scan_evidence)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("genesis", target[:200])
-        scan_evidence = _scan_genesis(target)
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 Genesis 自演化审计。"
+
         user_msg = (
             f"## 审计目标\n{target}\n\n"
             f"## 自演化扫描\n{scan_evidence}\n"
+            f"\n## 确定性 Genesis 自演化审计\n{deterministic}\n"
         )
-        return await _run_analysis(router, _GENESIS_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _GENESIS_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM Genesis 增强\n" + enhanced
 
 
 # ===========================================================================

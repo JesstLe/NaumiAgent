@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.22] - 2026-06-01
+
+### Added
+- **Genesis 工具确定性落地** — `/genesis` 在模型路由未初始化时也会返回自演化审计、可运行 genesis inventory 脚本、刚性/元编程/自省检测和 evolution contract。
+
+### Fixed
+- **Genesis 源码读取修复** — `_scan_genesis` 现在会先解析目标路径再读取源码，避免路径字符串被逐字符处理导致扫描为空。
+
 ## [0.1.21] - 2026-06-01
 
 ### Added
