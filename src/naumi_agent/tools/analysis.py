@@ -24,6 +24,7 @@ from naumi_agent.tools.analysis_support import macro as _macro_support
 from naumi_agent.tools.analysis_support import pid as _pid_support
 from naumi_agent.tools.analysis_support import probe as _probe_support
 from naumi_agent.tools.analysis_support import spar as _spar_support
+from naumi_agent.tools.analysis_support import supervisor as _supervisor_support
 from naumi_agent.tools.analysis_support import vision as _vision_support
 from naumi_agent.tools.analysis_support import watchdog as _watchdog_support
 from naumi_agent.tools.analysis_support import world as _world_support
@@ -66,6 +67,10 @@ _build_macro_inventory_script = _macro_support.build_macro_inventory_script
 _build_macro_report = _macro_support.build_macro_report
 _build_watchdog_inventory_script = _watchdog_support.build_watchdog_inventory_script
 _build_watchdog_report = _watchdog_support.build_watchdog_report
+_build_supervisor_inventory_script = (
+    _supervisor_support.build_supervisor_inventory_script
+)
+_build_supervisor_report = _supervisor_support.build_supervisor_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -8874,7 +8879,7 @@ _ISOLATION_ERROR_PATTERNS = [
 def _scan_supervisor(target: str) -> str:
     """Scan system for supervisor tree readiness."""
     findings: list[str] = []
-    source = _read_sources(target)
+    source = _read_sources(_resolve_target(target))
 
     if not source.strip():
         return "⚠️ 未找到可分析的源代码。"
@@ -9113,23 +9118,27 @@ class SupervisorTool(Tool):
     async def execute(
         self, *, target: str, **kwargs: Any,
     ) -> str:
+        scan_evidence = _scan_supervisor(target)
+        deterministic = _build_supervisor_report(target, scan_evidence)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("supervisor", target[:200])
-
-        scan_evidence = _scan_supervisor(target)
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 Supervisor 守护者树审计。"
 
         manager = _get_analysis_subagent_manager(router)
         if manager is not None:
-            return await self._execute_with_supervisor_tree(
+            enhanced = await self._execute_with_supervisor_tree(
                 router, manager, target, scan_evidence,
             )
+            return deterministic + "\n\n## 多智能体 Supervisor 增强\n" + enhanced
 
         user_msg = (
             f"## 审计目标\n{target}\n\n"
             f"## 守护者树扫描\n{scan_evidence}\n"
+            f"\n## 确定性 Supervisor 守护者树审计\n{deterministic}\n"
         )
-        return await _run_analysis(router, _SUPERVISOR_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _SUPERVISOR_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM Supervisor 增强\n" + enhanced
 
     async def _execute_with_supervisor_tree(
         self,
