@@ -27,6 +27,7 @@ from naumi_agent.tools.browser.runtime.download_manager import (
 from naumi_agent.tools.browser.runtime.network_recorder import (
     NetworkRecorder,
     _sanitize_headers,
+    failure_text,
 )
 
 # ---------------------------------------------------------------------------
@@ -312,6 +313,15 @@ class TestSanitizeHeaders:
 
 
 class TestNetworkRecorder:
+    def test_failure_text_accepts_playwright_python_string(self) -> None:
+        assert failure_text("net::ERR_ABORTED") == "net::ERR_ABORTED"
+
+    def test_failure_text_accepts_object_payload(self) -> None:
+        failure = MagicMock()
+        failure.error_text = "net::ERR_FAILED"
+
+        assert failure_text(failure) == "net::ERR_FAILED"
+
     def test_init(self) -> None:
         rec = NetworkRecorder()
         assert rec.entries == []
@@ -381,6 +391,28 @@ class TestBrowserRuntimeLifecycle:
         playwright.stop.assert_awaited_once()
         assert runtime._playwright is None
 
+    def test_runtime_request_failed_accepts_string_failure(self, tmp_path: Path) -> None:
+        runtime = BrowserRuntime(tmp_path)
+        request = MagicMock()
+        request.failure = "net::ERR_ABORTED"
+        request.url = "https://example.com/api"
+        request.method = "POST"
+        request.resource_type = "fetch"
+        request.post_data = "{\"ok\":false}"
+
+        runtime._on_request_failed(request)
+
+        assert runtime.network_events == [
+            {
+                "type": "requestfailed",
+                "url": "https://example.com/api",
+                "method": "POST",
+                "resourceType": "fetch",
+                "failure": "net::ERR_ABORTED",
+                "requestBody": "{\"ok\":false}",
+            }
+        ]
+
     def test_on_request_disabled(self) -> None:
         rec = NetworkRecorder()
         mock_req = MagicMock()
@@ -398,6 +430,21 @@ class TestBrowserRuntimeLifecycle:
         mock_req = MagicMock()
         rec._on_request_failed(mock_req)
         assert len(rec.entries) == 0
+
+    def test_on_request_failed_records_string_failure(self) -> None:
+        rec = NetworkRecorder()
+        rec.enabled = True
+        mock_req = MagicMock()
+        mock_req.url = "https://example.com/failed"
+        mock_req.resource_type = "xhr"
+        mock_req.failure = "net::ERR_ABORTED"
+
+        rec._on_request_failed(mock_req)
+
+        assert rec.entries[0]["type"] == "requestFailed"
+        assert rec.entries[0]["url"] == "https://example.com/failed"
+        assert rec.entries[0]["failure"] == "net::ERR_ABORTED"
+        assert rec.entries[0]["resourceType"] == "xhr"
 
     def test_max_entries_eviction(self) -> None:
         rec = NetworkRecorder(max_entries=5)

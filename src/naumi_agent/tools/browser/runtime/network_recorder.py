@@ -16,6 +16,27 @@ DEFAULT_MAX_ENTRIES = 500
 _SENSITIVE_HEADERS = frozenset(["authorization", "cookie", "set-cookie"])
 
 
+def failure_text(failure: Any, default: str = "Unknown error") -> str:
+    """Normalize Playwright request failure payloads across runtimes."""
+    if failure is None:
+        return default
+    if isinstance(failure, str):
+        return failure or default
+
+    for attr in ("error_text", "errorText"):
+        value = getattr(failure, attr, None)
+        if callable(value):
+            try:
+                value = value()
+            except Exception:
+                value = None
+        if value:
+            return str(value)
+
+    text = str(failure)
+    return text if text else default
+
+
 class NetworkRecorder:
     def __init__(self, *, max_entries: int = DEFAULT_MAX_ENTRIES) -> None:
         self.entries: list[dict[str, Any]] = []
@@ -105,12 +126,10 @@ class NetworkRecorder:
     def _on_request_failed(self, request: Any) -> None:
         if not self.enabled:
             return
-        failure = request.failure
-        failure_text = failure.error_text if failure else "Unknown error"
         self._push({
             "type": "requestFailed",
             "url": request.url,
-            "failure": failure_text,
+            "failure": failure_text(request.failure),
             "resourceType": request.resource_type,
             "timestamp": datetime.now().isoformat(),
         })
