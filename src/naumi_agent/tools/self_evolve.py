@@ -8,14 +8,81 @@ import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
-from naumi_agent.tools.base import Tool
+from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
 _MAX_REFLECTIVE_ROUNDS = 3
+MAX_EVOLUTION_CONTENT_CHARS = 200_000
+MAX_EVOLUTION_DESCRIPTION_CHARS = 2_000
+
+
+def _normalize_evolution_inputs(
+    target_file: Any,
+    original_content: Any,
+    new_content: Any,
+    description: Any,
+    round_number: Any,
+    apply_decision: Any,
+) -> tuple[str, str, str, str, int, bool]:
+    """Validate public self-evolution inputs before scoring or rollback."""
+    if not isinstance(target_file, str) or not target_file.strip():
+        raise ValueError("target_file 不能为空，且必须是字符串。")
+    target_file = target_file.strip()
+    if not target_file.endswith(".py"):
+        raise ValueError("target_file 必须指向 .py 文件。")
+    target_path = PurePosixPath(target_file)
+    if (
+        target_path.is_absolute()
+        or "\\" in target_file
+        or any(part == ".." for part in target_path.parts)
+    ):
+        raise ValueError("target_file 不能是绝对路径或包含路径越界片段。")
+
+    if not isinstance(original_content, str):
+        raise ValueError("original_content 必须是字符串。")
+    if len(original_content) > MAX_EVOLUTION_CONTENT_CHARS:
+        raise ValueError(
+            "original_content 过大，当前上限为 "
+            f"{MAX_EVOLUTION_CONTENT_CHARS} 个字符。"
+        )
+
+    if not isinstance(new_content, str):
+        raise ValueError("new_content 必须是字符串。")
+    if len(new_content) > MAX_EVOLUTION_CONTENT_CHARS:
+        raise ValueError(
+            "new_content 过大，当前上限为 "
+            f"{MAX_EVOLUTION_CONTENT_CHARS} 个字符。"
+        )
+
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("description 不能为空，且必须是字符串。")
+    description = description.strip()
+    if len(description) > MAX_EVOLUTION_DESCRIPTION_CHARS:
+        raise ValueError(
+            "description 过长，当前上限为 "
+            f"{MAX_EVOLUTION_DESCRIPTION_CHARS} 个字符。"
+        )
+
+    if isinstance(round_number, bool) or not isinstance(round_number, int):
+        raise ValueError("round 必须是整数。")
+    if round_number < 1 or round_number > _MAX_REFLECTIVE_ROUNDS:
+        raise ValueError(f"round 必须在 1 到 {_MAX_REFLECTIVE_ROUNDS} 之间。")
+
+    if not isinstance(apply_decision, bool):
+        raise ValueError("apply_decision 必须是布尔值。")
+
+    return (
+        target_file,
+        original_content,
+        new_content,
+        description,
+        round_number,
+        apply_decision,
+    )
 
 
 @dataclass
@@ -609,6 +676,15 @@ class SelfEvolveTool(Tool):
         )
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            user_facing_name="自我进化",
+            search_hint="评估源码修改 质量指标 反思循环 安全回滚",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -653,6 +729,31 @@ class SelfEvolveTool(Tool):
         apply_decision: bool = False,
         **kwargs: Any,
     ) -> str:
+        try:
+            (
+                target_file,
+                original_content,
+                new_content,
+                description,
+                round,
+                apply_decision,
+            ) = _normalize_evolution_inputs(
+                target_file,
+                original_content,
+                new_content,
+                description,
+                round,
+                apply_decision,
+            )
+        except ValueError as e:
+            return "\n".join(
+                [
+                    "## 自我进化报告",
+                    "**状态**: ❌ 已拒绝",
+                    f"**原因**: {e}",
+                ]
+            )
+
         cycle_result = run_evolution_cycle(
             target_file=target_file,
             original_content=original_content,

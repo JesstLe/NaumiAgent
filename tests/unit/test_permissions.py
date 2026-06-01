@@ -8,6 +8,7 @@ from naumi_agent.safety.permissions import (
 )
 from naumi_agent.tools.builtin import YamlMicroVerifyTool, YamlValidateTool
 from naumi_agent.tools.forge import ForgeTool
+from naumi_agent.tools.self_evolve import SelfEvolveTool
 from naumi_agent.tools.self_modify import SelfModifyTool
 
 
@@ -138,6 +139,16 @@ class TestPermissionChecker:
                 {
                     "description": "count comments",
                     "tool_name": "comment_counter",
+                },
+            ),
+            (
+                "self_evolve",
+                SelfEvolveTool(),
+                {
+                    "target_file": "tools/example.py",
+                    "original_content": "x = 1\n",
+                    "new_content": "x = 2\n",
+                    "description": "example",
                 },
             ),
         ]
