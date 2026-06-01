@@ -14,6 +14,7 @@ from naumi_agent.tools.forge import (
     _import_test,
     _to_class_name,
     _validate_tool_code,
+    build_deterministic_tool_code,
     forge_tool,
     list_generated_tools,
     load_all_generated_tools,
@@ -71,6 +72,12 @@ class TestToClassName:
 
     def test_single_word(self):
         assert _to_class_name("calculator") == "CalculatorTool"
+
+
+class TestDeterministicName:
+    def test_chinese_description_gets_stable_non_colliding_name(self):
+        code = build_deterministic_tool_code("统计代码注释率的工具")
+        assert "custom_tool_71d3ab07" in code
 
 
 class TestExtractPythonCode:
@@ -150,6 +157,22 @@ class TestValidateToolCode:
         ok, msg = _validate_tool_code(code)
         assert not ok
         assert "execute method" in msg
+
+
+class TestDeterministicToolCode:
+    def test_builds_valid_runnable_tool_code(self):
+        code = build_deterministic_tool_code(
+            "count comments in source text",
+            "comment_counter_scaffold",
+        )
+
+        ok, class_name = _validate_tool_code(code)
+        assert ok
+        assert class_name == "CommentCounterScaffoldTool"
+
+        import_ok, tool_name = _import_test(code, class_name)
+        assert import_ok
+        assert tool_name == "comment_counter_scaffold"
 
 
 class TestImportTest:
@@ -289,10 +312,19 @@ class TestLoadAllGeneratedTools:
 
 
 class TestForgeTool:
-    def test_needs_llm_without_code(self):
-        result = forge_tool("统计代码注释率的工具")
-        assert result["status"] == "needs_llm"
-        assert "system_prompt" in result
+    def test_forges_deterministic_tool_without_code(self, tmp_path: Path):
+        with patch(
+            "naumi_agent.tools.forge.get_generated_dir",
+            return_value=tmp_path,
+        ):
+            result = forge_tool(
+                "count comments in source text",
+                tool_name="comment_counter_scaffold",
+            )
+        assert result["status"] == "forged"
+        assert result["generation_mode"] == "deterministic"
+        assert result["tool_name"] == "comment_counter_scaffold"
+        assert Path(result["file_path"]).exists()
 
     def test_forges_with_valid_code(self, tmp_path: Path):
         with patch(
@@ -346,10 +378,19 @@ class TestForgeToolClass:
         assert schema["required"] == ["description"]
 
     @pytest.mark.asyncio
-    async def test_execute_needs_llm(self):
-        tool = ForgeTool()
-        result = await tool.execute(description="a tool that counts lines")
-        assert "LLM" in result or "生成" in result
+    async def test_execute_forges_deterministic_tool(self, tmp_path: Path):
+        with patch(
+            "naumi_agent.tools.forge.get_generated_dir",
+            return_value=tmp_path,
+        ):
+            tool = ForgeTool()
+            result = await tool.execute(
+                description="a tool that counts lines",
+                tool_name="line_counter_scaffold",
+            )
+        assert "锻造成功" in result
+        assert "deterministic" in result
+        assert (tmp_path / "line_counter_scaffold.py").exists()
 
     @pytest.mark.asyncio
     async def test_execute_forges_tool(self, tmp_path: Path):

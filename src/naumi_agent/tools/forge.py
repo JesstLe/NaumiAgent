@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import textwrap
+from hashlib import sha1
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,124 @@ def _to_class_name(tool_name: str) -> str:
     """Convert snake_case tool name to PascalCase class name."""
     parts = tool_name.replace("-", "_").split("_")
     return "".join(p.capitalize() for p in parts) + "Tool"
+
+
+def _sanitize_tool_name(raw: str, fallback: str = "custom_tool") -> str:
+    """Convert user text into a safe snake_case tool name."""
+    words = re.findall(r"[a-zA-Z][a-zA-Z0-9]*", raw.replace("-", "_"))
+    if not words:
+        digest = sha1(raw.encode("utf-8", errors="ignore")).hexdigest()[:8]
+        return f"{fallback}_{digest}"
+    name = "_".join(word.lower() for word in words[:4])
+    name = re.sub(r"_+", "_", name).strip("_")
+    return name or fallback
+
+
+def _description_keywords(description: str, limit: int = 12) -> list[str]:
+    """Extract stable keywords used by the deterministic scaffold."""
+    words = re.findall(r"[a-zA-Z0-9_\u4e00-\u9fff]{2,}", description)
+    seen: set[str] = set()
+    keywords: list[str] = []
+    for word in words:
+        normalized = word.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        keywords.append(word[:40])
+        if len(keywords) >= limit:
+            break
+    return keywords
+
+
+def build_deterministic_tool_code(description: str, tool_name: str | None = None) -> str:
+    """Build a runnable generated tool without requiring an LLM."""
+    safe_name = _sanitize_tool_name(tool_name or description)
+    class_name = _to_class_name(safe_name)
+    keywords = _description_keywords(description)
+    return textwrap.dedent(f'''\
+        """Generated deterministic tool: {safe_name}."""
+
+        from __future__ import annotations
+
+        import json
+        import re
+        from typing import Any
+
+        from naumi_agent.tools.base import Tool
+
+
+        class {class_name}(Tool):
+            """Deterministic generated tool scaffold."""
+
+            @property
+            def name(self) -> str:
+                return {safe_name!r}
+
+            @property
+            def description(self) -> str:
+                return {description!r}
+
+            @property
+            def parameters_schema(self) -> dict[str, Any]:
+                return {{
+                    "type": "object",
+                    "properties": {{
+                        "input_text": {{
+                            "type": "string",
+                            "description": "要分析的文本或任务材料",
+                            "default": "",
+                        }},
+                        "mode": {{
+                            "type": "string",
+                            "description": "输出模式：summary 或 json",
+                            "default": "summary",
+                        }},
+                    }},
+                    "required": [],
+                }}
+
+            async def execute(
+                self,
+                *,
+                input_text: str = "",
+                mode: str = "summary",
+                **kwargs: Any,
+            ) -> str:
+                text = input_text or "\\n".join(
+                    str(value) for value in kwargs.values() if value is not None
+                )
+                keywords = {keywords!r}
+                lines = [line.strip() for line in text.splitlines() if line.strip()]
+                words = re.findall(r"[\\w\\u4e00-\\u9fff]+", text)
+                hits = {{
+                    keyword: len(re.findall(re.escape(keyword), text, re.IGNORECASE))
+                    for keyword in keywords
+                }}
+                payload = {{
+                    "tool": self.name,
+                    "description": self.description,
+                    "chars": len(text),
+                    "lines": len(lines),
+                    "words": len(words),
+                    "keyword_hits": hits,
+                    "empty": not bool(text.strip()),
+                }}
+                if mode == "json":
+                    return json.dumps(payload, ensure_ascii=False, indent=2)
+                hit_lines = [
+                    f"- {{keyword}}: {{count}}"
+                    for keyword, count in hits.items()
+                    if count
+                ] or ["- 未命中描述关键词"]
+                return "\\n".join([
+                    f"## {{self.name}} 执行结果",
+                    f"- 字符数: {{payload['chars']}}",
+                    f"- 非空行数: {{payload['lines']}}",
+                    f"- 词元数: {{payload['words']}}",
+                    "## 关键词命中",
+                    *hit_lines,
+                ])
+        ''')
 
 
 def _extract_python_code(llm_output: str) -> str:
@@ -346,21 +465,19 @@ def forge_tool(
     Args:
         description: What the tool should do.
         tool_name: Optional explicit tool name.
-        llm_output: Pre-generated code (if None, caller provides via LLM).
+        llm_output: Pre-generated code. When omitted, a deterministic scaffold
+            is generated locally.
 
     Returns:
         Dict with status, tool_name, validation results.
     """
-    if llm_output is None:
-        return {
-            "status": "needs_llm",
-            "description": description,
-            "system_prompt": _TOOL_GENERATION_SYSTEM,
-            "message": "需要 LLM 生成代码。请用 system_prompt 调用 LLM 后将输出传入 llm_output。",
-        }
-
     # 1. Extract code
-    code = _extract_python_code(llm_output)
+    deterministic = llm_output is None
+    code = (
+        build_deterministic_tool_code(description, tool_name)
+        if deterministic
+        else _extract_python_code(llm_output)
+    )
 
     # 2. Determine tool name
     if tool_name is None:
@@ -417,6 +534,7 @@ def forge_tool(
         "file_path": str(file_path),
         "import_name": import_msg,  # actual tool name from instance
         "code": code,
+        "generation_mode": "deterministic" if deterministic else "llm_output",
     }
 
 
@@ -469,19 +587,12 @@ class ForgeTool(Tool):
         parts: list[str] = ["## 🔨 工具锻造结果"]
         status = result["status"]
 
-        if status == "needs_llm":
-            parts.append("**状态**: 📝 需要 LLM 生成代码")
-            parts.append(f"**描述**: {description}")
-            parts.append("")
-            parts.append("请使用以下系统提示词调用 LLM 生成工具代码，然后将输出传入:")
-            parts.append("```")
-            parts.append(result["system_prompt"])
-            parts.append("```")
-
-        elif status == "forged":
+        if status == "forged":
             parts.append("**状态**: ✅ 工具已锻造成功")
             parts.append(f"**名称**: `{result['import_name']}`")
             parts.append(f"**文件**: `{result['file_path']}`")
+            mode = result.get("generation_mode", "llm_output")
+            parts.append(f"**生成方式**: `{mode}`")
             parts.append("")
             parts.append("### 工具代码")
             parts.append("```python")

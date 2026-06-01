@@ -575,10 +575,11 @@ async def run_forge(engine: Any, arg: str) -> None:
 
     console.print(f"[bold cyan]🔨 工具锻造: {description}[/bold cyan]")
 
-    console.print("[dim]Phase 1: LLM 生成工具代码...[/dim]")
+    console.print("[dim]Phase 1: 尝试 LLM 生成工具代码...[/dim]")
 
     from naumi_agent.tools.forge import _TOOL_GENERATION_SYSTEM
 
+    llm_output = None
     try:
         response = await engine._router.call(
             messages=[
@@ -589,16 +590,15 @@ async def run_forge(engine: Any, arg: str) -> None:
         )
         llm_output = response.content.strip()
     except Exception as e:
-        console.print(f"[red]LLM 调用失败: {e}[/red]")
-        return
+        console.print(f"[yellow]LLM 调用失败，将使用确定性工具骨架: {e}[/yellow]")
 
     console.print("[dim]Phase 2: 验证并保存工具...[/dim]")
 
     with console.status("[bold green]锻造中...[/bold green]"):
-        result_str = await forge_tool_instance.execute(
-            description=description,
-            llm_output=llm_output,
-        )
+        kwargs = {"description": description}
+        if llm_output:
+            kwargs["llm_output"] = llm_output
+        result_str = await forge_tool_instance.execute(**kwargs)
 
     console.print()
     console.print(
