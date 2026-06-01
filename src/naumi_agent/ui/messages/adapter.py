@@ -98,6 +98,35 @@ def _to_tuple(value: Any) -> tuple[Any, ...]:
     return ()
 
 
+def _parse_args_dict(args_raw: Any) -> dict[str, str]:
+    """Parse tool arguments into a flat string dict for field extraction."""
+    if not args_raw:
+        return {}
+    if isinstance(args_raw, dict):
+        return {k: str(v) for k, v in args_raw.items() if v is not None}
+    try:
+        parsed = json.loads(args_raw)
+        if isinstance(parsed, dict):
+            return {k: str(v) for k, v in parsed.items() if v is not None}
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return {}
+
+
+def _extract_primary_arg(args: dict[str, str]) -> str:
+    """Extract the most informative argument for card display."""
+    for key in (
+        "file_path", "path", "target_path", "filename",
+        "command", "query", "url", "task", "description", "goal",
+    ):
+        val = args.get(key)
+        if val:
+            if len(val) > 50:
+                return val[:47] + "…"
+            return val
+    return ""
+
+
 class EngineEventAdapter:
     """Stateless converter: raw engine event → typed UIMessage.
 
@@ -281,11 +310,20 @@ class EngineEventAdapter:
     def _adapt_tool_start(
         self, event: str, data: dict[str, Any]
     ) -> ToolUseMessage:
+        args_raw = data.get("args")
+        args_parsed = _parse_args_dict(args_raw)
+        # Extract structured fields BEFORE truncation
+        primary_arg = _extract_primary_arg(args_parsed)
         return ToolUseMessage(
             type=MessageType.TOOL_USE,
             tool_name=_safe_str(data.get("name")),
-            args_summary=_summarize_args(data.get("args")),
-            args_raw="",  # do NOT store full args — too large
+            args_summary=_summarize_args(args_raw),
+            args_raw="",
+            primary_arg=primary_arg,
+            file_path=args_parsed.get("file_path", args_parsed.get("path", "")),
+            command=args_parsed.get("command", ""),
+            query=args_parsed.get("query", ""),
+            url=args_parsed.get("url", ""),
             raw_event=event,
             raw_data=None,
         )

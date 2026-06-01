@@ -95,18 +95,24 @@ def _render_tool_prepare(msg: ToolPrepareMessage) -> str | None:
 def _render_tool_use(msg: ToolUseMessage) -> str | None:
     from naumi_agent.main import _tool_label
 
-    label = _tool_label(msg.tool_name, msg.args_summary)
+    # Use structured primary_arg (path/command/query) over truncated args_summary
+    display_arg = msg.primary_arg or msg.file_path or msg.command or msg.query or msg.url
+    label = _tool_label(msg.tool_name, display_arg)
     return _tool_card_ansi(label, status="running")
 
 
 def _render_tool_result(msg: ToolResultMessage) -> str | None:
-    from naumi_agent.main import _tool_label
+    from naumi_agent.main import _capture, _print_tool_output, _tool_label
 
     label = _tool_label(msg.tool_name)
     card_status = "success" if msg.status == "success" else msg.status or "error"
     parts = [_tool_card_ansi(label, status=card_status, duration_ms=msg.duration_ms)]
     if msg.content_preview:
-        parts.append(msg.content_preview + "\n")
+        # Reuse the existing diff/code highlighting (uses module-level console
+        # that _capture can intercept).
+        _name = msg.tool_name
+        _content = msg.content_preview
+        parts.append(_capture(lambda: _print_tool_output(_name, _content)))
     return "".join(parts)
 
 

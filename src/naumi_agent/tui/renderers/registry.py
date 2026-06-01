@@ -15,6 +15,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+import rich.markup
 from rich.text import Text
 from textual.widgets import Static
 
@@ -145,12 +146,12 @@ def _render_hook_trace(
 ) -> None:
     status_label = "拦截" if msg.aborted else "异常" if msg.error else "触发"
     style = "yellow" if msg.aborted else "red" if msg.error else "magenta"
-    suffix = f" · {msg.error}" if msg.error else ""
+    suffix = f" · {rich.markup.escape(msg.error)}" if msg.error else ""
     chat.mount(
         Static(
             Text.from_markup(
-                f"  [{style}]hook {status_label}: "
-                f"{msg.point} → {msg.callback} "
+                f"  [{style}]hook {rich.markup.escape(status_label)}: "
+                f"{rich.markup.escape(msg.point)} → {rich.markup.escape(msg.callback)} "
                 f"({msg.duration_ms}ms){suffix}[/{style}]"
             ),
             classes="tool-done",
@@ -190,12 +191,13 @@ def _render_subagent_event(
         else "red" if msg.status in {"error", "failed"}
         else "cyan"
     )
-    suffix = f" · {msg.message}" if msg.message else ""
+    suffix = f" · {rich.markup.escape(msg.message)}" if msg.message else ""
     chat.mount(
         Static(
             Text.from_markup(
-                f"  [{style}]subagent {msg.status}: "
-                f"{msg.agent_name} / {msg.task_id}{suffix}[/{style}]"
+                f"  [{style}]subagent {rich.markup.escape(msg.status)}: "
+                f"{rich.markup.escape(msg.agent_name)} / "
+                f"{rich.markup.escape(msg.task_id)}{suffix}[/{style}]"
             ),
             classes="tool-done",
         )
@@ -218,13 +220,16 @@ def _render_permission_bubble(
         else "green" if msg.status in {"confirmed", "bypass_enabled"}
         else "yellow"
     )
-    suffix = f" · {msg.reason[:120]}" if msg.reason else ""
+    suffix = (
+        f" · {rich.markup.escape(msg.reason[:120])}" if msg.reason else ""
+    )
     chat.mount(
         Static(
             Text.from_markup(
                 f"  [{style}]permission bubble: "
-                f"{msg.agent_name} → {msg.tool_name} "
-                f"[{msg.status}]{suffix}[/{style}]"
+                f"{rich.markup.escape(msg.agent_name)} → "
+                f"{rich.markup.escape(msg.tool_name)} "
+                f"[{rich.markup.escape(msg.status)}]{suffix}[/{style}]"
             ),
             classes="tool-done",
         )
@@ -305,12 +310,12 @@ def _render_context_compact(
         else ""
     )
     preserved_text = (
-        "；保留：" + "、".join(msg.preserved_sections)
+        "；保留：" + rich.markup.escape("、".join(msg.preserved_sections))
         if msg.preserved_sections
         else ""
     )
     warning_text = (
-        "；风险：" + "；".join(msg.warnings)
+        "；风险：" + rich.markup.escape("；".join(msg.warnings))
         if msg.warnings
         else ""
     )
@@ -319,7 +324,8 @@ def _render_context_compact(
             Text.from_markup(
                 "[magenta]  context compacted: "
                 f"{msg.before} → {msg.after} messages"
-                f"{archived_text}{preserved_text}{warning_text}[/magenta]"
+                f"{rich.markup.escape(archived_text)}"
+                f"{preserved_text}{warning_text}[/magenta]"
             ),
             classes="tool-done",
         )

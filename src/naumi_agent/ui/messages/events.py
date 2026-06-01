@@ -103,9 +103,16 @@ class ToolUseMessage(UIMessage):
     tool_name: str = ""
     args_summary: str = ""  # condensed parameter preview
     args_raw: str = ""  # raw JSON arguments (may be large; renderers should truncate)
+    # Structured fields extracted BEFORE truncation for reliable card display
+    primary_arg: str = ""  # e.g. file_path, command, query, url
+    file_path: str = ""
+    command: str = ""
+    query: str = ""
+    url: str = ""
 
     def summary(self) -> str:
-        return f"[tool_use] {self.tool_name}"
+        label = self.primary_arg or self.tool_name
+        return f"[tool_use] {label}"
 
 
 @dataclass(frozen=True)
