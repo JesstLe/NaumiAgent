@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.29] - 2026-06-01
+
+### Added
+- **Page 工具确定性落地** — `/page` 在模型路由未初始化时也会返回内存分页报告、可运行 page inventory、上下文压力估算和 page_out/page_in contract。
+
+### Changed
+- **Page 接口补强** — `analysis_page` 新增可选 `session_context` 参数，用于基于真实 transcript 计算上下文压力。
+
 ## [0.1.28] - 2026-06-01
 
 ### Added
