@@ -80,15 +80,29 @@ class TestAdaptivePlanner:
         planner._classifier.classify.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_local_fast_path_skips_classifier_for_simple_question(self) -> None:
+    async def test_local_fast_path_keeps_questions_on_classifier(self) -> None:
         router = AsyncMock()
         planner = AdaptivePlanner(router)
-        planner._classifier.classify = AsyncMock()
+        planner._classifier.classify = AsyncMock(
+            return_value=type(
+                "Intent",
+                (),
+                {
+                    "intent": "信息查询",
+                    "complexity": Complexity.SIMPLE,
+                    "requires_tools": False,
+                    "requires_planning": False,
+                    "requires_subagents": False,
+                    "estimated_steps": 1,
+                    "confidence": 0.9,
+                },
+            )()
+        )
 
         plan = await planner.plan("这是正常的吗")
 
         assert plan.mode == ExecutionMode.SINGLE_TURN
-        planner._classifier.classify.assert_not_awaited()
+        planner._classifier.classify.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_local_fast_path_keeps_action_tasks_on_classifier(self) -> None:

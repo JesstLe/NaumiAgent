@@ -103,24 +103,9 @@ PLANNER_PROMPT = """\
 }}
 """
 
-_FAST_PATH_MAX_CHARS = 160
 _SIMPLE_CHAT_PATTERNS = (
     re.compile(r"^\s*(hi|hello|hey|yo|oi|你好|您好|嗨|哈喽|在吗)[!！。.\s]*$", re.I),
     re.compile(r"^\s*(谢谢|多谢|thanks|thank you|ok|好的|好|嗯|行)[!！。.\s]*$", re.I),
-)
-_ACTION_HINT_RE = re.compile(
-    r"("
-    r"修复|修改|创建|新增|删除|重构|检查|排查|调试|运行|执行|安装|部署|提交|"
-    r"搜索|浏览|打开|读取|写入|生成|实现|测试|分析|审查|迁移|容器|docker|"
-    r"bug|error|traceback|exception|pytest|ruff|git|commit|branch|diff|"
-    r"https?://|/[\w.-]+|[\w.-]+\.(py|ts|tsx|js|jsx|json|ya?ml|toml|md|html|css)"
-    r")",
-    re.I,
-)
-_SIMPLE_QUESTION_RE = re.compile(
-    r"^\s*(什么|怎么|如何|为什么|是否|是不是|能不能|可以吗|"
-    r"what|why|how|can|could|should|is|are|do|does)\b",
-    re.I,
 )
 
 
@@ -243,23 +228,6 @@ class AdaptivePlanner:
                 requires_subagents=False,
                 estimated_steps=1,
                 confidence=0.98,
-            )
-
-        if len(text) > _FAST_PATH_MAX_CHARS or _ACTION_HINT_RE.search(text):
-            return None
-
-        if (
-            text.endswith(("?", "？", "吗", "呢"))
-            or _SIMPLE_QUESTION_RE.match(text)
-        ):
-            return Intent(
-                intent="信息查询",
-                complexity=Complexity.SIMPLE,
-                requires_tools=False,
-                requires_planning=False,
-                requires_subagents=False,
-                estimated_steps=1,
-                confidence=0.85,
             )
 
         return None
