@@ -1,5 +1,6 @@
 import { looksLikeDiff } from "./ansi.js";
 import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
+import { clearRenderCache, createRenderCache } from "./render-cache.js";
 
 export function createInitialState() {
   return {
@@ -21,6 +22,7 @@ export function createInitialState() {
     debugTrace: null,
     folds: {},
     foldCursor: 0,
+    renderCache: createRenderCache(),
   };
 }
 
@@ -74,6 +76,7 @@ export function reduceServerEvent(state, record) {
         state.activeThinking = null;
         state.folds = {};
         state.foldCursor = 0;
+        clearRenderCache(state.renderCache);
       }
       pushSystemMessage(state, "resume", `已恢复会话: ${payload.title ?? payload.session_id}`, "info");
       return [{ type: "session_replayed", sessionId: state.currentSessionId }];
@@ -288,6 +291,8 @@ export function handleSubmitText(state, text, send) {
     state.activeAssistant = null;
     state.activeThinking = null;
     state.folds = {};
+    state.foldCursor = 0;
+    clearRenderCache(state.renderCache);
     return;
   }
   send("submit", { text });
@@ -349,6 +354,7 @@ export function toggleFoldCommand(state, text) {
   const nextExpanded = !entry.expanded;
   state.folds = setFoldExpanded(state.folds, entry.key, nextExpanded);
   state.foldCursor = (index + 1) % entries.length;
+  clearRenderCache(state.renderCache);
   pushSystemMessage(state, "fold", `${nextExpanded ? "已展开" : "已折叠"} ${index + 1}. ${entry.label}`, "info");
 }
 
@@ -360,6 +366,7 @@ export function setFoldCommand(state, text, expanded) {
   }
   if (/\s+all\s*$/i.test(text)) {
     state.folds = entries.reduce((folds, entry) => setFoldExpanded(folds, entry.key, expanded), state.folds);
+    clearRenderCache(state.renderCache);
     pushSystemMessage(state, "fold", `${expanded ? "已展开" : "已折叠"}全部 ${entries.length} 个折叠项。`, "info");
     return;
   }
@@ -367,6 +374,7 @@ export function setFoldCommand(state, text, expanded) {
   const entry = entries[index];
   state.folds = setFoldExpanded(state.folds, entry.key, expanded);
   state.foldCursor = (index + 1) % entries.length;
+  clearRenderCache(state.renderCache);
   pushSystemMessage(state, "fold", `${expanded ? "已展开" : "已折叠"} ${index + 1}. ${entry.label}`, "info");
 }
 
