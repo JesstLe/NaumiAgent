@@ -15,6 +15,7 @@ def create_background_tools(runner: BackgroundRunner) -> list[Tool]:
         BackgroundListTool(runner),
         BackgroundCancelTool(runner),
         BackgroundReadOutputTool(runner),
+        BackgroundCleanupTool(runner),
     ]
 
 
@@ -67,8 +68,10 @@ class BackgroundRunTool(Tool):
             f"- 任务 ID：`{task.id}`\n"
             f"- 状态：运行中\n"
             f"- PID：{task.pid}\n"
+            f"- 进程组：{task.process_group_id or '-'}\n"
             f"- 输出文件：`{task.output_path}`\n\n"
-            "可使用 `background_status` 查询状态，或 `background_read_output` 读取完整输出。"
+            "可使用 `background_status` 查询状态，`background_read_output` 读取完整输出；"
+            "服务残留时用 `background_cleanup` 回收。"
         )
 
 
@@ -181,3 +184,23 @@ class BackgroundReadOutputTool(Tool):
         **kwargs: Any,
     ) -> str:
         return self._runner.read_output(task_id, max_chars=max_chars)
+
+
+class BackgroundCleanupTool(Tool):
+    def __init__(self, runner: BackgroundRunner) -> None:
+        self._runner = runner
+
+    @property
+    def name(self) -> str:
+        return "background_cleanup"
+
+    @property
+    def description(self) -> str:
+        return "清理后台任务：终止仍在运行的任务，并标记已经丢失进程的陈旧任务。"
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {}, "required": []}
+
+    async def execute(self, **kwargs: Any) -> str:
+        return await self._runner.cleanup()

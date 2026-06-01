@@ -214,6 +214,24 @@ class TestBashRunTool:
         assert f"工作目录: {tmp_path}" in result
         assert str(tmp_path) in result
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "python -m http.server 8080 &",
+            "nohup python -m http.server 8080",
+            "python -m http.server 8080; disown",
+        ],
+    )
+    async def test_background_shell_forms_use_background_runner(
+        self,
+        bash_tool: BashRunTool,
+        command: str,
+    ) -> None:
+        result = await bash_tool.execute(command=command)
+
+        assert "后台 shell 写法" in result
+        assert "background_run" in result
+
 
 class TestYamlValidateTool:
     async def test_metadata_marks_file_path_as_sandboxed_path_arg(self) -> None:

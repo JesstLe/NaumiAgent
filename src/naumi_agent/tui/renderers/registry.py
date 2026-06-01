@@ -11,6 +11,7 @@ to update. The registry dispatches by message type — no if/elif chain.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -116,7 +117,12 @@ def _render_tool_use(
 ) -> None:
     from naumi_agent.main import _tool_label
 
-    label = _tool_label(msg.tool_name, msg.args_summary)
+    display_arg = msg.primary_arg or msg.file_path or msg.command or msg.query or msg.url
+    label_args = (
+        json.dumps({"path": display_arg}, ensure_ascii=False)
+        if display_arg else msg.args_summary
+    )
+    label = _tool_label(msg.tool_name, label_args)
     chat.start_tool(label)
     status.status_text = f"{label}..."
 
@@ -344,16 +350,22 @@ def _render_recovery(
         else "red" if msg.phase == "failed"
         else "yellow"
     )
+    phase = rich.markup.escape(msg.phase)
+    action = rich.markup.escape(msg.action)
+    reason = rich.markup.escape(msg.reason)
+    before = rich.markup.escape(str(msg.before))
+    after = rich.markup.escape(str(msg.after))
+    unit = rich.markup.escape(msg.unit)
     suffix = (
-        f" {msg.before} → {msg.after} {msg.unit}"
+        f" {before} → {after} {unit}"
         if msg.after != "?"
-        else f" before={msg.before}"
+        else f" before={before}"
     )
     chat.mount(
         Static(
             Text.from_markup(
-                f"  [{style}]recovery {msg.phase}: "
-                f"{msg.action} ({msg.reason}){suffix}[/{style}]"
+                f"  [{style}]recovery {phase}: "
+                f"{action} ({reason}){suffix}[/{style}]"
             ),
             classes="tool-done",
         )

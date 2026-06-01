@@ -190,6 +190,25 @@ def _resolve_config_path(path: str) -> str:
     return fallback
 
 
+def _runtime_debug_metadata(
+    config: AppConfig,
+    resolved_config_path: str,
+    engine: Any,
+) -> dict[str, str]:
+    """Build path metadata shown by /debug and stored in debug-runs."""
+    debug_runs_dir = Path(config.memory.session_db_path).parent / "debug-runs"
+    return {
+        "config_path": str(Path(resolved_config_path).resolve()),
+        "config_dir": str(Path(resolved_config_path).resolve().parent),
+        "cwd": str(Path.cwd()),
+        "workspace_root": str(engine.workspace_root),
+        "session_db_path": str(Path(config.memory.session_db_path).resolve()),
+        "vector_db_path": str(Path(config.memory.vector_db_path).resolve()),
+        "debug_runs_dir": str(debug_runs_dir.resolve()),
+        "model": engine.router.resolve_model("capable"),
+    }
+
+
 @app.command()
 def chat(
     config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
@@ -239,11 +258,7 @@ def _launch_tui(config_path: str) -> None:
     debug_trace = DebugTrace.create(
         interface="tui",
         base_dir=Path(config.memory.session_db_path).parent / "debug-runs",
-        metadata={
-            "config_path": resolved,
-            "workspace_root": str(engine.workspace_root),
-            "model": engine.router.resolve_model("capable"),
-        },
+        metadata=_runtime_debug_metadata(config, resolved, engine),
     )
     app = NaumiApp(engine, debug_trace=debug_trace)
     app.run()
@@ -868,11 +883,7 @@ async def _chat(config_path: str) -> None:
     debug_trace = DebugTrace.create(
         interface="cli",
         base_dir=Path(config.memory.session_db_path).parent / "debug-runs",
-        metadata={
-            "config_path": resolved,
-            "workspace_root": str(engine.workspace_root),
-            "model": engine.router.resolve_model("capable"),
-        },
+        metadata=_runtime_debug_metadata(config, resolved, engine),
     )
 
     cli = CLIApp(debug_trace=debug_trace)
@@ -1223,6 +1234,12 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             workspace_root = getattr(engine, "workspace_root", Path.cwd())
             console.print(f"工作区根目录: [cyan]{workspace_root}[/cyan]")
             console.print(f"启动目录: [dim]{Path.cwd()}[/dim]")
+            config = getattr(engine, "_config", None)
+            if config is not None:
+                console.print(f"会话库: [dim]{Path(config.memory.session_db_path).resolve()}[/dim]")
+                console.print(
+                    "[dim]完整调试路径可用 /debug 查看[/dim]"
+                )
         case "/skills":
             _show_skills(engine)
         case "/tools" | "/t":
@@ -1661,7 +1678,7 @@ def _print_help() -> None:
         ("/hook <目标>", "逆向插桩 — 黑盒解剖"),
         ("/pursue <目标>", "目标追踪 — 自主循环执行直至真正达成"),
         ("/worktree <子命令>", "隔离执行区 — create/status/bind/keep/remove"),
-        ("/background <子命令>", "后台任务 — run/status/list/cancel/output"),
+        ("/background <子命令>", "后台任务 — run/status/list/cancel/output/cleanup"),
         ("/schedule <子命令>", "调度提醒 — create/list/cancel/pause/resume"),
         ("/todo <子命令>", "todo 清单 — list/add/start/done/pending/delete/clear"),
         ("/team <子命令>", "团队协议 — status/handoff/blocker/decision/request/result"),
@@ -2031,6 +2048,8 @@ async def _run_background(engine: Any, arg: str) -> None:
                 console.print("[yellow]用法: /background cancel <任务ID>[/yellow]")
                 return
             await _execute("background_cancel", task_id=parts[1])
+        case "cleanup":
+            await _execute("background_cleanup")
         case "output":
             if len(parts) < 2:
                 console.print("[yellow]用法: /background output <任务ID>[/yellow]")
@@ -2039,7 +2058,7 @@ async def _run_background(engine: Any, arg: str) -> None:
         case _:
             console.print(
                 "[yellow]未知后台任务子命令[/yellow]\n"
-                "[dim]可用: run/status/list/cancel/output[/dim]"
+                "[dim]可用: run/status/list/cancel/cleanup/output[/dim]"
             )
 
 

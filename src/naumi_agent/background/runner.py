@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import signal
+import socket
 from datetime import datetime
 from pathlib import Path
 
@@ -12,6 +14,12 @@ from naumi_agent.background.models import BackgroundStatus, BackgroundTask
 from naumi_agent.background.store import BackgroundTaskStore
 
 _PREVIEW_CHARS = 2000
+_PORT_PATTERNS = (
+    re.compile(r"\bhttp\.server\s+(?P<port>\d{2,5})(?:\s|$)"),
+    re.compile(r"(?:^|\s)(?:--port|-p|--bind-port)\s+(?P<port>\d{2,5})(?:\s|$)"),
+    re.compile(r"(?:^|\s)PORT=(?P<port>\d{2,5})(?:\s|$)"),
+    re.compile(r"(?::)(?P<port>\d{2,5})(?:/|\s|$)"),
+)
 
 
 class BackgroundRunner:
@@ -44,6 +52,14 @@ class BackgroundRunner:
         if not workdir.is_dir():
             raise ValueError(f"工作目录不存在：{workdir}")
 
+        port_hints = _extract_port_hints(command)
+        busy_ports = [port for port in port_hints if _is_port_listening(port)]
+        if busy_ports:
+            ports = ", ".join(str(port) for port in busy_ports)
+            raise ValueError(
+                f"端口已被占用：{ports}。请换端口，或先用 /background cleanup 清理遗留服务。"
+            )
+
         task_id = self._store.next_id()
         output_path = self._store.artifacts_dir / f"{task_id}.log"
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,6 +79,8 @@ class BackgroundRunner:
             status=BackgroundStatus.RUNNING,
             output_path=str(output_path),
             pid=proc.pid,
+            process_group_id=proc.pid,
+            port_hints=port_hints,
             started_at=now,
         )
         self._processes[task_id] = proc
@@ -98,6 +116,33 @@ class BackgroundRunner:
 
     def read_output(self, task_id: str, max_chars: int = 20000) -> str:
         return self._store.read_output(task_id, max_chars=max_chars)
+
+    async def cleanup(self) -> str:
+        """Stop tracked running tasks and mark stale records."""
+        cancelled = 0
+        stale = 0
+        for task in self._store.list_tasks():
+            if task.is_finished:
+                continue
+            proc = self._processes.get(task.id)
+            if proc is not None and proc.returncode is None:
+                await self.cancel(task.id)
+                cancelled += 1
+                continue
+            if task.pid and _pid_exists(task.pid):
+                _terminate_pid_group(task.process_group_id or task.pid, force=True)
+                task.status = BackgroundStatus.CANCELLED
+                task.completed_at = _now()
+                task.error = "cleanup 已终止遗留后台进程"
+                self._store.save(task)
+                cancelled += 1
+                continue
+            task.status = BackgroundStatus.FAILED
+            task.completed_at = task.completed_at or _now()
+            task.error = "cleanup 标记：任务记录仍为运行中，但进程已不存在"
+            self._store.save(task)
+            stale += 1
+        return f"后台清理完成：终止 {cancelled} 个运行任务，标记 {stale} 个陈旧任务。"
 
     def collect_notifications(self, limit: int = 5) -> list[str]:
         """Return newly finished task notifications and mark them delivered."""
@@ -164,13 +209,20 @@ def format_task(task: BackgroundTask) -> str:
     exit_part = "" if task.exit_code is None else f"\n- 退出码：{task.exit_code}"
     error_part = f"\n- 错误：{task.error}" if task.error else ""
     completed = f"\n- 完成时间：{task.completed_at}" if task.completed_at else ""
+    detail_lines: list[str] = []
+    if task.process_group_id:
+        detail_lines.append(f"- 进程组：{task.process_group_id}")
+    if task.port_hints:
+        detail_lines.append(f"- 端口提示：{', '.join(str(port) for port in task.port_hints)}")
+    details = ("\n" + "\n".join(detail_lines)) if detail_lines else ""
     preview = f"\n\n输出预览：\n```text\n{task.output_preview}\n```" if task.output_preview else ""
     return (
         f"### 后台任务 {task.id}\n"
         f"- 状态：{_status_label(task.status)}\n"
         f"- 命令：`{task.command}`\n"
         f"- 工作目录：`{task.cwd}`\n"
-        f"- PID：{task.pid or '-'}\n"
+        f"- PID：{task.pid or '-'}"
+        f"{details}\n"
         f"- 输出文件：`{task.output_path}`\n"
         f"- 开始时间：{task.started_at}"
         f"{completed}{exit_part}{error_part}{preview}"
@@ -221,6 +273,45 @@ async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
         except ProcessLookupError:
             pass
         await proc.wait()
+
+
+def _terminate_pid_group(pgid: int, *, force: bool = False) -> None:
+    sig = signal.SIGKILL if force else signal.SIGTERM
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        return
+
+
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _extract_port_hints(command: str) -> list[int]:
+    ports: list[int] = []
+    for pattern in _PORT_PATTERNS:
+        for match in pattern.finditer(command):
+            try:
+                port = int(match.group("port"))
+            except ValueError:
+                continue
+            if 1024 <= port <= 65535 and port not in ports:
+                ports.append(port)
+    return ports
+
+
+def _is_port_listening(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.1)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
 def _preview(output: str) -> str:

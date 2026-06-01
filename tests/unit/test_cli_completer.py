@@ -32,6 +32,9 @@ class TestSlashCommandCompleter:
         assert "/cooe" in results
         assert "/cosmos" in results
 
+    def test_invalid_regex_does_not_crash(self):
+        assert _complete("/[") == []
+
     def test_no_match(self):
         assert _complete("/zzzzz") == []
 

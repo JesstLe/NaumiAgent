@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import sys
 from pathlib import Path
 
 import pytest
 
-from naumi_agent.background import BackgroundRunner, BackgroundStatus, BackgroundTaskStore
+from naumi_agent.background import (
+    BackgroundRunner,
+    BackgroundStatus,
+    BackgroundTask,
+    BackgroundTaskStore,
+)
 from naumi_agent.background.tools import create_background_tools
 from naumi_agent.config.settings import AppConfig, MemoryConfig, SafetyConfig
 from naumi_agent.orchestrator.engine import AgentEngine
@@ -95,6 +101,59 @@ class TestBackgroundRunner:
         with pytest.raises(ValueError, match="工作目录不存在"):
             await runner.run("echo hi", cwd="/definitely/not/a/real/dir")
 
+    @pytest.mark.asyncio
+    async def test_run_rejects_obviously_busy_port(self, runner: BackgroundRunner) -> None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen()
+            port = sock.getsockname()[1]
+
+            with pytest.raises(ValueError, match="端口已被占用"):
+                await runner.run(f"{sys.executable} -m http.server {port}")
+
+    @pytest.mark.asyncio
+    async def test_run_does_not_treat_plain_numbers_as_ports(
+        self,
+        runner: BackgroundRunner,
+    ) -> None:
+        task = await runner.run(f"{sys.executable} -c \"print(2026)\"")
+        await _wait_for_finished(runner, task.id)
+
+        finished = runner.get(task.id)
+        assert finished is not None
+        assert finished.port_hints == []
+        assert finished.status == BackgroundStatus.COMPLETED
+        await runner.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_marks_stale_running_records(
+        self,
+        tmp_path: Path,
+        runner: BackgroundRunner,
+    ) -> None:
+        output_path = tmp_path / "background" / "artifacts" / "bg_0999.log"
+        runner.store.save(
+            BackgroundTask(
+                id="bg_0999",
+                command="python -m http.server 8765",
+                cwd=str(tmp_path),
+                status=BackgroundStatus.RUNNING,
+                output_path=str(output_path),
+                pid=None,
+                process_group_id=None,
+                port_hints=[8765],
+                started_at="2026-01-01T00:00:00",
+            )
+        )
+
+        result = await runner.cleanup()
+        stored = runner.get("bg_0999")
+
+        assert "标记 1 个陈旧任务" in result
+        assert stored is not None
+        assert stored.status == BackgroundStatus.FAILED
+        assert "进程已不存在" in stored.error
+
 
 class TestBackgroundTools:
     @pytest.mark.asyncio
@@ -106,6 +165,7 @@ class TestBackgroundTools:
             "background_list",
             "background_cancel",
             "background_read_output",
+            "background_cleanup",
         }
 
     @pytest.mark.asyncio
@@ -124,6 +184,14 @@ class TestBackgroundTools:
         await runner.shutdown()
 
     @pytest.mark.asyncio
+    async def test_cleanup_tool_reports_cleanup_result(self, runner: BackgroundRunner) -> None:
+        tools = {tool.name: tool for tool in create_background_tools(runner)}
+
+        result = await tools["background_cleanup"].execute()
+
+        assert "后台清理完成" in result
+
+    @pytest.mark.asyncio
     async def test_engine_registers_background_tools(self, tmp_path: Path) -> None:
         engine = AgentEngine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
@@ -136,6 +204,7 @@ class TestBackgroundTools:
                 "background_list",
                 "background_cancel",
                 "background_read_output",
+                "background_cleanup",
             }.issubset(names)
         finally:
             await engine.shutdown()
@@ -182,12 +251,19 @@ class TestBackgroundPermissions:
         assert checker.check("background_list", {}).allowed
         assert checker.check("background_read_output", {"task_id": "bg_0001"}).allowed
         assert not checker.check("background_run", {"command": "echo hi"}).allowed
+        assert not checker.check("background_cleanup", {}).allowed
 
     def test_moderate_background_run_requires_confirmation(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
         decision = checker.check("background_run", {"command": "echo hi"})
         assert decision.allowed
         assert decision.requires_confirmation
+
+    def test_moderate_background_cleanup_does_not_require_confirmation(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+        decision = checker.check("background_cleanup", {})
+        assert decision.allowed
+        assert not decision.requires_confirmation
 
     def test_background_run_blocks_dangerous_commands(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)

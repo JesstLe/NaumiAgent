@@ -512,6 +512,16 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         ],
         requires_confirmation=False,
     ),
+    "background_cleanup": PermissionRule(
+        tool_name="background_cleanup",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
     "background_read_output": PermissionRule(
         tool_name="background_read_output",
         allowed_modes=[

@@ -91,6 +91,16 @@ class TestToolCardRendering:
         assert "running" in text
         assert "bash_run" in text
 
+    def test_tool_use_shows_structured_path(
+        self, adapter: EngineEventAdapter, renderer: CLIRenderer
+    ) -> None:
+        args = '{"file_path": "/tmp/showcase/index.html", "content": "' + "x" * 1000 + '"}'
+        msg = adapter.adapt("tool_start", {"name": "file_write", "args": args})
+        text = renderer.render(msg)
+        assert text is not None
+        assert "file_write" in text
+        assert "/tmp/showcase/index.html" in text
+
     def test_tool_result_success(
         self, adapter: EngineEventAdapter, renderer: CLIRenderer
     ) -> None:

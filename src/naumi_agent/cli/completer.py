@@ -99,7 +99,7 @@ def _build_commands() -> list[CommandMeta]:
         # 元命令
         CommandMeta("/pursue", "目标追踪 — 自主循环执行直至真正达成", takes_arg=True, arg_hint="<目标>", readonly=False, category="元命令"),
         CommandMeta("/worktree", "隔离执行区 — create/status/bind/keep/remove", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
-        CommandMeta("/background", "后台任务 — run/status/list/cancel/output", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
+        CommandMeta("/background", "后台任务 — run/status/list/cancel/output/cleanup", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
         CommandMeta("/schedule", "调度提醒 — create/list/cancel/pause/resume", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
         CommandMeta("/todo", "todo 清单 — list/add/start/done/pending/delete/clear", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
         CommandMeta("/bdaemon", "外部浏览器 daemon — start/health/run/list/status/watch", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
@@ -157,10 +157,13 @@ class SlashCommandCompleter(Completer):
 
             if query == "":
                 matched = True
-            elif re.search(query, cmd_name):
-                matched = True
-            elif _fuzzy_match(query, cmd_name):
-                matched = True
+            else:
+                try:
+                    matched = re.search(query, cmd_name) is not None
+                except re.error:
+                    matched = query in cmd_name
+                if not matched and _fuzzy_match(query, cmd_name):
+                    matched = True
 
             if not matched:
                 continue
