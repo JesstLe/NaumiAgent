@@ -13,7 +13,7 @@ from typing import Any
 from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
-from naumi_agent.mcp.client import MCPClientManager, setup_mcp_servers
+from naumi_agent.mcp.client import MCPClientManager, MCPServerConfig, setup_mcp_servers
 from naumi_agent.memory.compactor import ContextCompactor
 from naumi_agent.memory.long_term import LongTermMemory
 from naumi_agent.memory.session import Session, SessionStore
@@ -482,6 +482,23 @@ class AgentEngine:
         self._mcp_manager = manager
         for tool in tools:
             self._tool_registry.register(tool)
+
+    async def connect_mcp_server(
+        self,
+        *,
+        name: str,
+        command: str,
+        args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+    ) -> list[str]:
+        """Connect an MCP server at runtime and register discovered tools."""
+        if self._mcp_manager is None:
+            self._mcp_manager = MCPClientManager()
+        config = MCPServerConfig(command=command, args=args or [], env=env)
+        tools = await self._mcp_manager.connect(name, config)
+        for tool in tools:
+            self._tool_registry.register(tool)
+        return [tool.name for tool in tools]
 
     @property
     def tool_registry(self) -> ToolRegistry:
