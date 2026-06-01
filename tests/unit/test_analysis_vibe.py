@@ -13,6 +13,7 @@ from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.tools.analysis import VibeModeTool
 from naumi_agent.tools.analysis import _build_vibe_scaffold as analysis_build_vibe_scaffold
 from naumi_agent.tools.analysis_support.vibe import build_vibe_scaffold, scan_vibe_request
+from naumi_agent.tools.analysis_tools.vibe import VibeModeTool as SplitVibeModeTool
 from naumi_agent.tools.base import ToolCall
 
 
@@ -104,6 +105,40 @@ class TestVibeModeTool:
         assert "app.py" in output
         assert "## LLM 增强建议" in output
         assert "增强建议" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner_and_writes_files(
+        self,
+        tmp_path,
+    ) -> None:
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强建议：添加本地输入校验。"
+
+        router = object()
+        tool = SplitVibeModeTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        )
+        output = await tool.execute(
+            description="客户资料 Demo",
+            tech_stack="html",
+            output_dir=str(tmp_path),
+        )
+
+        index = tmp_path / "index.html"
+        assert tool.metadata.destructive
+        assert tool.metadata.path_argument_names == ("output_dir",)
+        assert index.is_file()
+        assert "客户资料 Demo" in index.read_text(encoding="utf-8")
+        assert "## Vibe Scaffold" in output
+        assert "## LLM 增强建议" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "VIBE MODE" in calls[0][1]
+        assert "客户资料 Demo" in calls[0][2]
 
     @pytest.mark.asyncio
     async def test_engine_blocks_output_dir_outside_sandbox(self, tmp_path) -> None:
