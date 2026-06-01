@@ -90,6 +90,7 @@ uv run naumi-ui-bridge --config config.yaml
 - `frontend/terminal-ui/src/protocol.js`
 - `frontend/terminal-ui/src/state.js`
 - `frontend/terminal-ui/src/render.js`
+- `frontend/terminal-ui/src/components/`
 - `frontend/terminal-ui/src/ansi.js`
 
 启动：
@@ -105,6 +106,7 @@ npm --prefix frontend/terminal-ui start -- --config config.yaml
 - assistant streaming 增量渲染。
 - thinking 折叠为一行摘要。
 - 工具调用使用独立卡片，支持 running/success/error。
+- tool card、permission footer、todo footer、status footer、Markdown/diff 已拆成轻量组件层。
 - todo 常驻 footer，完成后由 `open_count=0` 清除。
 - footer 根据窗口宽度截断。
 - `Shift+Tab` 发送 `cycle_mode`，底栏显示 `default / plan / bypass`。
@@ -117,7 +119,7 @@ npm --prefix frontend/terminal-ui start -- --config config.yaml
 ## 当前不足
 
 - `/resume` 目前是消息级 replay，尚未恢复滚动位置、折叠展开状态和工具卡内部 UI 状态。
-- 新前端是轻依赖原型，尚未迁入完整 Ink/pi-tui 组件体系。
-- 前端状态、协议、渲染已经拆分为可测试模块，但还不是完整 Ink/pi-tui 组件树。
+- 新前端已有轻量组件层，但尚未迁入完整 Ink/pi-tui 组件体系。
+- 前端状态、协议、组件、渲染已经拆分为可测试模块。
 - 工具调用卡片已优先通过稳定 `tool_call_id` 关联结果，缺失时才回退到 tool name。
 - 代码高亮是内置轻量关键词高亮，不等价于 Pygments/Tree-sitter。

@@ -1,0 +1,37 @@
+import { ANSI, color, compactText } from "../ansi.js";
+import { MarkdownExcerpt } from "./markdown.js";
+import { renderComponent } from "./core.js";
+import { ToolCard } from "./tool-card.js";
+
+export function Message({ message }) {
+  return {
+    render(ctx) {
+      return renderMessage(message, ctx.width);
+    },
+  };
+}
+
+export function renderMessage(message, width) {
+  if (message.kind === "user") {
+    return ["", `${color(ANSI.green, ">")} ${message.content}`];
+  }
+  if (message.kind === "assistant") {
+    return ["", ...renderComponent(MarkdownExcerpt({ text: message.content }), { width })];
+  }
+  if (message.kind === "thinking") {
+    const content = compactText(message.content || "思考中...");
+    const label = message.done ? "thinking" : "thinking...";
+    return ["", color(ANSI.dim, `${label}: ${content}`)];
+  }
+  if (message.kind === "tool") {
+    return renderComponent(ToolCard({ tool: message }), { width });
+  }
+  if (message.kind === "permission") {
+    return ["", color(ANSI.yellow, `permission: ${message.message.tool_name} · ${message.message.status}`)];
+  }
+  if (message.kind === "system") {
+    const style = message.level === "error" ? ANSI.red : message.level === "warning" ? ANSI.yellow : ANSI.dim;
+    return ["", color(style, `${message.title}: ${message.content}`)];
+  }
+  return ["", color(ANSI.dim, `${message.kind}: ${JSON.stringify(message.message ?? {})}`)];
+}
