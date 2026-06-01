@@ -11,7 +11,13 @@ import pytest
 from naumi_agent.cli import layout as cli_layout
 from naumi_agent.cli.layout import CLIApp
 from naumi_agent.clipboard import CopyResult
-from naumi_agent.debug_trace import DebugTrace, find_latest_run, render_debug_replay
+from naumi_agent.debug_trace import (
+    DebugTrace,
+    find_latest_run,
+    list_debug_runs,
+    render_debug_replay,
+    render_debug_runs_index,
+)
 
 
 def _read_events(path: Path) -> list[dict]:
@@ -72,6 +78,7 @@ def test_debug_trace_describes_runtime_paths(tmp_path: Path) -> None:
     assert "- 会话库: /tmp/naumi/data/sessions.db" in text
     assert "- 向量库: /tmp/naumi/data/chroma" in text
     assert f"- debug-runs: {tmp_path}" in text
+    assert "最近 debug-runs" in text
 
 
 def test_debug_trace_can_be_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -183,3 +190,28 @@ def test_find_latest_run_returns_newest_run(tmp_path: Path) -> None:
 
     assert latest == newer.run_dir
     assert latest != older.run_dir
+
+
+def test_debug_runs_index_lists_recent_runs_with_counts(tmp_path: Path) -> None:
+    trace = DebugTrace.create(
+        interface="cli",
+        base_dir=tmp_path,
+        metadata={"workspace_root": "/tmp/workspace"},
+    )
+    trace.input("cli.input", "查看日志")
+    trace.event("engine.stream_event", {"event": "tool_start", "data": {"name": "bash_run"}})
+    trace.event("exception", {"where": "cli.submit", "message": "boom"})
+    trace.close()
+
+    summaries = list_debug_runs(tmp_path)
+    rendered = render_debug_runs_index(tmp_path)
+
+    assert len(summaries) == 1
+    assert summaries[0].interface == "cli"
+    assert summaries[0].stream_event_count == 1
+    assert summaries[0].exception_count == 1
+    assert summaries[0].workspace == "/tmp/workspace"
+    assert "最近 debug-runs" in rendered
+    assert "cli" in rendered
+    assert "工作区: /tmp/workspace" in rendered
+    assert "/debug-replay" in rendered
