@@ -188,6 +188,16 @@ async def cli_event_handler(event: str, data: dict[str, Any]) -> None:
             f"[{style}]team {event_type}: "
             f"{sender} → {recipient} [{priority}]{suffix}[/{style}]"
         )
+    elif event == "context_compacted":
+        before = data.get("before", "?")
+        after = data.get("after", "?")
+        preserved = data.get("preserved_sections", [])
+        warnings = data.get("warnings", [])
+        console.print(f"[magenta]context compacted: {before} → {after} messages[/magenta]")
+        if isinstance(preserved, list) and preserved:
+            console.print("[magenta]保留：[/magenta]" + "、".join(str(item) for item in preserved))
+        if isinstance(warnings, list) and warnings:
+            console.print("[yellow]风险：[/yellow]" + "；".join(str(item) for item in warnings))
     elif event == "token":
         console.print(data.get("content", ""), end="")
     elif event == "response_start":

@@ -1471,6 +1471,29 @@ class NaumiApp(App):
                         data["before"],
                         data["after"],
                     )
+                    preserved = data.get("preserved_sections", [])
+                    warnings = data.get("warnings", [])
+                    preserved_text = (
+                        "；保留：" + "、".join(str(item) for item in preserved)
+                        if isinstance(preserved, list) and preserved
+                        else ""
+                    )
+                    warning_text = (
+                        "；风险：" + "；".join(str(item) for item in warnings)
+                        if isinstance(warnings, list) and warnings
+                        else ""
+                    )
+                    chat.mount(
+                        Static(
+                            Text.from_markup(
+                                "[magenta]  context compacted: "
+                                f"{data['before']} → {data['after']} messages"
+                                f"{preserved_text}{warning_text}[/magenta]"
+                            ),
+                            classes="tool-done",
+                        )
+                    )
+                    status.status_text = "上下文已压缩，运行时状态已保留"
                 case "error":
                     chat.start_response()
                     chat.add_response_token(f"**错误**: {data['message']}")

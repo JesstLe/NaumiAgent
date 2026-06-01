@@ -34,6 +34,7 @@ from naumi_agent.scheduler import SchedulerRunner, SchedulerStore, create_schedu
 from naumi_agent.skills.loader import SkillLoader
 from naumi_agent.skills.tool import create_skill_tools
 from naumi_agent.streaming.event_bus import EventEmitter
+from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
@@ -783,7 +784,14 @@ class AgentEngine:
             return
 
         before = len(self._messages)
-        self._messages = await self._compactor.compact(self._messages, max_tokens)
+        runtime_snapshot, preserved_sections, warnings = (
+            await self._build_compaction_runtime_snapshot()
+        )
+        self._messages = await self._compactor.compact(
+            self._messages,
+            max_tokens,
+            runtime_snapshot=runtime_snapshot,
+        )
         after = len(self._messages)
 
         if after < before:
@@ -800,8 +808,188 @@ class AgentEngine:
                     {
                         "before": before,
                         "after": after,
+                        "preserved_sections": preserved_sections,
+                        "warnings": warnings,
                     },
                 )
+
+    async def _build_compaction_runtime_snapshot(self) -> tuple[str, list[str], list[str]]:
+        """Build deterministic state that must survive history compaction."""
+        sections: list[str] = []
+        preserved: list[str] = []
+        warnings: list[str] = []
+
+        task_section, task_warnings = await self._compaction_task_section()
+        if task_section:
+            sections.append(task_section)
+            preserved.append("todo")
+            warnings.extend(task_warnings)
+
+        team_section, team_warnings = await self._compaction_team_section()
+        if team_section:
+            sections.append(team_section)
+            preserved.append("team_protocol")
+            warnings.extend(team_warnings)
+
+        subagent_section = self._compaction_subagent_section()
+        if subagent_section:
+            sections.append(subagent_section)
+            preserved.append("subagent_events")
+
+        constraint_section = self._compaction_user_constraint_section()
+        if constraint_section:
+            sections.append(constraint_section)
+            preserved.append("recent_user_constraints")
+
+        hook_section = self._compaction_hook_section()
+        if hook_section:
+            sections.append(hook_section)
+            preserved.append("hook_trace")
+
+        if not sections:
+            return "当前没有需要额外保留的运行时状态。", [], []
+        return "\n\n".join(sections), preserved, warnings
+
+    async def _compaction_task_section(self) -> tuple[str, list[str]]:
+        try:
+            tasks = await self.task_store.list_tasks()
+        except Exception as e:
+            logger.debug("Compaction task snapshot failed: %s", e)
+            return "### Todo 状态\n- 任务状态读取失败。", ["任务状态读取失败"]
+        if not tasks:
+            return "", []
+
+        warnings: list[str] = []
+        active = [
+            task for task in tasks
+            if task.status in {TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED}
+        ]
+        if active:
+            warnings.append(f"有 {len(active)} 个未完成/阻塞 todo")
+
+        counts = {
+            status: sum(1 for task in tasks if task.status == status)
+            for status in TaskStatus
+        }
+        lines = [
+            "### Todo 状态",
+            "- 汇总："
+            f"{counts[TaskStatus.COMPLETED]} 完成，"
+            f"{counts[TaskStatus.IN_PROGRESS]} 进行中，"
+            f"{counts[TaskStatus.BLOCKED]} 阻塞，"
+            f"{counts[TaskStatus.PENDING]} 待处理",
+        ]
+        for task in tasks[:8]:
+            active_form = f" | 当前：{task.active_form}" if task.active_form else ""
+            blocked_by = f" | blocked_by={','.join(task.blocked_by)}" if task.blocked_by else ""
+            lines.append(
+                f"- #{task.id} [{task.status.value}] {task.subject}"
+                f"{active_form}{blocked_by}"
+            )
+        if len(tasks) > 8:
+            lines.append(f"- ... 还有 {len(tasks) - 8} 个")
+        return "\n".join(lines), warnings
+
+    async def _compaction_team_section(self) -> tuple[str, list[str]]:
+        bus = self.subagent_manager.message_bus
+        warnings: list[str] = []
+        history = [
+            msg for msg in bus.get_history(limit=12)
+            if msg.topic.startswith("team.")
+            or "team_event_type" in msg.metadata
+        ]
+        try:
+            blackboard = await bus.blackboard_get_all()
+        except Exception as e:
+            logger.debug("Compaction team blackboard snapshot failed: %s", e)
+            blackboard = {}
+            warnings.append("团队黑板读取失败")
+
+        team_entries = [
+            (key, entry) for key, entry in sorted(blackboard.items())
+            if key.startswith("team/")
+        ]
+        if not history and not team_entries:
+            return "", warnings
+
+        blockers = [
+            msg for msg in history
+            if msg.metadata.get("team_event_type") == "blocker"
+            or msg.priority.value == "critical"
+        ]
+        if blockers:
+            warnings.append(f"有 {len(blockers)} 条团队阻塞/高危事件")
+
+        lines = ["### Team Protocol"]
+        if history:
+            lines.append("- 最近团队消息：")
+            for msg in history[-8:]:
+                event = msg.metadata.get("team_event_type", msg.topic)
+                target = msg.recipient or "广播"
+                lines.append(
+                    f"  - {event}: {msg.sender} → {target} "
+                    f"[{msg.priority.value}] {msg.content[:140]}"
+                )
+        if team_entries:
+            lines.append("- 团队黑板：")
+            for key, entry in team_entries[-8:]:
+                value = entry.value
+                content = (
+                    value.get("content", value)
+                    if isinstance(value, dict)
+                    else value
+                )
+                lines.append(
+                    f"  - {key} (v{entry.version}, {entry.author}): "
+                    f"{str(content)[:140]}"
+                )
+        return "\n".join(lines), warnings
+
+    def _compaction_subagent_section(self) -> str:
+        events = self.subagent_manager.get_recent_events(limit=8)
+        if not events:
+            return ""
+        lines = ["### Subagent 事件"]
+        for event in events:
+            agent = str(event.get("agent_name") or "未匹配")
+            status = str(event.get("status") or "?")
+            task_id = str(event.get("task_id") or "?")
+            message = str(event.get("message") or "")
+            lines.append(f"- {status}: {agent} / {task_id} {message[:140]}")
+        return "\n".join(lines)
+
+    def _compaction_user_constraint_section(self) -> str:
+        keywords = ("不要", "先不", "最后", "注意", "必须", "禁止", "可以", "不要全量")
+        constraints: list[str] = []
+        for message in self._messages[-24:]:
+            if message.get("role") != "user":
+                continue
+            content = str(message.get("content", "")).strip()
+            if not content:
+                continue
+            if any(keyword in content for keyword in keywords):
+                constraints.append(content[:180])
+        if not constraints:
+            return ""
+        lines = ["### 最近用户约束"]
+        for item in constraints[-6:]:
+            lines.append(f"- {item}")
+        return "\n".join(lines)
+
+    def _compaction_hook_section(self) -> str:
+        trace = self.hooks.get_trace()[-8:]
+        interesting = [
+            entry for entry in trace
+            if entry.aborted or entry.error
+        ]
+        if not interesting:
+            return ""
+        lines = ["### Hook 风险"]
+        for entry in interesting:
+            status = "aborted" if entry.aborted else "error"
+            detail = entry.error or ""
+            lines.append(f"- {entry.point}:{entry.callback} {status} {detail[:120]}")
+        return "\n".join(lines)
 
     async def _fire_hook(
         self,

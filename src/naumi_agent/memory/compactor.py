@@ -99,7 +99,11 @@ class ContextCompactor:
         return False
 
     async def compact(
-        self, messages: list[dict[str, Any]], max_tokens: int
+        self,
+        messages: list[dict[str, Any]],
+        max_tokens: int,
+        *,
+        runtime_snapshot: str = "",
     ) -> list[dict[str, Any]]:
         """压缩消息列表.
 
@@ -149,11 +153,18 @@ class ContextCompactor:
             return messages
 
         # 构建压缩后的消息列表
+        summary_content = f"## 之前的对话摘要\n\n{summary}"
+        if runtime_snapshot.strip():
+            summary_content += (
+                "\n\n## 压缩时保留的运行时状态\n\n"
+                f"{runtime_snapshot.strip()}"
+            )
+
         compacted = [
             *system_msgs,
             {
                 "role": "system",
-                "content": f"## 之前的对话摘要\n\n{summary}",
+                "content": summary_content,
             },
             *recent,
         ]
