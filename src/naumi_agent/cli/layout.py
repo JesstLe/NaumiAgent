@@ -400,12 +400,19 @@ class CLIApp:
         """Return the complete visible transcript, including live output."""
         return "".join([*self._output, *self._live])
 
-    def copy_transcript(self) -> str:
-        """Copy or save the complete transcript and show a short status line."""
+    def copy_transcript(self, scope: str = "all") -> str:
+        """Copy or save transcript diagnostics and show a short status line."""
+        normalized_scope = scope.strip().lower() or "all"
+        if normalized_scope in {"last", "error"} and self._debug_trace is not None:
+            text = self._debug_trace.build_diagnostic_text(normalized_scope)
+            prefix = f"cli-{normalized_scope}-diagnostic"
+        else:
+            text = self.get_transcript()
+            prefix = "cli-transcript"
         result = copy_or_save_transcript(
-            self.get_transcript(),
+            text,
             base_dir=Path.cwd() / "data",
-            prefix="cli-transcript",
+            prefix=prefix,
         )
         self.append_output(f"\033[2m{result.message}\033[0m\n")
         return result.message

@@ -131,9 +131,132 @@ class DebugTrace:
             f"- 运行元数据: {self.manifest_path}"
         )
 
+    def build_diagnostic_text(self, scope: str = "last") -> str:
+        """Build a copy-friendly diagnostic excerpt from structured events."""
+        if not self.enabled:
+            return "结构化调试日志已禁用，无法生成诊断片段。"
+        events = self._read_events()
+        if not events:
+            return "暂无结构化调试事件。"
+
+        normalized_scope = scope.strip().lower()
+        if normalized_scope in {"all", "full", "transcript"}:
+            if self.transcript_path.exists():
+                return self.transcript_path.read_text(encoding="utf-8")
+            return "暂无可读输出记录。"
+        if normalized_scope == "error":
+            return self._build_error_diagnostic(events)
+        return self._build_last_turn_diagnostic(events)
+
+    def _read_events(self) -> list[dict[str, Any]]:
+        if not self.events_path.exists():
+            return []
+        events: list[dict[str, Any]] = []
+        for line in self.events_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+        return events
+
+    def _build_last_turn_diagnostic(self, events: list[dict[str, Any]]) -> str:
+        start = self._find_last_event_index(events, "input")
+        selected = events[start:] if start is not None else events
+        return self._format_events("最近一轮诊断记录", selected)
+
+    def _build_error_diagnostic(self, events: list[dict[str, Any]]) -> str:
+        error_index = self._find_last_error_index(events)
+        if error_index is None:
+            return self._build_last_turn_diagnostic(events)
+        input_index = self._find_last_event_index(events, "input", before=error_index)
+        start = input_index if input_index is not None else max(0, error_index - 12)
+        end = min(len(events), error_index + 8)
+        return self._format_events("最近错误诊断记录", events[start:end])
+
+    @staticmethod
+    def _find_last_event_index(
+        events: list[dict[str, Any]],
+        name: str,
+        *,
+        before: int | None = None,
+    ) -> int | None:
+        stop = len(events) if before is None else before + 1
+        for index in range(stop - 1, -1, -1):
+            if events[index].get("event") == name:
+                return index
+        return None
+
+    @staticmethod
+    def _find_last_error_index(events: list[dict[str, Any]]) -> int | None:
+        for index in range(len(events) - 1, -1, -1):
+            event = events[index]
+            name = event.get("event")
+            data = event.get("data", {})
+            if name == "exception":
+                return index
+            if name == "engine.stream_event" and isinstance(data, dict):
+                if data.get("event") == "error":
+                    return index
+            if name in {"cli.submit_error", "tui.agent_run_error"}:
+                return index
+        return None
+
+    def _format_events(self, title: str, events: list[dict[str, Any]]) -> str:
+        lines = [
+            title,
+            f"run_id: {self.run_id}",
+            f"interface: {self.interface}",
+            f"events: {self.events_path}",
+            "",
+        ]
+        for event in events:
+            lines.extend(self._format_event(event))
+        return "\n".join(lines).rstrip() + "\n"
+
+    @staticmethod
+    def _format_event(event: dict[str, Any]) -> list[str]:
+        name = str(event.get("event", "event"))
+        ts = str(event.get("ts", ""))
+        data = event.get("data", {})
+        if not isinstance(data, dict):
+            data = {"value": data}
+
+        if name == "input":
+            source = data.get("source", "input")
+            return [f"[{ts}] INPUT {source}", str(data.get("text", "")), ""]
+        if name == "output":
+            sink = data.get("sink", "output")
+            text = str(data.get("text", ""))
+            return [f"[{ts}] OUTPUT {sink}", text, ""]
+        if name == "engine.stream_event":
+            stream_event = data.get("event", "")
+            stream_data = data.get("data", {})
+            if isinstance(stream_data, dict) and "content" in stream_data:
+                content = str(stream_data.get("content", ""))
+                return [f"[{ts}] STREAM {stream_event}", content, ""]
+            return [
+                f"[{ts}] STREAM {stream_event}",
+                json.dumps(_json_safe(stream_data), ensure_ascii=False, indent=2),
+                "",
+            ]
+        if name == "exception":
+            return [
+                f"[{ts}] EXCEPTION {data.get('where', '')}",
+                str(data.get("trace") or data.get("message") or ""),
+                "",
+            ]
+        return [
+            f"[{ts}] EVENT {name}",
+            json.dumps(_json_safe(data), ensure_ascii=False, indent=2),
+            "",
+        ]
+
     def close(self) -> None:
         if self._closed:
             return
         self.event("trace_closed", {})
         self._closed = True
-

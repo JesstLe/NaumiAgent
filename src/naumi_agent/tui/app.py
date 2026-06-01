@@ -1050,7 +1050,7 @@ class NaumiApp(App):
                 help_text = (
                     "## 可用命令\n"
                     "- `/help` — 显示帮助\n"
-                    "- `/copy` — 复制/导出当前完整记录 (Ctrl+Y)\n"
+                    "- `/copy [all|last|error]` — 复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)\n"
                     "- `/debug` — 显示本次结构化调试日志位置\n"
                     "- `/pwd` — 显示当前工作目录\n"
                     "- `/tools` — 列出可用工具\n"
@@ -1129,7 +1129,7 @@ class NaumiApp(App):
                 )
                 chat.mount(Markdown(f"```\n{info}\n```", classes="agent-msg"))
             case "/copy":
-                self.action_copy_transcript()
+                self.action_copy_transcript(arg or "all")
             case "/pwd":
                 cwd = Path.cwd()
                 workspace_root = getattr(self.engine, "workspace_root", cwd)
@@ -2066,13 +2066,20 @@ class NaumiApp(App):
         self.engine.reset()
         self._show_startup_status()
 
-    def action_copy_transcript(self) -> None:
-        """Copy or export the full diagnostic transcript."""
+    def action_copy_transcript(self, scope: str = "all") -> None:
+        """Copy or export diagnostic transcript content."""
         status = self.query_one(StatusBar)
+        normalized_scope = scope.strip().lower() or "all"
+        if normalized_scope in {"last", "error"} and self.debug_trace is not None:
+            text = self.debug_trace.build_diagnostic_text(normalized_scope)
+            prefix = f"tui-{normalized_scope}-diagnostic"
+        else:
+            text = self._build_session_transcript()
+            prefix = "tui-transcript"
         result = copy_or_save_transcript(
-            self._build_session_transcript(),
+            text,
             base_dir=Path.cwd() / "data",
-            prefix="tui-transcript",
+            prefix=prefix,
         )
         status.status_text = result.message
 
