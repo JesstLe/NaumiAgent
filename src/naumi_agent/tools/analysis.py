@@ -18,6 +18,7 @@ from naumi_agent.tools import analysis_common
 from naumi_agent.tools.analysis_support import consensus as _consensus_support
 from naumi_agent.tools.analysis_support import fusion as _fusion_support
 from naumi_agent.tools.analysis_support import hook as _hook_support
+from naumi_agent.tools.analysis_support import pid as _pid_support
 from naumi_agent.tools.analysis_support import probe as _probe_support
 from naumi_agent.tools.analysis_support import spar as _spar_support
 from naumi_agent.tools.analysis_support import vision as _vision_support
@@ -48,6 +49,8 @@ _build_fusion_inventory_script = _fusion_support.build_fusion_inventory_script
 _build_fusion_report = _fusion_support.build_fusion_report
 _build_consensus_inventory_script = _consensus_support.build_consensus_inventory_script
 _build_consensus_report = _consensus_support.build_consensus_report
+_build_pid_inventory_script = _pid_support.build_pid_inventory_script
+_build_pid_report = _pid_support.build_pid_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -6975,7 +6978,7 @@ def _scan_pid(target: str) -> str:
     pipelines, feedback gaps, error accumulation risks, and missing
     predictive correction mechanisms."""
     findings: list[str] = []
-    source = _read_sources(target)
+    source = _read_sources(_resolve_target(target))
 
     if not source.strip():
         return "⚠️ 未找到可分析的源代码。"
@@ -7199,15 +7202,20 @@ class PIDTool(Tool):
     async def execute(
         self, *, target: str, **kwargs: Any,
     ) -> str:
+        scan_evidence = _scan_pid(target)
+        deterministic = _build_pid_report(target, scan_evidence)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("pid", target[:200])
-        scan_evidence = _scan_pid(target)
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 PID 闭环审计。"
+
         user_msg = (
             f"## 审计目标\n{target}\n\n"
             f"## PID 扫描报告\n{scan_evidence}\n"
+            f"\n## 确定性 PID 闭环审计\n{deterministic}\n"
         )
-        return await _run_analysis(router, _PID_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _PID_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM PID 增强\n" + enhanced
 
 
 # ===========================================================================
