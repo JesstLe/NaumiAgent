@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.54] - 2026-06-01
+
+### Changed
+- **Analysis World 模块拆分** — 将 `/world` 的状态清单、状态转移映射、因果链分析、客体永久性审计和反事实缺口评分迁移到 `analysis_support.world`，主 `analysis.py` 保留工具编排、兼容入口与 LLM World 增强路径。
+
+## [0.1.53] - 2026-06-01
+
+### Changed
+- **Analysis SPAR 模块拆分** — 将 `/spar` 的攻击面扫描、奖励作弊检测、虚无主义检测和自博弈就绪度评分迁移到 `analysis_support.spar`，主 `analysis.py` 保留工具编排、兼容入口与 LLM SPAR 增强路径。
+
+## [0.1.52] - 2026-06-01
+
+### Changed
+- **Analysis OODA 模块拆分** — 将 `/ooda` 的脆弱模式扫描、OODA 阶段覆盖分析、韧性评分和确定性任务指挥报告迁移到 `analysis_support.ooda`，主 `analysis.py` 保留工具编排与 LLM OODA 增强路径。
+
 ## [0.1.51] - 2026-06-01
 
 ### Changed
