@@ -237,13 +237,26 @@ class TestSchedulerTools:
             )
             now[0] += timedelta(minutes=2)
 
-            engine._inject_scheduler_notifications()
+            events: list[tuple[str, dict[str, object]]] = []
+
+            async def on_event(event: str, data: dict[str, object]) -> None:
+                events.append((event, data))
+
+            await engine._inject_scheduler_notifications(on_event)
 
             assert any(
                 "schedule_notification" in str(msg.get("content", ""))
                 for msg in engine._messages
             )
             assert "注入验证" in str(engine._messages[-1]["content"])
+            assert events
+            event, data = events[-1]
+            assert event == "runtime_notification"
+            assert data["source"] == "schedule"
+            assert data["title"] == "调度提醒"
+            assert data["count"] == 1
+            assert "注入验证" in str(data["preview"])
+            assert "schedule_notification" in str(data["content"])
         finally:
             await engine.shutdown()
 

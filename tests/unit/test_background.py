@@ -152,12 +152,25 @@ class TestBackgroundTools:
             task = await engine.background_runner.run(f"{sys.executable} -c \"print('injected')\"")
             await _wait_for_finished(engine.background_runner, task.id)
 
-            engine._inject_background_notifications()
+            events: list[tuple[str, dict[str, object]]] = []
+
+            async def on_event(event: str, data: dict[str, object]) -> None:
+                events.append((event, data))
+
+            await engine._inject_background_notifications(on_event)
             assert any(
                 "background_task_notification" in str(msg.get("content", ""))
                 for msg in engine._messages
             )
             assert "injected" in str(engine._messages[-1]["content"])
+            assert events
+            event, data = events[-1]
+            assert event == "runtime_notification"
+            assert data["source"] == "background"
+            assert data["title"] == "后台任务通知"
+            assert data["count"] == 1
+            assert "bg_0001" in str(data["preview"])
+            assert "injected" in str(data["content"])
         finally:
             await engine.shutdown()
 

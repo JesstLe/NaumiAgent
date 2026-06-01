@@ -10,6 +10,7 @@ from naumi_agent.main import (
     _format_context_compacted,
     _format_permission_bubble,
     _format_recovery_event,
+    _format_runtime_notification,
     _print_tool_output,
     _show_cli_status,
     _tool_label,
@@ -153,3 +154,38 @@ def test_permission_bubble_rendering_includes_agent_tool_and_reason() -> None:
     assert "bash_run" in rendered
     assert "needs_confirmation" in rendered
     assert "需要用户确认" in rendered
+
+
+def test_runtime_notification_rendering_includes_title_source_and_preview() -> None:
+    rendered = _format_runtime_notification({
+        "title": "后台任务通知",
+        "source": "background",
+        "count": 2,
+        "preview": "任务ID：bg_0001；状态：已完成",
+    })
+
+    assert "后台任务通知" in rendered
+    assert "background" in rendered
+    assert "×2" in rendered
+    assert "bg_0001" in rendered
+
+
+@pytest.mark.asyncio
+async def test_fullscreen_cli_runtime_notification_is_visible() -> None:
+    cli = FakeCLI()
+    handler = _cli_event_factory(cli)
+
+    await handler(
+        "runtime_notification",
+        {
+            "title": "调度提醒",
+            "source": "schedule",
+            "count": 1,
+            "preview": "内容：检查测试结果",
+        },
+    )
+
+    text = "".join(cli.live)
+    assert "调度提醒" in text
+    assert "schedule" in text
+    assert "检查测试结果" in text
