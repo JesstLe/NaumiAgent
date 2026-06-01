@@ -27,6 +27,16 @@ _run_analysis = analysis_common.run_analysis
 
 # --- 各模式专用的静态扫描函数 ---
 
+def _format_static_scan_result(title: str, scan_evidence: str, files: list[Path]) -> str:
+    return "\n".join(
+        [
+            f"## {title}",
+            f"- 扫描文件数：{len(files)}",
+            "",
+            scan_evidence,
+        ]
+    )
+
 def _scan_chaos(files: list[Path], source_text: str) -> str:
     """chaos 模式静态扫描：找真正的脆弱点."""
     findings: list[str] = []
@@ -391,16 +401,17 @@ class ChaosAnalysisTool(Tool):
         }
 
     async def execute(self, *, target: str, context: str = "", **kwargs: Any) -> str:
-        router = _global_router
-        if router is None:
-            return _router_unavailable("chaos", target)
-
         files = _resolve_target(target)
         if not files:
             return f"无法解析目标: {target} (请提供文件或目录路径)"
 
         source_text = _read_sources(files)
         scan_evidence = _scan_chaos(files, source_text)
+        deterministic = _format_static_scan_result("Chaos 静态扫描", scan_evidence, files)
+
+        router = _global_router
+        if router is None:
+            return deterministic + "\n\n模型路由未初始化，已返回静态扫描结果。"
 
         user_msg = (
             f"## 静态扫描证据\n{scan_evidence}\n\n"
@@ -409,7 +420,8 @@ class ChaosAnalysisTool(Tool):
         if context:
             user_msg += f"\n## 补充上下文\n{context}\n"
 
-        return await _run_analysis(router, _CHAOS_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _CHAOS_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM 灾难推演\n" + enhanced
 
 
 class ScaleAnalysisTool(Tool):
@@ -453,16 +465,21 @@ class ScaleAnalysisTool(Tool):
     async def execute(
         self, *, target: str, qps: int = 10000, context: str = "", **kwargs: Any
     ) -> str:
-        router = _global_router
-        if router is None:
-            return _router_unavailable("scale", target)
-
         files = _resolve_target(target)
         if not files:
             return f"无法解析目标: {target} (请提供文件或目录路径)"
 
         source_text = _read_sources(files)
         scan_evidence = _scan_scale(files, source_text, qps)
+        deterministic = _format_static_scan_result(
+            f"Scale 静态扫描（目标 QPS: {qps:,}）",
+            scan_evidence,
+            files,
+        )
+
+        router = _global_router
+        if router is None:
+            return deterministic + "\n\n模型路由未初始化，已返回静态扫描结果。"
 
         system = _SCALE_SYSTEM.format(qps=qps)
         user_msg = (
@@ -472,7 +489,8 @@ class ScaleAnalysisTool(Tool):
         if context:
             user_msg += f"\n## 补充上下文\n{context}\n"
 
-        return await _run_analysis(router, system, user_msg)
+        enhanced = await _run_analysis(router, system, user_msg)
+        return deterministic + "\n\n## LLM 扩容方案\n" + enhanced
 
 
 class StateAuditTool(Tool):
@@ -509,16 +527,17 @@ class StateAuditTool(Tool):
         }
 
     async def execute(self, *, target: str, context: str = "", **kwargs: Any) -> str:
-        router = _global_router
-        if router is None:
-            return _router_unavailable("state", target)
-
         files = _resolve_target(target)
         if not files:
             return f"无法解析目标: {target} (请提供文件或目录路径)"
 
         source_text = _read_sources(files)
         scan_evidence = _scan_state(files, source_text)
+        deterministic = _format_static_scan_result("State 静态扫描", scan_evidence, files)
+
+        router = _global_router
+        if router is None:
+            return deterministic + "\n\n模型路由未初始化，已返回静态扫描结果。"
 
         user_msg = (
             f"## 静态扫描证据\n{scan_evidence}\n\n"
@@ -527,7 +546,8 @@ class StateAuditTool(Tool):
         if context:
             user_msg += f"\n## 补充上下文\n{context}\n"
 
-        return await _run_analysis(router, _STATE_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _STATE_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM 分布式改造建议\n" + enhanced
 
 
 class VibeModeTool(Tool):
