@@ -11,7 +11,7 @@ from prompt_toolkit.document import Document
 # (command, description, takes_argument)
 COMMANDS: list[tuple[str, str, bool]] = [
     ("/help", "显示帮助", False),
-    ("/copy", "复制/导出当前完整记录", False),
+    ("/copy", "复制/导出完整记录、最近一轮或最近错误", True),
     ("/debug", "显示本次结构化调试日志位置", False),
     ("/pwd", "显示当前工作目录", False),
     ("/tools", "列出可用工具", False),

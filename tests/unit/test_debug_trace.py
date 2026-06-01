@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from naumi_agent.cli import layout as cli_layout
 from naumi_agent.cli.layout import CLIApp
+from naumi_agent.clipboard import CopyResult
 from naumi_agent.debug_trace import DebugTrace
 
 
@@ -59,6 +61,37 @@ def test_debug_trace_can_be_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert "禁用" in trace.describe()
 
 
+def test_debug_trace_builds_last_turn_diagnostic(tmp_path: Path) -> None:
+    trace = DebugTrace.create(interface="cli", base_dir=tmp_path)
+    trace.input("cli.input", "第一轮")
+    trace.output("cli.output", "旧输出\n")
+    trace.input("cli.input", "第二轮")
+    trace.event("engine.stream_event", {"event": "tool_start", "data": {"name": "file_read"}})
+    trace.output("cli.live", "新输出\n")
+
+    text = trace.build_diagnostic_text("last")
+
+    assert "最近一轮诊断记录" in text
+    assert "第二轮" in text
+    assert "新输出" in text
+    assert "旧输出" not in text
+
+
+def test_debug_trace_builds_error_diagnostic_from_stream_error(tmp_path: Path) -> None:
+    trace = DebugTrace.create(interface="tui", base_dir=tmp_path)
+    trace.input("tui.input", "触发错误")
+    trace.event("engine.stream_event", {"event": "tool_start", "data": {"name": "bash_run"}})
+    trace.event("engine.stream_event", {"event": "error", "data": {"message": "boom"}})
+    trace.output("tui.response", "错误: boom\n")
+
+    text = trace.build_diagnostic_text("error")
+
+    assert "最近错误诊断记录" in text
+    assert "触发错误" in text
+    assert "boom" in text
+    assert "bash_run" in text
+
+
 def test_cli_app_records_outputs_and_submit_failure(tmp_path: Path) -> None:
     trace = DebugTrace.create(interface="cli", base_dir=tmp_path)
     cli = CLIApp(debug_trace=trace)
@@ -77,3 +110,26 @@ def test_cli_app_records_outputs_and_submit_failure(tmp_path: Path) -> None:
     assert "output" in names
     assert "custom" in names
 
+
+def test_cli_copy_last_uses_debug_trace_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace = DebugTrace.create(interface="cli", base_dir=tmp_path)
+    trace.input("cli.input", "最近任务")
+    trace.output("cli.live", "最近输出\n")
+    cli = CLIApp(debug_trace=trace)
+    copied: list[tuple[str, str]] = []
+
+    def fake_copy(text: str, *, base_dir: Path, prefix: str) -> CopyResult:
+        copied.append((text, prefix))
+        return CopyResult(copied=True, path=base_dir / "exports" / "x.txt", message="ok")
+
+    monkeypatch.setattr(cli_layout, "copy_or_save_transcript", fake_copy)
+
+    message = cli.copy_transcript("last")
+
+    assert message == "ok"
+    assert copied
+    assert copied[0][1] == "cli-last-diagnostic"
+    assert "最近任务" in copied[0][0]

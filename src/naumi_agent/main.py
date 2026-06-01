@@ -895,7 +895,7 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             _show_hooks(engine)
         case "/copy":
             if _active_cli:
-                _active_cli.copy_transcript()
+                _active_cli.copy_transcript(arg or "all")
             else:
                 console.print("[yellow]当前界面不支持复制完整记录[/yellow]")
         case "/pwd":
@@ -1291,7 +1291,7 @@ def _print_help() -> None:
     console.print("[bold]可用命令:[/bold]")
     commands = [
         ("/help", "显示帮助"),
-        ("/copy", "复制/导出当前完整记录 (Ctrl+Y)"),
+        ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
         ("/pwd", "显示当前工作目录"),
         ("/tools", "列出可用工具"),
