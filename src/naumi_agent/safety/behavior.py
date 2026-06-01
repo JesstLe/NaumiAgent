@@ -6,16 +6,63 @@ import time
 from dataclasses import dataclass
 
 _TOOL_WORKFLOW_GROUPS: dict[str, str] = {
+    # A normal coding task moves through read/write/edit/execute/verify stages.
+    # These are progress within one implementation path, not strategy changes.
+    "file_read": "local_code_workflow",
+    "file_write": "local_code_workflow",
+    "file_edit": "local_code_workflow",
+    "yaml_micro_verify": "local_code_workflow",
+    "bash_run": "local_code_workflow",
+    "code_execute": "local_code_workflow",
+    "background_run": "local_code_workflow",
+    # Browser automation also advances through navigation, observation, input,
+    # and diagnostics as one interactive workflow.
+    "browser_goto": "browser_workflow",
+    "browser_observe": "browser_workflow",
+    "browser_click": "browser_workflow",
+    "browser_type": "browser_workflow",
+    "browser_hover": "browser_workflow",
+    "browser_keypress": "browser_workflow",
+    "browser_scroll": "browser_workflow",
+    "browser_evaluate": "browser_workflow",
+    "browser_select_option": "browser_workflow",
+    "browser_handle_dialog": "browser_workflow",
+    "browser_navigate_back": "browser_workflow",
+    "browser_tabs": "browser_workflow",
+    "browser_switch_tab": "browser_workflow",
+    "browser_waitFor": "browser_workflow",
+    "browser_upload": "browser_workflow",
+    "browser_drag": "browser_workflow",
+    "browser_drag_file": "browser_workflow",
+    "browser_screenshot": "browser_workflow",
+    "browser_debug_state": "browser_workflow",
+    "browser_text_layout_audit": "browser_workflow",
+    "browser_cdp_health": "browser_workflow",
+    "browser_attach_diagnostics": "browser_workflow",
+    "browser_chrome_launcher_info": "browser_workflow",
+    "browser_start": "browser_workflow",
+    "browser_stop": "browser_workflow",
+    "web_search": "research_workflow",
+    "web_fetch": "research_workflow",
+    "memory_recall": "memory_workflow",
+    "memory_store": "memory_workflow",
     # These tools are consecutive stages of one multi-agent workflow, not
     # competing strategies. Treating them as unrelated causes false convergence.
     "spawn_agent": "subagent_workflow",
     "delegate_task": "subagent_workflow",
     "list_agents": "subagent_workflow",
     "destroy_agent": "subagent_workflow",
+    "team_signal": "subagent_workflow",
+    "team_status": "subagent_workflow",
+    "blackboard_read": "subagent_workflow",
+    "blackboard_write": "subagent_workflow",
     "task_create": "task_workflow",
     "task_update": "task_workflow",
     "task_list": "task_workflow",
     "task_delete": "task_workflow",
+    "todo_write": "task_workflow",
+    "runtime_status": "runtime_workflow",
+    "runtime_mcp_connect": "runtime_workflow",
 }
 
 

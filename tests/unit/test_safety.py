@@ -253,6 +253,38 @@ class TestBehaviorMonitorIntervention:
 
         assert monitor.check_intervention() is None
 
+    def test_local_code_workflow_steps_are_not_oscillation(self) -> None:
+        """Read/write/edit/run stages are one coding workflow, not plan switching."""
+        monitor = BehaviorMonitor()
+        for i, tool in enumerate([
+            "file_write",
+            "file_edit",
+            "code_execute",
+            "bash_run",
+            "file_read",
+            "yaml_micro_verify",
+        ]):
+            monitor.begin_turn(i)
+            monitor.record_tool_call(tool)
+
+        assert monitor.check_intervention() is None
+
+    def test_browser_workflow_steps_are_not_oscillation(self) -> None:
+        """Browser navigation, interaction, and diagnostics are one workflow."""
+        monitor = BehaviorMonitor()
+        for i, tool in enumerate([
+            "browser_goto",
+            "browser_observe",
+            "browser_click",
+            "browser_type",
+            "browser_screenshot",
+            "browser_text_layout_audit",
+        ]):
+            monitor.begin_turn(i)
+            monitor.record_tool_call(tool)
+
+        assert monitor.check_intervention() is None
+
     def test_reset_clears_intervention_history(self) -> None:
         monitor = BehaviorMonitor()
         for i, tool in enumerate(["tool_a", "tool_b", "tool_c"]):
