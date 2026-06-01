@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -79,6 +80,9 @@ _TASK_EVENT_TOOLS = {
     "task_delete",
 }
 
+_TOOL_PREPARE_MIN_INTERVAL = 0.25
+_TOOL_PREPARE_MIN_ARG_DELTA = 4096
+
 
 class AgentRuntimeMode(StrEnum):
     """User-facing runtime modes controlled by Shift+Tab."""
@@ -130,7 +134,131 @@ def _notification_preview(content: str, *, max_chars: int = 240) -> str:
     preview = "；".join(lines) if lines else "已收到运行时通知。"
     if len(preview) <= max_chars:
         return preview
-    return preview[: max_chars - 1].rstrip() + "…"
+    return preview[: max_chars - 1] + "…"
+
+
+def _decode_partial_json_string(raw: str) -> str:
+    """Decode a best-effort JSON string fragment without failing on truncation."""
+    if not raw:
+        return ""
+    # A streamed JSON argument can end halfway through an escape sequence. Trim
+    # the dangling slash so the preview remains stable while more bytes arrive.
+    if raw.endswith("\\"):
+        raw = raw[:-1]
+    try:
+        return json.loads(f'"{raw}"')
+    except json.JSONDecodeError:
+        return (
+            raw.replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .replace('\\"', '"')
+            .replace("\\\\", "\\")
+        )
+
+
+def _extract_tool_arg_field(arguments: str, keys: tuple[str, ...]) -> str:
+    """Extract a complete or partial string field from streamed tool arguments."""
+    if not arguments:
+        return ""
+    try:
+        parsed = json.loads(arguments)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        for key in keys:
+            value = parsed.get(key)
+            if isinstance(value, str):
+                return value
+            if value is not None:
+                return str(value)
+
+    for key in keys:
+        marker = f'"{key}"'
+        start = arguments.find(marker)
+        if start < 0:
+            continue
+        colon = arguments.find(":", start + len(marker))
+        if colon < 0:
+            continue
+        value_start = colon + 1
+        while value_start < len(arguments) and arguments[value_start].isspace():
+            value_start += 1
+        if value_start >= len(arguments):
+            continue
+        if arguments[value_start] != '"':
+            value_end = value_start
+            while value_end < len(arguments) and arguments[value_end] not in ",}":
+                value_end += 1
+            return arguments[value_start:value_end].strip()
+
+        value_start += 1
+        escaped = False
+        chars: list[str] = []
+        for ch in arguments[value_start:]:
+            if escaped:
+                chars.append("\\" + ch)
+                escaped = False
+                continue
+            if ch == "\\":
+                escaped = True
+                continue
+            if ch == '"':
+                break
+            chars.append(ch)
+        return _decode_partial_json_string("".join(chars))
+    return ""
+
+
+def _summarize_tool_prepare_snapshot(
+    snapshot: Any,
+    *,
+    started_at: float,
+    now: float,
+) -> dict[str, Any]:
+    """Build a compact, user-safe progress payload from streamed tool args."""
+    entries: list[dict[str, Any]] = []
+    if isinstance(snapshot, dict):
+        entries = [call for _, call in sorted(snapshot.items(), key=lambda item: str(item[0]))]
+    elif isinstance(snapshot, list):
+        entries = [call for call in snapshot if isinstance(call, dict)]
+
+    call = entries[0] if entries else {}
+    function = call.get("function") if isinstance(call, dict) else {}
+    if not isinstance(function, dict):
+        function = {}
+    name = str(function.get("name") or "tool")
+    arguments = str(function.get("arguments") or "")
+    path = _extract_tool_arg_field(
+        arguments,
+        ("file_path", "path", "target_path", "filename", "url"),
+    )
+    content = _extract_tool_arg_field(arguments, ("content", "text", "code", "patch"))
+    data: dict[str, Any] = {
+        "name": name,
+        "tool_call_id": str(call.get("id") or "") if isinstance(call, dict) else "",
+        "argument_chars": len(arguments),
+        "elapsed_ms": int(max(0.0, now - started_at) * 1000),
+    }
+    if path:
+        data["path"] = path
+    if content:
+        data["content_chars"] = len(content)
+        data["content_lines"] = content.count("\n") + 1
+    return data
+
+
+def _tool_prepare_signature(data: dict[str, Any]) -> str:
+    """Return the fields that should trigger visible progress updates."""
+    return "|".join(
+        str(data.get(key, ""))
+        for key in (
+            "name",
+            "path",
+            "argument_chars",
+            "content_chars",
+            "content_lines",
+        )
+    )
 
 
 @dataclass
@@ -1935,6 +2063,11 @@ class AgentEngine:
             finish_reason: str | None = None
             should_guard_text = bool(tools)
             tool_call_started = False
+            tool_prepare_started = False
+            tool_prepare_start = 0.0
+            last_tool_prepare_emit = 0.0
+            last_tool_prepare_arg_chars = 0
+            last_tool_prepare_signature = ""
             llm_start = 0.0
             first_chunk_seen = False
 
@@ -1991,6 +2124,50 @@ class AgentEngine:
                     if chunk.tool_call_started:
                         tool_call_started = True
                         pending_text_parts.clear()
+                        if not tool_prepare_started:
+                            tool_prepare_started = True
+                            tool_prepare_start = time.perf_counter()
+                            last_tool_prepare_emit = tool_prepare_start
+                            data = _summarize_tool_prepare_snapshot(
+                                chunk.tool_call_snapshot,
+                                started_at=tool_prepare_start,
+                                now=tool_prepare_start,
+                            )
+                            last_tool_prepare_arg_chars = int(
+                                data.get("argument_chars", 0) or 0
+                            )
+                            last_tool_prepare_signature = _tool_prepare_signature(data)
+                            await on_event("tool_prepare_start", data)
+
+                    if chunk.tool_call_snapshot:
+                        if not tool_prepare_started:
+                            tool_prepare_started = True
+                            tool_prepare_start = time.perf_counter()
+                            last_tool_prepare_emit = tool_prepare_start
+                        now = time.perf_counter()
+                        data = _summarize_tool_prepare_snapshot(
+                            chunk.tool_call_snapshot,
+                            started_at=tool_prepare_start,
+                            now=now,
+                        )
+                        signature = _tool_prepare_signature(data)
+                        arg_chars = int(data.get("argument_chars", 0) or 0)
+                        enough_time = (
+                            now - last_tool_prepare_emit
+                            >= _TOOL_PREPARE_MIN_INTERVAL
+                        )
+                        enough_growth = (
+                            arg_chars - last_tool_prepare_arg_chars
+                            >= _TOOL_PREPARE_MIN_ARG_DELTA
+                        )
+                        if (
+                            signature != last_tool_prepare_signature
+                            and (enough_time or enough_growth)
+                        ):
+                            last_tool_prepare_emit = now
+                            last_tool_prepare_arg_chars = arg_chars
+                            last_tool_prepare_signature = signature
+                            await on_event("tool_prepare_snapshot", data)
 
                     if chunk.token:
                         text_parts.append(chunk.token)
@@ -2080,6 +2257,13 @@ class AgentEngine:
             # --- 工具调用 ---
             if collected_tool_calls:
                 pending_text_parts.clear()
+                if tool_prepare_started:
+                    first_snapshot = _summarize_tool_prepare_snapshot(
+                        collected_tool_calls,
+                        started_at=tool_prepare_start or time.perf_counter(),
+                        now=time.perf_counter(),
+                    )
+                    await on_event("tool_prepare_end", first_snapshot)
                 assistant_msg: dict[str, Any] = {
                     "role": "assistant",
                     "content": None,
@@ -2202,6 +2386,18 @@ class AgentEngine:
                 if exceeded:
                     return exceeded
                 continue
+
+            if tool_prepare_started:
+                await on_event(
+                    "tool_prepare_end",
+                    {
+                        "name": "tool",
+                        "argument_chars": 0,
+                        "elapsed_ms": int(
+                            max(0.0, time.perf_counter() - tool_prepare_start) * 1000
+                        ),
+                    },
+                )
 
             # --- 最终回答 ---
             tool_call_history.clear()

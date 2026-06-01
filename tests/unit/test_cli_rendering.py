@@ -31,6 +31,7 @@ class FakeCLI:
         self.status = ""
         self.mode_status = ""
         self.todo_status = ""
+        self.activity_status = ""
 
     def append_live(self, text: str) -> None:
         self.live.append(text)
@@ -50,6 +51,9 @@ class FakeCLI:
 
     def set_todo_status(self, text: str | None) -> None:
         self.todo_status = text or ""
+
+    def set_activity_status(self, text: str | None) -> None:
+        self.activity_status = text or ""
 
 
 class FakeRouter:
@@ -290,6 +294,32 @@ async def test_fullscreen_cli_task_snapshot_updates_sticky_todo_bar() -> None:
     )
 
     assert cli.todo_status == ""
+
+
+@pytest.mark.asyncio
+async def test_fullscreen_cli_tool_prepare_updates_sticky_activity_bar() -> None:
+    cli = FakeCLI()
+    handler = _cli_event_factory(cli)
+
+    await handler(
+        "tool_prepare_start",
+        {
+            "name": "file_write",
+            "path": "/Users/lv/Workspace/showcase.html",
+            "content_lines": 42,
+            "content_chars": 8192,
+            "argument_chars": 9000,
+            "elapsed_ms": 1500,
+        },
+    )
+
+    assert "准备 file_write" in cli.activity_status
+    assert "showcase.html" in cli.activity_status
+    assert "42 行" in cli.activity_status
+    assert cli.live == []
+
+    await handler("tool_prepare_end", {"name": "file_write"})
+    assert cli.activity_status == ""
 
 
 def test_streaming_markdown_highlighter_colors_fenced_python() -> None:

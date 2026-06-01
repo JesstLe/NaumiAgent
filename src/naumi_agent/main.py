@@ -24,6 +24,7 @@ from naumi_agent.ui.code_excerpt import (
     DEFAULT_CODE_BLOCK_MAX_LINES,
     excerpt_markdown_code_blocks,
 )
+from naumi_agent.ui.tool_activity import format_tool_prepare_status
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -242,6 +243,9 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
         sys.stdout.flush()
     elif event == "thinking_end":
         sys.stdout.write(f"\033[0m\n{_sep()}\n")
+        sys.stdout.flush()
+    elif event == "tool_prepare_start":
+        sys.stdout.write(f"\033[2m  {format_tool_prepare_status(data)}\033[0m\n")
         sys.stdout.flush()
     elif event == "tool_start":
         name = data.get("name", "?")
@@ -725,10 +729,21 @@ def _cli_event_factory(cli: Any):
             cli.append_live(f"{_sep()}\n\033[2m💭 思考中...\033[0m\n")
         elif event == "thinking_end":
             cli.append_live(f"\033[0m\n{_sep()}\n")
+        elif event in {"tool_prepare_start", "tool_prepare_snapshot"}:
+            text = format_tool_prepare_status(data)
+            if hasattr(cli, "set_activity_status"):
+                cli.set_activity_status(text)
+            else:
+                cli.append_live(f"\033[2m  {text}\033[0m\n")
+        elif event == "tool_prepare_end":
+            if hasattr(cli, "set_activity_status"):
+                cli.set_activity_status(None)
         elif event == "tool_start":
             name = data.get("name", "?")
             args = data.get("args", "")
             label = _tool_label(name, args)
+            if hasattr(cli, "set_activity_status"):
+                cli.set_activity_status(f"执行 {label}")
             cli.append_live(f"{_sep()}\n\033[36m  ⏳ {label}\033[0m\n")
         elif event == "tool_end":
             name = data.get("name", "?")
@@ -736,6 +751,8 @@ def _cli_event_factory(cli: Any):
             content = data.get("content", "")
             dur = data.get("duration_ms", 0)
             label = _tool_label(name)
+            if hasattr(cli, "set_activity_status"):
+                cli.set_activity_status(None)
             if status == "success":
                 cli.append_live(f"\033[32m  ✓ {label}\033[0m \033[2m({dur}ms)\033[0m\n")
             else:

@@ -220,6 +220,7 @@ class CLIApp:
         self._mode_text = "default"
         self._status_text = "就绪"
         self._todo_text = ""
+        self._activity_text = ""
         self._pending_permission: asyncio.Future[str] | None = None
 
         self._last_esc_time = 0.0
@@ -301,6 +302,7 @@ class CLIApp:
     async def _run_submit(self, text: str) -> None:
         self._processing = True
         self._live = []
+        self._activity_text = ""
         self._debug_input("cli.input", text)
         if self._output_win:
             self._output_win.scroll_to_bottom()
@@ -324,6 +326,7 @@ class CLIApp:
             if self._live:
                 self._output.extend(self._live)
                 self._live = []
+            self._activity_text = ""
             self._processing = False
             self._invalidate()
 
@@ -498,6 +501,12 @@ class CLIApp:
         self.record_debug_event("cli.todo_status", {"text": self._todo_text})
         self._invalidate()
 
+    def set_activity_status(self, text: str | None) -> None:
+        """Update the sticky bottom activity bar for transient tool preparation."""
+        self._activity_text = text or ""
+        self.record_debug_event("cli.activity_status", {"text": self._activity_text})
+        self._invalidate()
+
     def get_transcript(self) -> str:
         """Return the complete visible transcript, including live output."""
         return "".join([*self._output, *self._live])
@@ -545,6 +554,10 @@ class CLIApp:
 
     def _render_todo(self, cols: int) -> FormattedText:
         text = f" {self._todo_text}"
+        return FormattedText([("class:processing", _fit_text_to_width(text, cols))])
+
+    def _render_activity(self, cols: int) -> FormattedText:
+        text = f" {self._activity_text}"
         return FormattedText([("class:processing", _fit_text_to_width(text, cols))])
 
     def _build_app(self) -> Application:
@@ -603,9 +616,17 @@ class CLIApp:
             ),
             filter=Condition(lambda: bool(self._todo_text)),
         )
+        activity_win = ConditionalContainer(
+            Window(
+                height=1,
+                content=_DynamicLineControl(lambda width: self._render_activity(width)),
+            ),
+            filter=Condition(lambda: bool(self._activity_text)),
+        )
 
         body = HSplit([
             self._output_win,
+            activity_win,
             todo_win,
             status_win,
             border_top,
