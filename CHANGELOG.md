@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.34] - 2026-06-01
+
+### Added
+- **Self-Evolve 安全执行闭环** — `self_evolve` 新增 `apply_decision`，可在显式开启时记录采纳/迭代状态，并在回滚决策下安全写回原始内容。
+
+### Fixed
+- **Self-Evolve 质量评估修复** — 修改前/修改后指标现在都基于对应源码内容的临时文件测量，避免当前目标文件状态污染 before lint 指标；ruff 错误计数兼容新版输出格式。
+- **Self-Modify 路径边界修复** — 自修改目标解析改用 `Path.relative_to()` 做结构化边界判断，避免 macOS `/var` 与 `/private/var` 等规范化差异导致合法路径被误判越界。
+
 ## [0.1.33] - 2026-06-01
 
 ### Fixed
