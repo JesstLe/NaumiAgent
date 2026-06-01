@@ -19,6 +19,9 @@ from naumi_agent.tools.analysis_tools.chaos import (
 from naumi_agent.tools.analysis_tools.scale import (
     ScaleAnalysisTool as SplitScaleAnalysisTool,
 )
+from naumi_agent.tools.analysis_tools.state import (
+    StateAuditTool as SplitStateAuditTool,
+)
 
 
 def _write_vulnerable_source(path: Path) -> None:
@@ -152,3 +155,30 @@ class TestStaticAnalysisFallbacks:
         assert "7,500" in calls[0][2]
         assert "burst traffic" in calls[0][2]
         assert "high-concurrency architect" in calls[0][1]
+
+    @pytest.mark.asyncio
+    async def test_split_state_uses_injected_runner_and_context(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "service.py"
+        _write_vulnerable_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "LLM 建议：将内存 Session 迁移到 Redis。"
+
+        router = object()
+        output = await SplitStateAuditTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(target=str(source), context="5 replica deployment")
+
+        assert "## State 静态扫描" in output
+        assert "模块级可变容器" in output
+        assert "## LLM 分布式改造建议" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "distributed systems auditor" in calls[0][1]
+        assert "5 replica deployment" in calls[0][2]

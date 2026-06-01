@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.109] - 2026-06-01
+
+### Changed
+- **State Analysis Tool 拆分** — 将 `analysis_state` 的 Tool 包装迁移到 `analysis_tools.state`，保留 `analysis.py` 兼容 wrapper 和 slash/Agent 共用 execute 路径；新增注入式 runner 测试，覆盖真实有状态违规扫描、部署 context 传递、无 router 确定性输出和 LLM 分布式改造增强路径。
+
 ## [0.1.108] - 2026-06-01
 
 ### Changed
