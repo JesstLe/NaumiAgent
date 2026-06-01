@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
+import traceback
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -269,16 +272,52 @@ class CLIApp:
         if self._output_win:
             self._output_win.scroll_to_bottom()
         self._invalidate()
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
         try:
             if self._on_submit:
-                await self._on_submit(text)
+                with (
+                    contextlib.redirect_stdout(stdout_buf),
+                    contextlib.redirect_stderr(stderr_buf),
+                ):
+                    await self._on_submit(text)
+        except Exception:
+            self._append_captured_streams(stdout_buf, stderr_buf)
+            self.append_output(self._format_submit_exception())
         finally:
+            self._append_captured_streams(stdout_buf, stderr_buf)
             # Any remaining live content not yet finalized
             if self._live:
                 self._output.extend(self._live)
                 self._live = []
             self._processing = False
             self._invalidate()
+
+    def _append_captured_streams(
+        self,
+        stdout_buf: io.StringIO,
+        stderr_buf: io.StringIO,
+    ) -> None:
+        text = stdout_buf.getvalue() + stderr_buf.getvalue()
+        if not text:
+            return
+        self._output.append(text)
+        stdout_buf.seek(0)
+        stdout_buf.truncate(0)
+        stderr_buf.seek(0)
+        stderr_buf.truncate(0)
+        if self._output_win:
+            self._output_win.ensure_at_bottom()
+        self._invalidate()
+
+    def _format_submit_exception(self) -> str:
+        trace = traceback.format_exc().rstrip()
+        last_line = trace.rsplit("\n", 1)[-1] if trace else "未知错误"
+        return (
+            "\033[31m提交处理失败，已拦截异常，界面仍可继续使用。\033[0m\n"
+            f"\033[31m{last_line}\033[0m\n"
+            f"\033[2m{trace}\033[0m\n"
+        )
 
     def exit(self) -> None:
         if self._app:
