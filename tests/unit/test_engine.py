@@ -724,6 +724,47 @@ class TestTaskVisualization:
         ]
         assert "补测试" in str(snapshots[-1]["summary"])
 
+    @pytest.mark.asyncio
+    async def test_todo_snapshot_does_not_duplicate_merge_items(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        engine.task_store.set_session(session.id)
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        await engine._execute_tool(ToolCall(
+            id="todo-1",
+            name="todo_write",
+            arguments=json.dumps({
+                "todos": [
+                    {"content": "创建项目目录结构", "status": "pending"},
+                    {"content": "编写 HTML 文件", "status": "pending"},
+                ],
+            }, ensure_ascii=False),
+        ), on_event=on_event)
+        result = await engine._execute_tool(ToolCall(
+            id="todo-2",
+            name="todo_write",
+            arguments=json.dumps({
+                "todos": [
+                    {"content": "创建项目目录结构", "status": "completed"},
+                ],
+            }, ensure_ascii=False),
+        ), on_event=on_event)
+
+        assert result.status == "success"
+        snapshots = [data for event, data in events if event == "task_snapshot"]
+        assert snapshots[-1]["count"] == 2
+        assert snapshots[-1]["open_count"] == 1
+        assert snapshots[-1]["completed_count"] == 1
+        assert snapshots[-1]["items"] == [
+            {"id": "2", "status": "pending", "subject": "编写 HTML 文件"}
+        ]
+
 
 class TestSubagentVisualization:
     @pytest.mark.asyncio
