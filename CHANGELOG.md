@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.68] - 2026-06-01
+
+### Changed
+- **Browser Daemon 工具边界加固** — 为 `browser_daemon_*` 工具补充只读/需确认/状态变更元数据，并为任务文本、控制文本、运行列表数量、最大步骤数、handoff 超时和 CDP endpoint 增加确定性夹取与校验，使外部浏览器 daemon 执行链路更适合 Agent 自主调用。
+
 ## [0.1.67] - 2026-06-01
 
 ### Changed

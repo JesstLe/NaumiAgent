@@ -7,6 +7,7 @@ import pytest
 from naumi_agent.config.settings import BrowserDaemonConfig
 from naumi_agent.tools.browser_daemon import (
     BrowserDaemonClient,
+    BrowserDaemonListRunsTool,
     BrowserDaemonReplyTool,
     BrowserDaemonRunTool,
     BrowserDaemonStartTool,
@@ -22,6 +23,7 @@ class FakeBrowserDaemonClient:
         self.created: dict | None = None
         self.replies: list[dict] = []
         self.watch_args: dict | None = None
+        self.list_limit: int | None = None
 
     async def create_run(self, task_instruction: str, **kwargs):
         self.created = {"task_instruction": task_instruction, **kwargs}
@@ -63,6 +65,10 @@ class FakeBrowserDaemonClient:
             },
         }
 
+    async def list_runs(self, limit: int):
+        self.list_limit = limit
+        return {"runs": []}
+
 
 class PollingBrowserDaemonClient(BrowserDaemonClient):
     def __init__(self, statuses: list[str]) -> None:
@@ -96,13 +102,26 @@ def test_dashboard_url_includes_token() -> None:
 def test_create_browser_daemon_tools() -> None:
     client = BrowserDaemonClient(BrowserDaemonConfig())
 
-    names = {tool.name for tool in create_browser_daemon_tools(client)}
+    tools = create_browser_daemon_tools(client)
+    names = {tool.name for tool in tools}
 
     assert "browser_daemon_health" in names
     assert "browser_daemon_start" in names
     assert "browser_daemon_run" in names
     assert "browser_daemon_watch" in names
     assert "browser_daemon_manual_control" in names
+
+
+def test_browser_daemon_tools_expose_permission_metadata() -> None:
+    client = BrowserDaemonClient(BrowserDaemonConfig())
+    tools = {tool.name: tool for tool in create_browser_daemon_tools(client)}
+
+    assert tools["browser_daemon_health"].metadata.read_only is True
+    assert tools["browser_daemon_list_runs"].metadata.read_only is True
+    assert tools["browser_daemon_run_status"].metadata.concurrency_safe is True
+    assert tools["browser_daemon_start"].metadata.requires_confirmation is True
+    assert tools["browser_daemon_run"].metadata.requires_confirmation is True
+    assert tools["browser_daemon_abort"].metadata.destructive is True
 
 
 @pytest.mark.asyncio
@@ -120,6 +139,36 @@ async def test_run_tool_submits_task() -> None:
         "cdp_endpoint": None,
         "handoff_timeout_ms": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_run_tool_clamps_numeric_inputs() -> None:
+    client = FakeBrowserDaemonClient()
+    tool = BrowserDaemonRunTool(client)  # type: ignore[arg-type]
+
+    result = await tool.execute(
+        task_instruction="打开 example.com",
+        max_steps=999_999,
+        handoff_timeout_ms=999_999_999,
+        cdp_endpoint="  ws://localhost:9222/devtools/browser/1  ",
+    )
+
+    assert "run-1" in result
+    assert client.created is not None
+    assert client.created["max_steps"] == 500
+    assert client.created["handoff_timeout_ms"] == 600_000
+    assert client.created["cdp_endpoint"] == "ws://localhost:9222/devtools/browser/1"
+
+
+@pytest.mark.asyncio
+async def test_run_tool_rejects_overlong_task() -> None:
+    client = FakeBrowserDaemonClient()
+    tool = BrowserDaemonRunTool(client)  # type: ignore[arg-type]
+
+    result = await tool.execute(task_instruction="x" * 8001)
+
+    assert "task_instruction 过长" in result
+    assert client.created is None
 
 
 @pytest.mark.asyncio
@@ -148,6 +197,17 @@ async def test_watch_tool_reports_handoff_ready_state() -> None:
         "timeout_ms": 1000,
         "poll_interval_ms": 200,
     }
+
+
+@pytest.mark.asyncio
+async def test_list_runs_tool_clamps_limit() -> None:
+    client = FakeBrowserDaemonClient()
+    tool = BrowserDaemonListRunsTool(client)  # type: ignore[arg-type]
+
+    result = await tool.execute(limit=999)
+
+    assert "暂无 browser-debugging-daemon 运行" in result
+    assert client.list_limit == 100
 
 
 @pytest.mark.asyncio

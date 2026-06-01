@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 import httpx
 
 from naumi_agent.config.settings import BrowserDaemonConfig
-from naumi_agent.tools.base import Tool
+from naumi_agent.tools.base import Tool, ToolMetadata
 
 
 class BrowserDaemonError(RuntimeError):
@@ -25,6 +25,9 @@ RUN_HANDOFF_STATUSES = frozenset(
     {"waiting_for_instruction", "manual_control_requested", "manual_control"}
 )
 RUN_WATCH_READY_STATUSES = RUN_TERMINAL_STATUSES | RUN_HANDOFF_STATUSES
+MAX_TASK_INSTRUCTION_CHARS = 8_000
+MAX_RUN_CONTROL_TEXT_CHARS = 4_000
+MAX_LIST_RUNS_LIMIT = 100
 
 
 class BrowserDaemonClient:
@@ -277,6 +280,32 @@ def _normalize_int(value: Any, *, fallback: int, minimum: int, maximum: int) -> 
     return max(minimum, min(maximum, parsed))
 
 
+def _normalize_optional_int(
+    value: Any,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int | None:
+    if value is None or value == "":
+        return None
+    return _normalize_int(value, fallback=minimum, minimum=minimum, maximum=maximum)
+
+
+def _normalize_text(
+    value: Any,
+    *,
+    field_name: str,
+    max_chars: int,
+    allow_empty: bool = False,
+) -> str:
+    text = str(value or "").strip()
+    if not text and not allow_empty:
+        raise BrowserDaemonError(f"{field_name} 不能为空。")
+    if len(text) > max_chars:
+        raise BrowserDaemonError(f"{field_name} 过长，最多 {max_chars} 个字符。")
+    return text
+
+
 def _is_watch_ready(run: dict[str, Any]) -> bool:
     return str(run.get("status") or "") in RUN_WATCH_READY_STATUSES
 
@@ -310,6 +339,15 @@ class BrowserDaemonHealthTool(Tool):
         return "检查外部 browser-debugging-daemon 的 HTTP 健康状态。"
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="浏览器 Daemon 健康检查",
+            search_hint="browser daemon health status dashboard",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {"type": "object", "properties": {}}
 
@@ -332,6 +370,15 @@ class BrowserDaemonStartTool(Tool):
     @property
     def description(self) -> str:
         return "启动本机 workspace 下的 browser-debugging-daemon HTTP 服务。"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            user_facing_name="启动浏览器 Daemon",
+            search_hint="browser daemon start launch local service",
+        )
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -364,6 +411,15 @@ class BrowserDaemonDashboardTool(Tool):
         return "返回 browser-debugging-daemon dashboard URL。"
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="浏览器 Daemon Dashboard",
+            search_hint="browser daemon dashboard url",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {"type": "object", "properties": {}}
 
@@ -384,6 +440,15 @@ class BrowserDaemonRunTool(Tool):
         return "向 browser-debugging-daemon 队列提交一个自主浏览器任务。"
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            user_facing_name="提交浏览器 Daemon 任务",
+            search_hint="browser daemon run task attached managed autonomous",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -402,19 +467,37 @@ class BrowserDaemonRunTool(Tool):
         }
 
     async def execute(self, **kwargs: Any) -> str:
-        task = str(kwargs.get("task_instruction") or "").strip()
-        if not task:
-            return "❌ task_instruction 不能为空。"
+        try:
+            task = _normalize_text(
+                kwargs.get("task_instruction"),
+                field_name="task_instruction",
+                max_chars=MAX_TASK_INSTRUCTION_CHARS,
+            )
+        except BrowserDaemonError as exc:
+            return f"❌ {exc}"
         browser_source = str(kwargs.get("browser_source") or "auto")
         if browser_source not in {"auto", "managed", "attached"}:
             return "❌ browser_source 必须是 auto、managed 或 attached。"
         try:
             payload = await self._client.create_run(
                 task,
-                max_steps=kwargs.get("max_steps"),
+                max_steps=_normalize_optional_int(
+                    kwargs.get("max_steps"),
+                    minimum=1,
+                    maximum=500,
+                ),
                 browser_source=browser_source,
-                cdp_endpoint=kwargs.get("cdp_endpoint"),
-                handoff_timeout_ms=kwargs.get("handoff_timeout_ms"),
+                cdp_endpoint=_normalize_text(
+                    kwargs.get("cdp_endpoint"),
+                    field_name="cdp_endpoint",
+                    max_chars=500,
+                    allow_empty=True,
+                ) or None,
+                handoff_timeout_ms=_normalize_optional_int(
+                    kwargs.get("handoff_timeout_ms"),
+                    minimum=1_000,
+                    maximum=10 * 60 * 1_000,
+                ),
             )
         except BrowserDaemonError as exc:
             return f"❌ 创建运行失败：{exc}"
@@ -439,6 +522,15 @@ class BrowserDaemonListRunsTool(Tool):
         return "列出 browser-debugging-daemon 最近的队列运行。"
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="浏览器 Daemon 运行列表",
+            search_hint="browser daemon list runs queue history",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -446,7 +538,12 @@ class BrowserDaemonListRunsTool(Tool):
         }
 
     async def execute(self, **kwargs: Any) -> str:
-        limit = int(kwargs.get("limit") or 20)
+        limit = _normalize_int(
+            kwargs.get("limit"),
+            fallback=20,
+            minimum=1,
+            maximum=MAX_LIST_RUNS_LIMIT,
+        )
         try:
             payload = await self._client.list_runs(limit=limit)
         except BrowserDaemonError as exc:
@@ -472,6 +569,15 @@ class BrowserDaemonRunStatusTool(Tool):
     @property
     def description(self) -> str:
         return "查看 browser-debugging-daemon 指定运行的详情。"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="浏览器 Daemon 运行详情",
+            search_hint="browser daemon run status details",
+        )
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -505,6 +611,14 @@ class BrowserDaemonWatchTool(Tool):
     def description(self) -> str:
         return (
             "等待 browser-debugging-daemon 运行到完成、失败、中止或需要人工接管/回复的状态。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            user_facing_name="等待浏览器 Daemon 运行",
+            search_hint="browser daemon watch wait status handoff timeout",
         )
 
     @property
@@ -586,6 +700,15 @@ class _RunControlTool(Tool):
         return f"对 browser-debugging-daemon 运行执行 {self.verb} 操作。"
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            user_facing_name=f"浏览器 Daemon {self.verb}",
+            search_hint="browser daemon run control reply resume abort manual",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -598,7 +721,15 @@ class _RunControlTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         run_id = str(kwargs.get("run_id") or "").strip()
-        text = str(kwargs.get(self.text_field) or self.default_text).strip()
+        try:
+            text = _normalize_text(
+                kwargs.get(self.text_field) or self.default_text,
+                field_name=self.text_field,
+                max_chars=MAX_RUN_CONTROL_TEXT_CHARS,
+                allow_empty=bool(self.default_text),
+            )
+        except BrowserDaemonError as exc:
+            return f"❌ {exc}"
         if not run_id:
             return "❌ run_id 不能为空。"
         try:
