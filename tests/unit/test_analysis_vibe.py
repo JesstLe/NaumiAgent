@@ -10,40 +10,39 @@ import pytest
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.orchestrator.engine import AgentEngine
-from naumi_agent.tools.analysis import (
-    VibeModeTool,
-    _build_vibe_scaffold,
-    _scan_vibe_request,
-)
+from naumi_agent.tools.analysis import VibeModeTool
+from naumi_agent.tools.analysis import _build_vibe_scaffold as analysis_build_vibe_scaffold
+from naumi_agent.tools.analysis_support.vibe import build_vibe_scaffold, scan_vibe_request
 from naumi_agent.tools.base import ToolCall
 
 
 class TestVibeScaffold:
     def test_builds_python_stdlib_scaffold_by_default(self) -> None:
-        scaffold = _build_vibe_scaffold("做一个任务看板")
+        scaffold = build_vibe_scaffold("做一个任务看板")
 
         assert scaffold.kind == "python-stdlib-web"
         assert scaffold.run_command == "python app.py"
         assert any(name == "app.py" for name, _ in scaffold.files)
         assert any("做一个任务看板" in content for _, content in scaffold.files)
+        assert analysis_build_vibe_scaffold("做一个任务看板") == scaffold
 
     def test_builds_node_scaffold_when_requested(self) -> None:
-        scaffold = _build_vibe_scaffold("计数器", "node")
+        scaffold = build_vibe_scaffold("计数器", "node")
 
         assert scaffold.kind == "node-stdlib-web"
         assert scaffold.run_command == "npm start"
         assert any(name == "server.js" for name, _ in scaffold.files)
 
     def test_builds_static_scaffold_when_requested(self) -> None:
-        scaffold = _build_vibe_scaffold("静态页", "html")
+        scaffold = build_vibe_scaffold("静态页", "html")
 
         assert scaffold.kind == "static-html"
         assert scaffold.run_command == "python -m http.server 8000"
         assert any(name == "index.html" for name, _ in scaffold.files)
 
     def test_scan_reports_real_generated_files(self) -> None:
-        scaffold = _build_vibe_scaffold("Demo", "html")
-        scan = _scan_vibe_request("Demo", "html", scaffold)
+        scaffold = build_vibe_scaffold("Demo", "html")
+        scan = scan_vibe_request("Demo", "html", scaffold)
 
         assert "确定性 scaffold 类型：static-html" in scan
         assert "index.html" in scan
