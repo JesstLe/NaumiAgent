@@ -6,7 +6,9 @@ import logging
 import os
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
+
+from naumi_agent.tools.base import ToolMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,11 @@ class PermissionRule:
     requires_confirmation: bool
     max_calls_per_session: int | None = None
     blocked_commands: list[str] | None = None
+
+
+class PermissionAwareTool(Protocol):
+    @property
+    def metadata(self) -> ToolMetadata: ...
 
 
 # 工具权限表
@@ -682,13 +689,31 @@ class PermissionChecker:
 
         return tool_name, None
 
-    def check(self, tool_name: str, args: dict[str, Any]) -> PermissionDecision:
+    def check(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        tool: PermissionAwareTool | None = None,
+    ) -> PermissionDecision:
         """检查工具调用是否被允许."""
         tool_name, rule = self._resolve_rule(tool_name)
+        metadata = tool.metadata if tool is not None else None
 
         if not rule:
+            if metadata and metadata.read_only:
+                rule = PermissionRule(
+                    tool_name=tool_name,
+                    allowed_modes=[
+                        PermissionMode.BYPASS,
+                        PermissionMode.PERMISSIVE,
+                        PermissionMode.MODERATE,
+                        PermissionMode.STRICT,
+                        PermissionMode.LOCKDOWN,
+                    ],
+                    requires_confirmation=False,
+                )
             # MCP tools are dynamic — allow based on mode
-            if tool_name.startswith("mcp__"):
+            elif tool_name.startswith("mcp__"):
                 mcp_allowed = [
                     PermissionMode.BYPASS,
                     PermissionMode.PERMISSIVE,
@@ -701,7 +726,8 @@ class PermissionChecker:
                     allowed=False,
                     reason=f"MCP tool '{tool_name}' not allowed in {self._mode.value} mode",
                 )
-            return PermissionDecision(allowed=False, reason=f"Unknown tool: {tool_name}")
+            else:
+                return PermissionDecision(allowed=False, reason=f"Unknown tool: {tool_name}")
 
         if self._mode not in rule.allowed_modes:
             return PermissionDecision(
@@ -718,35 +744,50 @@ class PermissionChecker:
             )
 
         # 文件路径沙箱检查
-        if "path" in args:
-            path_check = self._check_path_sandbox(args["path"])
+        path_argument_names = (
+            metadata.path_argument_names if metadata else ("path", "cwd")
+        )
+        for arg_name in path_argument_names:
+            if arg_name not in args or not args[arg_name]:
+                continue
+            path_check = self._check_path_sandbox(args[arg_name], arg_name=arg_name)
             if not path_check.allowed:
                 return path_check
-        if "cwd" in args and args["cwd"]:
-            cwd_check = self._check_path_sandbox(args["cwd"])
-            if not cwd_check.allowed:
-                return cwd_check
 
         # 命令检查
-        if tool_name in {"bash_run", "background_run", "runtime_mcp_connect"} and "command" in args:
-            cmd_check = self._check_command(args["command"])
-            if not cmd_check.allowed:
-                return cmd_check
+        command_argument_names = (
+            metadata.command_argument_names if metadata else ("command",)
+        )
+        if tool_name in {"bash_run", "background_run", "runtime_mcp_connect"}:
+            for arg_name in command_argument_names:
+                if arg_name not in args or not args[arg_name]:
+                    continue
+                cmd_check = self._check_command(args[arg_name])
+                if not cmd_check.allowed:
+                    return cmd_check
 
         # 记录调用
         self._call_counts[tool_name] = count + 1
+        requires_confirmation = rule.requires_confirmation
+        if metadata and metadata.requires_confirmation is not None:
+            requires_confirmation = metadata.requires_confirmation
 
         return PermissionDecision(
             allowed=True,
             requires_confirmation=(
-                rule.requires_confirmation and self._mode != PermissionMode.BYPASS
+                requires_confirmation and self._mode != PermissionMode.BYPASS
             ),
         )
 
-    def _check_path_sandbox(self, path: str) -> PermissionDecision:
+    def _check_path_sandbox(self, path: Any, *, arg_name: str = "path") -> PermissionDecision:
         """检查文件路径是否在允许的目录内."""
         if self._mode == PermissionMode.BYPASS:
             return PermissionDecision(allowed=True)
+        if not isinstance(path, str):
+            return PermissionDecision(
+                allowed=False,
+                reason=f"Path argument '{arg_name}' must be a string",
+            )
 
         abs_path = self._resolve_path_for_sandbox(path)
         if any(

@@ -8,6 +8,7 @@ from naumi_agent.tools.builtin import (
     FileEditTool,
     FileReadTool,
     FileWriteTool,
+    YamlValidateTool,
     create_builtin_tools,
 )
 
@@ -39,6 +40,28 @@ class TestToolRegistry:
             assert "function" in t
             assert "name" in t["function"]
             assert "parameters" in t["function"]
+
+    def test_builtin_tool_metadata_exposes_execution_traits(
+        self,
+        registry: ToolRegistry,
+    ) -> None:
+        read_tool = registry.get("file_read")
+        write_tool = registry.get("file_write")
+        bash_tool = registry.get("bash_run")
+        yaml_tool = registry.get("yaml_validate")
+
+        assert read_tool is not None
+        assert write_tool is not None
+        assert bash_tool is not None
+        assert yaml_tool is not None
+
+        assert read_tool.is_read_only
+        assert read_tool.is_concurrency_safe
+        assert write_tool.is_destructive
+        assert bash_tool.metadata.requires_confirmation is True
+        assert bash_tool.metadata.command_argument_names == ("command",)
+        assert yaml_tool.metadata.path_argument_names == ("file_path",)
+        assert yaml_tool.user_facing_name == "YAML 语法校验"
 
     def test_parse_arguments_accepts_decoded_object(self, registry: ToolRegistry) -> None:
         tool = registry.get("file_read")
@@ -190,3 +213,11 @@ class TestBashRunTool:
 
         assert f"工作目录: {tmp_path}" in result
         assert str(tmp_path) in result
+
+
+class TestYamlValidateTool:
+    async def test_metadata_marks_file_path_as_sandboxed_path_arg(self) -> None:
+        tool = YamlValidateTool()
+
+        assert tool.metadata.read_only
+        assert tool.metadata.path_argument_names == ("file_path",)

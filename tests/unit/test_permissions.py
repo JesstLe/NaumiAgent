@@ -4,6 +4,7 @@ from naumi_agent.safety.permissions import (
     PermissionChecker,
     PermissionMode,
 )
+from naumi_agent.tools.builtin import YamlMicroVerifyTool, YamlValidateTool
 
 
 class TestPermissionChecker:
@@ -39,6 +40,38 @@ class TestPermissionChecker:
         )
         assert checker.check("file_read", {"path": "/workspace/file.txt"}).allowed
         assert not checker.check("file_read", {"path": "/etc/passwd"}).allowed
+
+    def test_tool_metadata_path_args_are_sandboxed(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE, allowed_dirs=["/workspace"])
+        tool = YamlValidateTool()
+
+        allowed = checker.check(
+            "yaml_validate",
+            {"file_path": "/workspace/config.yaml"},
+            tool=tool,
+        )
+        blocked = checker.check(
+            "yaml_validate",
+            {"file_path": "/etc/passwd"},
+            tool=tool,
+        )
+
+        assert allowed.allowed
+        assert not blocked.allowed
+        assert "outside allowed directories" in blocked.reason
+
+    def test_tool_metadata_path_args_reject_non_string_paths(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE, allowed_dirs=["/workspace"])
+        tool = YamlMicroVerifyTool()
+
+        result = checker.check(
+            "yaml_micro_verify",
+            {"file_path": ["not", "a", "path"]},
+            tool=tool,
+        )
+
+        assert not result.allowed
+        assert "must be a string" in result.reason
 
     def test_relative_path_uses_workspace_root(self, tmp_path) -> None:
         checker = PermissionChecker(
