@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.60] - 2026-06-01
+
+### Changed
+- **Analysis Macro 模块拆分** — 将 `/macro` 的中心化瓶颈扫描、数据市场潜力识别、激励机制盘点、竞争淘汰检测和自由市场就绪度评分迁移到 `analysis_support.macro`，主 `analysis.py` 保留工具编排、兼容入口与 LLM Macro 增强路径。
+
 ## [0.1.59] - 2026-06-01
 
 ### Changed
