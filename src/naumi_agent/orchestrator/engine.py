@@ -1294,9 +1294,26 @@ class AgentEngine:
             from naumi_agent.tasks.store import format_task_list
 
             tasks = await self.task_store.list_tasks()
+            open_tasks = [task for task in tasks if task.status != TaskStatus.COMPLETED]
+            completed_count = len(tasks) - len(open_tasks)
             await on_event("task_snapshot", {
                 "source": source,
                 "count": len(tasks),
+                "open_count": len(open_tasks),
+                "completed_count": completed_count,
+                "items": [
+                    {
+                        "id": task.id,
+                        "status": task.status.value,
+                        "subject": (
+                            task.active_form
+                            if task.status in {TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED}
+                            and task.active_form
+                            else task.subject
+                        ),
+                    }
+                    for task in open_tasks
+                ],
                 "summary": format_task_list(tasks),
             })
         except Exception as e:

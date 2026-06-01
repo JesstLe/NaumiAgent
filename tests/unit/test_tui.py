@@ -6,7 +6,7 @@ import pytest
 
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
-from naumi_agent.tui.app import NaumiApp, _format_tool_output_markdown
+from naumi_agent.tui.app import NaumiApp, TodoBar, _format_tool_output_markdown
 
 
 class TestNaumiApp:
@@ -59,3 +59,19 @@ class TestNaumiApp:
             choice = await asyncio.wait_for(task, timeout=2)
 
         assert choice == "allow"
+
+    @pytest.mark.asyncio
+    async def test_todo_bar_is_hidden_until_it_has_open_tasks(self) -> None:
+        engine = AgentEngine(AppConfig())
+        app = NaumiApp(engine)
+        async with app.run_test(size=(100, 30)) as pilot:
+            todo = app.query_one(TodoBar)
+            assert "hidden" in todo.classes
+
+            todo.todo_text = "todo: 0/1 完成 | ● #1 正在实现"
+            await pilot.pause(0.1)
+            assert "hidden" not in todo.classes
+
+            todo.todo_text = ""
+            await pilot.pause(0.1)
+            assert "hidden" in todo.classes

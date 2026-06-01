@@ -897,6 +897,34 @@ class StatusBar(Static):
         self.update(text)
 
 
+class TodoBar(Static):
+    """底部常驻 todo 栏；无未完成任务时隐藏."""
+
+    DEFAULT_CSS = """
+    TodoBar {
+        height: 1;
+        background: $boost;
+        color: $warning;
+        padding: 0 1;
+    }
+    TodoBar.hidden {
+        display: none;
+    }
+    """
+
+    todo_text: reactive[str] = reactive("")
+    debug_trace: Any | None = None
+
+    def on_mount(self) -> None:
+        self.set_class(True, "hidden")
+
+    def watch_todo_text(self, text: str) -> None:
+        if self.debug_trace is not None:
+            self.debug_trace.event("tui.todo_status", {"text": text})
+        self.set_class(not bool(text), "hidden")
+        self.update(text)
+
+
 class Spinner(Static):
     """动画旋转指示器."""
 
@@ -1048,6 +1076,7 @@ class NaumiApp(App):
             yield HistoryPanel()
             yield BrowserPanel()
             yield ActivityPanel()
+        yield TodoBar()
         yield InputBar()
         yield Spinner()
         yield StatusBar()
@@ -1065,6 +1094,8 @@ class NaumiApp(App):
         chat.debug_trace = self.debug_trace
         status = self.query_one(StatusBar)
         status.debug_trace = self.debug_trace
+        todo = self.query_one(TodoBar)
+        todo.debug_trace = self.debug_trace
         if self.debug_trace is not None:
             self.debug_trace.event("tui.mount", {"title": self.TITLE})
         self._update_git_title()
@@ -1676,14 +1707,11 @@ class NaumiApp(App):
                     )
                     status.status_text = f"hook {status_label}: {point}"
                 case "task_snapshot":
+                    from naumi_agent.main import _format_todo_bar
+
                     source = str(data.get("source", "todo"))
-                    summary = str(data.get("summary", "当前没有任务。"))
-                    chat.mount(
-                        Markdown(
-                            f"## todo 更新：{source}\n\n{summary}",
-                            classes="agent-msg",
-                        )
-                    )
+                    todo_bar = self.query_one(TodoBar)
+                    todo_bar.todo_text = _format_todo_bar(data)
                     status.status_text = f"todo 已更新：{source}"
                 case "subagent_event":
                     event_status = str(data.get("status", "?"))
@@ -2616,6 +2644,7 @@ class NaumiApp(App):
     @work(exclusive=True, exit_on_error=False)
     async def _run_todo_command(self, arg: str) -> None:
         """执行 todo 命令."""
+        from naumi_agent.main import _format_todo_bar
         from naumi_agent.tasks.commands import run_todo_command
 
         chat = self.query_one(ChatPanel)
@@ -2625,6 +2654,22 @@ class NaumiApp(App):
             session = await self.engine.get_or_create_session()
             self.engine.task_store.set_session(session.id)
             result = await run_todo_command(self.engine.task_store, arg)
+            tasks = await self.engine.task_store.list_tasks()
+            open_tasks = [task for task in tasks if task.status.value != "completed"]
+            self.query_one(TodoBar).todo_text = _format_todo_bar({
+                "count": len(tasks),
+                "open_count": len(open_tasks),
+                "completed_count": len(tasks) - len(open_tasks),
+                "items": [
+                    {
+                        "id": task.id,
+                        "status": task.status.value,
+                        "subject": task.active_form or task.subject,
+                    }
+                    for task in open_tasks
+                ],
+                "summary": result,
+            })
             chat.mount(Markdown(f"## todo\n\n{result}", classes="agent-msg"))
         except Exception as e:
             chat.mount(Markdown(f"**todo 命令失败**: {e}", classes="agent-msg"))

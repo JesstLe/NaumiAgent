@@ -15,6 +15,7 @@ from naumi_agent.main import (
     _format_permission_bubble,
     _format_recovery_event,
     _format_runtime_notification,
+    _format_todo_bar,
     _print_tool_output,
     _render_result,
     _show_cli_status,
@@ -28,6 +29,7 @@ class FakeCLI:
         self.live: list[str] = []
         self.output: list[str] = []
         self.status = ""
+        self.todo_status = ""
 
     def append_live(self, text: str) -> None:
         self.live.append(text)
@@ -41,6 +43,9 @@ class FakeCLI:
 
     def set_status(self, text: str) -> None:
         self.status = text
+
+    def set_todo_status(self, text: str | None) -> None:
+        self.todo_status = text or ""
 
 
 class FakeRouter:
@@ -207,6 +212,25 @@ def test_runtime_notification_rendering_includes_title_source_and_preview() -> N
     assert "bg_0001" in rendered
 
 
+def test_todo_bar_shows_current_open_task_and_clears_when_complete() -> None:
+    active = _format_todo_bar({
+        "count": 3,
+        "open_count": 1,
+        "completed_count": 2,
+        "items": [{"id": "3", "status": "in_progress", "subject": "正在补测试"}],
+    })
+    done = _format_todo_bar({
+        "count": 3,
+        "open_count": 0,
+        "completed_count": 3,
+        "items": [],
+    })
+
+    assert "todo: 2/3 完成" in active
+    assert "正在补测试" in active
+    assert done == ""
+
+
 @pytest.mark.asyncio
 async def test_fullscreen_cli_runtime_notification_is_visible() -> None:
     cli = FakeCLI()
@@ -226,6 +250,40 @@ async def test_fullscreen_cli_runtime_notification_is_visible() -> None:
     assert "调度提醒" in text
     assert "schedule" in text
     assert "检查测试结果" in text
+
+
+@pytest.mark.asyncio
+async def test_fullscreen_cli_task_snapshot_updates_sticky_todo_bar() -> None:
+    cli = FakeCLI()
+    handler = _cli_event_factory(cli)
+
+    await handler(
+        "task_snapshot",
+        {
+            "source": "todo_write",
+            "count": 2,
+            "open_count": 1,
+            "completed_count": 1,
+            "items": [{"id": "2", "status": "pending", "subject": "补测试"}],
+            "summary": "summary should not be appended",
+        },
+    )
+
+    assert "补测试" in cli.todo_status
+    assert cli.live == []
+
+    await handler(
+        "task_snapshot",
+        {
+            "source": "todo_write",
+            "count": 2,
+            "open_count": 0,
+            "completed_count": 2,
+            "items": [],
+        },
+    )
+
+    assert cli.todo_status == ""
 
 
 def test_streaming_markdown_highlighter_colors_fenced_python() -> None:

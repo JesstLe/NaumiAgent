@@ -342,6 +342,48 @@ def _format_task_snapshot(data: dict[str, Any]) -> str:
     return f"\033[36m  todo 更新: {source}\033[0m\n{summary}"
 
 
+def _format_todo_bar(data: dict[str, Any]) -> str:
+    """Format a compact bottom todo bar; return empty when all todos are complete."""
+    try:
+        open_count = int(data.get("open_count", 0) or 0)
+        total = int(data.get("count", open_count) or open_count)
+        completed = int(data.get("completed_count", max(total - open_count, 0)) or 0)
+    except (TypeError, ValueError):
+        open_count = 0
+        total = 0
+        completed = 0
+    if open_count <= 0:
+        return ""
+
+    raw_items = data.get("items", [])
+    items = raw_items if isinstance(raw_items, list) else []
+    current: dict[str, Any] | None = None
+    priority = {"in_progress": 0, "blocked": 1, "pending": 2}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if current is None or priority.get(str(item.get("status")), 99) < priority.get(
+            str(current.get("status")),
+            99,
+        ):
+            current = item
+
+    if current is None:
+        summary = str(data.get("summary", "") or "")
+        first_line = summary.splitlines()[0] if summary else "有未完成任务"
+        return f"todo: {completed}/{total} 完成 | {first_line}"
+
+    status = str(current.get("status", "pending"))
+    icon = {
+        "pending": "○",
+        "in_progress": "●",
+        "blocked": "!",
+    }.get(status, "○")
+    task_id = str(current.get("id", "?"))
+    subject = str(current.get("subject", "") or "未命名任务")
+    return f"todo: {completed}/{total} 完成 | {icon} #{task_id} {subject}"
+
+
 def _format_subagent_event(data: dict[str, Any]) -> str:
     """Format subagent lifecycle events for user-visible output."""
     status = str(data.get("status", "?"))
@@ -661,7 +703,10 @@ def _cli_event_factory(cli: Any):
         elif event == "hook_trace":
             cli.append_live(_format_hook_trace(data) + "\n")
         elif event == "task_snapshot":
-            cli.append_live(_format_task_snapshot(data) + "\n")
+            if hasattr(cli, "set_todo_status"):
+                cli.set_todo_status(_format_todo_bar(data) or None)
+            else:
+                cli.append_live(_format_task_snapshot(data) + "\n")
         elif event == "subagent_event":
             cli.append_live(_format_subagent_event(data) + "\n")
         elif event == "permission_bubble":
@@ -1980,6 +2025,23 @@ async def _run_todo(engine: Any, arg: str) -> None:
     session = await engine.get_or_create_session()
     engine.task_store.set_session(session.id)
     result = await run_todo_command(engine.task_store, arg)
+    if _active_cli is not None and hasattr(_active_cli, "set_todo_status"):
+        tasks = await engine.task_store.list_tasks()
+        open_tasks = [task for task in tasks if task.status.value != "completed"]
+        _active_cli.set_todo_status(_format_todo_bar({
+            "count": len(tasks),
+            "open_count": len(open_tasks),
+            "completed_count": len(tasks) - len(open_tasks),
+            "items": [
+                {
+                    "id": task.id,
+                    "status": task.status.value,
+                    "subject": task.active_form or task.subject,
+                }
+                for task in open_tasks
+            ],
+            "summary": result,
+        }) or None)
     console.print(
         Panel(
             Markdown(result),

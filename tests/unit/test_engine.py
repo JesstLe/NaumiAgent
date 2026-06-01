@@ -674,6 +674,11 @@ class TestTaskVisualization:
         snapshots = [data for event, data in events if event == "task_snapshot"]
         assert snapshots
         assert snapshots[-1]["source"] == "todo_write"
+        assert snapshots[-1]["open_count"] == 1
+        assert snapshots[-1]["completed_count"] == 1
+        assert snapshots[-1]["items"] == [
+            {"id": "2", "status": "pending", "subject": "补测试"}
+        ]
         assert "补测试" in str(snapshots[-1]["summary"])
 
 
