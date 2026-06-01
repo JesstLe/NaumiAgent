@@ -16,7 +16,7 @@ from naumi_agent.config.settings import AppConfig, MemoryConfig, SafetyConfig
 from naumi_agent.hooks import HookContext, HookPoint
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelResponse, ModelTier, StreamChunk, TokenUsage
-from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.orchestrator.subagent_manager import SubTask
 from naumi_agent.safety.behavior import BehaviorMonitor
@@ -417,6 +417,49 @@ class TestToolExecution:
         assert result.status == "success"
         assert "bypass_now" in result.content
         assert engine.permission_mode == PermissionMode.BYPASS
+        assert engine.runtime_mode == AgentRuntimeMode.BYPASS
+
+    @pytest.mark.asyncio
+    async def test_plan_runtime_mode_blocks_write_tools(
+        self,
+        engine: AgentEngine,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "blocked.txt"
+        engine.set_runtime_mode(AgentRuntimeMode.PLAN)
+        tc = ToolCall(
+            id="x",
+            name="file_write",
+            arguments=json.dumps({"path": str(target), "content": "nope"}),
+        )
+
+        result = await engine._execute_tool(tc)
+
+        assert result.status == "error"
+        assert "Plan 模式只允许只读工具" in result.content
+        assert not target.exists()
+
+    @pytest.mark.asyncio
+    async def test_plan_runtime_mode_allows_read_only_tools(self, engine: AgentEngine) -> None:
+        engine.set_runtime_mode("plan")
+        tc = ToolCall(id="x", name="file_read", arguments='{"path": "pyproject.toml"}')
+
+        result = await engine._execute_tool(tc)
+
+        assert result.status == "success"
+        assert "pyproject.toml" in result.content
+
+    def test_runtime_mode_cycle_updates_permission_mode(self, engine: AgentEngine) -> None:
+        assert engine.runtime_mode == AgentRuntimeMode.DEFAULT
+
+        assert engine.cycle_runtime_mode() == AgentRuntimeMode.PLAN
+        assert engine.permission_mode == PermissionMode.STRICT
+
+        assert engine.cycle_runtime_mode() == AgentRuntimeMode.BYPASS
+        assert engine.permission_mode == PermissionMode.BYPASS
+
+        assert engine.cycle_runtime_mode() == AgentRuntimeMode.DEFAULT
+        assert engine.permission_mode == PermissionMode.MODERATE
 
     @pytest.mark.asyncio
     async def test_confirmation_callback_denies_tool(self, engine: AgentEngine) -> None:

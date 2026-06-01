@@ -29,6 +29,7 @@ class FakeCLI:
         self.live: list[str] = []
         self.output: list[str] = []
         self.status = ""
+        self.mode_status = ""
         self.todo_status = ""
 
     def append_live(self, text: str) -> None:
@@ -43,6 +44,9 @@ class FakeCLI:
 
     def set_status(self, text: str) -> None:
         self.status = text
+
+    def set_mode_status(self, text: str) -> None:
+        self.mode_status = text
 
     def set_todo_status(self, text: str | None) -> None:
         self.todo_status = text or ""
@@ -65,6 +69,7 @@ class FakeEngine:
     router = FakeRouter()
     usage = FakeUsage()
     workspace_root = "/tmp/workspace"
+    runtime_mode = SimpleNamespace(value="default")
 
     def get_context_info(self) -> dict[str, int]:
         return {"used": 3000, "window": 12000, "percentage": 25}
@@ -100,6 +105,7 @@ def test_cli_status_updates_fixed_status_not_output(monkeypatch) -> None:
     _show_cli_status(cli, FakeEngine())
 
     assert "test-model" in cli.status
+    assert cli.mode_status == "default"
     assert "工作区: /tmp/workspace" in cli.status
     assert cli.output == []
 
