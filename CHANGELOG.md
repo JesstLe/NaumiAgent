@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.72] - 2026-06-01
+
+### Changed
+- **Self Evolve 工具边界加固** — 将 `self_evolve` 标记为需要确认的破坏性反思闭环工具，并在质量评估或安全回滚前校验 `target_file`、修改前后内容、说明文本、迭代轮次和 `apply_decision` 类型，避免异常输入触发错误的采纳/回滚决策。
+
 ## [0.1.71] - 2026-06-01
 
 ### Changed

@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from naumi_agent.tools.self_evolve import (
+    MAX_EVOLUTION_CONTENT_CHARS,
     EvolutionStep,
     QualityMetrics,
     SelfEvolveTool,
@@ -521,6 +522,88 @@ class TestSelfEvolveTool:
         assert "round" in schema["properties"]
         assert "apply_decision" in schema["properties"]
         assert len(schema["required"]) == 4
+
+    def test_metadata_marks_self_evolve_as_confirmed_state_change(self):
+        metadata = SelfEvolveTool().metadata
+        assert metadata.destructive is True
+        assert metadata.requires_confirmation is True
+        assert metadata.user_facing_name == "自我进化"
+
+    @pytest.mark.parametrize(
+        ("kwargs", "expected_reason"),
+        [
+            (
+                {"target_file": ""},
+                "target_file 不能为空",
+            ),
+            (
+                {"target_file": "tools/test.txt"},
+                "target_file 必须指向 .py 文件",
+            ),
+            (
+                {"target_file": "../escape.py"},
+                "target_file 不能是绝对路径",
+            ),
+            (
+                {"original_content": None},
+                "original_content 必须是字符串",
+            ),
+            (
+                {"new_content": None},
+                "new_content 必须是字符串",
+            ),
+            (
+                {"description": ""},
+                "description 不能为空",
+            ),
+            (
+                {"round": 0},
+                "round 必须在 1 到 3 之间",
+            ),
+            (
+                {"round": True},
+                "round 必须是整数",
+            ),
+            (
+                {"apply_decision": "yes"},
+                "apply_decision 必须是布尔值",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_execute_rejects_invalid_inputs_before_cycle(
+        self,
+        kwargs,
+        expected_reason,
+    ):
+        base_kwargs = {
+            "target_file": "tools/test.py",
+            "original_content": NO_DOC_SOURCE,
+            "new_content": FULL_DOC_SOURCE,
+            "description": "add docs",
+        }
+        base_kwargs.update(kwargs)
+
+        with patch("naumi_agent.tools.self_evolve.run_evolution_cycle") as cycle_mock:
+            result = await SelfEvolveTool().execute(**base_kwargs)
+
+        cycle_mock.assert_not_called()
+        assert "已拒绝" in result
+        assert expected_reason in result
+
+    @pytest.mark.asyncio
+    async def test_execute_rejects_oversized_content_before_cycle(self):
+        with patch("naumi_agent.tools.self_evolve.run_evolution_cycle") as cycle_mock:
+            result = await SelfEvolveTool().execute(
+                target_file="tools/test.py",
+                original_content=NO_DOC_SOURCE,
+                new_content="x" * (MAX_EVOLUTION_CONTENT_CHARS + 1),
+                description="oversized",
+            )
+
+        cycle_mock.assert_not_called()
+        assert "已拒绝" in result
+        assert "new_content 过大" in result
 
     @pytest.mark.asyncio
     async def test_execute_improvement(self):
