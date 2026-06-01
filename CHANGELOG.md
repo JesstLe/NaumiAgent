@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.20] - 2026-06-01
+
+### Added
+- **PID 工具确定性落地** — `/pid` 在模型路由未初始化时也会返回闭环控制审计、可运行 PID inventory 脚本、P/I/D 改造契约和渐进实施计划。
+
+### Fixed
+- **PID 源码读取修复** — `_scan_pid` 现在会先解析目标路径再读取源码，避免路径字符串被逐字符处理导致扫描为空。
+
 ## [0.1.19] - 2026-06-01
 
 ### Added
