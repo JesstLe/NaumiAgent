@@ -806,13 +806,22 @@ class AgentEngine:
 
         return cleaned
 
-    async def list_sessions(self, page: int = 1, page_size: int = 20) -> tuple[list[Session], int]:
+    async def list_sessions(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        query: str = "",
+    ) -> tuple[list[Session], int]:
         """列出历史会话."""
-        return await self.session_store.list_sessions(page=page, page_size=page_size)
+        return await self.session_store.list_sessions(page=page, page_size=page_size, query=query)
 
     async def delete_session(self, session_id: str) -> bool:
         """删除指定会话."""
         return await self.session_store.delete(session_id)
+
+    async def archive_session(self, session_id: str) -> bool:
+        """归档指定会话."""
+        return await self.session_store.archive(session_id)
 
     async def _save_session(self) -> None:
         """将完整历史写入持久化存储（不丢失压缩前的消息）."""
@@ -820,6 +829,9 @@ class AgentEngine:
         session.messages = list(self._full_history) if self._full_history else list(self._messages)
         session.total_tokens = self._usage.total_input_tokens + self._usage.total_output_tokens
         session.total_cost_usd = self._usage.total_cost_usd
+        session.workspace_root = str(self.workspace_root)
+        session.git_branch = self._current_git_branch()
+        session.summary = self._build_session_summary(session.messages)
 
         # 自动标题：从第一条用户消息中提取
         if not session.title or session.title == "新会话":
@@ -829,6 +841,37 @@ class AgentEngine:
                     break
 
         await self.session_store.save(session)
+
+    def _current_git_branch(self) -> str:
+        """Return current git branch for session history metadata."""
+        import subprocess
+
+        try:
+            return subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=str(self.workspace_root),
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _build_session_summary(messages: list[dict[str, Any]], max_chars: int = 180) -> str:
+        """Build a deterministic session preview from user/assistant messages."""
+        parts: list[str] = []
+        for message in messages:
+            if message.get("role") not in {"user", "assistant"}:
+                continue
+            content = str(message.get("content", "") or "").strip().replace("\n", " ")
+            if content:
+                parts.append(content)
+            if len(" ".join(parts)) >= max_chars:
+                break
+        summary = " / ".join(parts).strip()
+        if len(summary) > max_chars:
+            return summary[: max_chars - 1].rstrip() + "…"
+        return summary
 
     # --- 记忆注入 ---
 

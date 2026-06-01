@@ -1312,7 +1312,7 @@ async def _handle_command(engine: Any, cmd: str) -> None:
 
             console.print(f"[bold green]NaumiAgent[/bold green] v{__version__}")
         case "/history":
-            await _show_history(engine)
+            await _show_history(engine, arg)
         case "/memory":
             await _handle_memory(engine, arg)
         case "/load":
@@ -2691,37 +2691,60 @@ def _run_forge_remove(arg: str) -> None:
     else:
         console.print(f"[red]未找到工具: {tool_name}[/red]")
 
-async def _show_history(engine: Any) -> None:
-    """显示历史会话列表."""
-    from rich.table import Table
+async def _show_history(engine: Any, arg: str = "") -> None:
+    """显示历史会话列表、搜索结果或预览."""
+    from rich.markdown import Markdown
 
-    sessions, total = await engine.list_sessions(page=1, page_size=20)
-    if not sessions:
-        console.print("[dim]暂无历史会话[/dim]")
+    from naumi_agent.ui.history_screen import (
+        build_history_snapshot,
+        render_history_preview,
+        render_history_screen,
+    )
+
+    parts = arg.strip().split(maxsplit=1)
+    subcommand = parts[0].lower() if parts else ""
+    sub_arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if subcommand == "preview":
+        if not sub_arg:
+            console.print("[yellow]用法: /history preview <session_id>[/yellow]")
+            return
+        session = await engine.session_store.load(sub_arg)
+        if session is None:
+            console.print(f"[red]会话 {sub_arg} 不存在[/red]")
+            return
+        console.print(Markdown(render_history_preview(session)))
         return
 
-    table = Table(title=f"历史会话 (共 {total} 个)", show_lines=False)
-    table.add_column("ID", style="cyan", width=12)
-    table.add_column("标题", max_width=40)
-    table.add_column("消息数", justify="right", width=6)
-    table.add_column("Token", justify="right", width=8)
-    table.add_column("更新时间", width=20)
+    if subcommand == "archive":
+        if not sub_arg:
+            console.print("[yellow]用法: /history archive <session_id>[/yellow]")
+            return
+        if await engine.archive_session(sub_arg):
+            console.print(f"[green]已归档会话:[/green] {sub_arg}")
+        else:
+            console.print(f"[red]会话 {sub_arg} 不存在[/red]")
+        return
 
-    for s in sessions:
-        title = s.title or "新会话"
-        if len(title) > 38:
-            title = title[:36] + "…"
-        table.add_row(
-            s.id,
-            title,
-            str(len(s.messages)),
-            str(s.total_tokens),
-            s.updated_at.strftime("%Y-%m-%d %H:%M"),
-        )
+    if subcommand == "delete":
+        if not sub_arg:
+            console.print("[yellow]用法: /history delete <session_id>[/yellow]")
+            return
+        await _delete_session(engine, sub_arg)
+        return
 
-    console.print(table)
-    console.print("[dim]使用 /load <id> 加载指定会话[/dim]")
-    console.print()
+    query = arg.strip()
+    sessions, total = await engine.list_sessions(page=1, page_size=20, query=query)
+    git = _get_git_info()
+    snapshot = build_history_snapshot(
+        sessions,
+        total=total,
+        query=query,
+        current_session_id=engine._session.id if engine._session else None,
+        fallback_workspace=str(getattr(engine, "workspace_root", "")),
+        fallback_git_branch=str(git["branch"] or ""),
+    )
+    console.print(render_history_screen(snapshot))
 
 
 def _replay_session_to_cli(cli: Any, session: Any, engine: Any = None) -> None:

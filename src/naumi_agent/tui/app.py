@@ -34,6 +34,7 @@ from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.clipboard import copy_or_save_transcript
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
+from naumi_agent.ui.history_screen import build_history_snapshot, render_history_preview
 from naumi_agent.ui.keybindings import (
     KEYBINDING_DEFINITIONS,
     KeybindingSet,
@@ -97,6 +98,13 @@ class LoadSessionMessage(Message):
 
 
 class DeleteSessionMessage(Message):
+    def __init__(self, session_id: str, title: str) -> None:
+        super().__init__()
+        self.session_id = session_id
+        self.title = title
+
+
+class ArchiveSessionMessage(Message):
     def __init__(self, session_id: str, title: str) -> None:
         super().__init__()
         self.session_id = session_id
@@ -505,6 +513,7 @@ class HistoryPanel(VerticalScroll):
     """
 
     show_panel: reactive[bool] = reactive(False)
+    search_query: reactive[str] = reactive("")
 
     def watch_show_panel(self, show: bool) -> None:
         self.display = show
@@ -520,10 +529,17 @@ class HistoryPanel(VerticalScroll):
         for child in list(self.children):
             child.remove()
 
-        self.mount(Static("📋 历史会话", classes="history-title"))
+        title = "📋 历史会话"
+        if self.search_query:
+            title += f" · 搜索: {self.search_query}"
+        self.mount(Static(title, classes="history-title"))
 
         try:
-            sessions, total = await app.engine.list_sessions(page=1, page_size=50)
+            sessions, total = await app.engine.list_sessions(
+                page=1,
+                page_size=50,
+                query=self.search_query,
+            )
         except Exception:
             self.mount(Static("[dim]加载失败[/dim]"))
             return
@@ -532,22 +548,27 @@ class HistoryPanel(VerticalScroll):
             self.mount(Static("[dim]暂无历史会话[/dim]"))
             return
 
-        current_id = app.engine._session.id if app.engine._session else None
-
-        for s in sessions:
-            title = s.title or "新会话"
-            if len(title) > 28:
-                title = title[:26] + "…"
-            time_str = s.updated_at.strftime("%m-%d %H:%M")
-            msg_count = len(s.messages)
-            is_current = s.id == current_id
-
+        snapshot = build_history_snapshot(
+            sessions,
+            total=total,
+            query=self.search_query,
+            current_session_id=app.engine._session.id if app.engine._session else None,
+            fallback_workspace=str(getattr(app.engine, "workspace_root", "")),
+        )
+        for item in snapshot.items:
             entry = SessionEntry(
-                session_id=s.id,
-                title=title,
-                time_str=time_str,
-                msg_count=msg_count,
-                is_current=is_current,
+                session_id=item.id,
+                title=item.title,
+                time_str=item.updated_at.strftime("%m-%d %H:%M"),
+                msg_count=item.message_count,
+                meta=(
+                    f"{item.model} · Token {item.total_tokens} · "
+                    f"${item.total_cost_usd:.4f}"
+                ),
+                workspace=item.workspace_root,
+                git_branch=item.git_branch,
+                summary=item.summary,
+                is_current=item.is_current,
             )
             self.mount(entry)
 
@@ -566,6 +587,11 @@ class HistoryPanel(VerticalScroll):
                 app._delete_session(event.session_id, event.title)
 
         app.push_screen(DeleteConfirmScreen(event.title), on_confirm)
+
+    def on_archive_session_message(self, event: ArchiveSessionMessage) -> None:
+        app = self.app
+        if isinstance(app, NaumiApp):
+            app._archive_session(event.session_id)
 
 
 class DeleteConfirmScreen(ModalScreen[bool]):
@@ -715,6 +741,12 @@ class SessionEntry(Static):
         height: 3;
         min-width: 3;
     }
+
+    SessionEntry .archive-btn {
+        width: 3;
+        height: 3;
+        min-width: 3;
+    }
     """
 
     def __init__(
@@ -723,6 +755,10 @@ class SessionEntry(Static):
         title: str,
         time_str: str,
         msg_count: int,
+        meta: str = "",
+        workspace: str = "",
+        git_branch: str = "",
+        summary: str = "",
         is_current: bool = False,
         **kwargs: Any,
     ) -> None:
@@ -732,21 +768,33 @@ class SessionEntry(Static):
         self._entry_title = title
         self._entry_time = time_str
         self._entry_count = msg_count
+        self._entry_meta = meta
+        self._entry_workspace = workspace
+        self._entry_git_branch = git_branch
+        self._entry_summary = summary
         if is_current:
             self.add_class("current")
 
     def compose(self) -> ComposeResult:
+        workspace = Path(self._entry_workspace).name if self._entry_workspace else "未知工作区"
+        git = self._entry_git_branch or "未知分支"
         yield Static(
             f"[dim]{self.session_id}[/dim]\n"
             f"{self._entry_title}\n"
-            f"[dim]{self._entry_time} · {self._entry_count}条消息[/dim]",
+            f"[dim]{self._entry_time} · {self._entry_count}条消息 · {self._entry_meta}[/dim]\n"
+            f"[dim]{workspace} · {git}[/dim]\n"
+            f"[dim]{self._entry_summary}[/dim]",
             classes="session-info",
         )
+        yield Button("A", variant="warning", classes="archive-btn")
         yield Button("✕", variant="error", classes="delete-btn")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
-        self.post_message(DeleteSessionMessage(self.session_id, self.title_text))
+        if "archive-btn" in event.button.classes:
+            self.post_message(ArchiveSessionMessage(self.session_id, self.title_text))
+        else:
+            self.post_message(DeleteSessionMessage(self.session_id, self.title_text))
 
     def on_click(self) -> None:
         self.post_message(self.Clicked(self))
@@ -1438,7 +1486,7 @@ class NaumiApp(App):
                 )
                 chat.mount(Markdown(info, classes="agent-msg"))
             case "/history":
-                self.action_toggle_history()
+                self._run_history_command(arg)
             case "/load":
                 if not arg:
                     self.action_toggle_history()
@@ -2241,6 +2289,39 @@ class NaumiApp(App):
         if history.show_panel:
             history.refresh_sessions()
 
+    def _run_history_command(self, arg: str) -> None:
+        history = self.query_one(HistoryPanel)
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        parts = arg.strip().split(maxsplit=1)
+        subcommand = parts[0].lower() if parts else ""
+        sub_arg = parts[1].strip() if len(parts) > 1 else ""
+        if subcommand == "preview":
+            if not sub_arg:
+                status.status_text = "用法: /history preview <session_id>"
+                return
+            self._show_history_preview(sub_arg)
+            return
+        if subcommand == "archive":
+            if not sub_arg:
+                status.status_text = "用法: /history archive <session_id>"
+                return
+            self._archive_session(sub_arg)
+            return
+        if subcommand == "delete":
+            if not sub_arg:
+                status.status_text = "用法: /history delete <session_id>"
+                return
+            self._delete_session(sub_arg, sub_arg)
+            return
+        history.search_query = arg.strip()
+        history.show_panel = True
+        history.refresh_sessions()
+        if history.search_query:
+            chat.mount(
+                Markdown(f"历史会话搜索：`{history.search_query}`", classes="agent-msg")
+            )
+
     def on_load_session_message(self, msg: LoadSessionMessage) -> None:
         self._load_and_show_session(msg.session_id)
 
@@ -2440,6 +2521,32 @@ class NaumiApp(App):
             lines.append("")
 
         return "\n".join(lines).rstrip() + "\n"
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _show_history_preview(self, session_id: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        session = await self.engine.session_store.load(session_id)
+        if session is None:
+            status.status_text = f"会话不存在: {session_id}"
+            return
+        chat.mount(Markdown(render_history_preview(session), classes="agent-msg"))
+        status.status_text = f"已预览: {session.title or session_id}"
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _archive_session(self, session_id: str) -> None:
+        status = self.query_one(StatusBar)
+        try:
+            ok = await self.engine.archive_session(session_id)
+            if ok:
+                status.status_text = f"已归档: {session_id}"
+                history = self.query_one(HistoryPanel)
+                if history.show_panel:
+                    history.refresh_sessions()
+            else:
+                status.status_text = f"会话不存在: {session_id}"
+        except Exception as e:
+            status.status_text = f"归档失败: {e}"
 
     @work(exclusive=True, exit_on_error=False)
     async def _delete_session(self, session_id: str, title: str) -> None:
