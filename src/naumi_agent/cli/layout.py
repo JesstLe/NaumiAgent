@@ -198,10 +198,11 @@ class _DynamicLineControl(UIControl):
 class CLIApp:
     """Full-screen CLI: scrollable output + fixed input bar, no screen switching."""
 
-    def __init__(self) -> None:
+    def __init__(self, debug_trace: Any = None) -> None:
         self._output: list[str] = []
         self._live: list[str] = []
         self._processing = False
+        self._debug_trace = debug_trace
         self._app: Application | None = None
         self._input_buf = Buffer(
             multiline=False,
@@ -269,6 +270,7 @@ class CLIApp:
     async def _run_submit(self, text: str) -> None:
         self._processing = True
         self._live = []
+        self._debug_input("cli.input", text)
         if self._output_win:
             self._output_win.scroll_to_bottom()
         self._invalidate()
@@ -283,6 +285,7 @@ class CLIApp:
                     await self._on_submit(text)
         except Exception:
             self._append_captured_streams(stdout_buf, stderr_buf)
+            self._debug_exception("cli.submit", traceback.format_exc())
             self.append_output(self._format_submit_exception())
         finally:
             self._append_captured_streams(stdout_buf, stderr_buf)
@@ -302,6 +305,7 @@ class CLIApp:
         if not text:
             return
         self._output.append(text)
+        self._debug_output("cli.captured_stream", text)
         stdout_buf.seek(0)
         stdout_buf.truncate(0)
         stderr_buf.seek(0)
@@ -319,6 +323,27 @@ class CLIApp:
             f"\033[2m{trace}\033[0m\n"
         )
 
+    def _debug_input(self, source: str, text: str, **extra: Any) -> None:
+        if self._debug_trace is not None:
+            self._debug_trace.input(source, text, **extra)
+
+    def _debug_output(self, sink: str, text: str, **extra: Any) -> None:
+        if self._debug_trace is not None:
+            self._debug_trace.output(sink, text, **extra)
+
+    def _debug_exception(self, where: str, trace: str) -> None:
+        if self._debug_trace is not None:
+            self._debug_trace.event("exception", {"where": where, "trace": trace})
+
+    def record_debug_event(self, name: str, data: dict[str, Any] | None = None) -> None:
+        if self._debug_trace is not None:
+            self._debug_trace.event(name, data or {})
+
+    def debug_info(self) -> str:
+        if self._debug_trace is None:
+            return "当前 CLI 未启用结构化调试日志。"
+        return self._debug_trace.describe()
+
     def exit(self) -> None:
         if self._app:
             self._app.exit()
@@ -329,17 +354,21 @@ class CLIApp:
 
     def append_output(self, ansi_text: str) -> None:
         self._output.append(ansi_text)
+        self._debug_output("cli.output", ansi_text)
         if self._output_win:
             self._output_win.ensure_at_bottom()
         self._invalidate()
 
     def append_live(self, text: str) -> None:
         self._live.append(text)
+        self._debug_output("cli.live", text, live=True)
         if self._output_win:
             self._output_win.ensure_at_bottom()
         self._invalidate()
 
     def finalize_live(self) -> None:
+        if self._live:
+            self.record_debug_event("cli.live_finalized", {"chunks": len(self._live)})
         self._output.extend(self._live)
         self._live = []
         if self._output_win:
@@ -347,6 +376,10 @@ class CLIApp:
         self._invalidate()
 
     def clear_output(self) -> None:
+        self.record_debug_event(
+            "cli.output_cleared",
+            {"output_chunks": len(self._output), "live_chunks": len(self._live)},
+        )
         self._output.clear()
         self._live.clear()
         if self._output_win:
@@ -360,6 +393,7 @@ class CLIApp:
     def set_status(self, text: str) -> None:
         """Update fixed bottom status text without adding it to chat history."""
         self._status_text = text
+        self.record_debug_event("cli.status", {"text": text})
         self._invalidate()
 
     def get_transcript(self) -> str:

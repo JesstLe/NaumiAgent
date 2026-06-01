@@ -192,6 +192,7 @@ def chat(
 
 
 def _launch_tui(config_path: str) -> None:
+    from naumi_agent.debug_trace import DebugTrace
     from naumi_agent.log_setup import setup_logging
     from naumi_agent.orchestrator.engine import AgentEngine
     from naumi_agent.tui.app import NaumiApp
@@ -201,7 +202,16 @@ def _launch_tui(config_path: str) -> None:
     setup_logging(config.log_level)
     _check_api_key(config)
     engine = AgentEngine(config)
-    app = NaumiApp(engine)
+    debug_trace = DebugTrace.create(
+        interface="tui",
+        base_dir=Path(config.memory.session_db_path).parent / "debug-runs",
+        metadata={
+            "config_path": resolved,
+            "workspace_root": str(engine.workspace_root),
+            "model": engine.router.resolve_model("capable"),
+        },
+    )
+    app = NaumiApp(engine, debug_trace=debug_trace)
     app.run()
 
 
@@ -447,6 +457,8 @@ def _cli_event_factory(cli: Any):
         nonlocal thinking_started, has_streamed_tokens
         nonlocal model_name, token_count, first_token_time, last_token_time
         nonlocal turn_start_time
+        if hasattr(cli, "record_debug_event"):
+            cli.record_debug_event("engine.stream_event", {"event": event, "data": data})
 
         if event == "turn_start":
             model_name = data.get("model", "")
@@ -546,6 +558,7 @@ def _cli_event_factory(cli: Any):
 
 async def _chat(config_path: str) -> None:
     from naumi_agent.cli.layout import CLIApp
+    from naumi_agent.debug_trace import DebugTrace
     from naumi_agent.log_setup import setup_logging
     from naumi_agent.orchestrator.engine import AgentEngine
 
@@ -554,8 +567,17 @@ async def _chat(config_path: str) -> None:
     setup_logging(config.log_level)
     _check_api_key(config)
     engine = AgentEngine(config)
+    debug_trace = DebugTrace.create(
+        interface="cli",
+        base_dir=Path(config.memory.session_db_path).parent / "debug-runs",
+        metadata={
+            "config_path": resolved,
+            "workspace_root": str(engine.workspace_root),
+            "model": engine.router.resolve_model("capable"),
+        },
+    )
 
-    cli = CLIApp()
+    cli = CLIApp(debug_trace=debug_trace)
     global _active_cli
     _active_cli = cli
 
@@ -571,18 +593,22 @@ async def _chat(config_path: str) -> None:
 
     async def on_submit(text: str) -> None:
         if text in ("/quit", "/q", "/exit", "exit"):
+            cli.record_debug_event("cli.exit_requested", {"text": text})
             await engine.shutdown()
+            debug_trace.close()
             cli.exit()
             return
 
         cli.append_output(f"\033[32m❯\033[0m {text}\n")
 
         if text.startswith("/"):
+            cli.record_debug_event("cli.command_start", {"command": text})
             async def _run_cmd() -> None:
                 await _handle_command(engine, text)
 
             output = await _capture_async(_run_cmd)
             cli.append_output(output)
+            cli.record_debug_event("cli.command_end", {"command": text, "output": output})
             return
 
         # Suppress log noise during streaming
@@ -591,7 +617,17 @@ async def _chat(config_path: str) -> None:
         logging.getLogger("naumi_agent").setLevel(logging.ERROR)
 
         event_handler = _cli_event_factory(cli)
+        cli.record_debug_event("cli.agent_run_start", {"task": text})
         result = await engine.run_streaming(text, event_handler)
+        cli.record_debug_event(
+            "cli.agent_run_end",
+            {
+                "status": result.status,
+                "response": result.response,
+                "error": result.error,
+                "usage": result.usage,
+            },
+        )
 
         # Restore log levels
         logging.getLogger("litellm").setLevel(logging.WARNING)
@@ -619,7 +655,10 @@ async def _chat(config_path: str) -> None:
         _show_cli_status(cli, engine)
 
     cli.set_submit_handler(on_submit)
-    await cli.run()
+    try:
+        await cli.run()
+    finally:
+        debug_trace.close()
 
 
 @app.command()
@@ -845,6 +884,11 @@ async def _handle_command(engine: Any, cmd: str) -> None:
     match command:
         case "/h" | "/help":
             _print_help()
+        case "/debug":
+            if _active_cli and hasattr(_active_cli, "debug_info"):
+                console.print(_active_cli.debug_info())
+            else:
+                console.print("[yellow]当前界面未暴露调试日志路径[/yellow]")
         case "/hooks":
             _show_hooks(engine)
         case "/copy":
@@ -1246,6 +1290,7 @@ def _print_help() -> None:
     commands = [
         ("/help", "显示帮助"),
         ("/copy", "复制/导出当前完整记录 (Ctrl+Y)"),
+        ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
         ("/pwd", "显示当前工作目录"),
         ("/tools", "列出可用工具"),
         ("/model", "显示模型配置"),

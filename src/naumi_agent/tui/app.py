@@ -91,6 +91,7 @@ class ChatPanel(VerticalScroll):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self.debug_trace: Any | None = None
         self._response_text = ""
         self._response_widget: Markdown | Static | None = None
         self._thinking_text = ""
@@ -100,12 +101,27 @@ class ChatPanel(VerticalScroll):
         self._model_widget: Static | None = None
 
     def add_user_message(self, content: str) -> None:
+        self._trace_output("tui.user_message", content)
         self.mount(Markdown(f"**你** {content}", classes="user-msg"))
         self.scroll_end(animate=False)
+
+    def mount(self, *widgets: Any, before: Any = None, after: Any = None) -> Any:
+        for widget in widgets:
+            text = self._widget_debug_text(widget)
+            payload = {
+                "widget": type(widget).__name__,
+                "classes": sorted(getattr(widget, "_classes", set())),
+            }
+            if text:
+                self._trace_output("tui.mount", text, **payload)
+            else:
+                self._trace_event("tui.mount", payload)
+        return super().mount(*widgets, before=before, after=after)
 
     # --- 思考过程 ---
 
     def start_thinking(self) -> None:
+        self._trace_event("tui.thinking_start", {})
         self._thinking_text = ""
         self._thinking_content_widget = Static(_THINKING_LABEL, classes="thinking-content")
         self._thinking_collapsible = Collapsible(
@@ -117,12 +133,14 @@ class ChatPanel(VerticalScroll):
         self.scroll_end(animate=False)
 
     def add_thinking_chunk(self, content: str) -> None:
+        self._trace_output("tui.thinking", content)
         self._thinking_text += content
         if self._thinking_content_widget:
             self._thinking_content_widget.update(RichMarkdown(self._thinking_text))
             self.scroll_end(animate=False)
 
     def end_thinking(self) -> None:
+        self._trace_event("tui.thinking_end", {"chars": len(self._thinking_text)})
         if not self._thinking_text:
             if self._thinking_collapsible:
                 self._thinking_collapsible.remove()
@@ -150,12 +168,14 @@ class ChatPanel(VerticalScroll):
     # --- 流式响应 ---
 
     def start_response(self) -> None:
+        self._trace_event("tui.response_start", {})
         self._response_text = ""
         self._response_widget = Markdown("", classes="agent-msg")
         self.mount(self._response_widget)
         self.scroll_end(animate=False)
 
     def add_response_token(self, token: str) -> None:
+        self._trace_output("tui.response_token", token)
         self._response_text += token
         if self._response_widget:
             self._response_widget.update(self._response_text)
@@ -164,6 +184,7 @@ class ChatPanel(VerticalScroll):
     # --- 工具调用 ---
 
     def start_tool(self, name: str) -> None:
+        self._trace_event("tui.tool_start", {"name": name})
         self._current_tool_widget = Static(
             Text.from_markup(f"  ⏳ [dim]{name}[/dim]"),
             classes="tool-running",
@@ -172,6 +193,10 @@ class ChatPanel(VerticalScroll):
         self.scroll_end(animate=False)
 
     def end_tool(self, name: str, status: str, duration_ms: int) -> None:
+        self._trace_event(
+            "tui.tool_end",
+            {"name": name, "status": status, "duration_ms": duration_ms},
+        )
         if self._current_tool_widget is None:
             return
         icon = "✅" if status == "success" else "❌"
@@ -186,6 +211,7 @@ class ChatPanel(VerticalScroll):
     # --- 清空 ---
 
     def clear(self) -> None:
+        self._trace_event("tui.chat_cleared", {"children": len(self.children)})
         self.query(Static).remove()
         self.query(Markdown).remove()
         self.query(Collapsible).remove()
@@ -202,6 +228,7 @@ class ChatPanel(VerticalScroll):
 
     def show_model(self, model: str) -> None:
         """Display the model name before response starts."""
+        self._trace_event("tui.model", {"model": model})
         self._model_widget = Static(
             Text.from_markup(f"[dim]  ⚙ {model}[/dim]"),
             classes="tool-done",
@@ -225,6 +252,17 @@ class ChatPanel(VerticalScroll):
         output_tokens: int = 0,
         engine: Any = None,
     ) -> None:
+        self._trace_event(
+            "tui.response_finalized",
+            {
+                "turns": turns,
+                "cost": cost,
+                "tokens": tokens,
+                "model": model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            },
+        )
         self._response_text = ""
         self._response_widget = None
 
@@ -277,6 +315,10 @@ class ChatPanel(VerticalScroll):
         self.scroll_end(animate=False)
 
     def add_tool_call(self, tool_name: str, status: str, duration_ms: int) -> None:
+        self._trace_event(
+            "tui.tool_call",
+            {"tool_name": tool_name, "status": status, "duration_ms": duration_ms},
+        )
         color = "green" if status == "success" else "red"
         self.mount(
             Static(
@@ -284,6 +326,21 @@ class ChatPanel(VerticalScroll):
                 classes="tool-msg",
             )
         )
+
+    def _trace_event(self, name: str, data: dict[str, Any]) -> None:
+        if self.debug_trace is not None:
+            self.debug_trace.event(name, data)
+
+    def _trace_output(self, sink: str, text: str, **extra: Any) -> None:
+        if self.debug_trace is not None:
+            self.debug_trace.output(sink, text, **extra)
+
+    def _widget_debug_text(self, widget: Any) -> str:
+        for attr in ("_initial_markdown", "_Static__content"):
+            value = getattr(widget, attr, None)
+            if value is not None:
+                return str(value)
+        return ""
 
 
 class ActivityPanel(VerticalScroll):
@@ -730,8 +787,11 @@ class StatusBar(Static):
     """
 
     status_text: reactive[str] = reactive("就绪")
+    debug_trace: Any | None = None
 
     def watch_status_text(self, text: str) -> None:
+        if self.debug_trace is not None:
+            self.debug_trace.event("tui.status", {"text": text})
         self.update(text)
 
 
@@ -861,9 +921,15 @@ class NaumiApp(App):
         Binding("ctrl+b", "toggle_browser", "浏览器"),
     ]
 
-    def __init__(self, engine: AgentEngine, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        engine: AgentEngine,
+        debug_trace: Any | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.engine = engine
+        self.debug_trace = debug_trace
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -878,10 +944,19 @@ class NaumiApp(App):
         yield Footer()
 
     async def on_unmount(self) -> None:
+        if self.debug_trace is not None:
+            self.debug_trace.event("tui.unmount", {})
+            self.debug_trace.close()
         await self.engine.shutdown()
 
     def on_mount(self) -> None:
         """Initialize UI on startup."""
+        chat = self.query_one(ChatPanel)
+        chat.debug_trace = self.debug_trace
+        status = self.query_one(StatusBar)
+        status.debug_trace = self.debug_trace
+        if self.debug_trace is not None:
+            self.debug_trace.event("tui.mount", {"title": self.TITLE})
         self._update_git_title()
         self._show_startup_status()
 
@@ -928,6 +1003,8 @@ class NaumiApp(App):
 
     def on_user_input_message(self, msg: UserInputMessage) -> None:
         text = msg.content.strip()
+        if self.debug_trace is not None:
+            self.debug_trace.input("tui.input", msg.content)
 
         # 斜杠命令拦截
         if text.startswith("/"):
@@ -943,6 +1020,8 @@ class NaumiApp(App):
         self._run_agent(msg.content)
 
     def _handle_slash_command(self, text: str) -> None:
+        if self.debug_trace is not None:
+            self.debug_trace.event("tui.command_start", {"command": text})
         parts = text.split(maxsplit=1)
         cmd = parts[0]
         arg = parts[1] if len(parts) > 1 else ""
@@ -972,6 +1051,7 @@ class NaumiApp(App):
                     "## 可用命令\n"
                     "- `/help` — 显示帮助\n"
                     "- `/copy` — 复制/导出当前完整记录 (Ctrl+Y)\n"
+                    "- `/debug` — 显示本次结构化调试日志位置\n"
                     "- `/pwd` — 显示当前工作目录\n"
                     "- `/tools` — 列出可用工具\n"
                     "- `/model` — 显示模型配置\n"
@@ -1041,6 +1121,13 @@ class NaumiApp(App):
                     "- `/quit` — 退出\n"
                 )
                 chat.mount(Markdown(help_text, classes="agent-msg"))
+            case "/debug":
+                info = (
+                    self.debug_trace.describe()
+                    if self.debug_trace is not None
+                    else "当前 TUI 未启用结构化调试日志。"
+                )
+                chat.mount(Markdown(f"```\n{info}\n```", classes="agent-msg"))
             case "/copy":
                 self.action_copy_transcript()
             case "/pwd":
@@ -1320,6 +1407,8 @@ class NaumiApp(App):
                 else:
                     self._show_btemplate_compare(arg)
             case "/quit" | "/exit":
+                if self.debug_trace is not None:
+                    self.debug_trace.event("tui.exit_requested", {"command": text})
                 self.exit()
             case _:
                 chat.mount(
@@ -1337,6 +1426,8 @@ class NaumiApp(App):
 
         chat = self.query_one(ChatPanel)
         status = self.query_one(StatusBar)
+        if self.debug_trace is not None:
+            self.debug_trace.event("tui.agent_run_start", {"task": task})
 
         # Streaming state for metrics
         streaming_model = ""
@@ -1349,6 +1440,11 @@ class NaumiApp(App):
             nonlocal streaming_model, streaming_token_count
             nonlocal streaming_first_time, streaming_last_time
             nonlocal streaming_turn_start
+            if self.debug_trace is not None:
+                self.debug_trace.event(
+                    "engine.stream_event",
+                    {"event": event_type, "data": data},
+                )
 
             match event_type:
                 case "turn_start":
@@ -1594,6 +1690,16 @@ class NaumiApp(App):
 
         try:
             result = await self.engine.run_streaming(task, on_event)
+            if self.debug_trace is not None:
+                self.debug_trace.event(
+                    "tui.agent_run_end",
+                    {
+                        "status": result.status,
+                        "response": result.response,
+                        "error": result.error,
+                        "usage": result.usage,
+                    },
+                )
 
             if result.status == "error" and result.error:
                 chat.start_response()
@@ -1636,6 +1742,8 @@ class NaumiApp(App):
             status.status_text = "✅ " + " | ".join(status_parts)
         except Exception as e:
             logger.exception("Agent run failed")
+            if self.debug_trace is not None:
+                self.debug_trace.exception("tui.agent_run", e, task=task)
             chat.start_response()
             chat.add_response_token(f"**错误**: {e}")
             chat.finalize(0, 0.0, engine=self.engine)
