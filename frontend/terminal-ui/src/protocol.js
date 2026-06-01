@@ -19,7 +19,7 @@ export function splitShellLike(command) {
   return command.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((part) => part.replace(/^"|"$/g, "")) ?? [];
 }
 
-export function createEventSender(writable) {
+export function createEventSender(writable, { debugLog = null } = {}) {
   let nextClientId = 1;
   return function send(type, payload) {
     const record = {
@@ -28,7 +28,9 @@ export function createEventSender(writable) {
       version: 1,
       payload,
     };
-    writable.write(`${JSON.stringify(record)}\n`);
+    const line = `${JSON.stringify(record)}\n`;
+    debugLog?.log("protocol.send", { record, line });
+    writable.write(line);
     return record.id;
   };
 }

@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
 import { ANSI } from "./ansi.js";
+import { createDebugLog } from "./debug-log.js";
 import {
   INPUT_KEYS,
   backspaceInput,
@@ -21,6 +22,7 @@ import { getUiSnapshot, loadUiStateStore, saveUiStateStore, setUiSnapshot } from
 const args = parseArgs(process.argv.slice(2));
 const state = createInitialState();
 const uiStateStore = loadUiStateStore(process.cwd());
+const debugLog = createDebugLog({ cwd: process.cwd(), env: process.env });
 
 let bridge = null;
 let send = null;
@@ -31,17 +33,21 @@ main();
 
 function main() {
   bridge = startBridge();
-  send = createEventSender(bridge.stdin);
+  send = createEventSender(bridge.stdin, { debugLog });
   attachJsonlLineReader(bridge.stdout, handleBridgeLine);
   bridge.stderr.on("data", (chunk) => {
-    pushSystemMessage(state, "bridge stderr", chunk.toString("utf8").trim(), "warning");
+    const text = chunk.toString("utf8").trim();
+    debugLog?.log("bridge.stderr", { text });
+    pushSystemMessage(state, "bridge stderr", text, "warning");
   });
   bridge.on("exit", (code, signal) => {
+    debugLog?.log("bridge.exit", { code, signal, quitting });
     if (!quitting) {
       pushSystemMessage(state, "bridge exit", `后端桥接已退出 code=${code} signal=${signal}`, "error");
       redraw();
     }
     restoreTerminal();
+    debugLog?.close();
     process.exit(code ?? 0);
   });
 
@@ -86,25 +92,30 @@ function restoreTerminal() {
 function exit() {
   if (quitting) return;
   quitting = true;
+  debugLog?.log("terminal_ui.exit", {});
   try {
     send("shutdown", {});
   } catch {
     // ignore shutdown write failures
   }
   restoreTerminal();
+  debugLog?.close();
   bridge?.kill("SIGTERM");
   process.exit(0);
 }
 
 function handleBridgeLine(line) {
   if (!line.trim()) return;
+  debugLog?.log("protocol.receive.line", { line });
   let record;
   try {
     record = JSON.parse(line);
   } catch {
+    debugLog?.log("protocol.receive.error", { line, error: "JSON.parse failed" });
     pushSystemMessage(state, "bridge json", line, "error");
     return;
   }
+  debugLog?.log("protocol.receive.record", { type: record.type, request_id: record.request_id, seq: record.seq, payload: record.payload });
   const actions = reduceServerEvent(state, record);
   for (const action of actions) {
     if (action.type === "session_replayed") {
@@ -120,6 +131,10 @@ function handleBridgeLine(line) {
 }
 
 function handleKeyInput(chunk) {
+  debugLog?.log("input.chunk", {
+    chars: String(chunk),
+    char_count: Array.from(String(chunk)).length,
+  });
   for (const key of splitInputChunk(chunk)) {
     handleSingleKeyInput(key);
   }
@@ -240,6 +255,25 @@ function scheduleRedraw() {
 function redraw() {
   const width = Math.max(60, process.stdout.columns ?? 100);
   const height = Math.max(12, process.stdout.rows ?? 30);
-  const lines = renderScreen(state, width, height, { cwd: process.cwd(), home: process.env.HOME });
-  process.stdout.write(ANSI.clear + lines.join("\n"));
+  try {
+    const lines = renderScreen(state, width, height, { cwd: process.cwd(), home: process.env.HOME });
+    debugLog?.log("render.screen", {
+      width,
+      height,
+      line_count: lines.length,
+      messages: state.messages.length,
+      running: state.running,
+      mode: state.mode,
+      scroll_offset: state.scrollOffset,
+    });
+    process.stdout.write(ANSI.clear + lines.join("\n"));
+  } catch (error) {
+    debugLog?.log("render.error", {
+      width,
+      height,
+      error: `${error.name}: ${error.message}`,
+      stack: error.stack,
+    });
+    throw error;
+  }
 }

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
@@ -37,6 +38,12 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
     assert(plain.includes("todo: 1/3 完成"));
     assert(plain.includes("准备 file_write"));
     assert(plain.includes("success file_write showcase/index.html"));
+
+    const debugEvents = readDebugEvents(app.debugLogPath);
+    assert(debugEvents.some((record) => record.event === "input.chunk"));
+    assert(debugEvents.some((record) => record.event === "protocol.send" && record.payload.record.type === "submit"));
+    assert(debugEvents.some((record) => record.event === "protocol.receive.record" && record.payload.type === "ui/message"));
+    assert(debugEvents.some((record) => record.event === "render.screen"));
   } finally {
     forceKill(app);
   }
@@ -129,7 +136,8 @@ test("terminal UI process recalls submitted input with arrow history", async () 
 
 function launchTerminalUi(fixtureName = "fake-bridge.js") {
   const fakeBridge = new URL(`./fixtures/${fixtureName}`, import.meta.url).pathname;
-  return spawn(
+  const debugLogPath = path.join(tmpdir(), `naumi-terminal-ui-debug-${Date.now()}-${Math.random()}.jsonl`);
+  const child = spawn(
     process.execPath,
     ["src/index.js", "--bridge-command", `${process.execPath} ${fakeBridge}`],
     {
@@ -139,9 +147,12 @@ function launchTerminalUi(fixtureName = "fake-bridge.js") {
         ...process.env,
         FORCE_COLOR: "0",
         NAUMI_TERMINAL_UI_STATE_PATH: path.join(tmpdir(), `naumi-terminal-ui-state-${Date.now()}-${Math.random()}.json`),
+        NAUMI_TERMINAL_UI_DEBUG_LOG: debugLogPath,
       },
     },
   );
+  child.debugLogPath = debugLogPath;
+  return child;
 }
 
 function collectOutput(child) {
@@ -187,4 +198,8 @@ async function waitForOutput(output, needle, timeoutMs = 1500) {
     await delay(20);
   }
   assert.fail(`等待输出超时: ${needle}\n\n${stripAnsi(output.text).slice(-3000)}`);
+}
+
+function readDebugEvents(filePath) {
+  return fs.readFileSync(filePath, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
