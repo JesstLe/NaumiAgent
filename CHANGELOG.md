@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6] - 2026-06-01
+
+### Added
+- **JIT 工具确定性落地** — `/jit` 在模型路由未初始化时也会生成可运行 Python 脚本，并返回执行状态。
+- **安全算术执行** — `/jit` 可识别简单算术表达式，通过受限 AST 求值返回确定性结果；非直接算术任务会生成可运行的任务分类/验证脚手架。
+
 ## [0.1.5] - 2026-06-01
 
 ### Added
