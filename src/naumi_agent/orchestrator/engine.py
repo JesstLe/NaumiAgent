@@ -1019,6 +1019,98 @@ class AgentEngine:
                 })
         return result
 
+    async def _call_model_with_recovery(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        tier: ModelTier,
+        tools: list[dict[str, Any]] | None,
+        on_event: EventCallback | None = None,
+        streaming: bool = False,
+        cause: Exception | None = None,
+    ) -> Any:
+        """Call the model and recover once from prompt-too-long failures."""
+        try:
+            if cause is not None and _is_prompt_too_long_error(cause):
+                raise cause
+            return await self._router.call(messages=messages, tier=tier, tools=tools)
+        except Exception as e:
+            if not _is_prompt_too_long_error(e):
+                raise
+            recovered = await self._reactive_compact_for_prompt_too_long(
+                on_event=on_event,
+                streaming=streaming,
+                error=e,
+            )
+            if not recovered:
+                raise
+            return await self._router.call(
+                messages=self._messages,
+                tier=tier,
+                tools=tools,
+            )
+
+    async def _reactive_compact_for_prompt_too_long(
+        self,
+        *,
+        on_event: EventCallback | None = None,
+        streaming: bool = False,
+        error: Exception,
+    ) -> bool:
+        """Aggressively make room after a prompt-too-long model error."""
+        before = len(self._messages)
+        self._messages = [
+            message for message in self._messages
+            if not is_harness_context_message(message)
+        ]
+        base_count = len(self._messages)
+        runtime_snapshot, preserved_sections, warnings = (
+            await self._build_compaction_runtime_snapshot()
+        )
+        if on_event is not None:
+            await on_event("recovery_event", {
+                "reason": "prompt_too_long",
+                "action": "reactive_compact_retry",
+                "phase": "started",
+                "before": before,
+                "streaming": streaming,
+                "error": str(error)[:240],
+            })
+
+        self._messages = await self._compactor.compact(
+            self._messages,
+            max_tokens=1,
+            runtime_snapshot=runtime_snapshot,
+        )
+
+        if len(self._messages) >= base_count:
+            self._messages = _fallback_reactive_compact_messages(
+                self._messages,
+                runtime_snapshot=runtime_snapshot,
+            )
+
+        await self._inject_harness_context_snapshot(on_event)
+        after = len(self._messages)
+        recovered = after < before
+        if on_event is not None:
+            await on_event("recovery_event", {
+                "reason": "prompt_too_long",
+                "action": "reactive_compact_retry",
+                "phase": "completed" if recovered else "failed",
+                "before": before,
+                "after": after,
+                "streaming": streaming,
+                "preserved_sections": preserved_sections,
+                "warnings": warnings,
+            })
+        logger.warning(
+            "Reactive compact for prompt_too_long: %d → %d messages (recovered=%s)",
+            before,
+            after,
+            recovered,
+        )
+        return recovered
+
     async def _inject_harness_context_snapshot(
         self,
         on_event: EventCallback | None = None,
@@ -1404,7 +1496,7 @@ class AgentEngine:
                 data={"turn": turn + 1, "message_count": len(self._messages)},
                 session_id=session_id,
             ))
-            response = await self._router.call(
+            response = await self._call_model_with_recovery(
                 messages=self._messages,
                 tier=ModelTier.CAPABLE,
                 tools=tools,
@@ -1685,10 +1777,13 @@ class AgentEngine:
                         collected_tool_calls.update(chunk.tool_call)
             except Exception as e:
                 logger.warning("Streaming failed, fallback to non-streaming: %s", e)
-                response = await self._router.call(
+                response = await self._call_model_with_recovery(
                     messages=self._messages,
                     tier=ModelTier.CAPABLE,
                     tools=tools,
+                    on_event=on_event,
+                    streaming=True,
+                    cause=e,
                 )
                 self._track_model_usage(response.usage, model_str)
                 stream_tokens = response.usage.total_tokens
@@ -2105,3 +2200,47 @@ def _append_harness_context_sections(snapshot: str, sections: list[str]) -> str:
     if snapshot.endswith(closing):
         return snapshot[: -len(closing)] + f"\n\n{extra}{closing}"
     return f"{snapshot}\n\n{extra}"
+
+
+def _is_prompt_too_long_error(error: Exception) -> bool:
+    """Detect provider errors that mean the input context is too large."""
+    text = f"{type(error).__name__}: {error}".lower()
+    markers = (
+        "prompt_too_long",
+        "context_length",
+        "context length",
+        "maximum context",
+        "max context",
+        "input too long",
+        "too many tokens",
+        "token limit",
+        "request too large",
+        "413",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _fallback_reactive_compact_messages(
+    messages: list[dict[str, Any]],
+    *,
+    runtime_snapshot: str,
+) -> list[dict[str, Any]]:
+    """Deterministic fallback when LLM compaction cannot reduce the prompt."""
+    system_messages = [
+        message for message in messages
+        if message.get("role") == "system"
+        and not is_harness_context_message(message)
+    ]
+    base_system = system_messages[:1]
+    non_system = [message for message in messages if message.get("role") != "system"]
+    recent = non_system[-5:]
+    summary = {
+        "role": "system",
+        "content": (
+            "## Reactive compact fallback\n\n"
+            "模型报告上下文超限。旧对话已被确定性裁剪，只保留最近消息和运行时状态。"
+            "\n\n## 压缩时保留的运行时状态\n\n"
+            f"{runtime_snapshot.strip() or '无额外运行时状态。'}"
+        ),
+    }
+    return [*base_system, summary, *recent]

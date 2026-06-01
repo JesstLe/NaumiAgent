@@ -8,6 +8,7 @@ from naumi_agent.main import (
     _capture,
     _cli_event_factory,
     _format_context_compacted,
+    _format_recovery_event,
     _print_tool_output,
     _show_cli_status,
     _tool_label,
@@ -120,3 +121,18 @@ def test_context_compacted_rendering_includes_preserved_state_and_warnings() -> 
     assert "todo" in rendered
     assert "team_protocol" in rendered
     assert "未完成/阻塞" in rendered
+
+
+def test_recovery_event_rendering_includes_reason_and_action() -> None:
+    rendered = _format_recovery_event({
+        "reason": "prompt_too_long",
+        "action": "reactive_compact_retry",
+        "phase": "completed",
+        "before": 80,
+        "after": 9,
+    })
+
+    assert "prompt_too_long" in rendered
+    assert "reactive_compact_retry" in rendered
+    assert "80" in rendered
+    assert "9" in rendered

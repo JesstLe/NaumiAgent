@@ -1498,6 +1498,34 @@ class NaumiApp(App):
                         )
                     )
                     status.status_text = "上下文已压缩，运行时状态已保留"
+                case "recovery_event":
+                    reason = str(data.get("reason", "?"))
+                    action = str(data.get("action", "?"))
+                    phase = str(data.get("phase", "?"))
+                    before = data.get("before", "?")
+                    after = data.get("after", "?")
+                    style = (
+                        "green"
+                        if phase == "completed"
+                        else "red"
+                        if phase == "failed"
+                        else "yellow"
+                    )
+                    suffix = (
+                        f" {before} → {after} messages"
+                        if after != "?"
+                        else f" before={before}"
+                    )
+                    chat.mount(
+                        Static(
+                            Text.from_markup(
+                                f"  [{style}]recovery {phase}: {action} "
+                                f"({reason}){suffix}[/{style}]"
+                            ),
+                            classes="tool-done",
+                        )
+                    )
+                    status.status_text = f"恢复流程：{phase}"
                 case "error":
                     chat.start_response()
                     chat.add_response_token(f"**错误**: {data['message']}")

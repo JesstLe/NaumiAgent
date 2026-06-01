@@ -14,7 +14,7 @@ from naumi_agent.agents.team_protocol import execute_team_signal
 from naumi_agent.config.settings import AppConfig, MemoryConfig, SafetyConfig
 from naumi_agent.hooks import HookContext, HookPoint
 from naumi_agent.memory.session import Session
-from naumi_agent.model.router import ModelResponse, TokenUsage
+from naumi_agent.model.router import ModelResponse, ModelTier, TokenUsage
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.orchestrator.subagent_manager import SubTask
@@ -764,6 +764,126 @@ class TestContextCompactionPreservation:
             assert "接手压缩保真验证" in summary_text
             assert "没有找到合适的子 Agent" in summary_text
             assert "先不要全量测试" in summary_text
+        finally:
+            await engine.shutdown()
+
+
+class TestErrorRecovery:
+    @pytest.mark.asyncio
+    async def test_prompt_too_long_reactive_compacts_and_retries(
+        self,
+        tmp_path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        try:
+            engine._messages = [
+                {"role": "system", "content": "system prompt"},
+                *[
+                    {"role": "user", "content": f"long history {i}"}
+                    for i in range(20)
+                ],
+            ]
+            recovered_response = ModelResponse(
+                content="恢复成功",
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test",
+            )
+            compacted_messages = [
+                {"role": "system", "content": "system prompt"},
+                {"role": "system", "content": "compact summary"},
+                {"role": "user", "content": "latest"},
+            ]
+            with (
+                patch.object(
+                    engine._router,
+                    "call",
+                    new_callable=AsyncMock,
+                    side_effect=[
+                        RuntimeError("prompt_too_long: context length exceeded"),
+                        recovered_response,
+                    ],
+                ) as mock_call,
+                patch.object(
+                    engine._compactor,
+                    "compact",
+                    new_callable=AsyncMock,
+                    return_value=compacted_messages,
+                ),
+            ):
+                result = await engine._call_model_with_recovery(
+                    messages=engine._messages,
+                    tier=ModelTier.CAPABLE,
+                    tools=None,
+                    on_event=on_event,
+                )
+
+            assert result.content == "恢复成功"
+            assert mock_call.call_count == 2
+            recovery_events = [data for event, data in events if event == "recovery_event"]
+            assert [event["phase"] for event in recovery_events] == ["started", "completed"]
+            assert recovery_events[-1]["action"] == "reactive_compact_retry"
+            assert len(engine._messages) < 22
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_prompt_too_long_uses_deterministic_fallback_if_compactor_stalls(
+        self,
+        tmp_path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        try:
+            original_messages = [
+                {"role": "system", "content": "system prompt"},
+                *[
+                    {"role": "user", "content": f"long history {i}"}
+                    for i in range(20)
+                ],
+            ]
+            engine._messages = list(original_messages)
+            recovered_response = ModelResponse(
+                content="fallback ok",
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test",
+            )
+            with (
+                patch.object(
+                    engine._router,
+                    "call",
+                    new_callable=AsyncMock,
+                    side_effect=[
+                        RuntimeError("context_length exceeded"),
+                        recovered_response,
+                    ],
+                ),
+                patch.object(
+                    engine._compactor,
+                    "compact",
+                    new_callable=AsyncMock,
+                    return_value=original_messages,
+                ),
+            ):
+                result = await engine._call_model_with_recovery(
+                    messages=engine._messages,
+                    tier=ModelTier.CAPABLE,
+                    tools=None,
+                )
+
+            assert result.content == "fallback ok"
+            summary_text = "\n".join(str(msg.get("content", "")) for msg in engine._messages)
+            assert "Reactive compact fallback" in summary_text
+            assert len(engine._messages) < len(original_messages)
         finally:
             await engine.shutdown()
 
