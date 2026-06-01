@@ -178,6 +178,8 @@ async def run_background(engine: Any, arg: str) -> None:
                 console.print("[yellow]用法: /background cancel <任务ID>[/yellow]")
                 return
             await _execute("background_cancel", task_id=parts[1])
+        case "cleanup":
+            await _execute("background_cleanup")
         case "output":
             if len(parts) < 2:
                 console.print("[yellow]用法: /background output <任务ID>[/yellow]")
@@ -186,7 +188,7 @@ async def run_background(engine: Any, arg: str) -> None:
         case _:
             console.print(
                 "[yellow]未知后台任务子命令[/yellow]\n"
-                "[dim]可用: run/status/list/cancel/output[/dim]"
+                "[dim]可用: run/status/list/cancel/cleanup/output[/dim]"
             )
 
 

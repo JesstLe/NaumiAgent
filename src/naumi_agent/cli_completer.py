@@ -61,7 +61,7 @@ COMMANDS: list[tuple[str, str, bool]] = [
     ("/hook", "逆向插桩 — 黑盒解剖", True),
     ("/pursue", "目标追踪 — 自主循环执行直至真正达成", True),
     ("/worktree", "隔离执行区 — create/status/bind/keep/remove", True),
-    ("/background", "后台任务 — run/status/list/cancel/output", True),
+    ("/background", "后台任务 — run/status/list/cancel/output/cleanup", True),
     ("/schedule", "调度提醒 — create/list/cancel/pause/resume", True),
     ("/todo", "todo 清单 — list/add/start/done/pending/delete/clear", True),
     ("/team", "团队协议 — status/handoff/blocker/decision/request/result", True),
@@ -110,7 +110,14 @@ class SlashCommandCompleter(Completer):
             return []
         results = []
         for cmd, desc, takes_arg in COMMANDS:
-            if query == "" or re.search(query, cmd.lstrip("/")):
+            cmd_name = cmd.lstrip("/")
+            matched = query == ""
+            if not matched:
+                try:
+                    matched = re.search(query, cmd_name) is not None
+                except re.error:
+                    matched = query in cmd_name
+            if matched:
                 suffix = " <参数>" if takes_arg else ""
                 results.append(
                     Completion(

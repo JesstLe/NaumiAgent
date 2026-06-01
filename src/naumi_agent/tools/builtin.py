@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,18 @@ def _resolve_workspace_path(path: str, workspace_root: Path) -> Path:
     if not candidate.is_absolute():
         candidate = workspace_root / candidate
     return candidate.resolve()
+
+
+def _looks_like_background_shell(command: str) -> bool:
+    """Detect shell backgrounding that would bypass BackgroundRunner tracking."""
+    stripped = command.strip()
+    if not stripped:
+        return False
+    if re.search(r"(^|[;&|]\s*)nohup\s+", stripped):
+        return True
+    if re.search(r"(^|[;&|]\s*)disown(\s|$)", stripped):
+        return True
+    return stripped.endswith("&")
 
 
 class FileReadTool(Tool):
@@ -398,6 +411,11 @@ class BashRunTool(Tool):
         self, *, command: str, timeout: int = 30, cwd: str | None = None, **kwargs: Any
     ) -> str:
         try:
+            if _looks_like_background_shell(command):
+                return (
+                    "Error: 检测到后台 shell 写法（如 `&`/`nohup`/`disown`）。"
+                    "请改用 background_run，这样系统可以记录 PID、输出文件并在 cleanup 时回收进程。"
+                )
             workdir = (
                 _resolve_workspace_path(cwd, self._workspace_root)
                 if cwd

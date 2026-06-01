@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from naumi_agent.ui.task_status_renderer import (
     AgentStatus,
     BackgroundTaskStatus,

@@ -75,7 +75,7 @@ def print_help() -> None:
         ("/vision <目标>", "AI 视觉数据提取 — 反封锁视觉管线"),
         ("/pursue <目标>", "目标追踪 — 自主循环执行直至真正达成"),
         ("/worktree <子命令>", "隔离执行区 — create/status/bind/keep/remove"),
-        ("/background <子命令>", "后台任务 — run/status/list/cancel/output"),
+        ("/background <子命令>", "后台任务 — run/status/list/cancel/output/cleanup"),
         ("/schedule <子命令>", "调度提醒 — create/list/cancel/pause/resume"),
         ("/todo <子命令>", "todo 清单 — list/add/start/done/pending/delete/clear"),
         ("/self-review [模块]", "自我审查 — 扫描自身源码质量与架构"),

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 
@@ -26,6 +26,8 @@ class BackgroundTask:
     status: BackgroundStatus
     output_path: str
     pid: int | None = None
+    process_group_id: int | None = None
+    port_hints: list[int] = field(default_factory=list)
     exit_code: int | None = None
     started_at: str = ""
     completed_at: str = ""

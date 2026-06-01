@@ -70,6 +70,10 @@ _OUTPUT_CONTINUATION_PROMPT = (
     "你的上一条回答因为输出上限被截断。请从截断处直接继续，"
     "不要重写已经说过的内容，不要添加开场白。"
 )
+_REPEATED_TOOL_CALL_MESSAGE = (
+    "同一个工具调用已经连续重复，系统已跳过本次重复执行。"
+    "请基于已有工具结果继续判断；如需要继续操作，请选择有明确差异的下一步。"
+)
 
 _TASK_EVENT_TOOLS = {
     "delegate_task",
@@ -1794,7 +1798,10 @@ class AgentEngine:
         if plan.potential_issues:
             lines.append(f"注意事项：{'、'.join(plan.potential_issues)}")
         lines.append("")
-        lines.append("请按此计划逐步执行。一旦开始执行某一步骤，请完成它，不要中途切换到其他方案。")
+        lines.append(
+            "请优先按此计划推进；如果工具结果证明某一步不可行，"
+            "可以调整下一步，但要基于已有证据简短说明原因。"
+        )
         return "\n".join(lines)
 
     async def _react_loop(
@@ -1910,10 +1917,7 @@ class AgentEngine:
                             "Repeated tool call detected: %s, injecting stop",
                             tc.name,
                         )
-                        skip_remaining_reason = (
-                            "This action has already been completed successfully. "
-                            "Do NOT repeat it. Provide your final response to the user now."
-                        )
+                        skip_remaining_reason = _REPEATED_TOOL_CALL_MESSAGE
                         self._append_message(
                             {
                                 "role": "tool",
@@ -2316,10 +2320,7 @@ class AgentEngine:
                             "Repeated tool call detected: %s, injecting stop",
                             tc.name,
                         )
-                        skip_remaining_reason = (
-                            "This action has already been completed successfully. "
-                            "Do NOT repeat it. Provide your final response to the user now."
-                        )
+                        skip_remaining_reason = _REPEATED_TOOL_CALL_MESSAGE
                         self._append_message(
                             {
                                 "role": "tool",

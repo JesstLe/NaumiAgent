@@ -175,12 +175,42 @@ class DebugTrace:
     def describe(self) -> str:
         if not self.enabled:
             return "结构化调试日志已通过 NAUMI_DEBUG_TRACE=0 禁用。"
-        return (
-            f"调试日志目录: {self.run_dir}\n"
-            f"- 结构化事件: {self.events_path}\n"
-            f"- 可读输出: {self.transcript_path}\n"
-            f"- 运行元数据: {self.manifest_path}"
-        )
+        lines = [
+            f"调试日志目录: {self.run_dir}",
+            f"- 结构化事件: {self.events_path}",
+            f"- 可读输出: {self.transcript_path}",
+            f"- 运行元数据: {self.manifest_path}",
+        ]
+        metadata = self._read_manifest_metadata()
+        if metadata:
+            lines.extend([
+                "",
+                "运行路径:",
+                f"- 启动目录: {metadata.get('cwd', '-')}",
+                f"- 配置文件: {metadata.get('config_path', '-')}",
+                f"- 工作区: {metadata.get('workspace_root', '-')}",
+                f"- 会话库: {metadata.get('session_db_path', '-')}",
+                f"- 向量库: {metadata.get('vector_db_path', '-')}",
+                f"- debug-runs: {metadata.get('debug_runs_dir', '-')}",
+            ])
+        return "\n".join(lines)
+
+    def _read_manifest_metadata(self) -> dict[str, Any]:
+        if not self.manifest_path.exists():
+            return {}
+        try:
+            manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(manifest, dict):
+            return {}
+        metadata = manifest.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        cwd = manifest.get("cwd")
+        if isinstance(cwd, str):
+            return {"cwd": cwd, **metadata}
+        return metadata
 
     def build_diagnostic_text(self, scope: str = "last") -> str:
         """Build a copy-friendly diagnostic excerpt from structured events."""

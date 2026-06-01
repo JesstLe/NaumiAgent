@@ -167,4 +167,31 @@ class AppConfig(BaseSettings):
         logger.debug("Loading config from %s", p)
         with p.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-        return cls(**data)
+        config = cls(**data)
+        config._resolve_runtime_paths(p.parent)
+        return config
+
+    def _resolve_runtime_paths(self, base_dir: Path) -> None:
+        """Anchor persistent runtime paths to the config file directory.
+
+        The CLI can be launched from any workspace. Persistent data must not
+        drift with the process cwd, otherwise `/resume` and debug replay read a
+        different SQLite/debug directory depending on where the user started
+        the command.
+        """
+        self.memory.session_db_path = _anchor_path(
+            self.memory.session_db_path,
+            base_dir,
+        )
+        self.memory.vector_db_path = _anchor_path(
+            self.memory.vector_db_path,
+            base_dir,
+        )
+
+
+def _anchor_path(path: str, base_dir: Path) -> str:
+    """Return an absolute path, resolving relative values against base_dir."""
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        p = base_dir / p
+    return str(p.resolve())

@@ -32,6 +32,9 @@ class TestSlashCommandCompleter:
         assert "/cooe" in results
         assert "/cosmos" in results
 
+    def test_invalid_regex_does_not_crash(self):
+        assert _complete("/[") == []
+
     def test_no_match(self):
         assert _complete("/zzzzz") == []
 
@@ -42,7 +45,10 @@ class TestSlashCommandCompleter:
         assert _complete("/chaos ") == []
 
     def test_all_commands_start_with_slash(self):
-        assert _complete("/") == [cmd for cmd, _, _ in COMMANDS]
+        results = _complete("/")
+        assert len(results) == len(COMMANDS)
+        assert set(results) == {cmd for cmd, _, _ in COMMANDS}
+        assert all(cmd.startswith("/") for cmd in results)
 
     def test_quit_and_exit_registered(self):
         results = _complete("/")

@@ -51,6 +51,29 @@ def test_debug_trace_writes_manifest_events_and_transcript(tmp_path: Path) -> No
     assert events[1]["data"]["text"] == "hello"
 
 
+def test_debug_trace_describes_runtime_paths(tmp_path: Path) -> None:
+    trace = DebugTrace.create(
+        interface="cli",
+        base_dir=tmp_path,
+        metadata={
+            "config_path": "/tmp/naumi/config.yaml",
+            "workspace_root": "/tmp/workspace",
+            "session_db_path": "/tmp/naumi/data/sessions.db",
+            "vector_db_path": "/tmp/naumi/data/chroma",
+            "debug_runs_dir": str(tmp_path),
+        },
+    )
+
+    text = trace.describe()
+
+    assert "运行路径" in text
+    assert "- 配置文件: /tmp/naumi/config.yaml" in text
+    assert "- 工作区: /tmp/workspace" in text
+    assert "- 会话库: /tmp/naumi/data/sessions.db" in text
+    assert "- 向量库: /tmp/naumi/data/chroma" in text
+    assert f"- debug-runs: {tmp_path}" in text
+
+
 def test_debug_trace_can_be_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NAUMI_DEBUG_TRACE", "0")
 

@@ -1765,6 +1765,14 @@ class TestRun:
             if m.get("role") == "tool"
         }
         assert {"call_3a", "call_3b"}.issubset(tool_result_ids)
+        repeated_messages = [
+            str(m.get("content", ""))
+            for m in engine._messages
+            if m.get("role") == "tool" and m.get("tool_call_id") == "call_3a"
+        ]
+        assert any("连续重复" in content for content in repeated_messages)
+        assert not any("completed successfully" in content for content in repeated_messages)
+        assert not any("final response" in content for content in repeated_messages)
 
 
 class TestMemoryInjection:
@@ -1910,6 +1918,8 @@ class TestPlanInjection:
         ]
         assert len(system_msgs) == 1
         assert "multi-step analysis" in system_msgs[0]["content"]
+        assert "不要中途切换到其他方案" not in system_msgs[0]["content"]
+        assert "可以调整下一步" in system_msgs[0]["content"]
 
     @pytest.mark.asyncio
     async def test_simple_plan_not_injected(self, engine: AgentEngine) -> None:

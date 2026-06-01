@@ -13,6 +13,7 @@ has no direct output representation (e.g. perf_phase only updates status).
 
 from __future__ import annotations
 
+import json
 import shutil
 from collections.abc import Callable
 
@@ -118,7 +119,11 @@ def _render_tool_use(msg: ToolUseMessage) -> str | None:
 
     # Use structured primary_arg (path/command/query) over truncated args_summary
     display_arg = msg.primary_arg or msg.file_path or msg.command or msg.query or msg.url
-    label = _tool_label(msg.tool_name, display_arg)
+    label_args = (
+        json.dumps({"path": display_arg}, ensure_ascii=False)
+        if display_arg else msg.args_summary
+    )
+    label = _tool_label(msg.tool_name, label_args)
     return _tool_card_ansi(label, status="running")
 
 

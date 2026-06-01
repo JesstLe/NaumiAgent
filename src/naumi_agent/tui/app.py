@@ -9,6 +9,7 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+import rich.markup
 from rich.markdown import Markdown as RichMarkdown
 from rich.text import Text
 from textual import on, work
@@ -223,7 +224,8 @@ class ChatPanel(VerticalScroll):
 
     def start_tool(self, name: str) -> None:
         self._trace_event("tui.tool_start", {"name": name})
-        text = Text.from_markup(f"  ⏳ [dim]{name}[/dim]")
+        safe_name = rich.markup.escape(name)
+        text = Text.from_markup(f"  ⏳ [dim]{safe_name}[/dim]")
         if self._current_tool_widget is None:
             self._current_tool_widget = Static(text, classes="tool-running")
             self.mount(self._current_tool_widget)
@@ -248,7 +250,8 @@ class ChatPanel(VerticalScroll):
             },
         )
         icon = "✅" if status == "success" else "❌"
-        done_text = Text.from_markup(f"  {icon} [dim]{name} ({duration_ms}ms)[/dim]")
+        safe_name = rich.markup.escape(name)
+        done_text = Text.from_markup(f"  {icon} [dim]{safe_name} ({duration_ms}ms)[/dim]")
         if self._current_tool_widget is None:
             self.mount(Static(done_text, classes="tool-done"))
         else:
@@ -1294,7 +1297,7 @@ class NaumiApp(App):
                     "- `/autopsy <目标>` — 执行迹切片与 Bug 解剖\n"
                     "- `/pursue <目标>` — 目标追踪（自主循环直至达成）\n"
                     "- `/worktree <子命令>` — 隔离执行区 create/status/bind/keep/remove\n"
-                    "- `/background <子命令>` — 后台任务 run/status/list/cancel/output\n"
+                    "- `/background <子命令>` — 后台任务 run/status/list/cancel/output/cleanup\n"
                     "- `/todo <子命令>` — todo 清单 list/add/start/done/pending/delete/clear\n"
                     "- `/team <子命令>` — 团队协议 status/handoff/blocker/decision/request/result\n"
                     "- `/runtime [分区]` — 运行时状态 "
@@ -1350,12 +1353,21 @@ class NaumiApp(App):
             case "/pwd":
                 cwd = Path.cwd()
                 workspace_root = getattr(self.engine, "workspace_root", cwd)
+                config = getattr(self.engine, "_config", None)
+                extra_lines = ""
+                if config is not None:
+                    extra_lines = (
+                        "\n\n"
+                        f"会话库：`{Path(config.memory.session_db_path).resolve()}`\n\n"
+                        f"向量库：`{Path(config.memory.vector_db_path).resolve()}`\n\n"
+                        "完整调试路径可用 `/debug` 查看。"
+                    )
                 chat.mount(
                     Markdown(
                         f"## 当前路径\n\n工作区根目录：`{workspace_root}`\n\n"
                         f"启动目录：`{cwd}`\n\n"
-                        f"相对路径 `workspace/showcase/index.html` 会写入：\n\n"
-                        f"`{workspace_root / 'workspace' / 'showcase' / 'index.html'}`",
+                        "工具里的相对路径会按工作区根目录解析。"
+                        f"{extra_lines}",
                         classes="agent-msg",
                     )
                 )
@@ -2599,6 +2611,8 @@ class NaumiApp(App):
                         status.status_text = "用法: /background cancel <任务ID>"
                         return
                     await _execute("background_cancel", task_id=parts[1])
+                case "cleanup":
+                    await _execute("background_cleanup")
                 case "output":
                     if len(parts) < 2:
                         status.status_text = "用法: /background output <任务ID>"
@@ -2608,7 +2622,7 @@ class NaumiApp(App):
                     status.status_text = "未知后台任务子命令"
                     chat.mount(
                         Markdown(
-                            "可用子命令：`run`、`status`、`list`、`cancel`、`output`",
+                            "可用子命令：`run`、`status`、`list`、`cancel`、`cleanup`、`output`",
                             classes="agent-msg",
                         )
                     )
