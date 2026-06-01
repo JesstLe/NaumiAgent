@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.46] - 2026-06-01
+
+### Fixed
+- **Streaming 工具调用文本缓冲** — 工具可用的流式回合会先缓冲模型文本，避免工具调用前导碎片或参数片段泄露到 CLI/TUI；纯文本回合继续实时输出 token。
+
 ## [0.1.45] - 2026-06-01
 
 ### Changed
