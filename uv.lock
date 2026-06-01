@@ -2027,7 +2027,7 @@ wheels = [
 
 [[package]]
 name = "naumi-agent"
-version = "0.1.109"
+version = "0.1.110"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

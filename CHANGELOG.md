@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.110] - 2026-06-01
+
+### Changed
+- **Vibe Analysis Tool 拆分** — 将 `analysis_vibe` 的 Tool 包装迁移到 `analysis_tools.vibe`，保留 `analysis.py` 兼容 wrapper、`destructive`/`output_dir` 路径 metadata 和 slash/Agent 共用 execute 路径；新增注入式 runner 写文件测试，覆盖真实 scaffold 落盘、权限声明、无 router 确定性输出和 LLM 增强建议路径。
+
 ## [0.1.109] - 2026-06-01
 
 ### Changed
