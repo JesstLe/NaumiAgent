@@ -21,7 +21,11 @@ from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, St
 from naumi_agent.orchestrator.subagent_manager import SubTask
 from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import TokenBudget
-from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
+from naumi_agent.safety.permissions import (
+    PermissionChecker,
+    PermissionMode,
+    PermissionReasonCode,
+)
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tools.base import Tool, ToolCall, ToolResult
 
@@ -95,7 +99,7 @@ class TestEngineInit:
         unknown = []
         for name in engine.tool_registry.names:
             decision = checker.check(name, {})
-            if not decision.allowed and "Unknown tool" in decision.reason:
+            if not decision.allowed and decision.code == PermissionReasonCode.UNKNOWN_TOOL:
                 unknown.append(name)
 
         assert unknown == []
@@ -307,7 +311,7 @@ class TestToolExecution:
         tc = ToolCall(id="x", name="nonexistent_tool", arguments="{}")
         result = await engine._execute_tool(tc)
         assert result.status == "error"
-        assert "Unknown tool" in result.content
+        assert "未知工具" in result.content
 
     @pytest.mark.asyncio
     async def test_invalid_json_args(self, engine: AgentEngine) -> None:
@@ -347,7 +351,7 @@ class TestToolExecution:
         tc = ToolCall(id="x", name="file_read", arguments='{"path": "/etc/passwd"}')
         result = await engine._execute_tool(tc)
         assert result.status == "error"
-        assert "Permission denied" in result.content
+        assert "权限拒绝" in result.content
 
     @pytest.mark.asyncio
     async def test_metadata_path_arg_sandbox_blocks_yaml_validate(
@@ -363,8 +367,8 @@ class TestToolExecution:
         result = await engine._execute_tool(tc)
 
         assert result.status == "error"
-        assert "Permission denied" in result.content
-        assert "outside allowed directories" in result.content
+        assert "权限拒绝" in result.content
+        assert "不在允许目录内" in result.content
 
     @pytest.mark.asyncio
     async def test_path_in_allowed_dir(self, engine: AgentEngine) -> None:
@@ -374,8 +378,8 @@ class TestToolExecution:
             arguments='{"path": "/tmp/nonexistent_test_file.txt"}',
         )
         result = await engine._execute_tool(tc)
-        # Should attempt read, fail with "File not found" not "Permission denied"
-        assert "Error: File not found" in result.content or "Permission denied" in result.content
+        # Should attempt read, fail with "File not found" not a permission denial.
+        assert "Error: File not found" in result.content or "权限拒绝" in result.content
 
     @pytest.mark.asyncio
     async def test_confirmation_required_tool_blocked(self, engine: AgentEngine) -> None:

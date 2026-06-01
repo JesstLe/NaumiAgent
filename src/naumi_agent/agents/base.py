@@ -183,7 +183,7 @@ class BaseAgent:
                             {
                                 "role": "tool",
                                 "tool_call_id": call_id,
-                                "content": f"Unknown tool: {tool_name}",
+                                "content": f"未知工具：{tool_name}",
                             }
                         )
                         continue
@@ -199,7 +199,7 @@ class BaseAgent:
                                 "role": "tool",
                                 "tool_call_id": call_id,
                                 "content": (
-                                    "Aborted by hook: "
+                                    "被 Hook 中止："
                                     f"{hook_ctx.data.get('abort_reason', '')}"
                                 ),
                             }

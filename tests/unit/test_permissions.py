@@ -3,6 +3,8 @@
 from naumi_agent.safety.permissions import (
     PermissionChecker,
     PermissionMode,
+    PermissionReasonCode,
+    PermissionRiskLevel,
 )
 from naumi_agent.tools.builtin import YamlMicroVerifyTool, YamlValidateTool
 
@@ -32,7 +34,9 @@ class TestPermissionChecker:
         checker = PermissionChecker(PermissionMode.MODERATE)
         result = checker.check("unknown_tool", {})
         assert not result.allowed
-        assert "Unknown tool" in result.reason
+        assert result.code == PermissionReasonCode.UNKNOWN_TOOL
+        assert result.risk_level == PermissionRiskLevel.HIGH
+        assert "未知工具" in result.reason
 
     def test_path_sandbox(self) -> None:
         checker = PermissionChecker(
@@ -58,7 +62,9 @@ class TestPermissionChecker:
 
         assert allowed.allowed
         assert not blocked.allowed
-        assert "outside allowed directories" in blocked.reason
+        assert blocked.code == PermissionReasonCode.PATH_OUTSIDE_SANDBOX
+        assert blocked.risk_level == PermissionRiskLevel.HIGH
+        assert "不在允许目录内" in blocked.reason
 
     def test_tool_metadata_path_args_reject_non_string_paths(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE, allowed_dirs=["/workspace"])
@@ -71,7 +77,8 @@ class TestPermissionChecker:
         )
 
         assert not result.allowed
-        assert "must be a string" in result.reason
+        assert result.code == PermissionReasonCode.INVALID_PATH_ARGUMENT
+        assert "必须是字符串" in result.reason
 
     def test_relative_path_uses_workspace_root(self, tmp_path) -> None:
         checker = PermissionChecker(
@@ -87,6 +94,9 @@ class TestPermissionChecker:
         for cmd in ["rm -rf /", "sudo rm -rf /home", "mkfs.ext4 /dev/sda"]:
             result = checker.check("bash_run", {"command": cmd})
             assert not result.allowed, f"Should block: {cmd}"
+            assert result.code == PermissionReasonCode.DANGEROUS_COMMAND
+            assert result.risk_level == PermissionRiskLevel.HIGH
+            assert "高风险模式" in result.reason
 
     def test_safe_commands(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
@@ -99,7 +109,8 @@ class TestPermissionChecker:
             checker.check("bash_run", {"command": "echo test"})
         result = checker.check("bash_run", {"command": "echo one more"})
         assert not result.allowed
-        assert "exceeded" in result.reason
+        assert result.code == PermissionReasonCode.MAX_CALLS_EXCEEDED
+        assert "最大调用次数" in result.reason
 
     def test_confirmation_required(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
@@ -149,13 +160,13 @@ class TestPermissionChecker:
         ]:
             result = checker.check(tool_name, {})
             assert result.allowed, tool_name
-            assert "Unknown tool" not in result.reason
+            assert "未知工具" not in result.reason
 
     def test_namespaced_tool_family_allowed(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
         result = checker.check("default__browser_scroll", {})
         assert result.allowed
-        assert "Unknown tool" not in result.reason
+        assert "未知工具" not in result.reason
 
     def test_reset_counts(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)

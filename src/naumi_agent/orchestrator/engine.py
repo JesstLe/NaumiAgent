@@ -1660,8 +1660,8 @@ class AgentEngine:
                                 "role": "tool",
                                 "tool_call_id": tc.id,
                                 "content": (
-                                    "Aborted by hook: "
-                                    f"{hook_ctx.data.get('abort_reason', 'no reason')}"
+                                    "被 Hook 中止："
+                                    f"{hook_ctx.data.get('abort_reason', '未提供原因')}"
                                 ),
                             }
                         )
@@ -1974,18 +1974,18 @@ class AgentEngine:
                         session_id=session_id,
                     ), on_event)
                     if hook_ctx.should_abort:
-                        abort_reason = hook_ctx.data.get("abort_reason", "no reason")
+                        abort_reason = hook_ctx.data.get("abort_reason", "未提供原因")
                         await on_event("tool_end", {
                             "name": tc.name,
                             "status": "aborted",
                             "duration_ms": 0,
-                            "content": f"Aborted by hook: {abort_reason}",
+                            "content": f"被 Hook 中止：{abort_reason}",
                         })
                         self._append_message(
                             {
                                 "role": "tool",
                                 "tool_call_id": tc.id,
-                                "content": f"Aborted by hook: {abort_reason}",
+                                "content": f"被 Hook 中止：{abort_reason}",
                             }
                         )
                         continue
@@ -2119,7 +2119,7 @@ class AgentEngine:
             return ToolResult(
                 call_id=tc.id,
                 status="error",
-                content=f"Unknown tool: {tc.name}",
+                content=f"未知工具：{tc.name}",
             )
 
         try:
@@ -2153,7 +2153,7 @@ class AgentEngine:
             return ToolResult(
                 call_id=tc.id,
                 status="error",
-                content=f"Permission denied by hook: {reason}",
+                content=f"权限被 Hook 拒绝：{reason}",
             )
 
         decision = self._permission_checker.check(tc.name, args, tool=tool)
@@ -2185,7 +2185,7 @@ class AgentEngine:
             return ToolResult(
                 call_id=tc.id,
                 status="error",
-                content=f"Permission denied by hook: {reason}",
+                content=f"权限被 Hook 拒绝：{reason}",
             )
         if not decision.allowed:
             logger.warning("Tool %s blocked: %s", tc.name, decision.reason)
@@ -2200,7 +2200,7 @@ class AgentEngine:
             return ToolResult(
                 call_id=tc.id,
                 status="error",
-                content=f"Permission denied: {decision.reason}",
+                content=f"权限拒绝：{decision.reason}",
             )
         if decision.requires_confirmation:
             logger.warning("Tool %s requires confirmation and was blocked", tc.name)
@@ -2216,7 +2216,7 @@ class AgentEngine:
                 call_id=tc.id,
                 status="error",
                 content=(
-                    "Permission denied: 该工具需要用户确认，当前自动执行链路未提供确认步骤。"
+                    "权限拒绝：该工具需要用户确认，当前自动执行链路未提供确认步骤。"
                     "请在 bypass 模式下运行，或使用更安全的替代工具完成任务。"
                 ),
             )
