@@ -7,6 +7,7 @@ from naumi_agent.safety.permissions import (
     PermissionRiskLevel,
 )
 from naumi_agent.tools.builtin import YamlMicroVerifyTool, YamlValidateTool
+from naumi_agent.tools.self_modify import SelfModifyTool
 
 
 class TestPermissionChecker:
@@ -115,6 +116,23 @@ class TestPermissionChecker:
     def test_confirmation_required(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
         result = checker.check("bash_run", {"command": "echo test"})
+        assert result.allowed
+        assert result.requires_confirmation
+
+    def test_tool_metadata_can_require_confirmation(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+        tool = SelfModifyTool()
+
+        result = checker.check(
+            "self_modify",
+            {
+                "target_file": "tools/example.py",
+                "new_content": "x = 1\n",
+                "description": "example",
+            },
+            tool=tool,
+        )
+
         assert result.allowed
         assert result.requires_confirmation
 

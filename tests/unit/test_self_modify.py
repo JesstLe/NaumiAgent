@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from naumi_agent.tools.self_modify import (
+    MAX_SELF_MODIFY_CONTENT_CHARS,
     SelfModifyTool,
     _compute_diff,
     _create_git_backup,
@@ -510,6 +511,57 @@ class TestSelfModifyTool:
         assert "new_content" in schema["properties"]
         assert "description" in schema["properties"]
         assert len(schema["required"]) == 3
+
+    def test_metadata_marks_self_modification_as_confirmed_state_change(self):
+        metadata = SelfModifyTool().metadata
+        assert metadata.destructive is True
+        assert metadata.requires_confirmation is True
+        assert metadata.user_facing_name == "自我修改"
+
+    @pytest.mark.parametrize(
+        ("target_file", "new_content", "description", "expected_reason"),
+        [
+            ("", "x = 1\n", "valid change", "target_file 不能为空"),
+            ("tools/analysis.py", "", "valid change", "new_content 不能为空"),
+            ("tools/analysis.py", "x = 1\n", "", "description 不能为空"),
+            (123, "x = 1\n", "valid change", "target_file 不能为空"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_execute_rejects_invalid_inputs_before_validation(
+        self,
+        target_file,
+        new_content,
+        description,
+        expected_reason,
+    ):
+        tool = SelfModifyTool()
+
+        with patch("naumi_agent.tools.self_modify.validate_and_apply") as apply_mock:
+            result = await tool.execute(
+                target_file=target_file,
+                new_content=new_content,
+                description=description,
+            )
+
+        apply_mock.assert_not_called()
+        assert "已拒绝" in result
+        assert expected_reason in result
+
+    @pytest.mark.asyncio
+    async def test_execute_rejects_oversized_content_before_validation(self):
+        tool = SelfModifyTool()
+
+        with patch("naumi_agent.tools.self_modify.validate_and_apply") as apply_mock:
+            result = await tool.execute(
+                target_file="tools/analysis.py",
+                new_content="x" * (MAX_SELF_MODIFY_CONTENT_CHARS + 1),
+                description="oversized change",
+            )
+
+        apply_mock.assert_not_called()
+        assert "已拒绝" in result
+        assert "new_content 过大" in result
 
     @pytest.mark.asyncio
     async def test_execute_reports_applied(self):

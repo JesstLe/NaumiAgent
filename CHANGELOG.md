@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.70] - 2026-06-01
+
+### Changed
+- **Self Modify 工具边界加固** — 将 `self_modify` 标记为需要确认的破坏性自修改工具，并在进入写盘验证链路前校验 `target_file`、`new_content` 和 `description` 的类型、空值与长度，避免无效或异常大的输入触发源码修改流程。
+
 ## [0.1.69] - 2026-06-01
 
 ### Changed
