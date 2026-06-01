@@ -16,6 +16,7 @@ from naumi_agent.main import (
     _format_recovery_event,
     _format_runtime_notification,
     _format_todo_bar,
+    _print_tool_card,
     _print_tool_output,
     _render_result,
     _show_cli_status,
@@ -102,6 +103,22 @@ def test_fenced_diff_tool_output_renders_diff_body() -> None:
     assert "tool output · file_edit" in rendered
 
 
+def test_tool_card_renders_status_frame() -> None:
+    running = _capture(lambda: _print_tool_card("📝 file_write a.py", status="running"))
+    success = _capture(
+        lambda: _print_tool_card(
+            "📝 file_write a.py",
+            status="success",
+            duration_ms=12,
+        )
+    )
+
+    assert "tool · running" in running
+    assert "file_write a.py" in running
+    assert "tool · success" in success
+    assert "12ms" in success
+
+
 def test_cli_status_updates_fixed_status_not_output(monkeypatch) -> None:
     cli = FakeCLI()
     monkeypatch.setattr("naumi_agent.main._get_git_info", lambda: {"branch": "", "dirty": False})
@@ -159,6 +176,7 @@ async def test_fullscreen_cli_tool_end_includes_tool_output() -> None:
     assert "file_edit" in text
     assert "-old" in text
     assert "+new" in text
+    assert "tool · success" in text
     assert "tool output · file_edit" in text
 
 

@@ -149,6 +149,37 @@ def _tool_label(name: str, args: str = "") -> str:
     return f"{icon} {name}{hint}"
 
 
+def _print_tool_card(
+    label: str,
+    *,
+    status: str,
+    duration_ms: int | float | None = None,
+) -> None:
+    """Print a compact Claude-style tool-use card."""
+    styles = {
+        "running": ("cyan", "⏳", "running"),
+        "success": ("green", "✓", "success"),
+        "error": ("red", "✗", "error"),
+        "failed": ("red", "✗", "error"),
+        "skipped": ("yellow", "↷", "skipped"),
+        "aborted": ("yellow", "!", "aborted"),
+    }
+    style, icon, title_status = styles.get(status, ("cyan", "•", status or "tool"))
+    body = Text()
+    body.append(f"{icon} ", style=style)
+    body.append(label)
+    if duration_ms is not None:
+        body.append(f" ({int(duration_ms)}ms)", style="dim")
+    console.print(
+        Panel(
+            body,
+            title=f"tool · {title_status}",
+            border_style=style,
+            padding=(0, 1),
+        )
+    )
+
+
 def _show_cli_status(cli: Any, engine: Any) -> None:
     """Show model, context, budget, git stats in the CLI output area."""
     runtime_mode = getattr(engine, "runtime_mode", None)
@@ -251,18 +282,15 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
         name = data.get("name", "?")
         args = data.get("args", "")
         label = _tool_label(name, args)
-        sys.stdout.write(f"  {_sep()}\n\033[36m  ⏳ {label}\033[0m\n")
-        sys.stdout.flush()
+        _print_tool_card(label, status="running")
     elif event == "tool_end":
         name = data.get("name", "?")
         status = data.get("status", "?")
         content = data.get("content", "")
         duration = data.get("duration_ms", 0)
         label = _tool_label(name)
-        if status == "error":
-            console.print(f"\033[31m  ✗ {label} 失败 ({duration:.0f}ms)\033[0m")
-        else:
-            console.print(f"\033[32m  ✓ {label}\033[0m \033[2m({duration:.0f}ms)\033[0m")
+        card_status = "success" if status == "success" else str(status or "error")
+        _print_tool_card(label, status=card_status, duration_ms=duration)
         if content:
             _print_tool_output(name, content)
     elif event == "hook_trace":
@@ -744,7 +772,7 @@ def _cli_event_factory(cli: Any):
             label = _tool_label(name, args)
             if hasattr(cli, "set_activity_status"):
                 cli.set_activity_status(f"执行 {label}")
-            cli.append_live(f"{_sep()}\n\033[36m  ⏳ {label}\033[0m\n")
+            cli.append_live(_capture(lambda: _print_tool_card(label, status="running")))
         elif event == "tool_end":
             name = data.get("name", "?")
             status = data.get("status", "unknown")
@@ -753,10 +781,16 @@ def _cli_event_factory(cli: Any):
             label = _tool_label(name)
             if hasattr(cli, "set_activity_status"):
                 cli.set_activity_status(None)
-            if status == "success":
-                cli.append_live(f"\033[32m  ✓ {label}\033[0m \033[2m({dur}ms)\033[0m\n")
-            else:
-                cli.append_live(f"\033[31m  ✗ {label} 失败 ({dur}ms)\033[0m\n")
+            card_status = "success" if status == "success" else str(status or "error")
+            cli.append_live(
+                _capture(
+                    lambda: _print_tool_card(
+                        label,
+                        status=card_status,
+                        duration_ms=dur,
+                    )
+                )
+            )
             if content:
                 cli.append_live(_capture(lambda: _print_tool_output(name, content)))
         elif event == "hook_trace":
