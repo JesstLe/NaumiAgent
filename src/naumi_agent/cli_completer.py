@@ -63,6 +63,7 @@ COMMANDS: list[tuple[str, str, bool]] = [
     ("/schedule", "调度提醒 — create/list/cancel/pause/resume", True),
     ("/todo", "todo 清单 — list/add/start/done/pending/delete/clear", True),
     ("/team", "团队协议 — status/handoff/blocker/decision/request/result", True),
+    ("/runtime", "运行时状态 — all/context/todo/team/subagent/hooks/resources", True),
     ("/self-review", "自我审查 — 扫描自身源码质量与架构", True),
     ("/reload", "热重载 — 重载模块无需重启", True),
     ("/evolve", "自我进化 — 反思循环修改自身工具代码并验证", True),

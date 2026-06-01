@@ -1108,6 +1108,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _run_todo(engine, arg)
         case "/team":
             await _run_team(engine, arg)
+        case "/runtime":
+            await _run_runtime(engine, arg)
         case "/self-review":
             await _run_self_review(engine, arg)
         case "/reload":
@@ -1241,6 +1243,7 @@ def _print_help() -> None:
         ("/schedule <子命令>", "调度提醒 — create/list/cancel/pause/resume"),
         ("/todo <子命令>", "todo 清单 — list/add/start/done/pending/delete/clear"),
         ("/team <子命令>", "团队协议 — status/handoff/blocker/decision/request/result"),
+        ("/runtime [分区]", "运行时状态 — all/context/todo/team/subagent/hooks/resources"),
         ("/self-review [模块]", "自我审查 — 扫描自身源码质量与架构"),
         ("/reload [域]", "热重载 — 重载模块无需重启 (tools/memory/skills/all)"),
         ("/evolve <描述>", "自我进化 — 反思循环修改自身工具代码并验证"),
@@ -1706,6 +1709,21 @@ async def _run_team(engine: Any, arg: str) -> None:
         Panel(
             Markdown(result),
             title="[bold cyan]team[/bold cyan]",
+            border_style="cyan",
+            padding=(1, 2),
+        )
+    )
+
+
+async def _run_runtime(engine: Any, arg: str) -> None:
+    """执行 runtime 状态命令."""
+    from naumi_agent.tools.runtime import run_runtime_command
+
+    result = await run_runtime_command(engine, arg)
+    console.print(
+        Panel(
+            Markdown(result),
+            title="[bold cyan]runtime[/bold cyan]",
             border_style="cyan",
             padding=(1, 2),
         )

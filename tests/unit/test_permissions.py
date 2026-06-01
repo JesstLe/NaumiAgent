@@ -103,6 +103,7 @@ class TestPermissionChecker:
             "team_signal",
             "team_status",
             "blackboard_write",
+            "runtime_status",
             "self_modify",
             "self_review",
             "forge_tool",
