@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.55] - 2026-06-01
+
+### Changed
+- **Analysis Fusion 模块拆分** — 将 `/fusion` 的概率区扫描、精度敏感区识别、危险融合点检测、过度决定论识别和融合架构评分迁移到 `analysis_support.fusion`，主 `analysis.py` 保留工具编排、兼容入口与 LLM Fusion 增强路径。
+
 ## [0.1.54] - 2026-06-01
 
 ### Changed
