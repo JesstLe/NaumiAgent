@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.31] - 2026-06-01
+
+### Added
+- **分析工具无 Router smoke 覆盖** — 新增 34 个 analysis tools 的统一 smoke 测试，验证无模型路由时全部返回确定性输出且不回退到旧的 `Router 未注入` 文案。
+
 ## [0.1.30] - 2026-06-01
 
 ### Added
