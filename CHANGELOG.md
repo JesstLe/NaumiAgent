@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.40] - 2026-06-01
+
+### Changed
+- **Analysis Heal 模块拆分** — 将 `/heal` 的错误日志摘要、traceback 切片、错误处理静态扫描和确定性修复建议迁移到 `analysis_support.heal`，主 `analysis.py` 保留目标解析、源码读取和 LLM 热修复增强路径。
+
 ## [0.1.39] - 2026-06-01
 
 ### Changed
