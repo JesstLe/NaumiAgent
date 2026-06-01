@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5] - 2026-06-01
+
+### Added
+- **DSPy 工具确定性落地** — `/dspy` 在模型路由未初始化时也会返回 Prompt 模板、Few-shot、Metric、可配置性和成熟度评分扫描结果。
+- **Baseline Metric 生成** — `/dspy` 现在会生成可执行的 `score_output()` 启发式评价函数，作为后续 DSPy 编译优化的最小可运行起点。
+
 ## [0.1.4] - 2026-06-01
 
 ### Changed

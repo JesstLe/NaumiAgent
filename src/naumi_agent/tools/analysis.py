@@ -1708,6 +1708,41 @@ def _scan_dspy(
     return "\n".join(findings)
 
 
+def _build_dspy_baseline_metric(prompt_target: str = "") -> str:
+    target = prompt_target.strip() or "目标任务"
+    return f'''\
+def score_output(input_text: str, output_text: str) -> dict[str, float | bool | str]:
+    """Baseline metric for DSPy-style prompt optimization: {target}."""
+    normalized = output_text.strip()
+    has_content = bool(normalized)
+    is_not_error = "error" not in normalized.lower() and "traceback" not in normalized.lower()
+    has_structure = any(marker in normalized for marker in ("1.", "- ", "##", "：", ":"))
+    length_ok = 20 <= len(normalized) <= 4000
+    score = sum([has_content, is_not_error, has_structure, length_ok]) / 4
+    return {{
+        "score": score,
+        "has_content": has_content,
+        "is_not_error": is_not_error,
+        "has_structure": has_structure,
+        "length_ok": length_ok,
+        "reason": "baseline heuristic; replace with task-specific ground truth checks",
+    }}
+'''
+
+
+def _format_dspy_report(scan_evidence: str, prompt_target: str, files: list[Path]) -> str:
+    metric_code = _build_dspy_baseline_metric(prompt_target)
+    return (
+        "## DSPy 静态成熟度扫描\n"
+        f"- 扫描文件数：{len(files)}\n\n"
+        f"{scan_evidence}\n\n"
+        "## Baseline Metric\n"
+        "```python\n"
+        f"{metric_code}"
+        "```"
+    )
+
+
 _DSPY_SYSTEM = """\
 You are a Prompt Compiler implementing the DSPy (Declaration-based \
 Self-evolving Programming) paradigm.
@@ -1802,10 +1837,6 @@ class DSPyTool(Tool):
         prompt_target: str = "",
         **kwargs: Any,
     ) -> str:
-        router = _global_router
-        if router is None:
-            return _router_unavailable("dspy", prompt_target or target)
-
         # 默认扫描当前项目
         if not target:
             target = str(Path.cwd())
@@ -1815,9 +1846,15 @@ class DSPyTool(Tool):
 
         source_text = _read_sources(files)
         scan_evidence = _scan_dspy(files, source_text, prompt_target)
+        deterministic = _format_dspy_report(scan_evidence, prompt_target, files)
+
+        router = _global_router
+        if router is None:
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 DSPy 扫描结果。"
 
         user_msg = (
             f"## 静态扫描证据\n{scan_evidence}\n\n"
+            f"## Baseline Metric\n{_build_dspy_baseline_metric(prompt_target)}\n\n"
             f"## 源代码\n{source_text[:50000]}\n"
         )
         if prompt_target:
@@ -1826,7 +1863,8 @@ class DSPyTool(Tool):
                 f"{prompt_target}\n"
             )
 
-        return await _run_analysis(router, _DSPY_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _DSPY_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM Prompt 编译建议\n" + enhanced
 
 
 # ===========================================================================
