@@ -317,6 +317,7 @@ class EngineEventAdapter:
         return ToolUseMessage(
             type=MessageType.TOOL_USE,
             tool_name=_safe_str(data.get("name")),
+            tool_call_id=_safe_str(data.get("call_id") or data.get("tool_call_id")),
             args_summary=_summarize_args(args_raw),
             args_raw="",
             primary_arg=primary_arg,
@@ -336,6 +337,7 @@ class EngineEventAdapter:
         return ToolResultMessage(
             type=MessageType.TOOL_RESULT,
             tool_name=_safe_str(data.get("name")),
+            tool_call_id=_safe_str(data.get("call_id") or data.get("tool_call_id")),
             status=_safe_str(data.get("status")),
             duration_ms=_safe_int(data.get("duration_ms")),
             content_preview=preview,

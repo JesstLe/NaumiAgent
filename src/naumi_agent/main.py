@@ -202,6 +202,29 @@ def chat(
         asyncio.run(_chat(config))
 
 
+@app.command("ui")
+def terminal_ui(
+    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+) -> None:
+    """启动新一代终端 UI（legacy CLI/TUI 仍可通过 chat 使用）."""
+    import subprocess
+
+    frontend_dir = _PROJECT_ROOT / "frontend" / "terminal-ui"
+    if not frontend_dir.exists():
+        console.print(f"[red]未找到新终端 UI 目录: {frontend_dir}[/red]")
+        raise typer.Exit(1)
+    cmd = [
+        "npm",
+        "--prefix",
+        str(frontend_dir),
+        "start",
+        "--",
+        "--config",
+        config,
+    ]
+    raise typer.Exit(subprocess.run(cmd, cwd=str(_PROJECT_ROOT), check=False).returncode)
+
+
 def _launch_tui(config_path: str) -> None:
     from naumi_agent.debug_trace import DebugTrace
     from naumi_agent.log_setup import setup_logging
