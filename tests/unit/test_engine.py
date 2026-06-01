@@ -19,7 +19,6 @@ from naumi_agent.model.router import ModelResponse, ModelTier, StreamChunk, Toke
 from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.orchestrator.subagent_manager import SubTask
-from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import TokenBudget
 from naumi_agent.safety.permissions import (
     PermissionChecker,
@@ -1853,14 +1852,11 @@ class TestPlanInjection:
         assert len(system_msgs) == 0
 
 
-class TestOscillationBreaking:
-    """Tests for force-converge termination when approach oscillation is detected."""
+class TestConvergenceMessagesDisabled:
+    """Engine should not inject convergence-control messages."""
 
     @pytest.mark.asyncio
-    async def test_force_converge_terminates_loop(self, engine: AgentEngine) -> None:
-        """After max interventions, force_converge should terminate the loop."""
-        engine._behavior_monitor = BehaviorMonitor(max_interventions=1)
-
+    async def test_tool_diversity_does_not_force_converge(self, engine: AgentEngine) -> None:
         call_count = 0
         tool_names = [
             "analysis_chaos", "analysis_scale", "analysis_state",
@@ -1886,7 +1882,7 @@ class TestOscillationBreaking:
                 call_id=tc.id, status="success", content="mocked",
             )
 
-        engine._config.safety.max_turns = 20
+        engine._config.safety.max_turns = 4
 
         with (
             patch.object(
@@ -1900,14 +1896,22 @@ class TestOscillationBreaking:
         ):
             result = await engine.run("展示一项能力")
 
-        assert result.status == "completed"
-        assert call_count < 20  # Terminated early by force_converge
+        assert result.status == "max_turns"
+        assert call_count >= 4
+        assert not any(
+            m.get("role") == "system"
+            and (
+                "频繁切换执行方案" in m.get("content", "")
+                or "不要再调用任何工具" in m.get("content", "")
+            )
+            for m in engine._messages
+        )
 
     @pytest.mark.asyncio
-    async def test_intervention_message_injected(self, engine: AgentEngine) -> None:
-        """Oscillating tools should cause an intervention system message."""
-        engine._behavior_monitor = BehaviorMonitor(max_interventions=3)
-
+    async def test_tool_diversity_can_still_reach_final_response(
+        self,
+        engine: AgentEngine,
+    ) -> None:
         call_count = 0
         tool_names = ["analysis_chaos", "analysis_scale", "analysis_state"]
 
@@ -1946,23 +1950,24 @@ class TestOscillationBreaking:
                 side_effect=mock_execute,
             ),
         ):
-            await engine.run("test oscillation")
+            result = await engine.run("test oscillation")
 
-        # Check that intervention messages were injected
-        intervention_msgs = [
-            m for m in engine._messages
-            if m.get("role") == "system" and "频繁切换执行方案" in m.get("content", "")
-        ]
-        assert len(intervention_msgs) >= 1
+        assert result.status == "completed"
+        assert result.response == "最终结果"
+        assert not any(
+            m.get("role") == "system"
+            and (
+                "频繁切换执行方案" in m.get("content", "")
+                or "不要再调用任何工具" in m.get("content", "")
+            )
+            for m in engine._messages
+        )
 
     @pytest.mark.asyncio
-    async def test_subagent_workflow_does_not_force_converge(
+    async def test_subagent_workflow_has_no_convergence_message(
         self,
         engine: AgentEngine,
     ) -> None:
-        """Creating then delegating to a subagent is one workflow, not oscillation."""
-        engine._behavior_monitor = BehaviorMonitor(max_interventions=1)
-
         responses = [
             ModelResponse(
                 content="",
