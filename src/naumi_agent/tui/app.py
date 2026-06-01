@@ -889,12 +889,21 @@ class StatusBar(Static):
     """
 
     status_text: reactive[str] = reactive("就绪")
+    mode_text: reactive[str] = reactive("default")
     debug_trace: Any | None = None
+
+    def watch_mode_text(self, text: str) -> None:
+        if self.debug_trace is not None:
+            self.debug_trace.event("tui.runtime_mode", {"mode": text})
+        self._refresh()
 
     def watch_status_text(self, text: str) -> None:
         if self.debug_trace is not None:
             self.debug_trace.event("tui.status", {"text": text})
-        self.update(text)
+        self._refresh()
+
+    def _refresh(self) -> None:
+        self.update(f"mode: {self.mode_text} | {self.status_text}")
 
 
 class TodoBar(Static):
@@ -1056,6 +1065,7 @@ class NaumiApp(App):
         Binding("ctrl+y", "copy_transcript", "复制记录"),
         Binding("ctrl+t", "show_tools", "工具列表"),
         Binding("ctrl+b", "toggle_browser", "浏览器"),
+        Binding("shift+tab", "cycle_runtime_mode", "切换模式", priority=True),
     ]
 
     def __init__(
@@ -1122,6 +1132,8 @@ class NaumiApp(App):
         self.push_screen(PermissionConfirmScreen(payload), on_choice)
         result = await future
         choice = str(result or "deny")
+        if choice == "bypass":
+            self.query_one(StatusBar).mode_text = "bypass"
         if self.debug_trace is not None:
             self.debug_trace.event(
                 "tui.permission_confirm_choice",
@@ -1133,6 +1145,8 @@ class NaumiApp(App):
         """Show model, budget, and context info in status bar on startup."""
         try:
             status = self.query_one(StatusBar)
+            runtime_mode = getattr(self.engine, "runtime_mode", None)
+            status.mode_text = getattr(runtime_mode, "value", str(runtime_mode or "default"))
             model = self.engine.router.resolve_model("capable")
             budget = self.engine.get_budget_info()
             ctx = self.engine.get_context_info()
@@ -1632,6 +1646,8 @@ class NaumiApp(App):
                     "engine.stream_event",
                     {"event": event_type, "data": data},
                 )
+            runtime_mode = getattr(self.engine, "runtime_mode", None)
+            status.mode_text = getattr(runtime_mode, "value", str(runtime_mode or "default"))
 
             match event_type:
                 case "run_started":
@@ -1746,6 +1762,7 @@ class NaumiApp(App):
                         if bubble_status in {
                             "blocked",
                             "blocked_by_hook",
+                            "blocked_by_plan_mode",
                             "denied",
                             "confirmation_error",
                         }
@@ -2134,6 +2151,14 @@ class NaumiApp(App):
         browser.show_panel = not browser.show_panel
         if browser.show_panel:
             browser.refresh_browser_state(self.engine)
+
+    def action_cycle_runtime_mode(self) -> None:
+        mode = self.engine.cycle_runtime_mode()
+        status = self.query_one(StatusBar)
+        status.mode_text = mode.value
+        status.status_text = f"已切换模式: {mode.value}"
+        if self.debug_trace is not None:
+            self.debug_trace.event("tui.runtime_mode_changed", {"mode": mode.value})
 
     def action_toggle_history(self) -> None:
         history = self.query_one(HistoryPanel)

@@ -213,15 +213,18 @@ class CLIApp:
         )
         self._kb = KeyBindings()
         self._on_submit: Callable[[str], Awaitable[None]] | None = None
+        self._on_mode_toggle: Callable[[], str] | None = None
         self._output_win: _OutputWindow | None = None
         self._git_branch: str = ""
         self._git_dirty: bool = False
+        self._mode_text = "default"
         self._status_text = "就绪"
         self._todo_text = ""
         self._pending_permission: asyncio.Future[str] | None = None
 
         self._last_esc_time = 0.0
         permission_pending = Condition(lambda: self._pending_permission is not None)
+        no_permission_pending = Condition(lambda: self._pending_permission is None)
 
         @self._kb.add("y", filter=permission_pending)
         def _permission_allow(event: Any) -> None:
@@ -234,6 +237,14 @@ class CLIApp:
         @self._kb.add("s-tab", filter=permission_pending)
         def _permission_bypass(event: Any) -> None:
             self._resolve_pending_permission("bypass")
+
+        @self._kb.add("s-tab", filter=no_permission_pending)
+        def _toggle_runtime_mode(event: Any) -> None:
+            if self._on_mode_toggle is None:
+                return
+            mode = self._on_mode_toggle()
+            self.set_mode_status(mode)
+            self.set_status(f"已切换模式: {mode}")
 
         @self._kb.add("enter")
         def _submit(event: Any) -> None:
@@ -283,6 +294,9 @@ class CLIApp:
 
     def set_submit_handler(self, handler: Callable[[str], Awaitable[None]]) -> None:
         self._on_submit = handler
+
+    def set_mode_toggle_handler(self, handler: Callable[[], str]) -> None:
+        self._on_mode_toggle = handler
 
     async def _run_submit(self, text: str) -> None:
         self._processing = True
@@ -410,6 +424,8 @@ class CLIApp:
             "deny": "已拒绝本次工具执行",
             "bypass": "已切换 bypass 并执行本次工具",
         }
+        if choice == "bypass":
+            self.set_mode_status("bypass")
         self.append_live(f"\033[2m{labels.get(choice, choice)}\033[0m\n")
         future.set_result(choice)
 
@@ -470,6 +486,12 @@ class CLIApp:
         self.record_debug_event("cli.status", {"text": text})
         self._invalidate()
 
+    def set_mode_status(self, text: str) -> None:
+        """Update runtime mode shown in the fixed bottom status line."""
+        self._mode_text = text
+        self.record_debug_event("cli.runtime_mode", {"mode": text})
+        self._invalidate()
+
     def set_todo_status(self, text: str | None) -> None:
         """Update the sticky bottom todo bar, or clear it when text is empty."""
         self._todo_text = text or ""
@@ -518,7 +540,7 @@ class CLIApp:
         return result
 
     def _render_status(self, cols: int) -> FormattedText:
-        text = f" {self._status_text}"
+        text = f" mode: {self._mode_text} | {self._status_text}"
         return FormattedText([("class:status", _fit_text_to_width(text, cols))])
 
     def _render_todo(self, cols: int) -> FormattedText:

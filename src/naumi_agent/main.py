@@ -146,9 +146,15 @@ def _tool_label(name: str, args: str = "") -> str:
 
 def _show_cli_status(cli: Any, engine: Any) -> None:
     """Show model, context, budget, git stats in the CLI output area."""
+    runtime_mode = getattr(engine, "runtime_mode", None)
+    runtime_mode_text = getattr(runtime_mode, "value", str(runtime_mode or "default"))
+    if hasattr(cli, "set_mode_status"):
+        cli.set_mode_status(runtime_mode_text)
     parts: list[str] = []
     model = engine.router.resolve_model("capable")
     parts.append(model)
+    if not hasattr(cli, "set_mode_status"):
+        parts.append(f"mode: {runtime_mode_text}")
     workspace_root = getattr(engine, "workspace_root", Path.cwd())
     parts.append(f"工作区: {workspace_root}")
     u = engine.usage
@@ -797,6 +803,13 @@ async def _chat(config_path: str) -> None:
 
     cli = CLIApp(debug_trace=debug_trace)
     engine.set_permission_confirmer(cli.confirm_permission)
+
+    def toggle_runtime_mode() -> str:
+        mode = engine.cycle_runtime_mode()
+        cli.record_debug_event("cli.runtime_mode_changed", {"mode": mode.value})
+        return mode.value
+
+    cli.set_mode_toggle_handler(toggle_runtime_mode)
     global _active_cli
     _active_cli = cli
 

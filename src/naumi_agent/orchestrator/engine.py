@@ -6,6 +6,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from enum import StrEnum
 from inspect import signature
 from pathlib import Path
 from typing import Any
@@ -80,6 +81,43 @@ _TASK_EVENT_TOOLS = {
 }
 
 
+class AgentRuntimeMode(StrEnum):
+    """User-facing runtime modes controlled by Shift+Tab."""
+
+    DEFAULT = "default"
+    PLAN = "plan"
+    BYPASS = "bypass"
+
+
+_RUNTIME_MODE_CYCLE = (
+    AgentRuntimeMode.DEFAULT,
+    AgentRuntimeMode.PLAN,
+    AgentRuntimeMode.BYPASS,
+)
+
+_PLAN_MODE_READ_ONLY_TOOLS = {
+    "file_read",
+    "yaml_micro_verify",
+    "yaml_validate",
+    "web_search",
+    "web_fetch",
+    "memory_recall",
+    "task_list",
+    "runtime_status",
+    "tool_search",
+    "list_agents",
+    "read_agent",
+    "team_status",
+    "blackboard_read",
+    "pursuit_status",
+    "pursuit_list",
+    "background_status",
+    "background_output",
+    "scheduler_list",
+    "worktree_list",
+}
+
+
 def _notification_preview(content: str, *, max_chars: int = 240) -> str:
     """Build a compact one-line preview for runtime notification events."""
     lines = []
@@ -137,6 +175,12 @@ class AgentEngine:
             mode=PermissionMode(config.safety.permission_mode),
             allowed_dirs=[*config.safety.allowed_dirs, str(self.workspace_root)],
             workspace_root=str(self.workspace_root),
+        )
+        self._default_permission_mode = self._permission_checker.mode
+        self._runtime_mode = (
+            AgentRuntimeMode.BYPASS
+            if self._default_permission_mode == PermissionMode.BYPASS
+            else AgentRuntimeMode.DEFAULT
         )
         self.session_store = SessionStore(config.memory)
         self.long_term_memory = LongTermMemory(config.memory)
@@ -391,6 +435,31 @@ class AgentEngine:
     def permission_mode(self) -> PermissionMode:
         """Return the active permission mode."""
         return self._permission_checker.mode
+
+    @property
+    def runtime_mode(self) -> AgentRuntimeMode:
+        """Return the user-facing runtime mode."""
+        return self._runtime_mode
+
+    def set_runtime_mode(self, mode: AgentRuntimeMode | str) -> AgentRuntimeMode:
+        """Apply a user-facing runtime mode to the underlying permission layer."""
+        runtime_mode = AgentRuntimeMode(mode)
+        self._runtime_mode = runtime_mode
+        if runtime_mode == AgentRuntimeMode.DEFAULT:
+            permission_mode = self._default_permission_mode
+        elif runtime_mode == AgentRuntimeMode.PLAN:
+            permission_mode = PermissionMode.STRICT
+        else:
+            permission_mode = PermissionMode.BYPASS
+        self._permission_checker.set_mode(permission_mode)
+        self._config.safety.permission_mode = permission_mode.value
+        return self._runtime_mode
+
+    def cycle_runtime_mode(self) -> AgentRuntimeMode:
+        """Cycle default → plan → bypass → default for Shift+Tab."""
+        idx = _RUNTIME_MODE_CYCLE.index(self._runtime_mode)
+        next_mode = _RUNTIME_MODE_CYCLE[(idx + 1) % len(_RUNTIME_MODE_CYCLE)]
+        return self.set_runtime_mode(next_mode)
 
     def set_permission_confirmer(
         self,
@@ -1320,7 +1389,7 @@ class AgentEngine:
             logger.debug("Task snapshot event failed: %s", e)
 
     def _check_budget(self) -> AgentResult | None:
-        if PermissionMode(self._config.safety.permission_mode) == PermissionMode.BYPASS:
+        if self._permission_checker.mode == PermissionMode.BYPASS:
             return None
         if not self._budget_tracker.is_exceeded():
             return None
@@ -2287,6 +2356,27 @@ class AgentEngine:
         except ValueError as e:
             return ToolResult(call_id=tc.id, status="error", content=str(e))
 
+        if (
+            self._runtime_mode == AgentRuntimeMode.PLAN
+            and not self._tool_allowed_in_plan_mode(tc.name, tool)
+        ):
+            reason = (
+                "Plan 模式只允许只读工具。按 Shift+Tab 可切换到 default 或 bypass 后重试。"
+            )
+            await self._emit_permission_bubble(
+                on_event,
+                agent_name=agent_name,
+                tool_name=tc.name,
+                status="blocked_by_plan_mode",
+                reason=reason,
+                requires_confirmation=False,
+            )
+            return ToolResult(
+                call_id=tc.id,
+                status="error",
+                content=f"权限拒绝：{reason}",
+            )
+
         session_id = self._session.id if self._session else ""
         before_ctx = await self._fire_hook(HookContext(
             point=HookPoint.TOOL_PERMISSION_CHECK,
@@ -2454,8 +2544,7 @@ class AgentEngine:
 
         choice = self._normalize_permission_confirmation(raw_choice)
         if choice == "bypass":
-            self._permission_checker.set_mode(PermissionMode.BYPASS)
-            self._config.safety.permission_mode = PermissionMode.BYPASS.value
+            self.set_runtime_mode(AgentRuntimeMode.BYPASS)
             await self._emit_permission_bubble(
                 on_event,
                 agent_name=agent_name,
@@ -2498,6 +2587,28 @@ class AgentEngine:
         if normalized in {"bypass", "b", "shift+tab", "s-tab"}:
             return "bypass"
         return "deny"
+
+    def _tool_allowed_in_plan_mode(self, tool_name: str, tool: Any) -> bool:
+        """Return whether a tool is safe for read-only planning mode."""
+        metadata = getattr(tool, "metadata", None)
+        if getattr(metadata, "destructive", False):
+            return False
+        if getattr(metadata, "read_only", False):
+            return True
+        if tool_name in _PLAN_MODE_READ_ONLY_TOOLS:
+            return True
+        if tool_name.startswith("browser_daemon_"):
+            readonly_suffixes = (
+                "health",
+                "status",
+                "list",
+                "get",
+                "read",
+                "observe",
+                "screenshot",
+            )
+            return tool_name.removeprefix("browser_daemon_").startswith(readonly_suffixes)
+        return False
 
     async def _emit_permission_bubble(
         self,

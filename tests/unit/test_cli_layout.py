@@ -131,9 +131,18 @@ class TestCLIAppScrolling:
 
                 assert "hello" in cli.get_transcript()
                 assert "model | workspace | token" not in cli.get_transcript()
-                assert cli._render_status(80).__pt_formatted_text__()[0][1].strip().startswith(
-                    "model"
-                )
+                rendered = cli._render_status(80).__pt_formatted_text__()[0][1].strip()
+                assert rendered.startswith("mode: default")
+                assert "model | workspace | token" in rendered
+
+    def test_runtime_mode_bar_is_not_part_of_transcript(self) -> None:
+        with create_pipe_input() as pipe_input:
+            with create_app_session(input=pipe_input, output=DummyOutput()):
+                cli = _build_cli_app()
+                cli.set_mode_status("plan")
+
+                assert "mode: plan" not in cli.get_transcript()
+                assert "mode: plan" in cli._render_status(80).__pt_formatted_text__()[0][1]
 
     def test_output_window_has_scrollbar_margin(self) -> None:
         with create_pipe_input() as pipe_input:
@@ -151,11 +160,11 @@ class TestCLIAppScrolling:
                 cli.set_status("abcdefghijklmnopqrstuvwxyz")
 
                 small = cli._render_status(10).__pt_formatted_text__()[0][1]
-                large = cli._render_status(30).__pt_formatted_text__()[0][1]
+                large = cli._render_status(60).__pt_formatted_text__()[0][1]
 
                 assert len(small) == 10
                 assert small.endswith("…")
-                assert large.strip() == "abcdefghijklmnopqrstuvwxyz"
+                assert "abcdefghijklmnopqrstuvwxyz" in large
 
     def test_status_bar_truncates_wide_text_to_render_width(self) -> None:
         with create_pipe_input() as pipe_input:
