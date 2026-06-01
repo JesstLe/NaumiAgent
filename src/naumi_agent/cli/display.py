@@ -215,8 +215,9 @@ async def cli_event_handler(event: str, data: dict[str, Any]) -> None:
         phase = str(data.get("phase", "?"))
         before = data.get("before", "?")
         after = data.get("after", "?")
+        unit = str(data.get("unit", "messages"))
         style = "green" if phase == "completed" else "red" if phase == "failed" else "yellow"
-        suffix = f" {before} → {after} messages" if after != "?" else f" before={before}"
+        suffix = f" {before} → {after} {unit}" if after != "?" else f" before={before}"
         console.print(f"[{style}]recovery {phase}: {action} ({reason}){suffix}[/{style}]")
     elif event == "token":
         console.print(data.get("content", ""), end="")

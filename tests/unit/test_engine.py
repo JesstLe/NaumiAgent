@@ -14,7 +14,7 @@ from naumi_agent.agents.team_protocol import execute_team_signal
 from naumi_agent.config.settings import AppConfig, MemoryConfig, SafetyConfig
 from naumi_agent.hooks import HookContext, HookPoint
 from naumi_agent.memory.session import Session
-from naumi_agent.model.router import ModelResponse, ModelTier, TokenUsage
+from naumi_agent.model.router import ModelResponse, ModelTier, StreamChunk, TokenUsage
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.orchestrator.subagent_manager import SubTask
@@ -769,6 +769,134 @@ class TestContextCompactionPreservation:
 
 
 class TestErrorRecovery:
+    @pytest.mark.asyncio
+    async def test_length_finish_reason_continues_final_response(
+        self,
+        tmp_path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        try:
+            engine._messages = [
+                {"role": "system", "content": "system prompt"},
+                {"role": "user", "content": "写一个完整答案"},
+            ]
+            first = ModelResponse(
+                content="第一段",
+                finish_reason="length",
+                usage=TokenUsage(input_tokens=3, output_tokens=2, total_tokens=5),
+                model="test-model",
+            )
+            continuation = ModelResponse(
+                content="第二段",
+                finish_reason="stop",
+                usage=TokenUsage(input_tokens=4, output_tokens=2, total_tokens=6),
+                model="test-model",
+            )
+
+            with patch.object(
+                engine._router,
+                "call",
+                new_callable=AsyncMock,
+                side_effect=[first, continuation],
+            ) as mock_call:
+                result = await engine._react_loop(tools=None)
+
+            assert result.status == "completed"
+            assert result.response == "第一段第二段"
+            assert mock_call.call_count == 2
+            continuation_messages = mock_call.call_args_list[1].kwargs["messages"]
+            assert continuation_messages[-2] == {
+                "role": "assistant",
+                "content": "第一段",
+            }
+            assert "从截断处直接继续" in continuation_messages[-1]["content"]
+            assistant_messages = [
+                msg for msg in engine._messages
+                if msg.get("role") == "assistant"
+            ]
+            assert assistant_messages[-1]["content"] == "第一段第二段"
+            assert not any(
+                msg.get("role") == "user" and "从截断处直接继续" in msg.get("content", "")
+                for msg in engine._messages
+            )
+            assert engine.usage.total_input_tokens == 7
+            assert engine.usage.total_output_tokens == 4
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_streaming_length_finish_reason_emits_continuation(
+        self,
+        tmp_path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        async def stream_response(**_: object):
+            yield StreamChunk(token="上半")
+            yield StreamChunk(finish_reason="length")
+            yield StreamChunk(
+                usage=TokenUsage(input_tokens=3, output_tokens=2, total_tokens=5),
+                finish_reason="stop",
+            )
+
+        try:
+            engine._messages = [
+                {"role": "system", "content": "system prompt"},
+                {"role": "user", "content": "写一个完整答案"},
+            ]
+            continuation = ModelResponse(
+                content="下半",
+                finish_reason="stop",
+                usage=TokenUsage(input_tokens=4, output_tokens=2, total_tokens=6),
+                model="test-model",
+            )
+
+            with (
+                patch.object(engine._router, "stream", new=stream_response),
+                patch.object(
+                    engine._router,
+                    "call",
+                    new_callable=AsyncMock,
+                    return_value=continuation,
+                ),
+            ):
+                result = await engine._react_loop_streaming(
+                    tools=None,
+                    on_event=on_event,
+                )
+
+            assert result.status == "completed"
+            assert result.response == "上半下半"
+            token_text = "".join(
+                str(data.get("content", ""))
+                for event, data in events
+                if event == "token"
+            )
+            assert token_text == "上半下半"
+            recovery_events = [
+                data for event, data in events
+                if event == "recovery_event"
+                and data.get("reason") == "output_truncated"
+            ]
+            assert [event["phase"] for event in recovery_events] == [
+                "started",
+                "completed",
+            ]
+            assert recovery_events[-1]["unit"] == "chars"
+            assert engine._messages[-1]["content"] == "上半下半"
+        finally:
+            await engine.shutdown()
+
     @pytest.mark.asyncio
     async def test_prompt_too_long_reactive_compacts_and_retries(
         self,
