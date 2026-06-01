@@ -176,6 +176,17 @@ async def cli_event_handler(event: str, data: dict[str, Any]) -> None:
         console.print(
             f"[{style}]subagent {status}: {agent} / {task_id}{suffix}[/{style}]"
         )
+    elif event == "permission_bubble":
+        agent = str(data.get("agent_name", "?"))
+        tool = str(data.get("tool_name", "?"))
+        status = str(data.get("status", "?"))
+        reason = str(data.get("reason", "") or "")
+        style = "red" if status in {"blocked", "blocked_by_hook"} else "yellow"
+        suffix = f" · {reason[:120]}" if reason else ""
+        console.print(
+            f"[{style}]permission bubble: {agent} → {tool} "
+            f"[{status}]{suffix}[/{style}]"
+        )
     elif event == "team_event":
         event_type = str(data.get("event_type", "?"))
         sender = str(data.get("sender", "?"))

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from naumi_agent.hooks import HookContext, HookPoint
+from naumi_agent.tools.base import ToolCall
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
+
+EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 class AgentCapability(StrEnum):
@@ -95,7 +99,12 @@ class BaseAgent:
                 tools.append(tool.to_openai_tool())
         return tools
 
-    async def execute(self, task: str, context: str = "") -> AgentResult:
+    async def execute(
+        self,
+        task: str,
+        context: str = "",
+        event_callback: EventCallback | None = None,
+    ) -> AgentResult:
         """执行子任务."""
         from naumi_agent.model.router import ModelTier
 
@@ -197,15 +206,22 @@ class BaseAgent:
                         )
                         continue
 
-                    try:
-                        args = tool.parse_arguments(args_str)
-                        output = await tool.execute(**args)
-                    except Exception as e:
-                        output = f"Error: {type(e).__name__}: {e}"
+                    result = await self.engine._execute_tool(
+                        ToolCall(id=call_id, name=tool_name, arguments=args_str),
+                        on_event=event_callback,
+                        agent_name=self.config.name,
+                    )
+                    output = result.content
 
                     await hooks.fire(HookContext(
                         point=HookPoint.TOOL_EXECUTE_END,
-                        data={"tool_name": tool_name, "agent": self.config.name},
+                        data={
+                            "tool_name": tool_name,
+                            "agent": self.config.name,
+                            "status": result.status,
+                            "duration_ms": result.duration_ms,
+                            "permission_bubble": True,
+                        },
                         agent_name=self.config.name,
                     ))
 

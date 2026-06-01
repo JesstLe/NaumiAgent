@@ -54,6 +54,14 @@ class TestRuntimeStatus:
         await engine.subagent_manager.delegate(
             SubTask(id="runtime-sub", description="没有关键词的验证任务")
         )
+        await engine._emit_permission_bubble(
+            None,
+            agent_name="coder",
+            tool_name="bash_run",
+            status="needs_confirmation",
+            reason="该工具需要用户确认",
+            requires_confirmation=True,
+        )
 
         output = await build_runtime_status(engine, sections="todo,team,subagent,recommendations")
 
@@ -61,6 +69,8 @@ class TestRuntimeStatus:
         assert "等待用户确认范围" in output
         assert "接手 runtime_status 验证" in output
         assert "没有找到合适的子 Agent" in output
+        assert "权限冒泡" in output
+        assert "bash_run" in output
         assert "blocked todo" in output
 
     @pytest.mark.asyncio

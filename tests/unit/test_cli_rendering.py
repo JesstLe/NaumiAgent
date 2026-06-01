@@ -8,6 +8,7 @@ from naumi_agent.main import (
     _capture,
     _cli_event_factory,
     _format_context_compacted,
+    _format_permission_bubble,
     _format_recovery_event,
     _print_tool_output,
     _show_cli_status,
@@ -136,3 +137,17 @@ def test_recovery_event_rendering_includes_reason_and_action() -> None:
     assert "reactive_compact_retry" in rendered
     assert "80" in rendered
     assert "9" in rendered
+
+
+def test_permission_bubble_rendering_includes_agent_tool_and_reason() -> None:
+    rendered = _format_permission_bubble({
+        "agent_name": "coder",
+        "tool_name": "bash_run",
+        "status": "needs_confirmation",
+        "reason": "该工具需要用户确认",
+    })
+
+    assert "coder" in rendered
+    assert "bash_run" in rendered
+    assert "needs_confirmation" in rendered
+    assert "需要用户确认" in rendered

@@ -8,6 +8,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from inspect import signature
 from typing import TYPE_CHECKING, Any
 
 from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult, BaseAgent
@@ -425,7 +426,16 @@ class SubAgentManager:
                 data={"task_id": task.id, "agent_name": agent_name, "task": task.description},
                 agent_name=agent_name,
             ))
-            result = await agent.execute(task=task.description, context=context)
+            execute_kwargs: dict[str, Any] = {
+                "task": task.description,
+                "context": context,
+            }
+            if (
+                event_callback is not None
+                and "event_callback" in signature(agent.execute).parameters
+            ):
+                execute_kwargs["event_callback"] = event_callback
+            result = await agent.execute(**execute_kwargs)
             await self._hooks.fire(HookContext(
                 point=HookPoint.AGENT_EXECUTE_END,
                 data={

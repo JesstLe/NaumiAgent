@@ -242,6 +242,15 @@ class _RuntimeSnapshot:
                 task_id = str(event.get("task_id") or "?")
                 message = str(event.get("message") or "")
                 lines.append(f"  - {status}: {agent} / {task_id} {message[:140]}")
+        bubbles = self.engine.get_recent_permission_bubbles(limit=self.limit)
+        if bubbles:
+            lines.append("- 权限冒泡：")
+            for bubble in bubbles:
+                agent = str(bubble.get("agent_name") or "?")
+                tool = str(bubble.get("tool_name") or "?")
+                status = str(bubble.get("status") or "?")
+                reason = str(bubble.get("reason") or "")
+                lines.append(f"  - {agent} → {tool} [{status}] {reason[:140]}")
         return "\n".join(lines)
 
     def hooks_section(self) -> str:
