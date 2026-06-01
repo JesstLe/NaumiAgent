@@ -26,6 +26,23 @@ from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tools.base import Tool, ToolCall, ToolResult
 
 
+class FakeTool(Tool):
+    @property
+    def name(self) -> str:
+        return "fake_tool"
+
+    @property
+    def description(self) -> str:
+        return "测试工具"
+
+    @property
+    def parameters_schema(self) -> dict[str, object]:
+        return {"type": "object", "properties": {}}
+
+    async def execute(self, **kwargs: object) -> str:
+        return "ok"
+
+
 @pytest.fixture
 def engine(request: pytest.FixtureRequest) -> AgentEngine:
     config = AppConfig()
@@ -133,6 +150,42 @@ class TestReset:
 
 
 class TestSetSystemPrompt:
+    def test_ensure_system_prompt_uses_section_builder(self, engine: AgentEngine) -> None:
+        engine._ensure_system_prompt()
+
+        system_messages = [m for m in engine._messages if m["role"] == "system"]
+        assert len(system_messages) == 1
+        content = system_messages[0]["content"]
+        assert '<naumi_system_prompt version="sections-v1">' in content
+        assert "## Runtime Defaults" in content
+        assert str(engine.workspace_root) in content
+        assert "Registered tools:" in content
+
+    def test_ensure_system_prompt_refreshes_generated_prompt(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        engine._ensure_system_prompt()
+        before = engine._messages[0]["content"]
+        before_count = int(re.search(r"Registered tools: (\d+)", before).group(1))
+        engine._tool_registry.register(FakeTool())
+
+        engine._ensure_system_prompt()
+
+        system_messages = [m for m in engine._messages if m["role"] == "system"]
+        assert len(system_messages) == 1
+        after = system_messages[0]["content"]
+        after_count = int(re.search(r"Registered tools: (\d+)", after).group(1))
+        assert after_count == before_count + 1
+        assert len(engine._full_history) == 1
+
+    def test_custom_system_prompt_is_not_overwritten(self, engine: AgentEngine) -> None:
+        engine.set_system_prompt("custom prompt")
+
+        engine._ensure_system_prompt()
+
+        assert engine._messages[0]["content"] == "custom prompt"
+
     def test_replaces_existing(self, engine: AgentEngine) -> None:
         engine._messages.append({"role": "system", "content": "old"})
         engine.set_system_prompt("new prompt")
