@@ -1,5 +1,6 @@
 """CLI layout behavior tests."""
 
+import pytest
 from prompt_toolkit.application.current import create_app_session
 from prompt_toolkit.input.defaults import create_pipe_input
 from prompt_toolkit.output import DummyOutput
@@ -185,3 +186,27 @@ class TestCLIAppScrolling:
         assert _border_line(1, "╭", "─", "╮")[0][1] == "╭"
         assert _border_line(2, "╭", "─", "╮")[0][1] == "╭╮"
         assert _border_line(10, "╭", "─", "╮")[0][1] == "╭────────╮"
+
+    @pytest.mark.asyncio
+    async def test_submit_captures_stray_output_and_exceptions(
+        self,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        cli = CLIApp()
+
+        async def handler(_text: str) -> None:
+            print("stray stdout")
+            raise RuntimeError("boom")
+
+        cli.set_submit_handler(handler)
+
+        await cli._run_submit("x")
+
+        captured = capsys.readouterr()
+        transcript = cli.get_transcript()
+        assert captured.out == ""
+        assert captured.err == ""
+        assert "stray stdout" in transcript
+        assert "RuntimeError: boom" in transcript
+        assert "界面仍可继续使用" in transcript
+        assert cli._processing is False
