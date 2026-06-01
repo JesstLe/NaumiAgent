@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.28] - 2026-06-01
+
+### Added
+- **Self-Review 工具确定性落地** — `/self-review` 在模型路由未初始化时也会返回自审查报告、可运行 self-review inventory、AST 代码健康指标和 self-evolution contract。
+
+### Fixed
+- **Self-Review 执行顺序修复** — 自审查现在会先定位并扫描源码，再按需追加 LLM 增强，避免无模型时跳过静态自审能力。
+
 ## [0.1.27] - 2026-06-01
 
 ### Added

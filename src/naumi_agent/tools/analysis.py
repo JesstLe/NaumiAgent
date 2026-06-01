@@ -24,6 +24,7 @@ from naumi_agent.tools.analysis_support import hook as _hook_support
 from naumi_agent.tools.analysis_support import macro as _macro_support
 from naumi_agent.tools.analysis_support import pid as _pid_support
 from naumi_agent.tools.analysis_support import probe as _probe_support
+from naumi_agent.tools.analysis_support import self_review as _self_review_support
 from naumi_agent.tools.analysis_support import spar as _spar_support
 from naumi_agent.tools.analysis_support import supervisor as _supervisor_support
 from naumi_agent.tools.analysis_support import vision as _vision_support
@@ -74,6 +75,10 @@ _build_supervisor_inventory_script = (
     _supervisor_support.build_supervisor_inventory_script
 )
 _build_supervisor_report = _supervisor_support.build_supervisor_report
+_build_self_review_inventory_script = (
+    _self_review_support.build_self_review_inventory_script
+)
+_build_self_review_report = _self_review_support.build_self_review_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -9849,10 +9854,6 @@ class SelfReviewTool(Tool):
     async def execute(
         self, *, focus: str = "all", module: str = "", **kwargs: Any,
     ) -> str:
-        router = _global_router
-        if router is None:
-            return _router_unavailable("self-review", "naumi_agent source")
-
         source_dir = _find_agent_source_dir()
 
         if module:
@@ -9866,15 +9867,22 @@ class SelfReviewTool(Tool):
 
         source_text = _read_sources(files, max_chars=80000)
         scan_evidence = _scan_self_review(files, source_text)
+        deterministic = _build_self_review_report(target_dir, focus, scan_evidence)
+
+        router = _global_router
+        if router is None:
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 Self-Review 自审查报告。"
 
         user_msg = (
             f"## 静态扫描证据\n{scan_evidence}\n\n"
+            f"## 确定性 Self-Review 自审查报告\n{deterministic}\n\n"
             f"## 源代码\n{source_text[:50000]}\n"
         )
         if focus != "all":
             user_msg += f"\n## 审查重点\n请重点关注: {focus}\n"
 
-        return await _run_analysis(router, _SELF_REVIEW_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _SELF_REVIEW_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM Self-Review 增强\n" + enhanced
 
 
 def create_analysis_tools() -> list[Tool]:
