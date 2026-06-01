@@ -1356,7 +1356,7 @@ def _print_help() -> None:
         ("/browser-screenshot", "截取当前页面截图"),
         (
             "/bdaemon <子命令>",
-            "外部浏览器 daemon — start/health/run/list/status/reply/resume/abort/manual",
+            "外部浏览器 daemon — start/health/run/list/status/watch/reply/resume/abort/manual",
         ),
         ("/tasks", "列出浏览器任务运行"),
         ("/task <id>", "查看任务运行详情"),
@@ -2877,6 +2877,12 @@ async def _run_browser_daemon(engine: Any, arg: str) -> None:
                 console.print("[yellow]用法: /bdaemon status <运行ID>[/yellow]")
                 return
             await _execute("browser_daemon_run_status", run_id=parts[1])
+        case "watch":
+            if len(parts) < 2:
+                console.print("[yellow]用法: /bdaemon watch <运行ID> [超时毫秒][/yellow]")
+                return
+            timeout_ms = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 30000
+            await _execute("browser_daemon_watch", run_id=parts[1], timeout_ms=timeout_ms)
         case "reply":
             if len(parts) < 3:
                 console.print("[yellow]用法: /bdaemon reply <运行ID> <指令>[/yellow]")
@@ -2907,7 +2913,8 @@ async def _run_browser_daemon(engine: Any, arg: str) -> None:
         case _:
             console.print(
                 "[yellow]未知 bdaemon 子命令[/yellow]\n"
-                "[dim]可用: health/start/dashboard/run/list/status/reply/resume/abort/manual[/dim]"
+                "[dim]可用: health/start/dashboard/run/list/status/watch/reply/"
+                "resume/abort/manual[/dim]"
             )
 
 
