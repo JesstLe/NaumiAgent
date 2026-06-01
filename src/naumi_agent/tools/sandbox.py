@@ -9,11 +9,15 @@ import sys
 import tempfile
 from typing import Any
 
-from naumi_agent.tools.base import Tool
+from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
 _MAX_OUTPUT_BYTES = 100_000
+MAX_CODE_CHARS = 100_000
+MIN_EXEC_TIMEOUT_SECONDS = 1
+MAX_EXEC_TIMEOUT_SECONDS = 60
+SUPPORTED_LANGUAGES = frozenset({"python", "javascript", "bash"})
 
 # Cache docker availability to avoid repeated checks.
 _docker_available_cache: bool | None = None
@@ -32,6 +36,16 @@ class CodeExecuteTool(Tool):
             "在隔离的 Docker 容器中执行代码。"
             "支持 python、javascript、bash。自动安装依赖。"
             "如果 Docker 不可用，则在本地临时目录执行（受限模式）。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            command_argument_names=("code",),
+            user_facing_name="代码执行",
+            search_hint="execute code sandbox docker python javascript bash",
         )
 
     @property
@@ -62,6 +76,15 @@ class CodeExecuteTool(Tool):
         timeout: int = 30,
         **kwargs: Any,
     ) -> str:
+        try:
+            code, language, timeout = _normalize_execution_inputs(
+                code,
+                language,
+                timeout,
+            )
+        except ValueError as e:
+            return f"代码执行已拒绝: {e}"
+
         if await self._check_docker():
             return await self._run_in_docker(code, language, timeout)
         return await self._run_local(code, language, timeout)
@@ -221,6 +244,35 @@ def _truncate(text: str, max_bytes: int = _MAX_OUTPUT_BYTES) -> str:
         return text
     truncated = encoded[:max_bytes].decode("utf-8", errors="replace")
     return truncated + f"\n... (输出已截断，原始大小 {len(encoded)} 字节)"
+
+
+def _normalize_execution_inputs(
+    code: Any,
+    language: Any,
+    timeout: Any,
+) -> tuple[str, str, int]:
+    """Validate public code execution inputs before spawning processes."""
+    if not isinstance(code, str) or not code.strip():
+        raise ValueError("code 不能为空，且必须是字符串。")
+    if len(code) > MAX_CODE_CHARS:
+        raise ValueError(f"code 过长，当前上限为 {MAX_CODE_CHARS} 个字符。")
+
+    if not isinstance(language, str):
+        raise ValueError("language 必须是字符串。")
+    normalized_language = language.strip().lower()
+    if normalized_language not in SUPPORTED_LANGUAGES:
+        allowed = " | ".join(sorted(SUPPORTED_LANGUAGES))
+        raise ValueError(f"language 只能是: {allowed}。")
+
+    if isinstance(timeout, bool) or not isinstance(timeout, int):
+        raise ValueError("timeout 必须是整数秒。")
+    if timeout < MIN_EXEC_TIMEOUT_SECONDS or timeout > MAX_EXEC_TIMEOUT_SECONDS:
+        raise ValueError(
+            "timeout 必须在 "
+            f"{MIN_EXEC_TIMEOUT_SECONDS} 到 {MAX_EXEC_TIMEOUT_SECONDS} 秒之间。"
+        )
+
+    return code, normalized_language, timeout
 
 
 def create_sandbox_tools() -> list[Tool]:

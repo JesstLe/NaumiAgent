@@ -17,6 +17,7 @@ from naumi_agent.tools.analysis import (
     _build_sleep_report,
     _scan_sleep,
 )
+from naumi_agent.tools.analysis_tools.sleep import SleepPruningTool as SplitSleepTool
 
 
 def _sleep_context() -> str:
@@ -102,3 +103,35 @@ class TestSleepPruningTool:
         assert "## Sleep 确定性突触修剪报告" in output
         assert "## LLM Sleep 增强" in output
         assert "commit 摘要" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_file_and_router_dependencies(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "notes.py"
+        target.write_text("def shipped():\n    assert True\n", encoding="utf-8")
+
+        async def run_analysis(router, system_prompt: str, user_msg: str) -> str:
+            assert router == "router"
+            assert "Circadian Synaptic Pruning" in system_prompt
+            assert "def shipped" in user_msg
+            return "注入 Sleep 增强"
+
+        tool = SplitSleepTool(
+            router_getter=lambda: "router",
+            run_analysis=run_analysis,
+            resolve_target=lambda raw: [Path(raw)],
+            read_sources=lambda files: "\n".join(
+                file.read_text(encoding="utf-8") for file in files
+            ),
+        )
+
+        output = await tool.execute(
+            session_context=_sleep_context(),
+            target=str(target),
+        )
+
+        assert "## Sleep 确定性突触修剪报告" in output
+        assert "## LLM Sleep 增强" in output
+        assert "注入 Sleep 增强" in output

@@ -9,6 +9,7 @@ import pytest
 
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.tools.analysis import PointerTool, _build_pointer_report, _scan_pointer
+from naumi_agent.tools.analysis_tools.pointer import PointerTool as SplitPointerTool
 
 
 def _write_pointer_source(path: Path) -> None:
@@ -87,3 +88,33 @@ class TestPointerTool:
         assert "## SPA 确定性指针架构" in output
         assert "## LLM SPA 架构增强" in output
         assert "Decimal dereference" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_file_and_router_dependencies(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "finance.py"
+        _write_pointer_source(source)
+
+        async def run_analysis(router, system_prompt: str, user_msg: str) -> str:
+            assert router == "router"
+            assert "Semantic Pointer Architecture" in system_prompt
+            assert "金融报价" in user_msg
+            assert "finance.price_ref" in user_msg
+            return "注入 SPA 增强"
+
+        tool = SplitPointerTool(
+            router_getter=lambda: "router",
+            run_analysis=run_analysis,
+            resolve_target=lambda raw: [Path(raw)],
+            read_sources=lambda files: "\n".join(
+                file.read_text(encoding="utf-8") for file in files
+            ),
+        )
+
+        output = await tool.execute(target=str(source), context="金融报价")
+
+        assert "## SPA 确定性指针架构" in output
+        assert "## LLM SPA 架构增强" in output
+        assert "注入 SPA 增强" in output

@@ -11,6 +11,7 @@ from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.tools.analysis import DSPyTool
 from naumi_agent.tools.analysis import _scan_dspy as analysis_scan_dspy
 from naumi_agent.tools.analysis_support.dspy import build_dspy_baseline_metric, scan_dspy
+from naumi_agent.tools.analysis_tools.dspy import DSPyTool as SplitDSPyTool
 
 
 def _write_prompt_source(path: Path) -> None:
@@ -93,3 +94,37 @@ class TestDSPyTool:
         assert "## DSPy 静态成熟度扫描" in output
         assert "## LLM Prompt 编译建议" in output
         assert "真实标注集" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_file_and_router_dependencies(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "prompts.py"
+        _write_prompt_source(source)
+
+        async def run_analysis(router, system_prompt: str, user_msg: str) -> str:
+            assert router == "router"
+            assert "Prompt Compiler" in system_prompt
+            assert "翻译问候语" in user_msg
+            assert "score_output" in user_msg
+            return "注入 DSPy 建议"
+
+        tool = SplitDSPyTool(
+            router_getter=lambda: "router",
+            run_analysis=run_analysis,
+            resolve_target=lambda raw: [Path(raw)],
+            read_sources=lambda files: "\n".join(
+                file.read_text(encoding="utf-8") for file in files
+            ),
+            cwd_getter=lambda: tmp_path,
+        )
+
+        output = await tool.execute(
+            target=str(source),
+            prompt_target="翻译问候语",
+        )
+
+        assert "## DSPy 静态成熟度扫描" in output
+        assert "## LLM Prompt 编译建议" in output
+        assert "注入 DSPy 建议" in output

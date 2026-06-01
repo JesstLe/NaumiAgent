@@ -17,6 +17,7 @@ from naumi_agent.tools.analysis import (
     _build_genesis_report,
     _scan_genesis,
 )
+from naumi_agent.tools.analysis_tools.genesis import GenesisTool as SplitGenesisTool
 
 
 def _write_genesis_source(path: Path) -> None:
@@ -121,3 +122,28 @@ class TestGenesisTool:
         assert "## LLM Genesis 增强" in output
         assert "回滚点" in output
 
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner(
+        self, tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "genesis_case.py"
+        _write_genesis_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：为 registry 增加沙盒验证和回滚点。"
+
+        router = object()
+        output = await SplitGenesisTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(target=str(source))
+
+        assert "## Genesis 确定性自演化审计" in output
+        assert "## LLM Genesis 增强" in output
+        assert "回滚点" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "系统自演化架构师" in calls[0][1]
+        assert str(source) in calls[0][2]

@@ -10,9 +10,12 @@ import logging
 from typing import Any
 
 from naumi_agent.skills.skill import Skill
-from naumi_agent.tools.base import Tool
+from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
+
+MAX_SKILL_ARGUMENT_CHARS = 8_000
+MAX_RENDERED_SKILL_CHARS = 80_000
 
 
 class SkillTool(Tool):
@@ -39,6 +42,18 @@ class SkillTool(Tool):
             )
             desc += f" Arguments: {args_desc}."
         return desc
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        dynamic_context = "`!`" in self._skill.instructions
+        return ToolMetadata(
+            read_only=not dynamic_context,
+            destructive=dynamic_context,
+            concurrency_safe=not dynamic_context,
+            requires_confirmation=True if dynamic_context else False,
+            user_facing_name=f"Skill: {self._skill.name}",
+            search_hint=f"skill render instructions {self._skill.name}",
+        )
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -76,21 +91,35 @@ class SkillTool(Tool):
         否则用 arguments 字段作为原始字符串。
         """
         # 构造 arguments 字符串
-        raw_args = kwargs.get("arguments", "")
+        try:
+            raw_args = _normalize_skill_text_arg(
+                kwargs.get("arguments", ""),
+                field_name="arguments",
+                required=False,
+            )
+        except ValueError as e:
+            return f"Skill 执行已拒绝: {e}"
 
         # 如果有具体参数定义，将 kwargs 转为额外变量
         extra_vars: dict[str, str] = {}
         if self._skill.arguments:
             for arg in self._skill.arguments:
                 if arg.name in kwargs:
-                    extra_vars[arg.name] = str(kwargs[arg.name])
+                    try:
+                        extra_vars[arg.name] = _normalize_skill_text_arg(
+                            kwargs[arg.name],
+                            field_name=arg.name,
+                            required=arg.required,
+                        )
+                    except ValueError as e:
+                        return f"Skill 执行已拒绝: {e}"
 
             # 拼接位置参数
             parts = []
             for arg in self._skill.arguments:
-                val = kwargs.get(arg.name, arg.default or "")
+                val = extra_vars.get(arg.name, arg.default or "")
                 if val:
-                    parts.append(str(val))
+                    parts.append(val)
             if parts:
                 raw_args = " ".join(parts)
 
@@ -98,6 +127,11 @@ class SkillTool(Tool):
             arguments=raw_args,
             extra_vars=extra_vars,
         )
+        if len(rendered) > MAX_RENDERED_SKILL_CHARS:
+            return (
+                "Skill 执行已拒绝: 渲染结果过长，当前上限为 "
+                f"{MAX_RENDERED_SKILL_CHARS} 个字符。"
+            )
 
         logger.info(
             "Skill '%s' rendered (%d chars)",
@@ -128,6 +162,16 @@ class SkillDispatchTool(Tool):
         return (
             f"Execute a named skill. Available skills: {names}{suffix}. "
             "Renders the skill's instruction template with given arguments."
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            user_facing_name="执行 Skill",
+            search_hint="skill execute dispatch render instructions",
         )
 
     @property
@@ -169,3 +213,27 @@ def create_skill_tools(skills: list[Skill]) -> list[Tool]:
 
     # 大量 skill 时使用 dispatch tool
     return [SkillDispatchTool([s.name for s in skills])]
+
+
+def _normalize_skill_text_arg(
+    value: Any,
+    *,
+    field_name: str,
+    required: bool,
+) -> str:
+    """Validate skill arguments before template rendering."""
+    if value is None:
+        if required:
+            raise ValueError(f"{field_name} 不能为空。")
+        return ""
+    if not isinstance(value, str):
+        value = str(value)
+    normalized = value.strip()
+    if required and not normalized:
+        raise ValueError(f"{field_name} 不能为空。")
+    if len(normalized) > MAX_SKILL_ARGUMENT_CHARS:
+        raise ValueError(
+            f"{field_name} 过长，当前上限为 "
+            f"{MAX_SKILL_ARGUMENT_CHARS} 个字符。"
+        )
+    return normalized

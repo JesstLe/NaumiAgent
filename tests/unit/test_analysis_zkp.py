@@ -17,6 +17,7 @@ from naumi_agent.tools.analysis import (
     _build_zkp_trace_script,
     _scan_zkp,
 )
+from naumi_agent.tools.analysis_tools.zkp import ZKPTool as SplitZKPTool
 
 
 def _write_zkp_source(path: Path) -> None:
@@ -118,3 +119,28 @@ class TestZKPTool:
         assert "## LLM ZKP 增强" in output
         assert "source_path" in output
 
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner(
+        self, tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "zkp_case.py"
+        _write_zkp_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：每个 summary claim 都要绑定 source_path。"
+
+        router = object()
+        output = await SplitZKPTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(target=str(source))
+
+        assert "## ZKP 确定性轨迹校验方案" in output
+        assert "## LLM ZKP 增强" in output
+        assert "source_path" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "可验证计算架构师" in calls[0][1]
+        assert str(source) in calls[0][2]

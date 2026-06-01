@@ -13,6 +13,12 @@ from naumi_agent.tools.analysis import (
     ScaleAnalysisTool,
     StateAuditTool,
 )
+from naumi_agent.tools.analysis_tools.chaos import (
+    ChaosAnalysisTool as SplitChaosAnalysisTool,
+)
+from naumi_agent.tools.analysis_tools.scale import (
+    ScaleAnalysisTool as SplitScaleAnalysisTool,
+)
 
 
 def _write_vulnerable_source(path: Path) -> None:
@@ -94,3 +100,55 @@ class TestStaticAnalysisFallbacks:
         assert "## Chaos 静态扫描" in output
         assert "## LLM 灾难推演" in output
         assert "LLM 推演" in output
+
+    @pytest.mark.asyncio
+    async def test_split_chaos_uses_injected_runner(self, tmp_path: Path) -> None:
+        source = tmp_path / "service.py"
+        _write_vulnerable_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "LLM 推演：外部依赖超时会放大故障。"
+
+        router = object()
+        output = await SplitChaosAnalysisTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(target=str(source), context="FastAPI service")
+
+        assert "## Chaos 静态扫描" in output
+        assert "无 timeout 的外部 HTTP 调用" in output
+        assert "## LLM 灾难推演" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "ruthless chaos engineering architect" in calls[0][1]
+        assert "FastAPI service" in calls[0][2]
+
+    @pytest.mark.asyncio
+    async def test_split_scale_uses_injected_runner_and_qps(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "service.py"
+        _write_vulnerable_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "LLM 扩容：为同步 HTTP 增加连接池和超时。"
+
+        router = object()
+        output = await SplitScaleAnalysisTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(target=str(source), qps=7500, context="burst traffic")
+
+        assert "## Scale 静态扫描（目标 QPS: 7,500）" in output
+        assert "同步阻塞 I/O 调用" in output
+        assert "## LLM 扩容方案" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "7,500" in calls[0][2]
+        assert "burst traffic" in calls[0][2]
+        assert "high-concurrency architect" in calls[0][1]

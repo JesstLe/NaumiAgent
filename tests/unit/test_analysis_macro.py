@@ -17,6 +17,7 @@ from naumi_agent.tools.analysis import (
     _build_macro_report,
     _scan_macro,
 )
+from naumi_agent.tools.analysis_tools.macro import MacroTool as SplitMacroTool
 
 
 def _write_macro_source(path: Path) -> None:
@@ -119,3 +120,28 @@ class TestMacroTool:
         assert "## LLM Macro 增强" in output
         assert "仲裁器" in output
 
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner(
+        self, tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "macro_case.py"
+        _write_macro_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：把 coordinator 拆成数据商和仲裁器。"
+
+        router = object()
+        output = await SplitMacroTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(task=str(source))
+
+        assert "## Macro 确定性多智能体市场审计" in output
+        assert "## LLM Macro 增强" in output
+        assert "仲裁器" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "多智能体经济系统架构师" in calls[0][1]
+        assert str(source) in calls[0][2]

@@ -9,6 +9,7 @@ import pytest
 
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.tools.analysis import MCTSTool, _build_mcts_decision_report, _scan_mcts
+from naumi_agent.tools.analysis_tools.mcts import MCTSTool as SplitMCTSTool
 
 
 def _write_branchy_source(path: Path) -> None:
@@ -89,3 +90,33 @@ class TestMCTSTool:
         assert "## MCTS 确定性多路径探索" in output
         assert "## LLM MCTS 深化" in output
         assert "异常路径测试" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_file_and_router_dependencies(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "decision.py"
+        _write_branchy_source(source)
+
+        async def run_analysis(router, system_prompt: str, user_msg: str) -> str:
+            assert router == "router"
+            assert "Monte Carlo Tree Search" in system_prompt
+            assert "修复决策逻辑" in user_msg
+            assert "决策分支点" in user_msg
+            return "注入 MCTS 深化"
+
+        tool = SplitMCTSTool(
+            router_getter=lambda: "router",
+            run_analysis=run_analysis,
+            resolve_target=lambda raw: [Path(raw)],
+            read_sources=lambda files: "\n".join(
+                file.read_text(encoding="utf-8") for file in files
+            ),
+        )
+
+        output = await tool.execute(problem="修复决策逻辑", target=str(source))
+
+        assert "## MCTS 确定性多路径探索" in output
+        assert "## LLM MCTS 深化" in output
+        assert "注入 MCTS 深化" in output

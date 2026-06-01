@@ -17,6 +17,7 @@ from naumi_agent.tools.analysis import (
     _build_pid_report,
     _scan_pid,
 )
+from naumi_agent.tools.analysis_tools.pid import PIDTool as SplitPIDTool
 
 
 def _write_pid_source(path: Path) -> None:
@@ -119,3 +120,28 @@ class TestPIDTool:
         assert "## LLM PID 增强" in output
         assert "deadline" in output
 
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner(
+        self, tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "pid_case.py"
+        _write_pid_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：为 while True 增加 deadline 和熔断。"
+
+        router = object()
+        output = await SplitPIDTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(target=str(source))
+
+        assert "## PID 确定性闭环审计" in output
+        assert "## LLM PID 增强" in output
+        assert "deadline" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "自动化控制论架构师" in calls[0][1]
+        assert str(source) in calls[0][2]

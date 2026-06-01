@@ -18,6 +18,7 @@ from naumi_agent.tools.analysis import (
     _scan_probe,
 )
 from naumi_agent.tools.analysis_support.probe import select_probe_modes
+from naumi_agent.tools.analysis_tools.probe import ProbeTool as SplitProbeTool
 
 
 def test_scan_probe_flags_unknown_system() -> None:
@@ -105,3 +106,26 @@ class TestProbeTool:
         assert "## Probe 确定性反幻觉协议" in output
         assert "## LLM 探测增强" in output
         assert "模块版本" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_router_runner(self) -> None:
+        async def run_analysis(router, system_prompt: str, user_msg: str) -> str:
+            assert router == "router"
+            assert "Black-Box Probe" in system_prompt
+            assert "探测 python inspect API" in user_msg
+            assert "Read-only Probe Script" in user_msg
+            return "注入探测增强"
+
+        tool = SplitProbeTool(
+            router_getter=lambda: "router",
+            run_analysis=run_analysis,
+        )
+
+        output = await tool.execute(
+            task="探测 python inspect API",
+            context="inspect module",
+        )
+
+        assert "## Probe 确定性反幻觉协议" in output
+        assert "## LLM 探测增强" in output
+        assert "注入探测增强" in output

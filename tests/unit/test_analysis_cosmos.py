@@ -17,6 +17,7 @@ from naumi_agent.tools.analysis import (
     _build_cosmos_report,
     _scan_cosmos,
 )
+from naumi_agent.tools.analysis_tools.cosmos import CosmosTool as SplitCosmosTool
 
 
 def _write_cosmos_source(path: Path) -> None:
@@ -126,3 +127,29 @@ class TestCosmosTool:
         assert "## Cosmos 确定性创世引擎审计" in output
         assert "## LLM Cosmos 增强" in output
         assert "deterministic replay" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner(
+        self, tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "cosmos_case.py"
+        _write_cosmos_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：把 WorldState schema 接入 deterministic replay。"
+
+        router = object()
+        output = await SplitCosmosTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(target=str(source))
+
+        assert "## Cosmos 确定性创世引擎审计" in output
+        assert "## LLM Cosmos 增强" in output
+        assert "deterministic replay" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "计算宇宙学架构师" in calls[0][1]
+        assert str(source) in calls[0][2]

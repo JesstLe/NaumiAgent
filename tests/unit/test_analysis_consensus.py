@@ -17,6 +17,9 @@ from naumi_agent.tools.analysis import (
     _build_consensus_report,
     _scan_consensus,
 )
+from naumi_agent.tools.analysis_tools.consensus import (
+    ConsensusTool as SplitConsensusTool,
+)
 
 
 def _write_consensus_source(path: Path) -> None:
@@ -116,3 +119,28 @@ class TestConsensusTool:
         assert "## LLM Consensus 增强" in output
         assert "2/3 quorum" in output
 
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner(
+        self, tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "decision.py"
+        _write_consensus_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：删除前需要 2/3 quorum 和 dry-run。"
+
+        router = object()
+        output = await SplitConsensusTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(target=str(source))
+
+        assert "## Consensus 确定性共识审计" in output
+        assert "## LLM Consensus 增强" in output
+        assert "2/3 quorum" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "拜占庭容错架构师" in calls[0][1]
+        assert str(source) in calls[0][2]

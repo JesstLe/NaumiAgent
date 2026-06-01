@@ -17,6 +17,7 @@ from naumi_agent.tools.analysis import (
     _build_page_report,
     _scan_page,
 )
+from naumi_agent.tools.analysis_tools.page import MemoryPageTool as SplitPageTool
 
 
 def _page_context() -> str:
@@ -105,3 +106,29 @@ class TestMemoryPageTool:
         assert "## Page 确定性内存分页报告" in output
         assert "## LLM Page 增强" in output
         assert "已提交任务" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_router_window(self) -> None:
+        router = Mock()
+        router.resolve_model.return_value = "test-model"
+        router.get_context_window.return_value = 256
+
+        async def run_analysis(router_arg, system_prompt: str, user_msg: str) -> str:
+            assert router_arg is router
+            assert "virtual memory paging" in system_prompt
+            assert "上下文窗口: 256 tokens" in user_msg
+            return "注入分页增强"
+
+        tool = SplitPageTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        )
+
+        output = await tool.execute(
+            context_window=512,
+            session_context=_page_context(),
+        )
+
+        assert "## Page 确定性内存分页报告" in output
+        assert "## LLM Page 增强" in output
+        assert "注入分页增强" in output

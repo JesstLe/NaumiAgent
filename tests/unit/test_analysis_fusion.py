@@ -17,6 +17,7 @@ from naumi_agent.tools.analysis import (
     _build_fusion_report,
     _scan_fusion,
 )
+from naumi_agent.tools.analysis_tools.fusion import FusionTool as SplitFusionTool
 
 
 def _write_fusion_source(path: Path) -> None:
@@ -118,3 +119,28 @@ class TestFusionTool:
         assert "## LLM Fusion 增强" in output
         assert "schema 校验" in output
 
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner(
+        self, tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "fusion_case.py"
+        _write_fusion_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：为 content 增加 schema 校验。"
+
+        router = object()
+        output = await SplitFusionTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(target=str(source))
+
+        assert "## Fusion 确定性边界审计" in output
+        assert "## LLM Fusion 增强" in output
+        assert "schema 校验" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "决定论-概率论融合架构师" in calls[0][1]
+        assert str(source) in calls[0][2]

@@ -13,6 +13,9 @@ from naumi_agent.tools.analysis import (
     _build_speculate_report,
     _scan_speculate,
 )
+from naumi_agent.tools.analysis_tools.speculate import (
+    SpeculateTool as SplitSpeculateTool,
+)
 
 
 def _write_speculate_source(path: Path) -> None:
@@ -98,3 +101,33 @@ class TestSpeculateTool:
         assert "## Speculate 确定性双阶段计划" in output
         assert "## LLM 推测解码增强" in output
         assert "shell=True" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_file_and_router_dependencies(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "danger.py"
+        _write_speculate_source(source)
+
+        async def run_analysis(router, system_prompt: str, user_msg: str) -> str:
+            assert router == "router"
+            assert "Speculative Decoding" in system_prompt
+            assert "审查命令执行" in user_msg
+            assert "子进程执行" in user_msg
+            return "注入推测解码增强"
+
+        tool = SplitSpeculateTool(
+            router_getter=lambda: "router",
+            run_analysis=run_analysis,
+            resolve_target=lambda raw: [Path(raw)],
+            read_sources=lambda files: "\n".join(
+                file.read_text(encoding="utf-8") for file in files
+            ),
+        )
+
+        output = await tool.execute(target=str(source), task="审查命令执行")
+
+        assert "## Speculate 确定性双阶段计划" in output
+        assert "## LLM 推测解码增强" in output
+        assert "注入推测解码增强" in output

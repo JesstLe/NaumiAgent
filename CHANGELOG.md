@@ -2,6 +2,184 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.108] - 2026-06-01
+
+### Changed
+- **Scale Analysis Tool 拆分** — 将 `analysis_scale` 的 Tool 包装迁移到 `analysis_tools.scale`，保留 `analysis.py` 兼容 wrapper 和 slash/Agent 共用 execute 路径；新增注入式 runner 测试，覆盖目标 QPS 参数传递、真实高并发瓶颈扫描、无 router 确定性输出和 LLM 扩容方案增强路径。
+
+## [0.1.107] - 2026-06-01
+
+### Changed
+- **Chaos Analysis Tool 拆分** — 参照 Claude Code 的工具执行流水线模式，将 `analysis_chaos` 的 Tool 包装迁移到 `analysis_tools.chaos`，保留 `analysis.py` 兼容 wrapper 和 slash/Agent 共用 execute 路径；新增注入式 runner 测试，覆盖真实静态 SPOF 扫描、无 router 确定性输出和 LLM 灾难推演增强路径。
+
+## [0.1.106] - 2026-06-01
+
+### Changed
+- **Self-Review Analysis Tool 拆分** — 将 `self_review` 的 Tool 包装迁移到 `analysis_tools.self_review`，保留 `analysis.py` 兼容 wrapper、全局 router 行为和源码目录定位注入点；新增注入式 runner 测试，覆盖源码自审扫描、inventory 脚本执行、Self-Evolution contract 和 LLM Self-Review 增强路径。
+
+## [0.1.105] - 2026-06-01
+
+### Changed
+- **Autopsy Analysis Tool 拆分** — 将 `analysis_autopsy` 的 Tool 包装迁移到 `analysis_tools.autopsy`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 runner 测试，覆盖 DTS-CHE 静态扫描、执行迹/假设验证/爆炸半径检测、真实 autopsy inventory 脚本执行和 LLM Autopsy 增强路径。
+
+## [0.1.104] - 2026-06-01
+
+### Changed
+- **Supervisor Analysis Tool 拆分** — 将 `analysis_supervisor` 的 Tool 包装迁移到 `analysis_tools.supervisor`，保留 `analysis.py` 兼容 wrapper、全局 router 行为和 SubAgent manager 守护树路径；新增注入式 runner 测试，覆盖单体风险扫描、Worker 候选/守护者基础设施/错误隔离检测、真实 supervisor inventory 脚本执行和 LLM Supervisor 增强路径。
+
+## [0.1.103] - 2026-06-01
+
+### Changed
+- **Watchdog Analysis Tool 拆分** — 将 `analysis_watchdog` 的 Tool 包装迁移到 `analysis_tools.watchdog`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 runner 测试，覆盖原地修改风险扫描、心跳/回滚/隔离机制检测、真实 watchdog inventory 脚本执行和 LLM Watchdog 增强路径。
+
+## [0.1.102] - 2026-06-01
+
+### Changed
+- **Cosmos Analysis Tool 拆分** — 将 `analysis_cosmos` 的 Tool 包装迁移到 `analysis_tools.cosmos`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 runner 测试，覆盖状态维度/生成能力/社会模拟/观测响应扫描、真实 cosmos inventory 脚本执行和 LLM Cosmos 增强路径。
+
+## [0.1.101] - 2026-06-01
+
+### Changed
+- **Macro Analysis Tool 拆分** — 将 `analysis_macro` 的 Tool 包装迁移到 `analysis_tools.macro`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 runner 测试，覆盖中心化决策扫描、数据市场/激励/竞争机制检测、真实 market inventory 脚本执行和 LLM Macro 增强路径。
+
+## [0.1.100] - 2026-06-01
+
+### Changed
+- **Genesis Analysis Tool 拆分** — 将 `analysis_genesis` 的 Tool 包装迁移到 `analysis_tools.genesis`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 runner 测试，覆盖刚性代码扫描、元编程/自省能力检测、真实 self-evolution inventory 脚本执行和 LLM Genesis 增强路径。
+
+## [0.1.99] - 2026-06-01
+
+### Changed
+- **ZKP Analysis Tool 拆分** — 将 `analysis_zkp` 的 Tool 包装迁移到 `analysis_tools.zkp`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 runner 测试，覆盖未验证 AI 输出扫描、引用基础设施检测、真实 trace verifier 脚本执行和 LLM ZKP 增强路径。
+
+## [0.1.98] - 2026-06-01
+
+### Changed
+- **PID Analysis Tool 拆分** — 将 `analysis_pid` 的 Tool 包装迁移到 `analysis_tools.pid`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 runner 测试，覆盖开环流水线扫描、误差累积风险检测、真实 pid inventory 脚本执行和 LLM PID 增强路径。
+
+## [0.1.97] - 2026-06-01
+
+### Changed
+- **Consensus Analysis Tool 拆分** — 将 `analysis_consensus` 的 Tool 包装迁移到 `analysis_tools.consensus`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 runner 测试，覆盖高风险决策扫描、单模型决策点检测、真实 consensus inventory 脚本执行和 LLM Consensus 增强路径。
+
+## [0.1.96] - 2026-06-01
+
+### Changed
+- **Fusion Analysis Tool 拆分** — 将 `analysis_fusion` 的 Tool 包装迁移到 `analysis_tools.fusion`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 runner 测试，覆盖 AI/LLM 调用扫描、危险融合点检测、真实 fusion inventory 脚本执行和 LLM Fusion 增强路径。
+
+## [0.1.95] - 2026-06-01
+
+### Changed
+- **World Analysis Tool 拆分** — 将 `analysis_world` 的 Tool 包装迁移到 `analysis_tools.world`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 runner 测试，覆盖 AST 状态转移扫描、客体永久性审计、真实 world inventory 脚本执行和 LLM World 增强路径。
+
+## [0.1.94] - 2026-06-01
+
+### Changed
+- **SPAR Analysis Tool 拆分** — 将 `analysis_spar` 的 Tool 包装迁移到 `analysis_tools.spar`，保留 `analysis.py` 兼容 wrapper、全局 router 行为和 SubAgent manager 对抗路径；新增注入式 runner 测试，覆盖静态攻击面扫描、奖励作弊检测、真实 harness 脚本执行和 LLM SPAR 增强路径。
+- **SPAR 调度依赖注入化** — 将 SubAgent manager 获取逻辑从工具主体中抽出为 `subagent_manager_getter` 注入点，便于后续替换蓝军/红军执行器并单测真实对抗循环。
+
+## [0.1.93] - 2026-06-01
+
+### Changed
+- **Vision Analysis Tool 拆分** — 将 `analysis_vision` 的 Tool 包装迁移到 `analysis_tools.vision`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 runner 测试，覆盖视觉任务扫描、真实 PNG inventory 脚本执行、ROI 提取契约和 LLM Vision 增强路径。
+- **Vision 合规边界收紧** — 将 LLM 增强 prompt 从“绕过反爬限制”调整为授权页面/用户截图/可见样本的证据优先视觉提取协议；遇到登录、验证码、WAF、访问控制等场景时只做授权采集与合规审查规划。
+
+## [0.1.92] - 2026-06-01
+
+### Changed
+- **Hook Analysis Tool 拆分** — 将 `analysis_hook` 的 Tool 包装迁移到 `analysis_tools.hook`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 runner 测试，覆盖逆向/插桩目标扫描、确定性 Hook 报告、真实只读 inventory 脚本和 LLM Hook 增强路径。
+- **Hook 合规边界收紧** — 将 LLM 增强 prompt 从“反调试规避方案”调整为授权、只读、证据优先的插桩侦测协议；遇到反作弊、完整性校验、内核驱动等风险时只做风险识别并要求授权确认。
+
+## [0.1.91] - 2026-06-01
+
+### Changed
+- **Probe Analysis Tool 拆分** — 将 `analysis_probe` 的 Tool 包装迁移到 `analysis_tools.probe`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 runner 测试，继续覆盖只读探测脚本生成、真实脚本执行、信息回填模板和 LLM 探测增强路径。
+
+## [0.1.90] - 2026-06-01
+
+### Changed
+- **OODA Analysis Tool 拆分** — 将 `analysis_ooda` 的 Tool 包装迁移到 `analysis_tools.ooda`，保留 `analysis.py` 兼容 wrapper、目标解析和全局 router 行为；新增真实脆弱自动化源码的注入式测试，覆盖硬编码等待/WebDriver 定位扫描、确定性 OODA 指挥方案和 LLM OODA 增强路径。
+
+## [0.1.89] - 2026-06-01
+
+### Changed
+- **COOE Analysis Tool 拆分** — 将 `analysis_cooe` 的 Tool 包装迁移到 `analysis_tools.cooe`，保留 `analysis.py` 兼容 wrapper、可选源码目标扫描和全局 router 行为；新增真实 async pipeline 的注入式测试，覆盖 I/O/调用图/ROB 扫描、确定性 DAG 调度和 LLM COOE 架构增强路径。
+
+## [0.1.88] - 2026-06-01
+
+### Changed
+- **Pointer Analysis Tool 拆分** — 将 `analysis_pointer` 的 Tool 包装迁移到 `analysis_tools.pointer`，保留 `analysis.py` 兼容 wrapper、目标解析和全局 router 行为；新增真实金融报价/HTTP 数据源的注入式测试，覆盖精密数据与外部边界扫描、确定性 SPA 指针表和 LLM SPA 架构增强路径。
+
+## [0.1.87] - 2026-06-01
+
+### Changed
+- **Speculate Analysis Tool 拆分** — 将 `analysis_speculate` 的 Tool 包装迁移到 `analysis_tools.speculate`，保留 `analysis.py` 兼容 wrapper、目标解析和全局 router 行为；新增真实高风险源码的注入式测试，覆盖子进程执行风险扫描、确定性双阶段计划和 LLM 推测解码增强路径。
+
+## [0.1.86] - 2026-06-01
+
+### Changed
+- **Route Analysis Tool 拆分** — 将 `analysis_route` 的 Tool 包装迁移到 `analysis_tools.route`，保留 `analysis.py` 兼容 wrapper、SubAgent manager stale-router 保护和 LLM fallback 行为；新增真实后端/安全源码的注入式测试，覆盖专家领域扫描、确定性 MoE 骨架和 LLM 综合增强路径。
+
+## [0.1.85] - 2026-06-01
+
+### Changed
+- **MCTS Analysis Tool 拆分** — 将 `analysis_mcts` 的 Tool 包装迁移到 `analysis_tools.mcts`，保留 `analysis.py` 兼容 wrapper、可选源码目标扫描和全局 router 行为；新增真实分支源码的注入式测试，覆盖决策分支/异常路径扫描、确定性多路径剪枝报告和 LLM MCTS 深化路径。
+
+## [0.1.84] - 2026-06-01
+
+### Changed
+- **Graph Analysis Tool 拆分** — 将 `analysis_graph` 的 Tool 包装迁移到 `analysis_tools.graph`，保留 `analysis.py` 兼容 wrapper、默认当前目录扫描和全局 router 行为；新增真实临时 Python 项目的注入式测试，覆盖 AST 实体/关系/循环依赖扫描、源码读取和 LLM 图谱推演路径。
+
+## [0.1.83] - 2026-06-01
+
+### Changed
+- **DSPy Analysis Tool 拆分** — 将 `analysis_dspy` 的 Tool 包装迁移到 `analysis_tools.dspy`，保留 `analysis.py` 兼容 wrapper、默认当前目录扫描和全局 router 行为；新增真实 prompt 文件的注入式测试，覆盖 Prompt 模板/Few-shot/Metric 静态扫描、baseline metric 和 LLM 编译建议路径。
+
+## [0.1.82] - 2026-06-01
+
+### Changed
+- **Page Analysis Tool 拆分** — 将 `analysis_page` 的 Tool 包装迁移到 `analysis_tools.page`，保留 `analysis.py` 兼容 wrapper 和全局 router 行为；新增注入式 router 窗口测试，覆盖真实上下文窗口裁剪、确定性分页报告和 LLM Page 增强路径。
+
+## [0.1.81] - 2026-06-01
+
+### Changed
+- **Sleep Analysis Tool 拆分** — 将 `analysis_sleep` 的 Tool 包装迁移到 `analysis_tools.sleep`，并通过 `router_getter`、`run_analysis`、`resolve_target`、`read_sources` 注入保留旧行为；新增带真实临时文件读取的注入式测试，覆盖确定性 Sleep 报告和 LLM 增强路径。
+
+## [0.1.80] - 2026-06-01
+
+### Changed
+- **Analysis Tool 拆分样板** — 将 `analysis_entropy` 的 Tool 包装迁移到 `analysis_tools.entropy`，保留 `analysis.py` 的兼容导出和全局 router 注入行为；新增注入式 runner 测试，后续可按同一模式逐步迁移其他 analysis 工具，降低单文件维护压力。
+
+## [0.1.79] - 2026-06-01
+
+### Changed
+- **Subagent 生命周期工具边界加固** — 为 `delegate_task`、`spawn_agent`、`destroy_agent` 和 `list_agents` 增加工具元数据，并在委派、创建、销毁前校验 Agent 名称、任务描述、成功标准和上下文长度；`destroy_agent` 现在显式标记为需要确认的破坏性工具，避免异常名称或超长内容进入子 Agent 调度链路。
+
+## [0.1.78] - 2026-06-01
+
+### Changed
+- **Team Protocol 工具边界加固** — 为 `team_signal` 和 `team_status` 增加状态变更/只读工具元数据，并在发布团队事件或读取状态前校验文本字段、黑板 key、布尔开关和显示数量，避免异常团队消息污染协作协议或黑板状态。
+
+## [0.1.77] - 2026-06-01
+
+### Changed
+- **Skill 工具边界加固** — 为 `SkillTool` 和 `skill_execute` 增加工具元数据，普通 skill 标记为只读，包含动态命令注入的 skill 标记为需确认；同时校验 skill 参数长度和必填参数，避免超长参数或空必填值撑爆上下文。
+
+## [0.1.76] - 2026-06-01
+
+### Changed
+- **Blackboard 工具边界加固** — 为 `blackboard_read` 和 `blackboard_write` 增加只读/状态变更工具元数据，并校验共享状态 key/value 的类型、空值、长度和路径越界片段，避免多 Agent 协作黑板被异常 key 或超大内容污染。
+
+## [0.1.75] - 2026-06-01
+
+### Changed
+- **Code Execute 工具边界加固** — 将 `code_execute` 标记为需要确认的破坏性代码执行工具，并在 Docker 或本地降级执行前校验代码内容、语言白名单和超时范围，避免空代码、未知解释器或异常超时参数进入进程执行路径。
+
+## [0.1.74] - 2026-06-01
+
+### Changed
+- **Memory 工具边界加固** — 为 `memory_store` 和 `memory_recall` 增加工具元数据、分类白名单、内容/查询长度限制和 `top_k` 边界校验，避免空记忆、异常分类或过大召回请求污染长期记忆；新增无需 ChromaDB 的工具层单测，并保留真实长期记忆定向验证。
+
 ## [0.1.73] - 2026-06-01
 
 ### Changed
