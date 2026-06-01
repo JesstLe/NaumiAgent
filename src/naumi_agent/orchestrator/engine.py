@@ -698,7 +698,6 @@ class AgentEngine:
         on_event: EventCallback | None = None,
     ) -> None:
         """Inject due schedule notifications into context."""
-        self.scheduler_runner.start()
         notifications = self.scheduler_runner.collect_notifications()
         if not notifications:
             return
