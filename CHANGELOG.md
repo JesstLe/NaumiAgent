@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.19] - 2026-06-01
+
+### Added
+- **Consensus 工具确定性落地** — `/consensus` 在模型路由未初始化时也会返回共识审计、可运行 consensus inventory 脚本、高风险/单点决策检测和 quorum 契约。
+
+### Fixed
+- **Consensus 源码读取修复** — `_scan_consensus` 现在会先解析目标路径再读取源码，避免路径字符串被逐字符处理导致扫描为空。
+
 ## [0.1.18] - 2026-06-01
 
 ### Added
