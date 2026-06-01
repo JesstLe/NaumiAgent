@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from naumi_agent.model.router import ModelResponse, TokenUsage
-from naumi_agent.tools.analysis import SelfHealTool, _build_heal_report
+from naumi_agent.tools.analysis import SelfHealTool
+from naumi_agent.tools.analysis import _build_heal_report as analysis_build_heal_report
+from naumi_agent.tools.analysis_support.heal import build_heal_report
 
 TRACEBACK = """Traceback (most recent call last):
   File "/tmp/app.py", line 10, in handle
@@ -28,12 +30,13 @@ def handle(user):
 
 
 def test_build_heal_report_extracts_root_frame_and_guidance() -> None:
-    report = _build_heal_report(TRACEBACK)
+    report = build_heal_report(TRACEBACK)
 
     assert "错误类型：KeyError" in report
     assert "疑似根因位置：/tmp/app.py:10 in handle()" in report
     assert "显式存在性校验" in report
     assert "回归验证建议" in report
+    assert analysis_build_heal_report(TRACEBACK) == report
 
 
 class TestSelfHealTool:
