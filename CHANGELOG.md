@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.13] - 2026-06-01
+
+### Added
+- **Probe 工具确定性落地** — `/probe` 在模型路由未初始化时也会返回只读黑盒探测协议、可运行 Python 探测脚本、信息回填模板和基于真实证据的后续开发计划。
+- **Probe 模块拆分起步** — 将 `/probe` 的静态风险扫描、模式选择、脚本生成和报告生成抽到 `analysis_support.probe`，保留 `analysis.py` 兼容入口，降低万行分析模块继续膨胀的风险。
+
 ## [0.1.12] - 2026-06-01
 
 ### Added
