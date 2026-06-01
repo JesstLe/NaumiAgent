@@ -2183,7 +2183,7 @@ class AgentEngine:
                 content=f"Permission denied by hook: {reason}",
             )
 
-        decision = self._permission_checker.check(tc.name, args)
+        decision = self._permission_checker.check(tc.name, args, tool=tool)
         after_ctx = await self._fire_hook(HookContext(
             point=HookPoint.TOOL_PERMISSION_CHECK,
             data={

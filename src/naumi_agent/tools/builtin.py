@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from naumi_agent.tools.base import Tool
+from naumi_agent.tools.base import Tool, ToolMetadata
 
 
 def _resolve_workspace_path(path: str, workspace_root: Path) -> Path:
@@ -30,6 +30,14 @@ class FileReadTool(Tool):
     @property
     def description(self) -> str:
         return "读取指定路径的文件内容。支持 offset 和 limit 参数读取部分内容。"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="读取文件",
+        )
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -93,6 +101,13 @@ class FileWriteTool(Tool):
     @property
     def description(self) -> str:
         return "将内容写入指定文件。如果文件不存在则创建，存在则覆盖。"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            user_facing_name="写入文件",
+        )
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -210,6 +225,13 @@ class FileEditTool(Tool):
         )
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            user_facing_name="编辑文件",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -274,6 +296,15 @@ class YamlMicroVerifyTool(Tool):
         )
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            path_argument_names=("file_path",),
+            user_facing_name="YAML 微验证",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -331,6 +362,15 @@ class BashRunTool(Tool):
     @property
     def description(self) -> str:
         return "在 shell 中执行命令并返回输出。支持超时设置。工作目录默认为当前进程目录。"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            requires_confirmation=True,
+            path_argument_names=("cwd",),
+            command_argument_names=("command",),
+            user_facing_name="执行命令",
+        )
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -416,6 +456,15 @@ class YamlValidateTool(Tool):
     @property
     def description(self):
         return '使用 Python 仅做只读 YAML 语法校验，确保插入注释后文件仍能正常解析'
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            path_argument_names=("file_path",),
+            user_facing_name="YAML 语法校验",
+        )
 
     @property
     def parameters_schema(self):

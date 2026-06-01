@@ -6,6 +6,7 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,25 @@ class ToolResult:
     duration_ms: int = 0
 
 
+class InterruptBehavior(StrEnum):
+    CANCEL = "cancel"
+    BLOCK = "block"
+
+
+@dataclass(frozen=True)
+class ToolMetadata:
+    """工具执行与权限系统使用的能力元数据."""
+
+    read_only: bool = False
+    destructive: bool = False
+    concurrency_safe: bool = False
+    requires_confirmation: bool | None = None
+    path_argument_names: tuple[str, ...] = ("path", "cwd")
+    command_argument_names: tuple[str, ...] = ("command",)
+    interrupt_behavior: InterruptBehavior = InterruptBehavior.BLOCK
+    user_facing_name: str | None = None
+
+
 class Tool(ABC):
     """所有工具的基类."""
 
@@ -61,6 +81,26 @@ class Tool(ABC):
     @property
     @abstractmethod
     def parameters_schema(self) -> dict[str, Any]: ...
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(user_facing_name=self.name)
+
+    @property
+    def is_read_only(self) -> bool:
+        return self.metadata.read_only
+
+    @property
+    def is_destructive(self) -> bool:
+        return self.metadata.destructive
+
+    @property
+    def is_concurrency_safe(self) -> bool:
+        return self.metadata.concurrency_safe
+
+    @property
+    def user_facing_name(self) -> str:
+        return self.metadata.user_facing_name or self.name
 
     def to_openai_tool(self) -> dict[str, Any]:
         """转为 OpenAI function calling 格式."""

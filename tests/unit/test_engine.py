@@ -259,6 +259,23 @@ class TestToolExecution:
         assert "Permission denied" in result.content
 
     @pytest.mark.asyncio
+    async def test_metadata_path_arg_sandbox_blocks_yaml_validate(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        tc = ToolCall(
+            id="x",
+            name="yaml_validate",
+            arguments='{"file_path": "/etc/passwd"}',
+        )
+
+        result = await engine._execute_tool(tc)
+
+        assert result.status == "error"
+        assert "Permission denied" in result.content
+        assert "outside allowed directories" in result.content
+
+    @pytest.mark.asyncio
     async def test_path_in_allowed_dir(self, engine: AgentEngine) -> None:
         engine._permission_checker._allowed_dirs = ["/tmp"]
         tc = ToolCall(
