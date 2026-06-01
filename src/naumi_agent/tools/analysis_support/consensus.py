@@ -2,6 +2,156 @@
 
 from __future__ import annotations
 
+import re
+
+from naumi_agent.tools import analysis_common
+
+HIGH_RISK_PATTERNS = [
+    (r"(?:buy|sell|trade|order|execute)\s*\(", "金融交易指令"),
+    (r"(?:delete|drop|remove|truncate|destroy)\s*\(", "数据删除操作"),
+    (r"(?:deploy|publish|release|promote)\s*\(", "生产环境发布"),
+    (r"(?:INSERT|UPDATE|DELETE)\s+", "数据库写入"),
+    (r"(?:ssh|scp|rsync|ansible)\s+", "远程服务器操作"),
+    (r"(?:send|dispatch|notify|email|sms)\s*\(", "对外消息发送"),
+    (r"(?:refund|withdraw|transfer|payment)\s*\(", "资金流转操作"),
+    (r"(?:config|setting|env)\[.+\]\s*=", "关键配置修改"),
+    (r"(?:grant|revoke|permission|role|auth)\s*\(", "权限变更操作"),
+]
+
+SINGLE_POINT_PATTERNS = [
+    (
+        r"(?:result|decision|answer)\s*=\s*(?:await\s+)?(?:llm|ai|model|gpt)\.\w+",
+        "单模型直接决策",
+    ),
+    (
+        r"if\s+(?:await\s+)?(?:llm|ai|model)\.\w+\([^)]*\)\s*:",
+        "单模型条件分支",
+    ),
+    (
+        r"return\s+(?:await\s+)?(?:llm|ai|model)\.\w+\([^)]*\)",
+        "直接返回单模型结果",
+    ),
+    (
+        r"(?:llm|ai|model|chat)\.?\w*\s*\(\s*[^)]*\)\s*\.\s*(?:json|parse)",
+        "单模型输出直接解析",
+    ),
+]
+
+DIVERSITY_PATTERNS = [
+    (r"(?:model|provider|backend)\s*=\s*[\"'][^\"']+[\"']", "模型选择参数"),
+    (r"temperature\s*=\s*[0-9.]+", "温度参数"),
+    (r"(?:retry|fallback|backup|secondary)\s*\(", "重试/备选机制"),
+    (r"(?:vote|quorum|majority|consensus)\s*\(", "表决/共识机制"),
+    (r"for\s+\w+\s+in\s+(?:models|providers|agents)", "多模型遍历"),
+    (r"(?:parallel|concurrent|gather)\s*\([^)]*model", "并行多模型调用"),
+]
+
+
+def scan_consensus(target: str) -> str:
+    """Scan high-risk decisions, single-model risks, and quorum readiness."""
+    findings: list[str] = []
+    source = analysis_common.read_sources(analysis_common.resolve_target(target))
+
+    if not source.strip():
+        return "⚠️ 未找到可分析的源代码。"
+
+    lines = source.split("\n")
+
+    findings.append("## 1. 高风险决策点 (High-Risk Decisions)")
+    risk_points: dict[str, list[int]] = {}
+    for pattern, label in HIGH_RISK_PATTERNS:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                risk_points.setdefault(label, []).append(index)
+
+    total_risks = sum(len(line_nos) for line_nos in risk_points.values())
+    if risk_points:
+        findings.append(
+            f"- 检测到 **{total_risks}** 处高风险操作，"
+            f"**{len(risk_points)}** 类："
+        )
+        for label, line_nos in sorted(
+            risk_points.items(),
+            key=lambda item: -len(item[1]),
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append("- 未检测到明显的高风险决策操作")
+    findings.append("")
+
+    findings.append("## 2. 单点决策风险 (Single-Point-of-Decision)")
+    spod_hits: list[tuple[str, int, str]] = []
+    for pattern, desc in SINGLE_POINT_PATTERNS:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                spod_hits.append((desc, index, line.strip()))
+
+    if spod_hits:
+        findings.append(
+            f"- ⚠️ 发现 **{len(spod_hits)}** 处单模型决策风险 "
+            f"— 一个模型的幻觉即可导致灾难："
+        )
+        for desc, line_no, line_text in spod_hits[:8]:
+            short = line_text[:75] + ("..." if len(line_text) > 75 else "")
+            findings.append(f"  - L{line_no}: {desc}")
+            findings.append(f"    `{short}`")
+    else:
+        findings.append("- ✅ 未检测到明显的单点决策模式")
+    findings.append("")
+
+    findings.append("## 3. 多样性与冗余度 (Diversity & Redundancy)")
+    diversity_hits: dict[str, list[int]] = {}
+    for pattern, label in DIVERSITY_PATTERNS:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                diversity_hits.setdefault(label, []).append(index)
+
+    if diversity_hits:
+        findings.append(f"- 检测到 **{len(diversity_hits)}** 类多样性机制：")
+        for label, line_nos in sorted(
+            diversity_hits.items(),
+            key=lambda item: -len(item[1]),
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append("- ❌ 未检测到任何多样性/冗余机制 — 系统完全依赖单一决策源")
+    findings.append("")
+
+    has_voting = any("表决" in label or "共识" in label for label in diversity_hits)
+    has_parallel = any("并行" in label for label in diversity_hits)
+    has_retry = any("重试" in label or "备选" in label for label in diversity_hits)
+
+    diversity_score = min(len(diversity_hits) / 4.0, 1.0)
+    risk_exposure = min(total_risks / 10.0, 1.0)
+    spod_severity = min(len(spod_hits) * 0.2, 1.0)
+
+    consensus_score = (
+        diversity_score * 0.4
+        + has_voting * 0.2
+        + has_parallel * 0.1
+        + has_retry * 0.1
+        - spod_severity * 0.2
+        + 0.2
+    )
+    consensus_score = max(0.0, min(1.0, consensus_score))
+
+    findings.append("## 4. 共识架构评分")
+    findings.append(f"- **综合评分: {consensus_score:.0%}**")
+    findings.append(f"- 多样性机制: {diversity_score:.0%}")
+    findings.append(f"- 高风险暴露: {risk_exposure:.0%}")
+    findings.append(f"- 单点决策风险: {spod_severity:.0%}")
+
+    if total_risks > 0 and not has_voting:
+        findings.append("- 🔴 存在高风险操作但无共识机制 — 强烈建议引入多模型表决")
+    elif consensus_score >= 0.7:
+        findings.append("- ✅ 共识架构较为成熟")
+    elif consensus_score >= 0.4:
+        findings.append("- ⚠️ 部分具备共识能力，需补强多样性")
+    else:
+        findings.append("- ❌ 缺乏共识机制，高风险操作应引入拜占庭容错")
+
+    return "\n".join(findings)
+
 
 def build_consensus_inventory_script(target: str) -> str:
     """Build a dependency-free quorum-readiness scanner."""

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.56] - 2026-06-01
+
+### Changed
+- **Analysis Consensus 模块拆分** — 将 `/consensus` 的高风险决策扫描、单点模型决策识别、多样性/冗余检测和共识架构评分迁移到 `analysis_support.consensus`，主 `analysis.py` 保留工具编排、兼容入口与 LLM Consensus 增强路径。
+
 ## [0.1.55] - 2026-06-01
 
 ### Changed
