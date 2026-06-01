@@ -117,6 +117,9 @@ from naumi_agent.tools.analysis_tools.spar import (
 from naumi_agent.tools.analysis_tools.speculate import (
     SpeculateTool as _SpeculateTool,
 )
+from naumi_agent.tools.analysis_tools.state import (
+    StateAuditTool as _StateAuditTool,
+)
 from naumi_agent.tools.analysis_tools.supervisor import (
     SupervisorTool as _SupervisorTool,
 )
@@ -262,24 +265,6 @@ _extract_ooda_resilience_score = _ooda_support.extract_ooda_resilience_score
 #  LLM Prompt 模板
 # ---------------------------------------------------------------------------
 
-_STATE_SYSTEM = """\
-You are a distributed systems auditor. You have REAL static analysis evidence from \
-the target codebase, plus the actual source code.
-
-Based on the evidence:
-
-1. **Violations Detail**: For each finding, explain exactly what breaks when the service \
-is deployed behind a load balancer across 5 instances. Cite specific patterns.
-
-2. **Distributed Replacements**: For every violation, provide the specific cloud-native \
-replacement (Redis, Kafka, etc.) with configuration examples.
-
-3. **Migration Priority**: Order fixes by severity (data loss risk first, then \
-consistency, then performance). Include effort estimates.
-
-Reference the scan evidence explicitly. No generic advice.
-"""
-
 _VIBE_SYSTEM = """\
 You are in VIBE MODE. Drop all architectural concerns, edge cases, and perfectionism.
 
@@ -321,61 +306,14 @@ class ScaleAnalysisTool(_ScaleAnalysisTool):
         )
 
 
-class StateAuditTool(Tool):
-    """状态与分布式审查 — 静态扫描找有状态违规 + LLM 给出分布式方案."""
+class StateAuditTool(_StateAuditTool):
+    """Compatibility wrapper for the split State analysis tool."""
 
-    @property
-    def name(self) -> str:
-        return "analysis_state"
-
-    @property
-    def description(self) -> str:
-        return (
-            "审查代码是否符合无状态(Stateless)云原生标准。"
-            "先静态扫描找全局变量、内存Session、本地锁、本地文件写入等违规，"
-            "计算云原生就绪评分，再由 LLM 给出具体分布式替代方案。"
+    def __init__(self) -> None:
+        super().__init__(
+            router_getter=lambda: _global_router,
+            run_analysis=_run_analysis,
         )
-
-    @property
-    def parameters_schema(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "target": {
-                    "type": "string",
-                    "description": "要审查的文件路径或目录路径",
-                },
-                "context": {
-                    "type": "string",
-                    "description": "补充上下文（系统架构、部署方式等）",
-                    "default": "",
-                },
-            },
-            "required": ["target"],
-        }
-
-    async def execute(self, *, target: str, context: str = "", **kwargs: Any) -> str:
-        files = _resolve_target(target)
-        if not files:
-            return f"无法解析目标: {target} (请提供文件或目录路径)"
-
-        source_text = _read_sources(files)
-        scan_evidence = _scan_state(files, source_text)
-        deterministic = _format_static_scan_result("State 静态扫描", scan_evidence, files)
-
-        router = _global_router
-        if router is None:
-            return deterministic + "\n\n模型路由未初始化，已返回静态扫描结果。"
-
-        user_msg = (
-            f"## 静态扫描证据\n{scan_evidence}\n\n"
-            f"## 源代码\n{source_text[:50000]}\n"
-        )
-        if context:
-            user_msg += f"\n## 补充上下文\n{context}\n"
-
-        enhanced = await _run_analysis(router, _STATE_SYSTEM, user_msg)
-        return deterministic + "\n\n## LLM 分布式改造建议\n" + enhanced
 
 
 class VibeModeTool(Tool):
