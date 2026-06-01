@@ -11,6 +11,8 @@ class TestAppConfig:
         assert config.models.default_model == "claude-sonnet-4-6"
         assert config.safety.max_turns == 30
         assert config.memory.session_db_path == "data/sessions.db"
+        assert config.ui.theme == "dark"
+        assert config.ui.output_style == "detailed"
         assert config.browser_daemon.base_url == "http://127.0.0.1:3005"
         assert config.browser_daemon.project_dir.endswith("browser-debugging-daemon")
 
@@ -29,6 +31,10 @@ class TestAppConfig:
                     "browser_daemon": {
                         "base_url": "http://127.0.0.1:3999",
                     },
+                    "ui": {
+                        "theme": "high_contrast",
+                        "output_style": "debug",
+                    },
                 }
             )
         )
@@ -38,6 +44,8 @@ class TestAppConfig:
         assert config.models.fast_model == "gpt-4o-mini"
         assert config.safety.max_turns == 50
         assert config.browser_daemon.base_url == "http://127.0.0.1:3999"
+        assert config.ui.theme == "high_contrast"
+        assert config.ui.output_style == "debug"
         assert config.memory.session_db_path == str(tmp_path / "data" / "sessions.db")
         assert config.memory.vector_db_path == str(tmp_path / "data" / "chroma")
 

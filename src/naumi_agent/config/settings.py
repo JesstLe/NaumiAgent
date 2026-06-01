@@ -131,6 +131,15 @@ class BrowserDaemonConfig(BaseSettings):
     startup_timeout_seconds: float = 8.0
 
 
+class UIConfig(BaseSettings):
+    """CLI/TUI theme and output verbosity configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="NAUMI_UI__")
+
+    theme: str = "dark"
+    output_style: str = "detailed"
+
+
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NAUMI_",
@@ -147,6 +156,7 @@ class AppConfig(BaseSettings):
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     browser_daemon: BrowserDaemonConfig = Field(default_factory=BrowserDaemonConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
     keybindings: dict[str, str | list[str]] = Field(default_factory=dict)
     workspace_root: str = Field(default_factory=lambda: str(Path.cwd()))
     custom_tools_dir: str | None = None

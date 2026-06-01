@@ -15,6 +15,7 @@ from naumi_agent.tui.app import (
     _format_tool_output_markdown,
 )
 from naumi_agent.ui.keybindings import build_keybindings
+from naumi_agent.ui.theme import build_ui_style_config
 
 
 class FakeMarkdown:
@@ -59,6 +60,15 @@ class TestNaumiApp:
         assert ("f2", "cycle_runtime_mode") in binding_pairs
         assert ("ctrl+a", "toggle_activity") in binding_pairs
         assert ("ctrl+y", "copy_transcript") not in binding_pairs
+
+    def test_tui_uses_configured_theme_css(self) -> None:
+        config = AppConfig()
+        engine = AgentEngine(config)
+        app = NaumiApp(engine, style_config=build_ui_style_config(theme="high_contrast"))
+
+        assert app._style_config.theme.name.value == "high_contrast"
+        assert "#00ff00" in app.CSS
+        assert "StatusBar" in app.CSS
 
     def test_tool_output_markdown_wraps_raw_diff(self) -> None:
         rendered = _format_tool_output_markdown("--- a\n+++ b\n@@\n-old\n+new")

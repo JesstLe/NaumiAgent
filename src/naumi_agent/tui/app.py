@@ -41,6 +41,7 @@ from naumi_agent.ui.keybindings import (
     render_keybinding_help,
     to_textual_key,
 )
+from naumi_agent.ui.theme import UIStyleConfig, build_ui_style_config, render_style_help
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
 
 logger = logging.getLogger(__name__)
@@ -1092,10 +1093,13 @@ class NaumiApp(App):
         engine: AgentEngine,
         debug_trace: Any | None = None,
         keybindings: KeybindingSet | None = None,
+        style_config: UIStyleConfig | None = None,
         **kwargs: Any,
     ) -> None:
         self._keybindings = keybindings or build_keybindings()
+        self._style_config = style_config or build_ui_style_config()
         self.BINDINGS = _build_textual_bindings(self._keybindings)
+        self.CSS = self.CSS + "\n" + self._style_config.tui_css()
         super().__init__(**kwargs)
         self.engine = engine
         self.debug_trace = debug_trace
@@ -1256,6 +1260,7 @@ class NaumiApp(App):
                     "## 可用命令\n"
                     "- `/help` — 显示帮助\n"
                     "- `/keybindings` — 显示当前快捷键配置\n"
+                    "- `/style` — 显示当前主题和输出风格\n"
                     "- `/copy [all|last|error]` — 复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)\n"
                     "- `/debug` — 显示本次结构化调试日志位置\n"
                     "- `/debug-replay [路径]` — 回放 debug-runs 结构化事件\n"
@@ -1336,6 +1341,13 @@ class NaumiApp(App):
                         classes="agent-msg",
                     )
                 )
+            case "/style" | "/theme":
+                chat.mount(
+                    Markdown(
+                        render_style_help(self._style_config),
+                        classes="agent-msg",
+                    )
+                )
             case "/debug":
                 info = (
                     self.debug_trace.describe()
@@ -1367,7 +1379,13 @@ class NaumiApp(App):
                 workspace_root = getattr(self.engine, "workspace_root", Path.cwd())
                 chat.mount(
                     Static(
-                        Text.from_ansi(render_git_diff_viewer(workspace_root, scope=scope)),
+                        Text.from_ansi(
+                            render_git_diff_viewer(
+                                workspace_root,
+                                scope=scope,
+                                style_config=self._style_config,
+                            )
+                        ),
                         classes="agent-msg",
                     )
                 )
