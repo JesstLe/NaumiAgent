@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
+import naumi_agent.main as main_module
 from naumi_agent.main import (
     _capture,
     _cli_event_factory,
@@ -12,6 +15,7 @@ from naumi_agent.main import (
     _format_recovery_event,
     _format_runtime_notification,
     _print_tool_output,
+    _render_result,
     _show_cli_status,
     _tool_label,
 )
@@ -45,6 +49,9 @@ class FakeRouter:
 class FakeUsage:
     total_input_tokens = 10
     total_output_tokens = 20
+    total_cost_usd = 0.01
+    turns = 1
+    cache_tokens = 0
 
 
 class FakeEngine:
@@ -87,6 +94,32 @@ def test_cli_status_updates_fixed_status_not_output(monkeypatch) -> None:
     assert "test-model" in cli.status
     assert "工作区: /tmp/workspace" in cli.status
     assert cli.output == []
+
+
+def test_fullscreen_result_omits_environment_stats(monkeypatch) -> None:
+    monkeypatch.setattr("naumi_agent.main._get_git_info", lambda: {"branch": "main", "dirty": True})
+    result = SimpleNamespace(
+        status="completed",
+        error=None,
+        response="完成",
+        usage=FakeUsage(),
+    )
+
+    rendered = _capture(
+        lambda: _render_result(
+            main_module.console,
+            result,
+            skip_response=True,
+            model="test-model",
+            engine=FakeEngine(),
+            show_environment_stats=False,
+        )
+    )
+
+    assert "轮次" in rendered
+    assert "上下文" not in rendered
+    assert "预算" not in rendered
+    assert "main" not in rendered
 
 
 @pytest.mark.asyncio
