@@ -1052,6 +1052,7 @@ class NaumiApp(App):
                     "- `/help` — 显示帮助\n"
                     "- `/copy [all|last|error]` — 复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)\n"
                     "- `/debug` — 显示本次结构化调试日志位置\n"
+                    "- `/debug-replay [路径]` — 回放 debug-runs 结构化事件\n"
                     "- `/pwd` — 显示当前工作目录\n"
                     "- `/tools` — 列出可用工具\n"
                     "- `/model` — 显示模型配置\n"
@@ -1128,6 +1129,23 @@ class NaumiApp(App):
                     else "当前 TUI 未启用结构化调试日志。"
                 )
                 chat.mount(Markdown(f"```\n{info}\n```", classes="agent-msg"))
+            case "/debug-replay":
+                from naumi_agent.debug_trace import find_latest_run, render_debug_replay
+
+                if arg:
+                    replay_target = Path(arg)
+                else:
+                    replay_base = (
+                        Path(self.engine._config.memory.session_db_path).parent
+                        / "debug-runs"
+                    )
+                    replay_target = find_latest_run(replay_base) or replay_base
+                chat.mount(
+                    Markdown(
+                        f"```\n{render_debug_replay(replay_target)}\n```",
+                        classes="agent-msg",
+                    )
+                )
             case "/copy":
                 self.action_copy_transcript(arg or "all")
             case "/pwd":

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ import pytest
 from naumi_agent.cli import layout as cli_layout
 from naumi_agent.cli.layout import CLIApp
 from naumi_agent.clipboard import CopyResult
-from naumi_agent.debug_trace import DebugTrace
+from naumi_agent.debug_trace import DebugTrace, find_latest_run, render_debug_replay
 
 
 def _read_events(path: Path) -> list[dict]:
@@ -133,3 +134,29 @@ def test_cli_copy_last_uses_debug_trace_diagnostic(
     assert copied
     assert copied[0][1] == "cli-last-diagnostic"
     assert "最近任务" in copied[0][0]
+
+
+def test_render_debug_replay_accepts_run_directory(tmp_path: Path) -> None:
+    trace = DebugTrace.create(interface="cli", base_dir=tmp_path)
+    trace.input("cli.input", "回放输入")
+    trace.event("perf_phase", {"phase": "planning", "label": "规划", "duration_ms": 12})
+    trace.output("cli.output", "回放输出\n")
+
+    text = render_debug_replay(trace.run_dir)
+
+    assert "NaumiAgent Debug Replay" in text
+    assert "回放输入" in text
+    assert "回放输出" in text
+    assert "planning" in text
+
+
+def test_find_latest_run_returns_newest_run(tmp_path: Path) -> None:
+    older = DebugTrace.create(interface="cli", base_dir=tmp_path)
+    newer = DebugTrace.create(interface="tui", base_dir=tmp_path)
+    newer_time = older.events_path.stat().st_mtime + 10
+    os.utime(newer.events_path, (newer_time, newer_time))
+
+    latest = find_latest_run(tmp_path)
+
+    assert latest == newer.run_dir
+    assert latest != older.run_dir
