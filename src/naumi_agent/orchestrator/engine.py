@@ -50,6 +50,18 @@ EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 
+_OUTPUT_TRUNCATED_FINISH_REASONS = {
+    "length",
+    "max_tokens",
+    "max_output_tokens",
+    "content_filter_length",
+}
+_MAX_OUTPUT_CONTINUATIONS = 2
+_OUTPUT_CONTINUATION_PROMPT = (
+    "你的上一条回答因为输出上限被截断。请从截断处直接继续，"
+    "不要重写已经说过的内容，不要添加开场白。"
+)
+
 _TASK_EVENT_TOOLS = {
     "delegate_task",
     "todo_write",
@@ -1051,6 +1063,64 @@ class AgentEngine:
                 tools=tools,
             )
 
+    async def _continue_truncated_final_response(
+        self,
+        *,
+        partial_content: str,
+        tier: ModelTier,
+        on_event: EventCallback | None = None,
+        streaming: bool = False,
+    ) -> str:
+        """Continue a final answer cut off by the model output limit."""
+        if not partial_content:
+            return partial_content
+
+        combined = partial_content
+        for attempt in range(1, _MAX_OUTPUT_CONTINUATIONS + 1):
+            if on_event is not None:
+                await on_event("recovery_event", {
+                    "reason": "output_truncated",
+                    "action": "continue_output",
+                    "phase": "started",
+                    "attempt": attempt,
+                    "before": len(combined),
+                    "unit": "chars",
+                    "streaming": streaming,
+                })
+
+            continuation_messages = [
+                *self._messages,
+                {"role": "assistant", "content": combined},
+                {"role": "user", "content": _OUTPUT_CONTINUATION_PROMPT},
+            ]
+            response = await self._call_model_with_recovery(
+                messages=continuation_messages,
+                tier=tier,
+                tools=None,
+                on_event=on_event,
+                streaming=streaming,
+            )
+            self._track_model_usage(response.usage, response.model)
+
+            combined = _join_continued_output(combined, response.content)
+            still_truncated = _is_output_truncated(response.finish_reason)
+            if on_event is not None:
+                await on_event("recovery_event", {
+                    "reason": "output_truncated",
+                    "action": "continue_output",
+                    "phase": "continued" if still_truncated else "completed",
+                    "attempt": attempt,
+                    "before": len(partial_content),
+                    "after": len(combined),
+                    "unit": "chars",
+                    "streaming": streaming,
+                })
+
+            if not still_truncated:
+                break
+
+        return combined
+
     async def _reactive_compact_for_prompt_too_long(
         self,
         *,
@@ -1673,8 +1743,14 @@ class AgentEngine:
 
             # --- 无工具调用：最终回答 ---
             tool_call_history.clear()
-            safe_content = self._output_guardrail.redact(response.content)
-            self._append_message({"role": "assistant", "content": response.content})
+            final_content = response.content
+            if _is_output_truncated(response.finish_reason):
+                final_content = await self._continue_truncated_final_response(
+                    partial_content=response.content,
+                    tier=ModelTier.CAPABLE,
+                )
+            safe_content = self._output_guardrail.redact(final_content)
+            self._append_message({"role": "assistant", "content": final_content})
             await self._fire_agent_stop(
                 status="completed",
                 response=safe_content,
@@ -1743,6 +1819,7 @@ class AgentEngine:
             got_response = False
             got_thinking = False
             stream_tokens = 0
+            finish_reason: str | None = None
 
             await self._fire_hook(HookContext(
                 point=HookPoint.LLM_CALL_START,
@@ -1759,6 +1836,9 @@ class AgentEngine:
                     if chunk.usage:
                         self._track_model_usage(chunk.usage, model_str)
                         stream_tokens = chunk.usage.total_tokens
+
+                    if chunk.finish_reason and chunk.finish_reason != "stop":
+                        finish_reason = chunk.finish_reason
 
                     if chunk.thinking:
                         if not got_thinking:
@@ -1798,6 +1878,7 @@ class AgentEngine:
                     thinking_parts.append(response.reasoning_content)
                 if response.tool_calls:
                     collected_tool_calls = {i: tc for i, tc in enumerate(response.tool_calls)}
+                finish_reason = response.finish_reason
 
             await self._fire_hook(HookContext(
                 point=HookPoint.LLM_CALL_END,
@@ -1991,6 +2072,21 @@ class AgentEngine:
 
             # --- 最终回答 ---
             tool_call_history.clear()
+            if _is_output_truncated(finish_reason):
+                continued_content = await self._continue_truncated_final_response(
+                    partial_content=text_content,
+                    tier=ModelTier.CAPABLE,
+                    on_event=on_event,
+                    streaming=True,
+                )
+                continuation_suffix = continued_content[len(text_content):]
+                if continuation_suffix:
+                    if not got_response:
+                        got_response = True
+                        await on_event("response_start", {})
+                    await on_event("token", {"content": continuation_suffix})
+                text_content = continued_content
+
             if got_response:
                 await on_event("response_end", {})
             self._append_message({"role": "assistant", "content": text_content})
@@ -2290,6 +2386,26 @@ def _is_prompt_too_long_error(error: Exception) -> bool:
         "413",
     )
     return any(marker in text for marker in markers)
+
+
+def _is_output_truncated(finish_reason: str | None) -> bool:
+    """Detect model finish reasons that indicate an incomplete final answer."""
+    reason = (finish_reason or "").lower().strip()
+    return reason in _OUTPUT_TRUNCATED_FINISH_REASONS
+
+
+def _join_continued_output(base: str, addition: str) -> str:
+    """Append continuation text while removing simple boundary overlap."""
+    if not addition:
+        return base
+    if addition.startswith(base):
+        return addition
+
+    max_overlap = min(len(base), len(addition), 240)
+    for size in range(max_overlap, 0, -1):
+        if base[-size:] == addition[:size]:
+            return base + addition[size:]
+    return base + addition
 
 
 def _fallback_reactive_compact_messages(

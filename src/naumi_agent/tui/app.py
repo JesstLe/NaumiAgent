@@ -1525,6 +1525,7 @@ class NaumiApp(App):
                     phase = str(data.get("phase", "?"))
                     before = data.get("before", "?")
                     after = data.get("after", "?")
+                    unit = str(data.get("unit", "messages"))
                     style = (
                         "green"
                         if phase == "completed"
@@ -1533,7 +1534,7 @@ class NaumiApp(App):
                         else "yellow"
                     )
                     suffix = (
-                        f" {before} → {after} messages"
+                        f" {before} → {after} {unit}"
                         if after != "?"
                         else f" before={before}"
                     )

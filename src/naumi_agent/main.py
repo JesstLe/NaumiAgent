@@ -383,8 +383,9 @@ def _format_recovery_event(data: dict[str, Any]) -> str:
     phase = str(data.get("phase", "?"))
     before = data.get("before", "?")
     after = data.get("after", "?")
+    unit = str(data.get("unit", "messages"))
     color = "32" if phase == "completed" else "31" if phase == "failed" else "33"
-    suffix = f" {before} → {after} messages" if after != "?" else f" before={before}"
+    suffix = f" {before} → {after} {unit}" if after != "?" else f" before={before}"
     return f"\033[{color}m  recovery {phase}: {action} ({reason}){suffix}\033[0m"
 
 
