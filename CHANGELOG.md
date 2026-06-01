@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.33] - 2026-06-01
+
+### Fixed
+- **Self-Modify 备份安全性** — 自我修改备份改为 `git hash-object` blob 备份，不再执行 `git add/stash/pop`，避免污染用户暂存区或干扰未提交改动。
+- **Self-Modify 测试执行可靠性** — 自我修改回归测试移除对 `pytest-timeout` CLI 插件参数的依赖，继续由 subprocess timeout 控制最长执行时间。
+
 ## [0.1.32] - 2026-06-01
 
 ### Added

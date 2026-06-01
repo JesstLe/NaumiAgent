@@ -120,38 +120,26 @@ def _is_modifiable_file(file_path: Path) -> bool:
 
 
 def _create_git_backup(file_path: Path) -> str | None:
-    """Create a git stash entry as backup before modification.
+    """Create a git blob backup before modification without touching the index.
 
     Returns:
-        Stash ref if successful, None if git unavailable.
+        Git blob ref if successful, None if git unavailable.
     """
     try:
-        # Stage the current file
-        subprocess.run(
-            ["git", "add", str(file_path)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
-        )
-        # Create a stash with a descriptive message
+        original_content = file_path.read_text(encoding="utf-8")
         result = subprocess.run(
-            ["git", "stash", "push", "-m", f"self_modify_backup:{file_path.name}"],
+            ["git", "hash-object", "-w", "--stdin"],
+            input=original_content,
             capture_output=True,
             text=True,
             timeout=10,
         )
         if result.returncode == 0:
-            # Pop immediately so working tree is restored
-            subprocess.run(
-                ["git", "stash", "pop"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            return "stash@{0}"
+            blob_hash = result.stdout.strip()
+            if blob_hash:
+                return f"blob:{blob_hash}"
         return None
-    except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
+    except (OSError, subprocess.TimeoutExpired, FileNotFoundError):
         return None
 
 
@@ -260,7 +248,6 @@ def _run_tests(file_path: Path) -> tuple[bool, str]:
                 sys.executable, "-m", "pytest",
                 str(test_file),
                 "-x", "-q",
-                "--timeout=30",
                 "--tb=short",
             ],
             capture_output=True,
