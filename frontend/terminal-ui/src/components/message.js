@@ -1,6 +1,7 @@
 import { ANSI, color, compactText } from "../ansi.js";
 import { MarkdownExcerpt } from "./markdown.js";
 import { renderComponent } from "./core.js";
+import { ActivityCard } from "./activity-card.js";
 import { ToolCard } from "./tool-card.js";
 
 export function Message({ message }) {
@@ -25,6 +26,9 @@ export function renderMessage(message, width, ctx = { width }) {
   }
   if (message.kind === "tool") {
     return renderComponent(ToolCard({ tool: message }), ctx);
+  }
+  if (message.kind === "activity") {
+    return renderComponent(ActivityCard({ activity: message }), ctx);
   }
   if (message.kind === "permission") {
     return ["", color(ANSI.yellow, `permission: ${message.message.tool_name} · ${message.message.status}`)];

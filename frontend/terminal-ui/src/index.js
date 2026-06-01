@@ -2,6 +2,17 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
 import { ANSI } from "./ansi.js";
+import {
+  INPUT_KEYS,
+  backspaceInput,
+  clearInput,
+  deleteInputForward,
+  insertInputText,
+  moveInputCursor,
+  navigateInputHistory,
+  rememberSubmittedInput,
+  splitInputChunk,
+} from "./input-buffer.js";
 import { attachJsonlLineReader, createEventSender, parseArgs, splitShellLike } from "./protocol.js";
 import { handleSubmitText, pushSystemMessage, reduceServerEvent, createInitialState, createUiSnapshot, applyUiSnapshot } from "./state.js";
 import { renderScreen } from "./render.js";
@@ -114,27 +125,9 @@ function handleKeyInput(chunk) {
   }
 }
 
-function splitInputChunk(chunk) {
-  const keys = [];
-  let text = String(chunk);
-  const escapeSequences = ["\x1b[Z", "\x1b[5~", "\x1b[6~"];
-  while (text) {
-    const sequence = escapeSequences.find((candidate) => text.startsWith(candidate));
-    if (sequence) {
-      keys.push(sequence);
-      text = text.slice(sequence.length);
-      continue;
-    }
-    const [char] = Array.from(text);
-    keys.push(char);
-    text = text.slice(char.length);
-  }
-  return keys;
-}
-
 function handleSingleKeyInput(chunk) {
   if (chunk === "\u0003") exit();
-  if (chunk === "\x1b[Z") {
+  if (chunk === INPUT_KEYS.shiftTab) {
     send("cycle_mode", {});
     return;
   }
@@ -157,7 +150,8 @@ function handleSingleKeyInput(chunk) {
     const text = state.input.trim();
     if (text) {
       handleSubmitText(state, text, send);
-      state.input = "";
+      rememberSubmittedInput(state, text);
+      clearInput(state);
       state.scrollOffset = 0;
       persistUiSnapshot();
     }
@@ -165,24 +159,59 @@ function handleSingleKeyInput(chunk) {
     return;
   }
   if (chunk === "\u007f" || chunk === "\b") {
-    state.input = Array.from(state.input).slice(0, -1).join("");
+    backspaceInput(state);
     scheduleRedraw();
     return;
   }
-  if (chunk === "\x1b[5~") {
+  if (chunk === INPUT_KEYS.delete) {
+    deleteInputForward(state);
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.left) {
+    moveInputCursor(state, "left");
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.right) {
+    moveInputCursor(state, "right");
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.up) {
+    navigateInputHistory(state, "up");
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.down) {
+    navigateInputHistory(state, "down");
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.home || chunk === INPUT_KEYS.homeAlt || chunk === INPUT_KEYS.ctrlA) {
+    moveInputCursor(state, "home");
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.end || chunk === INPUT_KEYS.endAlt || chunk === INPUT_KEYS.ctrlE) {
+    moveInputCursor(state, "end");
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.pageUp) {
     state.scrollOffset += Math.max(3, Math.floor((process.stdout.rows ?? 24) / 2));
     persistUiSnapshot();
     scheduleRedraw();
     return;
   }
-  if (chunk === "\x1b[6~") {
+  if (chunk === INPUT_KEYS.pageDown) {
     state.scrollOffset = Math.max(0, state.scrollOffset - Math.max(3, Math.floor((process.stdout.rows ?? 24) / 2)));
     persistUiSnapshot();
     scheduleRedraw();
     return;
   }
   if (chunk >= " " && chunk !== "\x7f") {
-    state.input += chunk;
+    insertInputText(state, chunk);
     scheduleRedraw();
   }
 }

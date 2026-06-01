@@ -15,7 +15,14 @@ export function renderToolCard(tool, width, ctx = { width }) {
   const statusStyle = tool.status === "success" ? ANSI.green : tool.status === "running" ? ANSI.cyan : ANSI.red;
   const titleLine = `${color(statusStyle, tool.status === "running" ? "running" : tool.status)} ${title}`;
   const output = tool.output ? ToolOutput({ text: tool.output, foldKey: `tool:${tool.callId || tool.id || tool.name}` }) : null;
-  const children = [line(titleLine), output];
+  const children = [line(titleLine)];
+  if (tool.prepareTitle) {
+    children.push(line(color(ANSI.dim, tool.prepareTitle)));
+    for (const detail of tool.prepareDetails ?? []) {
+      if (detail && detail !== "已交给工具执行") children.push(line(color(ANSI.dim, detail)));
+    }
+  }
+  children.push(output);
   if (tool.outputLength > (tool.output?.length ?? 0)) {
     children.push(line(color(ANSI.dim, `... 已截断，完整输出 ${tool.outputLength} 字符`)));
   }

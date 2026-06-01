@@ -106,9 +106,11 @@ npm --prefix frontend/terminal-ui start -- --config config.yaml
 - assistant streaming 增量渲染。
 - thinking 折叠为一行摘要。
 - 工具调用使用独立卡片，支持 running/success/error。
+- `tool_prepare` 使用 activity card 展示准备阶段；最终 tool card 会保留 prepare 摘要，避免快速工具事件被 viewport 吞掉。
 - tool card、permission footer、todo footer、status footer、Markdown/diff 已拆成轻量组件层。
 - todo 常驻 footer，完成后由 `open_count=0` 清除。
 - footer 根据窗口宽度截断。
+- 输入栏使用独立 input buffer，支持批量粘贴、Unicode 字符、Backspace/Delete、Left/Right、Home/End、Ctrl+A/Ctrl+E 与 Up/Down 历史导航。
 - `Shift+Tab` 发送 `cycle_mode`，底栏显示 `default / plan / bypass`。
 - 权限请求出现后可按 `y` 允许、`n` 拒绝、`b` bypass。
 - Markdown 代码块默认只展示前 40 行。
@@ -126,6 +128,7 @@ npm --prefix frontend/terminal-ui start -- --config config.yaml
 - `/resume` 目前是消息级 replay，已修复历史 assistant 消息拼接问题；滚动位置和 fold state 已在前端本地持久化，但尚未写入 Python 会话数据库。
 - 新前端已有轻量组件层，但尚未迁入完整 Ink/pi-tui 组件体系。
 - 前端状态、协议、组件、渲染、渲染缓存、viewport 窗口渲染已经拆分为可测试模块。
+- 输入栏已支持 cursor-aware 单行编辑；真正多行编辑器、历史命令搜索和 slash command palette 仍在后续阶段。
 - 工具调用卡片已优先通过稳定 `tool_call_id` 关联结果，缺失时才回退到 tool name。
 - 代码高亮是内置轻量关键词高亮，不等价于 Pygments/Tree-sitter。
 

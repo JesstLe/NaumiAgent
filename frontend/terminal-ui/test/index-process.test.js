@@ -20,6 +20,7 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
     await waitForOutput(output, "permission: bash_run");
 
     app.stdin.write("y");
+    await waitForOutput(output, "准备 file_write");
     await waitForOutput(output, "file_write showcase/index.html");
     await waitForOutput(output, "+new");
     await waitForOutput(output, "已折叠");
@@ -34,6 +35,7 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
     assert(plain.includes("生成一个展示页面"));
     assert(plain.includes("收到，我会创建一个可验证页面。"));
     assert(plain.includes("todo: 1/3 完成"));
+    assert(plain.includes("准备 file_write"));
     assert(plain.includes("success file_write showcase/index.html"));
   } finally {
     forceKill(app);
@@ -62,8 +64,71 @@ test("terminal UI process renders resume replay from typed UI messages", async (
   }
 });
 
-function launchTerminalUi() {
-  const fakeBridge = new URL("./fixtures/fake-bridge.js", import.meta.url).pathname;
+test("terminal UI process submits cursor-edited input text", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("helo\x1b[Dl\n");
+    await waitForOutput(output, "hello");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const plain = stripAnsi(output.text);
+    assert(plain.includes("hello"));
+    assert(!plain.includes("helo\n"));
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process supports home, end, delete, and backspace editing", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("bc\x1b[Ha\x1b[Fdx\b\x1b[D\x1b[3~\n");
+    await waitForOutput(output, "abc");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const plain = stripAnsi(output.text);
+    assert(plain.includes("abc"));
+    assert(!plain.includes("abcd"));
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process recalls submitted input with arrow history", async () => {
+  const app = launchTerminalUi("history-bridge.js");
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("first\n");
+    await waitForOutput(output, "submit#1:first");
+
+    app.stdin.write("second\n");
+    await waitForOutput(output, "submit#2:second");
+
+    app.stdin.write("\x1b[A\n");
+    await waitForOutput(output, "submit#3:second");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+function launchTerminalUi(fixtureName = "fake-bridge.js") {
+  const fakeBridge = new URL(`./fixtures/${fixtureName}`, import.meta.url).pathname;
   return spawn(
     process.execPath,
     ["src/index.js", "--bridge-command", `${process.execPath} ${fakeBridge}`],

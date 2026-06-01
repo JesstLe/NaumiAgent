@@ -7,6 +7,10 @@ export function createInitialState() {
     nextMessageId: 1,
     currentSessionId: "",
     input: "",
+    inputCursor: null,
+    inputHistory: [],
+    inputHistoryCursor: null,
+    inputHistoryDraft: "",
     mode: "default",
     status: {},
     messages: [],
@@ -64,6 +68,7 @@ export function reduceServerEvent(state, record) {
       break;
     case "run/completed":
       state.running = false;
+      finishActiveToolPrepare(state, "本轮执行已结束");
       state.activeToolPrepare = null;
       state.permission = null;
       break;
@@ -74,6 +79,7 @@ export function reduceServerEvent(state, record) {
         state.tools = [];
         state.activeAssistant = null;
         state.activeThinking = null;
+        state.activeToolPrepare = null;
         state.folds = {};
         state.foldCursor = 0;
         clearRenderCache(state.renderCache);
@@ -186,18 +192,17 @@ export function handleThinking(state, message) {
 
 export function handleToolPrepare(state, message) {
   if (message.phase === "end") {
-    state.activeToolPrepare = null;
+    finishActiveToolPrepare(state, "准备阶段已完成");
     return;
   }
-  const parts = [`准备 ${message.tool_name || "tool"}`];
-  if (message.path) parts.push(message.path);
-  if (message.content_lines) parts.push(`${message.content_lines} 行`);
-  if (message.argument_chars) parts.push(`${message.argument_chars} 字符参数`);
-  if (message.elapsed_ms > 1000) parts.push(`${(message.elapsed_ms / 1000).toFixed(1)}s`);
-  state.activeToolPrepare = parts.join(" · ");
+  const activity = ensureActiveToolPrepare(state, message);
+  activity.status = "running";
+  activity.title = `准备 ${message.tool_name || "tool"}`;
+  activity.details = buildToolPrepareDetails(message);
 }
 
 export function handleToolUse(state, message) {
+  const prepare = finishActiveToolPrepare(state, "已交给工具执行");
   const tool = {
     kind: "tool",
     id: nextMessageId(state, "tool"),
@@ -207,9 +212,50 @@ export function handleToolUse(state, message) {
     status: "running",
     durationMs: 0,
     output: "",
+    prepareTitle: prepare?.title ?? "",
+    prepareDetails: prepare?.details ?? [],
   };
   state.tools.push(tool);
   state.messages.push(tool);
+}
+
+function ensureActiveToolPrepare(state, message) {
+  if (state.activeToolPrepare && state.activeToolPrepare.status === "running") {
+    return state.activeToolPrepare;
+  }
+  const activity = {
+    kind: "activity",
+    id: nextMessageId(state, "activity"),
+    status: "running",
+    title: `准备 ${message.tool_name || "tool"}`,
+    details: [],
+  };
+  state.activeToolPrepare = activity;
+  state.messages.push(activity);
+  return activity;
+}
+
+function finishActiveToolPrepare(state, detail) {
+  if (!state.activeToolPrepare) return null;
+  const activity = state.activeToolPrepare;
+  state.activeToolPrepare.status = "done";
+  if (detail && !state.activeToolPrepare.details?.includes(detail)) {
+    state.activeToolPrepare.details = [...(state.activeToolPrepare.details ?? []), detail];
+  }
+  state.activeToolPrepare = null;
+  return activity;
+}
+
+function buildToolPrepareDetails(message) {
+  const details = [];
+  if (message.path) details.push(`路径: ${message.path}`);
+  if (message.command) details.push(`命令: ${message.command}`);
+  if (message.query) details.push(`查询: ${message.query}`);
+  if (message.url) details.push(`URL: ${message.url}`);
+  if (message.content_lines) details.push(`内容: ${message.content_lines} 行`);
+  if (message.argument_chars) details.push(`参数: ${message.argument_chars} 字符`);
+  if (message.elapsed_ms > 1000) details.push(`已准备: ${(message.elapsed_ms / 1000).toFixed(1)}s`);
+  return details;
 }
 
 export function handleToolResult(state, message) {
