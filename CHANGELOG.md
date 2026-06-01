@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.65] - 2026-06-01
+
+### Changed
+- **Analysis Self-Review 模块拆分** — 将 self-review 的源码目录定位、工具注册计数、裸异常/疑似密钥/类型注解/可变全局状态/日志与 TODO 静态扫描迁移到 `analysis_support.self_review`，主 `analysis.py` 保留工具编排、兼容入口与 LLM Self-Review 增强路径。
+
 ## [0.1.64] - 2026-06-01
 
 ### Changed
