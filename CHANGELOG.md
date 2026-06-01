@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.12] - 2026-06-01
+
+### Added
+- **OODA 工具确定性落地** — `/ooda` 在模型路由未初始化时也会返回 Observe/Orient/Decide/Act 循环设计、自愈机制、抗脆弱检查清单和韧性评分。
+
 ## [0.1.11] - 2026-06-01
 
 ### Added
