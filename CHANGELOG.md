@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.59] - 2026-06-01
+
+### Changed
+- **Analysis Genesis 模块拆分** — 将 `/genesis` 的刚性检测、元编程能力盘点、自省能力识别、架构灵活性扫描和自演化就绪度评分迁移到 `analysis_support.genesis`，主 `analysis.py` 保留工具编排、兼容入口与 LLM Genesis 增强路径。
+
 ## [0.1.58] - 2026-06-01
 
 ### Changed
