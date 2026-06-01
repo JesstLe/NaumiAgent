@@ -17,6 +17,7 @@ from naumi_agent.tools.analysis import (
     _build_autopsy_report,
     _scan_autopsy,
 )
+from naumi_agent.tools.analysis_tools.autopsy import AutopsyTool as SplitAutopsyTool
 
 
 def _write_autopsy_source(path: Path) -> None:
@@ -125,3 +126,27 @@ class TestAutopsyTool:
         assert "## Autopsy 确定性执行迹切片审计" in output
         assert "## LLM Autopsy 增强" in output
         assert "probe" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner(self, tmp_path: Path) -> None:
+        source = tmp_path / "autopsy_case.py"
+        _write_autopsy_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：用 probe 证伪 upstream data 假设。"
+
+        router = object()
+        output = await SplitAutopsyTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(target=str(source))
+
+        assert "## Autopsy 确定性执行迹切片审计" in output
+        assert "## LLM Autopsy 增强" in output
+        assert "probe" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "动态执行迹架构师" in calls[0][1]
+        assert str(source) in calls[0][2]

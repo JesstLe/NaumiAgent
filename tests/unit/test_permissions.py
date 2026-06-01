@@ -1,5 +1,7 @@
 """权限系统测试."""
 
+from types import SimpleNamespace
+
 from naumi_agent.safety.permissions import (
     PermissionChecker,
     PermissionMode,
@@ -9,8 +11,10 @@ from naumi_agent.safety.permissions import (
 from naumi_agent.tools.builtin import YamlMicroVerifyTool, YamlValidateTool
 from naumi_agent.tools.forge import ForgeTool
 from naumi_agent.tools.hotreload import HotReloadTool
+from naumi_agent.tools.sandbox import CodeExecuteTool
 from naumi_agent.tools.self_evolve import SelfEvolveTool
 from naumi_agent.tools.self_modify import SelfModifyTool
+from naumi_agent.tools.subagent import DestroyAgentTool
 
 
 class TestPermissionChecker:
@@ -156,6 +160,16 @@ class TestPermissionChecker:
                 "hot_reload",
                 HotReloadTool(),
                 {"target": "tools"},
+            ),
+            (
+                "code_execute",
+                CodeExecuteTool(),
+                {"code": "print('ok')", "language": "python"},
+            ),
+            (
+                "destroy_agent",
+                DestroyAgentTool(SimpleNamespace()),
+                {"name": "reviewer"},
             ),
         ]
 

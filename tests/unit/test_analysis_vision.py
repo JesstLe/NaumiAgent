@@ -18,6 +18,7 @@ from naumi_agent.tools.analysis import (
     _scan_vision,
 )
 from naumi_agent.tools.analysis_support.vision import detect_data_types
+from naumi_agent.tools.analysis_tools.vision import VisionTool as SplitVisionTool
 
 
 def _minimal_png(width: int = 2, height: int = 3) -> bytes:
@@ -110,3 +111,24 @@ class TestVisionTool:
         assert "## LLM Vision 增强" in output
         assert "截图 hash" in output
 
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner(self) -> None:
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：先固定截图 hash，再标注 ROI 合约。"
+
+        router = object()
+        output = await SplitVisionTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(task="提取登录后页面中的表格价格")
+
+        assert "## Vision 确定性视觉提取方案" in output
+        assert "## LLM Vision 增强" in output
+        assert "ROI 合约" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "Do not bypass login" in calls[0][1]
+        assert "提取登录后页面中的表格价格" in calls[0][2]

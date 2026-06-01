@@ -9,6 +9,7 @@ import pytest
 
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.tools.analysis import OODATool, _build_ooda_report, _scan_ooda
+from naumi_agent.tools.analysis_tools.ooda import OODATool as SplitOODATool
 
 
 def _write_ooda_source(path: Path) -> None:
@@ -86,3 +87,33 @@ class TestOODATool:
         assert "## OODA 确定性任务指挥" in output
         assert "## LLM OODA 增强" in output
         assert "显式等待" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_file_and_router_dependencies(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "bot.py"
+        _write_ooda_source(source)
+
+        async def run_analysis(router, system_prompt: str, user_msg: str) -> str:
+            assert router == "router"
+            assert "Mission Command" in system_prompt
+            assert "稳定提交按钮" in user_msg
+            assert "硬编码等待时间" in user_msg
+            return "注入 OODA 增强"
+
+        tool = SplitOODATool(
+            router_getter=lambda: "router",
+            run_analysis=run_analysis,
+            resolve_target=lambda raw: [Path(raw)],
+            read_sources=lambda files: "\n".join(
+                file.read_text(encoding="utf-8") for file in files
+            ),
+        )
+
+        output = await tool.execute(target=str(source), task="稳定提交按钮")
+
+        assert "## OODA 确定性任务指挥" in output
+        assert "## LLM OODA 增强" in output
+        assert "注入 OODA 增强" in output

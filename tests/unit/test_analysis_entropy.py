@@ -13,6 +13,9 @@ from naumi_agent.tools.analysis import (
 from naumi_agent.tools.analysis import _build_entropy_anchor as analysis_entropy_anchor
 from naumi_agent.tools.analysis import _scan_entropy as analysis_scan_entropy
 from naumi_agent.tools.analysis_support.entropy import build_entropy_anchor, scan_entropy
+from naumi_agent.tools.analysis_tools.entropy import (
+    EntropyValveTool as SplitEntropyTool,
+)
 
 
 class TestEntropyAnchor:
@@ -82,3 +85,25 @@ class TestEntropyValveTool:
         assert "## 熵减锚点" in output
         assert "## LLM 增强熵减" in output
         assert "增强锚点" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_accepts_injected_router_runner(self) -> None:
+        async def run_analysis(router, system_prompt: str, user_msg: str) -> str:
+            assert router == "router"
+            assert "Mandatory Protocol" in system_prompt
+            assert "## 当前上下文" in user_msg
+            return "注入增强结果"
+
+        tool = SplitEntropyTool(
+            router_getter=lambda: "router",
+            run_analysis=run_analysis,
+        )
+
+        output = await tool.execute(
+            context="目标是拆分 analysis。已经迁移 entropy。下一步跑测试。",
+            goal="降低 analysis.py 维护成本",
+        )
+
+        assert "## 熵减锚点" in output
+        assert "## LLM 增强熵减" in output
+        assert "注入增强结果" in output

@@ -18,6 +18,9 @@ from naumi_agent.tools.analysis import (
     _resolve_target,
     _scan_self_review,
 )
+from naumi_agent.tools.analysis_tools.self_review import (
+    SelfReviewTool as SplitSelfReviewTool,
+)
 
 
 def _write_self_review_source(path: Path) -> None:
@@ -146,3 +149,31 @@ class TestSelfReviewTool:
         assert "## Self-Review 确定性自审查报告" in output
         assert "## LLM Self-Review 增强" in output
         assert "bare except" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner_and_source_dir(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "self_review_case.py"
+        _write_self_review_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：优先修复 bare except。"
+
+        router = object()
+        output = await SplitSelfReviewTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+            source_dir_getter=lambda: str(tmp_path),
+        ).execute(focus="quality")
+
+        assert "## Self-Review 确定性自审查报告" in output
+        assert "## LLM Self-Review 增强" in output
+        assert "bare except" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "自审查分析引擎" in calls[0][1]
+        assert "请重点关注: quality" in calls[0][2]

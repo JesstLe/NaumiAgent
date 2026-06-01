@@ -18,6 +18,7 @@ from naumi_agent.tools.analysis import (
     _scan_hook,
 )
 from naumi_agent.tools.analysis_support.hook import classify_target_types
+from naumi_agent.tools.analysis_tools.hook import HookTool as SplitHookTool
 
 
 def test_scan_hook_detects_platform_and_protection() -> None:
@@ -96,3 +97,24 @@ class TestHookTool:
         assert "## LLM Hook 增强" in output
         assert "读取导出表" in output
 
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner(self) -> None:
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：只读导出表与 hash 校验。"
+
+        router = object()
+        output = await SplitHookTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(task="分析 wasm 模块导出表", target_type="wasm")
+
+        assert "## Hook 确定性合规侦测方案" in output
+        assert "## LLM Hook 增强" in output
+        assert "只读导出表" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "Do not provide bypass" in calls[0][1]
+        assert "分析 wasm 模块导出表" in calls[0][2]

@@ -17,6 +17,7 @@ from naumi_agent.tools.analysis import (
     _build_spar_report,
     _scan_spar,
 )
+from naumi_agent.tools.analysis_tools.spar import SparTool as SplitSparTool
 
 
 def _write_risky_source(path: Path) -> None:
@@ -132,3 +133,29 @@ class TestSparTool:
         assert "## SPAR 确定性对抗自博弈基线" in output
         assert "## LLM SPAR 增强" in output
         assert "红队边界测试" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner(
+        self, tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "risky.py"
+        _write_risky_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：把命令执行入口纳入红队边界测试。"
+
+        router = object()
+        output = await SplitSparTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(task=str(source))
+
+        assert "## SPAR 确定性对抗自博弈基线" in output
+        assert "## LLM SPAR 增强" in output
+        assert "红队边界测试" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "对抗性自博弈架构师" in calls[0][1]
+        assert str(source) in calls[0][2]

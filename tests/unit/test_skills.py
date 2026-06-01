@@ -8,7 +8,12 @@ from naumi_agent.skills.skill import (
     SkillError,
     parse_skill_md,
 )
-from naumi_agent.skills.tool import SkillDispatchTool, SkillTool, create_skill_tools
+from naumi_agent.skills.tool import (
+    MAX_SKILL_ARGUMENT_CHARS,
+    SkillDispatchTool,
+    SkillTool,
+    create_skill_tools,
+)
 
 # ---------------------------------------------------------------------------
 #  Fixtures — 临时 Skill 目录
@@ -434,12 +439,45 @@ class TestSkillTool:
         assert "who" in schema["properties"]
         assert "who" in schema["required"]
 
+    def test_tool_metadata_for_plain_skill(self, skill_dir):
+        skill = parse_skill_md(skill_dir / "greet" / "SKILL.md")
+        metadata = SkillTool(skill).metadata
+        assert metadata.read_only is True
+        assert metadata.requires_confirmation is False
+        assert metadata.user_facing_name == "Skill: greet"
+
+    def test_tool_metadata_requires_confirmation_for_dynamic_skill(
+        self,
+        dynamic_skill_dir,
+    ):
+        skill = parse_skill_md(dynamic_skill_dir / "sysinfo" / "SKILL.md")
+        metadata = SkillTool(skill).metadata
+        assert metadata.destructive is True
+        assert metadata.requires_confirmation is True
+        assert metadata.read_only is False
+
     @pytest.mark.asyncio
     async def test_tool_execute(self, skill_dir):
         skill = parse_skill_md(skill_dir / "greet" / "SKILL.md")
         tool = SkillTool(skill)
         result = await tool.execute(who="World", arguments="World")
         assert "World" in result
+
+    @pytest.mark.asyncio
+    async def test_tool_execute_rejects_missing_required_arg(self, skill_dir):
+        skill = parse_skill_md(skill_dir / "greet" / "SKILL.md")
+        tool = SkillTool(skill)
+        result = await tool.execute(who="")
+        assert "已拒绝" in result
+        assert "who 不能为空" in result
+
+    @pytest.mark.asyncio
+    async def test_tool_execute_rejects_oversized_arguments(self, skill_dir):
+        skill = parse_skill_md(skill_dir / "greet" / "SKILL.md")
+        tool = SkillTool(skill)
+        result = await tool.execute(who="x" * (MAX_SKILL_ARGUMENT_CHARS + 1))
+        assert "已拒绝" in result
+        assert "who 过长" in result
 
     def test_openai_tool_format(self, skill_dir):
         skill = parse_skill_md(skill_dir / "greet" / "SKILL.md")
@@ -458,6 +496,12 @@ class TestSkillDispatchTool:
         assert "name" in schema["properties"]
         assert schema["properties"]["name"]["enum"] == ["alpha", "beta"]
         assert "name" in schema["required"]
+
+    def test_dispatch_metadata(self):
+        metadata = SkillDispatchTool(["alpha", "beta"]).metadata
+        assert metadata.read_only is True
+        assert metadata.concurrency_safe is True
+        assert metadata.user_facing_name == "执行 Skill"
 
     @pytest.mark.asyncio
     async def test_dispatch_execute_raises(self):

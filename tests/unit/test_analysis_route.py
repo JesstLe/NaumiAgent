@@ -9,6 +9,7 @@ import pytest
 
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.tools.analysis import MoERouteTool, _build_route_report, _scan_route
+from naumi_agent.tools.analysis_tools.route import MoERouteTool as SplitMoERouteTool
 
 
 def _write_route_source(path: Path) -> None:
@@ -125,3 +126,36 @@ class TestMoERouteTool:
         assert "## LLM MoE 综合增强" in output
         assert "## SubAgent MoE 执行结果" not in output
         assert "当前 router" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_file_router_and_manager_getter(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "service.py"
+        _write_route_source(source)
+        manager_calls = []
+
+        async def run_analysis(router, system_prompt: str, user_msg: str) -> str:
+            assert router == "router"
+            assert "Mixture-of-Experts" in system_prompt
+            assert "设计 auth api" in user_msg
+            assert "任务涉及领域" in user_msg
+            return "注入 MoE 综合"
+
+        tool = SplitMoERouteTool(
+            router_getter=lambda: "router",
+            run_analysis=run_analysis,
+            resolve_target=lambda raw: [Path(raw)],
+            read_sources=lambda files: "\n".join(
+                file.read_text(encoding="utf-8") for file in files
+            ),
+            subagent_manager_getter=lambda router: manager_calls.append(router) or None,
+        )
+
+        output = await tool.execute(task="设计 auth api", target=str(source))
+
+        assert manager_calls == ["router"]
+        assert "## MoE 确定性专家路由" in output
+        assert "## LLM MoE 综合增强" in output
+        assert "注入 MoE 综合" in output

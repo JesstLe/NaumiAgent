@@ -17,6 +17,9 @@ from naumi_agent.tools.analysis import (
     _build_supervisor_report,
     _scan_supervisor,
 )
+from naumi_agent.tools.analysis_tools.supervisor import (
+    SupervisorTool as SplitSupervisorTool,
+)
 
 
 def _write_supervisor_source(path: Path) -> None:
@@ -133,3 +136,28 @@ class TestSupervisorTool:
         assert "## Supervisor 确定性守护者树审计" in output
         assert "## LLM Supervisor 增强" in output
         assert "max restart intensity" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner(self, tmp_path: Path) -> None:
+        source = tmp_path / "supervisor_case.py"
+        _write_supervisor_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：为 worker 配置 max restart intensity。"
+
+        router = object()
+        output = await SplitSupervisorTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+            subagent_manager_getter=lambda _router: None,
+        ).execute(target=str(source))
+
+        assert "## Supervisor 确定性守护者树审计" in output
+        assert "## LLM Supervisor 增强" in output
+        assert "max restart intensity" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "Erlang/OTP 守护者架构师" in calls[0][1]
+        assert str(source) in calls[0][2]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -12,11 +13,21 @@ from naumi_agent.agents.team_protocol import (
     format_team_signal_result,
 )
 from naumi_agent.tasks.models import TaskStatus
-from naumi_agent.tools.base import Tool
+from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
+MAX_BLACKBOARD_KEY_CHARS = 120
+MAX_BLACKBOARD_VALUE_CHARS = 20_000
+MAX_TEAM_FIELD_CHARS = 120
+MAX_TEAM_CONTENT_CHARS = 10_000
+MAX_TEAM_STATUS_LIMIT = 50
+MAX_AGENT_NAME_CHARS = 64
+MAX_SUBAGENT_TASK_CHARS = 10_000
+MAX_SUBAGENT_CONTEXT_CHARS = 20_000
+MAX_SUBAGENT_FIELD_CHARS = 120
+AGENT_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 
 
 def create_subagent_tools(manager: Any) -> list[Tool]:
@@ -48,6 +59,14 @@ class DelegateTaskTool(Tool):
             "将一个子任务委派给专用 Agent 执行。"
             "可用 Agent: coder（编程）、researcher（研究搜索）、browser（浏览器操作）。"
             "适用于需要特定能力的子任务。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            requires_confirmation=False,
+            user_facing_name="委派子任务",
+            search_hint="delegate task subagent coder researcher browser",
         )
 
     @property
@@ -92,7 +111,35 @@ class DelegateTaskTool(Tool):
     ) -> str:
         from naumi_agent.orchestrator.subagent_manager import SubTask
 
-        linked_task_id = (task_id or "").strip()
+        try:
+            task = _normalize_subagent_text(
+                task,
+                field_name="task",
+                required=True,
+                max_chars=MAX_SUBAGENT_TASK_CHARS,
+            )
+            agent = _normalize_agent_name(agent, field_name="agent", required=False)
+            linked_task_id = _normalize_subagent_text(
+                task_id,
+                field_name="task_id",
+                required=False,
+                max_chars=MAX_SUBAGENT_FIELD_CHARS,
+            )
+            success_criteria = _normalize_subagent_text(
+                success_criteria,
+                field_name="success_criteria",
+                required=False,
+                max_chars=MAX_SUBAGENT_TASK_CHARS,
+            )
+            context = _normalize_subagent_text(
+                context,
+                field_name="context",
+                required=False,
+                max_chars=MAX_SUBAGENT_CONTEXT_CHARS,
+            )
+        except ValueError as e:
+            return f"委派任务已拒绝: {e}"
+
         if linked_task_id:
             status_error = await _mark_linked_task_started(self._manager, linked_task_id)
             if status_error:
@@ -141,6 +188,14 @@ class SpawnAgentTool(Tool):
         )
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            requires_confirmation=False,
+            user_facing_name="创建子 Agent",
+            search_hint="spawn create subagent role focus capabilities",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -176,6 +231,29 @@ class SpawnAgentTool(Tool):
         focus: str = "",
         **kwargs: Any,
     ) -> str:
+        try:
+            name = _normalize_agent_name(name, field_name="name", required=True)
+            task_description = _normalize_subagent_text(
+                task_description,
+                field_name="task_description",
+                required=True,
+                max_chars=MAX_SUBAGENT_TASK_CHARS,
+            )
+            role = _normalize_subagent_text(
+                role,
+                field_name="role",
+                required=False,
+                max_chars=MAX_SUBAGENT_FIELD_CHARS,
+            ) or "expert_analyst"
+            focus = _normalize_subagent_text(
+                focus,
+                field_name="focus",
+                required=False,
+                max_chars=MAX_SUBAGENT_FIELD_CHARS,
+            )
+        except ValueError as e:
+            return f"创建 Agent 已拒绝: {e}"
+
         if self._manager.get_agent(name):
             return f"Agent '{name}' 已存在，可直接使用 delegate_task 委派任务。"
 
@@ -215,6 +293,15 @@ class DestroyAgentTool(Tool):
         )
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            user_facing_name="销毁子 Agent",
+            search_hint="destroy remove subagent cleanup dynamic agent",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -228,6 +315,11 @@ class DestroyAgentTool(Tool):
         }
 
     async def execute(self, *, name: str, **kwargs: Any) -> str:
+        try:
+            name = _normalize_agent_name(name, field_name="name", required=True)
+        except ValueError as e:
+            return f"销毁 Agent 已拒绝: {e}"
+
         if not self._manager.get_agent(name):
             return f"Agent '{name}' 不存在。"
 
@@ -249,6 +341,16 @@ class ListAgentsTool(Tool):
     @property
     def description(self) -> str:
         return "列出可用的专用 Agent 及其描述。"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            user_facing_name="列出子 Agent",
+            search_hint="list available subagents agents status lifecycle",
+        )
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -290,6 +392,14 @@ class TeamSignalTool(Tool):
         return (
             "发布结构化团队协作事件，并同步到消息总线、共享黑板和用户界面。"
             "用于 handoff、decision、blocker、update、request、result 等团队协议。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            requires_confirmation=False,
+            user_facing_name="发布团队信号",
+            search_hint="team signal handoff decision blocker update request result",
         )
 
     @property
@@ -357,6 +467,54 @@ class TeamSignalTool(Tool):
         **kwargs: Any,
     ) -> str:
         try:
+            event_type = _normalize_team_text(
+                event_type,
+                field_name="event_type",
+                required=True,
+                max_chars=MAX_TEAM_FIELD_CHARS,
+            )
+            sender = _normalize_team_text(
+                sender,
+                field_name="sender",
+                required=True,
+                max_chars=MAX_TEAM_FIELD_CHARS,
+            )
+            content = _normalize_team_text(
+                content,
+                field_name="content",
+                required=True,
+                max_chars=MAX_TEAM_CONTENT_CHARS,
+            )
+            recipient = _normalize_team_text(
+                recipient,
+                field_name="recipient",
+                required=False,
+                max_chars=MAX_TEAM_FIELD_CHARS,
+            )
+            topic = _normalize_team_text(
+                topic,
+                field_name="topic",
+                required=False,
+                max_chars=MAX_TEAM_FIELD_CHARS,
+            )
+            priority = _normalize_team_text(
+                priority,
+                field_name="priority",
+                required=True,
+                max_chars=MAX_TEAM_FIELD_CHARS,
+            )
+            task_id = _normalize_team_text(
+                task_id,
+                field_name="task_id",
+                required=False,
+                max_chars=MAX_TEAM_FIELD_CHARS,
+            )
+            blackboard_key = _normalize_blackboard_key(
+                blackboard_key,
+                required=False,
+            )
+            if not isinstance(record_to_blackboard, bool):
+                raise ValueError("record_to_blackboard 必须是布尔值。")
             result = await execute_team_signal(
                 self._manager,
                 event_type=event_type,
@@ -371,7 +529,7 @@ class TeamSignalTool(Tool):
                 event_callback=event_callback,
             )
         except ValueError as e:
-            return f"错误：{e}"
+            return f"团队信号已拒绝：{e}"
         return format_team_signal_result(result)
 
 
@@ -388,6 +546,16 @@ class TeamStatusTool(Tool):
     @property
     def description(self) -> str:
         return "查看团队协议状态，包括消息总览、指定 Agent 待处理消息和团队黑板。"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            user_facing_name="团队状态",
+            search_hint="team status messages blackboard agents",
+        )
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -410,6 +578,16 @@ class TeamStatusTool(Tool):
         }
 
     async def execute(self, *, agent: str = "", limit: int = 10, **kwargs: Any) -> str:
+        try:
+            agent = _normalize_team_text(
+                agent,
+                field_name="agent",
+                required=False,
+                max_chars=MAX_TEAM_FIELD_CHARS,
+            )
+            limit = _normalize_team_status_limit(limit)
+        except ValueError as e:
+            return f"团队状态已拒绝：{e}"
         return await execute_team_status(self._manager, agent=agent, limit=limit)
 
 
@@ -432,6 +610,16 @@ class BlackboardReadTool(Tool):
         )
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            user_facing_name="读取共享状态板",
+            search_hint="blackboard read shared state team agents",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -445,6 +633,11 @@ class BlackboardReadTool(Tool):
         }
 
     async def execute(self, *, key: str = "", **kwargs: Any) -> str:
+        try:
+            key = _normalize_blackboard_key(key, required=False)
+        except ValueError as e:
+            return f"读取共享状态已拒绝: {e}"
+
         bus = self._manager.message_bus
         if key:
             entry = await bus.blackboard_get(key)
@@ -488,6 +681,14 @@ class BlackboardWriteTool(Tool):
         )
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            requires_confirmation=False,
+            user_facing_name="写入共享状态板",
+            search_hint="blackboard write shared state team agents",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -507,12 +708,136 @@ class BlackboardWriteTool(Tool):
     async def execute(
         self, *, key: str, value: str, **kwargs: Any,
     ) -> str:
+        try:
+            key = _normalize_blackboard_key(key, required=True)
+            value = _normalize_blackboard_value(value)
+        except ValueError as e:
+            return f"写入共享状态已拒绝: {e}"
+
         bus = self._manager.message_bus
         entry = await bus.blackboard_set(key, value, author="main_agent")
         return (
             f"✅ 已写入共享状态 '{key}' "
             f"(版本: {entry.version})"
         )
+
+
+def _normalize_blackboard_key(key: Any, *, required: bool) -> str:
+    """Validate blackboard key before reading or writing shared state."""
+    if key is None:
+        if required:
+            raise ValueError("key 不能为空。")
+        return ""
+    if not isinstance(key, str):
+        raise ValueError("key 必须是字符串。")
+    normalized = key.strip()
+    if not normalized:
+        if required:
+            raise ValueError("key 不能为空。")
+        return ""
+    if len(normalized) > MAX_BLACKBOARD_KEY_CHARS:
+        raise ValueError(
+            "key 过长，当前上限为 "
+            f"{MAX_BLACKBOARD_KEY_CHARS} 个字符。"
+        )
+    if any(part == ".." for part in normalized.replace("\\", "/").split("/")):
+        raise ValueError("key 不能包含路径越界片段。")
+    return normalized
+
+
+def _normalize_blackboard_value(value: Any) -> str:
+    """Validate blackboard value before writing shared state."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("value 不能为空，且必须是字符串。")
+    normalized = value.strip()
+    if len(normalized) > MAX_BLACKBOARD_VALUE_CHARS:
+        raise ValueError(
+            "value 过长，当前上限为 "
+            f"{MAX_BLACKBOARD_VALUE_CHARS} 个字符。"
+        )
+    return normalized
+
+
+def _normalize_team_text(
+    value: Any,
+    *,
+    field_name: str,
+    required: bool,
+    max_chars: int,
+) -> str:
+    """Validate team protocol text fields at the tool boundary."""
+    if value is None:
+        if required:
+            raise ValueError(f"{field_name} 不能为空。")
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} 必须是字符串。")
+    normalized = value.strip()
+    if required and not normalized:
+        raise ValueError(f"{field_name} 不能为空。")
+    if len(normalized) > max_chars:
+        raise ValueError(f"{field_name} 过长，当前上限为 {max_chars} 个字符。")
+    return normalized
+
+
+def _normalize_team_status_limit(limit: Any) -> int:
+    """Validate team status display limit."""
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("limit 必须是整数。")
+    if limit < 1 or limit > MAX_TEAM_STATUS_LIMIT:
+        raise ValueError(f"limit 必须在 1 到 {MAX_TEAM_STATUS_LIMIT} 之间。")
+    return limit
+
+
+def _normalize_subagent_text(
+    value: Any,
+    *,
+    field_name: str,
+    required: bool,
+    max_chars: int,
+) -> str:
+    """Validate subagent orchestration text fields at the tool boundary."""
+    if value is None:
+        if required:
+            raise ValueError(f"{field_name} 不能为空。")
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} 必须是字符串。")
+    normalized = value.strip()
+    if required and not normalized:
+        raise ValueError(f"{field_name} 不能为空。")
+    if len(normalized) > max_chars:
+        raise ValueError(f"{field_name} 过长，当前上限为 {max_chars} 个字符。")
+    return normalized
+
+
+def _normalize_agent_name(
+    value: Any,
+    *,
+    field_name: str,
+    required: bool,
+) -> str | None:
+    """Validate dynamic and routed subagent names before manager dispatch."""
+    if value is None:
+        if required:
+            raise ValueError(f"{field_name} 不能为空。")
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} 必须是字符串。")
+    normalized = value.strip()
+    if not normalized:
+        if required:
+            raise ValueError(f"{field_name} 不能为空。")
+        return None
+    if len(normalized) > MAX_AGENT_NAME_CHARS:
+        raise ValueError(
+            f"{field_name} 过长，当前上限为 {MAX_AGENT_NAME_CHARS} 个字符。"
+        )
+    if not AGENT_NAME_RE.fullmatch(normalized):
+        raise ValueError(
+            f"{field_name} 只能使用字母开头，并包含字母、数字、下划线或连字符。"
+        )
+    return normalized
 
 
 def _build_delegation_prompt(task: str, success_criteria: str) -> str:

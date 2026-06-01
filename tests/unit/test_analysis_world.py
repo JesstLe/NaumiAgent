@@ -18,6 +18,7 @@ from naumi_agent.tools.analysis import (
     _scan_spar,
     _scan_world,
 )
+from naumi_agent.tools.analysis_tools.world import WorldModelTool as SplitWorldModelTool
 
 
 def _write_stateful_source(path: Path) -> None:
@@ -135,3 +136,28 @@ class TestWorldModelTool:
         assert "## LLM World 增强" in output
         assert "Cart.add" in output
 
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_runner(
+        self, tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "cart.py"
+        _write_stateful_source(source)
+        calls: list[tuple[object, str, str]] = []
+
+        async def run_analysis(router: object, system: str, user_msg: str) -> str:
+            calls.append((router, system, user_msg))
+            return "增强：为 Cart.add 增加反事实失败路径。"
+
+        router = object()
+        output = await SplitWorldModelTool(
+            router_getter=lambda: router,
+            run_analysis=run_analysis,
+        ).execute(target=str(source))
+
+        assert "## World 确定性世界模型审计" in output
+        assert "## LLM World 增强" in output
+        assert "反事实失败路径" in output
+        assert calls
+        assert calls[0][0] is router
+        assert "世界模型架构师" in calls[0][1]
+        assert str(source) in calls[0][2]

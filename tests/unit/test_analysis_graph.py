@@ -9,6 +9,7 @@ import pytest
 
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.tools.analysis import GraphRAGTool, _scan_graph
+from naumi_agent.tools.analysis_tools.graph import GraphRAGTool as SplitGraphRAGTool
 
 
 def _write_graph_project(root: Path) -> None:
@@ -82,3 +83,33 @@ class TestGraphRAGTool:
         assert "## GraphRAG 静态图谱" in output
         assert "## LLM 图谱推演" in output
         assert "循环依赖" in output
+
+    @pytest.mark.asyncio
+    async def test_split_tool_uses_injected_file_and_router_dependencies(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        _write_graph_project(tmp_path)
+
+        async def run_analysis(router, system_prompt: str, user_msg: str) -> str:
+            assert router == "router"
+            assert "GraphRAG" in system_prompt
+            assert "循环依赖" in user_msg
+            assert "class Alpha" in user_msg
+            return "注入图谱推演"
+
+        tool = SplitGraphRAGTool(
+            router_getter=lambda: "router",
+            run_analysis=run_analysis,
+            resolve_target=lambda raw: sorted(Path(raw).glob("*.py")),
+            read_sources=lambda files: "\n".join(
+                file.read_text(encoding="utf-8") for file in files
+            ),
+            cwd_getter=lambda: tmp_path,
+        )
+
+        output = await tool.execute(target=str(tmp_path))
+
+        assert "## GraphRAG 静态图谱" in output
+        assert "## LLM 图谱推演" in output
+        assert "注入图谱推演" in output
