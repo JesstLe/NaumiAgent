@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.32] - 2026-06-01
+
+### Added
+- **Forge 确定性锻造能力** — `forge_tool` 在未提供 `llm_output` 时也会生成可运行工具骨架、执行语法/接口/实例化验证并保存到 generated 目录。
+
+### Changed
+- **Forge 手动命令回退** — `/forge` 现在优先使用 LLM 生成代码，LLM 失败时会自动回退到底层确定性工具骨架，不再直接中断。
+
 ## [0.1.31] - 2026-06-01
 
 ### Added
