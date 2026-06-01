@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from naumi_agent.tools.base import Tool
+from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,40 @@ _MODIFIABLE_PREFIXES = (
     "naumi_agent.skills.",
 )
 
+MAX_SELF_MODIFY_CONTENT_CHARS = 200_000
+MAX_SELF_MODIFY_DESCRIPTION_CHARS = 2_000
+
 _AGENT_SOURCE_DIR: Path | None = None
+
+
+def _normalize_self_modify_inputs(
+    target_file: Any,
+    new_content: Any,
+    description: Any,
+) -> tuple[str, str, str]:
+    """Validate and normalize public self-modification inputs."""
+    if not isinstance(target_file, str) or not target_file.strip():
+        raise ValueError("target_file 不能为空，且必须是字符串。")
+
+    if not isinstance(new_content, str) or not new_content.strip():
+        raise ValueError("new_content 不能为空，且必须是字符串。")
+
+    if len(new_content) > MAX_SELF_MODIFY_CONTENT_CHARS:
+        raise ValueError(
+            "new_content 过大，当前上限为 "
+            f"{MAX_SELF_MODIFY_CONTENT_CHARS} 个字符。"
+        )
+
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("description 不能为空，且必须是字符串。")
+
+    if len(description) > MAX_SELF_MODIFY_DESCRIPTION_CHARS:
+        raise ValueError(
+            "description 过长，当前上限为 "
+            f"{MAX_SELF_MODIFY_DESCRIPTION_CHARS} 个字符。"
+        )
+
+    return target_file.strip(), new_content, description.strip()
 
 
 def _find_agent_source_dir() -> Path:
@@ -493,6 +526,15 @@ class SelfModifyTool(Tool):
         )
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            user_facing_name="自我修改",
+            search_hint="修改自身源码 验证 回滚 ruff pytest hot reload",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -524,6 +566,21 @@ class SelfModifyTool(Tool):
         description: str,
         **kwargs: Any,
     ) -> str:
+        try:
+            target_file, new_content, description = _normalize_self_modify_inputs(
+                target_file,
+                new_content,
+                description,
+            )
+        except ValueError as e:
+            return "\n".join(
+                [
+                    "## 自我修改结果",
+                    "**状态**: ❌ 已拒绝",
+                    f"**原因**: {e}",
+                ]
+            )
+
         result = validate_and_apply(target_file, new_content, description)
 
         parts: list[str] = ["## 自我修改结果"]
