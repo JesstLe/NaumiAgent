@@ -105,6 +105,14 @@ TASK_MANAGEMENT_SECTION = """\
 - Mark tasks completed immediately when done; use todo_write for multiple related changes.
 """
 
+OUTPUT_DISCIPLINE_SECTION = """\
+## Output Discipline
+- When creating or modifying files, use file_write/file_edit and do not paste full file contents into the chat.
+- Final answers should summarize what changed, list file paths, and mention verification results.
+- Show concise diffs or snippets only when they are necessary to explain a decision or when the user explicitly asks.
+- If the user asks for a complete file or full code block, provide it; otherwise keep large code out of the conversation transcript.
+"""
+
 TOOL_DISCOVERY_SECTION = """\
 ## Tool Discovery
 - **tool_search**: Search currently registered tools by capability keyword or use `select:<tool_name>` for direct lookup.
@@ -123,7 +131,7 @@ DECISION_COMMITMENT_SECTION = """\
 ## Decision Commitment (CRITICAL — obey strictly)
 1. Once you choose an approach, COMMIT to it. Do NOT switch to a different approach mid-execution.
 2. If something fails, fix it within the current approach — do NOT start over with a new approach.
-3. Complete your current work and present it.
+3. Complete your current work and present a concise summary of the result.
 4. After completing the task, STOP. Do not add extra polish, try alternatives, or explore tangential ideas.
 5. If you catch yourself thinking "let me try X instead", STOP — finish your current approach first.
 6. One complete solution > three half-finished attempts. Always prefer completing what you started over starting something new.
@@ -135,6 +143,7 @@ DEFAULT_PROMPT_SECTIONS = (
     PromptSection("analysis_modes", ANALYSIS_MODES_SECTION),
     PromptSection("guidelines", GUIDELINES_SECTION),
     PromptSection("task_management", TASK_MANAGEMENT_SECTION),
+    PromptSection("output_discipline", OUTPUT_DISCIPLINE_SECTION),
     PromptSection("tool_discovery", TOOL_DISCOVERY_SECTION),
     PromptSection("browser_usage", BROWSER_USAGE_SECTION),
     PromptSection("decision_commitment", DECISION_COMMITMENT_SECTION),

@@ -18,6 +18,8 @@ class TestSystemPromptAssembly:
         assert "## Your Capabilities" in prompt
         assert "## Analysis Modes" in prompt
         assert "## Task Management" in prompt
+        assert "## Output Discipline" in prompt
+        assert "do not paste full file contents" in prompt
         assert "## Tool Discovery" in prompt
         assert "tool_search" in prompt
         assert "## Decision Commitment" in prompt
