@@ -1,0 +1,44 @@
+name: permission_confirm
+description: 权限确认从等待、确认到工具完成的状态都能在 CLI/TUI 中稳定呈现。
+events:
+  - event: permission_bubble
+    data:
+      agent_name: main
+      tool_name: bash_run
+      status: needs_confirmation
+      reason: 该命令会修改工作区，需要你确认。
+      requires_confirmation: true
+  - event: permission_bubble
+    data:
+      agent_name: main
+      tool_name: bash_run
+      status: confirmed
+      reason: 已允许本次执行。
+  - event: tool_start
+    data:
+      name: bash_run
+      args:
+        command: uv run pytest tests/e2e/test_ui_scenarios.py -q
+  - event: tool_end
+    data:
+      name: bash_run
+      status: success
+      duration_ms: 902
+      content: 6 passed
+assert_cli_contains:
+  - permission bubble
+  - needs_confirmation
+  - confirmed
+  - uv run pytest tests/e2e/test_ui_scenarios.py -q
+  - 6 passed
+assert_tui_contains:
+  - permission bubble
+  - needs_confirmation
+  - confirmed
+  - bash_run
+  - success
+viewport:
+  width: 64
+  height: 8
+  assert_contains:
+    - success

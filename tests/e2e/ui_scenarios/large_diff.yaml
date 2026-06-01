@@ -1,0 +1,65 @@
+name: large_diff
+description: 大 diff 通过结构化 Diff Viewer 折叠预览，关键统计和文件路径仍然可见。
+diff_text: |
+  diff --git a/src/big.py b/src/big.py
+  index 1111111..2222222 100644
+  --- a/src/big.py
+  +++ b/src/big.py
+  @@ -1,4 +1,44 @@
+   def run():
+  -    return "old"
+  +    step_00 = "value"
+  +    step_01 = "value"
+  +    step_02 = "value"
+  +    step_03 = "value"
+  +    step_04 = "value"
+  +    step_05 = "value"
+  +    step_06 = "value"
+  +    step_07 = "value"
+  +    step_08 = "value"
+  +    step_09 = "value"
+  +    step_10 = "value"
+  +    step_11 = "value"
+  +    step_12 = "value"
+  +    step_13 = "value"
+  +    step_14 = "value"
+  +    step_15 = "value"
+  +    step_16 = "value"
+  +    step_17 = "value"
+  +    step_18 = "value"
+  +    step_19 = "value"
+  +    step_20 = "value"
+  +    step_21 = "value"
+  +    step_22 = "value"
+  +    step_23 = "value"
+  +    step_24 = "value"
+  +    step_25 = "value"
+  +    step_26 = "value"
+  +    step_27 = "value"
+  +    step_28 = "value"
+  +    step_29 = "value"
+  +    step_30 = "value"
+  +    step_31 = "value"
+  +    step_32 = "value"
+  +    step_33 = "value"
+  +    step_34 = "value"
+  +    step_35 = "value"
+  +    step_36 = "value"
+  +    step_37 = "value"
+  +    step_38 = "value"
+  +    step_39 = "value"
+  +    return step_00
+assert_cli_contains:
+  - 结构化 Diff Viewer
+  - src/big.py
+  - "+41"
+  - "-1"
+  - 已折叠
+  - step_00
+assert_cli_not_contains:
+  - step_39
+viewport:
+  width: 100
+  height: 10
+  assert_contains:
+    - 已折叠

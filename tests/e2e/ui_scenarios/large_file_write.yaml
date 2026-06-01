@@ -1,0 +1,48 @@
+name: large_file_write
+description: 大文件写入时，工具准备、执行与结果卡片都可回放，且不泄漏完整巨型参数。
+events:
+  - event: run_started
+    data:
+      task: 写入大型报告
+  - event: tool_prepare_start
+    data:
+      name: file_write
+      path: /tmp/naumi/report.md
+      argument_chars: 98304
+      content_chars: 96000
+      content_lines: 1800
+      elapsed_ms: 1200
+  - event: tool_prepare_snapshot
+    data:
+      name: file_write
+      path: /tmp/naumi/report.md
+      argument_chars: 98304
+      content_chars: 96000
+      content_lines: 1800
+      elapsed_ms: 2400
+  - event: tool_start
+    data:
+      name: file_write
+      args:
+        file_path: /tmp/naumi/report.md
+        content: 第一行内容，后续内容在真实参数中会非常长，但 UI 只能展示路径与摘要。
+  - event: tool_end
+    data:
+      name: file_write
+      status: success
+      duration_ms: 348
+      content: 已写入 /tmp/naumi/report.md，共 1800 行。
+assert_cli_contains:
+  - 已接手，准备执行
+  - 准备 file_write
+  - /tmp/naumi/report.md
+  - success
+  - 已写入 /tmp/naumi/report.md
+assert_tui_contains:
+  - 准备 file_write
+  - /tmp/naumi/report.md
+  - tool:end
+  - success
+assert_cli_not_contains:
+  - 后续内容在真实参数中会非常长
+min_history_lines: 8

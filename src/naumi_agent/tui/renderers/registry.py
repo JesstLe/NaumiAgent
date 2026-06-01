@@ -230,13 +230,14 @@ def _render_permission_bubble(
     suffix = (
         f" · {rich.markup.escape(msg.reason[:120])}" if msg.reason else ""
     )
+    status_text = rich.markup.escape(f"[{msg.status}]")
     chat.mount(
         Static(
             Text.from_markup(
                 f"  [{style}]permission bubble: "
                 f"{rich.markup.escape(msg.agent_name)} → "
                 f"{rich.markup.escape(msg.tool_name)} "
-                f"[{rich.markup.escape(msg.status)}]{suffix}[/{style}]"
+                f"{status_text}{suffix}[/{style}]"
             ),
             classes="tool-done",
         )
@@ -258,12 +259,13 @@ def _render_team_event(
         else "cyan"
     )
     suffix = f" · {msg.message[:120]}" if msg.message else ""
+    priority_text = rich.markup.escape(f"[{msg.priority}]")
     chat.mount(
         Static(
             Text.from_markup(
                 f"  [{style}]team {msg.event_type}: "
                 f"{msg.sender} → {msg.recipient} "
-                f"[{msg.priority}]{suffix}[/{style}]"
+                f"{priority_text}{suffix}[/{style}]"
             ),
             classes="tool-done",
         )
