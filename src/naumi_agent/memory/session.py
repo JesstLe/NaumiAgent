@@ -30,6 +30,9 @@ class Session:
     status: str = "active"
     total_tokens: int = 0
     total_cost_usd: float = 0.0
+    workspace_root: str = ""
+    git_branch: str = ""
+    summary: str = ""
 
     def add_message(self, role: str, content: str, **metadata: Any) -> None:
         msg: dict[str, Any] = {
@@ -52,6 +55,9 @@ class Session:
             "status": self.status,
             "total_tokens": self.total_tokens,
             "total_cost_usd": self.total_cost_usd,
+            "workspace_root": self.workspace_root,
+            "git_branch": self.git_branch,
+            "summary": self.summary,
         }
 
     @classmethod
@@ -68,6 +74,9 @@ class Session:
             status=row["status"],
             total_tokens=row.get("total_tokens", 0),
             total_cost_usd=row.get("total_cost_usd", 0.0),
+            workspace_root=row.get("workspace_root", ""),
+            git_branch=row.get("git_branch", ""),
+            summary=row.get("summary", ""),
         )
 
 
@@ -81,14 +90,20 @@ CREATE TABLE IF NOT EXISTS sessions (
     updated_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active',
     total_tokens INTEGER NOT NULL DEFAULT 0,
-    total_cost_usd REAL NOT NULL DEFAULT 0.0
+    total_cost_usd REAL NOT NULL DEFAULT 0.0,
+    workspace_root TEXT NOT NULL DEFAULT '',
+    git_branch TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT ''
 )
 """
 
 _UPSERT = """
 INSERT INTO sessions
-    (id, title, model, messages, created_at, updated_at, status, total_tokens, total_cost_usd)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (
+        id, title, model, messages, created_at, updated_at, status, total_tokens,
+        total_cost_usd, workspace_root, git_branch, summary
+    )
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     model = excluded.model,
@@ -96,12 +111,20 @@ ON CONFLICT(id) DO UPDATE SET
     updated_at = excluded.updated_at,
     status = excluded.status,
     total_tokens = excluded.total_tokens,
-    total_cost_usd = excluded.total_cost_usd
+    total_cost_usd = excluded.total_cost_usd,
+    workspace_root = excluded.workspace_root,
+    git_branch = excluded.git_branch,
+    summary = excluded.summary
 """
 
 _GET = "SELECT * FROM sessions WHERE id = ?"
-_LIST = "SELECT * FROM sessions WHERE status = 'active' ORDER BY updated_at DESC LIMIT ? OFFSET ?"
 _DELETE = "DELETE FROM sessions WHERE id = ?"
+_ARCHIVE = "UPDATE sessions SET status = 'archived', updated_at = ? WHERE id = ?"
+_EXTRA_COLUMNS = {
+    "workspace_root": "TEXT NOT NULL DEFAULT ''",
+    "git_branch": "TEXT NOT NULL DEFAULT ''",
+    "summary": "TEXT NOT NULL DEFAULT ''",
+}
 
 
 class SessionStore:
@@ -117,8 +140,17 @@ class SessionStore:
             self._db = await aiosqlite.connect(self._db_path)
             self._db.row_factory = aiosqlite.Row
             await self._db.execute(_CREATE_TABLE)
+            await self._ensure_schema(self._db)
             await self._db.commit()
         return self._db
+
+    async def _ensure_schema(self, db: aiosqlite.Connection) -> None:
+        cursor = await db.execute("PRAGMA table_info(sessions)")
+        rows = await cursor.fetchall()
+        existing = {row["name"] for row in rows}
+        for column, ddl in _EXTRA_COLUMNS.items():
+            if column not in existing:
+                await db.execute(f"ALTER TABLE sessions ADD COLUMN {column} {ddl}")
 
     async def create_session(
         self,
@@ -150,6 +182,9 @@ class SessionStore:
                 row["status"],
                 row["total_tokens"],
                 row["total_cost_usd"],
+                row["workspace_root"],
+                row["git_branch"],
+                row["summary"],
             ),
         )
         await db.commit()
@@ -162,14 +197,33 @@ class SessionStore:
             return None
         return Session.from_row(dict(row))
 
-    async def list_sessions(self, page: int = 1, page_size: int = 20) -> tuple[list[Session], int]:
+    async def list_sessions(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        query: str = "",
+    ) -> tuple[list[Session], int]:
         db = await self._get_db()
         offset = (page - 1) * page_size
+        normalized_query = query.strip()
 
-        cursor = await db.execute("SELECT COUNT(*) FROM sessions WHERE status = 'active'")
+        where = "status = 'active'"
+        params: list[Any] = []
+        if normalized_query:
+            where += (
+                " AND (id LIKE ? OR title LIKE ? OR model LIKE ? OR "
+                "workspace_root LIKE ? OR git_branch LIKE ? OR summary LIKE ?)"
+            )
+            like = f"%{normalized_query}%"
+            params.extend([like, like, like, like, like, like])
+
+        cursor = await db.execute(f"SELECT COUNT(*) FROM sessions WHERE {where}", params)
         total = (await cursor.fetchone())[0]
 
-        cursor = await db.execute(_LIST, (page_size, offset))
+        cursor = await db.execute(
+            f"SELECT * FROM sessions WHERE {where} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            (*params, page_size, offset),
+        )
         rows = await cursor.fetchall()
         sessions = [Session.from_row(dict(r)) for r in rows]
 
@@ -178,6 +232,12 @@ class SessionStore:
     async def delete(self, session_id: str) -> bool:
         db = await self._get_db()
         cursor = await db.execute(_DELETE, (session_id,))
+        await db.commit()
+        return cursor.rowcount > 0
+
+    async def archive(self, session_id: str) -> bool:
+        db = await self._get_db()
+        cursor = await db.execute(_ARCHIVE, (datetime.now().isoformat(), session_id))
         await db.commit()
         return cursor.rowcount > 0
 

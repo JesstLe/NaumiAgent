@@ -45,6 +45,26 @@ class TestSessionStore:
         sessions2, _ = await store.list_sessions(page=2, page_size=3)
         assert len(sessions2) == 2
 
+    async def test_search_and_archive_sessions(self, store: SessionStore) -> None:
+        keep = Session(title="保留会话", workspace_root="/workspace/keep", git_branch="main")
+        keep.summary = "包含关键搜索词"
+        archive = Session(title="归档会话", workspace_root="/workspace/archive")
+        await store.save(keep)
+        await store.save(archive)
+
+        matches, total = await store.list_sessions(query="关键搜索词")
+        assert total == 1
+        assert matches[0].id == keep.id
+        assert matches[0].workspace_root == "/workspace/keep"
+        assert matches[0].git_branch == "main"
+
+        archived = await store.archive(keep.id)
+        matches_after_archive, total_after_archive = await store.list_sessions(query="关键搜索词")
+
+        assert archived is True
+        assert matches_after_archive == []
+        assert total_after_archive == 0
+
     async def test_delete_session(self, store: SessionStore) -> None:
         session = Session(title="待删除")
         await store.save(session)
