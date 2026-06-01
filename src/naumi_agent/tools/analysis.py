@@ -94,6 +94,7 @@ _build_self_review_inventory_script = (
 _build_self_review_report = _self_review_support.build_self_review_report
 _build_page_inventory_script = _page_support.build_page_inventory_script
 _build_page_report = _page_support.build_page_report
+_scan_page = _page_support.scan_page
 _build_sleep_inventory_script = _sleep_support.build_sleep_inventory_script
 _build_sleep_report = _sleep_support.build_sleep_report
 _scan_entropy = _entropy_support.scan_entropy
@@ -581,28 +582,6 @@ class EvalDrivenTool(Tool):
 # ===========================================================================
 #  /page — LLM OS 内存分页调度
 # ===========================================================================
-
-def _scan_page(source_text: str) -> str:
-    """page 模式静态分析：统计当前上下文使用情况."""
-    findings: list[str] = []
-
-    total_chars = len(source_text)
-    est_tokens = total_chars // 4  # rough estimate for mixed CJK/ASCII
-    findings.append(f"- 当前对话估算 Token 数: ~{est_tokens:,}")
-    findings.append(f"- 对话字符数: {total_chars:,}")
-
-    # 统计消息角色分布
-    user_msgs = len(re.findall(r'"role":\s*"user"', source_text))
-    assistant_msgs = len(re.findall(r'"role":\s*"assistant"', source_text))
-    system_msgs = len(re.findall(r'"role":\s*"system"', source_text))
-    tool_msgs = len(re.findall(r'"role":\s*"tool"', source_text))
-    findings.append(
-        f"- 消息分布: user={user_msgs}, assistant={assistant_msgs}, "
-        f"system={system_msgs}, tool={tool_msgs}"
-    )
-
-    return "\n".join(findings)
-
 
 _PAGE_SYSTEM = """\
 You are an LLM OS memory manager implementing virtual memory paging.
