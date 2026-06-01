@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.63] - 2026-06-01
+
+### Changed
+- **Analysis Supervisor 模块拆分** — 将 `/supervisor` 的单体风险检测、Worker 候选识别、守护基础设施盘点、错误隔离质量和守护者树就绪度评分迁移到 `analysis_support.supervisor`，主 `analysis.py` 保留工具编排、兼容入口、多智能体 Supervisor 增强路径与 LLM fallback。
+
 ## [0.1.62] - 2026-06-01
 
 ### Changed
