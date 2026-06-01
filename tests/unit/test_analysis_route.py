@@ -91,3 +91,37 @@ class TestMoERouteTool:
         assert "## MoE 确定性专家路由" in output
         assert "## LLM MoE 综合增强" in output
         assert "认证边界" in output
+
+    @pytest.mark.asyncio
+    async def test_execute_ignores_stale_subagent_manager(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "service.py"
+        _write_route_source(source)
+        stale_router = object()
+        active_response = ModelResponse(
+            content="综合：使用当前 router。",
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+            model="test",
+        )
+
+        class StaleEngine:
+            _router = stale_router
+
+        class StaleManager:
+            _engine = StaleEngine()
+
+        with (
+            patch("naumi_agent.tools.analysis._global_router") as router,
+            patch(
+                "naumi_agent.tools.analysis._global_subagent_manager",
+                StaleManager(),
+            ),
+        ):
+            router.call = AsyncMock(return_value=active_response)
+            output = await MoERouteTool().execute(task="设计 auth api", target=str(source))
+
+        assert "## LLM MoE 综合增强" in output
+        assert "## SubAgent MoE 执行结果" not in output
+        assert "当前 router" in output
