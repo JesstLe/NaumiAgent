@@ -1178,6 +1178,14 @@ class TestErrorRecovery:
                 if event == "token"
             )
             assert token_text == result.response
+            perf_phases = [
+                str(data.get("phase", ""))
+                for event, data in events
+                if event == "perf_phase"
+            ]
+            assert "context_prepare" in perf_phases
+            assert "llm_first_chunk" in perf_phases
+            assert "llm_stream" in perf_phases
         finally:
             await engine.shutdown()
 
