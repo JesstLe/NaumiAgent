@@ -183,7 +183,13 @@ async def cli_event_handler(event: str, data: dict[str, Any]) -> None:
         tool = str(data.get("tool_name", "?"))
         status = str(data.get("status", "?"))
         reason = str(data.get("reason", "") or "")
-        style = "red" if status in {"blocked", "blocked_by_hook"} else "yellow"
+        style = (
+            "red"
+            if status in {"blocked", "blocked_by_hook", "denied", "confirmation_error"}
+            else "green"
+            if status in {"confirmed", "bypass_enabled"}
+            else "yellow"
+        )
         suffix = f" · {reason[:120]}" if reason else ""
         console.print(
             f"[{style}]permission bubble: {agent} → {tool} "

@@ -53,6 +53,7 @@ from naumi_agent.tools.web import create_web_tools
 from naumi_agent.worktree import WorktreeManager, create_worktree_tools
 
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
+PermissionConfirmationCallback = Callable[[dict[str, Any]], Awaitable[str | bool]]
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,7 @@ class AgentEngine:
         )
         self._harness_context = HarnessContextAssembler()
         self._permission_bubble_history: list[dict[str, Any]] = []
+        self._permission_confirmer: PermissionConfirmationCallback | None = None
 
         self.task_store = TaskStore(config.memory.session_db_path)
         self.background_runner = BackgroundRunner(
@@ -384,6 +386,18 @@ class AgentEngine:
     @property
     def usage(self) -> AgentUsage:
         return self._usage
+
+    @property
+    def permission_mode(self) -> PermissionMode:
+        """Return the active permission mode."""
+        return self._permission_checker.mode
+
+    def set_permission_confirmer(
+        self,
+        confirmer: PermissionConfirmationCallback | None,
+    ) -> None:
+        """Register a UI callback used when a tool needs user confirmation."""
+        self._permission_confirmer = confirmer
 
     @property
     def task_runner(self) -> Any:
@@ -2264,7 +2278,7 @@ class AgentEngine:
                 "tool_name": tc.name,
                 "arguments": args,
                 "agent_name": agent_name or "",
-                "permission_bubble": bool(agent_name),
+                "permission_bubble": True,
             },
             agent_name=agent_name,
             session_id=session_id,
@@ -2296,7 +2310,7 @@ class AgentEngine:
                 "requires_confirmation": decision.requires_confirmation,
                 "reason": decision.reason,
                 "agent_name": agent_name or "",
-                "permission_bubble": bool(agent_name),
+                "permission_bubble": True,
             },
             agent_name=agent_name,
             session_id=session_id,
@@ -2332,23 +2346,25 @@ class AgentEngine:
                 content=f"权限拒绝：{decision.reason}",
             )
         if decision.requires_confirmation:
-            logger.warning("Tool %s requires confirmation and was blocked", tc.name)
-            await self._emit_permission_bubble(
+            logger.info("Tool %s requires confirmation", tc.name)
+            confirmation = await self._confirm_tool_execution(
                 on_event,
                 agent_name=agent_name,
-                tool_name=tc.name,
-                status="needs_confirmation",
-                reason="该工具需要用户确认，当前自动执行链路未提供确认步骤。",
-                requires_confirmation=True,
+                tool_call=tc,
+                arguments=args,
+                decision=decision,
             )
-            return ToolResult(
-                call_id=tc.id,
-                status="error",
-                content=(
-                    "权限拒绝：该工具需要用户确认，当前自动执行链路未提供确认步骤。"
-                    "请在 bypass 模式下运行，或使用更安全的替代工具完成任务。"
-                ),
-            )
+            if confirmation not in {"allow", "bypass"}:
+                if confirmation == "unavailable":
+                    content = (
+                        "权限拒绝：该工具需要用户确认，但当前界面未注册确认入口。"
+                        "请使用支持确认的 CLI/TUI，或切换到 bypass 模式后重试。"
+                    )
+                elif confirmation == "error":
+                    content = "权限拒绝：权限确认流程异常，已停止执行该工具。"
+                else:
+                    content = "权限拒绝：用户已拒绝执行该工具。"
+                return ToolResult(call_id=tc.id, status="error", content=content)
 
         try:
             start = time.time()
@@ -2373,6 +2389,99 @@ class AgentEngine:
                 content=f"Tool error: {type(e).__name__}: {e}",
             )
 
+    async def _confirm_tool_execution(
+        self,
+        on_event: EventCallback | None,
+        *,
+        agent_name: str | None,
+        tool_call: ToolCall,
+        arguments: dict[str, Any],
+        decision: Any,
+    ) -> str:
+        """Ask the UI to confirm a tool execution that policy marked as sensitive."""
+        reason = decision.reason or "该工具需要用户确认。"
+        await self._emit_permission_bubble(
+            on_event,
+            agent_name=agent_name,
+            tool_name=tool_call.name,
+            status="needs_confirmation",
+            reason=reason,
+            requires_confirmation=True,
+        )
+        if self._permission_confirmer is None:
+            return "unavailable"
+
+        payload = {
+            "agent_name": agent_name or "main",
+            "tool_name": tool_call.name,
+            "call_id": tool_call.id,
+            "arguments": arguments,
+            "reason": reason,
+            "risk_level": getattr(decision.risk_level, "value", str(decision.risk_level)),
+            "requires_confirmation": True,
+            "permission_mode": self._permission_checker.mode.value,
+        }
+        try:
+            raw_choice = await self._permission_confirmer(payload)
+        except Exception as e:
+            logger.warning("Permission confirmation callback failed: %s", e)
+            await self._emit_permission_bubble(
+                on_event,
+                agent_name=agent_name,
+                tool_name=tool_call.name,
+                status="confirmation_error",
+                reason=str(e),
+                requires_confirmation=True,
+            )
+            return "error"
+
+        choice = self._normalize_permission_confirmation(raw_choice)
+        if choice == "bypass":
+            self._permission_checker.set_mode(PermissionMode.BYPASS)
+            self._config.safety.permission_mode = PermissionMode.BYPASS.value
+            await self._emit_permission_bubble(
+                on_event,
+                agent_name=agent_name,
+                tool_name=tool_call.name,
+                status="bypass_enabled",
+                reason="用户已切换到 bypass 模式，本次工具继续执行。",
+                requires_confirmation=False,
+            )
+            return "bypass"
+        if choice == "allow":
+            await self._emit_permission_bubble(
+                on_event,
+                agent_name=agent_name,
+                tool_name=tool_call.name,
+                status="confirmed",
+                reason="用户已允许本次工具执行。",
+                requires_confirmation=False,
+            )
+            return "allow"
+
+        await self._emit_permission_bubble(
+            on_event,
+            agent_name=agent_name,
+            tool_name=tool_call.name,
+            status="denied",
+            reason="用户拒绝执行该工具。",
+            requires_confirmation=True,
+        )
+        return "deny"
+
+    @staticmethod
+    def _normalize_permission_confirmation(choice: str | bool) -> str:
+        if choice is True:
+            return "allow"
+        if choice is False:
+            return "deny"
+        normalized = str(choice or "").strip().lower()
+        if normalized in {"allow", "allowed", "yes", "y", "confirm", "confirmed"}:
+            return "allow"
+        if normalized in {"bypass", "b", "shift+tab", "s-tab"}:
+            return "bypass"
+        return "deny"
+
     async def _emit_permission_bubble(
         self,
         on_event: EventCallback | None,
@@ -2383,11 +2492,9 @@ class AgentEngine:
         reason: str,
         requires_confirmation: bool,
     ) -> None:
-        """Emit parent-visible subagent permission decisions."""
-        if not agent_name:
-            return
+        """Emit permission decisions visible to parent or top-level UI."""
         payload = {
-            "agent_name": agent_name,
+            "agent_name": agent_name or "main",
             "tool_name": tool_name,
             "status": status,
             "reason": reason,

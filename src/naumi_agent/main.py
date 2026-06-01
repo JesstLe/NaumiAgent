@@ -359,7 +359,13 @@ def _format_permission_bubble(data: dict[str, Any]) -> str:
     tool = str(data.get("tool_name", "?"))
     status = str(data.get("status", "?"))
     reason = str(data.get("reason", "") or "")
-    color = "31" if status in {"blocked", "blocked_by_hook"} else "33"
+    color = (
+        "31"
+        if status in {"blocked", "blocked_by_hook", "denied", "confirmation_error"}
+        else "32"
+        if status in {"confirmed", "bypass_enabled"}
+        else "33"
+    )
     suffix = f" · {reason[:120]}" if reason else ""
     return f"\033[{color}m  permission bubble: {agent} → {tool} [{status}]{suffix}\033[0m"
 
@@ -593,6 +599,7 @@ async def _chat(config_path: str) -> None:
     )
 
     cli = CLIApp(debug_trace=debug_trace)
+    engine.set_permission_confirmer(cli.confirm_permission)
     global _active_cli
     _active_cli = cli
 
