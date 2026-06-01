@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.27] - 2026-06-01
+
+### Added
+- **Autopsy 工具确定性落地** — `/autopsy` 在模型路由未初始化时也会返回执行迹切片审计、可运行 autopsy inventory、AST 调用图、假设/爆炸半径检测和 autopsy contract。
+
+### Fixed
+- **Autopsy 源码读取修复** — `_scan_autopsy` 现在会先解析目标路径再读取源码，避免路径字符串被逐字符处理导致扫描为空。
+
 ## [0.1.26] - 2026-06-01
 
 ### Added

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from naumi_agent.tools import analysis_common
+from naumi_agent.tools.analysis_support import autopsy as _autopsy_support
 from naumi_agent.tools.analysis_support import consensus as _consensus_support
 from naumi_agent.tools.analysis_support import cosmos as _cosmos_support
 from naumi_agent.tools.analysis_support import fusion as _fusion_support
@@ -41,6 +42,8 @@ _run_analysis = analysis_common.run_analysis
 _scan_probe = _probe_support.scan_probe
 _build_probe_script = _probe_support.build_probe_script
 _build_probe_report = _probe_support.build_probe_report
+_build_autopsy_inventory_script = _autopsy_support.build_autopsy_inventory_script
+_build_autopsy_report = _autopsy_support.build_autopsy_report
 _scan_hook = _hook_support.scan_hook
 _build_hook_inventory_script = _hook_support.build_hook_inventory_script
 _build_hook_report = _hook_support.build_hook_report
@@ -9337,7 +9340,7 @@ def _scan_autopsy(target: str) -> str:
     """Scan system for DTS-CHE readiness — blind reading risks, trace
     infrastructure, hypothesis verification, and blast-radius containment."""
     findings: list[str] = []
-    source = _read_sources(target)
+    source = _read_sources(_resolve_target(target))
 
     if not source.strip():
         return "⚠️ 未找到可分析的源代码。"
@@ -9597,15 +9600,20 @@ class AutopsyTool(Tool):
     async def execute(
         self, *, target: str, **kwargs: Any,
     ) -> str:
+        scan_evidence = _scan_autopsy(target)
+        deterministic = _build_autopsy_report(target, scan_evidence)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("autopsy", target[:200])
-        scan_evidence = _scan_autopsy(target)
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 Autopsy 执行迹切片审计。"
+
         user_msg = (
             f"## Bug 解剖目标\n{target}\n\n"
             f"## DTS-CHE 扫描\n{scan_evidence}\n"
+            f"\n## 确定性 Autopsy 执行迹切片审计\n{deterministic}\n"
         )
-        return await _run_analysis(router, _AUTOPSY_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _AUTOPSY_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM Autopsy 增强\n" + enhanced
 
 
 # ---------------------------------------------------------------------------
