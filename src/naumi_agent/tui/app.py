@@ -838,23 +838,8 @@ class BrowserPanel(VerticalScroll):
         for child in list(self.children):
             child.remove()
 
-        self.mount(Static("📋 浏览器任务", classes="browser-section-title"))
-        runner = engine.task_runner
-        runs = runner.list_runs(limit=15)
-        if not runs:
-            self.mount(Static("[dim]暂无任务[/dim]", classes="browser-status"))
-            return
-        for r in runs:
-            status = r.get("status", "?")
-            instruction = (r.get("instruction") or "")[:25]
-            style = "green" if status == "completed" else "red" if status == "failed" else "yellow"
-            self.mount(
-                Static(
-                    f"[{style}]●[/{style}] {instruction}\n"
-                    f"[dim]{status} · {(r.get('createdAt') or '')[:16]}[/dim]",
-                    classes="task-entry",
-                )
-            )
+        self.mount(Static("📋 任务面板", classes="browser-section-title"))
+        self.mount(Static("[dim]正在读取任务状态...[/dim]", classes="browser-status"))
 
     def show_scan_results(self, auditor: Any) -> None:
         for child in list(self.children):
@@ -1308,7 +1293,7 @@ class NaumiApp(App):
                     "- `/browser-state` — 显示浏览器状态\n"
                     "- `/browser-screenshot` — 截取页面截图\n"
                     "- `/bdaemon <子命令>` — 外部浏览器 daemon health/start/run/watch\n"
-                    "- `/tasks` — 列出浏览器任务\n"
+                    "- `/tasks` — 打开 todo/subagent/background/browser 任务面板\n"
                     "- `/task <id>` — 查看任务详情\n"
                     "- `/task-reply <id> <指令>` — 回复等待中的任务\n"
                     "- `/task-abort <id>` — 中止任务\n"
@@ -2980,6 +2965,22 @@ class NaumiApp(App):
         browser = self.query_one(BrowserPanel)
         browser.show_panel = True
         browser.refresh_tasks(self.engine)
+        self._refresh_task_panel()
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _refresh_task_panel(self) -> None:
+        from naumi_agent.ui.task_panel import render_task_panel
+
+        browser = self.query_one(BrowserPanel)
+        for child in list(browser.children):
+            child.remove()
+        browser.mount(Static("📋 任务面板", classes="browser-section-title"))
+        browser.mount(
+            Static(
+                Text.from_ansi(await render_task_panel(self.engine, limit=15)),
+                classes="browser-status",
+            )
+        )
 
     @work(exclusive=True, exit_on_error=False)
     async def _show_task_detail(self, task_id: str) -> None:

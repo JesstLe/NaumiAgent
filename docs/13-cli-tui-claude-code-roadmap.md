@@ -901,9 +901,10 @@ codex/docs-13-claude-code-roadmap
 - ✅ Command palette 增强：fuzzy search + category + readonly 标记 + arg hint。
 - ✅ Virtualized CLI message history：`VirtualizedCLIHistory` + `VirtualizedHistoryControl`，CLI 输出区按行懒渲染，保留 PageUp/PageDown、live/finalize、resume replay 行为。
 - ✅ Debug log viewer：`/debug` 展示当前日志路径 + 最近 debug-runs 索引，`/debug-replay` 回放结构化事件，`/copy last|error` 导出诊断片段。
+- ✅ Task / Todo / Subagent 面板：`ui.task_panel` 聚合持久 todo、subagent 生命周期/事件、权限冒泡、background 任务和 browser runs；CLI `/tasks` 与 TUI 任务侧栏共用同一套快照/渲染逻辑。
 
 下一步：
 
 ```text
-feat: add task and subagent panels
+feat: add structured diff viewer
 ```

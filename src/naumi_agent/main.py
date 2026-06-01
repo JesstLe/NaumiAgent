@@ -1699,7 +1699,7 @@ def _print_help() -> None:
             "/bdaemon <子命令>",
             "外部浏览器 daemon — start/health/run/list/status/watch/reply/resume/abort/manual",
         ),
-        ("/tasks", "列出浏览器任务运行"),
+        ("/tasks", "任务面板 — todo/subagent/background/browser"),
         ("/task <id>", "查看任务运行详情"),
         ("/task-reply <id> <指令>", "回复等待中的任务"),
         ("/task-abort <id>", "中止运行中的任务"),
@@ -3250,37 +3250,12 @@ async def _run_browser_daemon(engine: Any, arg: str) -> None:
 
 
 async def _run_tasks_list(engine: Any) -> None:
-    """列出浏览器任务运行."""
-    from rich.table import Table
+    """显示 todo / subagent / background / browser 综合任务面板."""
+    from rich.text import Text
 
-    runner = engine.task_runner
-    runs = runner.list_runs(limit=20)
-    if not runs:
-        console.print("[dim]暂无浏览器任务运行[/dim]")
-        return
+    from naumi_agent.ui.task_panel import render_task_panel
 
-    table = Table(title="浏览器任务", show_lines=False)
-    table.add_column("ID", style="cyan", width=8)
-    table.add_column("指令", max_width=30)
-    table.add_column("状态", width=15)
-    table.add_column("步骤", justify="right", width=4)
-    table.add_column("创建时间", width=16)
-
-    for r in runs:
-        instruction = (r.get("instruction") or "")[:30]
-        status = r.get("status", "?")
-        steps = str(r.get("stepCount", r.get("steps", 0)))
-        created = (r.get("createdAt") or "")[:16]
-        style = "green" if status == "completed" else "red" if status == "failed" else "yellow"
-        table.add_row(
-            (r.get("id") or "")[:8],
-            instruction,
-            f"[{style}]{status}[/{style}]",
-            steps,
-            created,
-        )
-
-    console.print(table)
+    console.print(Text.from_ansi(await render_task_panel(engine, limit=20)))
 
 
 async def _run_task_detail(engine: Any, arg: str) -> None:
