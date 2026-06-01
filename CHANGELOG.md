@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.7] - 2026-06-01
+
+### Added
+- **MCTS 工具确定性落地** — `/mcts` 在模型路由未初始化时也会返回 Path A/B/C 多路径探索、KEEP/PRUNE 决策、Winning Path、验证方案和回退触发条件。
+
+### Fixed
+- `_scan_mcts` 现在能处理没有 import 的源码文件，不再因外部依赖集合未初始化而失败。
+
 ## [0.1.6] - 2026-06-01
 
 ### Added
