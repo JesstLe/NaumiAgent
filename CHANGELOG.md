@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.23] - 2026-06-01
+
+### Added
+- **Macro 工具确定性落地** — `/macro` 在模型路由未初始化时也会返回多智能体市场审计、可运行 market inventory、中心化/数据市场/激励/竞争检测和 market contract。
+
+### Fixed
+- **Macro 源码读取修复** — `_scan_macro` 现在会先解析目标路径再读取源码，避免路径字符串被逐字符处理导致扫描为空。
+
 ## [0.1.22] - 2026-06-01
 
 ### Added

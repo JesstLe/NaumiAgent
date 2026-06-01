@@ -19,6 +19,7 @@ from naumi_agent.tools.analysis_support import consensus as _consensus_support
 from naumi_agent.tools.analysis_support import fusion as _fusion_support
 from naumi_agent.tools.analysis_support import genesis as _genesis_support
 from naumi_agent.tools.analysis_support import hook as _hook_support
+from naumi_agent.tools.analysis_support import macro as _macro_support
 from naumi_agent.tools.analysis_support import pid as _pid_support
 from naumi_agent.tools.analysis_support import probe as _probe_support
 from naumi_agent.tools.analysis_support import spar as _spar_support
@@ -57,6 +58,8 @@ _build_zkp_trace_script = _zkp_support.build_zkp_trace_script
 _build_zkp_report = _zkp_support.build_zkp_report
 _build_genesis_inventory_script = _genesis_support.build_genesis_inventory_script
 _build_genesis_report = _genesis_support.build_genesis_report
+_build_macro_inventory_script = _macro_support.build_macro_inventory_script
+_build_macro_report = _macro_support.build_macro_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -7884,7 +7887,7 @@ def _scan_macro(target: str) -> str:
     bottlenecks, identify marketizable data flows, evaluate incentive
     mechanisms, and assess competition/survival infrastructure."""
     findings: list[str] = []
-    source = _read_sources(target)
+    source = _read_sources(_resolve_target(target))
 
     if not source.strip():
         return "⚠️ 未找到可分析的源代码。"
@@ -8112,15 +8115,20 @@ class MacroTool(Tool):
     async def execute(
         self, *, task: str, **kwargs: Any,
     ) -> str:
+        scan_evidence = _scan_macro(task)
+        deterministic = _build_macro_report(task, scan_evidence)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("macro", task[:200])
-        scan_evidence = _scan_macro(task)
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 Macro 市场审计。"
+
         user_msg = (
             f"## 市场博弈目标\n{task}\n\n"
             f"## 市场化扫描\n{scan_evidence}\n"
+            f"\n## 确定性 Macro 市场审计\n{deterministic}\n"
         )
-        return await _run_analysis(router, _MACRO_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _MACRO_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM Macro 增强\n" + enhanced
 
 
 # ===========================================================================
