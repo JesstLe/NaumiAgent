@@ -1240,6 +1240,7 @@ class NaumiApp(App):
                     "- `/copy [all|last|error]` — 复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)\n"
                     "- `/debug` — 显示本次结构化调试日志位置\n"
                     "- `/debug-replay [路径]` — 回放 debug-runs 结构化事件\n"
+                    "- `/diff [all|worktree|staged]` — 查看本轮结构化 git diff\n"
                     "- `/pwd` — 显示当前工作目录\n"
                     "- `/tools` — 列出可用工具\n"
                     "- `/model` — 显示模型配置\n"
@@ -1330,6 +1331,17 @@ class NaumiApp(App):
                 chat.mount(
                     Markdown(
                         f"```\n{render_debug_replay(replay_target)}\n```",
+                        classes="agent-msg",
+                    )
+                )
+            case "/diff":
+                from naumi_agent.ui.diff_viewer import render_git_diff_viewer
+
+                scope = arg.strip() or "all"
+                workspace_root = getattr(self.engine, "workspace_root", Path.cwd())
+                chat.mount(
+                    Static(
+                        Text.from_ansi(render_git_diff_viewer(workspace_root, scope=scope)),
                         classes="agent-msg",
                     )
                 )

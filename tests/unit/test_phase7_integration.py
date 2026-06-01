@@ -189,6 +189,7 @@ class TestCLICompleterCommands:
         from naumi_agent.cli_completer import COMMANDS
 
         cmd_names = [c[0] for c in COMMANDS]
+        assert "/diff" in cmd_names
         assert "/tasks" in cmd_names
         assert "/task" in cmd_names
         assert "/task-reply" in cmd_names
@@ -217,7 +218,7 @@ class TestCLICompleterCommands:
 
         new_cmds = {
             "/browse", "/autobrowse", "/browser-stop", "/browser-state",
-            "/browser-screenshot", "/tasks", "/task", "/task-reply",
+            "/browser-screenshot", "/diff", "/tasks", "/task", "/task-reply",
             "/task-abort", "/task-resume", "/scan", "/scan-full",
             "/scan-report", "/scan-baseline", "/btemplate-list",
             "/btemplate-run", "/btemplate-compare",

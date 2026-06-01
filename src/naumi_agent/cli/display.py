@@ -30,6 +30,7 @@ def print_help() -> None:
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次结构化调试日志位置"),
         ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),
+        ("/diff [all|worktree|staged]", "查看本轮结构化 git diff"),
         ("/pwd", "显示当前工作目录"),
         ("/tools", "列出可用工具"),
         ("/model", "显示模型配置"),

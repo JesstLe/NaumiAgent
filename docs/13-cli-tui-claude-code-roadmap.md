@@ -902,9 +902,10 @@ codex/docs-13-claude-code-roadmap
 - ✅ Virtualized CLI message history：`VirtualizedCLIHistory` + `VirtualizedHistoryControl`，CLI 输出区按行懒渲染，保留 PageUp/PageDown、live/finalize、resume replay 行为。
 - ✅ Debug log viewer：`/debug` 展示当前日志路径 + 最近 debug-runs 索引，`/debug-replay` 回放结构化事件，`/copy last|error` 导出诊断片段。
 - ✅ Task / Todo / Subagent 面板：`ui.task_panel` 聚合持久 todo、subagent 生命周期/事件、权限冒泡、background 任务和 browser runs；CLI `/tasks` 与 TUI 任务侧栏共用同一套快照/渲染逻辑。
+- ✅ Structured diff viewer：`ui.diff_viewer` 解析 git unified diff，按文件展示 hunk/additions/deletions、折叠大 diff、标出未跟踪文件；CLI/TUI 支持 `/diff [all|worktree|staged]`。
 
 下一步：
 
 ```text
-feat: add structured diff viewer
+feat: add configurable keybindings
 ```
