@@ -23,6 +23,7 @@ from naumi_agent.tools.analysis_support import probe as _probe_support
 from naumi_agent.tools.analysis_support import spar as _spar_support
 from naumi_agent.tools.analysis_support import vision as _vision_support
 from naumi_agent.tools.analysis_support import world as _world_support
+from naumi_agent.tools.analysis_support import zkp as _zkp_support
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,8 @@ _build_consensus_inventory_script = _consensus_support.build_consensus_inventory
 _build_consensus_report = _consensus_support.build_consensus_report
 _build_pid_inventory_script = _pid_support.build_pid_inventory_script
 _build_pid_report = _pid_support.build_pid_report
+_build_zkp_trace_script = _zkp_support.build_zkp_trace_script
+_build_zkp_report = _zkp_support.build_zkp_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -7278,7 +7281,7 @@ def _scan_zkp(target: str) -> str:
     unverified AI outputs, missing citations, claim-fact gaps, and
     validation layer completeness."""
     findings: list[str] = []
-    source = _read_sources(target)
+    source = _read_sources(_resolve_target(target))
 
     if not source.strip():
         return "⚠️ 未找到可分析的源代码。"
@@ -7498,15 +7501,20 @@ class ZKPTool(Tool):
     async def execute(
         self, *, target: str, **kwargs: Any,
     ) -> str:
+        scan_evidence = _scan_zkp(target)
+        deterministic = _build_zkp_report(target, scan_evidence)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("zkp", target[:200])
-        scan_evidence = _scan_zkp(target)
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 ZKP 轨迹校验方案。"
+
         user_msg = (
             f"## 审计目标\n{target}\n\n"
             f"## 可验证计算扫描\n{scan_evidence}\n"
+            f"\n## 确定性 ZKP 轨迹校验方案\n{deterministic}\n"
         )
-        return await _run_analysis(router, _ZKP_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _ZKP_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM ZKP 增强\n" + enhanced
 
 
 # ===========================================================================

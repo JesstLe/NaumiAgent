@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.21] - 2026-06-01
+
+### Added
+- **ZKP 工具确定性落地** — `/zkp` 在模型路由未初始化时也会返回轨迹校验方案、可运行 trace verifier、不可验证输出检测和 trace contract。
+
+### Fixed
+- **ZKP 源码读取修复** — `_scan_zkp` 现在会先解析目标路径再读取源码，避免路径字符串被逐字符处理导致扫描为空。
+
 ## [0.1.20] - 2026-06-01
 
 ### Added
