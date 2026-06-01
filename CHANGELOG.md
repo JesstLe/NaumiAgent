@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.15] - 2026-06-01
+
+### Added
+- **Vision 工具确定性落地** — `/vision` 在模型路由未初始化时也会返回视觉提取方案、截图 inventory 脚本、ROI 合约模板和字段校验计划。
+- **Vision 模块拆分** — 将 `/vision` 的反爬障碍检测、数据类型识别、管线规划和截图脚本生成抽到 `analysis_support.vision`，继续压缩万行分析模块。
+
 ## [0.1.14] - 2026-06-01
 
 ### Added
