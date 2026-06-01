@@ -881,19 +881,34 @@ tests/e2e/ui_scenarios/
 当前分支：
 
 ```text
-codex/claude-style-ui-runtime
+feat/ui-message-adapter
 ```
 
-已完成：
+已完成（阶段一）：
 
-- CLI 工具调用初步 card 化。
-- 工具准备阶段已有动态 activity bar。
-- 长工具参数生成不再表现为完全卡死。
+- ✅ 统一 UI 事件协议：`UIMessage` / `EngineEventAdapter` / 完整 dispatch table。
+- ✅ CLI/TUI message renderer registry：`CLIRenderer` 表驱动，新增类型不改主循环。
+- ✅ 工具调用独立 card 化：`ToolCardSummary` + tool-specific extractors。
+- ✅ 长代码块/diff/文件写入摘要：`code_excerpt` / `file_summary_renderer`。
+- ✅ 底部布局稳定化：`BottomBarState` + `clip_to_width` + output guard。
+- ✅ 权限 prompt 闭环：`PermissionBubbleMessage` + y/n/Shift+Tab。
+- ✅ Resume 渲染恢复：`replay_messages()` 将 session 历史转为 UIMessage 走 renderer。
+- ✅ Debug trace 集成：`DebugTrace` 记录所有 engine event + UIMessage + 渲染异常。
+
+已完成（阶段二，部分）：
+
+- ✅ 结构化 Task Status Renderer：todo bar / agent status / background task / summary bar。
+- ✅ Command palette 增强：fuzzy search + category + readonly 标记 + arg hint。
 
 下一步：
 
 ```text
-refactor: add ui message event adapter
+feat: add virtualized cli message history
 ```
 
-这是后续所有 CLI/TUI Claude Code 化迁移的主干。
+或
+
+```text
+feat: add debug log viewer
+```
+
