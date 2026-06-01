@@ -3170,6 +3170,71 @@ def _scan_speculate(
     return "\n".join(findings)
 
 
+def _build_speculate_report(
+    scan_evidence: str,
+    files: list[Path],
+    task: str = "",
+) -> str:
+    risky_files = _speculate_risky_files(files)
+    safe_files = [f.name for f in files if f.name not in {name for name, _ in risky_files}]
+    lines = [
+        "## Speculate 确定性双阶段计划",
+        f"- 任务：{task or '审查现有代码'}",
+        f"- 文件数：{len(files)}",
+        "",
+        "## 风险扫描",
+        scan_evidence,
+        "",
+        "## Phase 1: Intern Draft",
+        "- 快速处理低风险样板区域：导入、配置、数据模型字段、重复 getter/setter。",
+        "- 对每个改动保留最小 diff，不跨越模块边界。",
+    ]
+    if safe_files:
+        lines.append(f"- Safe files: {', '.join(safe_files[:8])}")
+    lines.extend(
+        [
+            "",
+            "## Phase 2: Architect Review",
+        ]
+    )
+    if risky_files:
+        for file_name, reason in risky_files[:8]:
+            lines.append(f"- ⚠️ {file_name}: {reason}")
+    else:
+        lines.append("- 未发现高风险文件；仍需覆盖空输入、错误输入和正常路径。")
+    lines.extend(
+        [
+            "",
+            "## Diff Summary Contract",
+            "- Total lines drafted: 由实际 diff 统计，禁止口头估算后跳过验证。",
+            f"- Files requiring slow review: {len(risky_files)}",
+            "- CRITICAL fixes applied: 必须逐条绑定测试或静态证据。",
+            "- Remaining concerns: 未覆盖的风险必须显式列出。",
+            "- Confidence: 只有 targeted tests 和真实场景都通过后才能 >8/10。",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _speculate_risky_files(files: list[Path]) -> list[tuple[str, str]]:
+    risky: list[tuple[str, str]] = []
+    for file in files:
+        try:
+            content = file.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        reasons: list[str] = []
+        for pattern, label, risk_level in _RISK_PATTERNS:
+            if re.search(pattern, content):
+                reasons.append(f"{risk_level}:{label}")
+        branches = len(re.findall(r"\bif\s+|\belif\s+", content))
+        if branches > 15:
+            reasons.append(f"HIGH:分支过多({branches})")
+        if reasons:
+            risky.append((file.name, ", ".join(reasons[:4])))
+    return risky
+
+
 _SPECULATE_SYSTEM = """\
 You are a Speculative Decoding engine using the "Intern Draft + Architect \
 Review" dual-mode paradigm.
@@ -3255,25 +3320,28 @@ class SpeculateTool(Tool):
         task: str = "",
         **kwargs: Any,
     ) -> str:
-        router = _global_router
-        if router is None:
-            return _router_unavailable("speculate", target)
-
         files = _resolve_target(target)
         if not files:
             return f"无法解析目标: {target} (请提供文件或目录路径)"
 
         source_text = _read_sources(files)
         scan_evidence = _scan_speculate(files, source_text, target)
+        deterministic = _build_speculate_report(scan_evidence, files, task)
+
+        router = _global_router
+        if router is None:
+            return deterministic + "\n\n模型路由未初始化，已返回确定性推测解码计划。"
 
         user_msg = (
             f"## 风险扫描证据\n{scan_evidence}\n\n"
+            f"## 确定性双阶段计划\n{deterministic}\n\n"
             f"## 源代码\n{source_text[:50000]}\n"
         )
         if task:
             user_msg += f"\n## 生成任务\n{task}\n"
 
-        return await _run_analysis(router, _SPECULATE_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _SPECULATE_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM 推测解码增强\n" + enhanced
 
 
 # ===========================================================================
