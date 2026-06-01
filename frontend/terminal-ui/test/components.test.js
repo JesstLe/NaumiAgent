@@ -94,3 +94,42 @@ test("activity card renders live operation details within width", () => {
   assert(plain.includes("路径: showcase/index.html"));
   assert(card.every((item) => visibleWidth(item) <= 72));
 });
+
+test("semantic event messages render as structured cards instead of JSON fallback", () => {
+  const messages = [
+    {
+      kind: "runtime_notification",
+      message: { source: "background", title: "后台任务完成", count: 1, preview: "server ready" },
+    },
+    {
+      kind: "subagent_event",
+      message: { agent_name: "reviewer", task_id: "task-1", status: "completed", message: "审查完成" },
+    },
+    {
+      kind: "team_event",
+      message: { event_type: "handoff", sender: "planner", recipient: "coder", priority: "high", message: "交接实现" },
+    },
+    {
+      kind: "context_compact",
+      message: { before: 260000, after: 90000, archived_tool_results: 3, preserved_sections: ["todo"], warnings: ["接近上限"] },
+    },
+    {
+      kind: "recovery",
+      message: { phase: "completed", action: "继续输出", reason: "模型输出中断", before: 1, after: 2, unit: "chunk" },
+    },
+  ];
+
+  const rendered = messages.flatMap((message) => renderComponent(Message({ message }), { width: 88 }));
+  const plain = stripAnsi(rendered.join("\n"));
+
+  assert(plain.includes("background"));
+  assert(plain.includes("后台任务完成"));
+  assert(plain.includes("subagent"));
+  assert(plain.includes("reviewer"));
+  assert(plain.includes("team"));
+  assert(plain.includes("planner -> coder"));
+  assert(plain.includes("compact 260000 -> 90000"));
+  assert(plain.includes("recovery"));
+  assert(!plain.includes('{"source"'));
+  assert(rendered.every((item) => visibleWidth(item) <= 88));
+});

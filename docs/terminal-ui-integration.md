@@ -107,6 +107,7 @@ npm --prefix frontend/terminal-ui start -- --config config.yaml
 - thinking 折叠为一行摘要。
 - 工具调用使用独立卡片，支持 running/success/error。
 - `tool_prepare` 使用 activity card 展示准备阶段；最终 tool card 会保留 prepare 摘要，避免快速工具事件被 viewport 吞掉。
+- background runtime notification、subagent、team、hook、context compact、recovery、error 事件使用结构化事件卡片渲染，不再裸露 JSON。
 - tool card、permission footer、todo footer、status footer、Markdown/diff 已拆成轻量组件层。
 - todo 常驻 footer，完成后由 `open_count=0` 清除。
 - footer 根据窗口宽度截断。
