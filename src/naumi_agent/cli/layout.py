@@ -16,7 +16,7 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI, FormattedText
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import Float, FloatContainer, HSplit, Window
+from prompt_toolkit.layout import ConditionalContainer, Float, FloatContainer, HSplit, Window
 from prompt_toolkit.layout.controls import (
     BufferControl,
     FormattedTextControl,
@@ -217,6 +217,7 @@ class CLIApp:
         self._git_branch: str = ""
         self._git_dirty: bool = False
         self._status_text = "就绪"
+        self._todo_text = ""
         self._pending_permission: asyncio.Future[str] | None = None
 
         self._last_esc_time = 0.0
@@ -469,6 +470,12 @@ class CLIApp:
         self.record_debug_event("cli.status", {"text": text})
         self._invalidate()
 
+    def set_todo_status(self, text: str | None) -> None:
+        """Update the sticky bottom todo bar, or clear it when text is empty."""
+        self._todo_text = text or ""
+        self.record_debug_event("cli.todo_status", {"text": self._todo_text})
+        self._invalidate()
+
     def get_transcript(self) -> str:
         """Return the complete visible transcript, including live output."""
         return "".join([*self._output, *self._live])
@@ -513,6 +520,10 @@ class CLIApp:
     def _render_status(self, cols: int) -> FormattedText:
         text = f" {self._status_text}"
         return FormattedText([("class:status", _fit_text_to_width(text, cols))])
+
+    def _render_todo(self, cols: int) -> FormattedText:
+        text = f" {self._todo_text}"
+        return FormattedText([("class:processing", _fit_text_to_width(text, cols))])
 
     def _build_app(self) -> Application:
         self._output_win = _OutputWindow(
@@ -563,8 +574,22 @@ class CLIApp:
             height=1,
             content=_DynamicLineControl(lambda width: self._render_status(width)),
         )
+        todo_win = ConditionalContainer(
+            Window(
+                height=1,
+                content=_DynamicLineControl(lambda width: self._render_todo(width)),
+            ),
+            filter=Condition(lambda: bool(self._todo_text)),
+        )
 
-        body = HSplit([self._output_win, status_win, border_top, input_win, border_bot])
+        body = HSplit([
+            self._output_win,
+            todo_win,
+            status_win,
+            border_top,
+            input_win,
+            border_bot,
+        ])
         root = FloatContainer(
             content=body,
             floats=[
