@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.26] - 2026-06-01
+
+### Added
+- **Supervisor 工具确定性落地** — `/supervisor` 在模型路由未初始化时也会返回守护者树审计、可运行 supervisor inventory、Worker/守护/隔离检测和 restart contract。
+
+### Fixed
+- **Supervisor 源码读取修复** — `_scan_supervisor` 现在会先解析目标路径再读取源码，避免路径字符串被逐字符处理导致扫描为空。
+
 ## [0.1.25] - 2026-06-01
 
 ### Added
