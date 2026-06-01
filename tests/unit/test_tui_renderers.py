@@ -30,6 +30,13 @@ class FakeTodo:
         self.status_text = ""
 
 
+def _mounted_plain_text(chat: FakeChat) -> str:
+    return "\n".join(
+        getattr(widget.content, "plain", str(widget.content))
+        for widget in chat.mounted
+    )
+
+
 def test_tool_use_shows_structured_path() -> None:
     adapter = EngineEventAdapter()
     renderer = TUIRenderer()
@@ -44,6 +51,29 @@ def test_tool_use_shows_structured_path() -> None:
     assert "file_write" in chat.started_tool
     assert "/tmp/showcase/index.html" in chat.started_tool
     assert "/tmp/showcase/index.html" in status.status_text
+
+
+def test_permission_renderer_keeps_literal_status_text() -> None:
+    adapter = EngineEventAdapter()
+    renderer = TUIRenderer()
+    chat = FakeChat()
+
+    msg = adapter.adapt(
+        "permission_bubble",
+        {
+            "agent_name": "main",
+            "tool_name": "bash_run",
+            "status": "needs_confirmation",
+            "reason": "需要确认。",
+        },
+    )
+    assert msg is not None
+
+    renderer.render(msg, chat, FakeStatus(), FakeTodo())
+
+    mounted = _mounted_plain_text(chat)
+    assert "[needs_confirmation]" in mounted
+    assert "bash_run" in mounted
 
 
 def test_recovery_renderer_escapes_markup_sensitive_text() -> None:

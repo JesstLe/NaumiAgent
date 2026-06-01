@@ -1,0 +1,24 @@
+name: resume_replay
+description: 历史会话恢复时，存量 messages 能重建用户、助手、工具调用和工具结果 transcript。
+messages:
+  - role: user
+    content: 继续检查 config.yaml
+  - role: assistant
+    content: 我先读取配置。
+    tool_calls:
+      - function:
+          name: file_read
+          arguments: '{"file_path":"config.yaml"}'
+  - role: tool
+    content: "models:\n  provider: openai\n"
+  - role: assistant
+    content: 配置可读取，下一步检查 UI 回放。
+assert_cli_contains:
+  - 继续检查 config.yaml
+  - 我先读取配置。
+  - file_read
+  - config.yaml
+  - 配置可读取
+assert_cli_not_contains:
+  - You are a helpful assistant
+min_history_lines: 4

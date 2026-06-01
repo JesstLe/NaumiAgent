@@ -895,7 +895,7 @@ codex/docs-13-claude-code-roadmap
 - ✅ Resume 渲染恢复：`replay_messages()` 将 session 历史转为 UIMessage 走 renderer。
 - ✅ Debug trace 集成：`DebugTrace` 记录所有 engine event + UIMessage + 渲染异常。
 
-已完成（阶段二，部分）：
+已完成（阶段二）：
 
 - ✅ 结构化 Task Status Renderer：todo bar / agent status / background task / summary bar。
 - ✅ Command palette 增强：fuzzy search + category + readonly 标记 + arg hint。
@@ -904,16 +904,17 @@ codex/docs-13-claude-code-roadmap
 - ✅ Task / Todo / Subagent 面板：`ui.task_panel` 聚合持久 todo、subagent 生命周期/事件、权限冒泡、background 任务和 browser runs；CLI `/tasks` 与 TUI 任务侧栏共用同一套快照/渲染逻辑。
 - ✅ Structured diff viewer：`ui.diff_viewer` 解析 git unified diff，按文件展示 hunk/additions/deletions、折叠大 diff、标出未跟踪文件；CLI/TUI 支持 `/diff [all|worktree|staged]`。
 
-已完成（阶段三，部分）：
+已完成（阶段三）：
 
 - ✅ Configurable keybindings：`ui.keybindings` 统一定义快捷键动作、默认值、配置覆盖、冲突检测和帮助渲染；CLI 的 prompt_toolkit `KeyBindings` 与 TUI 的 Textual `Binding` 均从同一配置生成，支持 `/keybindings` 查看当前生效按键。
 - ✅ Theme and output style system：`ui.theme` 提供 dark/minimal/high_contrast 主题、compact/detailed/debug/silent_tools 输出策略和语义色彩 token；CLI 状态/权限、TUI CSS、结构化 diff 和 `/style` 入口共用同一套配置。
 - ✅ Resume history screen：`ui.history_screen` 统一历史会话列表/预览渲染，Session 持久化 workspace/git/summary 元数据，`/history <关键词>` 支持搜索，`/history preview|archive|delete <id>` 支持预览、归档和删除；TUI 历史侧栏展示模型、token、cost、workspace、git、摘要并支持归档/删除。
 - ✅ Doctor diagnostics screen：`ui.doctor` 提供 Python/config/API key/model/workspace/git/rg/browser daemon/docker/MCP/debug log/terminal 的确定性检查，CLI/TUI `/doctor` 与 Agent 工具 `doctor_diagnostics` 共用同一套诊断与 Markdown 报告。
 - ✅ Cache message rendering：`ui.render_cache` 提供 bounded LRU 与统计；CLI renderer 按 `message_id` 缓存 ANSI 输出，TUI renderer 对重复 message id 做幂等跳过，renderer override 会清空缓存避免旧结果污染。
+- ✅ Terminal UI E2E scenarios：`tests/e2e/ui_scenarios/*.yaml` 覆盖大文件写入、权限确认、历史恢复、大 diff、subagent/team/recovery、终端 resize；`tests/e2e/test_ui_scenarios.py` 用真实 `EngineEventAdapter`、CLI/TUI renderer、virtualized history、structured diff viewer 和宽字符裁剪逻辑回放并断言关键文本/viewport 边界。
 
 下一步：
 
 ```text
-test: add terminal ui e2e scenarios
+阶段三已完成。后续可进入跨终端兼容实测、性能基准和真实终端截图回归。
 ```

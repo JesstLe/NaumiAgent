@@ -1,0 +1,32 @@
+name: terminal_resize
+description: 宽字符、emoji、长状态栏在多种终端宽度下裁剪到精确 cell 宽度。
+events:
+  - event: turn_start
+    data:
+      turn: 2
+      model: gpt-5-codex
+  - event: runtime_notification
+    data:
+      source: background
+      title: 后台任务通知
+      count: 2
+      preview: tmux / VS Code terminal / 中文宽字符全部参与回放
+resize:
+  status_text: "上下文: 263K/256K | 预算: $0.5008/$5.00 | 📂 main* | 中文宽字符 | ✅"
+  widths:
+    - 12
+    - 24
+    - 40
+    - 80
+assert_cli_contains:
+  - gpt-5-codex
+  - 后台任务通知
+assert_tui_contains:
+  - gpt-5-codex
+  - 后台任务通知
+  - background ×2
+viewport:
+  width: 40
+  height: 5
+  assert_contains:
+    - 后台任务通知
