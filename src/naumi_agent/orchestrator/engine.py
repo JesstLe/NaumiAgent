@@ -428,6 +428,12 @@ class AgentEngine:
         if hasattr(self, "subagent_manager"):
             await self.subagent_manager.stop_reaper()
             self.subagent_manager.destroy_all_dynamic()
+            try:
+                from naumi_agent.tools.analysis import clear_analysis_subagent_manager
+
+                clear_analysis_subagent_manager(self.subagent_manager)
+            except Exception as e:
+                logger.debug("Failed to clear analysis subagent manager: %s", e)
         if self._task_runner is not None:
             for run in self._task_runner.runs:
                 if run.get("status") in ("running", "queued"):

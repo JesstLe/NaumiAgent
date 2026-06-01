@@ -2841,7 +2841,7 @@ class MoERouteTool(Tool):
             return deterministic + "\n\n模型路由未初始化，已返回确定性 MoE 专家路由。"
 
         # Try to use SubAgentManager for real multi-agent execution
-        manager = _global_subagent_manager
+        manager = _get_analysis_subagent_manager(router)
         if manager is not None:
             agent_report = await self._execute_with_agents(
                 router, manager, task, scan_evidence, source_text,
@@ -5970,7 +5970,7 @@ class SparTool(Tool):
 
         scan_evidence = _scan_spar(task)
 
-        manager = _global_subagent_manager
+        manager = _get_analysis_subagent_manager(router)
         if manager is not None:
             return await self._execute_adversarial(
                 router, manager, task, scan_evidence,
@@ -9270,7 +9270,7 @@ class SupervisorTool(Tool):
 
         scan_evidence = _scan_supervisor(target)
 
-        manager = _global_subagent_manager
+        manager = _get_analysis_subagent_manager(router)
         if manager is not None:
             return await self._execute_with_supervisor_tree(
                 router, manager, target, scan_evidence,
@@ -9769,6 +9769,24 @@ def set_analysis_subagent_manager(manager: Any) -> None:
     """注入 SubAgentManager 实例，供工具内部调度子 Agent."""
     global _global_subagent_manager
     _global_subagent_manager = manager
+
+
+def clear_analysis_subagent_manager(manager: Any | None = None) -> None:
+    """Clear the global SubAgentManager when the owning engine shuts down."""
+    global _global_subagent_manager
+    if manager is None or _global_subagent_manager is manager:
+        _global_subagent_manager = None
+
+
+def _get_analysis_subagent_manager(router: Any) -> Any | None:
+    """Return a subagent manager only when it belongs to the active router."""
+    manager = _global_subagent_manager
+    if manager is None:
+        return None
+    engine = getattr(manager, "_engine", None)
+    if engine is not None and getattr(engine, "_router", None) is not router:
+        return None
+    return manager
 
 
 # ---------------------------------------------------------------------------
