@@ -691,8 +691,16 @@ _active_cli: Any = None
 
 
 def _cli_event_factory(cli: Any):
-    """Create event handler that writes to CLIApp instead of stdout."""
+    """Create event handler that writes to CLIApp instead of stdout.
+
+    Uses EngineEventAdapter + CLIRenderer for typed message dispatch,
+    falling back to the legacy if/elif for streaming-only paths
+    (markdown highlighting, timing metrics) that need local state.
+    """
     import time
+
+    from naumi_agent.cli.renderers import CLIRenderer
+    from naumi_agent.ui.messages import EngineEventAdapter
 
     thinking_started = False
     has_streamed_tokens = False
@@ -702,6 +710,8 @@ def _cli_event_factory(cli: Any):
     last_token_time = 0.0
     turn_start_time = 0.0
     markdown_highlighter = _StreamingMarkdownHighlighter()
+    adapter = EngineEventAdapter()
+    renderer = CLIRenderer()
 
     async def handler(event: str, data: dict[str, Any]) -> None:
         nonlocal thinking_started, has_streamed_tokens
@@ -710,82 +720,21 @@ def _cli_event_factory(cli: Any):
         if hasattr(cli, "record_debug_event"):
             cli.record_debug_event("engine.stream_event", {"event": event, "data": data})
 
+        # --- Streaming-only events that need local state ---
+        # Token/response events own their own rendering (markdown highlighter
+        # is stateful and lives in this closure).  After handling them we
+        # return — the adapter/renderer path would otherwise duplicate output.
         if event == "turn_start":
             model_name = data.get("model", "")
             token_count = 0
             first_token_time = 0.0
             last_token_time = 0.0
             turn_start_time = time.monotonic()
-            if model_name:
-                cli.append_live(f"\033[2m  ⚙ {model_name}\033[0m\n")
-        elif event == "run_started":
-            cli.append_live(f"{_sep()}\n\033[2m⏳ 已接手，准备执行...\033[0m\n")
-        elif event == "thinking_delta":
-            content = data.get("content", "")
-            if content:
-                cli.append_live(f"\033[2m{content}\033[0m")
-        elif event == "thinking_start":
-            thinking_started = True
-            cli.append_live(f"{_sep()}\n\033[2m💭 思考中...\033[0m\n")
-        elif event == "thinking_end":
-            cli.append_live(f"\033[0m\n{_sep()}\n")
-        elif event in {"tool_prepare_start", "tool_prepare_snapshot"}:
-            text = format_tool_prepare_status(data)
-            if hasattr(cli, "set_activity_status"):
-                cli.set_activity_status(text)
-            else:
-                cli.append_live(f"\033[2m  {text}\033[0m\n")
-        elif event == "tool_prepare_end":
-            if hasattr(cli, "set_activity_status"):
-                cli.set_activity_status(None)
-        elif event == "tool_start":
-            name = data.get("name", "?")
-            args = data.get("args", "")
-            label = _tool_label(name, args)
-            if hasattr(cli, "set_activity_status"):
-                cli.set_activity_status(f"执行 {label}")
-            cli.append_live(f"{_sep()}\n\033[36m  ⏳ {label}\033[0m\n")
-        elif event == "tool_end":
-            name = data.get("name", "?")
-            status = data.get("status", "unknown")
-            content = data.get("content", "")
-            dur = data.get("duration_ms", 0)
-            label = _tool_label(name)
-            if hasattr(cli, "set_activity_status"):
-                cli.set_activity_status(None)
-            if status == "success":
-                cli.append_live(f"\033[32m  ✓ {label}\033[0m \033[2m({dur}ms)\033[0m\n")
-            else:
-                cli.append_live(f"\033[31m  ✗ {label} 失败 ({dur}ms)\033[0m\n")
-            if content:
-                cli.append_live(_capture(lambda: _print_tool_output(name, content)))
-        elif event == "hook_trace":
-            cli.append_live(_format_hook_trace(data) + "\n")
-        elif event == "task_snapshot":
-            if hasattr(cli, "set_todo_status"):
-                cli.set_todo_status(_format_todo_bar(data) or None)
-            else:
-                cli.append_live(_format_task_snapshot(data) + "\n")
-        elif event == "subagent_event":
-            cli.append_live(_format_subagent_event(data) + "\n")
-        elif event == "permission_bubble":
-            cli.append_live(_format_permission_bubble(data) + "\n")
-        elif event == "team_event":
-            cli.append_live(_format_team_event(data) + "\n")
-        elif event == "runtime_notification":
-            cli.append_live(_format_runtime_notification(data) + "\n")
-        elif event == "context_compacted":
-            cli.append_live(_format_context_compacted(data) + "\n")
-        elif event == "recovery_event":
-            cli.append_live(_format_recovery_event(data) + "\n")
-        elif event == "perf_phase":
-            label = data.get("label") or data.get("phase") or "阶段"
-            duration = int(data.get("duration_ms", 0) or 0)
-            cli.append_live(f"\033[2m  ⏱ {label}: {duration}ms\033[0m\n")
+            # Fall through to adapter for ⚙ model display
         elif event == "response_start":
             markdown_highlighter.reset()
             cli.finalize_live()
-            cli.append_output(f"{_sep(thin=False)}\n")
+            # Fall through to adapter for separator line
         elif event == "token":
             has_streamed_tokens = True
             content = data.get("content", "")
@@ -796,13 +745,62 @@ def _cli_event_factory(cli: Any):
                 last_token_time = now
                 token_count += 1
                 cli.append_live(markdown_highlighter.feed(content))
+            return  # streaming block owns token rendering
         elif event == "response_end":
             tail = markdown_highlighter.flush()
             if tail:
                 cli.append_live(tail)
-        elif event == "error":
+            return  # streaming block owns response_end rendering
+
+        # --- Adapter-driven rendering for all other events ---
+        msg = adapter.adapt(event, data)
+        if msg is None:
+            return
+
+        # Status bar / activity bar / todo bar updates (non-rendering side-effects)
+        from naumi_agent.ui.messages.events import (
+            ErrorMessage,
+            RuntimeStatusMessage,
+            TodoStatusMessage,
+            ToolPrepareMessage,
+        )
+        if isinstance(msg, ErrorMessage):
+            # Errors finalize the live area so the message is clearly visible
             cli.finalize_live()
-            cli.append_live(f"\033[31m错误: {data.get('message', '')}\033[0m\n")
+        elif isinstance(msg, RuntimeStatusMessage):
+            if hasattr(cli, "set_activity_status"):
+                if msg.phase == "perf_phase":
+                    cli.set_activity_status(
+                        f"{msg.label}: {msg.duration_ms}ms"
+                    )
+        elif isinstance(msg, ToolPrepareMessage):
+            if hasattr(cli, "set_activity_status"):
+                if msg.phase == "end":
+                    cli.set_activity_status(None)
+                else:
+                    parts = [f"准备 {msg.tool_name}"]
+                    if msg.path:
+                        parts.append(msg.path)
+                    if msg.content_lines and msg.content_chars:
+                        parts.append(
+                            f"内容 {msg.content_lines} 行"
+                        )
+                    elif msg.argument_chars:
+                        parts.append(
+                            f"参数 {msg.argument_chars} 字符"
+                        )
+                    if msg.elapsed_ms >= 1000:
+                        parts.append(f"{msg.elapsed_ms / 1000:.1f}s")
+                    cli.set_activity_status(" · ".join(parts))
+                return  # activity bar owns the display — skip renderer
+        elif isinstance(msg, TodoStatusMessage):
+            if hasattr(cli, "set_todo_status"):
+                cli.set_todo_status(_format_todo_bar(data) or None)
+
+        # Main rendering via registry
+        ansi_text = renderer.render(msg)
+        if ansi_text is not None:
+            cli.append_live(ansi_text)
 
     def _get_model() -> str:
         return model_name
