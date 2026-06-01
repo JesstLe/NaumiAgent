@@ -63,6 +63,7 @@ _OUTPUT_TRUNCATED_FINISH_REASONS = {
     "content_filter_length",
 }
 _MAX_OUTPUT_CONTINUATIONS = 2
+_TOOL_TEXT_GUARD_CHARS = 24
 _OUTPUT_CONTINUATION_PROMPT = (
     "你的上一条回答因为输出上限被截断。请从截断处直接继续，"
     "不要重写已经说过的内容，不要添加开场白。"
@@ -1813,13 +1814,25 @@ class AgentEngine:
             await on_event("turn_start", {"turn": turn + 1, "model": model_str})
 
             text_parts: list[str] = []
+            pending_text_parts: list[str] = []
             thinking_parts: list[str] = []
             collected_tool_calls: dict[int, dict[str, Any]] = {}
             got_response = False
             got_thinking = False
             stream_tokens = 0
             finish_reason: str | None = None
-            should_buffer_text = bool(tools)
+            should_guard_text = bool(tools)
+            tool_call_started = False
+
+            async def flush_pending_text() -> None:
+                nonlocal got_response
+                if not pending_text_parts:
+                    return
+                if not got_response:
+                    got_response = True
+                    await on_event("response_start", {})
+                await on_event("token", {"content": "".join(pending_text_parts)})
+                pending_text_parts.clear()
 
             await self._fire_hook(HookContext(
                 point=HookPoint.LLM_CALL_START,
@@ -1847,15 +1860,26 @@ class AgentEngine:
                         thinking_parts.append(chunk.thinking)
                         await on_event("thinking_delta", {"content": chunk.thinking})
 
+                    if chunk.tool_call_started:
+                        tool_call_started = True
+                        pending_text_parts.clear()
+
                     if chunk.token:
                         text_parts.append(chunk.token)
-                        if should_buffer_text:
-                            # Tool-capable streaming can emit text fragments before the final
-                            # finish_reason reveals that the same assistant turn is actually a
-                            # tool call. Buffer first so tool-call preambles or malformed
-                            # argument fragments never leak into the CLI/TUI transcript.
+                        if tool_call_started:
                             continue
-                        if not got_response:
+                        if should_guard_text and not got_response:
+                            # Tool-capable streaming can emit a few text fragments before
+                            # the first tool-call delta arrives. Keep only a small guard
+                            # buffer, then release normal answers early instead of waiting
+                            # for the whole completion to finish.
+                            pending_text_parts.append(chunk.token)
+                            if len("".join(pending_text_parts)) >= _TOOL_TEXT_GUARD_CHARS:
+                                await flush_pending_text()
+                            continue
+                        if pending_text_parts:
+                            await flush_pending_text()
+                        elif not got_response:
                             got_response = True
                             await on_event("response_start", {})
                         await on_event("token", {"content": chunk.token})
@@ -1915,6 +1939,7 @@ class AgentEngine:
 
             # --- 工具调用 ---
             if collected_tool_calls:
+                pending_text_parts.clear()
                 assistant_msg: dict[str, Any] = {
                     "role": "assistant",
                     "content": None,
@@ -2075,7 +2100,9 @@ class AgentEngine:
 
             # --- 最终回答 ---
             tool_call_history.clear()
-            if text_content and not got_response:
+            if pending_text_parts:
+                await flush_pending_text()
+            elif text_content and not got_response:
                 got_response = True
                 await on_event("response_start", {})
                 await on_event("token", {"content": text_content})

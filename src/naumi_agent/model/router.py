@@ -50,6 +50,7 @@ class ModelResponse:
 class StreamChunk:
     token: str = ""
     tool_call: Any = None
+    tool_call_started: bool = False
     thinking: str = ""
     finish_reason: str | None = None
     usage: TokenUsage | None = None
@@ -390,6 +391,7 @@ class ModelRouter:
             token = delta.content or ""
 
             # 工具调用
+            tool_call_started = bool(delta.tool_calls)
             if delta.tool_calls:
                 for tc in delta.tool_calls:
                     idx = tc.index
@@ -415,11 +417,12 @@ class ModelRouter:
             if finish_reason == "tool_calls" and collected_tool_calls:
                 tool_call = collected_tool_calls
 
-            if token or thinking_text or tool_call or finish_reason:
+            if token or thinking_text or tool_call or tool_call_started or finish_reason:
                 yield StreamChunk(
                     token=token,
                     thinking=thinking_text,
                     tool_call=tool_call,
+                    tool_call_started=tool_call_started,
                     finish_reason=finish_reason,
                     usage=None,
                 )

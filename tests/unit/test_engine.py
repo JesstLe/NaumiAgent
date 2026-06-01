@@ -1077,6 +1077,7 @@ class TestErrorRecovery:
             if call_count == 1:
                 yield StreamChunk(token=")")
                 yield StreamChunk(token="y")
+                yield StreamChunk(tool_call_started=True)
                 yield StreamChunk(
                     tool_call={
                         0: {
@@ -1133,6 +1134,49 @@ class TestErrorRecovery:
                 if msg.get("role") == "assistant" and msg.get("tool_calls")
             ]
             assert tool_assistant_messages[-1]["content"] is None
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_streaming_final_answer_flushes_after_tool_guard_window(
+        self,
+        tmp_path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        async def stream_response(**_: object):
+            yield StreamChunk(token="abcdefghijklmnopqrstuvwxyz普通回答")
+            assert any(event == "token" for event, _ in events)
+            yield StreamChunk(token="，继续实时输出")
+            yield StreamChunk(finish_reason="stop")
+
+        try:
+            engine._messages = [
+                {"role": "system", "content": "system prompt"},
+                {"role": "user", "content": "直接回答"},
+            ]
+
+            with patch.object(engine._router, "stream", new=stream_response):
+                result = await engine._react_loop_streaming(
+                    tools=[FakeTool().to_openai_tool()],
+                    on_event=on_event,
+                )
+
+            assert result.status == "completed"
+            assert result.response == "abcdefghijklmnopqrstuvwxyz普通回答，继续实时输出"
+            token_text = "".join(
+                str(data.get("content", ""))
+                for event, data in events
+                if event == "token"
+            )
+            assert token_text == result.response
         finally:
             await engine.shutdown()
 
