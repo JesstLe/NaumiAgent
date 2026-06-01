@@ -12,6 +12,30 @@ def estimate_tokens(text: str) -> int:
     return max(1, cjk_chars // 2 + ascii_chars // 4) if text else 0
 
 
+def scan_sleep(files: list[object], source_text: str, session_context: str) -> str:
+    """Scan conversation/source material for consolidation topics."""
+    del files
+
+    findings: list[str] = []
+    topics: dict[str, int] = {}
+    for pattern, label in [
+        (r"(?:def |class |function |module )(\w+)", "代码定义"),
+        (r"(?:bug|error|fix|debug|crash)", "问题调试"),
+        (r"(?:test|spec|assert|verify)", "测试验证"),
+        (r"(?:design|arch|pattern|架构|设计)", "架构设计"),
+    ]:
+        count = len(re.findall(pattern, source_text, re.IGNORECASE))
+        if count:
+            topics[label] = count
+    if topics:
+        findings.append("- 对话主题分布:")
+        for label, count in sorted(topics.items(), key=lambda x: x[1], reverse=True):
+            findings.append(f"  - {label}: {count} 次出现")
+    total_chars = len(session_context)
+    findings.append(f"- 会话上下文: {total_chars:,} 字符 (~{total_chars // 4:,} tokens)")
+    return "\n".join(findings)
+
+
 def build_sleep_inventory_script() -> str:
     """Build a dependency-free session consolidation scanner."""
     return '''\
