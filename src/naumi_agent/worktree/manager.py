@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.worktree.models import WorktreeRecord, WorktreeStatus
 
@@ -101,6 +102,7 @@ class WorktreeManager:
         )
         records[name] = record
         self._save_records(records)
+        await self._mark_task_bound(record)
         self._log_event("create", record, {"task_id": task_id})
         return "已创建隔离 worktree。\n\n" + self.format_status(record)
 
@@ -124,6 +126,7 @@ class WorktreeManager:
         record.updated_at = _now()
         records[name] = record
         self._save_records(records)
+        await self._mark_task_bound(record)
         self._log_event("bind_task", record, {"task_id": task_id})
         return "已绑定任务。\n\n" + self.format_status(await self.status(name))
 
@@ -238,7 +241,24 @@ class WorktreeManager:
         task = await self._task_store.get_task(task_id)
         if task is None:
             return f"错误：依赖任务 #{task_id} 不存在"
+        if task.status == TaskStatus.COMPLETED:
+            return f"错误：任务 #{task_id} 已完成，不能绑定 worktree"
         return None
+
+    async def _mark_task_bound(self, record: WorktreeRecord) -> None:
+        """Reflect worktree ownership back to the visible todo item."""
+        if not record.task_id or self._task_store is None or not self._task_store.session_id:
+            return
+        task = await self._task_store.get_task(record.task_id)
+        if task is None or task.status == TaskStatus.COMPLETED:
+            return
+        active = f"在隔离 worktree `{record.name}` 中推进：{record.path}"
+        await self._task_store.update_task(
+            record.task_id,
+            status=TaskStatus.IN_PROGRESS,
+            active_form=active,
+            owner=f"worktree:{record.name}",
+        )
 
     def _ensure_git_repo(self) -> str | None:
         result = self._git(["rev-parse", "--show-toplevel"], cwd=self._repo_root)
