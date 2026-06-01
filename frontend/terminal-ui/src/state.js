@@ -89,6 +89,9 @@ export function mergeStatus(state, payload) {
 
 export function handleUiMessage(state, message) {
   switch (message.type) {
+    case "user":
+      state.messages.push({ kind: "user", content: message.content ?? "", isCommand: Boolean(message.is_command) });
+      break;
     case "assistant_stream":
       handleAssistantStream(state, message);
       break;
@@ -123,6 +126,9 @@ export function handleUiMessage(state, message) {
     case "hook_trace":
     case "error":
       state.messages.push({ kind: message.type, message });
+      break;
+    case "system_notice":
+      pushSystemMessage(state, message.title ?? "notice", message.content ?? message.message ?? "", "info");
       break;
     default:
       break;
