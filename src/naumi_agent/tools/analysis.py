@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from naumi_agent.tools import analysis_common
+from naumi_agent.tools.analysis_support import hook as _hook_support
 from naumi_agent.tools.analysis_support import probe as _probe_support
 from naumi_agent.tools.base import Tool, ToolMetadata
 
@@ -28,6 +29,9 @@ _run_analysis = analysis_common.run_analysis
 _scan_probe = _probe_support.scan_probe
 _build_probe_script = _probe_support.build_probe_script
 _build_probe_report = _probe_support.build_probe_report
+_scan_hook = _hook_support.scan_hook
+_build_hook_inventory_script = _hook_support.build_hook_inventory_script
+_build_hook_report = _hook_support.build_hook_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -5104,126 +5108,6 @@ class ProbeTool(Tool):
 #  /hook — 底层逆向与插桩推演协议
 # ===========================================================================
 
-# Target type detection
-_TARGET_TYPES = {
-    "native_cpp": [
-        (r"(?:C\+\+|cpp|native|unreal engine|directx|vulkan)", "原生 C++ 编译"),
-        (r"(?:\.exe|\.dll|\.so|\.sys)", "原生二进制文件"),
-        (r"(?:3A|AAA|unreal|虚幻)", "3A 游戏引擎"),
-    ],
-    "dotnet": [
-        (r"(?:C#|csharp|\.NET|unity|mono|il2cpp)", ".NET/C# 平台"),
-        (r"(?:assembly-csharp|dnspy|ilspy)", ".NET 反编译特征"),
-        (r"(?:原神|genshin|honkai)", "Unity 游戏"),
-    ],
-    "java": [
-        (r"(?:java|kotlin|android|apk|dex)", "Java/Android 平台"),
-        (r"(?:jadx|smali|dalvik)", "Android 逆向特征"),
-    ],
-    "wasm": [
-        (r"(?:wasm|webassembly|emscripten)", "WebAssembly"),
-        (r"(?:\.wasm|wasm2wat)", "WASM 文件"),
-    ],
-}
-
-# Anti-debug/anti-cheat indicators
-_ANTI_DEBUG_PATTERNS = [
-    (r"(?:anti.?cheat|EAC|BattlEye|VAC|Easy.?Anti)", "商业反作弊系统"),
-    (r"(?:Themida|VMProtect|Enigma|UPX|ASPack)", "加壳/混淆保护"),
-    (r"(?:IsDebuggerPresent|NtQueryInformationProcess)", "反调试 API"),
-    (r"(?:integrity.?check|signature.?verify)", "完整性校验"),
-    (r"(?:kernel.?driver|ring.?0|驱动)", "内核级保护"),
-]
-
-
-def _scan_hook(task: str) -> str:
-    """hook 模式静态扫描：识别目标类型和反调试保护."""
-    findings: list[str] = []
-    task_lower = task.lower()
-
-    # 1. Detect target type
-    target_matches: list[tuple[str, str]] = []
-    for ttype, patterns in _TARGET_TYPES.items():
-        for pattern, label in patterns:
-            if re.search(pattern, task_lower, re.IGNORECASE):
-                target_matches.append((ttype, label))
-                break
-
-    if target_matches:
-        findings.append("- 目标平台:")
-        for ttype, label in target_matches:
-            findings.append(f"  - {ttype}: {label}")
-    else:
-        findings.append("- 目标平台: 未明确指定（将给出通用方案）")
-
-    # 2. Recommend approach based on target type
-    approaches: dict[str, list[str]] = {
-        "native_cpp": [
-            "内存特征码扫描 (Signature Scanning)",
-            "指针链追踪 (Pointer Chain Tracing)",
-            "API Hooking via Detours/MinHook",
-            "硬件断点 (Hardware Breakpoints)",
-        ],
-        "dotnet": [
-            "dnSpy/ILSpy 反编译还原源码",
-            "HarmonyLib 运行时补丁",
-            "反射直接调用内部方法",
-            "Il2CppDumper 提取元数据",
-        ],
-        "java": [
-            "jadx/smali 反编译",
-            "Xposed/Frida 运行时 Hook",
-            "dex 修改与重打包",
-            "protobuf/flatbuffers 协议逆向",
-        ],
-        "wasm": [
-            "wasm2wat 反编译为 WAT",
-            "浏览器 DevTools 断点调试",
-            "内存 inspect + hook",
-            "wasm-decompile 还原伪代码",
-        ],
-    }
-    findings.append("- 推荐侦测手段:")
-    matched_types = set(t for t, _ in target_matches)
-    if matched_types:
-        for ttype in matched_types:
-            for approach in approaches.get(ttype, []):
-                findings.append(f"  - [{ttype}] {approach}")
-    else:
-        for approach in approaches["native_cpp"]:
-            findings.append(f"  - {approach}")
-
-    # 3. Detect anti-debug protections
-    anti_debug: list[str] = []
-    for pattern, label in _ANTI_DEBUG_PATTERNS:
-        if re.search(pattern, task_lower, re.IGNORECASE):
-            anti_debug.append(label)
-
-    if anti_debug:
-        findings.append(
-            f"- ⚠️ 反调试保护: {len(anti_debug)} 种"
-        )
-        for ad in anti_debug:
-            findings.append(f"  - {ad}")
-        findings.append(
-            "  → 需要反反调试策略（驱动级 Hook 或虚拟化绕过）"
-        )
-    else:
-        findings.append("- 反调试保护: 未提及（仍需验证）")
-
-    # 4. Complexity assessment
-    complexity = len(matched_types) * 10 + len(anti_debug) * 15
-    level = (
-        "EXTREME" if complexity > 50
-        else "HIGH" if complexity > 30
-        else "MEDIUM" if complexity > 10
-        else "LOW"
-    )
-    findings.append(f"- 逆向复杂度: {complexity} ({level})")
-
-    return "\n".join(findings)
-
-
 _HOOK_SYSTEM = """\
 You are a Reverse Engineering architect implementing dynamic \
 instrumentation and hooking protocols for black-box system analysis.
@@ -5319,16 +5203,21 @@ class HookTool(Tool):
     async def execute(
         self, *, task: str, target_type: str = "", **kwargs: Any,
     ) -> str:
-        router = _global_router
-        if router is None:
-            return _router_unavailable("hook", task[:200])
         combined = f"{task} {target_type}".strip()
         scan_evidence = _scan_hook(combined)
+        deterministic = _build_hook_report(task, target_type, scan_evidence)
+
+        router = _global_router
+        if router is None:
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 Hook 合规侦测方案。"
+
         user_msg = (
             f"## 逆向目标\n{task}\n\n"
             f"## 侦测扫描\n{scan_evidence}\n"
+            f"\n## 确定性 Hook 方案\n{deterministic}\n"
         )
-        return await _run_analysis(router, _HOOK_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _HOOK_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM Hook 增强\n" + enhanced
 
 
 # ===========================================================================

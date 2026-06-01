@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.14] - 2026-06-01
+
+### Added
+- **Hook 工具确定性落地** — `/hook` 在模型路由未初始化时也会返回合规只读侦测方案、目标平台/保护风险扫描、可运行 inventory 脚本和回填模板。
+- **Hook 模块拆分** — 将 `/hook` 的目标分类、保护风险检测、inventory 脚本生成和报告生成抽到 `analysis_support.hook`，继续缩小万行 `analysis.py`。
+
 ## [0.1.13] - 2026-06-01
 
 ### Added
