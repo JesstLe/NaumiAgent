@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.57] - 2026-06-01
+
+### Changed
+- **Analysis PID 模块拆分** — 将 `/pid` 的开环检测、反馈检查点盘点、误差累积风险、预测性纠偏识别和 PID 成熟度评分迁移到 `analysis_support.pid`，主 `analysis.py` 保留工具编排、兼容入口与 LLM PID 增强路径。
+
 ## [0.1.56] - 2026-06-01
 
 ### Changed
