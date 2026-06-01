@@ -34,6 +34,13 @@ from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.clipboard import copy_or_save_transcript
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
+from naumi_agent.ui.keybindings import (
+    KEYBINDING_DEFINITIONS,
+    KeybindingSet,
+    build_keybindings,
+    render_keybinding_help,
+    to_textual_key,
+)
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
 
 logger = logging.getLogger(__name__)
@@ -63,6 +70,23 @@ _SLASH_SUGGESTIONS = SuggestFromList(
     [cmd for cmd, _, _ in COMMANDS],
     case_sensitive=True,
 )
+
+
+def _build_textual_bindings(keybindings: KeybindingSet) -> list[Binding]:
+    bindings: list[Binding] = []
+    for definition in KEYBINDING_DEFINITIONS:
+        if "tui" not in definition.interfaces or definition.textual_action is None:
+            continue
+        for key in keybindings.keys_for(definition.action, interface="tui"):
+            bindings.append(
+                Binding(
+                    to_textual_key(key),
+                    definition.textual_action,
+                    definition.description,
+                    priority=definition.textual_priority,
+                )
+            )
+    return bindings
 
 
 class LoadSessionMessage(Message):
@@ -1061,23 +1085,17 @@ class NaumiApp(App):
     }
     """
 
-    BINDINGS = [
-        Binding("ctrl+q", "quit", "退出"),
-        Binding("tab", "toggle_activity", "活动面板"),
-        Binding("ctrl+h", "toggle_history", "历史"),
-        Binding("ctrl+l", "clear_chat", "清空"),
-        Binding("ctrl+y", "copy_transcript", "复制记录"),
-        Binding("ctrl+t", "show_tools", "工具列表"),
-        Binding("ctrl+b", "toggle_browser", "浏览器"),
-        Binding("shift+tab", "cycle_runtime_mode", "切换模式", priority=True),
-    ]
+    BINDINGS = _build_textual_bindings(build_keybindings())
 
     def __init__(
         self,
         engine: AgentEngine,
         debug_trace: Any | None = None,
+        keybindings: KeybindingSet | None = None,
         **kwargs: Any,
     ) -> None:
+        self._keybindings = keybindings or build_keybindings()
+        self.BINDINGS = _build_textual_bindings(self._keybindings)
         super().__init__(**kwargs)
         self.engine = engine
         self.debug_trace = debug_trace
@@ -1237,6 +1255,7 @@ class NaumiApp(App):
                 help_text = (
                     "## 可用命令\n"
                     "- `/help` — 显示帮助\n"
+                    "- `/keybindings` — 显示当前快捷键配置\n"
                     "- `/copy [all|last|error]` — 复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)\n"
                     "- `/debug` — 显示本次结构化调试日志位置\n"
                     "- `/debug-replay [路径]` — 回放 debug-runs 结构化事件\n"
@@ -1310,6 +1329,13 @@ class NaumiApp(App):
                     "- `/quit` — 退出\n"
                 )
                 chat.mount(Markdown(help_text, classes="agent-msg"))
+            case "/keybindings" | "/keys":
+                chat.mount(
+                    Markdown(
+                        render_keybinding_help(self._keybindings, interface="tui"),
+                        classes="agent-msg",
+                    )
+                )
             case "/debug":
                 info = (
                     self.debug_trace.describe()

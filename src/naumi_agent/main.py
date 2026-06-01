@@ -24,6 +24,7 @@ from naumi_agent.ui.code_excerpt import (
     DEFAULT_CODE_BLOCK_MAX_LINES,
     excerpt_markdown_code_blocks,
 )
+from naumi_agent.ui.keybindings import build_keybindings, render_keybinding_help
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -255,12 +256,13 @@ def _launch_tui(config_path: str) -> None:
     setup_logging(config.log_level)
     _check_api_key(config)
     engine = AgentEngine(config)
+    keybindings = build_keybindings(config.keybindings)
     debug_trace = DebugTrace.create(
         interface="tui",
         base_dir=Path(config.memory.session_db_path).parent / "debug-runs",
         metadata=_runtime_debug_metadata(config, resolved, engine),
     )
-    app = NaumiApp(engine, debug_trace=debug_trace)
+    app = NaumiApp(engine, debug_trace=debug_trace, keybindings=keybindings)
     app.run()
 
 
@@ -880,13 +882,14 @@ async def _chat(config_path: str) -> None:
     setup_logging(config.log_level)
     _check_api_key(config)
     engine = AgentEngine(config)
+    keybindings = build_keybindings(config.keybindings)
     debug_trace = DebugTrace.create(
         interface="cli",
         base_dir=Path(config.memory.session_db_path).parent / "debug-runs",
         metadata=_runtime_debug_metadata(config, resolved, engine),
     )
 
-    cli = CLIApp(debug_trace=debug_trace)
+    cli = CLIApp(debug_trace=debug_trace, keybindings=keybindings)
     engine.set_permission_confirmer(cli.confirm_permission)
 
     def toggle_runtime_mode() -> str:
@@ -1209,6 +1212,15 @@ async def _handle_command(engine: Any, cmd: str) -> None:
     match command:
         case "/h" | "/help":
             _print_help()
+        case "/keybindings" | "/keys":
+            if _active_cli and hasattr(_active_cli, "keybinding_help"):
+                console.print(Markdown(_active_cli.keybinding_help()))
+            else:
+                config = getattr(engine, "_config", None)
+                keybindings = build_keybindings(
+                    getattr(config, "keybindings", {}) if config is not None else {}
+                )
+                console.print(Markdown(render_keybinding_help(keybindings, interface="cli")))
         case "/debug":
             if _active_cli and hasattr(_active_cli, "debug_info"):
                 console.print(_active_cli.debug_info())
@@ -1637,6 +1649,7 @@ def _print_help() -> None:
     console.print("[bold]可用命令:[/bold]")
     commands = [
         ("/help", "显示帮助"),
+        ("/keybindings", "显示当前快捷键配置"),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
         ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),

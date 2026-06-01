@@ -147,6 +147,7 @@ class AppConfig(BaseSettings):
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     browser_daemon: BrowserDaemonConfig = Field(default_factory=BrowserDaemonConfig)
+    keybindings: dict[str, str | list[str]] = Field(default_factory=dict)
     workspace_root: str = Field(default_factory=lambda: str(Path.cwd()))
     custom_tools_dir: str | None = None
     log_level: str = "INFO"

@@ -904,8 +904,12 @@ codex/docs-13-claude-code-roadmap
 - ✅ Task / Todo / Subagent 面板：`ui.task_panel` 聚合持久 todo、subagent 生命周期/事件、权限冒泡、background 任务和 browser runs；CLI `/tasks` 与 TUI 任务侧栏共用同一套快照/渲染逻辑。
 - ✅ Structured diff viewer：`ui.diff_viewer` 解析 git unified diff，按文件展示 hunk/additions/deletions、折叠大 diff、标出未跟踪文件；CLI/TUI 支持 `/diff [all|worktree|staged]`。
 
+已完成（阶段三，部分）：
+
+- ✅ Configurable keybindings：`ui.keybindings` 统一定义快捷键动作、默认值、配置覆盖、冲突检测和帮助渲染；CLI 的 prompt_toolkit `KeyBindings` 与 TUI 的 Textual `Binding` 均从同一配置生成，支持 `/keybindings` 查看当前生效按键。
+
 下一步：
 
 ```text
-feat: add configurable keybindings
+feat: add theme and output style system
 ```
