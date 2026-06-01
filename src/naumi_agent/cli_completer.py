@@ -79,7 +79,7 @@ COMMANDS: list[tuple[str, str, bool]] = [
     ("/browser-state", "显示浏览器调试状态", False),
     ("/browser-screenshot", "截取当前页面截图", False),
     ("/bdaemon", "外部浏览器 daemon — start/health/run/list/status/watch", True),
-    ("/tasks", "列出浏览器任务运行", False),
+    ("/tasks", "任务面板 — todo/subagent/background/browser", False),
     ("/task", "查看任务运行详情", True),
     ("/task-reply", "回复等待中的任务", True),
     ("/task-abort", "中止运行中的任务", True),
