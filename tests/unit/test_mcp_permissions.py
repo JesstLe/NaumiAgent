@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
+from naumi_agent.safety.permissions import (
+    PermissionChecker,
+    PermissionMode,
+    PermissionReasonCode,
+)
 
 
 class TestMCPToolPermissions:
@@ -25,7 +29,8 @@ class TestMCPToolPermissions:
         checker = PermissionChecker(mode=PermissionMode.STRICT)
         decision = checker.check("mcp__dangerous", {"cmd": "rm"})
         assert not decision.allowed
-        assert "not allowed" in decision.reason
+        assert decision.code == PermissionReasonCode.MODE_BLOCKED
+        assert "不允许" in decision.reason
 
     def test_mcp_tool_blocked_lockdown(self):
         checker = PermissionChecker(mode=PermissionMode.LOCKDOWN)
@@ -43,4 +48,5 @@ class TestMCPToolPermissions:
         checker = PermissionChecker(mode=PermissionMode.MODERATE)
         decision = checker.check("totally_unknown_tool", {})
         assert not decision.allowed
-        assert "Unknown tool" in decision.reason
+        assert decision.code == PermissionReasonCode.UNKNOWN_TOOL
+        assert "未知工具" in decision.reason

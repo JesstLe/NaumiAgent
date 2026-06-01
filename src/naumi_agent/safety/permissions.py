@@ -21,11 +21,29 @@ class PermissionMode(StrEnum):
     LOCKDOWN = "lockdown"
 
 
+class PermissionReasonCode(StrEnum):
+    ALLOWED = "allowed"
+    UNKNOWN_TOOL = "unknown_tool"
+    MODE_BLOCKED = "mode_blocked"
+    MAX_CALLS_EXCEEDED = "max_calls_exceeded"
+    INVALID_PATH_ARGUMENT = "invalid_path_argument"
+    PATH_OUTSIDE_SANDBOX = "path_outside_sandbox"
+    DANGEROUS_COMMAND = "dangerous_command"
+
+
+class PermissionRiskLevel(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 @dataclass(frozen=True)
 class PermissionDecision:
     allowed: bool
     reason: str = ""
     requires_confirmation: bool = False
+    code: PermissionReasonCode = PermissionReasonCode.ALLOWED
+    risk_level: PermissionRiskLevel = PermissionRiskLevel.LOW
 
 
 @dataclass(frozen=True)
@@ -664,6 +682,22 @@ class PermissionChecker:
         ]
         self._call_counts: dict[str, int] = {}
 
+    @staticmethod
+    def _deny(
+        reason: str,
+        *,
+        code: PermissionReasonCode,
+        risk_level: PermissionRiskLevel = PermissionRiskLevel.MEDIUM,
+        requires_confirmation: bool = False,
+    ) -> PermissionDecision:
+        return PermissionDecision(
+            allowed=False,
+            reason=reason,
+            requires_confirmation=requires_confirmation,
+            code=code,
+            risk_level=risk_level,
+        )
+
     def _resolve_path_for_sandbox(self, path: str) -> str:
         expanded = os.path.expanduser(path)
         if os.path.isabs(expanded):
@@ -722,25 +756,32 @@ class PermissionChecker:
                 if self._mode in mcp_allowed:
                     self._call_counts[tool_name] = self._call_counts.get(tool_name, 0) + 1
                     return PermissionDecision(allowed=True)
-                return PermissionDecision(
-                    allowed=False,
-                    reason=f"MCP tool '{tool_name}' not allowed in {self._mode.value} mode",
+                return self._deny(
+                    f"MCP 工具 `{tool_name}` 不允许在 {self._mode.value} 模式下执行。",
+                    code=PermissionReasonCode.MODE_BLOCKED,
+                    risk_level=PermissionRiskLevel.HIGH,
                 )
             else:
-                return PermissionDecision(allowed=False, reason=f"Unknown tool: {tool_name}")
+                return self._deny(
+                    f"未知工具：{tool_name}",
+                    code=PermissionReasonCode.UNKNOWN_TOOL,
+                    risk_level=PermissionRiskLevel.HIGH,
+                )
 
         if self._mode not in rule.allowed_modes:
-            return PermissionDecision(
-                allowed=False,
-                reason=f"Tool '{tool_name}' not allowed in {self._mode.value} mode",
+            return self._deny(
+                f"工具 `{tool_name}` 不允许在 {self._mode.value} 模式下执行。",
+                code=PermissionReasonCode.MODE_BLOCKED,
+                risk_level=PermissionRiskLevel.HIGH,
             )
 
         # 调用次数检查
         count = self._call_counts.get(tool_name, 0)
         if rule.max_calls_per_session and count >= rule.max_calls_per_session:
-            return PermissionDecision(
-                allowed=False,
-                reason=f"Tool '{tool_name}' exceeded max calls ({rule.max_calls_per_session})",
+            return self._deny(
+                f"工具 `{tool_name}` 已达到本会话最大调用次数（{rule.max_calls_per_session}）。",
+                code=PermissionReasonCode.MAX_CALLS_EXCEEDED,
+                risk_level=PermissionRiskLevel.MEDIUM,
             )
 
         # 文件路径沙箱检查
@@ -784,9 +825,10 @@ class PermissionChecker:
         if self._mode == PermissionMode.BYPASS:
             return PermissionDecision(allowed=True)
         if not isinstance(path, str):
-            return PermissionDecision(
-                allowed=False,
-                reason=f"Path argument '{arg_name}' must be a string",
+            return self._deny(
+                f"路径参数 `{arg_name}` 必须是字符串。",
+                code=PermissionReasonCode.INVALID_PATH_ARGUMENT,
+                risk_level=PermissionRiskLevel.MEDIUM,
             )
 
         abs_path = self._resolve_path_for_sandbox(path)
@@ -796,9 +838,10 @@ class PermissionChecker:
         ):
             return PermissionDecision(allowed=True)
 
-        return PermissionDecision(
-            allowed=False,
-            reason=f"Path '{path}' is outside allowed directories: {self._allowed_dirs}",
+        return self._deny(
+            f"路径 `{path}` 不在允许目录内。允许目录：{self._allowed_dirs}",
+            code=PermissionReasonCode.PATH_OUTSIDE_SANDBOX,
+            risk_level=PermissionRiskLevel.HIGH,
         )
 
     def _check_command(self, command: str) -> PermissionDecision:
@@ -806,9 +849,10 @@ class PermissionChecker:
         cmd_lower = command.lower().strip()
         for blocked in BLOCKED_COMMANDS:
             if blocked.lower() in cmd_lower:
-                return PermissionDecision(
-                    allowed=False,
-                    reason=f"Blocked dangerous command pattern: {blocked}",
+                return self._deny(
+                    f"命令包含高风险模式 `{blocked}`，已阻止执行。",
+                    code=PermissionReasonCode.DANGEROUS_COMMAND,
+                    risk_level=PermissionRiskLevel.HIGH,
                 )
         return PermissionDecision(allowed=True)
 
