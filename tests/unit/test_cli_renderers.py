@@ -6,7 +6,7 @@ import pytest
 
 from naumi_agent.cli.renderers.registry import CLIRenderer
 from naumi_agent.ui.messages import EngineEventAdapter
-from naumi_agent.ui.messages.base import MessageType
+from naumi_agent.ui.messages.base import MessageType, UIMessage
 
 
 @pytest.fixture
@@ -214,10 +214,9 @@ class TestRegistryOverride:
         assert result == "CUSTOM"
 
     def test_unregistered_type_returns_none(self, renderer: CLIRenderer) -> None:
-        """Unregistered message types return None."""
-        from naumi_agent.ui.messages.events import SystemNoticeMessage
-
-        msg = SystemNoticeMessage(type=MessageType.SYSTEM_NOTICE)
+        """Message types with no registered renderer return None."""
+        # Create a message type that is not registered — use a synthetic approach
+        msg = UIMessage(type="completely_unknown_type")  # type: ignore[call-arg]
         result = renderer.render(msg)
         assert result is None
 
@@ -226,6 +225,7 @@ class TestAllMessageTypesRegistered:
     """Ensure every MessageType has a renderer registered."""
 
     RENDERED_TYPES = {
+        MessageType.USER,
         MessageType.THINKING,
         MessageType.ASSISTANT_STREAM,
         MessageType.TOOL_PREPARE,
@@ -241,6 +241,7 @@ class TestAllMessageTypesRegistered:
         MessageType.CONTEXT_COMPACT,
         MessageType.RECOVERY,
         MessageType.ERROR,
+        MessageType.SYSTEM_NOTICE,
     }
 
     def test_all_adapted_types_have_renderers(self, renderer: CLIRenderer) -> None:
