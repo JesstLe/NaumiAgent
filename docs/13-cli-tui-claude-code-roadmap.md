@@ -910,9 +910,10 @@ codex/docs-13-claude-code-roadmap
 - ✅ Theme and output style system：`ui.theme` 提供 dark/minimal/high_contrast 主题、compact/detailed/debug/silent_tools 输出策略和语义色彩 token；CLI 状态/权限、TUI CSS、结构化 diff 和 `/style` 入口共用同一套配置。
 - ✅ Resume history screen：`ui.history_screen` 统一历史会话列表/预览渲染，Session 持久化 workspace/git/summary 元数据，`/history <关键词>` 支持搜索，`/history preview|archive|delete <id>` 支持预览、归档和删除；TUI 历史侧栏展示模型、token、cost、workspace、git、摘要并支持归档/删除。
 - ✅ Doctor diagnostics screen：`ui.doctor` 提供 Python/config/API key/model/workspace/git/rg/browser daemon/docker/MCP/debug log/terminal 的确定性检查，CLI/TUI `/doctor` 与 Agent 工具 `doctor_diagnostics` 共用同一套诊断与 Markdown 报告。
+- ✅ Cache message rendering：`ui.render_cache` 提供 bounded LRU 与统计；CLI renderer 按 `message_id` 缓存 ANSI 输出，TUI renderer 对重复 message id 做幂等跳过，renderer override 会清空缓存避免旧结果污染。
 
 下一步：
 
 ```text
-perf: cache message rendering
+test: add terminal ui e2e scenarios
 ```

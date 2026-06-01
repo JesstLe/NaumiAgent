@@ -230,6 +230,32 @@ class TestRegistryOverride:
         result = renderer.render(msg)
         assert result is None
 
+    def test_renderer_caches_by_message_id(self, renderer: CLIRenderer) -> None:
+        """Rendering the same immutable message twice reuses cached text."""
+        calls = 0
+
+        def custom(_msg: UIMessage) -> str:
+            nonlocal calls
+            calls += 1
+            return "cached"
+
+        msg = UIMessage(type=MessageType.SYSTEM_NOTICE, message_id="cache-me")
+        renderer.register(MessageType.SYSTEM_NOTICE, custom)
+
+        assert renderer.render(msg) == "cached"
+        assert renderer.render(msg) == "cached"
+        assert calls == 1
+        assert renderer.cache_stats().hits == 1
+
+    def test_register_clears_render_cache(self, renderer: CLIRenderer) -> None:
+        msg = UIMessage(type=MessageType.SYSTEM_NOTICE, message_id="cache-reset")
+        renderer.register(MessageType.SYSTEM_NOTICE, lambda _msg: "old")
+        assert renderer.render(msg) == "old"
+
+        renderer.register(MessageType.SYSTEM_NOTICE, lambda _msg: "new")
+
+        assert renderer.render(msg) == "new"
+
 
 class TestAllMessageTypesRegistered:
     """Ensure every MessageType has a renderer registered."""

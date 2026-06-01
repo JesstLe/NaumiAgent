@@ -38,6 +38,7 @@ from naumi_agent.ui.messages.events import (
     ToolResultMessage,
     ToolUseMessage,
 )
+from naumi_agent.ui.render_cache import RenderCacheStats, RenderLRUCache, message_render_cache_key
 
 logger = logging.getLogger(__name__)
 
@@ -402,13 +403,23 @@ class TUIRenderer:
         renderer.render(msg, chat_panel, status_bar, todo_bar)
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, cache_size: int = 2_048) -> None:
         self._registry: dict[MessageType, _RendererFunc] = {}
+        self._rendered_messages: RenderLRUCache[tuple[str, str], bool] = RenderLRUCache(
+            cache_size
+        )
         self._register_defaults()
 
     def register(self, msg_type: MessageType, fn: _RendererFunc) -> None:
         """Register or override a renderer for a message type."""
         self._registry[msg_type] = fn
+        self._rendered_messages.clear()
+
+    def clear_cache(self) -> None:
+        self._rendered_messages.clear()
+
+    def cache_stats(self) -> RenderCacheStats:
+        return self._rendered_messages.stats()
 
     def render(
         self,
@@ -418,11 +429,15 @@ class TUIRenderer:
         todo: TodoBarLike,
     ) -> None:
         """Dispatch a UIMessage to the appropriate renderer."""
+        key = message_render_cache_key(msg)
+        if self._rendered_messages.get(key) is not None:
+            return
         fn = self._registry.get(msg.type)
         if fn is None:
             logger.debug("No TUI renderer for message type: %s", msg.type)
             return
         fn(msg, chat, status, todo)
+        self._rendered_messages.set(key, True)
 
     def _register_defaults(self) -> None:
         """Register the default set of renderers."""
