@@ -1,0 +1,115 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
+import { stripAnsi } from "../src/ansi.js";
+
+test("terminal UI process handles submit, mode switch, permission, and tool rendering", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("\x1b[Z");
+    await waitForOutput(output, "mode: bypass");
+
+    app.stdin.write("生成一个展示页面\n");
+    await waitForOutput(output, "permission: bash_run");
+
+    app.stdin.write("y");
+    await waitForOutput(output, "file_write showcase/index.html");
+    await waitForOutput(output, "+new");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const plain = stripAnsi(output.text);
+    assert(plain.includes("生成一个展示页面"));
+    assert(plain.includes("收到，我会创建一个可验证页面。"));
+    assert(plain.includes("todo: 1/3 完成"));
+    assert(plain.includes("success file_write showcase/index.html"));
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process renders resume replay from typed UI messages", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("/resume\n");
+    await waitForOutput(output, "已恢复会话: 恢复测试");
+    await waitForOutput(output, "继续检查 config.yaml");
+    await waitForOutput(output, "file_read config.yaml");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const plain = stripAnsi(output.text);
+    assert(plain.includes("我先读取配置。"));
+    assert(plain.includes("provider: openai"));
+  } finally {
+    forceKill(app);
+  }
+});
+
+function launchTerminalUi() {
+  const fakeBridge = new URL("./fixtures/fake-bridge.js", import.meta.url).pathname;
+  return spawn(
+    process.execPath,
+    ["src/index.js", "--bridge-command", `${process.execPath} ${fakeBridge}`],
+    {
+      cwd: new URL("..", import.meta.url).pathname,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, FORCE_COLOR: "0" },
+    },
+  );
+}
+
+function collectOutput(child) {
+  const state = { text: "" };
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    state.text += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    state.text += chunk;
+  });
+  return state;
+}
+
+async function stopTerminalUi(child) {
+  if (child.exitCode !== null) {
+    return child.exitCode;
+  }
+  child.stdin.write("\u0003");
+  const [code] = await Promise.race([
+    once(child, "exit"),
+    delay(1500).then(() => {
+      forceKill(child);
+      return once(child, "exit");
+    }).then(([code]) => [code]),
+  ]);
+  return code;
+}
+
+function forceKill(child) {
+  if (child.exitCode === null && !child.killed) {
+    child.kill("SIGTERM");
+  }
+}
+
+async function waitForOutput(output, needle, timeoutMs = 1500) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (stripAnsi(output.text).includes(needle)) {
+      return;
+    }
+    await delay(20);
+  }
+  assert.fail(`等待输出超时: ${needle}\n\n${stripAnsi(output.text).slice(-3000)}`);
+}

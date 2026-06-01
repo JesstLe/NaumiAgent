@@ -100,6 +100,30 @@ function handleBridgeLine(line) {
 }
 
 function handleKeyInput(chunk) {
+  for (const key of splitInputChunk(chunk)) {
+    handleSingleKeyInput(key);
+  }
+}
+
+function splitInputChunk(chunk) {
+  const keys = [];
+  let text = String(chunk);
+  const escapeSequences = ["\x1b[Z", "\x1b[5~", "\x1b[6~"];
+  while (text) {
+    const sequence = escapeSequences.find((candidate) => text.startsWith(candidate));
+    if (sequence) {
+      keys.push(sequence);
+      text = text.slice(sequence.length);
+      continue;
+    }
+    const [char] = Array.from(text);
+    keys.push(char);
+    text = text.slice(char.length);
+  }
+  return keys;
+}
+
+function handleSingleKeyInput(chunk) {
   if (chunk === "\u0003") exit();
   if (chunk === "\x1b[Z") {
     send("cycle_mode", {});
