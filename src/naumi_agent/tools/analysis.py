@@ -97,6 +97,7 @@ _build_page_report = _page_support.build_page_report
 _scan_page = _page_support.scan_page
 _build_sleep_inventory_script = _sleep_support.build_sleep_inventory_script
 _build_sleep_report = _sleep_support.build_sleep_report
+_scan_sleep = _sleep_support.scan_sleep
 _scan_entropy = _entropy_support.scan_entropy
 _build_entropy_anchor = _entropy_support.build_entropy_anchor
 _scan_jit = _jit_support.scan_jit
@@ -1978,33 +1979,6 @@ class COOETool(Tool):
 # ===========================================================================
 #  /sleep — 昼夜节律突触修剪
 # ===========================================================================
-
-def _scan_sleep(
-    files: list[Path], source_text: str, session_context: str,
-) -> str:
-    findings: list[str] = []
-    topics: dict[str, int] = {}
-    for pattern, label in [
-        (r"(?:def |class |function |module )(\w+)", "代码定义"),
-        (r"(?:bug|error|fix|debug|crash)", "问题调试"),
-        (r"(?:test|spec|assert|verify)", "测试验证"),
-        (r"(?:design|arch|pattern|架构|设计)", "架构设计"),
-    ]:
-        count = len(re.findall(pattern, source_text, re.IGNORECASE))
-        if count:
-            topics[label] = count
-    if topics:
-        findings.append("- 对话主题分布:")
-        for label, count in sorted(
-            topics.items(), key=lambda x: x[1], reverse=True,
-        ):
-            findings.append(f"  - {label}: {count} 次出现")
-    total_chars = len(session_context)
-    findings.append(
-        f"- 会话上下文: {total_chars:,} 字符 (~{total_chars // 4:,} tokens)"
-    )
-    return "\n".join(findings)
-
 
 _SLEEP_SYSTEM = """\
 You are a Circadian Synaptic Pruning engine implementing biological \

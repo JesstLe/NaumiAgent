@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.51] - 2026-06-01
+
+### Changed
+- **Analysis Sleep 模块收拢** — 将 `/sleep` 的会话主题分布扫描和上下文体积估算迁移到 `analysis_support.sleep`，让 Sleep 的确定性扫描、inventory script 和突触修剪报告集中维护。
+
 ## [0.1.50] - 2026-06-01
 
 ### Changed
