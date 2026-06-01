@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.39] - 2026-06-01
+
+### Changed
+- **Analysis DSPy 模块拆分** — 将 `/dspy` 的 Prompt/Few-shot/Metric 静态扫描、成熟度评分、baseline metric 生成和确定性报告迁移到 `analysis_support.dspy`，主 `analysis.py` 保留工具编排与 LLM 编译建议路径。
+
 ## [0.1.38] - 2026-06-01
 
 ### Changed

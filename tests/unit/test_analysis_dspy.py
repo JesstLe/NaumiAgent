@@ -8,11 +8,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from naumi_agent.model.router import ModelResponse, TokenUsage
-from naumi_agent.tools.analysis import (
-    DSPyTool,
-    _build_dspy_baseline_metric,
-    _scan_dspy,
-)
+from naumi_agent.tools.analysis import DSPyTool
+from naumi_agent.tools.analysis import _scan_dspy as analysis_scan_dspy
+from naumi_agent.tools.analysis_support.dspy import build_dspy_baseline_metric, scan_dspy
 
 
 def _write_prompt_source(path: Path) -> None:
@@ -37,17 +35,18 @@ def test_scan_dspy_reports_prompt_examples_and_metric(tmp_path: Path) -> None:
     source = tmp_path / "prompts.py"
     _write_prompt_source(source)
 
-    scan = _scan_dspy([source], source.read_text(encoding="utf-8"), "翻译问候语")
+    scan = scan_dspy([source], source.read_text(encoding="utf-8"), "翻译问候语")
 
     assert "发现 Prompt 模板" in scan
     assert "Few-shot 示例" in scan
     assert "评估函数/Metric" in scan
     assert "DSPy 工程成熟度" in scan
+    assert analysis_scan_dspy([source], source.read_text(encoding="utf-8"), "翻译问候语") == scan
 
 
 def test_build_dspy_baseline_metric_is_executable() -> None:
     namespace: dict[str, object] = {}
-    exec(_build_dspy_baseline_metric("翻译问候语"), namespace)
+    exec(build_dspy_baseline_metric("翻译问候语"), namespace)
 
     result = namespace["score_output"]("hello", "1. 你好")
 
