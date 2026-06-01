@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.62] - 2026-06-01
+
+### Changed
+- **Analysis Watchdog 模块拆分** — 将 `/watchdog` 的原地修改风险、心跳/健康检查、回滚基础设施、隔离级别和不死鸟恢复评分迁移到 `analysis_support.watchdog`，主 `analysis.py` 保留工具编排、兼容入口与 LLM Watchdog 增强路径。
+
 ## [0.1.61] - 2026-06-01
 
 ### Changed
