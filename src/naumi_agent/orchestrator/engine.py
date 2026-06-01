@@ -1386,6 +1386,7 @@ class AgentEngine:
         on_event: EventCallback,
     ) -> AgentResult:
         """执行任务 — 流式 ReAct 主循环，通过回调实时推送事件."""
+        await on_event("run_started", {"task": task})
         self._ensure_system_prompt()
 
         session = await self.get_or_create_session()

@@ -468,6 +468,8 @@ def _cli_event_factory(cli: Any):
             turn_start_time = time.monotonic()
             if model_name:
                 cli.append_live(f"\033[2m  ⚙ {model_name}\033[0m\n")
+        elif event == "run_started":
+            cli.append_live(f"{_sep()}\n\033[2m⏳ 已接手，准备执行...\033[0m\n")
         elif event == "thinking_delta":
             content = data.get("content", "")
             if content:

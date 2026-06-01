@@ -1,5 +1,9 @@
 """规划器单元测试."""
 
+from unittest.mock import AsyncMock
+
+import pytest
+
 from naumi_agent.orchestrator.planner import (
     AdaptivePlanner,
     Complexity,
@@ -63,3 +67,50 @@ class TestAdaptivePlanner:
         plan = planner._simple_plan("你好", intent_result)
         assert len(plan.steps) == 1
         assert plan.mode == ExecutionMode.SINGLE_TURN
+
+    @pytest.mark.asyncio
+    async def test_local_fast_path_skips_classifier_for_greeting(self) -> None:
+        router = AsyncMock()
+        planner = AdaptivePlanner(router)
+        planner._classifier.classify = AsyncMock()
+
+        plan = await planner.plan("你好")
+
+        assert plan.mode == ExecutionMode.SINGLE_TURN
+        planner._classifier.classify.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_local_fast_path_skips_classifier_for_simple_question(self) -> None:
+        router = AsyncMock()
+        planner = AdaptivePlanner(router)
+        planner._classifier.classify = AsyncMock()
+
+        plan = await planner.plan("这是正常的吗")
+
+        assert plan.mode == ExecutionMode.SINGLE_TURN
+        planner._classifier.classify.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_local_fast_path_keeps_action_tasks_on_classifier(self) -> None:
+        router = AsyncMock()
+        planner = AdaptivePlanner(router)
+        planner._classifier.classify = AsyncMock(
+            return_value=type(
+                "Intent",
+                (),
+                {
+                    "intent": "代码修复",
+                    "complexity": Complexity.SIMPLE,
+                    "requires_tools": True,
+                    "requires_planning": False,
+                    "requires_subagents": False,
+                    "estimated_steps": 1,
+                    "confidence": 0.9,
+                },
+            )()
+        )
+
+        plan = await planner.plan("修复 CLI 渲染 bug")
+
+        assert plan.mode == ExecutionMode.SINGLE_TURN
+        planner._classifier.classify.assert_awaited_once()

@@ -1447,6 +1447,8 @@ class NaumiApp(App):
                 )
 
             match event_type:
+                case "run_started":
+                    status.status_text = "⏳ 已接手，准备执行..."
                 case "turn_start":
                     model_val = data.get("model", "")
                     if model_val:
