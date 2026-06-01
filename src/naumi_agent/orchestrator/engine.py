@@ -1386,17 +1386,39 @@ class AgentEngine:
         on_event: EventCallback,
     ) -> AgentResult:
         """执行任务 — 流式 ReAct 主循环，通过回调实时推送事件."""
+        perf_start = time.perf_counter()
+
+        async def emit_perf_phase(
+            phase: str,
+            label: str,
+            start: float,
+            **extra: Any,
+        ) -> None:
+            await on_event(
+                "perf_phase",
+                {
+                    "phase": phase,
+                    "label": label,
+                    "duration_ms": int((time.perf_counter() - start) * 1000),
+                    **extra,
+                },
+            )
+
         await on_event("run_started", {"task": task})
         self._ensure_system_prompt()
 
+        phase_start = time.perf_counter()
         session = await self.get_or_create_session()
         self.task_store.set_session(session.id)
+        await emit_perf_phase("session_prepare", "会话准备", phase_start)
 
+        phase_start = time.perf_counter()
         hooked_task = await self._fire_user_prompt_submit(
             task,
             streaming=True,
             on_event=on_event,
         )
+        await emit_perf_phase("prompt_hooks", "输入 Hook", phase_start)
         if hooked_task is None:
             message = "用户输入已被 hook 拦截。"
             await on_event("error", {"message": message})
@@ -1410,18 +1432,36 @@ class AgentEngine:
             return AgentResult(status="error", error=message)
         task = hooked_task
         self._append_message({"role": "user", "content": task})
+        phase_start = time.perf_counter()
         await self._inject_relevant_memories(task)
+        await emit_perf_phase("memory_recall", "记忆召回", phase_start)
+        phase_start = time.perf_counter()
         tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
+        await emit_perf_phase(
+            "tool_schema",
+            "工具 Schema",
+            phase_start,
+            tool_count=len(tools or []),
+        )
 
         session_id = self._session.id if self._session else ""
+        phase_start = time.perf_counter()
         await self._fire_hook(HookContext(
             point=HookPoint.ENGINE_RUN_START,
             data={"task": task, "streaming": True},
             session_id=session_id,
         ), on_event)
+        await emit_perf_phase("engine_start_hooks", "启动 Hook", phase_start)
 
         try:
+            phase_start = time.perf_counter()
             plan = await self._planner.plan(task)
+            await emit_perf_phase(
+                "planning",
+                "规划",
+                phase_start,
+                mode=str(plan.mode),
+            )
             exceeded = self._check_budget()
             if exceeded:
                 result = exceeded
@@ -1435,14 +1475,19 @@ class AgentEngine:
             await on_event("error", {"message": error_msg})
             result = AgentResult(status="error", error=error_msg)
 
+        phase_start = time.perf_counter()
         await self._fire_hook(HookContext(
             point=HookPoint.ENGINE_RUN_END,
             data={"status": result.status, "task": task, "streaming": True},
             session_id=session_id,
         ), on_event)
+        await emit_perf_phase("engine_end_hooks", "结束 Hook", phase_start)
 
+        phase_start = time.perf_counter()
         await self._auto_extract_memories(task, result)
         await self._save_session()
+        await emit_perf_phase("persistence", "保存会话", phase_start)
+        await emit_perf_phase("run_total", "总耗时", perf_start, status=result.status)
 
         # Attach task summary if tasks exist
         tasks = await self.task_store.list_tasks()
@@ -1810,8 +1855,18 @@ class AgentEngine:
                 )
                 return exceeded
 
+            phase_start = time.perf_counter()
             await self._maybe_compact(on_event)
             await self._inject_harness_context_snapshot(on_event)
+            await on_event(
+                "perf_phase",
+                {
+                    "phase": "context_prepare",
+                    "label": "上下文准备",
+                    "duration_ms": int((time.perf_counter() - phase_start) * 1000),
+                    "turn": turn + 1,
+                },
+            )
             await on_event("turn_start", {"turn": turn + 1, "model": model_str})
 
             text_parts: list[str] = []
@@ -1824,6 +1879,8 @@ class AgentEngine:
             finish_reason: str | None = None
             should_guard_text = bool(tools)
             tool_call_started = False
+            llm_start = 0.0
+            first_chunk_seen = False
 
             async def flush_pending_text() -> None:
                 nonlocal got_response
@@ -1842,11 +1899,25 @@ class AgentEngine:
             ), on_event)
 
             try:
+                llm_start = time.perf_counter()
                 async for chunk in self._router.stream(
                     messages=self._messages,
                     tier=ModelTier.CAPABLE,
                     tools=tools,
                 ):
+                    if not first_chunk_seen:
+                        first_chunk_seen = True
+                        await on_event(
+                            "perf_phase",
+                            {
+                                "phase": "llm_first_chunk",
+                                "label": "模型首包",
+                                "duration_ms": int(
+                                    (time.perf_counter() - llm_start) * 1000
+                                ),
+                                "turn": turn + 1,
+                            },
+                        )
                     if chunk.usage:
                         self._track_model_usage(chunk.usage, model_str)
                         stream_tokens = chunk.usage.total_tokens
@@ -1887,6 +1958,18 @@ class AgentEngine:
 
                     if chunk.tool_call and isinstance(chunk.tool_call, dict):
                         collected_tool_calls.update(chunk.tool_call)
+                if llm_start:
+                    await on_event(
+                        "perf_phase",
+                        {
+                            "phase": "llm_stream",
+                            "label": "模型流式",
+                            "duration_ms": int(
+                                (time.perf_counter() - llm_start) * 1000
+                            ),
+                            "turn": turn + 1,
+                        },
+                    )
             except Exception as e:
                 logger.warning("Streaming failed, fallback to non-streaming: %s", e)
                 response = await self._call_model_with_recovery(

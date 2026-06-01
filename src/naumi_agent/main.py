@@ -512,6 +512,10 @@ def _cli_event_factory(cli: Any):
             cli.append_live(_format_context_compacted(data) + "\n")
         elif event == "recovery_event":
             cli.append_live(_format_recovery_event(data) + "\n")
+        elif event == "perf_phase":
+            label = data.get("label") or data.get("phase") or "阶段"
+            duration = int(data.get("duration_ms", 0) or 0)
+            cli.append_live(f"\033[2m  ⏱ {label}: {duration}ms\033[0m\n")
         elif event == "response_start":
             cli.finalize_live()
             cli.append_output(f"{_sep(thin=False)}\n")
