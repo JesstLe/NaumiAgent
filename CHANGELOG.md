@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.44] - 2026-06-01
+
+### Changed
+- **Analysis MCTS 模块拆分** — 将 `/mcts` 的决策空间扫描、复杂度等级提取和确定性多路径剪枝报告迁移到 `analysis_support.mcts`，主 `analysis.py` 保留工具编排与 LLM 慢思考深化路径。
+
 ## [0.1.43] - 2026-06-01
 
 ### Changed
