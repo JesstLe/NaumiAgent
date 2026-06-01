@@ -18,6 +18,8 @@ class TestSystemPromptAssembly:
         assert "## Your Capabilities" in prompt
         assert "## Analysis Modes" in prompt
         assert "## Task Management" in prompt
+        assert "## Tool Discovery" in prompt
+        assert "tool_search" in prompt
         assert "## Decision Commitment" in prompt
 
     def test_embeds_runtime_defaults_when_available(self) -> None:

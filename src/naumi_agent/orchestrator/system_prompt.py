@@ -105,6 +105,12 @@ TASK_MANAGEMENT_SECTION = """\
 - Mark tasks completed immediately when done; use todo_write for multiple related changes.
 """
 
+TOOL_DISCOVERY_SECTION = """\
+## Tool Discovery
+- **tool_search**: Search currently registered tools by capability keyword or use `select:<tool_name>` for direct lookup.
+- Use tool_search when you know the capability you need but are unsure of the exact tool name or available integration.
+"""
+
 BROWSER_USAGE_SECTION = """\
 ## Browser Tool Usage
 - **browser_goto**: Navigate to a URL. Call ONCE per URL. Returns SoM elements and page data. Do NOT call again for the same URL.
@@ -129,6 +135,7 @@ DEFAULT_PROMPT_SECTIONS = (
     PromptSection("analysis_modes", ANALYSIS_MODES_SECTION),
     PromptSection("guidelines", GUIDELINES_SECTION),
     PromptSection("task_management", TASK_MANAGEMENT_SECTION),
+    PromptSection("tool_discovery", TOOL_DISCOVERY_SECTION),
     PromptSection("browser_usage", BROWSER_USAGE_SECTION),
     PromptSection("decision_commitment", DECISION_COMMITMENT_SECTION),
 )

@@ -241,8 +241,11 @@ class AgentEngine:
 
         # Runtime status tools
         from naumi_agent.tools.runtime import create_runtime_tools
+        from naumi_agent.tools.search import create_tool_search_tools
 
         for tool in create_runtime_tools(self):
+            self._tool_registry.register(tool)
+        for tool in create_tool_search_tools(self._tool_registry):
             self._tool_registry.register(tool)
 
         # Hot-reload tool
