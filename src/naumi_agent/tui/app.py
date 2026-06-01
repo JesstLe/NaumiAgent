@@ -1490,6 +1490,18 @@ class NaumiApp(App):
                         )
                     )
                     status.status_text = f"team {event_type}: {sender} → {recipient}"
+                case "runtime_notification":
+                    title = str(data.get("title", "") or "运行时通知")
+                    source = str(data.get("source", "runtime"))
+                    count = int(data.get("count", 0) or 0)
+                    preview = str(data.get("preview", "") or "").replace("\n", " ")
+                    suffix = f" · {preview[:160]}" if preview else ""
+                    line = Text(
+                        f"  {title}: {source} ×{count}{suffix}",
+                        style="cyan",
+                    )
+                    chat.mount(Static(line, classes="tool-done"))
+                    status.status_text = f"{title}: {source} ×{count}"
                 case "context_compacted":
                     logger.info(
                         "Context compacted: %d → %d messages",

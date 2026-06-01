@@ -251,6 +251,8 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
         console.print(_format_permission_bubble(data))
     elif event == "team_event":
         console.print(_format_team_event(data))
+    elif event == "runtime_notification":
+        console.print(_format_runtime_notification(data))
     elif event == "context_compacted":
         console.print(_format_context_compacted(data))
     elif event == "recovery_event":
@@ -356,6 +358,16 @@ def _format_team_event(data: dict[str, Any]) -> str:
         f"\033[{color}m  team {event_type}: "
         f"{sender} → {recipient} [{priority}]{suffix}\033[0m"
     )
+
+
+def _format_runtime_notification(data: dict[str, Any]) -> str:
+    """Format background and scheduler notifications for visible output."""
+    title = str(data.get("title", "") or "运行时通知")
+    source = str(data.get("source", "runtime"))
+    count = int(data.get("count", 0) or 0)
+    preview = str(data.get("preview", "") or "").replace("\n", " ")
+    suffix = f" · {preview[:160]}" if preview else ""
+    return f"\033[36m  {title}: {source} ×{count}{suffix}\033[0m"
 
 
 def _format_context_compacted(data: dict[str, Any]) -> str:
@@ -480,6 +492,8 @@ def _cli_event_factory(cli: Any):
             cli.append_live(_format_permission_bubble(data) + "\n")
         elif event == "team_event":
             cli.append_live(_format_team_event(data) + "\n")
+        elif event == "runtime_notification":
+            cli.append_live(_format_runtime_notification(data) + "\n")
         elif event == "context_compacted":
             cli.append_live(_format_context_compacted(data) + "\n")
         elif event == "recovery_event":

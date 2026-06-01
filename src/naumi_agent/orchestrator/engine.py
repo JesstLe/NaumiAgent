@@ -78,6 +78,22 @@ _TASK_EVENT_TOOLS = {
 }
 
 
+def _notification_preview(content: str, *, max_chars: int = 240) -> str:
+    """Build a compact one-line preview for runtime notification events."""
+    lines = []
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or (line.startswith("<") and line.endswith(">")):
+            continue
+        lines.append(line)
+        if len(lines) >= 4:
+            break
+    preview = "；".join(lines) if lines else "已收到运行时通知。"
+    if len(preview) <= max_chars:
+        return preview
+    return preview[: max_chars - 1].rstrip() + "…"
+
+
 @dataclass
 class AgentUsage:
     total_input_tokens: int = 0
@@ -656,26 +672,71 @@ class AgentEngine:
         self._messages.append(msg)
         self._full_history.append(msg)
 
-    def _inject_background_notifications(self) -> None:
+    async def _inject_background_notifications(
+        self,
+        on_event: EventCallback | None = None,
+    ) -> None:
         """Inject newly completed background task notifications into context."""
         notifications = self.background_runner.collect_notifications()
         if not notifications:
             return
+        content = "\n\n".join(notifications)
         self._append_message({
             "role": "user",
-            "content": "\n\n".join(notifications),
+            "content": content,
         })
+        await self._emit_runtime_notification(
+            on_event,
+            source="background",
+            title="后台任务通知",
+            notifications=notifications,
+            content=content,
+        )
 
-    def _inject_scheduler_notifications(self) -> None:
+    async def _inject_scheduler_notifications(
+        self,
+        on_event: EventCallback | None = None,
+    ) -> None:
         """Inject due schedule notifications into context."""
         self.scheduler_runner.start()
         notifications = self.scheduler_runner.collect_notifications()
         if not notifications:
             return
+        content = "\n\n".join(notifications)
         self._append_message({
             "role": "user",
-            "content": "\n\n".join(notifications),
+            "content": content,
         })
+        await self._emit_runtime_notification(
+            on_event,
+            source="schedule",
+            title="调度提醒",
+            notifications=notifications,
+            content=content,
+        )
+
+    async def _emit_runtime_notification(
+        self,
+        on_event: EventCallback | None,
+        *,
+        source: str,
+        title: str,
+        notifications: list[str],
+        content: str,
+    ) -> None:
+        """Make runtime-delivered notifications visible in streaming UIs."""
+        if on_event is None:
+            return
+        await on_event(
+            "runtime_notification",
+            {
+                "source": source,
+                "title": title,
+                "count": len(notifications),
+                "preview": _notification_preview(content),
+                "content": content,
+            },
+        )
 
     def _ensure_system_prompt(self) -> None:
         """Ensure the system prompt is present in active and persisted history."""
@@ -1475,8 +1536,8 @@ class AgentEngine:
         for turn in range(max_turns):
             self._behavior_monitor.begin_turn(turn)
             self._usage.turns = turn + 1
-            self._inject_background_notifications()
-            self._inject_scheduler_notifications()
+            await self._inject_background_notifications()
+            await self._inject_scheduler_notifications()
 
             exceeded = self._check_budget()
             if exceeded:
@@ -1725,8 +1786,8 @@ class AgentEngine:
         for turn in range(max_turns):
             self._behavior_monitor.begin_turn(turn)
             self._usage.turns = turn + 1
-            self._inject_background_notifications()
-            self._inject_scheduler_notifications()
+            await self._inject_background_notifications(on_event)
+            await self._inject_scheduler_notifications(on_event)
 
             exceeded = self._check_budget()
             if exceeded:

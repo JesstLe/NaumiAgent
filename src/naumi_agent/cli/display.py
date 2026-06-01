@@ -199,6 +199,13 @@ async def cli_event_handler(event: str, data: dict[str, Any]) -> None:
             f"[{style}]team {event_type}: "
             f"{sender} → {recipient} [{priority}]{suffix}[/{style}]"
         )
+    elif event == "runtime_notification":
+        title = str(data.get("title", "") or "运行时通知")
+        source = str(data.get("source", "runtime"))
+        count = int(data.get("count", 0) or 0)
+        preview = str(data.get("preview", "") or "").replace("\n", " ")
+        suffix = f" · {preview[:160]}" if preview else ""
+        console.print(f"[cyan]{title}: {source} ×{count}{suffix}[/cyan]")
     elif event == "context_compacted":
         before = data.get("before", "?")
         after = data.get("after", "?")
