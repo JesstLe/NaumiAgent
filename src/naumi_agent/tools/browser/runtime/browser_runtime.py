@@ -30,7 +30,7 @@ from ..som import (
 from .artifact_store import ArtifactStore
 from .chrome_launcher import ChromeLauncher
 from .download_manager import DownloadManager
-from .network_recorder import NetworkRecorder
+from .network_recorder import NetworkRecorder, failure_text
 
 logger = logging.getLogger(__name__)
 
@@ -1460,15 +1460,12 @@ class BrowserRuntime:
         )
 
     def _on_request_failed(self, request: Any) -> None:
-        failure = request.failure
-        failure_text = failure.error_text if failure else "unknown"
-
         entry: dict[str, Any] = {
             "type": "requestfailed",
             "url": request.url,
             "method": request.method,
             "resourceType": request.resource_type,
-            "failure": failure_text,
+            "failure": failure_text(request.failure, default="unknown"),
         }
 
         if request.method != "GET":
