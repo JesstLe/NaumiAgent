@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.61] - 2026-06-01
+
+### Changed
+- **Analysis Cosmos 模块拆分** — 将 `/cosmos` 的状态维度扫描、生成能力识别、社会模拟要素盘点、观测者响应检测和创世潜力评分迁移到 `analysis_support.cosmos`，主 `analysis.py` 保留工具编排、兼容入口与 LLM Cosmos 增强路径。
+
 ## [0.1.60] - 2026-06-01
 
 ### Changed

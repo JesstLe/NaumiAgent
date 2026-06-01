@@ -2,6 +2,184 @@
 
 from __future__ import annotations
 
+import re
+
+from naumi_agent.tools import analysis_common
+
+STATE_RICHNESS_PATTERNS = [
+    (r"(?:position|coordinate|location|vector|matrix)\s*[:=]", "空间/位置状态"),
+    (r"(?:velocity|speed|acceleration|momentum|force)\s*[:=]", "运动/力学状态"),
+    (r"(?:mass|density|volume|temperature|energy)\s*[:=]", "物理属性状态"),
+    (r"(?:color|texture|material|light|shadow)\s*[:=]", "视觉/材质状态"),
+    (r"(?:health|hunger|mood|personality|emotion)\s*[:=]", "生命体内部状态"),
+    (r"(?:relationship|friendship|trust|reputation)\s*[:=]", "社会关系状态"),
+    (r"(?:memory|history|experience|knowledge)\s*[:=]", "记忆/认知状态"),
+    (r"(?:resource|inventory|currency|supply|demand)\s*[:=]", "经济/资源状态"),
+    (r"(?:rule|law|policy|constraint|boundary)\s*[:=]", "规则/法则状态"),
+    (r"(?:time|tick|frame|step|epoch|generation)\s*[:=]", "时间/演化状态"),
+]
+
+GENERATIVE_PATTERNS = [
+    (r"(?:random|rand|noise|stochastic|sample)\s*\(", "随机性/噪声生成"),
+    (r"(?:procedural|generate|synthesize|create)\s*\(", "程序化生成"),
+    (r"(?:mutate|evolve|crossover|breed)\s*\(", "进化/变异操作"),
+    (r"(?:compose|assemble|combine|blend|interpolate)\s*\(", "组合/混合操作"),
+    (r"(?:Perlin|Simplex|Worley|Voronoi|fractal)\s*", "程序化噪声/分形算法"),
+    (r"(?:LLM|GPT|Claude|model|neural)\s*.\s*(?:generate|create)", "LLM 生成能力"),
+    (r"(?:seed|initialize|bootstrap)\s*\(", "种子/初始化机制"),
+]
+
+SOCIAL_PATTERNS = [
+    (r"(?:agent|character|npc|entity|actor)\s*", "智能体定义"),
+    (r"(?:interact|communicate|message|talk|negotiate)\s*\(", "交互/通信机制"),
+    (r"(?:observe|perceive|sense|detect)\s*\(", "感知/观测机制"),
+    (r"(?:remember|recall|forget|memory|experience)\s*", "记忆/经验系统"),
+    (r"(?:decide|choose|plan|intend|goal)\s*\(", "决策/意图系统"),
+    (r"(?:emote|express|react|respond)\s*\(", "情感/反应系统"),
+    (r"(?:group|faction|tribe|culture|norm)\s*", "群体/文化结构"),
+    (r"(?:trade|exchange|barter|gift|share)\s*\(", "交易/共享机制"),
+]
+
+OBSERVER_PATTERNS = [
+    (r"(?:on_click|on_hover|on_touch|on_key|input)\s*", "用户输入响应"),
+    (r"(?:event|trigger|callback|listener|subscribe)\s*", "事件驱动机制"),
+    (r"(?:stream|real.?time|live|update|render)\s*", "实时渲染/流式更新"),
+    (r"(?:camera|viewport|frustum|visibility)\s*", "视点/可见性系统"),
+    (r"(?:LOD|level.?of.?detail|chunk|region|tile)\s*", "细节层次/分块加载"),
+    (r"(?:lazy|on.?demand|just.?in.?time|procedural)\s*", "按需/延迟生成"),
+]
+
+
+def scan_cosmos(target: str) -> str:
+    """Scan world-creation potential across state, generation, society, and observation."""
+    findings: list[str] = []
+    source = analysis_common.read_sources(analysis_common.resolve_target(target))
+
+    if not source.strip():
+        return "⚠️ 未找到可分析的源代码。"
+
+    lines = source.split("\n")
+
+    findings.append("## 1. 状态维度丰富度 (State Dimensions)")
+    state_dims: dict[str, list[int]] = {}
+    for pattern, label in STATE_RICHNESS_PATTERNS:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                state_dims.setdefault(label, []).append(index)
+
+    if state_dims:
+        total_state = sum(len(line_nos) for line_nos in state_dims.values())
+        findings.append(
+            f"- 检测到 **{total_state}** 处状态定义，"
+            f"覆盖 **{len(state_dims)}** 个维度："
+        )
+        for label, line_nos in sorted(
+            state_dims.items(),
+            key=lambda item: -len(item[1]),
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+        dim_count = len(state_dims)
+        if dim_count >= 7:
+            richness = "极高 (可支撑复杂世界)"
+        elif dim_count >= 4:
+            richness = "中等"
+        else:
+            richness = "较低 (世界较平坦)"
+        findings.append(f"- 状态空间丰富度: {richness}")
+    else:
+        findings.append("- ❌ 未检测到多维状态定义 — 世界缺乏物理法则")
+    findings.append("")
+
+    findings.append("## 2. 生成能力 (Generative Capacity)")
+    gen_hits: dict[str, list[int]] = {}
+    for pattern, label in GENERATIVE_PATTERNS:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                gen_hits.setdefault(label, []).append(index)
+
+    if gen_hits:
+        total_gen = sum(len(line_nos) for line_nos in gen_hits.values())
+        findings.append(
+            f"- 检测到 **{total_gen}** 处生成能力，"
+            f"**{len(gen_hits)}** 类："
+        )
+        for label, line_nos in sorted(gen_hits.items(), key=lambda item: -len(item[1])):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append("- ❌ 无程序化生成能力 — 世界无法自我扩展")
+    findings.append("")
+
+    findings.append("## 3. 社会模拟就绪度 (Social Simulation)")
+    social_hits: dict[str, list[int]] = {}
+    for pattern, label in SOCIAL_PATTERNS:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                social_hits.setdefault(label, []).append(index)
+
+    if social_hits:
+        total_social = sum(len(line_nos) for line_nos in social_hits.values())
+        findings.append(
+            f"- 检测到 **{total_social}** 处社会模拟要素，"
+            f"**{len(social_hits)}** 类："
+        )
+        for label, line_nos in sorted(
+            social_hits.items(),
+            key=lambda item: -len(item[1]),
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append("- ❌ 无社会模拟要素 — 无法涌现文明行为")
+    findings.append("")
+
+    findings.append("## 4. 观测者效应 (Observer Effect)")
+    obs_hits: dict[str, list[int]] = {}
+    for pattern, label in OBSERVER_PATTERNS:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                obs_hits.setdefault(label, []).append(index)
+
+    if obs_hits:
+        total_obs = sum(len(line_nos) for line_nos in obs_hits.values())
+        findings.append(
+            f"- 检测到 **{total_obs}** 处观测响应机制，"
+            f"**{len(obs_hits)}** 类："
+        )
+        for label, line_nos in obs_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+        findings.append("- 💡 世界能根据观测者的行为动态展开现实")
+    else:
+        findings.append("- ⚠️ 无观测响应 — 世界是静态的，不因交互而改变")
+    findings.append("")
+
+    state_score = min(len(state_dims) / 8.0, 1.0)
+    gen_score = min(len(gen_hits) / 5.0, 1.0)
+    social_score = min(len(social_hits) / 6.0, 1.0)
+    observer_score = min(len(obs_hits) / 4.0, 1.0)
+
+    cosmos_score = (
+        state_score * 0.25
+        + gen_score * 0.30
+        + social_score * 0.25
+        + observer_score * 0.20
+    )
+    cosmos_score = max(0.0, min(1.0, cosmos_score))
+
+    findings.append("## 5. 创世潜力评分 (Genesis Potential)")
+    findings.append(f"- **综合评分: {cosmos_score:.0%}**")
+    findings.append(f"- 物理法则维度: {state_score:.0%} ({len(state_dims)}/10 类状态)")
+    findings.append(f"- 生成能力: {gen_score:.0%} ({len(gen_hits)} 类生成机制)")
+    findings.append(f"- 社会模拟: {social_score:.0%} ({len(social_hits)} 类社会要素)")
+    findings.append(f"- 观测响应: {observer_score:.0%} ({len(obs_hits)} 类响应机制)")
+
+    if cosmos_score >= 0.7:
+        findings.append("- ✅ 系统具备创世引擎雏形，可尝试构建微型世界模拟")
+    elif cosmos_score >= 0.4:
+        findings.append("- ⚠️ 部分具备创世条件，需补强缺失维度")
+    else:
+        findings.append("- ❌ 系统距创世引擎尚远，建议先建立状态空间和生成能力基础")
+
+    return "\n".join(findings)
+
 
 def build_cosmos_inventory_script(target: str) -> str:
     """Build a dependency-free world-engine readiness scanner."""
