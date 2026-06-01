@@ -900,9 +900,10 @@ codex/docs-13-claude-code-roadmap
 - ✅ 结构化 Task Status Renderer：todo bar / agent status / background task / summary bar。
 - ✅ Command palette 增强：fuzzy search + category + readonly 标记 + arg hint。
 - ✅ Virtualized CLI message history：`VirtualizedCLIHistory` + `VirtualizedHistoryControl`，CLI 输出区按行懒渲染，保留 PageUp/PageDown、live/finalize、resume replay 行为。
+- ✅ Debug log viewer：`/debug` 展示当前日志路径 + 最近 debug-runs 索引，`/debug-replay` 回放结构化事件，`/copy last|error` 导出诊断片段。
 
 下一步：
 
 ```text
-feat: add debug log viewer
+feat: add task and subagent panels
 ```

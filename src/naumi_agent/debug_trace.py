@@ -8,11 +8,29 @@ import platform
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 _FALSE_VALUES = {"0", "false", "no", "off", "disabled"}
+
+
+@dataclass(frozen=True)
+class DebugRunSummary:
+    """Compact metadata for one debug run directory."""
+
+    run_id: str
+    interface: str
+    started_at: str
+    run_dir: Path
+    events_path: Path
+    transcript_path: Path
+    event_count: int
+    stream_event_count: int
+    exception_count: int
+    workspace: str = ""
+    last_event: str = ""
 
 
 def _json_safe(value: Any) -> Any:
@@ -47,6 +65,119 @@ def find_latest_run(base_dir: Path) -> Path | None:
     if not runs:
         return None
     return max(runs, key=lambda path: (path / "events.jsonl").stat().st_mtime)
+
+
+def list_debug_runs(base_dir: Path, *, limit: int = 10) -> list[DebugRunSummary]:
+    """Return newest debug runs with event counts and manifest metadata."""
+    root = base_dir.expanduser()
+    if not root.exists():
+        return []
+    run_dirs = [
+        path for path in root.iterdir()
+        if path.is_dir() and (path / "events.jsonl").exists()
+    ]
+    run_dirs.sort(key=lambda path: (path / "events.jsonl").stat().st_mtime, reverse=True)
+    summaries: list[DebugRunSummary] = []
+    for run_dir in run_dirs[: max(0, limit)]:
+        summaries.append(_summarize_run_dir(run_dir))
+    return summaries
+
+
+def render_debug_runs_index(base_dir: Path, *, limit: int = 10) -> str:
+    """Render recent debug runs as a copy-friendly text viewer."""
+    summaries = list_debug_runs(base_dir, limit=limit)
+    root = base_dir.expanduser().resolve()
+    if not summaries:
+        return (
+            "最近 debug-runs\n"
+            f"目录: {root}\n\n"
+            "暂无可回放的调试运行。运行 CLI/TUI 后会自动生成结构化日志。"
+        )
+
+    lines = [
+        "最近 debug-runs",
+        f"目录: {root}",
+        "",
+        "序号  时间                  UI   事件  流事件  异常  最后事件",
+    ]
+    for index, summary in enumerate(summaries, 1):
+        started = summary.started_at.replace("T", " ")[:19] or "-"
+        lines.append(
+            f"{index:<4}  {started:<19}  {summary.interface:<4}  "
+            f"{summary.event_count:>4}  {summary.stream_event_count:>5}  "
+            f"{summary.exception_count:>4}  {summary.last_event or '-'}"
+        )
+        lines.append(f"      {summary.run_dir}")
+        if summary.workspace:
+            lines.append(f"      工作区: {summary.workspace}")
+    lines.extend([
+        "",
+        "使用 `/debug-replay <路径>` 查看某次运行的结构化事件；"
+        "使用 `/copy last` 或 `/copy error` 导出最近一轮/错误诊断片段。",
+    ])
+    return "\n".join(lines)
+
+
+def _summarize_run_dir(run_dir: Path) -> DebugRunSummary:
+    events_path = run_dir / "events.jsonl"
+    manifest_path = run_dir / "manifest.json"
+    manifest = _read_json_dict(manifest_path)
+    metadata = manifest.get("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    event_count = 0
+    stream_event_count = 0
+    exception_count = 0
+    last_event = ""
+    for event in _iter_event_dicts(events_path):
+        event_count += 1
+        name = str(event.get("event", ""))
+        last_event = name
+        if name == "engine.stream_event":
+            stream_event_count += 1
+        if name == "exception":
+            exception_count += 1
+
+    return DebugRunSummary(
+        run_id=str(manifest.get("run_id") or run_dir.name),
+        interface=str(manifest.get("interface") or "-"),
+        started_at=str(manifest.get("started_at") or ""),
+        run_dir=run_dir.resolve(),
+        events_path=events_path.resolve(),
+        transcript_path=(run_dir / "transcript.txt").resolve(),
+        event_count=event_count,
+        stream_event_count=stream_event_count,
+        exception_count=exception_count,
+        workspace=str(metadata.get("workspace_root") or ""),
+        last_event=last_event,
+    )
+
+
+def _read_json_dict(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _iter_event_dicts(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    events: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            events.append(parsed)
+    return events
 
 
 def render_debug_replay(path: Path, *, max_events: int = 500) -> str:
@@ -193,6 +324,7 @@ class DebugTrace:
                 f"- 向量库: {metadata.get('vector_db_path', '-')}",
                 f"- debug-runs: {metadata.get('debug_runs_dir', '-')}",
             ])
+        lines.extend(["", render_debug_runs_index(self.run_dir.parent, limit=5)])
         return "\n".join(lines)
 
     def _read_manifest_metadata(self) -> dict[str, Any]:
