@@ -20,14 +20,35 @@ export function renderScreen(state, width, height, env = {}) {
   const footer = renderFooter(state, width, env);
   const footerHeight = footer.length;
   const bodyHeight = Math.max(1, height - footerHeight);
-  const bodyLines = renderBody(state, width, ctx);
-  const start = Math.max(0, bodyLines.length - bodyHeight - state.scrollOffset);
+  const bodyLines = renderBodyWindow(state, width, bodyHeight, state.scrollOffset, ctx);
+  const target = bodyHeight + state.scrollOffset;
+  const start = Math.max(0, bodyLines.length - target);
   const visible = bodyLines.slice(start, start + bodyHeight);
   while (visible.length < bodyHeight) visible.push("");
   return [
     ...visible.map((line) => padRight(line, width)),
     ...footer.map((line) => padRight(line, width)),
   ];
+}
+
+export function renderBodyWindow(state, width, bodyHeight, scrollOffset, ctx = createRenderContext({ width, env: {}, state })) {
+  const targetLines = Math.max(1, bodyHeight + Math.max(0, scrollOffset));
+  const tail = renderBodyTail(state, width);
+  const segments = [];
+  let collected = tail.length;
+
+  for (let index = state.messages.length - 1; index >= 0 && collected < targetLines; index -= 1) {
+    const messageLines = renderCachedMessage(
+      state.renderCache,
+      state.messages[index],
+      ctx,
+      () => renderComponent(Message({ message: state.messages[index] }), ctx),
+    );
+    segments.unshift(messageLines);
+    collected += messageLines.length;
+  }
+
+  return [...segments.flat(), ...tail];
 }
 
 export function renderBody(state, width, ctx = createRenderContext({ width, env: {}, state })) {
@@ -40,6 +61,12 @@ export function renderBody(state, width, ctx = createRenderContext({ width, env:
       () => renderComponent(Message({ message }), ctx),
     ));
   }
+  lines.push(...renderBodyTail(state, width));
+  return lines;
+}
+
+function renderBodyTail(state, width) {
+  const lines = [];
   if (state.activeToolPrepare) {
     lines.push(color(ANSI.dim, `tool prepare: ${state.activeToolPrepare}`));
   }

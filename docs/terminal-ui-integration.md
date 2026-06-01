@@ -117,6 +117,7 @@ npm --prefix frontend/terminal-ui start -- --config config.yaml
 - `/folds` 列出可折叠项，`/fold [n]` 切换折叠，`/expand [n|all]` 展开，`/collapse [n|all]` 折叠。
 - fold state 与 scroll offset 按 session id 保存到工作区 `.naumi/terminal-ui-state.json`，恢复会话时自动应用。
 - 历史消息渲染有前端 LRU 缓存，streaming 内容、tool result、fold state、宽度变化会自动失效。
+- 主屏幕采用 viewport-aware body 渲染，底部附近重绘只渲染当前可见窗口和滚动缓冲，不再全量拼接历史消息。
 - 调试日志路径通过 `debug/trace` 展示。
 - `/resume` 和 `/load <session_id>` 可回放历史消息。
 
@@ -124,7 +125,7 @@ npm --prefix frontend/terminal-ui start -- --config config.yaml
 
 - `/resume` 目前是消息级 replay，已修复历史 assistant 消息拼接问题；滚动位置和 fold state 已在前端本地持久化，但尚未写入 Python 会话数据库。
 - 新前端已有轻量组件层，但尚未迁入完整 Ink/pi-tui 组件体系。
-- 前端状态、协议、组件、渲染、渲染缓存已经拆分为可测试模块。
+- 前端状态、协议、组件、渲染、渲染缓存、viewport 窗口渲染已经拆分为可测试模块。
 - 工具调用卡片已优先通过稳定 `tool_call_id` 关联结果，缺失时才回退到 tool name。
 - 代码高亮是内置轻量关键词高亮，不等价于 Pygments/Tree-sitter。
 
