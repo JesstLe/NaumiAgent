@@ -1,12 +1,16 @@
 """CLI layout behavior tests."""
 
+import asyncio
+
 import pytest
 from prompt_toolkit.application.current import create_app_session
 from prompt_toolkit.input.defaults import create_pipe_input
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.utils import get_cwidth
 
 from naumi_agent.cli.layout import CLIApp, _border_line
+from naumi_agent.ui.keybindings import build_keybindings
 
 
 def _build_cli_app() -> CLIApp:
@@ -15,6 +19,14 @@ def _build_cli_app() -> CLIApp:
     assert app.mouse_support()
     assert cli._output_win is not None
     return cli
+
+
+def _registered_keys(cli: CLIApp) -> set[str]:
+    keys: set[str] = set()
+    for binding in cli._kb.bindings:
+        for key in binding.keys:
+            keys.add(key.value if isinstance(key, Keys) else str(key))
+    return keys
 
 
 class TestCLIAppScrolling:
@@ -152,6 +164,42 @@ class TestCLIAppScrolling:
                 window = cli._output_win
                 assert window is not None
                 assert window.right_margins
+
+    def test_custom_keybindings_are_registered_in_prompt_toolkit(self) -> None:
+        cli = CLIApp(
+            keybindings=build_keybindings(
+                {
+                    "copy_transcript": "Ctrl+X",
+                    "mode_cycle": "F2",
+                    "permission_allow": "a",
+                }
+            )
+        )
+
+        keys = _registered_keys(cli)
+
+        assert "c-x" in keys
+        assert "c-y" not in keys
+        assert "f2" in keys
+        assert "a" in keys
+
+    @pytest.mark.asyncio
+    async def test_permission_prompt_uses_configured_key_labels(self) -> None:
+        cli = CLIApp(
+            keybindings=build_keybindings(
+                {
+                    "permission_allow": "a",
+                    "permission_deny": "d",
+                    "permission_bypass": "Ctrl+B",
+                }
+            )
+        )
+        asyncio.get_running_loop().call_soon(cli._resolve_pending_permission, "deny")
+
+        choice = await cli.confirm_permission({"tool_name": "bash_run"})
+
+        assert choice == "deny"
+        assert "按 A 允许一次，按 D 拒绝，按 Ctrl+B 切换 bypass" in cli.get_transcript()
 
     def test_status_bar_uses_render_width(self) -> None:
         with create_pipe_input() as pipe_input:

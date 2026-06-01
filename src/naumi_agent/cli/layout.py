@@ -32,6 +32,12 @@ from prompt_toolkit.utils import get_cwidth
 from naumi_agent.cli.history import VirtualizedCLIHistory, VirtualizedHistoryControl
 from naumi_agent.cli_completer import SlashCommandCompleter
 from naumi_agent.clipboard import copy_or_save_transcript
+from naumi_agent.ui.keybindings import (
+    KeybindingAction,
+    KeybindingSet,
+    build_keybindings,
+    render_keybinding_help,
+)
 
 
 class _OutputWindow(Window):
@@ -200,10 +206,11 @@ class _DynamicLineControl(UIControl):
 class CLIApp:
     """Full-screen CLI: scrollable output + fixed input bar, no screen switching."""
 
-    def __init__(self, debug_trace: Any = None) -> None:
+    def __init__(self, debug_trace: Any = None, keybindings: KeybindingSet | None = None) -> None:
         self._history = VirtualizedCLIHistory()
         self._processing = False
         self._debug_trace = debug_trace
+        self._keybindings = keybindings or build_keybindings()
         self._app: Application | None = None
         self._input_buf = Buffer(
             multiline=False,
@@ -226,19 +233,45 @@ class CLIApp:
         permission_pending = Condition(lambda: self._pending_permission is not None)
         no_permission_pending = Condition(lambda: self._pending_permission is None)
 
-        @self._kb.add("y", filter=permission_pending)
+        def _bind(
+            action: KeybindingAction,
+            handler: Callable[[Any], None],
+            *,
+            filter: Condition | None = None,
+        ) -> None:
+            for key in self._keybindings.keys_for(action, interface="cli"):
+                if filter is None:
+                    self._kb.add(key)(handler)
+                else:
+                    self._kb.add(key, filter=filter)(handler)
+
         def _permission_allow(event: Any) -> None:
             self._resolve_pending_permission("allow")
 
-        @self._kb.add("n", filter=permission_pending)
+        _bind(
+            KeybindingAction.PERMISSION_ALLOW,
+            _permission_allow,
+            filter=permission_pending,
+        )
+
         def _permission_deny(event: Any) -> None:
             self._resolve_pending_permission("deny")
 
-        @self._kb.add("s-tab", filter=permission_pending)
+        _bind(
+            KeybindingAction.PERMISSION_DENY,
+            _permission_deny,
+            filter=permission_pending,
+        )
+
         def _permission_bypass(event: Any) -> None:
             self._resolve_pending_permission("bypass")
 
-        @self._kb.add("s-tab", filter=no_permission_pending)
+        _bind(
+            KeybindingAction.PERMISSION_BYPASS,
+            _permission_bypass,
+            filter=permission_pending,
+        )
+
         def _toggle_runtime_mode(event: Any) -> None:
             if self._on_mode_toggle is None:
                 return
@@ -246,7 +279,12 @@ class CLIApp:
             self.set_mode_status(mode)
             self.set_status(f"已切换模式: {mode}")
 
-        @self._kb.add("enter")
+        _bind(
+            KeybindingAction.MODE_CYCLE,
+            _toggle_runtime_mode,
+            filter=no_permission_pending,
+        )
+
         def _submit(event: Any) -> None:
             if self._processing:
                 return
@@ -255,7 +293,8 @@ class CLIApp:
                 self._input_buf.text = ""
                 asyncio.ensure_future(self._run_submit(text))
 
-        @self._kb.add("escape")
+        _bind(KeybindingAction.SUBMIT, _submit)
+
         def _escape(event: Any) -> None:
             import time
 
@@ -264,33 +303,34 @@ class CLIApp:
                 self._processing = False
             self._last_esc_time = now
 
-        @self._kb.add("c-c")
-        def _cancel(event: Any) -> None:
+        _bind(KeybindingAction.INTERRUPT, _escape)
+
+        def _exit(event: Any) -> None:
             if not self._processing:
                 event.app.exit()
 
-        @self._kb.add("c-d")
-        def _eof(event: Any) -> None:
-            if not self._processing:
-                event.app.exit()
+        _bind(KeybindingAction.EXIT, _exit)
 
-        @self._kb.add("pageup")
         def _page_up(event: Any) -> None:
             if self._output_win:
                 for _ in range(10):
                     self._output_win._scroll_up()
                 self._invalidate()
 
-        @self._kb.add("pagedown")
+        _bind(KeybindingAction.SCROLL_PAGE_UP, _page_up)
+
         def _page_down(event: Any) -> None:
             if self._output_win:
                 for _ in range(10):
                     self._output_win._scroll_down()
                 self._invalidate()
 
-        @self._kb.add("c-y")
+        _bind(KeybindingAction.SCROLL_PAGE_DOWN, _page_down)
+
         def _copy_all(event: Any) -> None:
             self.copy_transcript()
+
+        _bind(KeybindingAction.COPY_TRANSCRIPT, _copy_all)
 
     def set_submit_handler(self, handler: Callable[[str], Awaitable[None]]) -> None:
         self._on_submit = handler
@@ -406,13 +446,29 @@ class CLIApp:
                 "permission_mode": payload.get("permission_mode"),
             },
         )
-        self.set_status("权限确认: y 允许一次 | n 拒绝 | Shift+Tab 切换 bypass 并执行")
+        allow_keys = self._keybindings.display_keys_for(
+            KeybindingAction.PERMISSION_ALLOW,
+            interface="cli",
+        )
+        deny_keys = self._keybindings.display_keys_for(
+            KeybindingAction.PERMISSION_DENY,
+            interface="cli",
+        )
+        bypass_keys = self._keybindings.display_keys_for(
+            KeybindingAction.PERMISSION_BYPASS,
+            interface="cli",
+        )
+        self.set_status(
+            f"权限确认: {allow_keys} 允许一次 | {deny_keys} 拒绝 | "
+            f"{bypass_keys} 切换 bypass 并执行"
+        )
         self.append_live(
             "\n\033[33m权限确认\033[0m\n"
             f"  工具: {tool_name}\n"
             f"  原因: {reason}\n"
             f"  参数: {args_preview}\n"
-            "  按 y 允许一次，按 n 拒绝，按 Shift+Tab 切换 bypass 并执行。\n"
+            f"  按 {allow_keys} 允许一次，按 {deny_keys} 拒绝，"
+            f"按 {bypass_keys} 切换 bypass 并执行。\n"
         )
         try:
             choice = await self._pending_permission
@@ -443,6 +499,9 @@ class CLIApp:
         if self._debug_trace is None:
             return "当前 CLI 未启用结构化调试日志。"
         return self._debug_trace.describe()
+
+    def keybinding_help(self) -> str:
+        return render_keybinding_help(self._keybindings, interface="cli")
 
     def exit(self) -> None:
         if self._app:

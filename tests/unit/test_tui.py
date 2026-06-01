@@ -11,8 +11,10 @@ from naumi_agent.tui.app import (
     NaumiApp,
     StatusBar,
     TodoBar,
+    _build_textual_bindings,
     _format_tool_output_markdown,
 )
+from naumi_agent.ui.keybindings import build_keybindings
 
 
 class FakeMarkdown:
@@ -40,6 +42,23 @@ class TestNaumiApp:
         assert "tab" in binding_keys
         assert "shift+tab" in binding_keys
         assert "ctrl+l" in binding_keys
+
+    def test_custom_bindings_are_generated_for_tui(self) -> None:
+        bindings = build_keybindings(
+            {
+                "copy_transcript": "Ctrl+X",
+                "mode_cycle": "F2",
+                "toggle_activity": "Ctrl+A",
+            }
+        )
+        textual_bindings = _build_textual_bindings(bindings)
+
+        binding_pairs = {(binding.key, binding.action) for binding in textual_bindings}
+
+        assert ("ctrl+x", "copy_transcript") in binding_pairs
+        assert ("f2", "cycle_runtime_mode") in binding_pairs
+        assert ("ctrl+a", "toggle_activity") in binding_pairs
+        assert ("ctrl+y", "copy_transcript") not in binding_pairs
 
     def test_tool_output_markdown_wraps_raw_diff(self) -> None:
         rendered = _format_tool_output_markdown("--- a\n+++ b\n@@\n-old\n+new")
