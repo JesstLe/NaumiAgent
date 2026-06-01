@@ -359,48 +359,7 @@ class OutputGuardrail:
                 raise SecurityError(f"输出包含潜在危险命令")
 ```
 
-## 6. 行为监控
-
-```python
-# src/naumi_agent/safety/behavior_monitor.py
-
-class BehaviorMonitor:
-    """运行时行为异常检测"""
-
-    def __init__(self):
-        self._tool_call_history: list[tuple[str, float]] = []
-        self._error_count = 0
-
-    def record_tool_call(self, tool_name: str) -> None:
-        """记录工具调用"""
-        self._tool_call_history.append((tool_name, time.time()))
-
-    def check_anomalous_behavior(self) -> list[str]:
-        """检测异常行为模式"""
-        warnings = []
-
-        # 1. 检测重复调用（死循环）
-        recent_calls = self._tool_call_history[-10:]
-        if len(recent_calls) >= 10:
-            tool_names = [c[0] for c in recent_calls]
-            if len(set(tool_names)) <= 2:
-                warnings.append("检测到工具调用循环：重复调用同一工具")
-
-        # 2. 检测高频调用
-        if len(recent_calls) >= 5:
-            time_span = recent_calls[-1][1] - recent_calls[0][1]
-            if time_span < 5:  # 5秒内5次调用
-                warnings.append("工具调用频率异常高")
-
-        # 3. 检测错误率
-        total_calls = len(self._tool_call_history)
-        if total_calls > 0 and self._error_count / total_calls > 0.5:
-            warnings.append(f"工具调用失败率过高：{self._error_count}/{total_calls}")
-
-        return warnings
-```
-
-## 7. 安全配置
+## 6. 安全配置
 
 ```yaml
 # config.yaml — 安全相关配置
@@ -427,10 +386,4 @@ safety:
     input_validation: true
     output_redaction: true
     injection_detection: true
-
-  behavior:
-    max_turns: 30
-    max_tool_calls_per_minute: 30
-    loop_detection: true
-    error_rate_threshold: 0.5
 ```

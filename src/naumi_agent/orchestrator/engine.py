@@ -33,7 +33,6 @@ from naumi_agent.orchestrator.system_prompt import (
     build_system_prompt,
     is_generated_system_prompt,
 )
-from naumi_agent.safety.behavior import BehaviorMonitor
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
@@ -169,7 +168,6 @@ class AgentEngine:
                 max_usd=config.safety.max_budget_usd,
             )
         )
-        self._behavior_monitor = BehaviorMonitor()
         self._output_guardrail = OutputGuardrail()
         self._permission_checker = PermissionChecker(
             mode=PermissionMode(config.safety.permission_mode),
@@ -504,7 +502,6 @@ class AgentEngine:
         self._budget_tracker.reset()
         self._session = None
         self.task_store.set_session("")
-        self._behavior_monitor.reset()
         self._permission_checker.reset_counts()
 
     async def shutdown(self) -> None:
@@ -1680,7 +1677,6 @@ class AgentEngine:
         """ReAct 循环：推理 → 行动 → 观察."""
         max_turns = self._config.safety.max_turns
         tool_call_history: list[str] = []
-        convergence_injected = False
 
         # Inject plan as guidance to prevent approach oscillation
         if plan:
@@ -1689,7 +1685,6 @@ class AgentEngine:
                 self._append_message({"role": "system", "content": plan_guidance})
 
         for turn in range(max_turns):
-            self._behavior_monitor.begin_turn(turn)
             self._usage.turns = turn + 1
             await self._inject_background_notifications()
             await self._inject_scheduler_notifications()
@@ -1730,11 +1725,6 @@ class AgentEngine:
                 },
                 session_id=session_id,
             ))
-
-            # 行为监控
-            warnings = self._behavior_monitor.check_anomalous_behavior()
-            if warnings:
-                logger.warning("Behavior warnings: %s", warnings)
 
             exceeded = self._check_budget()
             if exceeded:
@@ -1834,9 +1824,6 @@ class AgentEngine:
                         },
                         session_id=session_id,
                     ))
-                    self._behavior_monitor.record_tool_call(
-                        tc.name, is_error=(result.status == "error")
-                    )
                     self._append_message(
                         {
                             "role": "tool",
@@ -1846,35 +1833,6 @@ class AgentEngine:
                     )
 
                 tool_call_history.extend(cur_calls)
-
-                # Active intervention: break approach oscillation
-                intervention = self._behavior_monitor.check_intervention()
-                if intervention is not None:
-                    self._append_message({
-                        "role": "system",
-                        "content": intervention.message,
-                    })
-                    if intervention.action == "force_converge":
-                        if convergence_injected:
-                            last_text = ""
-                            for m in reversed(self._messages):
-                                if m.get("role") == "assistant" and m.get("content"):
-                                    last_text = m["content"]
-                                    break
-                            safe_text = self._output_guardrail.redact(
-                                last_text or "任务执行被强制收敛（检测到方案振荡）。"
-                            )
-                            await self._fire_agent_stop(
-                                status="completed",
-                                response=safe_text,
-                                reason="force_converge",
-                            )
-                            return AgentResult(
-                                status="completed",
-                                response=safe_text,
-                                usage=self._usage,
-                            )
-                        convergence_injected = True
 
                 exceeded = self._check_budget()
                 if exceeded:
@@ -1930,7 +1888,6 @@ class AgentEngine:
         model_str = self._router.resolve_model(ModelTier.CAPABLE)
         session_id = self._session.id if self._session else ""
         tool_call_history: list[str] = []
-        convergence_injected = False
 
         # Inject plan as guidance to prevent approach oscillation
         if plan:
@@ -1939,7 +1896,6 @@ class AgentEngine:
                 self._append_message({"role": "system", "content": plan_guidance})
 
         for turn in range(max_turns):
-            self._behavior_monitor.begin_turn(turn)
             self._usage.turns = turn + 1
             await self._inject_background_notifications(on_event)
             await self._inject_scheduler_notifications(on_event)
@@ -2232,9 +2188,6 @@ class AgentEngine:
                         },
                         session_id=session_id,
                     ), on_event)
-                    self._behavior_monitor.record_tool_call(
-                        tc.name, is_error=(result.status == "error")
-                    )
                     self._append_message(
                         {
                             "role": "tool",
@@ -2244,38 +2197,6 @@ class AgentEngine:
                     )
 
                 tool_call_history.extend(cur_calls)
-
-                # Active intervention: break approach oscillation
-                intervention = self._behavior_monitor.check_intervention()
-                if intervention is not None:
-                    self._append_message({
-                        "role": "system",
-                        "content": intervention.message,
-                    })
-                    if intervention.action == "force_converge":
-                        if convergence_injected:
-                            last_text = ""
-                            for m in reversed(self._messages):
-                                if m.get("role") == "assistant" and m.get("content"):
-                                    last_text = m["content"]
-                                    break
-                            await on_event("response_start", {})
-                            force_msg = last_text or "任务执行被强制收敛（检测到方案振荡）。"
-                            await on_event("token", {"content": force_msg})
-                            await on_event("response_end", {})
-                            await self._fire_agent_stop(
-                                status="completed",
-                                response=force_msg,
-                                reason="force_converge",
-                                streaming=True,
-                                on_event=on_event,
-                            )
-                            return AgentResult(
-                                status="completed",
-                                response=self._output_guardrail.redact(force_msg),
-                                usage=self._usage,
-                            )
-                        convergence_injected = True
 
                 exceeded = self._check_budget()
                 if exceeded:

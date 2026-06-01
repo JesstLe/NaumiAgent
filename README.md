@@ -40,7 +40,7 @@ src/naumi_agent/
 ├── orchestrator/     # 核心引擎 — ReAct 循环、Planner、子 Agent
 ├── model/            # 模型路由 — LiteLLM 统一调用
 ├── tools/            # 工具系统 — 文件、浏览器、代码沙箱、网络、记忆
-├── safety/           # 安全 — 权限、预算、行为监控、护栏
+├── safety/           # 安全 — 权限、预算、输出护栏
 ├── memory/           # 记忆 — 会话持久化(SQLite)、长期记忆(ChromaDB)、上下文压缩
 ├── streaming/        # 事件总线 — 发布/订阅
 ├── tui/              # TUI 界面 — Textual

@@ -19,7 +19,6 @@ class TestIsProtected:
         assert _is_protected("naumi_agent.orchestrator.engine")
 
     def test_protects_safety(self):
-        assert _is_protected("naumi_agent.safety.behavior")
         assert _is_protected("naumi_agent.safety.permissions")
 
     def test_protects_config(self):
