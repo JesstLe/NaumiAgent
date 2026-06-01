@@ -2,6 +2,182 @@
 
 from __future__ import annotations
 
+import re
+
+from naumi_agent.tools import analysis_common
+
+MONOLITH_PATTERNS = [
+    (
+        r"(?:main|run|execute|process)\s*\([^)]*\)\s*:\s*\n"
+        r"\s*(?:await|result|call)",
+        "单线程顺序执行 (一崩全崩)",
+    ),
+    (
+        r"while\s+True\s*:\s*\n\s*(?:await\s+\w+\.\w+){3,}",
+        "无限循环串行调用 (无断路器)",
+    ),
+    (
+        r"try:\s*\n(?:\s+.*\n){10,}\s*except",
+        "巨型 try-except (试图穷举所有错误 — 反模式)",
+    ),
+    (
+        r"(?:Agent|Worker|Runner)\s*\(\s*[^)]*\)\s*\.\s*run\s*\(\s*\)",
+        "单一 Agent 直接运行 (无守护包装)",
+    ),
+]
+
+WORKER_PATTERNS = [
+    (
+        r"(?:llm|model|gpt|claude|ai|neural)\s*.\s*(?:call|generate|run)",
+        "LLM 调用 (高智能但不可靠)",
+    ),
+    (r"(?:crawl|scrape|parse|extract|analyze)\s*\(", "外部数据抓取/解析 (高失败率)"),
+    (r"(?:compile|build|transpile|generate)\s*\(", "代码生成/编译 (可能产出非法结果)"),
+    (r"(?:creative|brainstorm|ideate|explore)\s*", "创意性/发散性操作 (天生不稳定)"),
+]
+
+SUPERVISOR_PATTERNS = [
+    (r"(?:supervisor|guardian|watcher|monitor|overseer)\s*", "守护/监督者角色"),
+    (r"(?:restart_policy|restart_strategy|max_retries)\s*[:=]", "重启策略配置"),
+    (r"(?:child_spec|worker_spec|process_spec)\s*[:=]", "子进程规格定义"),
+    (r"(?:spawn|fork|Process|Thread)\s*\([^)]*target", "隔离式进程/线程启动"),
+    (r"(?:supervise|supervisor_tree|sup_tree)\s*", "Erlang 式守护者树"),
+    (r"(?:on_failure|on_error|on_crash|error_handler)\s*[:=]", "崩溃回调处理"),
+]
+
+ISOLATION_ERROR_PATTERNS = [
+    (
+        r"(?:try:.*\n.*except\s+\w+.*\n\s*(?:log|report|notify))",
+        "异常隔离 + 日志记录",
+    ),
+    (r"(?:catch|except)\s*.*:\s*\n\s*(?:restart|retry|spawn)", "异常触发重启"),
+    (r"(?:finally|cleanup|teardown|dispose)\s*:", "清理/资源释放"),
+    (r"(?:circuit.?breaker|bulkhead|timeout)\s*", "熔断/舱壁/超时隔离"),
+    (r"(?:isolate|quarantine|fence|contain)\s*", "故障隔离机制"),
+]
+
+
+def _collect_label_hits(
+    lines: list[str],
+    patterns: list[tuple[str, str]],
+) -> dict[str, list[int]]:
+    hits: dict[str, list[int]] = {}
+    for pattern, label in patterns:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                hits.setdefault(label, []).append(index)
+    return hits
+
+
+def scan_supervisor(target: str) -> str:
+    """Scan system readiness for Erlang-style supervisor trees."""
+    findings: list[str] = []
+    source = analysis_common.read_sources(analysis_common.resolve_target(target))
+
+    if not source.strip():
+        return "⚠️ 未找到可分析的源代码。"
+
+    lines = source.split("\n")
+
+    findings.append("## 1. 单体风险检测 (Monolith Risk)")
+    mono_hits: list[tuple[str, int, str]] = []
+    for pattern, desc in MONOLITH_PATTERNS:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line):
+                mono_hits.append((desc, index, line.strip()))
+
+    if mono_hits:
+        findings.append(
+            f"- 🔴 发现 **{len(mono_hits)}** 处单体架构风险 — "
+            f"一个模块崩溃会拖垮整个系统：",
+        )
+        for desc, line_no, line_text in mono_hits[:6]:
+            short = line_text[:70] + ("..." if len(line_text) > 70 else "")
+            findings.append(f"  - L{line_no}: {desc}")
+            findings.append(f"    `{short}`")
+    else:
+        findings.append("- ✅ 未检测到明显的单体架构风险")
+    findings.append("")
+
+    findings.append("## 2. 进化节点候选 (Worker Candidates — 需要守护)")
+    worker_hits = _collect_label_hits(lines, WORKER_PATTERNS)
+    total_workers = sum(len(line_nos) for line_nos in worker_hits.values())
+    if worker_hits:
+        findings.append(
+            f"- 检测到 **{total_workers}** 个高风险 Worker 候选，"
+            f"**{len(worker_hits)}** 类：",
+        )
+        for label, line_nos in sorted(
+            worker_hits.items(),
+            key=lambda item: -len(item[1]),
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+        findings.append("- 💡 这些模块应该被包裹在守护者(Supervisor)中运行")
+    else:
+        findings.append("- 高风险 Worker 较少，守护需求不高")
+    findings.append("")
+
+    findings.append("## 3. 守护基础设施 (Supervisor Infrastructure)")
+    sup_hits = _collect_label_hits(lines, SUPERVISOR_PATTERNS)
+    if sup_hits:
+        total_sup = sum(len(line_nos) for line_nos in sup_hits.values())
+        findings.append(
+            f"- 检测到 **{total_sup}** 处守护者机制，"
+            f"**{len(sup_hits)}** 类：",
+        )
+        for label, line_nos in sorted(
+            sup_hits.items(),
+            key=lambda item: -len(item[1]),
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append("- ❌ 无守护者基础设施 — 系统中无任何监督机制")
+    findings.append("")
+
+    findings.append("## 4. 错误隔离质量 (Error Isolation)")
+    iso_hits = _collect_label_hits(lines, ISOLATION_ERROR_PATTERNS)
+    if iso_hits:
+        total_iso = sum(len(line_nos) for line_nos in iso_hits.values())
+        findings.append(
+            f"- 检测到 **{total_iso}** 处错误隔离机制，"
+            f"**{len(iso_hits)}** 类：",
+        )
+        for label, line_nos in iso_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append("- ❌ 无错误隔离 — 一个模块的异常会传播到整个系统")
+    findings.append("")
+
+    mono_penalty = min(len(mono_hits) * 0.15, 0.4)
+    worker_need = min(total_workers / 5.0, 1.0)
+    sup_score = min(len(sup_hits) / 4.0, 1.0)
+    iso_score = min(len(iso_hits) / 3.0, 1.0)
+
+    readiness = (
+        worker_need * 0.15
+        + sup_score * 0.35
+        + iso_score * 0.35
+        - mono_penalty
+        + 0.15
+    )
+    readiness = max(0.0, min(1.0, readiness))
+
+    findings.append("## 5. 守护者树就绪度评分")
+    findings.append(f"- **综合评分: {readiness:.0%}**")
+    findings.append(f"- Worker 需求密度: {worker_need:.0%}")
+    findings.append(f"- 守护者基础设施: {sup_score:.0%}")
+    findings.append(f"- 错误隔离质量: {iso_score:.0%}")
+    findings.append(f"- 单体风险惩罚: -{mono_penalty:.0%}")
+
+    if readiness >= 0.7:
+        findings.append("- ✅ 系统具备成熟的守护者树架构，可实施 Let-it-crash 哲学")
+    elif readiness >= 0.4:
+        findings.append("- ⚠️ 部分具备守护条件，需为高风险 Worker 添加 Supervisor 包裹")
+    else:
+        findings.append("- ❌ 系统缺乏守护架构，强烈建议引入 Erlang 式 Supervisor Tree")
+
+    return "\n".join(findings)
+
 
 def build_supervisor_inventory_script(target: str) -> str:
     """Build a dependency-free supervisor-tree readiness scanner."""
