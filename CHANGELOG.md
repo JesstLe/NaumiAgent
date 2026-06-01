@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.16] - 2026-06-01
+
+### Added
+- **SPAR 工具确定性落地** — `/spar` 在模型路由未初始化时也会返回对抗自博弈基线、可运行静态 adversarial harness、红队测试建议和收敛门槛。
+
+### Fixed
+- **SPAR 源码读取修复** — `_scan_spar` 现在会先解析目标路径再读取源码，避免把路径字符串逐字符当作文件列表导致扫描为空。
+- **SPAR 误报收敛** — 堆释放模式改为匹配真实 `free()`/`delete` 调用，避免将 `dependency-free` 等普通文本误判为内存释放。
+
 ## [0.1.15] - 2026-06-01
 
 ### Added

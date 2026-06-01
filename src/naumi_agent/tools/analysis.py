@@ -17,6 +17,7 @@ from typing import Any
 from naumi_agent.tools import analysis_common
 from naumi_agent.tools.analysis_support import hook as _hook_support
 from naumi_agent.tools.analysis_support import probe as _probe_support
+from naumi_agent.tools.analysis_support import spar as _spar_support
 from naumi_agent.tools.analysis_support import vision as _vision_support
 from naumi_agent.tools.base import Tool, ToolMetadata
 
@@ -36,6 +37,8 @@ _build_hook_report = _hook_support.build_hook_report
 _scan_vision = _vision_support.scan_vision
 _build_vision_inventory_script = _vision_support.build_vision_inventory_script
 _build_vision_report = _vision_support.build_vision_report
+_build_spar_harness_script = _spar_support.build_spar_harness_script
+_build_spar_report = _spar_support.build_spar_report
 
 # --- 各模式专用的静态扫描函数 ---
 
@@ -5365,7 +5368,7 @@ _REWARD_HACK_PATTERNS = [
 # Vulnerability surface patterns for adversarial targeting
 _VULN_SURFACE_PATTERNS = [
     (r"(?:malloc|calloc|realloc|new)\s*\(", "堆内存分配"),
-    (r"(?:free|delete)\s*[\(\[]?", "堆内存释放"),
+    (r"(?:\bfree\s*\(|\bdelete\s*(?:\(|\[|\s+\w+))", "堆内存释放"),
     (r"(?:strcpy|strcat|sprintf|gets)\s*\(", "不安全字符串操作"),
     (r"(?:memcpy|memmove)\s*\([^,]+,\s*[^,]+,\s*[^)]+\)", "内存拷贝"),
     (r"(?:fopen|fwrite|fread|open)\s*\(", "文件 I/O"),
@@ -5455,7 +5458,7 @@ def _scan_spar(target: str) -> str:
     """Scan code for adversarial self-play readiness — vulnerability surface,
     reward hacking risk, and nihilism detection."""
     findings: list[str] = []
-    source = _read_sources(target)
+    source = _read_sources(_resolve_target(target))
 
     if not source.strip():
         return "⚠️ 未找到可分析的源代码。"
@@ -5714,11 +5717,12 @@ class SparTool(Tool):
     async def execute(
         self, *, task: str, **kwargs: Any,
     ) -> str:
+        scan_evidence = _scan_spar(task)
+        deterministic = _build_spar_report(task, scan_evidence)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("spar", task[:200])
-
-        scan_evidence = _scan_spar(task)
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 SPAR 自博弈基线。"
 
         manager = _get_analysis_subagent_manager(router)
         if manager is not None:
@@ -5729,8 +5733,10 @@ class SparTool(Tool):
         user_msg = (
             f"## 对抗目标\n{task}\n\n"
             f"## 静态扫描报告\n{scan_evidence}\n"
+            f"\n## 确定性 SPAR 基线\n{deterministic}\n"
         )
-        return await _run_analysis(router, _SPAR_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _SPAR_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM SPAR 增强\n" + enhanced
 
     async def _execute_adversarial(
         self,
