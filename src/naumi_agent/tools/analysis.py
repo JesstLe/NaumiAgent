@@ -3889,6 +3889,86 @@ def _scan_pointer(
     return "\n".join(findings)
 
 
+def _build_pointer_report(scan_evidence: str, files: list[Path], context: str = "") -> str:
+    pointers = _infer_pointer_table(files)
+    lines = [
+        "## SPA 确定性指针架构",
+        f"- 扫描文件数：{len(files)}",
+        f"- 业务上下文：{context or '未提供'}",
+        "",
+        "## 风险扫描",
+        scan_evidence,
+        "",
+        "## Reasoning Space",
+        "- AI 负责：策略解释、流程编排、自然语言交互、选择 pointer。",
+        "- AI 禁止：直接生成金额、精度敏感指标、token/hash、医疗/物理测量值。",
+        "- AI 输出必须携带 pointer id，而不是伪造物理态数据。",
+        "",
+        "## Physical Space",
+        "- 精确计算、DB/API 查询、Decimal/类型校验必须由普通代码完成。",
+        "- dereference 模块必须返回结构化结果：value、source、timestamp、validation。",
+        "- 失败必须显式返回 null/error，不允许由 AI 猜测补全。",
+        "",
+        "## Pointer Table",
+        "| Pointer | Dereference Module | Input | Output | Risk Level |",
+        "|---------|-------------------|-------|--------|------------|",
+    ]
+    lines.extend(pointers)
+    lines.extend(
+        [
+            "",
+            "## Migration Plan",
+            "1. 先替换风险评分最高的边界，让 AI 输出 pointer token。",
+            "2. 为每个 dereference 函数补类型校验和空值/错误返回。",
+            "3. 用 Decimal/结构化对象替代 float/string 拼接。",
+            "4. 为 pointer 结果记录来源、时间戳和校验状态。",
+            "5. 用 targeted tests 覆盖：正常数据、缺失数据、异常数据、过期数据。",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _infer_pointer_table(files: list[Path]) -> list[str]:
+    rows: list[str] = []
+    for file in files:
+        try:
+            content = file.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        lower = content.lower()
+        if any(token in lower for token in ("price", "amount", "balance", "currency")):
+            rows.append(
+                "| `finance.price_ref` | `finance_gateway.get_decimal()` | "
+                "`symbol/account_id` | `Decimal + source` | HIGH |"
+            )
+        if any(token in lower for token in ("token", "secret", "signature", "hash")):
+            rows.append(
+                "| `security.secret_ref` | `secret_store.get()` | "
+                "`secret_id` | `opaque bytes / redacted` | CRITICAL |"
+            )
+        if any(token in lower for token in ("diagnosis", "dosage", "blood_pressure")):
+            rows.append(
+                "| `medical.measurement_ref` | `clinical_store.get_measurement()` | "
+                "`patient_id + metric` | `validated measurement` | CRITICAL |"
+            )
+        if re.search(r"(?:\.execute\(|session\.query|cursor\.)", content):
+            rows.append(
+                "| `db.query_ref` | `repository.fetch()` | "
+                "`query object` | `typed record set` | HIGH |"
+            )
+        if re.search(r"(?:requests\.(get|post)|httpx\.client)", content, re.IGNORECASE):
+            rows.append(
+                "| `api.response_ref` | `api_client.fetch_validated()` | "
+                "`endpoint + params` | `schema-validated payload` | MEDIUM |"
+            )
+    if not rows:
+        rows.append(
+            "| `domain.value_ref` | `typed_repository.get()` | "
+            "`entity_id` | `validated domain object` | MEDIUM |"
+        )
+    return list(dict.fromkeys(rows))
+
+
 _POINTER_SYSTEM = """\
 You are a Semantic Pointer Architecture (SPA) analyst implementing the \
 C++ pointer concept in AI systems.
@@ -3993,25 +4073,28 @@ class PointerTool(Tool):
         context: str = "",
         **kwargs: Any,
     ) -> str:
-        router = _global_router
-        if router is None:
-            return _router_unavailable("pointer", target)
-
         files = _resolve_target(target)
         if not files:
             return f"无法解析目标: {target} (请提供文件或目录路径)"
 
         source_text = _read_sources(files)
         scan_evidence = _scan_pointer(files, source_text, target)
+        deterministic = _build_pointer_report(scan_evidence, files, context)
+
+        router = _global_router
+        if router is None:
+            return deterministic + "\n\n模型路由未初始化，已返回确定性 SPA 指针方案。"
 
         user_msg = (
             f"## SPA 扫描证据\n{scan_evidence}\n\n"
+            f"## 确定性 SPA 方案\n{deterministic}\n\n"
             f"## 源代码\n{source_text[:50000]}\n"
         )
         if context:
             user_msg += f"\n## 补充上下文\n{context}\n"
 
-        return await _run_analysis(router, _POINTER_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _POINTER_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM SPA 架构增强\n" + enhanced
 
 
 # ===========================================================================

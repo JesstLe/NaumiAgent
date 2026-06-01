@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.10] - 2026-06-01
+
+### Added
+- **Pointer 工具确定性落地** — `/pointer` 在模型路由未初始化时也会返回 SPA 推理态/物理态分离方案、Pointer Table、迁移计划和风险扫描结果。
+
 ## [0.1.9] - 2026-06-01
 
 ### Added
