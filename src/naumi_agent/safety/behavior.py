@@ -5,6 +5,23 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+_TOOL_WORKFLOW_GROUPS: dict[str, str] = {
+    # These tools are consecutive stages of one multi-agent workflow, not
+    # competing strategies. Treating them as unrelated causes false convergence.
+    "spawn_agent": "subagent_workflow",
+    "delegate_task": "subagent_workflow",
+    "list_agents": "subagent_workflow",
+    "destroy_agent": "subagent_workflow",
+    "task_create": "task_workflow",
+    "task_update": "task_workflow",
+    "task_list": "task_workflow",
+    "task_delete": "task_workflow",
+}
+
+
+def _workflow_key(tool_name: str) -> str:
+    return _TOOL_WORKFLOW_GROUPS.get(tool_name, tool_name)
+
 
 @dataclass
 class ToolCallRecord:
@@ -124,8 +141,8 @@ class BehaviorMonitor:
         # Count approach changes: low tool overlap between consecutive turns
         approach_changes = 0
         for i in range(1, len(recent)):
-            prev_tools = set(recent[i - 1].tools)
-            curr_tools = set(recent[i].tools)
+            prev_tools = {_workflow_key(tool) for tool in recent[i - 1].tools}
+            curr_tools = {_workflow_key(tool) for tool in recent[i].tools}
             if not prev_tools or not curr_tools:
                 continue
             overlap = len(prev_tools & curr_tools) / len(prev_tools | curr_tools)
@@ -136,7 +153,7 @@ class BehaviorMonitor:
         all_tools_in_window: set[str] = set()
         total_calls_in_window = 0
         for t in recent:
-            all_tools_in_window.update(t.tools)
+            all_tools_in_window.update(_workflow_key(tool) for tool in t.tools)
             total_calls_in_window += len(t.tools)
         unique_ratio = len(all_tools_in_window) / max(total_calls_in_window, 1)
 

@@ -612,6 +612,7 @@ async def _chat(config_path: str) -> None:
                     ttft=event_handler._get_ttft(),
                     duration=event_handler._get_duration(),
                     engine=engine,
+                    show_environment_stats=False,
                 )
             )
         )
@@ -744,6 +745,7 @@ def _render_result(
     ttft: float = 0.0,
     duration: float = 0.0,
     engine: Any = None,
+    show_environment_stats: bool = True,
 ) -> None:
     if result.status == "error" and result.error:
         c.print(f"[red]错误: {result.error}[/red]")
@@ -791,7 +793,7 @@ def _render_result(
     line2 = Text()
     has_line2 = False
 
-    if engine:
+    if engine and show_environment_stats:
         # Context window
         ctx = engine.get_context_info()
         ctx_pct = ctx["percentage"]
@@ -812,20 +814,22 @@ def _render_result(
         )
         has_line2 = True
 
-    # Cost on line 2 as well
-    line2.append(" | ", style="dim")
-    line2.append(f"费用: ${result.usage.total_cost_usd:.4f}", style="dim")
-    has_line2 = True
+    if show_environment_stats:
+        # Cost on line 2 as well
+        line2.append(" | ", style="dim")
+        line2.append(f"费用: ${result.usage.total_cost_usd:.4f}", style="dim")
+        has_line2 = True
 
     # Git
-    git = _get_git_info()
-    if git["branch"]:
-        git_label = git["branch"]
-        if git["dirty"]:
-            git_label += "*"
-        line2.append(" | ", style="dim")
-        line2.append(f"📂 {git_label}", style="dim")
-        has_line2 = True
+    if show_environment_stats:
+        git = _get_git_info()
+        if git["branch"]:
+            git_label = git["branch"]
+            if git["dirty"]:
+                git_label += "*"
+            line2.append(" | ", style="dim")
+            line2.append(f"📂 {git_label}", style="dim")
+            has_line2 = True
 
     if has_line2:
         c.print(line2)

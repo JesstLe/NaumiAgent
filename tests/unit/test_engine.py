@@ -1669,3 +1669,72 @@ class TestOscillationBreaking:
             if m.get("role") == "system" and "频繁切换执行方案" in m.get("content", "")
         ]
         assert len(intervention_msgs) >= 1
+
+    @pytest.mark.asyncio
+    async def test_subagent_workflow_does_not_force_converge(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        """Creating then delegating to a subagent is one workflow, not oscillation."""
+        engine._behavior_monitor = BehaviorMonitor(max_interventions=1)
+
+        responses = [
+            ModelResponse(
+                content="",
+                tool_calls=[{
+                    "id": "c1",
+                    "function": {
+                        "name": "spawn_agent",
+                        "arguments": '{"name":"news_summarizer","domain":"news"}',
+                    },
+                }],
+                usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+                model="test-model",
+            ),
+            ModelResponse(
+                content="",
+                tool_calls=[{
+                    "id": "c2",
+                    "function": {
+                        "name": "delegate_task",
+                        "arguments": (
+                            '{"agent":"news_summarizer",'
+                            '"task":"搜索并总结热门新闻"}'
+                        ),
+                    },
+                }],
+                usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+                model="test-model",
+            ),
+            ModelResponse(
+                content="新闻总结完成",
+                usage=TokenUsage(input_tokens=5, output_tokens=3, total_tokens=8),
+                model="test-model",
+            ),
+        ]
+
+        async def mock_execute(tc: ToolCall) -> ToolResult:
+            return ToolResult(call_id=tc.id, status="success", content=f"{tc.name} ok")
+
+        with (
+            patch.object(
+                engine._router,
+                "call",
+                new_callable=AsyncMock,
+                side_effect=responses,
+            ),
+            patch.object(
+                engine,
+                "_execute_tool",
+                new_callable=AsyncMock,
+                side_effect=mock_execute,
+            ),
+        ):
+            result = await engine.run("启动子 agent 对新闻进行总结")
+
+        assert result.status == "completed"
+        assert result.response == "新闻总结完成"
+        assert not any(
+            m.get("role") == "system" and "不要再调用任何工具" in m.get("content", "")
+            for m in engine._messages
+        )

@@ -225,6 +225,34 @@ class TestBehaviorMonitorIntervention:
 
         assert monitor.check_intervention() is None
 
+    def test_subagent_workflow_steps_are_not_oscillation(self) -> None:
+        """spawn_agent → delegate_task is one workflow, not a strategy switch."""
+        monitor = BehaviorMonitor()
+        for i, tool in enumerate([
+            "spawn_agent",
+            "delegate_task",
+            "delegate_task",
+            "list_agents",
+        ]):
+            monitor.begin_turn(i)
+            monitor.record_tool_call(tool)
+
+        assert monitor.check_intervention() is None
+
+    def test_task_workflow_steps_are_not_oscillation(self) -> None:
+        """Task CRUD tools are consecutive progress tracking operations."""
+        monitor = BehaviorMonitor()
+        for i, tool in enumerate([
+            "task_create",
+            "task_update",
+            "task_list",
+            "task_update",
+        ]):
+            monitor.begin_turn(i)
+            monitor.record_tool_call(tool)
+
+        assert monitor.check_intervention() is None
+
     def test_reset_clears_intervention_history(self) -> None:
         monitor = BehaviorMonitor()
         for i, tool in enumerate(["tool_a", "tool_b", "tool_c"]):
