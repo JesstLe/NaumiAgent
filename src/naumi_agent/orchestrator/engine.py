@@ -1819,6 +1819,7 @@ class AgentEngine:
             got_thinking = False
             stream_tokens = 0
             finish_reason: str | None = None
+            should_buffer_text = bool(tools)
 
             await self._fire_hook(HookContext(
                 point=HookPoint.LLM_CALL_START,
@@ -1847,11 +1848,17 @@ class AgentEngine:
                         await on_event("thinking_delta", {"content": chunk.thinking})
 
                     if chunk.token:
-                        # Tool-capable streaming can emit text fragments before the final
-                        # finish_reason reveals that the same assistant turn is actually a
-                        # tool call. Buffer first so tool-call preambles or malformed
-                        # argument fragments never leak into the CLI/TUI transcript.
                         text_parts.append(chunk.token)
+                        if should_buffer_text:
+                            # Tool-capable streaming can emit text fragments before the final
+                            # finish_reason reveals that the same assistant turn is actually a
+                            # tool call. Buffer first so tool-call preambles or malformed
+                            # argument fragments never leak into the CLI/TUI transcript.
+                            continue
+                        if not got_response:
+                            got_response = True
+                            await on_event("response_start", {})
+                        await on_event("token", {"content": chunk.token})
 
                     if chunk.tool_call and isinstance(chunk.tool_call, dict):
                         collected_tool_calls.update(chunk.tool_call)

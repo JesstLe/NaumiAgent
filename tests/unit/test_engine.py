@@ -1116,7 +1116,7 @@ class TestErrorRecovery:
                 ),
             ):
                 result = await engine._react_loop_streaming(
-                    tools=None,
+                    tools=[FakeTool().to_openai_tool()],
                     on_event=on_event,
                 )
 
