@@ -43,6 +43,7 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/copy", "复制/导出完整记录、最近一轮或最近错误", takes_arg=True, arg_hint="<all|last|error>", readonly=True, category="基础"),
         CommandMeta("/debug", "显示本次结构化调试日志位置", category="基础"),
         CommandMeta("/debug-replay", "回放 debug-runs 结构化事件", takes_arg=True, arg_hint="<路径>", readonly=True, category="基础"),
+        CommandMeta("/diff", "查看本轮结构化 git diff", takes_arg=True, arg_hint="[all|worktree|staged]", readonly=True, category="基础"),
         CommandMeta("/pwd", "显示当前工作目录", category="基础"),
         CommandMeta("/quit", "退出", readonly=False, category="基础"),
         CommandMeta("/exit", "退出", readonly=False, category="基础"),
