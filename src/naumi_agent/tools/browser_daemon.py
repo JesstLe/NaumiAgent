@@ -20,6 +20,13 @@ class BrowserDaemonError(RuntimeError):
     """Raised when the browser daemon HTTP API cannot complete a request."""
 
 
+RUN_TERMINAL_STATUSES = frozenset({"completed", "failed", "aborted"})
+RUN_HANDOFF_STATUSES = frozenset(
+    {"waiting_for_instruction", "manual_control_requested", "manual_control"}
+)
+RUN_WATCH_READY_STATUSES = RUN_TERMINAL_STATUSES | RUN_HANDOFF_STATUSES
+
+
 class BrowserDaemonClient:
     """Small async client for browser-debugging-daemon's HTTP API."""
 
@@ -188,6 +195,47 @@ class BrowserDaemonClient:
     async def get_run(self, run_id: str) -> dict[str, Any]:
         return await self.request("GET", f"/runs/{run_id}")
 
+    async def watch_run(
+        self,
+        run_id: str,
+        *,
+        timeout_ms: int = 30_000,
+        poll_interval_ms: int = 1_500,
+    ) -> dict[str, Any]:
+        timeout_ms = _normalize_int(
+            timeout_ms,
+            fallback=30_000,
+            minimum=0,
+            maximum=5 * 60 * 1000,
+        )
+        poll_interval_ms = _normalize_int(
+            poll_interval_ms,
+            fallback=1_500,
+            minimum=200,
+            maximum=10_000,
+        )
+        started_at = asyncio.get_running_loop().time()
+        deadline = started_at + (timeout_ms / 1000)
+        payload = await self.get_run(run_id)
+        run = payload.get("run") or {}
+
+        while not _is_watch_ready(run) and asyncio.get_running_loop().time() < deadline:
+            remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+            await asyncio.sleep(min(poll_interval_ms / 1000, remaining))
+            payload = await self.get_run(run_id)
+            run = payload.get("run") or {}
+
+        waited_ms = int((asyncio.get_running_loop().time() - started_at) * 1000)
+        return {
+            "run": run,
+            "watch": {
+                "runId": run_id,
+                "timedOut": not _is_watch_ready(run),
+                "waitedMs": waited_ms,
+                "readyStatuses": sorted(RUN_WATCH_READY_STATUSES),
+            },
+        }
+
     async def reply(self, run_id: str, instruction: str) -> dict[str, Any]:
         return await self.request(
             "POST",
@@ -219,6 +267,18 @@ class BrowserDaemonClient:
 
 def _format_json(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+
+
+def _normalize_int(value: Any, *, fallback: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = fallback
+    return max(minimum, min(maximum, parsed))
+
+
+def _is_watch_ready(run: dict[str, Any]) -> bool:
+    return str(run.get("status") or "") in RUN_WATCH_READY_STATUSES
 
 
 def _summarize_run(run: dict[str, Any]) -> str:
@@ -433,6 +493,81 @@ class BrowserDaemonRunStatusTool(Tool):
         return "## browser-debugging-daemon 运行详情\n\n" + _summarize_run(run)
 
 
+class BrowserDaemonWatchTool(Tool):
+    def __init__(self, client: BrowserDaemonClient) -> None:
+        self._client = client
+
+    @property
+    def name(self) -> str:
+        return "browser_daemon_watch"
+
+    @property
+    def description(self) -> str:
+        return (
+            "等待 browser-debugging-daemon 运行到完成、失败、中止或需要人工接管/回复的状态。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string"},
+                "timeout_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 300000,
+                    "default": 30000,
+                    "description": "最长等待毫秒数，0 表示只查询一次。",
+                },
+                "poll_interval_ms": {
+                    "type": "integer",
+                    "minimum": 200,
+                    "maximum": 10000,
+                    "default": 1500,
+                    "description": "轮询间隔毫秒数。",
+                },
+            },
+            "required": ["run_id"],
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        run_id = str(kwargs.get("run_id") or "").strip()
+        if not run_id:
+            return "❌ run_id 不能为空。"
+        timeout_ms = _normalize_int(
+            kwargs.get("timeout_ms", 30_000),
+            fallback=30_000,
+            minimum=0,
+            maximum=300_000,
+        )
+        poll_interval_ms = _normalize_int(
+            kwargs.get("poll_interval_ms", 1_500),
+            fallback=1_500,
+            minimum=200,
+            maximum=10_000,
+        )
+        try:
+            payload = await self._client.watch_run(
+                run_id,
+                timeout_ms=timeout_ms,
+                poll_interval_ms=poll_interval_ms,
+            )
+        except BrowserDaemonError as exc:
+            return f"❌ 等待运行失败：{exc}"
+
+        run = payload.get("run") or {}
+        watch = payload.get("watch") or {}
+        status_line = "已到达可处理状态" if not watch.get("timedOut") else "等待超时"
+        return (
+            f"## browser-debugging-daemon 运行等待：{status_line}\n\n"
+            f"{_summarize_run(run)}\n"
+            f"- 已等待：{watch.get('waitedMs', 0)}ms\n"
+            f"- 超时：{'是' if watch.get('timedOut') else '否'}\n"
+            f"- 可处理状态：{', '.join(watch.get('readyStatuses') or [])}"
+        )
+
+
 class _RunControlTool(Tool):
     endpoint_name = ""
     verb = ""
@@ -473,7 +608,7 @@ class _RunControlTool(Tool):
         return f"## {self.verb}完成\n\n" + _summarize_run(payload.get("run") or {})
 
     async def _execute_control(self, run_id: str, text: str) -> dict[str, Any]:
-        raise NotImplementedError
+        raise BrowserDaemonError("控制工具未配置执行端点。")
 
 
 class BrowserDaemonReplyTool(_RunControlTool):
@@ -525,6 +660,7 @@ def create_browser_daemon_tools(client: BrowserDaemonClient) -> list[Tool]:
         BrowserDaemonRunTool(client),
         BrowserDaemonListRunsTool(client),
         BrowserDaemonRunStatusTool(client),
+        BrowserDaemonWatchTool(client),
         BrowserDaemonReplyTool(client),
         BrowserDaemonResumeTool(client),
         BrowserDaemonAbortTool(client),

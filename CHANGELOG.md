@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.35] - 2026-06-01
+
+### Added
+- **Browser Daemon Watch 闭环** — 新增 `browser_daemon_watch` 工具和 `/bdaemon watch` CLI/TUI 入口，对齐外部 daemon MCP 的 `browser_task_watch` 能力，可等待运行到完成、失败、中止或人工接管/回复状态。
+
+### Fixed
+- **Browser Daemon 控制工具可用性** — 控制工具误注册时现在返回中文可控错误，不再暴露 `NotImplementedError`。
+
 ## [0.1.34] - 2026-06-01
 
 ### Added

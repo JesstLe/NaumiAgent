@@ -1104,7 +1104,7 @@ class NaumiApp(App):
                     "- `/browser-stop` — 停止浏览器\n"
                     "- `/browser-state` — 显示浏览器状态\n"
                     "- `/browser-screenshot` — 截取页面截图\n"
-                    "- `/bdaemon <子命令>` — 外部浏览器 daemon\n"
+                    "- `/bdaemon <子命令>` — 外部浏览器 daemon health/start/run/watch\n"
                     "- `/tasks` — 列出浏览器任务\n"
                     "- `/task <id>` — 查看任务详情\n"
                     "- `/task-reply <id> <指令>` — 回复等待中的任务\n"
@@ -2629,6 +2629,12 @@ class NaumiApp(App):
                         status.status_text = "用法: /bdaemon status <运行ID>"
                         return
                     await _execute("browser_daemon_run_status", run_id=parts[1])
+                case "watch":
+                    if len(parts) < 2:
+                        status.status_text = "用法: /bdaemon watch <运行ID> [超时毫秒]"
+                        return
+                    timeout_ms = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 30000
+                    await _execute("browser_daemon_watch", run_id=parts[1], timeout_ms=timeout_ms)
                 case "reply":
                     if len(parts) < 3:
                         status.status_text = "用法: /bdaemon reply <运行ID> <指令>"
@@ -2665,7 +2671,7 @@ class NaumiApp(App):
                     chat.mount(
                         Markdown(
                             "可用子命令：`health`、`start`、`dashboard`、`run`、"
-                            "`list`、`status`、`reply`、`resume`、`abort`、`manual`",
+                            "`list`、`status`、`watch`、`reply`、`resume`、`abort`、`manual`",
                             classes="agent-msg",
                         )
                     )
