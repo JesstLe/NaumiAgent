@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.58] - 2026-06-01
+
+### Changed
+- **Analysis ZKP 模块拆分** — 将 `/zkp` 的未验证输出检测、引用基础设施盘点、事实-证据缺口分析、验证层识别和可验证计算评分迁移到 `analysis_support.zkp`，主 `analysis.py` 保留工具编排、兼容入口与 LLM ZKP 增强路径。
+
 ## [0.1.57] - 2026-06-01
 
 ### Changed

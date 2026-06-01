@@ -2,6 +2,166 @@
 
 from __future__ import annotations
 
+import re
+
+from naumi_agent.tools import analysis_common
+
+UNVERIFIED_OUTPUT_PATTERNS = [
+    (r"return\s+(?:result|response|output|content|summary)", "直接返回 AI 输出 (无引用轨迹)"),
+    (
+        r"(?:result|answer|summary)\s*=\s*(?:await\s+)?(?:llm|model|router)",
+        "AI 输出赋值无验证层",
+    ),
+    (
+        r"(?:print|display|show|render)\s*\(\s*(?:result|response)",
+        "AI 输出直接展示 (无来源标注)",
+    ),
+    (r"json\.loads\s*\(\s*(?:result|response)", "AI 输出反序列化 (无结构验证)"),
+    (r"(?:summary|conclusion)\s*=\s*[^#\n]{0,50}$", "摘要赋值 (无引用来源)"),
+]
+
+CITATION_PATTERNS = [
+    (r"(?:source|reference|citation|cite)\s*[:=]", "引用/来源标注"),
+    (r"(?:line_no|lineno|location|offset)\s*[:=]", "行号/位置定位"),
+    (r"(?:chunk|document|file|page)_?id\s*[:=]", "文档/块 ID 引用"),
+    (r"\\?\[(\d+)\\?\]", "数字引用标记 [N]"),
+    (r"(?:provenance|origin|trace)\s*[:=]", "来源追溯字段"),
+    (r"(?:confidence|certainty|score)\s*[:=]", "置信度评分"),
+]
+
+CLAIM_GAP_PATTERNS = [
+    (r"(?:因此|所以|综上|可以看出|说明|证明)\s*", "无支撑的推理结论词"),
+    (r"(?:obviously|clearly|it is known|obviously)\s*", "无支撑的英文断言词"),
+    (r"(?:据统计|数据显示|研究表明)\s*(?!.*(?:来源|引用|http|ref))", "无引用的数据声称"),
+    (r"\d+(?:\.\d+)?%", "百分比数据 (需来源验证)"),
+    (r"(?:the\s+)?(?:result|output|answer)\s+is\s+", "直接陈述结论 (无推导过程)"),
+]
+
+VALIDATION_PATTERNS = [
+    (r"(?:verify|validate|cross.?check|corroborate)\s*\(", "交叉验证逻辑"),
+    (r"(?:spot.?check|sample|audit)\s*\(", "抽检验证"),
+    (r"(?:hash|checksum|digest)\s*[=<>]", "哈希校验"),
+    (r"(?:diff|compare|match)\s*\([^)]*(?:expected|baseline|golden)", "与基准比对"),
+    (r"(?:ground.?truth|reference|canonical)\s*", "真值/基准数据引用"),
+]
+
+
+def scan_zkp(target: str) -> str:
+    """Scan AI output traceability, citation infrastructure, and validators."""
+    findings: list[str] = []
+    source = analysis_common.read_sources(analysis_common.resolve_target(target))
+
+    if not source.strip():
+        return "⚠️ 未找到可分析的源代码。"
+
+    lines = source.split("\n")
+
+    findings.append("## 1. 未验证输出检测 (Unverified AI Outputs)")
+    unverified: list[tuple[str, int, str]] = []
+    for pattern, desc in UNVERIFIED_OUTPUT_PATTERNS:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line):
+                unverified.append((desc, index, line.strip()))
+
+    if unverified:
+        findings.append(f"- ⚠️ 发现 **{len(unverified)}** 处 AI 输出未经轨迹校验：")
+        for desc, line_no, line_text in unverified[:8]:
+            short = line_text[:70] + ("..." if len(line_text) > 70 else "")
+            findings.append(f"  - L{line_no}: {desc}")
+            findings.append(f"    `{short}`")
+    else:
+        findings.append("- ✅ AI 输出均经过验证层")
+    findings.append("")
+
+    findings.append("## 2. 引用基础设施 (Citation Infrastructure)")
+    citation_hits: dict[str, list[int]] = {}
+    for pattern, label in CITATION_PATTERNS:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line):
+                citation_hits.setdefault(label, []).append(index)
+
+    total_citations = sum(len(line_nos) for line_nos in citation_hits.values())
+    if citation_hits:
+        findings.append(
+            f"- 检测到 **{total_citations}** 处引用机制，"
+            f"**{len(citation_hits)}** 类："
+        )
+        for label, line_nos in sorted(
+            citation_hits.items(),
+            key=lambda item: -len(item[1]),
+        ):
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append("- ❌ 无任何引用机制 — AI 输出无法溯源")
+    findings.append("")
+
+    findings.append("## 3. 事实-证据缺口 (Claim-Fact Gaps)")
+    claim_gaps: list[tuple[str, int, str]] = []
+    for pattern, desc in CLAIM_GAP_PATTERNS:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                claim_gaps.append((desc, index, line.strip()))
+
+    if claim_gaps:
+        findings.append(f"- ⚠️ 发现 **{len(claim_gaps)}** 处可能是无支撑的事实声称：")
+        for desc, line_no, line_text in claim_gaps[:8]:
+            short = line_text[:70] + ("..." if len(line_text) > 70 else "")
+            findings.append(f"  - L{line_no}: {desc}")
+            findings.append(f"    `{short}`")
+        findings.append("- 🔴 这些声称需要引用轨迹来证明其真实性")
+    else:
+        findings.append("- ✅ 事实声称均有引用支撑")
+    findings.append("")
+
+    findings.append("## 4. 验证层 (Validation Layer)")
+    validation_hits: dict[str, list[int]] = {}
+    for pattern, label in VALIDATION_PATTERNS:
+        for index, line in enumerate(lines, 1):
+            if re.search(pattern, line, re.IGNORECASE):
+                validation_hits.setdefault(label, []).append(index)
+
+    if validation_hits:
+        total_val = sum(len(line_nos) for line_nos in validation_hits.values())
+        findings.append(
+            f"- 检测到 **{total_val}** 处验证机制，"
+            f"**{len(validation_hits)}** 类："
+        )
+        for label, line_nos in validation_hits.items():
+            findings.append(f"  - {label}: {len(line_nos)} 处")
+    else:
+        findings.append("- ❌ 无验证层 — 无法确认 AI 输出的真实性")
+    findings.append("")
+
+    citation_score = min(len(citation_hits) / 4.0, 1.0)
+    validation_score = min(len(validation_hits) / 3.0, 1.0)
+    unverified_penalty = min(len(unverified) * 0.1, 0.4)
+    claim_penalty = min(len(claim_gaps) * 0.05, 0.3)
+
+    zkp_score = (
+        citation_score * 0.35
+        + validation_score * 0.35
+        - unverified_penalty
+        - claim_penalty
+        + 0.3
+    )
+    zkp_score = max(0.0, min(1.0, zkp_score))
+
+    findings.append("## 5. 可验证计算评分 (Verifiability Score)")
+    findings.append(f"- **综合评分: {zkp_score:.0%}**")
+    findings.append(f"- 引用基础设施: {citation_score:.0%}")
+    findings.append(f"- 验证层完备度: {validation_score:.0%}")
+    findings.append(f"- 未验证输出扣分: -{unverified_penalty:.0%}")
+    findings.append(f"- 事实缺口扣分: -{claim_penalty:.0%}")
+
+    if zkp_score >= 0.7:
+        findings.append("- ✅ 具备较强的可验证性，AI 输出可溯源可校验")
+    elif zkp_score >= 0.4:
+        findings.append("- ⚠️ 部分具备可验证性，需加强引用和验证层")
+    else:
+        findings.append("- ❌ AI 输出几乎不可验证 — 建议引入引用轨迹树和交叉校验机制")
+
+    return "\n".join(findings)
+
 
 def build_zkp_trace_script(target: str) -> str:
     """Build a dependency-free citation/trace verifier."""
@@ -152,4 +312,3 @@ def build_zkp_report(target: str, scan_evidence: str) -> str:
         "3. 为数值/事实类 claim 增加 deterministic verifier。\n"
         "4. 将 trace JSON 固化为可验证计算回归样本。\n"
     )
-
