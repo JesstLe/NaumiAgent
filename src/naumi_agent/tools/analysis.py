@@ -19,6 +19,7 @@ from naumi_agent.tools.analysis_support import hook as _hook_support
 from naumi_agent.tools.analysis_support import probe as _probe_support
 from naumi_agent.tools.analysis_support import spar as _spar_support
 from naumi_agent.tools.analysis_support import vision as _vision_support
+from naumi_agent.tools.analysis_support import world as _world_support
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
@@ -39,8 +40,31 @@ _build_vision_inventory_script = _vision_support.build_vision_inventory_script
 _build_vision_report = _vision_support.build_vision_report
 _build_spar_harness_script = _spar_support.build_spar_harness_script
 _build_spar_report = _spar_support.build_spar_report
+_build_world_inventory_script = _world_support.build_world_inventory_script
+_build_world_report = _world_support.build_world_report
 
 # --- 各模式专用的静态扫描函数 ---
+
+
+def _read_sources_for_ast(files: list[Path], max_chars: int = 80000) -> str:
+    """Read source files with comment headers so AST parsing can still work."""
+    parts: list[str] = []
+    total = 0
+    for f in files:
+        try:
+            content = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        header = f"\n# file: {f}\n"
+        if total + len(header) + len(content) > max_chars:
+            remaining = max_chars - total
+            if remaining > len(header) + 200:
+                parts.append(header + content[: remaining - len(header)] + "\n# truncated")
+            break
+        parts.append(header + content)
+        total += len(header) + len(content)
+    return "".join(parts)
+
 
 def _format_static_scan_result(title: str, scan_evidence: str, files: list[Path]) -> str:
     return "\n".join(
@@ -5458,7 +5482,7 @@ def _scan_spar(target: str) -> str:
     """Scan code for adversarial self-play readiness — vulnerability surface,
     reward hacking risk, and nihilism detection."""
     findings: list[str] = []
-    source = _read_sources(_resolve_target(target))
+    source = _read_sources_for_ast(_resolve_target(target))
 
     if not source.strip():
         return "⚠️ 未找到可分析的源代码。"
@@ -5991,7 +6015,7 @@ def _scan_world(target: str) -> str:
     import ast as _ast
 
     findings: list[str] = []
-    source = _read_sources(target)
+    source = _read_sources_for_ast(_resolve_target(target))
 
     if not source.strip():
         return "⚠️ 未找到可分析的源代码。"
@@ -6271,15 +6295,20 @@ class WorldModelTool(Tool):
     async def execute(
         self, *, target: str, **kwargs: Any,
     ) -> str:
+        scan_evidence = _scan_world(target)
+        deterministic = _build_world_report(target, scan_evidence)
+
         router = _global_router
         if router is None:
-            return _router_unavailable("world", target[:200])
-        scan_evidence = _scan_world(target)
+            return deterministic + "\n\n模型路由未初始化，已返回确定性世界模型审计。"
+
         user_msg = (
             f"## 审计目标\n{target}\n\n"
             f"## 世界模型扫描报告\n{scan_evidence}\n"
+            f"\n## 确定性世界模型审计\n{deterministic}\n"
         )
-        return await _run_analysis(router, _WORLD_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _WORLD_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM World 增强\n" + enhanced
 
 
 # ===========================================================================
