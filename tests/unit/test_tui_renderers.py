@@ -67,3 +67,27 @@ def test_recovery_renderer_escapes_markup_sensitive_text() -> None:
     renderer.render(msg, chat, FakeStatus(), FakeTodo())
 
     assert len(chat.mounted) == 1
+
+
+def test_tui_renderer_skips_duplicate_message_id() -> None:
+    adapter = EngineEventAdapter()
+    renderer = TUIRenderer()
+    chat = FakeChat()
+    msg = adapter.adapt(
+        "recovery_event",
+        {
+            "phase": "started",
+            "action": "compact",
+            "reason": "context",
+            "before": "10",
+            "after": "5",
+            "unit": "messages",
+        },
+    )
+    assert msg is not None
+
+    renderer.render(msg, chat, FakeStatus(), FakeTodo())
+    renderer.render(msg, chat, FakeStatus(), FakeTodo())
+
+    assert len(chat.mounted) == 1
+    assert renderer.cache_stats().hits == 1

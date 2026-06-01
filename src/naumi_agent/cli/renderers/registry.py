@@ -37,6 +37,7 @@ from naumi_agent.ui.messages.events import (
     ToolUseMessage,
     UserMessage,
 )
+from naumi_agent.ui.render_cache import RenderCacheStats, RenderLRUCache, message_render_cache_key
 
 # Separator helpers (matching existing main.py style)
 _SEP_THIN = "─"
@@ -312,13 +313,23 @@ class CLIRenderer:
             cli.append_live(text)
     """
 
-    def __init__(self) -> None:
+    _NONE_SENTINEL = "<__naumi_none__>"
+
+    def __init__(self, *, cache_size: int = 2_048) -> None:
         self._registry: dict[MessageType, _RendererFunc] = {}
+        self._cache: RenderLRUCache[tuple[str, str], str] = RenderLRUCache(cache_size)
         self._register_defaults()
 
     def register(self, msg_type: MessageType, fn: _RendererFunc) -> None:
         """Register or override a renderer for a message type."""
         self._registry[msg_type] = fn
+        self._cache.clear()
+
+    def clear_cache(self) -> None:
+        self._cache.clear()
+
+    def cache_stats(self) -> RenderCacheStats:
+        return self._cache.stats()
 
     def render(self, msg: UIMessage) -> str | None:
         """Render a UIMessage to ANSI text.
@@ -328,7 +339,13 @@ class CLIRenderer:
         fn = self._registry.get(msg.type)
         if fn is None:
             return None
-        return fn(msg)
+        key = message_render_cache_key(msg)
+        cached = self._cache.get(key)
+        if cached is not None:
+            return None if cached == self._NONE_SENTINEL else cached
+        rendered = fn(msg)
+        self._cache.set(key, self._NONE_SENTINEL if rendered is None else rendered)
+        return rendered
 
     def _register_defaults(self) -> None:
         """Register the default set of renderers."""
