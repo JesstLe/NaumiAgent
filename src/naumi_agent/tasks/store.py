@@ -441,8 +441,9 @@ def format_task_list(tasks: list[Task], all_tasks: list[Task] | None = None) -> 
 
         blocked = t.is_blocked(reference)
         block_suffix = f" (blocked by #{', #'.join(t.blocked_by)})" if blocked else ""
+        owner_suffix = f" [{t.owner}]" if t.owner else ""
 
-        line = f" {icon} #{t.id} {subject}{block_suffix}"
+        line = f" {icon} #{t.id} {subject}{owner_suffix}{block_suffix}"
         if t.status == TaskStatus.COMPLETED:
             line = f"~~{line}~~"
         lines.append(line)

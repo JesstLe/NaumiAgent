@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
+from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.worktree.manager import WorktreeManager
 from naumi_agent.worktree.models import WorktreeStatus
@@ -103,9 +104,35 @@ class TestWorktreeManager:
 
         created = await manager.create("task-bound", task_id=task.id)
         assert "绑定任务：#1" in created
+        updated = await store.get_task(task.id)
+        assert updated is not None
+        assert updated.status == TaskStatus.IN_PROGRESS
+        assert updated.owner == "worktree:task-bound"
+        assert "在隔离 worktree `task-bound` 中推进" in (updated.active_form or "")
 
         missing = await manager.bind_task("task-bound", "999")
         assert "不存在" in missing
+
+    @pytest.mark.asyncio
+    async def test_bind_task_rejects_completed_task(
+        self,
+        git_repo: Path,
+        tmp_path: Path,
+    ) -> None:
+        store = TaskStore(str(tmp_path / "tasks.db"))
+        store.set_session("session-1")
+        task = await store.create_task(subject="已完成任务")
+        await store.update_task(task.id, status=TaskStatus.COMPLETED)
+        manager = WorktreeManager(
+            repo_root=git_repo,
+            storage_dir=tmp_path / "worktrees",
+            task_store=store,
+        )
+
+        result = await manager.create("done-task", task_id=task.id)
+
+        assert "已完成" in result
+        assert not (tmp_path / "worktrees" / "done-task").exists()
 
     @pytest.mark.asyncio
     async def test_create_with_task_without_session_returns_clear_error(

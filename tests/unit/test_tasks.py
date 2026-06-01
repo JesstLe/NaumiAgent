@@ -421,6 +421,24 @@ class TestTodoCommand:
         assert tasks[0].status == TaskStatus.COMPLETED
 
 
+class TestTaskFormatting:
+    @pytest.mark.asyncio
+    async def test_format_task_list_shows_owner(self, store: TaskStore) -> None:
+        task = await store.create_task(subject="隔离实现")
+        await store.update_task(
+            task.id,
+            status=TaskStatus.IN_PROGRESS,
+            active_form="在隔离 worktree `demo` 中推进",
+            owner="worktree:demo",
+        )
+        tasks = await store.list_tasks()
+
+        output = format_task_list(tasks)
+
+        assert "worktree:demo" in output
+        assert "在隔离 worktree `demo` 中推进" in output
+
+
 class TestDanglingReference:
     def test_is_blocked_with_dangling_reference(self) -> None:
         # dangling reference: task claims to be blocked by "99" which doesn't exist
