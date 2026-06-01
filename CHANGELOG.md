@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.36] - 2026-06-01
+
+### Changed
+- **Analysis 熵减模块拆分** — 将 `/entropy` 的确定性扫描、句子去重和三句锚点构造迁移到 `analysis_support.entropy`，主 `analysis.py` 继续保留兼容别名与 Tool 编排。
+
 ## [0.1.35] - 2026-06-01
 
 ### Added

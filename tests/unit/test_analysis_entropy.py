@@ -9,19 +9,21 @@ import pytest
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.tools.analysis import (
     EntropyValveTool,
-    _build_entropy_anchor,
-    _scan_entropy,
 )
+from naumi_agent.tools.analysis import _build_entropy_anchor as analysis_entropy_anchor
+from naumi_agent.tools.analysis import _scan_entropy as analysis_scan_entropy
+from naumi_agent.tools.analysis_support.entropy import build_entropy_anchor, scan_entropy
 
 
 class TestEntropyAnchor:
     def test_scan_entropy_reports_critical_for_repeated_context(self) -> None:
         repeated = "目标是修复工具。目标是修复工具。目标是修复工具。"
 
-        scan = _scan_entropy("", repeated)
+        scan = scan_entropy("", repeated)
 
         assert "语义重复率" in scan
         assert "CRITICAL" in scan
+        assert analysis_scan_entropy("", repeated) == scan
 
     def test_build_entropy_anchor_uses_goal_and_verified_facts(self) -> None:
         context = (
@@ -29,16 +31,17 @@ class TestEntropyAnchor:
             "下一步需要把 prompt 包装工具落地。"
         )
 
-        anchor = _build_entropy_anchor(context, goal="对齐 Claude Code 成熟能力")
+        anchor = build_entropy_anchor(context, goal="对齐 Claude Code 成熟能力")
 
         assert "## 熵减锚点" in anchor
         assert "核心任务：对齐 Claude Code 成熟能力" in anchor
         assert "测试通过" in anchor
         assert "下一步需要" in anchor
         assert "重启协议" in anchor
+        assert analysis_entropy_anchor(context, goal="对齐 Claude Code 成熟能力") == anchor
 
     def test_build_entropy_anchor_falls_back_without_relevant_keywords(self) -> None:
-        anchor = _build_entropy_anchor("这是一段很长但是没有明确执行语义的背景材料" * 12)
+        anchor = build_entropy_anchor("这是一段很长但是没有明确执行语义的背景材料" * 12)
 
         assert "当前目标需要继续推进" in anchor
         assert "当前没有可确认的验证事实" in anchor
