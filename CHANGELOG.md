@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.47] - 2026-06-01
+
+### Changed
+- **Analysis Speculate 模块拆分** — 将 `/speculate` 的样板代码识别、高风险区域扫描、文件复杂度分布和双阶段审查报告迁移到 `analysis_support.speculate`，主 `analysis.py` 保留工具编排与 LLM 推测解码增强路径。
+
 ## [0.1.46] - 2026-06-01
 
 ### Fixed
