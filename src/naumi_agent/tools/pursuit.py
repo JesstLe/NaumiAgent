@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 from naumi_agent.orchestrator.pursuit import GoalPursuitLoop, PursuitConfig
 from naumi_agent.orchestrator.pursuit_store import format_run, format_run_list
-from naumi_agent.tools.base import Tool
+from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
 _global_pursuit_loop: GoalPursuitLoop | None = None
+MAX_PURSUIT_GOAL_CHARS = 8_000
+PURSUIT_RUN_ID_RE = re.compile(r"^[a-zA-Z0-9_.:-]{1,128}$")
 
 
 def set_pursuit_dependencies(
@@ -31,6 +34,24 @@ def set_pursuit_dependencies(
     )
 
 
+def _normalize_goal(goal: Any) -> str:
+    text = str(goal or "").strip()
+    if not text:
+        raise ValueError("目标不能为空。")
+    if len(text) > MAX_PURSUIT_GOAL_CHARS:
+        raise ValueError(f"目标过长，最多 {MAX_PURSUIT_GOAL_CHARS} 个字符。")
+    return text
+
+
+def _normalize_run_id(run_id: Any) -> str:
+    text = str(run_id or "").strip()
+    if not text:
+        raise ValueError("run_id 不能为空。")
+    if not PURSUIT_RUN_ID_RE.fullmatch(text):
+        raise ValueError("run_id 只能包含字母、数字、下划线、点、冒号或连字符。")
+    return text
+
+
 class PursueTool(Tool):
     """目标追踪循环 — 自主运行直至目标真正达成."""
 
@@ -44,6 +65,15 @@ class PursueTool(Tool):
             "目标追踪：给定一个目标，自主循环执行（规划→行动→验证→评估）"
             "直到目标真正达成。适合需要长时间迭代、反复验证的复杂任务。"
             "Agent 会反复调用工具、评估进度、发现不足、调整策略。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            user_facing_name="追踪目标",
+            search_hint="pursuit goal autonomous loop plan act verify long running",
         )
 
     @property
@@ -65,6 +95,11 @@ class PursueTool(Tool):
         goal: str,
         **kwargs: Any,
     ) -> str:
+        try:
+            normalized_goal = _normalize_goal(goal)
+        except ValueError as e:
+            return f"⚠️ 目标追踪输入无效：{e}"
+
         loop = _global_pursuit_loop
         if loop is None:
             return (
@@ -84,7 +119,7 @@ class PursueTool(Tool):
         )
 
         try:
-            report = await pursuit.pursue(goal)
+            report = await pursuit.pursue(normalized_goal)
             return report
         except asyncio.CancelledError:
             pursuit.cancel()
@@ -104,6 +139,15 @@ class PursuitListTool(Tool):
     @property
     def description(self) -> str:
         return "列出持久化的目标追踪运行，默认包含已完成记录。"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="目标追踪列表",
+            search_hint="pursuit list runs persisted active status",
+        )
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -138,6 +182,15 @@ class PursuitStatusTool(Tool):
         return "查看一个目标追踪运行的状态、等待任务和最近证据。"
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="目标追踪状态",
+            search_hint="pursuit status run evidence waiting",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -146,12 +199,17 @@ class PursuitStatusTool(Tool):
         }
 
     async def execute(self, *, run_id: str, **kwargs: Any) -> str:
+        try:
+            normalized_run_id = _normalize_run_id(run_id)
+        except ValueError as e:
+            return f"错误：{e}"
+
         loop = _global_pursuit_loop
         if loop is None:
             return "⚠️ 目标追踪工具尚未初始化。"
-        run = loop.get_persisted_run(run_id)
+        run = loop.get_persisted_run(normalized_run_id)
         if run is None:
-            return f"错误：目标追踪运行不存在：{run_id}"
+            return f"错误：目标追踪运行不存在：{normalized_run_id}"
         return format_run(run)
 
 
@@ -167,6 +225,15 @@ class PursuitResumeTool(Tool):
         return "恢复一个持久化目标追踪运行，并回收已完成后台任务的输出证据。"
 
     @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            user_facing_name="恢复目标追踪",
+            search_hint="pursuit resume persisted run background evidence",
+        )
+
+    @property
     def parameters_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -175,10 +242,15 @@ class PursuitResumeTool(Tool):
         }
 
     async def execute(self, *, run_id: str, **kwargs: Any) -> str:
+        try:
+            normalized_run_id = _normalize_run_id(run_id)
+        except ValueError as e:
+            return f"错误：{e}"
+
         loop = _global_pursuit_loop
         if loop is None:
             return "⚠️ 目标追踪工具尚未初始化。"
-        return await loop.resume_persisted(run_id)
+        return await loop.resume_persisted(normalized_run_id)
 
 
 def create_pursuit_tool() -> list[Tool]:

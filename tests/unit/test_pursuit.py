@@ -22,6 +22,12 @@ from naumi_agent.orchestrator.pursuit import (
 )
 from naumi_agent.orchestrator.pursuit_store import PursuitStore, format_run
 from naumi_agent.orchestrator.subagent_manager import SubAgentManager
+from naumi_agent.tools.pursuit import (
+    PursueTool,
+    PursuitListTool,
+    PursuitResumeTool,
+    PursuitStatusTool,
+)
 
 
 def _make_engine() -> AgentEngine:
@@ -619,11 +625,19 @@ class TestPursueToolRegistration:
         assert engine.tool_registry.get("pursuit_resume") is not None
         assert hasattr(engine, "pursuit_store")
 
+    def test_pursuit_tools_expose_permission_metadata(self) -> None:
+        assert PursueTool().metadata.requires_confirmation is True
+        assert PursueTool().metadata.destructive is True
+        assert PursuitListTool().metadata.read_only is True
+        assert PursuitListTool().metadata.concurrency_safe is True
+        assert PursuitStatusTool().metadata.read_only is True
+        assert PursuitResumeTool().metadata.requires_confirmation is True
+        assert PursuitResumeTool().metadata.destructive is True
+
     @pytest.mark.asyncio
     async def test_tool_execute_without_init(self) -> None:
         # Reset global
         import naumi_agent.tools.pursuit as pursuit_mod
-        from naumi_agent.tools.pursuit import PursueTool
         pursuit_mod._global_pursuit_loop = None
 
         tool = PursueTool()
@@ -631,9 +645,24 @@ class TestPursueToolRegistration:
         assert "尚未初始化" in result
 
     @pytest.mark.asyncio
+    async def test_pursue_tool_rejects_invalid_goal(self) -> None:
+        result = await PursueTool().execute(goal="   ")
+        assert "目标不能为空" in result
+
+        result = await PursueTool().execute(goal="x" * 8001)
+        assert "目标过长" in result
+
+    @pytest.mark.asyncio
+    async def test_run_id_tools_reject_invalid_run_id(self) -> None:
+        status = await PursuitStatusTool().execute(run_id="bad id")
+        resume = await PursuitResumeTool().execute(run_id="bad id")
+
+        assert "run_id 只能包含" in status
+        assert "run_id 只能包含" in resume
+
+    @pytest.mark.asyncio
     async def test_pursuit_status_tool_reads_store(self, tmp_path) -> None:
         import naumi_agent.tools.pursuit as pursuit_mod
-        from naumi_agent.tools.pursuit import PursuitStatusTool
 
         store = PursuitStore(tmp_path / "pursuit")
         now = time.time()

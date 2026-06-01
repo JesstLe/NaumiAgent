@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.69] - 2026-06-01
+
+### Changed
+- **Pursuit 工具边界加固** — 为 `pursue_goal`、`pursuit_list`、`pursuit_status` 和 `pursuit_resume` 增加只读/需确认/状态变更元数据，并为目标文本和持久化运行 ID 增加确定性输入校验，使长循环目标追踪能力具备更清晰的 Agent 自主调用边界。
+
 ## [0.1.68] - 2026-06-01
 
 ### Changed
