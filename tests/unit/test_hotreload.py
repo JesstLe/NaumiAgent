@@ -6,6 +6,7 @@ import pytest
 from naumi_agent.tools.hotreload import (
     HotReloadTool,
     _is_protected,
+    _normalize_reload_target,
     _resolve_modules,
     list_reloadable,
     reload_domain,
@@ -49,6 +50,12 @@ class TestResolveModules:
         modules = _resolve_modules("tools")
         assert "naumi_agent.tools.builtin" in modules
         assert "naumi_agent.tools.analysis" in modules
+        assert "naumi_agent.tools.self_modify" in modules
+        assert "naumi_agent.tools.self_evolve" in modules
+        assert "naumi_agent.tools.forge" in modules
+        assert "naumi_agent.tools.analysis_support.watchdog" in modules
+        assert "naumi_agent.tools.hotreload" not in modules
+        assert "naumi_agent.tools.base" not in modules
 
     def test_memory_domain(self):
         modules = _resolve_modules("memory")
@@ -62,6 +69,29 @@ class TestResolveModules:
     def test_single_module(self):
         modules = _resolve_modules("naumi_agent.tools.web")
         assert modules == ["naumi_agent.tools.web"]
+
+    def test_rejects_non_agent_module(self):
+        with pytest.raises(ValueError, match="naumi_agent"):
+            _resolve_modules("os")
+
+
+class TestNormalizeReloadTarget:
+    def test_accepts_domain(self):
+        assert _normalize_reload_target(" tools ") == "tools"
+
+    def test_accepts_agent_module(self):
+        assert (
+            _normalize_reload_target("naumi_agent.tools.web")
+            == "naumi_agent.tools.web"
+        )
+
+    def test_rejects_empty(self):
+        with pytest.raises(ValueError, match="不能为空"):
+            _normalize_reload_target("")
+
+    def test_rejects_invalid_module_format(self):
+        with pytest.raises(ValueError, match="格式无效"):
+            _normalize_reload_target("naumi_agent.tools.bad-name")
 
 
 class TestReloadModule:
@@ -84,7 +114,11 @@ class TestReloadModule:
 
     def test_reload_invalid_module(self):
         result = reload_module("not_a_real_module_at_all")
-        assert result["status"] in ("error", "not_found")
+        assert result["status"] == "rejected"
+
+    def test_rejects_domain_target(self):
+        result = reload_module("tools")
+        assert result["status"] == "rejected"
 
 
 class TestReloadDomain:
@@ -115,6 +149,8 @@ class TestListReloadable:
     def test_tools_has_key_modules(self):
         domains = list_reloadable()
         assert "naumi_agent.tools.analysis" in domains["tools"]
+        assert "naumi_agent.tools.self_evolve" in domains["tools"]
+        assert "naumi_agent.tools.analysis_support.watchdog" in domains["tools"]
 
 
 class TestHotReloadTool:
@@ -129,6 +165,12 @@ class TestHotReloadTool:
         schema = HotReloadTool().parameters_schema
         assert "target" in schema["properties"]
         assert "target" in schema["required"]
+
+    def test_metadata_marks_hot_reload_as_confirmed_state_change(self):
+        metadata = HotReloadTool().metadata
+        assert metadata.destructive is True
+        assert metadata.requires_confirmation is True
+        assert metadata.user_facing_name == "热重载"
 
     @pytest.mark.asyncio
     @pytest.mark.skip(reason="mutates global module state, run separately")
@@ -150,3 +192,9 @@ class TestHotReloadTool:
         tool = HotReloadTool()
         result = await tool.execute(target="naumi_agent.orchestrator.engine")
         assert "受保护" in result or "protected" in result.lower() or "禁止" in result
+
+    @pytest.mark.asyncio
+    async def test_execute_rejects_invalid_target(self):
+        tool = HotReloadTool()
+        result = await tool.execute(target="os")
+        assert "已拒绝" in result or "naumi_agent" in result
