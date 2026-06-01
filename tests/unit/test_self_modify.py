@@ -190,14 +190,18 @@ class TestRunTests:
 
 
 class TestCreateGitBackup:
-    def test_backup_success(self):
+    def test_backup_success(self, tmp_path: Path):
+        source = tmp_path / "file.py"
+        source.write_text("x = 1\n", encoding="utf-8")
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            ref = _create_git_backup(Path("some/file.py"))
-            assert ref == "stash@{0}"
+            mock_run.return_value = MagicMock(returncode=0, stdout="abc123\n")
+            ref = _create_git_backup(source)
+            assert ref == "blob:abc123"
+            assert mock_run.call_args.args[0] == ["git", "hash-object", "-w", "--stdin"]
+            assert mock_run.call_args.kwargs["input"] == "x = 1\n"
 
     def test_backup_failure(self):
-        with patch("subprocess.run", side_effect=FileNotFoundError):
+        with patch("pathlib.Path.read_text", side_effect=FileNotFoundError):
             ref = _create_git_backup(Path("some/file.py"))
             assert ref is None
 
