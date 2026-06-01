@@ -11,11 +11,14 @@ from hashlib import sha1
 from pathlib import Path
 from typing import Any
 
-from naumi_agent.tools.base import Tool
+from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
 _GENERATED_DIR = Path(__file__).resolve().parent / "generated"
+MAX_FORGE_DESCRIPTION_CHARS = 4_000
+MAX_FORGE_CODE_CHARS = 200_000
+_SAFE_TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 _TOOL_GENERATION_SYSTEM = textwrap.dedent("""\
     你是 Agent 工具锻造系统。根据用户描述生成完整的 Python 工具代码。
@@ -58,6 +61,53 @@ def _sanitize_tool_name(raw: str, fallback: str = "custom_tool") -> str:
     name = "_".join(word.lower() for word in words[:4])
     name = re.sub(r"_+", "_", name).strip("_")
     return name or fallback
+
+
+def _normalize_tool_name(raw: Any, *, field_name: str = "tool_name") -> str:
+    """Normalize a public tool name into a safe generated file stem."""
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError(f"{field_name} 不能为空，且必须是字符串。")
+
+    normalized = raw.strip().replace("-", "_")
+    if not _SAFE_TOOL_NAME_RE.fullmatch(normalized):
+        raise ValueError(
+            f"{field_name} 只能包含小写字母、数字和下划线，"
+            "长度最多 64 个字符，且必须以小写字母开头。"
+        )
+    return normalized
+
+
+def _normalize_forge_inputs(
+    description: Any,
+    tool_name: Any | None,
+    llm_output: Any | None,
+) -> tuple[str, str | None, str | None]:
+    """Validate public forge inputs before any code generation or file write."""
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("description 不能为空，且必须是字符串。")
+    description = description.strip()
+    if len(description) > MAX_FORGE_DESCRIPTION_CHARS:
+        raise ValueError(
+            "description 过长，当前上限为 "
+            f"{MAX_FORGE_DESCRIPTION_CHARS} 个字符。"
+        )
+
+    safe_tool_name = (
+        _normalize_tool_name(tool_name)
+        if tool_name is not None
+        else None
+    )
+
+    if llm_output is None:
+        return description, safe_tool_name, None
+    if not isinstance(llm_output, str) or not llm_output.strip():
+        raise ValueError("llm_output 必须是非空字符串，或直接省略以使用确定性脚手架。")
+    if len(llm_output) > MAX_FORGE_CODE_CHARS:
+        raise ValueError(
+            "llm_output 过大，当前上限为 "
+            f"{MAX_FORGE_CODE_CHARS} 个字符。"
+        )
+    return description, safe_tool_name, llm_output
 
 
 def _description_keywords(description: str, limit: int = 12) -> list[str]:
@@ -295,7 +345,15 @@ def _import_test(code: str, class_name: str) -> tuple[bool, str]:
         if not hasattr(tool_instance, "execute"):
             return False, "实例缺少 execute 方法"
 
-        return True, tool_instance.name
+        try:
+            safe_name = _normalize_tool_name(
+                tool_instance.name,
+                field_name="生成工具实例名",
+            )
+        except ValueError as e:
+            return False, str(e)
+
+        return True, safe_name
     except Exception as e:
         return False, str(e)
     finally:
@@ -312,9 +370,12 @@ def save_tool(tool_name: str, code: str) -> Path:
     Returns:
         Path to the saved file.
     """
-    generated_dir = get_generated_dir()
-    file_name = f"{tool_name.replace('-', '_')}.py"
-    file_path = generated_dir / file_name
+    safe_name = _normalize_tool_name(tool_name)
+    generated_dir = get_generated_dir().resolve()
+    file_name = f"{safe_name}.py"
+    file_path = (generated_dir / file_name).resolve()
+    if file_path.parent != generated_dir:
+        raise ValueError("工具文件路径越界，已拒绝写入。")
     file_path.write_text(code, encoding="utf-8")
     return file_path
 
@@ -328,7 +389,11 @@ def load_generated_tool(tool_name: str) -> Tool | None:
     Returns:
         Tool instance or None if not found.
     """
-    file_name = f"{tool_name.replace('-', '_')}.py"
+    try:
+        safe_name = _normalize_tool_name(tool_name)
+    except ValueError:
+        return None
+    file_name = f"{safe_name}.py"
     file_path = get_generated_dir() / file_name
 
     if not file_path.exists():
@@ -348,7 +413,7 @@ def load_generated_tool(tool_name: str) -> Tool | None:
         import importlib.util
 
         spec = importlib.util.spec_from_file_location(
-            f"naumi_agent.tools.generated.{tool_name}",
+            f"naumi_agent.tools.generated.{safe_name}",
             str(file_path),
         )
         if spec is None or spec.loader is None:
@@ -361,7 +426,9 @@ def load_generated_tool(tool_name: str) -> Tool | None:
         if tool_class is None:
             return None
 
-        return tool_class()
+        tool = tool_class()
+        _normalize_tool_name(tool.name, field_name="生成工具实例名")
+        return tool
     except Exception as e:
         logger.warning("Failed to load generated tool %s: %s", tool_name, e)
         return None
@@ -417,7 +484,11 @@ def remove_generated_tool(tool_name: str) -> bool:
     Returns:
         True if the file was removed.
     """
-    file_name = f"{tool_name.replace('-', '_')}.py"
+    try:
+        safe_name = _normalize_tool_name(tool_name)
+    except ValueError:
+        return False
+    file_name = f"{safe_name}.py"
     file_path = get_generated_dir() / file_name
 
     if not file_path.exists():
@@ -471,6 +542,20 @@ def forge_tool(
     Returns:
         Dict with status, tool_name, validation results.
     """
+    try:
+        description, tool_name, llm_output = _normalize_forge_inputs(
+            description,
+            tool_name,
+            llm_output,
+        )
+    except ValueError as e:
+        return {
+            "status": "rejected",
+            "tool_name": tool_name if isinstance(tool_name, str) else None,
+            "error": str(e),
+            "code": "",
+        }
+
     # 1. Extract code
     deterministic = llm_output is None
     code = (
@@ -486,13 +571,22 @@ def forge_tool(
         if not name_match:
             name_match = re.search(r"return\s+f?'(\w+)'", code)
         if name_match:
-            tool_name = name_match.group(1)
+            try:
+                tool_name = _normalize_tool_name(
+                    name_match.group(1),
+                    field_name="生成代码中的工具名",
+                )
+            except ValueError as e:
+                return {
+                    "status": "rejected",
+                    "tool_name": None,
+                    "error": str(e),
+                    "code": code,
+                }
         else:
-            # Generate from description
-            words = re.findall(r"[a-zA-Z一-鿿]+", description)
-            tool_name = (
-                "_".join(w.lower() for w in words[:3] if w.isascii())
-                or "custom_tool"
+            tool_name = _normalize_tool_name(
+                _sanitize_tool_name(description),
+                field_name="自动生成的工具名",
             )
 
     # 3. Validate
@@ -524,7 +618,15 @@ def forge_tool(
         logger.info("Overwriting existing generated tool: %s", tool_name)
 
     # 6. Save
-    file_path = save_tool(tool_name, code)
+    try:
+        file_path = save_tool(tool_name, code)
+    except ValueError as e:
+        return {
+            "status": "rejected",
+            "tool_name": tool_name,
+            "error": str(e),
+            "code": code,
+        }
 
     logger.info("Forged new tool: %s at %s", tool_name, file_path)
     return {
@@ -551,6 +653,15 @@ class ForgeTool(Tool):
             "工具锻造 — 根据描述自动生成新的工具并注册。"
             "Agent 可以自主扩展自身能力，无需人工编码。"
             "生成的工具经过语法检查、接口验证、实例化测试后保存到磁盘并立即生效。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            user_facing_name="工具锻造",
+            search_hint="生成工具 写入磁盘 验证 Python Tool hot reload",
         )
 
     @property
