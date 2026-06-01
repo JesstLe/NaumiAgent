@@ -87,6 +87,10 @@ uv run naumi-ui-bridge --config config.yaml
 
 - `frontend/terminal-ui/package.json`
 - `frontend/terminal-ui/src/index.js`
+- `frontend/terminal-ui/src/protocol.js`
+- `frontend/terminal-ui/src/state.js`
+- `frontend/terminal-ui/src/render.js`
+- `frontend/terminal-ui/src/ansi.js`
 
 启动：
 
@@ -114,5 +118,6 @@ npm --prefix frontend/terminal-ui start -- --config config.yaml
 
 - `/resume` 目前是消息级 replay，尚未恢复滚动位置、折叠展开状态和工具卡内部 UI 状态。
 - 新前端是轻依赖原型，尚未迁入完整 Ink/pi-tui 组件体系。
-- 工具调用卡片目前按 tool name 关联结果；后端 typed UI message 还需要补充稳定 `tool_call_id`。
+- 前端状态、协议、渲染已经拆分为可测试模块，但还不是完整 Ink/pi-tui 组件树。
+- 工具调用卡片已优先通过稳定 `tool_call_id` 关联结果，缺失时才回退到 tool name。
 - 代码高亮是内置轻量关键词高亮，不等价于 Pygments/Tree-sitter。
