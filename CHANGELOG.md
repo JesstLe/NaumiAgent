@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.43] - 2026-06-01
+
+### Changed
+- **Analysis GraphRAG 模块拆分** — 将 `/graph` 的 AST 实体关系抽取、循环依赖检测、连通分量和度中心性统计迁移到 `analysis_support.graph`，主 `analysis.py` 保留工具编排与 LLM 图谱推演路径。
+
+## [0.1.42] - 2026-06-01
+
+### Changed
+- **Analysis 静态基础模块拆分** — 将 `/chaos`、`/scale`、`/state` 的基础静态扫描、AST 源码读取和通用扫描报告格式化迁移到 `analysis_support.static_modes`，主 `analysis.py` 保留工具编排与 LLM 增强路径。
+
 ## [0.1.41] - 2026-06-01
 
 ### Changed
