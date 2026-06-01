@@ -1850,6 +1850,10 @@ def _scan_graph(files: list[Path], source_text: str) -> str:
             tree = _ast.parse(f.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:
             continue
+        for parent in _ast.walk(tree):
+            for child in _ast.iter_child_nodes(parent):
+                if isinstance(parent, _ast.ClassDef):
+                    setattr(child, "parent", parent.name)
 
         # 1. Extract class nodes + inheritance edges
         for node in _ast.walk(tree):
@@ -2004,6 +2008,17 @@ def _scan_graph(files: list[Path], source_text: str) -> str:
     return "\n".join(findings)
 
 
+def _format_graph_report(scan_evidence: str, files: list[Path]) -> str:
+    return "\n".join(
+        [
+            "## GraphRAG 静态图谱",
+            f"- 扫描文件数：{len(files)}",
+            "",
+            scan_evidence,
+        ]
+    )
+
+
 _GRAPH_SYSTEM = """\
 You are a GraphRAG (Graph-based Retrieval Augmented Generation) analyst.
 
@@ -2083,10 +2098,6 @@ class GraphRAGTool(Tool):
     async def execute(
         self, *, target: str = "", **kwargs: Any,
     ) -> str:
-        router = _global_router
-        if router is None:
-            return _router_unavailable("graph", target)
-
         if not target:
             target = str(Path.cwd())
         files = _resolve_target(target)
@@ -2095,13 +2106,19 @@ class GraphRAGTool(Tool):
 
         source_text = _read_sources(files)
         scan_evidence = _scan_graph(files, source_text)
+        deterministic = _format_graph_report(scan_evidence, files)
+
+        router = _global_router
+        if router is None:
+            return deterministic + "\n\n模型路由未初始化，已返回静态图谱扫描结果。"
 
         user_msg = (
             f"## 图谱扫描证据\n{scan_evidence}\n\n"
             f"## 源代码\n{source_text[:50000]}\n"
         )
 
-        return await _run_analysis(router, _GRAPH_SYSTEM, user_msg)
+        enhanced = await _run_analysis(router, _GRAPH_SYSTEM, user_msg)
+        return deterministic + "\n\n## LLM 图谱推演\n" + enhanced
 
 
 # ===========================================================================

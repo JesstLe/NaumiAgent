@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2026-06-01
+
+### Changed
+- **GraphRAG 工具确定性落地** — `/graph` 在模型路由未初始化时也会返回实体节点、关系边、循环依赖、连通分量和度中心性扫描结果；模型可用时再追加 LLM 图谱推演。
+- **GraphRAG 方法归属修复** — AST 图扫描现在会把类方法标记为 `module:Class.method`，避免方法节点丢失所属类上下文。
+
 ## [0.1.3] - 2026-06-01
 
 ### Added
