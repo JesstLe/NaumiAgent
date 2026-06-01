@@ -6,17 +6,17 @@ import { ToolCard } from "./tool-card.js";
 export function Message({ message }) {
   return {
     render(ctx) {
-      return renderMessage(message, ctx.width);
+      return renderMessage(message, ctx.width, ctx);
     },
   };
 }
 
-export function renderMessage(message, width) {
+export function renderMessage(message, width, ctx = { width }) {
   if (message.kind === "user") {
     return ["", `${color(ANSI.green, ">")} ${message.content}`];
   }
   if (message.kind === "assistant") {
-    return ["", ...renderComponent(MarkdownExcerpt({ text: message.content, foldKey: `message:${message.id ?? ""}` }), { width })];
+    return ["", ...renderComponent(MarkdownExcerpt({ text: message.content, foldKey: `message:${message.id ?? ""}` }), ctx)];
   }
   if (message.kind === "thinking") {
     const content = compactText(message.content || "思考中...");
@@ -24,7 +24,7 @@ export function renderMessage(message, width) {
     return ["", color(ANSI.dim, `${label}: ${content}`)];
   }
   if (message.kind === "tool") {
-    return renderComponent(ToolCard({ tool: message }), { width });
+    return renderComponent(ToolCard({ tool: message }), ctx);
   }
   if (message.kind === "permission") {
     return ["", color(ANSI.yellow, `permission: ${message.message.tool_name} · ${message.message.status}`)];

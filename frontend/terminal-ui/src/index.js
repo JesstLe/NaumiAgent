@@ -3,11 +3,13 @@ import { spawn } from "node:child_process";
 import process from "node:process";
 import { ANSI } from "./ansi.js";
 import { attachJsonlLineReader, createEventSender, parseArgs, splitShellLike } from "./protocol.js";
-import { handleSubmitText, pushSystemMessage, reduceServerEvent, createInitialState } from "./state.js";
+import { handleSubmitText, pushSystemMessage, reduceServerEvent, createInitialState, createUiSnapshot, applyUiSnapshot } from "./state.js";
 import { renderScreen } from "./render.js";
+import { getUiSnapshot, loadUiStateStore, saveUiStateStore, setUiSnapshot } from "./ui-state-store.js";
 
 const args = parseArgs(process.argv.slice(2));
 const state = createInitialState();
+const uiStateStore = loadUiStateStore(process.cwd());
 
 let bridge = null;
 let send = null;
@@ -33,6 +35,7 @@ function main() {
   });
 
   setupTerminal();
+  restoreUiSnapshot(state.currentSessionId);
   send("hello", { client: "naumi-terminal-ui" });
   redraw();
 }
@@ -92,10 +95,16 @@ function handleBridgeLine(line) {
     return;
   }
   const actions = reduceServerEvent(state, record);
+  for (const action of actions) {
+    if (action.type === "session_replayed") {
+      restoreUiSnapshot(action.sessionId);
+    }
+  }
   if (actions.some((action) => action.type === "exit")) {
     exit();
     return;
   }
+  persistUiSnapshot();
   scheduleRedraw();
 }
 
@@ -150,6 +159,7 @@ function handleSingleKeyInput(chunk) {
       handleSubmitText(state, text, send);
       state.input = "";
       state.scrollOffset = 0;
+      persistUiSnapshot();
     }
     scheduleRedraw();
     return;
@@ -161,17 +171,32 @@ function handleSingleKeyInput(chunk) {
   }
   if (chunk === "\x1b[5~") {
     state.scrollOffset += Math.max(3, Math.floor((process.stdout.rows ?? 24) / 2));
+    persistUiSnapshot();
     scheduleRedraw();
     return;
   }
   if (chunk === "\x1b[6~") {
     state.scrollOffset = Math.max(0, state.scrollOffset - Math.max(3, Math.floor((process.stdout.rows ?? 24) / 2)));
+    persistUiSnapshot();
     scheduleRedraw();
     return;
   }
   if (chunk >= " " && chunk !== "\x7f") {
     state.input += chunk;
     scheduleRedraw();
+  }
+}
+
+function restoreUiSnapshot(sessionId) {
+  applyUiSnapshot(state, getUiSnapshot(uiStateStore, sessionId));
+}
+
+function persistUiSnapshot() {
+  setUiSnapshot(uiStateStore, state.currentSessionId, createUiSnapshot(state));
+  try {
+    saveUiStateStore(uiStateStore);
+  } catch (error) {
+    pushSystemMessage(state, "ui state", `无法保存终端 UI 状态: ${error.message}`, "warning");
   }
 }
 

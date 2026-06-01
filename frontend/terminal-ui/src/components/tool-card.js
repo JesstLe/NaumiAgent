@@ -5,12 +5,12 @@ import { ToolOutput } from "./markdown.js";
 export function ToolCard({ tool }) {
   return {
     render(ctx) {
-      return renderToolCard(tool, ctx.width);
+      return renderToolCard(tool, ctx.width, ctx);
     },
   };
 }
 
-export function renderToolCard(tool, width) {
+export function renderToolCard(tool, width, ctx = { width }) {
   const title = `${tool.name}${tool.primary ? ` ${tool.primary}` : ""}`;
   const statusStyle = tool.status === "success" ? ANSI.green : tool.status === "running" ? ANSI.cyan : ANSI.red;
   const titleLine = `${color(statusStyle, tool.status === "running" ? "running" : tool.status)} ${title}`;
@@ -19,5 +19,5 @@ export function renderToolCard(tool, width) {
   if (tool.outputLength > (tool.output?.length ?? 0)) {
     children.push(line(color(ANSI.dim, `... 已截断，完整输出 ${tool.outputLength} 字符`)));
   }
-  return renderComponent(boxComponent("tool", children), { width });
+  return renderComponent(boxComponent("tool", children), ctx);
 }

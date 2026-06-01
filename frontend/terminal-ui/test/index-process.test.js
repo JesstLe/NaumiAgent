@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { stripAnsi } from "../src/ansi.js";
 
@@ -20,6 +22,10 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
     app.stdin.write("y");
     await waitForOutput(output, "file_write showcase/index.html");
     await waitForOutput(output, "+new");
+    await waitForOutput(output, "已折叠");
+
+    app.stdin.write("/expand 1\n");
+    await waitForOutput(output, "+line 64");
 
     const code = await stopTerminalUi(app);
 
@@ -64,7 +70,11 @@ function launchTerminalUi() {
     {
       cwd: new URL("..", import.meta.url).pathname,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, FORCE_COLOR: "0" },
+      env: {
+        ...process.env,
+        FORCE_COLOR: "0",
+        NAUMI_TERMINAL_UI_STATE_PATH: path.join(tmpdir(), `naumi-terminal-ui-state-${Date.now()}-${Math.random()}.json`),
+      },
     },
   );
 }

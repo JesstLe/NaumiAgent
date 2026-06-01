@@ -1,5 +1,5 @@
 export const CODE_FOLD_VISIBLE_LINES = 40;
-export const DIFF_FOLD_VISIBLE_LINES = 60;
+export const DIFF_FOLD_VISIBLE_LINES = 18;
 
 export function createFoldState() {
   return {};

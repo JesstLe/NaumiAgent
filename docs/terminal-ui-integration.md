@@ -114,12 +114,14 @@ npm --prefix frontend/terminal-ui start -- --config config.yaml
 - Markdown 代码块默认只展示前 40 行。
 - unified diff 使用增删行颜色。
 - 代码块和 diff 使用稳定 fold key，支持通过前端 fold state 展开。
+- `/folds` 列出可折叠项，`/fold [n]` 切换折叠，`/expand [n|all]` 展开，`/collapse [n|all]` 折叠。
+- fold state 与 scroll offset 按 session id 保存到工作区 `.naumi/terminal-ui-state.json`，恢复会话时自动应用。
 - 调试日志路径通过 `debug/trace` 展示。
 - `/resume` 和 `/load <session_id>` 可回放历史消息。
 
 ## 当前不足
 
-- `/resume` 目前是消息级 replay，已修复历史 assistant 消息拼接问题；滚动位置和 fold state 尚未持久化到会话。
+- `/resume` 目前是消息级 replay，已修复历史 assistant 消息拼接问题；滚动位置和 fold state 已在前端本地持久化，但尚未写入 Python 会话数据库。
 - 新前端已有轻量组件层，但尚未迁入完整 Ink/pi-tui 组件体系。
 - 前端状态、协议、组件、渲染已经拆分为可测试模块。
 - 工具调用卡片已优先通过稳定 `tool_call_id` 关联结果，缺失时才回退到 tool name。

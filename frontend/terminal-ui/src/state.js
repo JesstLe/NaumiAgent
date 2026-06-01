@@ -1,6 +1,10 @@
+import { looksLikeDiff } from "./ansi.js";
+import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
+
 export function createInitialState() {
   return {
     nextMessageId: 1,
+    currentSessionId: "",
     input: "",
     mode: "default",
     status: {},
@@ -16,6 +20,7 @@ export function createInitialState() {
     bridgeReady: false,
     debugTrace: null,
     folds: {},
+    foldCursor: 0,
   };
 }
 
@@ -61,15 +66,17 @@ export function reduceServerEvent(state, record) {
       state.permission = null;
       break;
     case "session/replayed":
+      state.currentSessionId = payload.session_id || state.currentSessionId;
       if (payload.clear !== false) {
         state.messages = [];
         state.tools = [];
         state.activeAssistant = null;
         state.activeThinking = null;
         state.folds = {};
+        state.foldCursor = 0;
       }
       pushSystemMessage(state, "resume", `已恢复会话: ${payload.title ?? payload.session_id}`, "info");
-      break;
+      return [{ type: "session_replayed", sessionId: state.currentSessionId }];
     case "error":
       state.running = false;
       pushSystemMessage(state, "error", payload.message ?? "未知错误", "error");
@@ -247,6 +254,22 @@ export function handleTodoStatus(state, message) {
 }
 
 export function handleSubmitText(state, text, send) {
+  if (text === "/folds") {
+    showFoldList(state);
+    return;
+  }
+  if (text.startsWith("/fold")) {
+    toggleFoldCommand(state, text);
+    return;
+  }
+  if (text.startsWith("/expand")) {
+    setFoldCommand(state, text, true);
+    return;
+  }
+  if (text.startsWith("/collapse")) {
+    setFoldCommand(state, text, false);
+    return;
+  }
   if (text === "/resume" || text === "/r") {
     send("resume", {});
     return;
@@ -273,6 +296,120 @@ export function handleSubmitText(state, text, send) {
 export function pushSystemMessage(state, title, content, level) {
   if (!content) return;
   state.messages.push({ kind: "system", id: nextMessageId(state, "system"), title, content, level });
+}
+
+export function createUiSnapshot(state) {
+  return {
+    folds: state.folds,
+    foldCursor: state.foldCursor,
+    scrollOffset: state.scrollOffset,
+  };
+}
+
+export function applyUiSnapshot(state, snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return;
+  state.folds = sanitizeFolds(snapshot.folds);
+  state.foldCursor = Number.isFinite(Number(snapshot.foldCursor)) ? Math.max(0, Number(snapshot.foldCursor)) : 0;
+  state.scrollOffset = Number.isFinite(Number(snapshot.scrollOffset)) ? Math.max(0, Number(snapshot.scrollOffset)) : 0;
+}
+
+export function getFoldEntries(state) {
+  const entries = [];
+  for (const message of state.messages) {
+    if (message.kind === "assistant" && message.content) {
+      countCodeBlocks(message.content).forEach((_, index) => {
+        const key = `message:${message.id ?? ""}:code:${index}`;
+        entries.push({
+          key,
+          label: `assistant code #${index + 1}`,
+          expanded: isFoldExpanded(state.folds, key),
+        });
+      });
+    }
+    if (message.kind === "tool" && message.output && looksLikeDiff(message.output)) {
+      const key = `tool:${message.callId || message.id || message.name}`;
+      entries.push({
+        key,
+        label: `${message.name || "tool"} diff`,
+        expanded: isFoldExpanded(state.folds, key),
+      });
+    }
+  }
+  return entries;
+}
+
+export function toggleFoldCommand(state, text) {
+  const entries = getFoldEntries(state);
+  if (!entries.length) {
+    pushSystemMessage(state, "fold", "没有可折叠内容。", "info");
+    return;
+  }
+  const index = parseFoldIndex(text, entries, state.foldCursor);
+  const entry = entries[index];
+  const nextExpanded = !entry.expanded;
+  state.folds = setFoldExpanded(state.folds, entry.key, nextExpanded);
+  state.foldCursor = (index + 1) % entries.length;
+  pushSystemMessage(state, "fold", `${nextExpanded ? "已展开" : "已折叠"} ${index + 1}. ${entry.label}`, "info");
+}
+
+export function setFoldCommand(state, text, expanded) {
+  const entries = getFoldEntries(state);
+  if (!entries.length) {
+    pushSystemMessage(state, "fold", "没有可折叠内容。", "info");
+    return;
+  }
+  if (/\s+all\s*$/i.test(text)) {
+    state.folds = entries.reduce((folds, entry) => setFoldExpanded(folds, entry.key, expanded), state.folds);
+    pushSystemMessage(state, "fold", `${expanded ? "已展开" : "已折叠"}全部 ${entries.length} 个折叠项。`, "info");
+    return;
+  }
+  const index = parseFoldIndex(text, entries, state.foldCursor);
+  const entry = entries[index];
+  state.folds = setFoldExpanded(state.folds, entry.key, expanded);
+  state.foldCursor = (index + 1) % entries.length;
+  pushSystemMessage(state, "fold", `${expanded ? "已展开" : "已折叠"} ${index + 1}. ${entry.label}`, "info");
+}
+
+function showFoldList(state) {
+  const entries = getFoldEntries(state);
+  if (!entries.length) {
+    pushSystemMessage(state, "folds", "没有可折叠内容。", "info");
+    return;
+  }
+  const content = entries
+    .map((entry, index) => `${index + 1}. ${entry.expanded ? "expanded" : "collapsed"} · ${entry.label}`)
+    .join("\n");
+  pushSystemMessage(state, "folds", content, "info");
+}
+
+function parseFoldIndex(text, entries, fallback) {
+  const match = text.trim().match(/^\/(?:fold|expand|collapse)(?:\s+(\d+))?/);
+  if (!match?.[1]) return Math.min(Math.max(0, fallback), entries.length - 1);
+  return Math.min(Math.max(0, Number(match[1]) - 1), entries.length - 1);
+}
+
+function countCodeBlocks(text) {
+  const blocks = [];
+  let inCode = false;
+  for (const line of String(text ?? "").split("\n")) {
+    if (!line.startsWith("```")) continue;
+    if (inCode) {
+      blocks.push(true);
+      inCode = false;
+    } else {
+      inCode = true;
+    }
+  }
+  return blocks;
+}
+
+function sanitizeFolds(folds) {
+  if (!folds || typeof folds !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(folds)
+      .filter(([key, value]) => typeof key === "string" && value && typeof value === "object")
+      .map(([key, value]) => [key, { expanded: value.expanded === true }]),
+  );
 }
 
 function nextMessageId(state, prefix) {

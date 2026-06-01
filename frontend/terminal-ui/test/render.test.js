@@ -34,7 +34,7 @@ test("markdown and diff folds can be expanded through persisted fold state", () 
     folds: { "tool:t": { expanded: true } },
   }).map(stripAnsi);
 
-  assert(collapsedDiff.includes("... 已折叠 6 行 diff"));
+  assert(collapsedDiff.includes("... 已折叠 48 行 diff"));
   assert(expandedDiff.some((line) => line.includes("+line 64")));
 });
 
