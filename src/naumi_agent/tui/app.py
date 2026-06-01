@@ -32,6 +32,7 @@ from textual.widgets import (
 from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.clipboard import copy_or_save_transcript
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +202,7 @@ class ChatPanel(VerticalScroll):
         self._trace_output("tui.response_token", token)
         self._response_text += token
         if self._response_widget:
-            self._response_widget.update(self._response_text)
+            self._response_widget.update(excerpt_markdown_code_blocks(self._response_text))
             self.scroll_end(animate=False)
 
     # --- 工具调用 ---
@@ -2194,7 +2195,12 @@ class NaumiApp(App):
                 if reasoning:
                     chat.add_completed_thinking(reasoning)
                 if content:
-                    chat.mount(Markdown(content, classes="agent-msg"))
+                    chat.mount(
+                        Markdown(
+                            excerpt_markdown_code_blocks(content),
+                            classes="agent-msg",
+                        )
+                    )
                 # Show tool calls from this assistant message
                 for tc in m.get("tool_calls", []):
                     tc_name = (

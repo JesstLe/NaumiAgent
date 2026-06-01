@@ -6,7 +6,21 @@ import pytest
 
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
-from naumi_agent.tui.app import NaumiApp, StatusBar, TodoBar, _format_tool_output_markdown
+from naumi_agent.tui.app import (
+    ChatPanel,
+    NaumiApp,
+    StatusBar,
+    TodoBar,
+    _format_tool_output_markdown,
+)
+
+
+class FakeMarkdown:
+    def __init__(self) -> None:
+        self.content = ""
+
+    def update(self, content: str) -> None:
+        self.content = content
 
 
 class TestNaumiApp:
@@ -38,6 +52,24 @@ class TestNaumiApp:
         rendered = _format_tool_output_markdown("```python\nprint('ok')\n```")
 
         assert rendered == "```python\nprint('ok')\n```"
+
+    def test_chat_panel_excerpts_long_code_blocks_but_keeps_full_response(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        chat = ChatPanel()
+        widget = FakeMarkdown()
+        code = "\n".join(f"line_{idx}" for idx in range(1, 84))
+        full = f"```python\n{code}\n```\n"
+        monkeypatch.setattr(chat, "scroll_end", lambda animate=False: None)
+        chat._response_widget = widget
+
+        chat.add_response_token(full)
+
+        assert chat._response_text == full
+        assert "line_80" in widget.content
+        assert "line_81" not in widget.content
+        assert "已隐藏 3 行代码" in widget.content
 
     @pytest.mark.asyncio
     async def test_permission_confirmation_modal_returns_choice(self) -> None:

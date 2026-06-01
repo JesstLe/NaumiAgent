@@ -109,7 +109,7 @@ OUTPUT_DISCIPLINE_SECTION = """\
 ## Output Discipline
 - When creating or modifying files, use file_write/file_edit and do not paste full file contents into the chat.
 - Final answers should summarize what changed, list file paths, and mention verification results.
-- Show concise diffs or snippets only when they are necessary to explain a decision or when the user explicitly asks.
+- Show partial code blocks, concise diffs, or snippets only when they are necessary to explain a decision or when the user explicitly asks.
 - If the user asks for a complete file or full code block, provide it; otherwise keep large code out of the conversation transcript.
 """
 
