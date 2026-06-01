@@ -1445,6 +1445,27 @@ class NaumiApp(App):
                         )
                     )
                     status.status_text = f"subagent {event_status}: {agent}"
+                case "permission_bubble":
+                    agent = str(data.get("agent_name", "?"))
+                    tool = str(data.get("tool_name", "?"))
+                    bubble_status = str(data.get("status", "?"))
+                    reason = str(data.get("reason", "") or "")
+                    style = (
+                        "red"
+                        if bubble_status in {"blocked", "blocked_by_hook"}
+                        else "yellow"
+                    )
+                    suffix = f" · {reason[:120]}" if reason else ""
+                    chat.mount(
+                        Static(
+                            Text.from_markup(
+                                f"  [{style}]permission bubble: "
+                                f"{agent} → {tool} [{bubble_status}]{suffix}[/{style}]"
+                            ),
+                            classes="tool-done",
+                        )
+                    )
+                    status.status_text = f"permission bubble: {agent} → {tool}"
                 case "team_event":
                     event_type = str(data.get("event_type", "?"))
                     sender = str(data.get("sender", "?"))

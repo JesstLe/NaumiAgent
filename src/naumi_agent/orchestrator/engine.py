@@ -283,6 +283,7 @@ class AgentEngine:
             usage_callback=self._track_model_usage,
         )
         self._harness_context = HarnessContextAssembler()
+        self._permission_bubble_history: list[dict[str, Any]] = []
 
         self.task_store = TaskStore(config.memory.session_db_path)
         self.background_runner = BackgroundRunner(
@@ -2024,6 +2025,7 @@ class AgentEngine:
         self,
         tc: ToolCall,
         on_event: EventCallback | None = None,
+        agent_name: str | None = None,
     ) -> ToolResult:
         """执行单个工具调用（含权限检查）."""
         tool = self._tool_registry.get(tc.name)
@@ -2046,11 +2048,22 @@ class AgentEngine:
                 "phase": "before",
                 "tool_name": tc.name,
                 "arguments": args,
+                "agent_name": agent_name or "",
+                "permission_bubble": bool(agent_name),
             },
+            agent_name=agent_name,
             session_id=session_id,
         ), on_event)
         if before_ctx.should_abort:
             reason = before_ctx.data.get("abort_reason", "hook policy")
+            await self._emit_permission_bubble(
+                on_event,
+                agent_name=agent_name,
+                tool_name=tc.name,
+                status="blocked_by_hook",
+                reason=str(reason),
+                requires_confirmation=False,
+            )
             return ToolResult(
                 call_id=tc.id,
                 status="error",
@@ -2067,11 +2080,22 @@ class AgentEngine:
                 "allowed": decision.allowed,
                 "requires_confirmation": decision.requires_confirmation,
                 "reason": decision.reason,
+                "agent_name": agent_name or "",
+                "permission_bubble": bool(agent_name),
             },
+            agent_name=agent_name,
             session_id=session_id,
         ), on_event)
         if after_ctx.should_abort:
             reason = after_ctx.data.get("abort_reason", "hook policy")
+            await self._emit_permission_bubble(
+                on_event,
+                agent_name=agent_name,
+                tool_name=tc.name,
+                status="blocked_by_hook",
+                reason=str(reason),
+                requires_confirmation=decision.requires_confirmation,
+            )
             return ToolResult(
                 call_id=tc.id,
                 status="error",
@@ -2079,6 +2103,14 @@ class AgentEngine:
             )
         if not decision.allowed:
             logger.warning("Tool %s blocked: %s", tc.name, decision.reason)
+            await self._emit_permission_bubble(
+                on_event,
+                agent_name=agent_name,
+                tool_name=tc.name,
+                status="blocked",
+                reason=decision.reason,
+                requires_confirmation=decision.requires_confirmation,
+            )
             return ToolResult(
                 call_id=tc.id,
                 status="error",
@@ -2086,6 +2118,14 @@ class AgentEngine:
             )
         if decision.requires_confirmation:
             logger.warning("Tool %s requires confirmation and was blocked", tc.name)
+            await self._emit_permission_bubble(
+                on_event,
+                agent_name=agent_name,
+                tool_name=tc.name,
+                status="needs_confirmation",
+                reason="该工具需要用户确认，当前自动执行链路未提供确认步骤。",
+                requires_confirmation=True,
+            )
             return ToolResult(
                 call_id=tc.id,
                 status="error",
@@ -2117,6 +2157,38 @@ class AgentEngine:
                 status="error",
                 content=f"Tool error: {type(e).__name__}: {e}",
             )
+
+    async def _emit_permission_bubble(
+        self,
+        on_event: EventCallback | None,
+        *,
+        agent_name: str | None,
+        tool_name: str,
+        status: str,
+        reason: str,
+        requires_confirmation: bool,
+    ) -> None:
+        """Emit parent-visible subagent permission decisions."""
+        if not agent_name:
+            return
+        payload = {
+            "agent_name": agent_name,
+            "tool_name": tool_name,
+            "status": status,
+            "reason": reason,
+            "requires_confirmation": requires_confirmation,
+            "timestamp": time.time(),
+        }
+        self._permission_bubble_history.append(payload)
+        if len(self._permission_bubble_history) > 100:
+            self._permission_bubble_history = self._permission_bubble_history[-100:]
+        if on_event is not None:
+            await on_event("permission_bubble", payload)
+
+    def get_recent_permission_bubbles(self, limit: int = 8) -> list[dict[str, Any]]:
+        """Return recent subagent permission decisions that bubbled to parent."""
+        safe_limit = max(1, min(limit, 50))
+        return list(self._permission_bubble_history[-safe_limit:])
 
     def _parse_tool_call(self, raw: dict[str, Any]) -> ToolCall | None:
         """从 LLM 响应中提取 ToolCall."""

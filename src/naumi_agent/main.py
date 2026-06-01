@@ -247,6 +247,8 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
         console.print(_format_task_snapshot(data))
     elif event == "subagent_event":
         console.print(_format_subagent_event(data))
+    elif event == "permission_bubble":
+        console.print(_format_permission_bubble(data))
     elif event == "team_event":
         console.print(_format_team_event(data))
     elif event == "context_compacted":
@@ -328,6 +330,17 @@ def _format_subagent_event(data: dict[str, Any]) -> str:
     color = "32" if status == "completed" else "31" if status in {"error", "failed"} else "36"
     suffix = f" · {message}" if message else ""
     return f"\033[{color}m  subagent {status}: {agent} / {task_id}{suffix}\033[0m"
+
+
+def _format_permission_bubble(data: dict[str, Any]) -> str:
+    """Format subagent permission decisions that bubble to the parent."""
+    agent = str(data.get("agent_name", "?"))
+    tool = str(data.get("tool_name", "?"))
+    status = str(data.get("status", "?"))
+    reason = str(data.get("reason", "") or "")
+    color = "31" if status in {"blocked", "blocked_by_hook"} else "33"
+    suffix = f" · {reason[:120]}" if reason else ""
+    return f"\033[{color}m  permission bubble: {agent} → {tool} [{status}]{suffix}\033[0m"
 
 
 def _format_team_event(data: dict[str, Any]) -> str:
@@ -459,6 +472,8 @@ def _cli_event_factory(cli: Any):
             cli.append_live(_format_task_snapshot(data) + "\n")
         elif event == "subagent_event":
             cli.append_live(_format_subagent_event(data) + "\n")
+        elif event == "permission_bubble":
+            cli.append_live(_format_permission_bubble(data) + "\n")
         elif event == "team_event":
             cli.append_live(_format_team_event(data) + "\n")
         elif event == "context_compacted":

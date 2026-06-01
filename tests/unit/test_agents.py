@@ -1,5 +1,8 @@
 """子 Agent 系统测试."""
 
+import json
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from naumi_agent.agents.base import AgentCapability, BaseAgent
@@ -9,7 +12,8 @@ from naumi_agent.agents.presets import (
     CODER_CONFIG,
     RESEARCHER_CONFIG,
 )
-from naumi_agent.config.settings import AppConfig
+from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.orchestrator.engine import AgentEngine
 
 
@@ -67,3 +71,57 @@ class TestBaseAgent:
         for s in schemas:
             assert s["type"] == "function"
             assert "function" in s
+
+    @pytest.mark.asyncio
+    async def test_subagent_tool_call_bubbles_parent_permission(
+        self,
+        tmp_path,
+    ) -> None:
+        engine = AgentEngine(AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db"))
+        ))
+        agent = BaseAgent(CODER_CONFIG, engine)
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        tool_call = {
+            "id": "call_bash",
+            "function": {
+                "name": "bash_run",
+                "arguments": json.dumps({"command": "echo hi"}),
+            },
+        }
+        responses = [
+            ModelResponse(
+                content="",
+                tool_calls=[tool_call],
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test",
+            ),
+            ModelResponse(
+                content="已处理",
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test",
+            ),
+        ]
+
+        try:
+            with patch.object(
+                engine.router,
+                "call",
+                new_callable=AsyncMock,
+                side_effect=responses,
+            ):
+                result = await agent.execute("运行命令", event_callback=on_event)
+
+            assert result.status == "completed"
+            bubbles = [data for event, data in events if event == "permission_bubble"]
+            assert bubbles
+            assert bubbles[-1]["agent_name"] == "coder"
+            assert bubbles[-1]["tool_name"] == "bash_run"
+            assert bubbles[-1]["status"] == "needs_confirmation"
+            assert engine.get_recent_permission_bubbles()
+        finally:
+            await engine.shutdown()
