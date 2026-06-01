@@ -126,3 +126,21 @@ npm --prefix frontend/terminal-ui start -- --config config.yaml
 - 前端状态、协议、组件、渲染已经拆分为可测试模块。
 - 工具调用卡片已优先通过稳定 `tool_call_id` 关联结果，缺失时才回退到 tool name。
 - 代码高亮是内置轻量关键词高亮，不等价于 Pygments/Tree-sitter。
+
+## 第一阶段验证
+
+目标项由 `frontend/terminal-ui/test/phase-one-requirements.test.js` 显式覆盖：
+
+- 完整对话渲染且 footer 不覆盖正文。
+- 工具调用卡片使用 `tool_call_id` 关联结果，大 diff 默认折叠。
+- `mode`、权限确认、todo、status footer 同屏渲染。
+- 代码块和 diff 可列出、折叠、展开。
+- `/resume` typed message replay 与本地 UI snapshot 恢复。
+
+定向验证命令：
+
+```bash
+npm --prefix frontend/terminal-ui run check
+npm --prefix frontend/terminal-ui test
+uv run pytest tests/unit/test_ui_bridge.py tests/unit/test_ui_message_replay.py tests/unit/test_ui_message_adapter.py -q
+```
