@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.17] - 2026-06-01
+
+### Added
+- **World 工具确定性落地** — `/world` 在模型路由未初始化时也会返回世界模型审计、可运行状态 inventory 脚本、状态宇宙图谱和反事实补强计划。
+
+### Fixed
+- **AST 扫描源码读取修复** — 新增 AST 安全源码读取路径，避免 `### path` 头部破坏 Python AST；`/world` 与 `/spar` 的状态/空函数扫描现在能读取真实源码。
+
 ## [0.1.16] - 2026-06-01
 
 ### Added
