@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.8] - 2026-06-01
+
+### Added
+- **MoE Route 工具确定性落地** — `/route` 在模型路由未初始化时也会根据任务和代码关键词生成 3-5 位专家小组、跨专家冲突处理、综合行动计划和资源估算。
+
 ## [0.1.7] - 2026-06-01
 
 ### Added
