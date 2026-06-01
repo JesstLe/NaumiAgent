@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from naumi_agent.background.models import BackgroundStatus
 from naumi_agent.scheduler.models import ScheduleStatus
 from naumi_agent.tasks.models import TaskStatus
-from naumi_agent.tools.base import Tool
+from naumi_agent.tools.base import Tool, ToolMetadata
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
+
+MCP_SERVER_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 _ALL_SECTIONS = {
     "context",
@@ -26,6 +29,39 @@ _ALL_SECTIONS = {
 
 def create_runtime_tools(engine: AgentEngine) -> list[Tool]:
     return [RuntimeStatusTool(engine), RuntimeMCPConnectTool(engine)]
+
+
+def _normalize_runtime_mcp_name(name: str) -> str:
+    if not isinstance(name, str):
+        raise ValueError("MCP 连接失败：名称必须是字符串。")
+    clean_name = name.strip()
+    if not clean_name:
+        raise ValueError("MCP 连接失败：名称不能为空。")
+    if not MCP_SERVER_NAME_RE.fullmatch(clean_name):
+        raise ValueError(
+            "MCP 连接失败：名称只能包含字母、数字、下划线或连字符，"
+            "长度不能超过 64 个字符。"
+        )
+    return clean_name
+
+
+def _normalize_runtime_mcp_args(args: list[str] | None) -> list[str]:
+    if args is None:
+        return []
+    if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
+        raise ValueError("MCP 连接失败：args 必须是字符串数组。")
+    return args
+
+
+def _normalize_runtime_mcp_env(env: dict[str, str] | None) -> dict[str, str] | None:
+    if env is None:
+        return None
+    if not isinstance(env, dict) or not all(
+        isinstance(key, str) and isinstance(value, str)
+        for key, value in env.items()
+    ):
+        raise ValueError("MCP 连接失败：env 必须是字符串到字符串的映射。")
+    return env or None
 
 
 async def build_runtime_status(
@@ -93,10 +129,16 @@ async def connect_runtime_mcp(
     env: dict[str, str] | None = None,
 ) -> str:
     """Connect one MCP server and register its tools in the active runtime."""
-    clean_name = name.strip()
+    try:
+        clean_name = _normalize_runtime_mcp_name(name)
+        clean_args = _normalize_runtime_mcp_args(args)
+        clean_env = _normalize_runtime_mcp_env(env)
+    except ValueError as e:
+        return str(e)
+
+    if not isinstance(command, str):
+        return "MCP 连接失败：命令必须是字符串。"
     clean_command = command.strip()
-    if not clean_name:
-        return "MCP 连接失败：名称不能为空。"
     if not clean_command:
         return "MCP 连接失败：命令不能为空。"
 
@@ -104,8 +146,8 @@ async def connect_runtime_mcp(
     tool_names = await engine.connect_mcp_server(
         name=clean_name,
         command=clean_command,
-        args=args or [],
-        env=env or None,
+        args=clean_args,
+        env=clean_env,
     )
     new_names = [tool_name for tool_name in tool_names if tool_name not in before]
     if not tool_names:
@@ -136,6 +178,15 @@ class RuntimeStatusTool(Tool):
         return (
             "读取当前 Agent 运行时状态快照，包含上下文压力、todo、team protocol、"
             "subagent、hook、后台/调度资源和下一步建议。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="运行时状态",
+            search_hint="runtime status context todo team subagent hooks resources",
         )
 
     @property
@@ -186,6 +237,16 @@ class RuntimeMCPConnectTool(Tool):
         return (
             "在当前会话中连接一个 MCP server，发现并注册 mcp__<server>__<tool> "
             "命名空间工具。适合需要临时接入本地工具服务器时使用。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            command_argument_names=("command",),
+            user_facing_name="连接 MCP",
+            search_hint="runtime mcp connect server command register tools",
         )
 
     @property

@@ -14,7 +14,13 @@ from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.subagent_manager import SubTask
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tools.base import ToolCall
-from naumi_agent.tools.runtime import build_runtime_status, run_runtime_command
+from naumi_agent.tools.runtime import (
+    RuntimeMCPConnectTool,
+    RuntimeStatusTool,
+    build_runtime_status,
+    connect_runtime_mcp,
+    run_runtime_command,
+)
 
 
 @pytest.fixture
@@ -34,6 +40,16 @@ class TestRuntimeStatus:
     def test_tool_is_registered(self, engine: AgentEngine) -> None:
         assert "runtime_status" in engine.tool_registry.names
         assert "runtime_mcp_connect" in engine.tool_registry.names
+
+    def test_runtime_tools_expose_permission_metadata(self, engine: AgentEngine) -> None:
+        status_metadata = RuntimeStatusTool(engine).metadata
+        connect_metadata = RuntimeMCPConnectTool(engine).metadata
+
+        assert status_metadata.read_only is True
+        assert status_metadata.concurrency_safe is True
+        assert connect_metadata.destructive is True
+        assert connect_metadata.requires_confirmation is True
+        assert connect_metadata.command_argument_names == ("command",)
 
     @pytest.mark.asyncio
     async def test_snapshot_includes_runtime_state(self, engine: AgentEngine) -> None:
@@ -135,3 +151,44 @@ class TestRuntimeStatus:
 
         assert "未注册新工具" in output
         assert "请检查命令是否可执行" in output
+
+    @pytest.mark.asyncio
+    async def test_runtime_mcp_connect_rejects_invalid_server_name(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        with patch.object(
+            engine,
+            "connect_mcp_server",
+            new_callable=AsyncMock,
+        ) as connect:
+            output = await connect_runtime_mcp(
+                engine,
+                name="bad name",
+                command="python",
+                args=["server.py"],
+            )
+
+        connect.assert_not_awaited()
+        assert "名称只能包含" in output
+
+    @pytest.mark.asyncio
+    async def test_runtime_mcp_connect_rejects_invalid_args_and_env(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        output = await connect_runtime_mcp(
+            engine,
+            name="demo",
+            command="python",
+            args=["server.py", 1],  # type: ignore[list-item]
+        )
+        assert "args 必须是字符串数组" in output
+
+        output = await connect_runtime_mcp(
+            engine,
+            name="demo",
+            command="python",
+            env={"TOKEN": object()},  # type: ignore[dict-item]
+        )
+        assert "env 必须是字符串到字符串的映射" in output

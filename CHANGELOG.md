@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.67] - 2026-06-01
+
+### Changed
+- **Runtime MCP 连接边界加固** — 为 `runtime_status` 和 `runtime_mcp_connect` 增加工具元数据，将 `runtime_mcp_connect` 标记为需确认的命令型运行时变更，并为 MCP server 名称、args 和 env 增加确定性输入校验，避免注册不稳定命名空间或传入非字符串启动参数。
+
 ## [0.1.66] - 2026-06-01
 
 ### Changed
