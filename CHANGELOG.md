@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.48] - 2026-06-01
+
+### Changed
+- **Analysis Pointer 模块拆分** — 将 `/pointer` 的精密数据模式识别、外部数据源扫描、推理态/物理态边界风险评分和 pointer table 推断迁移到 `analysis_support.pointer`，主 `analysis.py` 保留工具编排与 LLM SPA 架构增强路径。
+
 ## [0.1.47] - 2026-06-01
 
 ### Changed
