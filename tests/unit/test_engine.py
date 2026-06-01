@@ -209,6 +209,43 @@ class TestSetSystemPrompt:
         assert len([m for m in engine._full_history if m["role"] == "system"]) == 1
 
 
+class TestAutoMemoryExtraction:
+    @pytest.mark.asyncio
+    async def test_completed_turn_stores_high_confidence_memory(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        engine._session = Session(title="auto memory")
+        engine.long_term_memory.store = AsyncMock(return_value="mem1")  # type: ignore[method-assign]
+        result = AgentResult(status="completed", response="收到。")
+
+        await engine._auto_extract_memories(
+            "以后请优先用中文回复。",
+            result,
+        )
+
+        engine.long_term_memory.store.assert_awaited_once()  # type: ignore[attr-defined]
+        entry = engine.long_term_memory.store.await_args.args[0]  # type: ignore[attr-defined]
+        assert entry.category == "preference"
+        assert "用户偏好" in entry.content
+        assert entry.metadata["source"] == "auto_extract"
+        assert entry.metadata["session_id"] == engine._session.id
+
+    @pytest.mark.asyncio
+    async def test_non_completed_turn_does_not_store_memory(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        engine.long_term_memory.store = AsyncMock(return_value="mem1")  # type: ignore[method-assign]
+
+        await engine._auto_extract_memories(
+            "以后请优先用中文回复。",
+            AgentResult(status="error", error="boom"),
+        )
+
+        engine.long_term_memory.store.assert_not_awaited()  # type: ignore[attr-defined]
+
+
 class TestSessionLoading:
     @pytest.mark.asyncio
     async def test_load_session_keeps_sanitized_full_history(self, tmp_path) -> None:

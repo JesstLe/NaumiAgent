@@ -14,8 +14,9 @@ from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
 from naumi_agent.mcp.client import MCPClientManager, MCPServerConfig, setup_mcp_servers
+from naumi_agent.memory.auto_extract import extract_memory_candidates
 from naumi_agent.memory.compactor import ContextCompactor
-from naumi_agent.memory.long_term import LongTermMemory
+from naumi_agent.memory.long_term import LongTermMemory, MemoryEntry
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.router import ModelRouter, ModelTier, TokenUsage
 from naumi_agent.orchestrator.context_assembly import (
@@ -622,6 +623,31 @@ class AgentEngine:
 
         self._messages.append({"role": "system", "content": memory_block})
         logger.info("Injected %d relevant memories into context", len(results))
+
+    async def _auto_extract_memories(self, task: str, result: AgentResult) -> None:
+        """Store high-confidence facts/preferences/decisions from a completed turn."""
+        if result.status != "completed":
+            return
+        candidates = extract_memory_candidates(task, result.response or "")
+        if not candidates:
+            return
+
+        session_id = self._session.id if self._session else ""
+        for candidate in candidates:
+            entry = MemoryEntry(
+                id="",
+                content=candidate.content,
+                category=candidate.category,
+                metadata={
+                    "source": "auto_extract",
+                    "reason": candidate.reason,
+                    "session_id": session_id,
+                },
+            )
+            try:
+                await self.long_term_memory.store(entry)
+            except Exception as e:
+                logger.debug("Auto memory extraction failed: %s", e)
 
     # --- 上下文压缩 ---
 
@@ -1273,6 +1299,7 @@ class AgentEngine:
             session_id=session_id,
         ))
 
+        await self._auto_extract_memories(task, result)
         await self._save_session()
 
         # Attach task summary if tasks exist
@@ -1343,6 +1370,7 @@ class AgentEngine:
             session_id=session_id,
         ), on_event)
 
+        await self._auto_extract_memories(task, result)
         await self._save_session()
 
         # Attach task summary if tasks exist
