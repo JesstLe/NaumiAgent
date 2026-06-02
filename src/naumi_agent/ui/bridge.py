@@ -290,6 +290,14 @@ class JsonlEngineBridge:
         """Load a persisted session and replay it as typed UI messages."""
         from naumi_agent.ui.messages.replay import replay_messages
 
+        if self._run_task is not None and not self._run_task.done():
+            await self.emit_error(
+                "当前任务仍在执行，请等待完成后再恢复会话。",
+                code="run_in_progress",
+                request_id=request_id,
+            )
+            return
+
         session_id = str(payload.get("session_id") or "").strip()
         if not session_id:
             session_id = await self._find_latest_resumable_session_id()
