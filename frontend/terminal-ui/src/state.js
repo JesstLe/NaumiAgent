@@ -77,13 +77,16 @@ export function reduceServerEvent(state, record) {
       break;
     case "session/replayed":
       state.currentSessionId = payload.session_id || state.currentSessionId;
+      state.running = false;
+      state.permission = null;
+      state.todo = null;
+      state.activeToolPrepare = null;
+      state.activeRuntimePhase = "";
       if (payload.clear !== false) {
         state.messages = [];
         state.tools = [];
         state.activeAssistant = null;
         state.activeThinking = null;
-        state.activeToolPrepare = null;
-        state.activeRuntimePhase = "";
         state.folds = {};
         state.foldCursor = 0;
         clearRenderCache(state.renderCache);

@@ -33,6 +33,44 @@ test("replayed assistant token messages stay independent outside a running turn"
   assert.equal(state.activeAssistant, null);
 });
 
+test("session replay clears stale run, permission, todo, and perf footer state", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, { type: "run/started", payload: {} });
+  reduceServerEvent(state, {
+    type: "permission/request",
+    request_id: "perm-1",
+    payload: { tool_name: "bash_run", reason: "需要确认。" },
+  });
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: {
+      type: "todo_status",
+      total_count: 2,
+      completed_count: 0,
+      open_count: 2,
+      items: [{ id: 1, subject: "旧任务", status: "in_progress" }],
+    },
+  });
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "runtime_status", phase: "perf_phase", label: "模型首包", duration_ms: 1800 },
+  });
+
+  reduceServerEvent(state, { type: "session/replayed", payload: { session_id: "s2", title: "恢复后", clear: true } });
+
+  assert.equal(state.running, false);
+  assert.equal(state.permission, null);
+  assert.equal(state.todo, null);
+  assert.equal(state.activeToolPrepare, null);
+  assert.equal(state.activeRuntimePhase, "");
+
+  const plain = renderScreen(state, 90, 12, { cwd: "/tmp", home: "/Users/lv" }).map(stripAnsi).join("\n");
+  assert(!plain.includes("permission: bash_run"));
+  assert(!plain.includes("todo:"));
+  assert(!plain.includes("运行中"));
+});
+
 test("tool results prefer stable call id before falling back to tool name", () => {
   const state = createInitialState();
 
