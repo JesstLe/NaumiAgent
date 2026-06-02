@@ -25,7 +25,10 @@ export function PermissionFooter({ permission }) {
       if (!permission) return [];
       const tool = permission.payload.tool_name ?? "tool";
       const reason = compactText(permission.payload.reason ?? "");
-      return wrapAnsiLine(color(ANSI.yellow, `permission: ${tool}  y=允许 n=拒绝 b=bypass  ${reason}`), ctx.width);
+      return wrapAnsiLine(
+        color(ANSI.yellow, `permission: ${tool}  y=允许 n=拒绝 b/Shift+Tab=bypass  ${reason}`),
+        ctx.width,
+      );
     },
   };
 }

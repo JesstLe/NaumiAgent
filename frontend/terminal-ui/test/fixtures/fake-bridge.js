@@ -54,6 +54,9 @@ attachJsonlLineReader(process.stdin, (line) => {
 
   if (record.type === "permission_response") {
     emit("permission/resolved", { request_id: payload.request_id, choice: payload.choice });
+    if (payload.choice === "bypass") {
+      emit("mode/changed", { mode: "bypass", status: { mode: "bypass" } });
+    }
     emitUi({
       type: "tool_prepare",
       phase: "snapshot",
