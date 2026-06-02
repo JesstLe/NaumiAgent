@@ -1,13 +1,39 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { attachJsonlLineReader, createEventSender, parseArgs, splitShellLike } from "../src/protocol.js";
+import {
+  attachJsonlLineReader,
+  createEventSender,
+  parseArgs,
+  parseBridgeCommandJson,
+  splitShellLike,
+} from "../src/protocol.js";
 
 test("parseArgs supports config and bridge command", () => {
-  assert.deepEqual(parseArgs(["--config", "local.yaml", "--bridge-command", "node fake.js"]), {
+  assert.deepEqual(parseArgs([
+    "--config",
+    "local.yaml",
+    "--bridge-command",
+    "node fake.js",
+    "--bridge-command-json",
+    "[\"node\",\"fake.js\"]",
+  ]), {
     config: "local.yaml",
     bridgeCommand: "node fake.js",
+    bridgeCommandJson: "[\"node\",\"fake.js\"]",
   });
+});
+
+test("parseBridgeCommandJson decodes argv without shell splitting", () => {
+  assert.deepEqual(
+    parseBridgeCommandJson("[\"/path with spaces/python\",\"-m\",\"naumi_agent.ui.bridge\"]"),
+    ["/path with spaces/python", "-m", "naumi_agent.ui.bridge"],
+  );
+
+  assert.throws(
+    () => parseBridgeCommandJson("[\"python\",42]"),
+    /必须是非空字符串数组/,
+  );
 });
 
 test("splitShellLike keeps quoted arguments together", () => {

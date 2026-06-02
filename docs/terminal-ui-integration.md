@@ -107,6 +107,10 @@ TUI 保留为 fallback：
 开发态启动时，launcher 优先使用仓库根目录下的 `frontend/terminal-ui`；wheel/pip
 安装态启动时，则使用打包进 `naumi_agent/frontend/terminal-ui` 的运行时前端资源。
 wheel 只包含 `package.json` 和 `src/`，不会把前端测试文件打包进用户安装环境。
+正式入口 `naumi ui` 会把当前 Python 解释器通过 `--bridge-command-json` 传给
+前端，用 `python -m naumi_agent.ui.bridge` 启动 bridge，避免安装态依赖 `uv`
+或误用其它 Python 环境。前端源码直接开发调试时，如果没有传 bridge command，
+仍保留 `uv run python -m naumi_agent.ui.bridge` 作为本地 fallback。
 
 ```bash
 naumi ui --legacy
