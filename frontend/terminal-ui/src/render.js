@@ -5,7 +5,7 @@ import {
   wrapAnsiLine,
 } from "./ansi.js";
 import { createRenderContext, renderComponent } from "./components/core.js";
-import { renderFooter } from "./components/footer.js";
+import { renderFooter, renderFooterSections } from "./components/footer.js";
 import { Message } from "./components/message.js";
 import { renderCachedMessage } from "./render-cache.js";
 
@@ -17,7 +17,7 @@ export { renderToolCard } from "./components/tool-card.js";
 
 export function renderScreen(state, width, height, env = {}) {
   const ctx = createRenderContext({ width, env, state });
-  const footer = renderFooter(state, width, env);
+  const footer = clampFooterSections(renderFooterSections(state, width, env), height);
   const footerHeight = footer.length;
   const bodyHeight = Math.max(1, height - footerHeight);
   const bodyLines = renderBodyWindow(state, width, bodyHeight, state.scrollOffset, ctx);
@@ -29,6 +29,29 @@ export function renderScreen(state, width, height, env = {}) {
     ...visible.map((line) => padRight(line, width)),
     ...footer.map((line) => padRight(line, width)),
   ];
+}
+
+function clampFooterSections(sections, height) {
+  const maxFooterHeight = Math.max(0, height - 1);
+  const footer = sections.flatMap((section) => section.lines);
+  if (footer.length <= maxFooterHeight) return footer;
+  if (maxFooterHeight <= 0) return [];
+
+  const prompt = sections.find((section) => section.name === "prompt")?.lines ?? [];
+  const promptLines = prompt.slice(-maxFooterHeight);
+  if (promptLines.length >= maxFooterHeight) return promptLines;
+
+  const remaining = maxFooterHeight - promptLines.length;
+  const leading = [];
+  for (const section of sections) {
+    if (section.name === "prompt" || section.name === "help") continue;
+    for (const line of section.lines) {
+      if (leading.length >= remaining) break;
+      leading.push(line);
+    }
+    if (leading.length >= remaining) break;
+  }
+  return [...leading, ...promptLines];
 }
 
 export function renderBodyWindow(state, width, bodyHeight, scrollOffset, ctx = createRenderContext({ width, env: {}, state })) {

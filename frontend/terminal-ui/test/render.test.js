@@ -86,3 +86,39 @@ test("screen renderer reserves footer lines and keeps prompt visible", () => {
   assert(plain.some((line) => line.includes("default > hello")));
   assert(lines.every((line) => visibleWidth(line) <= 60));
 });
+
+test("screen renderer clamps oversized footer in tiny terminals", () => {
+  const state = createInitialState();
+  state.mode = "bypass";
+  state.input = "确认一下";
+  state.permission = {
+    requestId: "perm-1",
+    payload: {
+      tool_name: "bash_run",
+      reason: "需要确认一个非常长的命令说明，窄窗口下会换成很多行。",
+    },
+  };
+  state.todo = {
+    total: 4,
+    completed: 1,
+    current: { id: 2, subject: "继续写入非常长的前端文件并验证", status: "in_progress" },
+  };
+  state.status = {
+    model: "openai/kimi-for-coding",
+    workspace_root: "/Users/lv/Workspace/NaumiAgent/very/deep/path",
+    usage: { total_tokens: 999 },
+    context: { used: 240000, window: 256000, percentage: 93.7 },
+    budget: { used_usd: 1.23, max_usd: 5 },
+    git: { branch: "main", dirty: true },
+  };
+  state.messages = Array.from({ length: 8 }, (_, index) => ({ kind: "assistant", content: `正文 ${index}` }));
+
+  const lines = renderScreen(state, 34, 5, { cwd: "/tmp", home: "/Users/lv" });
+  const plain = lines.map(stripAnsi);
+
+  assert.equal(lines.length, 5);
+  assert(plain.some((line) => line.includes("bypass > 确认一下")));
+  assert(plain.some((line) => line.includes("permission: bash_run")));
+  assert(!plain.some((line) => line.includes("Shift+Tab 模式")));
+  assert(lines.every((line) => visibleWidth(line) <= 34));
+});
