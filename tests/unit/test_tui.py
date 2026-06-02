@@ -1,6 +1,7 @@
 """TUI 组件测试."""
 
 import asyncio
+import logging
 
 import pytest
 
@@ -12,6 +13,8 @@ from naumi_agent.tui.app import (
     StatusBar,
     TodoBar,
     _build_textual_bindings,
+    _capture_tui_terminal_noise,
+    _captured_terminal_text,
     _format_tool_output_markdown,
 )
 from naumi_agent.ui.keybindings import build_keybindings
@@ -81,6 +84,24 @@ class TestNaumiApp:
         rendered = _format_tool_output_markdown("```python\nprint('ok')\n```")
 
         assert rendered == "```python\nprint('ok')\n```"
+
+    def test_tui_agent_run_captures_stray_terminal_noise(self, capsys) -> None:
+        logger = logging.getLogger("LiteLLM")
+        previous = logger.level
+        logger.setLevel(logging.INFO)
+        try:
+            with _capture_tui_terminal_noise() as (stdout_buf, stderr_buf):
+                print("LiteLLM completion noise")
+                logger.info("hidden client log")
+            captured_text = _captured_terminal_text(stdout_buf, stderr_buf)
+        finally:
+            logger.setLevel(previous)
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+        assert "LiteLLM completion noise" in captured_text
+        assert logger.level == previous
 
     def test_chat_panel_excerpts_long_code_blocks_but_keeps_full_response(
         self,

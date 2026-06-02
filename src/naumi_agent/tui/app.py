@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import json
 import logging
 import shlex
@@ -47,6 +49,58 @@ from naumi_agent.ui.theme import UIStyleConfig, build_ui_style_config, render_st
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
 
 logger = logging.getLogger(__name__)
+
+_TERMINAL_NOISE_LOGGERS = ("litellm", "LiteLLM")
+
+
+@contextlib.contextmanager
+def _capture_tui_terminal_noise() -> Any:
+    """Capture stray terminal writes and mute noisy model client loggers."""
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    previous_levels = {
+        name: logging.getLogger(name).level for name in _TERMINAL_NOISE_LOGGERS
+    }
+    try:
+        for name in _TERMINAL_NOISE_LOGGERS:
+            logging.getLogger(name).setLevel(logging.ERROR)
+        with (
+            contextlib.redirect_stdout(stdout_buf),
+            contextlib.redirect_stderr(stderr_buf),
+        ):
+            yield stdout_buf, stderr_buf
+    finally:
+        for name, level in previous_levels.items():
+            logging.getLogger(name).setLevel(level)
+
+
+def _captured_terminal_text(stdout_buf: io.StringIO, stderr_buf: io.StringIO) -> str:
+    return stdout_buf.getvalue() + stderr_buf.getvalue()
+
+
+def _mount_captured_terminal_noise(
+    chat: ChatPanel,
+    text: str,
+    *,
+    debug_trace: Any | None = None,
+) -> None:
+    """Show captured third-party terminal output inside chat, collapsed."""
+    if not text.strip():
+        return
+    if debug_trace is not None:
+        debug_trace.output("tui.captured_terminal_noise", text)
+    preview = text.strip()
+    if len(preview) > 4000:
+        preview = preview[:4000] + "\n... 已截断外部日志预览"
+    content = Static(RichMarkdown(f"```text\n{preview}\n```"))
+    panel = Collapsible(
+        content,
+        title=f"已拦截外部终端日志 ({len(text)} 字符)",
+        collapsed=True,
+        classes="tool-done",
+    )
+    chat.mount(panel)
+    chat.scroll_end(animate=False)
 
 
 def _format_tool_output_markdown(content: str) -> str:
@@ -2034,8 +2088,11 @@ class NaumiApp(App):
                 return end - streaming_turn_start
             return 0.0
 
+        captured_noise = ""
         try:
-            result = await self.engine.run_streaming(task, on_event)
+            with _capture_tui_terminal_noise() as (stdout_buf, stderr_buf):
+                result = await self.engine.run_streaming(task, on_event)
+                captured_noise = _captured_terminal_text(stdout_buf, stderr_buf)
             if self.debug_trace is not None:
                 self.debug_trace.event(
                     "tui.agent_run_end",
@@ -2087,7 +2144,9 @@ class NaumiApp(App):
             status_parts.append(f"上下文: {ctx_pct}%")
             status.status_text = "✅ " + " | ".join(status_parts)
         except Exception as e:
-            logger.exception("Agent run failed")
+            if "stdout_buf" in locals() and "stderr_buf" in locals():
+                captured_noise = _captured_terminal_text(stdout_buf, stderr_buf)
+            logger.debug("Agent run failed", exc_info=True)
             if self.debug_trace is not None:
                 self.debug_trace.exception("tui.agent_run", e, task=task)
             chat.start_response()
@@ -2095,6 +2154,11 @@ class NaumiApp(App):
             chat.finalize(0, 0.0, engine=self.engine)
             status.status_text = f"❌ 错误: {e}"
         finally:
+            _mount_captured_terminal_noise(
+                chat,
+                captured_noise,
+                debug_trace=self.debug_trace,
+            )
             self.query_one(Spinner)._active = False
             self._set_input_enabled(True)
 
