@@ -82,11 +82,16 @@ export function HelpFooter() {
 }
 
 export function renderFooter(state, width, env = {}) {
+  return renderFooterSections(state, width, env).flatMap((section) => section.lines);
+}
+
+export function renderFooterSections(state, width, env = {}) {
+  const ctx = { width };
   return [
-    PermissionFooter({ permission: state.permission }),
-    TodoFooter({ todo: state.todo }),
-    StatusFooter({ state, env }),
-    PromptFooter({ state }),
-    HelpFooter(),
-  ].flatMap((component) => component.render({ width }));
+    { name: "permission", lines: PermissionFooter({ permission: state.permission }).render(ctx) },
+    { name: "todo", lines: TodoFooter({ todo: state.todo }).render(ctx) },
+    { name: "status", lines: StatusFooter({ state, env }).render(ctx) },
+    { name: "prompt", lines: PromptFooter({ state }).render(ctx) },
+    { name: "help", lines: HelpFooter().render(ctx) },
+  ].filter((section) => section.lines.length > 0);
 }

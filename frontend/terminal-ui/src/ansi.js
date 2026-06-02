@@ -70,7 +70,14 @@ export function wrapAnsiLine(line, width) {
     for (let i = 0; i < remaining.length; i += 1) {
       const ch = remaining[i];
       if (ch === "\x1b") ansi = true;
-      if (!ansi) visible += charWidth(ch);
+      if (!ansi) {
+        const nextVisible = visible + charWidth(ch);
+        if (nextVisible > width) {
+          take = visible === 0 ? i + 1 : i;
+          break;
+        }
+        visible = nextVisible;
+      }
       if (ansi && ch === "m") ansi = false;
       if (visible >= width) {
         take = i + 1;
