@@ -1096,6 +1096,23 @@ class AgentEngine:
                     },
                 )
 
+    def _sanitize_messages_for_model(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        update_engine_context: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return model-ready messages with inline visual payloads summarized."""
+        sanitized, replacements = self._compactor.sanitize_visual_payloads(messages)
+        if replacements:
+            logger.info(
+                "Sanitized %d inline visual payloads before model call",
+                replacements,
+            )
+            if update_engine_context:
+                self._messages = sanitized
+        return sanitized
+
     async def _build_compaction_runtime_snapshot(self) -> tuple[str, list[str], list[str]]:
         """Build deterministic state that must survive history compaction."""
         sections: list[str] = []
@@ -1310,7 +1327,11 @@ class AgentEngine:
         try:
             if cause is not None and _is_prompt_too_long_error(cause):
                 raise cause
-            return await self._router.call(messages=messages, tier=tier, tools=tools)
+            safe_messages = self._sanitize_messages_for_model(
+                messages,
+                update_engine_context=messages is self._messages,
+            )
+            return await self._router.call(messages=safe_messages, tier=tier, tools=tools)
         except Exception as e:
             if not _is_prompt_too_long_error(e):
                 raise
@@ -1321,8 +1342,12 @@ class AgentEngine:
             )
             if not recovered:
                 raise
+            safe_messages = self._sanitize_messages_for_model(
+                self._messages,
+                update_engine_context=True,
+            )
             return await self._router.call(
-                messages=self._messages,
+                messages=safe_messages,
                 tier=tier,
                 tools=tools,
             )
@@ -2147,8 +2172,12 @@ class AgentEngine:
 
             try:
                 llm_start = time.perf_counter()
+                stream_messages = self._sanitize_messages_for_model(
+                    self._messages,
+                    update_engine_context=True,
+                )
                 async for chunk in self._router.stream(
-                    messages=self._messages,
+                    messages=stream_messages,
                     tier=ModelTier.CAPABLE,
                     tools=tools,
                 ):
@@ -2855,7 +2884,8 @@ class AgentEngine:
         """Return context window usage estimate."""
         model = self._router.resolve_model(ModelTier.CAPABLE)
         window = self._router.get_context_window(model)
-        used = self._usage.total_input_tokens
+        sanitized, _ = self._compactor.sanitize_visual_payloads(self._messages)
+        used = self._compactor._estimate_tokens(sanitized)
         return {
             "model": model,
             "window": window,
