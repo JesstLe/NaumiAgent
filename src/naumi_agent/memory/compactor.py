@@ -276,11 +276,11 @@ class ContextCompactor:
             return litellm.token_counter(model=model, messages=messages)
         except Exception:
             # Fallback: 1 token ≈ 4 chars
-            total_chars = sum(len(m.get("content", "")) for m in messages)
+            total_chars = sum(_fallback_token_chars(m.get("content", "")) for m in messages)
             for m in messages:
                 for tc in m.get("tool_calls", []):
                     func = tc.get("function", {})
-                    total_chars += len(func.get("arguments", ""))
+                    total_chars += _fallback_token_chars(func.get("arguments", ""))
             return total_chars // 4
 
     async def _extract_memories(self, messages: list[dict[str, Any]]) -> None:
@@ -423,6 +423,17 @@ def _visual_payload_placeholder(value: Any) -> dict[str, str]:
         "type": "text",
         "text": f"[图片内容已省略: {description}]",
     }
+
+
+def _fallback_token_chars(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, str):
+        return len(value)
+    try:
+        return len(json.dumps(value, ensure_ascii=False))
+    except TypeError:
+        return len(str(value))
 
 
 @dataclass(frozen=True)

@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -150,6 +151,47 @@ class TestReset:
         engine._usage.total_input_tokens = 100
         engine.reset()
         assert engine._usage.total_input_tokens == 0
+
+
+class TestContextVisualPayloads:
+    @pytest.mark.asyncio
+    async def test_model_call_sanitizes_inline_image_payload(self, engine: AgentEngine) -> None:
+        data_url = "data:image/png;base64," + ("a" * 4096)
+        messages = [{"role": "user", "content": f"请看截图：{data_url}"}]
+        response = ModelResponse(content="ok", model="test-model")
+        engine._router.call = AsyncMock(return_value=response)  # type: ignore[method-assign]
+
+        await engine._call_model_with_recovery(
+            messages=messages,
+            tier=ModelTier.CAPABLE,
+            tools=None,
+        )
+
+        sent_messages = engine._router.call.call_args.kwargs["messages"]
+        assert "base64_chars=4096" in sent_messages[0]["content"]
+        assert "a" * 512 not in str(sent_messages)
+
+    def test_context_info_estimates_sanitized_current_messages(
+        self,
+        engine: AgentEngine,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        data_url = "data:image/png;base64," + ("a" * 12000)
+        engine._messages = [{"role": "user", "content": f"截图：{data_url}"}]
+        engine._usage.total_input_tokens = 12000
+        engine._router.resolve_model = MagicMock(return_value="test-model")
+        engine._router.get_context_window = MagicMock(return_value=200000)
+
+        def fallback_estimate(messages: list[dict[str, Any]]) -> int:
+            assert "a" * 512 not in str(messages)
+            return sum(len(str(message.get("content", ""))) for message in messages) // 4
+
+        monkeypatch.setattr(engine._compactor, "_estimate_tokens", fallback_estimate)
+
+        info = engine.get_context_info()
+
+        assert info["used"] < 200
+        assert info["percentage"] < 1
 
 
 class TestSetSystemPrompt:
