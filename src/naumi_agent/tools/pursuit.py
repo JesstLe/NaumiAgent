@@ -14,6 +14,7 @@ from naumi_agent.tools.base import Tool, ToolMetadata
 logger = logging.getLogger(__name__)
 
 _global_pursuit_loop: GoalPursuitLoop | None = None
+_background_pursuit_tasks: set[asyncio.Task[str]] = set()
 MAX_PURSUIT_GOAL_CHARS = 8_000
 PURSUIT_RUN_ID_RE = re.compile(r"^[a-zA-Z0-9_.:-]{1,128}$")
 
@@ -119,14 +120,54 @@ class PursueTool(Tool):
         )
 
         try:
-            report = await pursuit.pursue(normalized_goal)
-            return report
+            task = asyncio.create_task(
+                pursuit.pursue(normalized_goal),
+                name="naumi-pursuit-goal",
+            )
+            _background_pursuit_tasks.add(task)
+            task.add_done_callback(_background_pursuit_tasks.discard)
+            task.add_done_callback(_log_background_pursuit_result)
+            await asyncio.sleep(0)
+            run_id = pursuit._run.id if pursuit._run is not None else "启动中"
+            return (
+                "✅ 目标追踪已在后台启动，界面不会等待长循环完成。\n\n"
+                f"- run_id: `{run_id}`\n"
+                f"- 查看状态: `/pursue status {run_id}`\n"
+                "- 查看列表: `/pursue list`\n"
+                f"- 默认上限: {_format_pursuit_limits(config)}\n\n"
+                "追踪循环会持续记录证据；如果进入 waiting 或 blocked，"
+                "可以用状态命令查看原因。"
+            )
         except asyncio.CancelledError:
             pursuit.cancel()
             return "⚠️ 目标追踪被用户取消。"
         except Exception as e:
             logger.exception("Pursuit loop error")
             return f"⚠️ 目标追踪异常: {type(e).__name__}: {e}"
+
+
+def _log_background_pursuit_result(task: asyncio.Task[str]) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception as e:
+        logger.debug("Background pursuit loop failed: %s", e, exc_info=True)
+
+
+def _format_pursuit_limits(config: PursuitConfig) -> str:
+    def number(value: float | int, suffix: str) -> str:
+        return "无限" if value == float("inf") else f"{value:.0f}{suffix}"
+
+    budget = (
+        "无限"
+        if config.max_budget_usd == float("inf")
+        else f"${config.max_budget_usd:.2f}"
+    )
+    return (
+        f"{number(config.max_iterations, ' 轮')} / "
+        f"{number(config.max_time_seconds, ' 秒')} / {budget}"
+    )
 
 
 class PursuitListTool(Tool):

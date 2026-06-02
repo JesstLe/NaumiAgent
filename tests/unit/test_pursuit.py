@@ -1,5 +1,6 @@
 """Goal Pursuit Loop tests."""
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock
 
@@ -100,6 +101,7 @@ class TestDataStructures:
         config = PursuitConfig()
         assert config.max_iterations == 1000
         assert config.max_budget_usd == float("inf")
+        assert config.max_time_seconds == float("inf")
         assert config.stagnation_threshold == 3
 
     def test_pursuit_evidence_defaults(self) -> None:
@@ -651,6 +653,41 @@ class TestPursueToolRegistration:
 
         result = await PursueTool().execute(goal="x" * 8001)
         assert "目标过长" in result
+
+    @pytest.mark.asyncio
+    async def test_pursue_tool_starts_background_run(self, tmp_path, monkeypatch) -> None:
+        import naumi_agent.tools.pursuit as pursuit_mod
+
+        store = PursuitStore(tmp_path / "pursuit")
+        pursuit_mod._global_pursuit_loop = GoalPursuitLoop(
+            router=MagicMock(),
+            tool_registry=MagicMock(),
+            subagent_manager=MagicMock(),
+            store=store,
+        )
+
+        async def fake_pursue(self, goal: str) -> str:
+            now = time.time()
+            self._run = PursuitRun(
+                id="pursuit_bg",
+                goal=goal,
+                status=PursuitRunStatus.RUNNING,
+                phase="assess",
+                started_at=now,
+                updated_at=now,
+            )
+            self._persist_run()
+            await asyncio.sleep(0)
+            return "报告"
+
+        monkeypatch.setattr(GoalPursuitLoop, "pursue", fake_pursue)
+
+        result = await PursueTool().execute(goal="后台目标")
+
+        assert "后台启动" in result
+        assert "pursuit_bg" in result
+        assert "无限" in result
+        assert store.get_run("pursuit_bg") is not None
 
     @pytest.mark.asyncio
     async def test_run_id_tools_reject_invalid_run_id(self) -> None:
