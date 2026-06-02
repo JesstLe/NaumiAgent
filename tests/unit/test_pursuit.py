@@ -99,9 +99,9 @@ class TestDataStructures:
 
     def test_pursuit_config_defaults(self) -> None:
         config = PursuitConfig()
-        assert config.max_iterations == 1000
-        assert config.max_budget_usd == float("inf")
-        assert config.max_time_seconds == float("inf")
+        assert config.max_iterations == 50
+        assert config.max_budget_usd == 2.0
+        assert config.max_time_seconds == 1800.0
         assert config.stagnation_threshold == 3
 
     def test_pursuit_evidence_defaults(self) -> None:
@@ -686,7 +686,7 @@ class TestPursueToolRegistration:
 
         assert "后台启动" in result
         assert "pursuit_bg" in result
-        assert "无限" in result
+        assert "50 轮 / 1800 秒 / $2.00" in result
         assert store.get_run("pursuit_bg") is not None
 
     @pytest.mark.asyncio

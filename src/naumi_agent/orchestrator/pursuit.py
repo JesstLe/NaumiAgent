@@ -164,9 +164,9 @@ class PursuitRun:
 class PursuitConfig:
     """Configuration for the pursuit loop."""
 
-    max_iterations: int = 1000
-    max_budget_usd: float = float("inf")
-    max_time_seconds: float = float("inf")
+    max_iterations: int = 50
+    max_budget_usd: float = 2.0
+    max_time_seconds: float = 1800.0
     stagnation_threshold: int = 3  # consecutive iterations with no progress
     verify_interval: int = 1  # verify every N iterations
     plan_depth: int = 3  # how many steps to plan ahead
