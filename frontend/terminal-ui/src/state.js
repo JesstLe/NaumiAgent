@@ -125,6 +125,7 @@ export function handleUiMessage(state, message) {
       handleThinking(state, message);
       break;
     case "tool_prepare":
+      handleTodoPrepare(state, message);
       handleToolPrepare(state, message);
       break;
     case "tool_use":
@@ -306,6 +307,25 @@ export function handleTodoStatus(state, message) {
     total: message.total_count ?? 0,
     completed: message.completed_count ?? 0,
     current,
+  };
+}
+
+export function handleTodoPrepare(state, message) {
+  if (!["todo_write", "task_create", "task_update", "task_delete"].includes(message.tool_name)) {
+    return;
+  }
+  if (message.phase === "end") {
+    return;
+  }
+  const currentTodo = state.todo ?? {};
+  state.todo = {
+    total: currentTodo.total ?? 0,
+    completed: currentTodo.completed ?? 0,
+    current: {
+      id: "...",
+      status: "in_progress",
+      subject: "正在更新任务列表",
+    },
   };
 }
 
