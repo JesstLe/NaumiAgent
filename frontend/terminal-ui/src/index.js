@@ -14,7 +14,13 @@ import {
   rememberSubmittedInput,
   splitInputChunk,
 } from "./input-buffer.js";
-import { attachJsonlLineReader, createEventSender, parseArgs, splitShellLike } from "./protocol.js";
+import {
+  attachJsonlLineReader,
+  createEventSender,
+  parseArgs,
+  parseBridgeCommandJson,
+  splitShellLike,
+} from "./protocol.js";
 import { handleSubmitText, pushSystemMessage, reduceServerEvent, createInitialState, createUiSnapshot, applyUiSnapshot } from "./state.js";
 import { renderScreen } from "./render.js";
 import { getUiSnapshot, loadUiStateStore, saveUiStateStore, setUiSnapshot } from "./ui-state-store.js";
@@ -60,6 +66,10 @@ function main() {
 }
 
 function startBridge() {
+  if (args.bridgeCommandJson) {
+    const [cmd, ...cmdArgs] = parseBridgeCommandJson(args.bridgeCommandJson);
+    return spawn(cmd, cmdArgs, { stdio: ["pipe", "pipe", "pipe"], cwd: process.cwd() });
+  }
   if (args.bridgeCommand) {
     const [cmd, ...cmdArgs] = splitShellLike(args.bridgeCommand);
     return spawn(cmd, cmdArgs, { stdio: ["pipe", "pipe", "pipe"], cwd: process.cwd() });

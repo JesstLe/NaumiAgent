@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,9 +30,18 @@ def test_build_terminal_ui_command_uses_direct_node_entry(tmp_path: Path) -> Non
         "config.yaml",
         frontend_dir=frontend,
         node_executable="/opt/bin/node",
+        bridge_python_executable="/venv/bin/python",
     )
 
-    assert cmd == ["/opt/bin/node", str(entry), "--config", "config.yaml"]
+    assert cmd[:4] == ["/opt/bin/node", str(entry), "--config", "config.yaml"]
+    assert cmd[4] == "--bridge-command-json"
+    assert json.loads(cmd[5]) == [
+        "/venv/bin/python",
+        "-m",
+        "naumi_agent.ui.bridge",
+        "--config",
+        "config.yaml",
+    ]
 
 
 def test_resolve_terminal_ui_frontend_prefers_source_tree(tmp_path: Path) -> None:
@@ -63,9 +73,17 @@ def test_build_terminal_ui_command_uses_packaged_frontend_when_source_is_missing
         project_root=project_root,
         package_root=package_root,
         node_executable="/opt/bin/node",
+        bridge_python_executable="/venv/bin/python",
     )
 
-    assert cmd == ["/opt/bin/node", str(entry), "--config", "config.yaml"]
+    assert cmd[:4] == ["/opt/bin/node", str(entry), "--config", "config.yaml"]
+    assert json.loads(cmd[5]) == [
+        "/venv/bin/python",
+        "-m",
+        "naumi_agent.ui.bridge",
+        "--config",
+        "config.yaml",
+    ]
 
 
 def test_build_terminal_ui_command_requires_entry(tmp_path: Path) -> None:

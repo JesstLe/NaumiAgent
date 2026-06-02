@@ -1,7 +1,7 @@
 import { StringDecoder } from "node:string_decoder";
 
 export function parseArgs(argv) {
-  const parsed = { config: "config.yaml", bridgeCommand: "" };
+  const parsed = { config: "config.yaml", bridgeCommand: "", bridgeCommandJson: "" };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if ((arg === "--config" || arg === "-c") && argv[i + 1]) {
@@ -10,7 +10,19 @@ export function parseArgs(argv) {
     } else if (arg === "--bridge-command" && argv[i + 1]) {
       parsed.bridgeCommand = argv[i + 1];
       i += 1;
+    } else if (arg === "--bridge-command-json" && argv[i + 1]) {
+      parsed.bridgeCommandJson = argv[i + 1];
+      i += 1;
     }
+  }
+  return parsed;
+}
+
+export function parseBridgeCommandJson(value) {
+  if (!value) return [];
+  const parsed = JSON.parse(value);
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string" || item.length === 0)) {
+    throw new Error("--bridge-command-json 必须是非空字符串数组");
   }
   return parsed;
 }

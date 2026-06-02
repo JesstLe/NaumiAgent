@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import os
 import shlex
@@ -293,6 +294,7 @@ def _build_terminal_ui_command(
     *,
     frontend_dir: Path | None = None,
     node_executable: str | None = None,
+    bridge_python_executable: str | None = None,
     project_root: Path | None = None,
     package_root: Path | None = None,
 ) -> list[str]:
@@ -310,7 +312,21 @@ def _build_terminal_ui_command(
             "未找到 Node.js，无法启动新一代终端 UI。请先安装 Node.js 20+。"
         )
 
-    return [node, str(entry), "--config", config_path]
+    bridge_command = [
+        bridge_python_executable or sys.executable,
+        "-m",
+        "naumi_agent.ui.bridge",
+        "--config",
+        config_path,
+    ]
+    return [
+        node,
+        str(entry),
+        "--config",
+        config_path,
+        "--bridge-command-json",
+        json.dumps(bridge_command, ensure_ascii=False, separators=(",", ":")),
+    ]
 
 
 def _launch_tui(config_path: str) -> None:
