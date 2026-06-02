@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { stripAnsi } from "../src/ansi.js";
+import { renderScreen } from "../src/render.js";
 import { createInitialState, createUiSnapshot, applyUiSnapshot, getFoldEntries, handleSubmitText, reduceServerEvent } from "../src/state.js";
 
 test("assistant stream updates one active message", () => {
@@ -94,6 +96,35 @@ test("tool prepare creates a durable activity message before tool cards", () => 
   assert.equal(state.messages.at(-1).kind, "tool");
   assert.equal(state.messages.at(-1).prepareTitle, "准备 file_write");
   assert(state.messages.at(-1).prepareDetails.includes("路径: showcase/index.html"));
+});
+
+test("runtime perf phase does not corrupt active tool prepare state", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: {
+      type: "runtime_status",
+      phase: "perf_phase",
+      label: "模型首包",
+      duration_ms: 2400,
+    },
+  });
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "tool_use", tool_call_id: "call-1", tool_name: "bash_run", command: "pwd" },
+  });
+
+  assert.equal(state.activeRuntimePhase, "模型首包: 2400ms");
+  assert.equal(state.activeToolPrepare, null);
+  assert.equal(state.tools[0].name, "bash_run");
+  assert.equal(state.tools[0].prepareTitle, "");
+  assert.deepEqual(state.tools[0].prepareDetails, []);
+
+  state.running = true;
+  const plain = renderScreen(state, 90, 12, { cwd: "/tmp", home: "/Users/lv" }).map(stripAnsi).join("\n");
+  assert(plain.includes("运行中... · 模型首包: 2400ms"));
 });
 
 test("todo footer state tracks open work and clears when complete", () => {

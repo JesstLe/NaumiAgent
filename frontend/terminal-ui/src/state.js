@@ -18,6 +18,7 @@ export function createInitialState() {
     activeAssistant: null,
     activeThinking: null,
     activeToolPrepare: null,
+    activeRuntimePhase: "",
     todo: null,
     permission: null,
     running: false,
@@ -71,6 +72,7 @@ export function reduceServerEvent(state, record) {
       state.running = false;
       finishActiveToolPrepare(state, "本轮执行已结束");
       state.activeToolPrepare = null;
+      state.activeRuntimePhase = "";
       state.permission = null;
       break;
     case "session/replayed":
@@ -81,6 +83,7 @@ export function reduceServerEvent(state, record) {
         state.activeAssistant = null;
         state.activeThinking = null;
         state.activeToolPrepare = null;
+        state.activeRuntimePhase = "";
         state.folds = {};
         state.foldCursor = 0;
         clearRenderCache(state.renderCache);
@@ -135,7 +138,7 @@ export function handleUiMessage(state, message) {
       break;
     case "runtime_status":
       if (message.phase === "perf_phase") {
-        state.activeToolPrepare = `${message.label}: ${message.duration_ms}ms`;
+        state.activeRuntimePhase = `${message.label}: ${message.duration_ms}ms`;
       }
       break;
     case "recovery":

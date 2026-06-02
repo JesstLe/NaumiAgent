@@ -68,7 +68,8 @@ export function renderBody(state, width, ctx = createRenderContext({ width, env:
 function renderBodyTail(state, width) {
   const lines = [];
   if (state.running) {
-    lines.push(color(ANSI.dim, "运行中..."));
+    const phase = state.activeRuntimePhase ? ` · ${state.activeRuntimePhase}` : "";
+    lines.push(color(ANSI.dim, `运行中...${phase}`));
   }
   return lines.flatMap((line) => wrapAnsiLine(line, width));
 }
