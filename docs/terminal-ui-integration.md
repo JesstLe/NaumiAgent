@@ -104,6 +104,10 @@ naumi ui --config config.yaml
 debug log 和 Python bridge 的相对 `--config` 解析都以这个目录为准。旧版 Textual
 TUI 保留为 fallback：
 
+开发态启动时，launcher 优先使用仓库根目录下的 `frontend/terminal-ui`；wheel/pip
+安装态启动时，则使用打包进 `naumi_agent/frontend/terminal-ui` 的运行时前端资源。
+wheel 只包含 `package.json` 和 `src/`，不会把前端测试文件打包进用户安装环境。
+
 ```bash
 naumi ui --legacy
 # 或
