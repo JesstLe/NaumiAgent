@@ -66,6 +66,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/naumi_agent"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"frontend/terminal-ui/package.json" = "naumi_agent/frontend/terminal-ui/package.json"
+"frontend/terminal-ui/src" = "naumi_agent/frontend/terminal-ui/src"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

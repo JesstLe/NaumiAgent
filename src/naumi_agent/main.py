@@ -259,17 +259,50 @@ def _launch_terminal_ui(config_path: str, *, cwd: Path | None = None) -> int:
     return subprocess.run(cmd, cwd=str(cwd or Path.cwd()), check=False).returncode
 
 
+def _resolve_terminal_ui_frontend_dir(
+    *,
+    frontend_dir: Path | None = None,
+    project_root: Path | None = None,
+    package_root: Path | None = None,
+) -> Path:
+    """Resolve the terminal UI runtime directory in source and installed layouts."""
+    if frontend_dir is not None:
+        entry = frontend_dir / "src" / "index.js"
+        if entry.exists():
+            return frontend_dir
+        raise TerminalUiLaunchError(f"未找到新终端 UI 入口: {entry}")
+
+    source_root = project_root or _PROJECT_ROOT
+    installed_root = package_root or Path(__file__).resolve().parent
+    candidates = [
+        source_root / "frontend" / "terminal-ui",
+        installed_root / "frontend" / "terminal-ui",
+    ]
+    for candidate in candidates:
+        if (candidate / "src" / "index.js").exists():
+            return candidate
+
+    searched = "\n".join(
+        f"- {candidate / 'src' / 'index.js'}" for candidate in candidates
+    )
+    raise TerminalUiLaunchError(f"未找到新终端 UI 入口，已检查：\n{searched}")
+
+
 def _build_terminal_ui_command(
     config_path: str,
     *,
     frontend_dir: Path | None = None,
     node_executable: str | None = None,
+    project_root: Path | None = None,
+    package_root: Path | None = None,
 ) -> list[str]:
     """Build the direct Node command for the next-generation terminal UI."""
-    frontend = frontend_dir or (_PROJECT_ROOT / "frontend" / "terminal-ui")
+    frontend = _resolve_terminal_ui_frontend_dir(
+        frontend_dir=frontend_dir,
+        project_root=project_root,
+        package_root=package_root,
+    )
     entry = frontend / "src" / "index.js"
-    if not entry.exists():
-        raise TerminalUiLaunchError(f"未找到新终端 UI 入口: {entry}")
 
     node = node_executable or shutil.which("node")
     if not node:

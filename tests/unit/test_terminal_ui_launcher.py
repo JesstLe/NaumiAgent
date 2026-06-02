@@ -1,22 +1,67 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from naumi_agent.main import TerminalUiLaunchError, _build_terminal_ui_command, _launch_terminal_ui
+from naumi_agent.main import (
+    TerminalUiLaunchError,
+    _build_terminal_ui_command,
+    _launch_terminal_ui,
+    _resolve_terminal_ui_frontend_dir,
+)
+
+
+def _write_terminal_ui_entry(frontend: Path) -> Path:
+    entry = frontend / "src" / "index.js"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    return entry
 
 
 def test_build_terminal_ui_command_uses_direct_node_entry(tmp_path: Path) -> None:
     frontend = tmp_path / "terminal-ui"
-    entry = frontend / "src" / "index.js"
-    entry.parent.mkdir(parents=True)
-    entry.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    entry = _write_terminal_ui_entry(frontend)
 
     cmd = _build_terminal_ui_command(
         "config.yaml",
         frontend_dir=frontend,
+        node_executable="/opt/bin/node",
+    )
+
+    assert cmd == ["/opt/bin/node", str(entry), "--config", "config.yaml"]
+
+
+def test_resolve_terminal_ui_frontend_prefers_source_tree(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    package_root = tmp_path / "package"
+    source_frontend = project_root / "frontend" / "terminal-ui"
+    package_frontend = package_root / "frontend" / "terminal-ui"
+    _write_terminal_ui_entry(source_frontend)
+    _write_terminal_ui_entry(package_frontend)
+
+    resolved = _resolve_terminal_ui_frontend_dir(
+        project_root=project_root,
+        package_root=package_root,
+    )
+
+    assert resolved == source_frontend
+
+
+def test_build_terminal_ui_command_uses_packaged_frontend_when_source_is_missing(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    package_root = tmp_path / "package"
+    package_frontend = package_root / "frontend" / "terminal-ui"
+    entry = _write_terminal_ui_entry(package_frontend)
+
+    cmd = _build_terminal_ui_command(
+        "config.yaml",
+        project_root=project_root,
+        package_root=package_root,
         node_executable="/opt/bin/node",
     )
 
@@ -37,9 +82,7 @@ def test_build_terminal_ui_command_requires_node(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     frontend = tmp_path / "terminal-ui"
-    entry = frontend / "src" / "index.js"
-    entry.parent.mkdir(parents=True)
-    entry.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    _write_terminal_ui_entry(frontend)
     monkeypatch.setattr("naumi_agent.main.shutil.which", lambda name: None)
 
     with pytest.raises(TerminalUiLaunchError, match="未找到 Node.js"):
@@ -73,3 +116,18 @@ def test_launch_terminal_ui_preserves_invocation_cwd(
             "check": False,
         }
     ]
+
+
+def test_terminal_ui_runtime_assets_are_included_in_wheel() -> None:
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+
+    force_include = data["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+
+    assert force_include["frontend/terminal-ui/package.json"] == (
+        "naumi_agent/frontend/terminal-ui/package.json"
+    )
+    assert force_include["frontend/terminal-ui/src"] == (
+        "naumi_agent/frontend/terminal-ui/src"
+    )
+    assert "frontend/terminal-ui/test" not in force_include
