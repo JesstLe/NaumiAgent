@@ -49,6 +49,32 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
   }
 });
 
+test("terminal UI process can launch bridge from JSON argv", async () => {
+  const app = launchTerminalUi("fake-bridge.js", { bridgeMode: "json" });
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("json bridge\n");
+    await waitForOutput(output, "json bridge");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const debugEvents = readDebugEvents(app.debugLogPath);
+    assert(
+      debugEvents.some(
+        (record) =>
+          record.event === "protocol.send"
+          && record.payload.record.type === "submit"
+          && record.payload.record.payload.text === "json bridge",
+      ),
+    );
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process treats Shift+Tab as bypass while permission is pending", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);
@@ -184,12 +210,15 @@ test("terminal UI process shows debug paths with /debug", async () => {
   }
 });
 
-function launchTerminalUi(fixtureName = "fake-bridge.js") {
+function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
   const fakeBridge = new URL(`./fixtures/${fixtureName}`, import.meta.url).pathname;
   const debugLogPath = path.join(tmpdir(), `naumi-terminal-ui-debug-${Date.now()}-${Math.random()}.jsonl`);
+  const bridgeArgs = options.bridgeMode === "json"
+    ? ["--bridge-command-json", JSON.stringify([process.execPath, fakeBridge])]
+    : ["--bridge-command", `${process.execPath} ${fakeBridge}`];
   const child = spawn(
     process.execPath,
-    ["src/index.js", "--bridge-command", `${process.execPath} ${fakeBridge}`],
+    ["src/index.js", ...bridgeArgs],
     {
       cwd: new URL("..", import.meta.url).pathname,
       stdio: ["pipe", "pipe", "pipe"],
