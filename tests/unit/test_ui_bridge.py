@@ -114,6 +114,19 @@ class _FakeEngine:
         return True
 
 
+class _SlowFakeEngine(_FakeEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.release_run = asyncio.Event()
+
+    async def run_streaming(self, task: str, on_event: Any) -> AgentResult:
+        await on_event("response_start", {})
+        await on_event("token", {"content": f"处理中: {task}"})
+        await self.release_run.wait()
+        await on_event("response_end", {})
+        return AgentResult(status="completed", response="完成", usage=self.usage)
+
+
 def _records(writer: io.StringIO) -> list[dict[str, Any]]:
     return [
         json.loads(line)
@@ -244,3 +257,33 @@ async def test_bridge_resume_replays_session_messages() -> None:
         message.get("type") == "assistant_stream" and message.get("content") == "旧回答"
         for message in replayed
     )
+
+
+@pytest.mark.asyncio
+async def test_bridge_rejects_resume_while_run_is_active() -> None:
+    engine = _SlowFakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {"id": "submit-1", "type": ClientEventType.SUBMIT, "payload": {"text": "长任务"}}
+    )
+    assert bridge._run_task is not None
+    await asyncio.sleep(0)
+
+    await bridge.handle_client_record(
+        {"id": "resume-1", "type": ClientEventType.RESUME, "payload": {}}
+    )
+
+    records = _records(writer)
+    assert any(
+        record["type"] == "error"
+        and record["payload"].get("code") == "run_in_progress"
+        and "恢复会话" in record["payload"].get("message", "")
+        for record in records
+    )
+    assert not any(record["type"] == "session/replayed" for record in records)
+
+    engine.release_run.set()
+    await bridge._run_task
