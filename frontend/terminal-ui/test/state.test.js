@@ -146,6 +146,31 @@ test("slash commands route through protocol without adding chat noise", () => {
   assert.deepEqual(state.folds, {});
 });
 
+test("debug command shows frontend and bridge trace paths without backend calls", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+  state.frontendDebugLogPath = "/tmp/terminal-ui-debug.jsonl";
+  reduceServerEvent(state, {
+    type: "debug/trace",
+    payload: {
+      run_id: "run-1",
+      events_path: "/tmp/bridge-events.jsonl",
+      transcript_path: "/tmp/bridge-transcript.jsonl",
+    },
+  });
+
+  handleSubmitText(state, "/debug", send);
+
+  assert.deepEqual(sent, []);
+  const message = state.messages.at(-1);
+  assert.equal(message.kind, "system");
+  assert.equal(message.title, "debug");
+  assert(String(message.content).includes("前端日志: /tmp/terminal-ui-debug.jsonl"));
+  assert(String(message.content).includes("Bridge events: /tmp/bridge-events.jsonl"));
+  assert(String(message.content).includes("Bridge run: run-1"));
+});
+
 test("fold commands list and toggle fold entries without backend calls", () => {
   const state = createInitialState();
   const sent = [];

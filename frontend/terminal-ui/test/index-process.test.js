@@ -134,6 +134,25 @@ test("terminal UI process recalls submitted input with arrow history", async () 
   }
 });
 
+test("terminal UI process shows debug paths with /debug", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("/debug\n");
+    await waitForOutput(output, "前端日志:");
+    await waitForOutput(output, app.debugLogPath);
+    await waitForOutput(output, "Bridge events:");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 function launchTerminalUi(fixtureName = "fake-bridge.js") {
   const fakeBridge = new URL(`./fixtures/${fixtureName}`, import.meta.url).pathname;
   const debugLogPath = path.join(tmpdir(), `naumi-terminal-ui-debug-${Date.now()}-${Math.random()}.jsonl`);

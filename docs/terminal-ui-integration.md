@@ -122,6 +122,7 @@ npm --prefix frontend/terminal-ui start -- --config config.yaml
 - 历史消息渲染有前端 LRU 缓存，streaming 内容、tool result、fold state、宽度变化会自动失效。
 - 主屏幕采用 viewport-aware body 渲染，底部附近重绘只渲染当前可见窗口和滚动缓冲，不再全量拼接历史消息。
 - Python bridge 调试日志路径通过 `debug/trace` 展示；JS terminal-ui 额外写入 `.naumi/terminal-ui-debug.jsonl`，记录输入、协议收发、stderr、render 统计和渲染异常。可用 `NAUMI_TERMINAL_UI_DEBUG_LOG=0` 禁用，或设置为自定义路径。
+- `/debug` 在前端直接展示 JS terminal-ui 日志、Python bridge events/transcript、run id、消息数、工具卡片数和当前 mode，bridge 掉线时也能用于定位前端问题。
 - `/resume` 和 `/load <session_id>` 可回放历史消息。
 
 ## 当前不足
