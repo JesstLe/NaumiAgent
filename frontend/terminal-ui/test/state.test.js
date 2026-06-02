@@ -194,6 +194,37 @@ test("todo footer state tracks open work and clears when complete", () => {
   assert.equal(state.todo, null);
 });
 
+test("todo prepare gives immediate sticky feedback before backend snapshot", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: {
+      type: "tool_prepare",
+      phase: "start",
+      tool_name: "todo_write",
+      argument_chars: 128,
+    },
+  });
+
+  assert.equal(state.todo.completed, 0);
+  assert.equal(state.todo.current.subject, "正在更新任务列表");
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: {
+      type: "todo_status",
+      total_count: 2,
+      completed_count: 1,
+      open_count: 1,
+      items: [{ id: 2, subject: "验证页面", status: "pending" }],
+    },
+  });
+
+  assert.equal(state.todo.completed, 1);
+  assert.equal(state.todo.current.subject, "验证页面");
+});
+
 test("slash commands route through protocol without adding chat noise", () => {
   const state = createInitialState();
   const sent = [];
