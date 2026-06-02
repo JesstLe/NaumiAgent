@@ -144,12 +144,12 @@ function handleKeyInput(chunk) {
 
 function handleSingleKeyInput(chunk) {
   if (chunk === "\u0003") exit();
-  if (chunk === INPUT_KEYS.shiftTab) {
-    send("cycle_mode", {});
-    return;
-  }
   if (state.permission) {
     const key = chunk.toLowerCase();
+    if (chunk === INPUT_KEYS.shiftTab) {
+      send("permission_response", { request_id: state.permission.requestId, choice: "bypass" });
+      return;
+    }
     if (key === "y" || key === "a") {
       send("permission_response", { request_id: state.permission.requestId, choice: "allow" });
       return;
@@ -162,6 +162,10 @@ function handleSingleKeyInput(chunk) {
       send("permission_response", { request_id: state.permission.requestId, choice: "bypass" });
       return;
     }
+  }
+  if (chunk === INPUT_KEYS.shiftTab) {
+    send("cycle_mode", {});
+    return;
   }
   if (chunk === "\r" || chunk === "\n") {
     const text = state.input.trim();

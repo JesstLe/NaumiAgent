@@ -49,6 +49,37 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
   }
 });
 
+test("terminal UI process treats Shift+Tab as bypass while permission is pending", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+
+    app.stdin.write("生成一个展示页面\n");
+    await waitForOutput(output, "permission: bash_run");
+
+    app.stdin.write("\x1b[Z");
+    await waitForOutput(output, "mode: bypass");
+    await waitForOutput(output, "file_write showcase/index.html");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const debugEvents = readDebugEvents(app.debugLogPath);
+    assert(
+      debugEvents.some(
+        (record) =>
+          record.event === "protocol.send"
+          && record.payload.record.type === "permission_response"
+          && record.payload.record.payload.choice === "bypass",
+      ),
+    );
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process renders resume replay from typed UI messages", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);
