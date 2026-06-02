@@ -253,10 +253,10 @@ def terminal_ui(
         raise typer.Exit(1) from exc
 
 
-def _launch_terminal_ui(config_path: str) -> int:
+def _launch_terminal_ui(config_path: str, *, cwd: Path | None = None) -> int:
     """Launch the next-generation JS terminal UI from the Python CLI."""
     cmd = _build_terminal_ui_command(config_path)
-    return subprocess.run(cmd, cwd=str(_PROJECT_ROOT), check=False).returncode
+    return subprocess.run(cmd, cwd=str(cwd or Path.cwd()), check=False).returncode
 
 
 def _build_terminal_ui_command(

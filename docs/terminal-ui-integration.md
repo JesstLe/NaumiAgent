@@ -100,7 +100,9 @@ naumi ui --config config.yaml
 ```
 
 `naumi ui` 会由 Python CLI 直接拉起 `frontend/terminal-ui/src/index.js` 并连接
-`naumi_agent.ui.bridge`。旧版 Textual TUI 保留为 fallback：
+`naumi_agent.ui.bridge`。启动时会保留用户当前工作目录；前端 UI state、
+debug log 和 Python bridge 的相对 `--config` 解析都以这个目录为准。旧版 Textual
+TUI 保留为 fallback：
 
 ```bash
 naumi ui --legacy

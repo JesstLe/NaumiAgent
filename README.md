@@ -25,6 +25,7 @@ naumi chat
 
 # 新一代终端 UI（推荐）
 naumi ui
+# 会以当前目录作为工作区启动
 
 # 旧版 Textual TUI fallback
 naumi ui --legacy
