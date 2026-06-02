@@ -29,6 +29,16 @@ test("input tokenizer preserves CSI keys and batches printable paste chunks", ()
     INPUT_KEYS.pageUp,
     INPUT_KEYS.pageDown,
   ]);
+  assert.deepEqual(splitInputChunk(`a${INPUT_KEYS.upAlt}b${INPUT_KEYS.downAlt}`), [
+    "a",
+    INPUT_KEYS.upAlt,
+    "b",
+    INPUT_KEYS.downAlt,
+  ]);
+  assert.deepEqual(splitInputChunk(`${INPUT_KEYS.homeSs3}${INPUT_KEYS.endSs3}`), [
+    INPUT_KEYS.homeSs3,
+    INPUT_KEYS.endSs3,
+  ]);
 });
 
 test("input history navigates submitted commands and restores draft text", () => {

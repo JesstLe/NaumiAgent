@@ -199,32 +199,32 @@ function handleSingleKeyInput(chunk) {
     scheduleRedraw();
     return;
   }
-  if (chunk === INPUT_KEYS.left) {
+  if (chunk === INPUT_KEYS.left || chunk === INPUT_KEYS.leftAlt) {
     moveInputCursor(state, "left");
     scheduleRedraw();
     return;
   }
-  if (chunk === INPUT_KEYS.right) {
+  if (chunk === INPUT_KEYS.right || chunk === INPUT_KEYS.rightAlt) {
     moveInputCursor(state, "right");
     scheduleRedraw();
     return;
   }
-  if (chunk === INPUT_KEYS.up) {
+  if (chunk === INPUT_KEYS.up || chunk === INPUT_KEYS.upAlt) {
     navigateInputHistory(state, "up");
     scheduleRedraw();
     return;
   }
-  if (chunk === INPUT_KEYS.down) {
+  if (chunk === INPUT_KEYS.down || chunk === INPUT_KEYS.downAlt) {
     navigateInputHistory(state, "down");
     scheduleRedraw();
     return;
   }
-  if (chunk === INPUT_KEYS.home || chunk === INPUT_KEYS.homeAlt || chunk === INPUT_KEYS.ctrlA) {
+  if (chunk === INPUT_KEYS.home || chunk === INPUT_KEYS.homeAlt || chunk === INPUT_KEYS.homeSs3 || chunk === INPUT_KEYS.ctrlA) {
     moveInputCursor(state, "home");
     scheduleRedraw();
     return;
   }
-  if (chunk === INPUT_KEYS.end || chunk === INPUT_KEYS.endAlt || chunk === INPUT_KEYS.ctrlE) {
+  if (chunk === INPUT_KEYS.end || chunk === INPUT_KEYS.endAlt || chunk === INPUT_KEYS.endSs3 || chunk === INPUT_KEYS.ctrlE) {
     moveInputCursor(state, "end");
     scheduleRedraw();
     return;

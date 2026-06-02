@@ -3,25 +3,41 @@ export const INPUT_KEYS = {
   pageUp: "\x1b[5~",
   pageDown: "\x1b[6~",
   up: "\x1b[A",
+  upAlt: "\x1bOA",
   down: "\x1b[B",
+  downAlt: "\x1bOB",
   left: "\x1b[D",
+  leftAlt: "\x1bOD",
   right: "\x1b[C",
+  rightAlt: "\x1bOC",
   home: "\x1b[H",
   homeAlt: "\x1b[1~",
+  homeSs3: "\x1bOH",
   end: "\x1b[F",
   endAlt: "\x1b[4~",
+  endSs3: "\x1bOF",
   delete: "\x1b[3~",
   ctrlA: "\x01",
   ctrlE: "\x05",
 };
 
 const CSI_PATTERN = /^\x1b\[[0-9;?]*[~A-Za-z]/;
+const SS3_PATTERN = /^\x1bO[A-Za-z]/;
 
 export function splitInputChunk(chunk) {
   const keys = [];
   let text = String(chunk ?? "");
 
   while (text) {
+    if (text.startsWith("\x1bO")) {
+      const match = text.match(SS3_PATTERN);
+      if (match) {
+        keys.push(match[0]);
+        text = text.slice(match[0].length);
+        continue;
+      }
+    }
+
     if (text.startsWith("\x1b[")) {
       const match = text.match(CSI_PATTERN);
       if (match) {
