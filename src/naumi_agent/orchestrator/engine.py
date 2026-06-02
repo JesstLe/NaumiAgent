@@ -1045,6 +1045,15 @@ class AgentEngine:
         hard_cap = self._config.safety.max_input_tokens
         max_tokens = min(context_window, hard_cap)
 
+        self._messages, visual_replacements = self._compactor.sanitize_visual_payloads(
+            self._messages
+        )
+        if visual_replacements:
+            logger.info(
+                "Sanitized %d inline visual payloads from context",
+                visual_replacements,
+            )
+
         self._messages, archived_tool_results = (
             self._compactor.offload_large_tool_results(self._messages)
         )

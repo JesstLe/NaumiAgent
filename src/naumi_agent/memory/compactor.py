@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
@@ -20,6 +21,10 @@ logger = logging.getLogger(__name__)
 _LARGE_TOOL_RESULT_CHARS = 12_000
 _TOOL_RESULT_PREVIEW_CHARS = 1_200
 _ARCHIVED_TOOL_RESULT_MARKER = "[大型工具结果已归档]"
+_IMAGE_DATA_URL_RE = re.compile(
+    r"data:image/(?P<format>[a-zA-Z0-9.+-]+);base64,(?P<data>[A-Za-z0-9+/=_-]+)"
+)
+_MULTIMODAL_IMAGE_TYPES = {"image_url", "input_image"}
 
 COMPACTION_PROMPT = """\
 请将以下对话历史压缩为简洁的摘要。保留关键信息：
@@ -130,6 +135,23 @@ class ContextCompactor:
 
         return updated, archived
 
+    def sanitize_visual_payloads(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Replace inline image payloads with compact placeholders."""
+        sanitized_messages: list[dict[str, Any]] = []
+        replacements = 0
+
+        for message in messages:
+            sanitized, count = _sanitize_visual_value(message)
+            replacements += count
+            sanitized_messages.append(
+                sanitized if isinstance(sanitized, dict) else message
+            )
+
+        return sanitized_messages, replacements
+
     def should_compact(self, messages: list[dict[str, Any]], max_tokens: int) -> bool:
         """判断是否需要压缩."""
         estimated = self._estimate_tokens(messages)
@@ -150,6 +172,7 @@ class ContextCompactor:
 
         保留 system prompt 和最近几轮，压缩中间历史。
         """
+        messages, _ = self.sanitize_visual_payloads(messages)
         messages, _ = self.offload_large_tool_results(messages)
         if not self.should_compact(messages, max_tokens):
             return messages
@@ -334,6 +357,72 @@ class ContextCompactor:
             chars=len(content),
             sha256=digest,
         )
+
+
+def _sanitize_visual_value(value: Any) -> tuple[Any, int]:
+    if isinstance(value, str):
+        return _sanitize_visual_string(value)
+
+    if isinstance(value, list):
+        changed = 0
+        items: list[Any] = []
+        for item in value:
+            sanitized, count = _sanitize_visual_value(item)
+            changed += count
+            items.append(sanitized)
+        return (items, changed) if changed else (value, 0)
+
+    if not isinstance(value, dict):
+        return value, 0
+
+    message_type = str(value.get("type") or "")
+    if message_type in _MULTIMODAL_IMAGE_TYPES:
+        return _visual_payload_placeholder(value), 1
+
+    changed = 0
+    sanitized_dict: dict[str, Any] = {}
+    for key, child in value.items():
+        if key in {"image_url", "input_image"} and child:
+            sanitized_dict[key] = _visual_payload_placeholder(child)
+            changed += 1
+            continue
+        sanitized, count = _sanitize_visual_value(child)
+        changed += count
+        sanitized_dict[key] = sanitized
+
+    return (sanitized_dict, changed) if changed else (value, 0)
+
+
+def _sanitize_visual_string(value: str) -> tuple[str, int]:
+    replacements = 0
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal replacements
+        replacements += 1
+        return (
+            "[图片内容已省略: "
+            f"data:image/{match.group('format')};base64, "
+            f"base64_chars={len(match.group('data'))}]"
+        )
+
+    sanitized = _IMAGE_DATA_URL_RE.sub(replace, value)
+    return sanitized, replacements
+
+
+def _visual_payload_placeholder(value: Any) -> dict[str, str]:
+    text = str(value)
+    data_url_match = _IMAGE_DATA_URL_RE.search(text)
+    if data_url_match:
+        description = (
+            f"data:image/{data_url_match.group('format')};base64, "
+            f"base64_chars={len(data_url_match.group('data'))}"
+        )
+    else:
+        description = f"image_payload_chars={len(text)}"
+    return {
+        "type": "text",
+        "text": f"[图片内容已省略: {description}]",
+    }
 
 
 @dataclass(frozen=True)

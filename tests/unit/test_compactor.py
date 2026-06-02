@@ -104,6 +104,32 @@ class TestContextCompactor:
         assert archived == []
         assert updated == messages
 
+    def test_sanitize_visual_payloads_replaces_inline_image_content(
+        self,
+        compactor: ContextCompactor,
+    ) -> None:
+        data_url = "data:image/png;base64," + ("a" * 2048)
+        messages = [
+            {"role": "user", "content": f"看这个截图：{data_url}"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "请分析"},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            },
+        ]
+
+        updated, count = compactor.sanitize_visual_payloads(messages)
+
+        assert count == 2
+        assert "base64_chars=2048" in updated[0]["content"]
+        assert "a" * 512 not in str(updated)
+        assert updated[1]["content"][1] == {
+            "type": "text",
+            "text": "[图片内容已省略: data:image/png;base64, base64_chars=2048]",
+        }
+
     async def test_compact_preserves_system(self, compactor: ContextCompactor) -> None:
         messages = [
             {"role": "system", "content": "system prompt"},
