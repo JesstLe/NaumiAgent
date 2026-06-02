@@ -23,6 +23,7 @@ const args = parseArgs(process.argv.slice(2));
 const state = createInitialState();
 const uiStateStore = loadUiStateStore(process.cwd());
 const debugLog = createDebugLog({ cwd: process.cwd(), env: process.env });
+state.frontendDebugLogPath = debugLog?.path ?? "";
 
 let bridge = null;
 let send = null;
@@ -32,6 +33,7 @@ let quitting = false;
 main();
 
 function main() {
+  debugLog?.log("terminal_ui.state", { frontend_debug_log_path: state.frontendDebugLogPath });
   bridge = startBridge();
   send = createEventSender(bridge.stdin, { debugLog });
   attachJsonlLineReader(bridge.stdout, handleBridgeLine);
