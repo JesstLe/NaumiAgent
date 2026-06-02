@@ -8,6 +8,7 @@ import logging
 import os
 import shlex
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -77,6 +78,10 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+
+
+class TerminalUiLaunchError(RuntimeError):
+    """Raised when the next terminal UI cannot be launched."""
 
 # Friendly tool name mapping for display
 _TOOL_ICONS: dict[str, str] = {
@@ -227,24 +232,52 @@ def chat(
 @app.command("ui")
 def terminal_ui(
     config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    legacy: bool = typer.Option(
+        False,
+        "--legacy",
+        help="启动旧版 Textual TUI，而不是新一代终端 UI",
+    ),
 ) -> None:
     """启动新一代终端 UI（legacy CLI/TUI 仍可通过 chat 使用）."""
-    import subprocess
+    if legacy:
+        _launch_tui(config)
+        return
+    try:
+        raise typer.Exit(_launch_terminal_ui(config))
+    except TerminalUiLaunchError as exc:
+        console.print(f"[red]{exc}[/red]")
+        console.print(
+            "[dim]可暂时使用 legacy fallback："
+            "naumi ui --legacy 或 naumi chat --tui[/dim]"
+        )
+        raise typer.Exit(1) from exc
 
-    frontend_dir = _PROJECT_ROOT / "frontend" / "terminal-ui"
-    if not frontend_dir.exists():
-        console.print(f"[red]未找到新终端 UI 目录: {frontend_dir}[/red]")
-        raise typer.Exit(1)
-    cmd = [
-        "npm",
-        "--prefix",
-        str(frontend_dir),
-        "start",
-        "--",
-        "--config",
-        config,
-    ]
-    raise typer.Exit(subprocess.run(cmd, cwd=str(_PROJECT_ROOT), check=False).returncode)
+
+def _launch_terminal_ui(config_path: str) -> int:
+    """Launch the next-generation JS terminal UI from the Python CLI."""
+    cmd = _build_terminal_ui_command(config_path)
+    return subprocess.run(cmd, cwd=str(_PROJECT_ROOT), check=False).returncode
+
+
+def _build_terminal_ui_command(
+    config_path: str,
+    *,
+    frontend_dir: Path | None = None,
+    node_executable: str | None = None,
+) -> list[str]:
+    """Build the direct Node command for the next-generation terminal UI."""
+    frontend = frontend_dir or (_PROJECT_ROOT / "frontend" / "terminal-ui")
+    entry = frontend / "src" / "index.js"
+    if not entry.exists():
+        raise TerminalUiLaunchError(f"未找到新终端 UI 入口: {entry}")
+
+    node = node_executable or shutil.which("node")
+    if not node:
+        raise TerminalUiLaunchError(
+            "未找到 Node.js，无法启动新一代终端 UI。请先安装 Node.js 20+。"
+        )
+
+    return [node, str(entry), "--config", config_path]
 
 
 def _launch_tui(config_path: str) -> None:

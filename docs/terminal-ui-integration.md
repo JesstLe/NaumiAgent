@@ -96,7 +96,16 @@ uv run naumi-ui-bridge --config config.yaml
 启动：
 
 ```bash
-npm --prefix frontend/terminal-ui start -- --config config.yaml
+naumi ui --config config.yaml
+```
+
+`naumi ui` 会由 Python CLI 直接拉起 `frontend/terminal-ui/src/index.js` 并连接
+`naumi_agent.ui.bridge`。旧版 Textual TUI 保留为 fallback：
+
+```bash
+naumi ui --legacy
+# 或
+naumi chat --tui
 ```
 
 当前能力：

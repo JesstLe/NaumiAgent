@@ -23,7 +23,13 @@ pip install -e ".[dev]"
 # CLI 交互对话
 naumi chat
 
-# TUI 界面（推荐）
+# 新一代终端 UI（推荐）
+naumi ui
+
+# 旧版 Textual TUI fallback
+naumi ui --legacy
+
+# 旧版 TUI 入口仍可用
 naumi chat --tui
 
 # 单任务执行
