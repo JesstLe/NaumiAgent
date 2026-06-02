@@ -35,9 +35,18 @@ def resolve_config_path(path: str) -> str:
     candidate = Path(path)
     if candidate.exists():
         return str(candidate)
-    project_root = Path(__file__).resolve().parents[2]
-    fallback = project_root / "config.yaml"
-    return str(fallback)
+    fallback = _find_default_config_path(Path(__file__).resolve())
+    return str(fallback) if fallback is not None else path
+
+
+def _find_default_config_path(start_path: Path) -> Path | None:
+    """Find the source-tree config.yaml from a module path, regardless of depth."""
+    start_dir = start_path if start_path.is_dir() else start_path.parent
+    for directory in (start_dir, *start_dir.parents):
+        config_path = directory / "config.yaml"
+        if config_path.exists():
+            return config_path
+    return None
 
 
 def _git_snapshot(cwd: Path) -> dict[str, Any]:

@@ -11,7 +11,7 @@ import pytest
 
 from naumi_agent.orchestrator.engine import AgentResult, AgentRuntimeMode, AgentUsage
 from naumi_agent.safety.permissions import PermissionMode
-from naumi_agent.ui.bridge import JsonlEngineBridge
+from naumi_agent.ui.bridge import JsonlEngineBridge, resolve_config_path
 from naumi_agent.ui.protocol import (
     ClientEventType,
     ServerEventType,
@@ -120,6 +120,25 @@ def _records(writer: io.StringIO) -> list[dict[str, Any]]:
         for line in writer.getvalue().splitlines()
         if line.strip()
     ]
+
+
+def test_bridge_resolve_config_path_uses_existing_relative_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text("log_level: DEBUG\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert resolve_config_path("config.yaml") == "config.yaml"
+
+
+def test_bridge_resolve_config_path_falls_back_to_repo_config() -> None:
+    resolved = Path(resolve_config_path("__missing_naumi_config__.yaml"))
+
+    assert resolved.name == "config.yaml"
+    assert resolved.exists()
+    assert resolved.parent.name == "NaumiAgent"
 
 
 def test_protocol_decodes_strict_jsonl() -> None:
