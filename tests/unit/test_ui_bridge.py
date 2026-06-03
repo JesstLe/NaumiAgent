@@ -18,6 +18,7 @@ from naumi_agent.orchestrator.engine import AgentEngine, AgentResult, AgentRunti
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.safety.permissions import PermissionMode
 from naumi_agent.tools.base import ToolCall, ToolResult
+from naumi_agent.ui import bridge as ui_bridge
 from naumi_agent.ui.bridge import JsonlEngineBridge, resolve_config_path
 from naumi_agent.ui.messages.events import (
     AssistantStreamMessage,
@@ -343,6 +344,20 @@ async def test_bridge_status_payload_includes_session_id() -> None:
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
 
     assert bridge.status_payload()["session_id"] == "session-abc"
+
+
+def test_bridge_status_payload_includes_slash_command_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        ui_bridge,
+        "_load_cli_slash_commands",
+        lambda: [{"command": "/help", "description": "显示帮助"}],
+    )
+    engine = _FakeEngine()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    slash_commands = bridge.status_payload().get("slash_commands")
+
+    assert isinstance(slash_commands, list)
+    assert slash_commands == [{"command": "/help", "aliases": ["/h"], "description": "显示帮助"}]
 
 
 @pytest.mark.asyncio
