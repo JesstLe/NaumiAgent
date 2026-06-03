@@ -7,6 +7,7 @@ import os
 import platform
 import threading
 import time
+import traceback
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -293,12 +294,14 @@ class DebugTrace:
                     f.write(text)
 
     def exception(self, where: str, exc: BaseException, **extra: Any) -> None:
+        trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         self.event(
             "exception",
             {
                 "where": where,
                 "type": type(exc).__name__,
                 "message": str(exc),
+                "trace": trace,
                 **extra,
             },
         )

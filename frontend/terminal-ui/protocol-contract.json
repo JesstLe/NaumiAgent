@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "transport": "jsonl",
+  "client_events": [
+    "hello",
+    "submit",
+    "set_mode",
+    "cycle_mode",
+    "set_reasoning",
+    "permission_response",
+    "resume",
+    "task_panel",
+    "task_cancel",
+    "permissions_panel",
+    "doctor",
+    "ping",
+    "shutdown"
+  ],
+  "server_events": [
+    "ready",
+    "ack",
+    "error",
+    "pong",
+    "user/message",
+    "ui/message",
+    "engine/event",
+    "run/started",
+    "run/completed",
+    "session/replayed",
+    "runtime/status",
+    "mode/changed",
+    "permission/request",
+    "permission/resolved",
+    "debug/trace",
+    "shutdown"
+  ],
+  "ui_messages": {
+    "assistant_stream": {
+      "fields": ["phase", "content"],
+      "phases": ["start", "token", "end"]
+    },
+    "thinking": {
+      "fields": ["phase", "content"],
+      "phases": ["start", "delta", "end"]
+    },
+    "tool_prepare": {
+      "fields": [
+        "tool_name",
+        "tool_call_id",
+        "phase",
+        "path",
+        "argument_chars",
+        "content_chars",
+        "content_lines",
+        "elapsed_ms",
+        "todo_total",
+        "todo_completed",
+        "todo_open",
+        "todo_items"
+      ],
+      "phases": ["start", "snapshot", "end"],
+      "notes": "tool_prepare_end must remain available to the following tool_use so final tool cards can preserve prepare progress."
+    },
+    "tool_use": {
+      "fields": ["tool_name", "tool_call_id", "primary_arg", "file_path", "command", "query", "url"]
+    },
+    "tool_result": {
+      "fields": ["tool_name", "tool_call_id", "status", "duration_ms", "content_preview", "content_length"]
+    },
+    "todo_status": {
+      "fields": ["source", "total_count", "open_count", "completed_count", "items", "summary_text"]
+    },
+    "permission_bubble": {
+      "fields": ["agent_name", "tool_name", "status", "reason", "requires_confirmation"]
+    },
+    "runtime_status": {
+      "fields": ["phase", "label", "duration_ms", "model", "turn"]
+    },
+    "system_notice": {
+      "fields": ["title", "content", "level"]
+    }
+  }
+}

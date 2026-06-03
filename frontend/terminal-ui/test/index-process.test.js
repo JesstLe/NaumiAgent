@@ -13,16 +13,21 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    app.stdin.write("\x1b[Z");
+    await waitForOutput(output, "mode: plan");
     app.stdin.write("\x1b[Z");
     await waitForOutput(output, "mode: bypass");
 
     app.stdin.write("生成一个展示页面\n");
     await waitForOutput(output, "permission: bash_run");
+    await waitForOutput(output, "需要确认");
 
     app.stdin.write("y");
     await waitForOutput(output, "准备 file_write");
-    await waitForOutput(output, "file_write showcase/index.html");
+    await waitForOutput(output, "生成中 [");
+    await waitForOutput(output, "88 lines");
+    await waitForOutput(output, "路径: showcase/index.html");
     await waitForOutput(output, "+new");
     await waitForOutput(output, "已折叠");
 
@@ -37,11 +42,14 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
     assert(plain.includes("收到，我会创建一个可验证页面。"));
     assert(plain.includes("todo: 1/3 完成"));
     assert(plain.includes("准备 file_write"));
-    assert(plain.includes("success file_write showcase/index.html"));
+    assert(plain.includes("生成中 ["));
+    assert(plain.includes("路径: showcase/index.html"));
+    assert(plain.includes("+new"));
 
     const debugEvents = readDebugEvents(app.debugLogPath);
     assert(debugEvents.some((record) => record.event === "input.chunk"));
     assert(debugEvents.some((record) => record.event === "protocol.send" && record.payload.record.type === "submit"));
+    assert(debugEvents.some((record) => record.event === "protocol.send" && record.payload.record.type === "permission_response" && record.payload.record.payload.choice === "allow"));
     assert(debugEvents.some((record) => record.event === "protocol.receive.record" && record.payload.type === "ui/message"));
     assert(debugEvents.some((record) => record.event === "render.screen"));
   } finally {
@@ -54,7 +62,7 @@ test("terminal UI process can launch bridge from JSON argv", async () => {
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
     app.stdin.write("json bridge\n");
     await waitForOutput(output, "json bridge");
 
@@ -75,6 +83,124 @@ test("terminal UI process can launch bridge from JSON argv", async () => {
   }
 });
 
+test("terminal UI process keeps explicit plan mode across status refreshes", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    app.stdin.write("/mode plan\n");
+    await waitForOutput(output, "mode: plan");
+
+    app.stdin.write("/tasks\n");
+    await waitForOutput(output, "tasks todo 1");
+    await waitForOutput(output, "mode: plan");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const debugEvents = readDebugEvents(app.debugLogPath);
+    const modeChanged = debugEvents.find(
+      (record) =>
+        record.event === "protocol.receive.record"
+        && record.payload.type === "mode/changed"
+        && record.payload.payload?.mode === "plan",
+    );
+    assert.equal(modeChanged.payload.payload.status.permission_mode, "strict");
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process talks to the Python JSONL bridge fixture", async () => {
+  const app = launchTerminalUi(null, {
+    bridgeCommandJson: ["uv", "run", "python", "test/fixtures/python-bridge-fixture.py"],
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    app.stdin.write("\x1b[Z");
+    await waitForOutput(output, "mode: plan");
+    app.stdin.write("\x1b[Z");
+    await waitForOutput(output, "mode: bypass");
+
+    app.stdin.write("python bridge e2e\n");
+    await waitForOutput(output, "Python bridge 收到: python bridge e2e");
+    await waitForOutput(output, "permission: file_write");
+
+    app.stdin.write("y");
+    await waitForOutput(output, "准备 file_write");
+    await waitForOutput(output, "12 lines");
+    await waitForOutput(output, "准备阶段已完成");
+    await waitForOutput(output, "路径: python-fixture/index.html");
+    await waitForOutput(output, "+new from python bridge");
+
+    app.stdin.write("/tasks\n");
+    await waitForOutput(output, "正在写入 Python bridge 页面");
+
+    app.stdin.write("/resume\n");
+    await waitForOutput(output, "已恢复会话: Python Bridge 恢复");
+    await waitForOutput(output, "这是 Python bridge replay。");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const debugEvents = readDebugEvents(app.debugLogPath);
+    assert(
+      debugEvents.some(
+        (record) =>
+          record.event === "protocol.receive.record"
+          && record.payload.type === "permission/request",
+      ),
+    );
+    assert(
+      debugEvents.some(
+        (record) =>
+          record.event === "protocol.receive.record"
+          && record.payload.type === "engine/event",
+      ),
+    );
+    assert(
+      debugEvents.some(
+        (record) =>
+          record.event === "protocol.receive.record"
+          && record.payload.type === "mode/changed"
+          && record.payload.payload?.mode === "plan"
+          && record.payload.payload?.status?.permission_mode === "strict",
+      ),
+    );
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process reports invalid bridge protocol records without crashing", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("bad bridge event\n");
+    await waitForOutput(output, "bridge protocol");
+    await waitForOutput(output, "未知 Bridge 事件");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const debugEvents = readDebugEvents(app.debugLogPath);
+    assert(
+      debugEvents.some(
+        (record) =>
+          record.event === "protocol.receive.error"
+          && String(record.payload.error).includes("未知 Bridge 事件"),
+      ),
+    );
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process treats Shift+Tab as bypass while permission is pending", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);
@@ -87,7 +213,7 @@ test("terminal UI process treats Shift+Tab as bypass while permission is pending
 
     app.stdin.write("\x1b[Z");
     await waitForOutput(output, "mode: bypass");
-    await waitForOutput(output, "file_write showcase/index.html");
+    await waitForOutput(output, "路径: showcase/index.html");
 
     const code = await stopTerminalUi(app);
 
@@ -210,12 +336,306 @@ test("terminal UI process shows debug paths with /debug", async () => {
   }
 });
 
+test("terminal UI process opens task panel through bridge protocol", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("/tasks\n");
+    await waitForOutput(output, "tasks todo 1");
+    await waitForOutput(output, "#1 [running] 写入页面");
+    await waitForOutput(output, "暂无后台任务");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const debugEvents = readDebugEvents(app.debugLogPath);
+    assert(
+      debugEvents.some(
+        (record) =>
+          record.event === "protocol.send"
+          && record.payload.record.type === "task_panel",
+      ),
+    );
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process opens filtered task panel through bridge protocol", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("/tasks background running 6\n");
+    await waitForOutput(output, "filter source=background status=running");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const taskPanelSend = readDebugEvents(app.debugLogPath).find(
+      (record) =>
+        record.event === "protocol.send"
+        && record.payload.record.type === "task_panel",
+    );
+    assert.equal(taskPanelSend.payload.record.payload.source, "background");
+    assert.equal(taskPanelSend.payload.record.payload.status, "running");
+    assert.equal(taskPanelSend.payload.record.payload.limit, 6);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process opens task detail through bridge protocol", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("/tasks detail bg_0001\n");
+    await waitForOutput(output, "detail=bg_0001");
+    await waitForOutput(output, "类型: Background");
+    await waitForOutput(output, "CWD: /tmp/project");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const taskPanelSend = readDebugEvents(app.debugLogPath).find(
+      (record) =>
+        record.event === "protocol.send"
+        && record.payload.record.type === "task_panel",
+    );
+    assert.equal(taskPanelSend.payload.record.payload.detail_id, "bg_0001");
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process opens selected task detail with keyboard", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("/tasks\n");
+    await waitForOutput(output, "task: 1/3 1");
+    app.stdin.write("\n");
+    await waitForOutput(output, "detail=1");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const detailSend = readDebugEvents(app.debugLogPath)
+      .filter(
+        (record) =>
+          record.event === "protocol.send"
+          && record.payload.record.type === "task_panel",
+      )
+      .at(-1);
+    assert.equal(detailSend.payload.record.payload.detail_id, "1");
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process sends task cancel through bridge protocol", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("/tasks cancel bg_0001\n");
+    await waitForOutput(output, "已请求取消all任务 bg_0001");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const cancelSend = readDebugEvents(app.debugLogPath).find(
+      (record) =>
+        record.event === "protocol.send"
+        && record.payload.record.type === "task_cancel",
+    );
+    assert.equal(cancelSend.payload.record.payload.task_id, "bg_0001");
+    assert.equal(cancelSend.payload.record.payload.source, "all");
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process uses focused task action keys", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("/tasks\n");
+    await waitForOutput(output, "Tab/n 选择");
+    app.stdin.write("e");
+    await waitForOutput(output, "event flow");
+    app.stdin.write("x");
+    await waitForOutput(output, "已请求取消todo任务 1");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const cancelSend = readDebugEvents(app.debugLogPath).find(
+      (record) =>
+        record.event === "protocol.send"
+        && record.payload.record.type === "task_cancel",
+    );
+    assert.equal(cancelSend.payload.record.payload.task_id, "1");
+    assert.equal(cancelSend.payload.record.payload.source, "todo");
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process folds timeline sources locally", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("/tasks\n");
+    await waitForOutput(output, "run_7");
+    await waitForOutput(output, "sources: background 1");
+
+    app.stdin.write("/tasks timeline collapse browser\n");
+    await waitForOutput(output, "browser 1 folded");
+    await waitForOutput(output, "已折叠 1 项来源事件");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const plain = stripAnsi(output.text);
+    assert(plain.includes("browser 1 folded"));
+    const foldedOutput = plain.slice(plain.lastIndexOf("browser 1 folded"));
+    assert(!foldedOutput.includes("打开页面"));
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process refreshes pinned task panel on task status changes", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("/tasks pin\n");
+    await waitForOutput(output, "tasks todo 1");
+    await waitForOutput(output, "tasks: bg 1");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const taskPanelSends = readDebugEvents(app.debugLogPath).filter(
+      (record) =>
+        record.event === "protocol.send"
+        && record.payload.record.type === "task_panel",
+    );
+    assert(taskPanelSends.length >= 2);
+    assert.equal(taskPanelSends[0].payload.record.payload.pinned, true);
+    assert.equal(taskPanelSends.at(-1).payload.record.payload.refresh, true);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process opens doctor diagnostics through bridge protocol", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("/doctor\n");
+    await waitForOutput(output, "doctor: ## 环境诊断存在提醒");
+    await waitForOutput(output, "PASS Python 环境");
+    await waitForOutput(output, "browser daemon 集成已禁用");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const debugEvents = readDebugEvents(app.debugLogPath);
+    assert(
+      debugEvents.some(
+        (record) =>
+          record.event === "protocol.send"
+          && record.payload.record.type === "doctor",
+      ),
+    );
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process opens permission panel through bridge protocol", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("/permissions\n");
+    await waitForOutput(output, "permissions pending 1");
+    await waitForOutput(output, "perm-1 main -> bash_run");
+    await waitForOutput(output, "tasks: perm 1");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const debugEvents = readDebugEvents(app.debugLogPath);
+    assert(
+      debugEvents.some(
+        (record) =>
+          record.event === "protocol.send"
+          && record.payload.record.type === "permissions_panel",
+      ),
+    );
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process toggles reasoning display through bridge protocol", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForOutput(output, "reasoning: off");
+    app.stdin.write("/reasoning on\n");
+    await waitForOutput(output, "reasoning 文本显示已开启。");
+    await waitForOutput(output, "reasoning: on");
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const debugEvents = readDebugEvents(app.debugLogPath);
+    assert(
+      debugEvents.some(
+        (record) =>
+          record.event === "protocol.send"
+          && record.payload.record.type === "set_reasoning"
+          && record.payload.record.payload.enabled === true,
+      ),
+    );
+  } finally {
+    forceKill(app);
+  }
+});
+
 function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
-  const fakeBridge = new URL(`./fixtures/${fixtureName}`, import.meta.url).pathname;
   const debugLogPath = path.join(tmpdir(), `naumi-terminal-ui-debug-${Date.now()}-${Math.random()}.jsonl`);
-  const bridgeArgs = options.bridgeMode === "json"
-    ? ["--bridge-command-json", JSON.stringify([process.execPath, fakeBridge])]
-    : ["--bridge-command", `${process.execPath} ${fakeBridge}`];
+  const fakeBridge = fixtureName
+    ? new URL(`./fixtures/${fixtureName}`, import.meta.url).pathname
+    : "";
+  const bridgeArgs = options.bridgeCommandJson
+    ? ["--bridge-command-json", JSON.stringify(options.bridgeCommandJson)]
+    : options.bridgeMode === "json"
+      ? ["--bridge-command-json", JSON.stringify([process.execPath, fakeBridge])]
+      : ["--bridge-command", `${process.execPath} ${fakeBridge}`];
   const child = spawn(
     process.execPath,
     ["src/index.js", ...bridgeArgs],

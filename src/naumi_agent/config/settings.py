@@ -41,6 +41,7 @@ class MemoryConfig(BaseSettings):
     session_db_path: str = "data/sessions.db"
     vector_db_path: str = "data/chroma"
     compaction_threshold: float = 0.75
+    compaction_reserved_tokens: int = 20_000
 
 
 class SafetyConfig(BaseSettings):
@@ -138,6 +139,7 @@ class UIConfig(BaseSettings):
 
     theme: str = "dark"
     output_style: str = "detailed"
+    show_reasoning: bool = True
 
 
 class AppConfig(BaseSettings):

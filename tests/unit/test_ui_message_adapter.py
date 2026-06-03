@@ -137,6 +137,7 @@ class TestToolLifecycle:
     def test_tool_prepare_start(self, adapter: EngineEventAdapter) -> None:
         msg = adapter.adapt("tool_prepare_start", {
             "name": "file_write",
+            "tool_call_id": "call-file",
             "path": "/tmp/test.py",
             "argument_chars": 500,
             "content_lines": 30,
@@ -144,6 +145,7 @@ class TestToolLifecycle:
         })
         assert isinstance(msg, ToolPrepareMessage)
         assert msg.tool_name == "file_write"
+        assert msg.tool_call_id == "call-file"
         assert msg.phase == "start"
         assert msg.path == "/tmp/test.py"
         assert msg.content_lines == 30
@@ -151,20 +153,35 @@ class TestToolLifecycle:
     def test_tool_prepare_snapshot(self, adapter: EngineEventAdapter) -> None:
         msg = adapter.adapt("tool_prepare_snapshot", {
             "name": "file_write",
+            "tool_call_id": "call-file",
             "argument_chars": 5000,
             "elapsed_ms": 2000,
         })
         assert isinstance(msg, ToolPrepareMessage)
         assert msg.phase == "snapshot"
+        assert msg.tool_call_id == "call-file"
         assert msg.argument_chars == 5000
 
     def test_tool_prepare_end(self, adapter: EngineEventAdapter) -> None:
         msg = adapter.adapt("tool_prepare_end", {
-            "name": "file_write",
+            "name": "todo_write",
+            "tool_call_id": "call-todo",
+            "argument_chars": 512,
             "elapsed_ms": 3000,
+            "todo_total": 2,
+            "todo_completed": 1,
+            "todo_open": 1,
+            "todo_items": [{"id": "2", "status": "pending", "subject": "验证"}],
         })
         assert isinstance(msg, ToolPrepareMessage)
         assert msg.phase == "end"
+        assert msg.tool_name == "todo_write"
+        assert msg.tool_call_id == "call-todo"
+        assert msg.argument_chars == 512
+        assert msg.todo_total == 2
+        assert msg.todo_completed == 1
+        assert msg.todo_open == 1
+        assert msg.todo_items == ({"id": "2", "status": "pending", "subject": "验证"},)
 
     def test_tool_start(self, adapter: EngineEventAdapter) -> None:
         msg = adapter.adapt("tool_start", {

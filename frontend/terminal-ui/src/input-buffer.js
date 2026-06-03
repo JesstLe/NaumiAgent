@@ -22,20 +22,38 @@ export const INPUT_KEYS = {
 };
 
 const CSI_PATTERN = /^\x1b\[[0-9;?]*[~A-Za-z]/;
-const SS3_PATTERN = /^\x1bO[A-Za-z]/;
+const SS3_PATTERN = /^\x1b[Oo][A-Za-z]/;
+const SS3_FALLBACK_PATTERN = /^[Oo][ABab]$/;
+const MAX_PENDING_ESCAPE_CHARS = 16;
+
+export function splitInputStreamChunk(chunk, pending = "") {
+  const combined = `${pending ?? ""}${chunk ?? ""}`;
+  const trailing = extractTrailingIncompleteEscape(combined);
+  const text = trailing ? combined.slice(0, -trailing.length) : combined;
+  return {
+    keys: splitInputChunk(text),
+    pending: trailing,
+  };
+}
 
 export function splitInputChunk(chunk) {
   const keys = [];
   let text = String(chunk ?? "");
 
   while (text) {
-    if (text.startsWith("\x1bO")) {
+    if (text.startsWith("\x1bO") || text.startsWith("\x1bo")) {
       const match = text.match(SS3_PATTERN);
       if (match) {
-        keys.push(match[0]);
+        keys.push(normalizeSs3Key(match[0]));
         text = text.slice(match[0].length);
         continue;
       }
+    }
+
+    if (text.length === 2 && SS3_FALLBACK_PATTERN.test(text)) {
+      keys.push(normalizeSs3Key(`\x1b${text}`));
+      text = "";
+      continue;
     }
 
     if (text.startsWith("\x1b[")) {
@@ -187,4 +205,27 @@ function isControlInput(char) {
   if (!char) return false;
   const code = char.charCodeAt(0);
   return code < 32 || code === 127;
+}
+
+function extractTrailingIncompleteEscape(text) {
+  const value = String(text ?? "");
+  const escIndex = value.lastIndexOf("\x1b");
+  if (escIndex < 0) return "";
+  const suffix = value.slice(escIndex);
+  if (suffix.length > MAX_PENDING_ESCAPE_CHARS) return "";
+  if (suffix === "\x1b" || suffix === "\x1b[" || suffix === "\x1bO" || suffix === "\x1bo") {
+    return suffix;
+  }
+  if (suffix.startsWith("\x1b[") && !CSI_PATTERN.test(suffix)) {
+    return suffix;
+  }
+  if ((suffix.startsWith("\x1bO") || suffix.startsWith("\x1bo")) && !SS3_PATTERN.test(suffix)) {
+    return suffix;
+  }
+  return "";
+}
+
+function normalizeSs3Key(value) {
+  if (!value || value.length < 3) return value;
+  return `\x1bO${value.slice(2).toUpperCase()}`;
 }

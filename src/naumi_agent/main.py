@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import json
 import logging
@@ -218,6 +219,28 @@ def _runtime_debug_metadata(
     }
 
 
+@contextlib.contextmanager
+def _capture_tui_launch_noise() -> Any:
+    """Capture startup stdout/stderr and suppress noisy launch-time logs."""
+    stdout_buf = io.StringIO()
+    stderr_buf = io.StringIO()
+    noisy_loggers = ("litellm", "LiteLLM", "naumi_agent")
+    previous_levels = {
+        name: logging.getLogger(name).level for name in noisy_loggers
+    }
+    try:
+        for name in noisy_loggers:
+            logging.getLogger(name).setLevel(logging.ERROR)
+        with (
+            contextlib.redirect_stdout(stdout_buf),
+            contextlib.redirect_stderr(stderr_buf),
+        ):
+            yield stdout_buf, stderr_buf
+    finally:
+        for name, level in previous_levels.items():
+            logging.getLogger(name).setLevel(level)
+
+
 @app.command()
 def chat(
     config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
@@ -311,6 +334,7 @@ def _build_terminal_ui_command(
         raise TerminalUiLaunchError(
             "未找到 Node.js，无法启动新一代终端 UI。请先安装 Node.js 20+。"
         )
+    _validate_node_runtime(node)
 
     bridge_command = [
         bridge_python_executable or sys.executable,
@@ -329,6 +353,41 @@ def _build_terminal_ui_command(
     ]
 
 
+def _validate_node_runtime(node_executable: str) -> None:
+    """Fail early with a readable message when the terminal UI runtime is too old."""
+    try:
+        version = subprocess.check_output(
+            [node_executable, "--version"],
+            stderr=subprocess.STDOUT,
+            timeout=5,
+            text=True,
+        ).strip()
+    except Exception as exc:
+        raise TerminalUiLaunchError(
+            f"无法检测 Node.js 版本，无法启动新一代终端 UI：{exc}"
+        ) from exc
+
+    major = _parse_node_major(version)
+    if major is None:
+        raise TerminalUiLaunchError(
+            f"无法识别 Node.js 版本输出：{version or '<empty>'}。请安装 Node.js 20+。"
+        )
+    if major < 20:
+        raise TerminalUiLaunchError(
+            f"当前 Node.js 版本为 {version}，新一代终端 UI 需要 Node.js 20+。"
+        )
+
+
+def _parse_node_major(version: str) -> int | None:
+    normalized = version.strip()
+    if normalized.startswith("v"):
+        normalized = normalized[1:]
+    major_text = normalized.split(".", 1)[0]
+    if not major_text.isdigit():
+        return None
+    return int(major_text)
+
+
 def _launch_tui(config_path: str) -> None:
     from naumi_agent.debug_trace import DebugTrace
     from naumi_agent.log_setup import setup_logging
@@ -337,23 +396,38 @@ def _launch_tui(config_path: str) -> None:
 
     resolved = _resolve_config_path(config_path)
     config = AppConfig.from_yaml(resolved)
+    global _show_reasoning_text
+    _show_reasoning_text = bool(getattr(config.ui, "show_reasoning", False))
     setup_logging(config.log_level)
     _check_api_key(config)
-    engine = AgentEngine(config)
-    keybindings = build_keybindings(config.keybindings)
-    style_config = build_ui_style_from_config(config)
+    with _capture_tui_launch_noise() as (stdout_buf, stderr_buf):
+        engine = AgentEngine(config)
+        keybindings = build_keybindings(config.keybindings)
+        style_config = build_ui_style_from_config(config)
     debug_trace = DebugTrace.create(
         interface="tui",
         base_dir=Path(config.memory.session_db_path).parent / "debug-runs",
         metadata=_runtime_debug_metadata(config, resolved, engine),
     )
+    startup_noise = stdout_buf.getvalue() + stderr_buf.getvalue()
+    if startup_noise.strip():
+        debug_trace.output(
+            "tui.startup_noise",
+            startup_noise,
+            hidden=True,
+            source="launch",
+        )
     app = NaumiApp(
         engine,
         debug_trace=debug_trace,
         keybindings=keybindings,
         style_config=style_config,
+        show_reasoning=bool(getattr(config.ui, "show_reasoning", False)),
     )
     app.run()
+
+
+_show_reasoning_text = False
 
 
 async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
@@ -365,7 +439,7 @@ async def _cli_event_handler(event: str, data: dict[str, Any]) -> None:
             sys.stdout.flush()
     elif event == "thinking_delta":
         content = data.get("content", "")
-        if content:
+        if content and _show_reasoning_text:
             sys.stdout.write(content)
             sys.stdout.flush()
     elif event == "thinking_start":
@@ -841,7 +915,7 @@ def _cli_event_factory(cli: Any):
     turn_start_time = 0.0
     markdown_highlighter = _StreamingMarkdownHighlighter()
     adapter = EngineEventAdapter()
-    renderer = CLIRenderer()
+    renderer = CLIRenderer(show_reasoning=_show_reasoning_text)
 
     async def handler(event: str, data: dict[str, Any]) -> None:
         nonlocal thinking_started, has_streamed_tokens
@@ -1315,6 +1389,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
         case "/style" | "/theme":
             config = getattr(engine, "_config", None)
             console.print(Markdown(render_style_help(build_ui_style_from_config(config))))
+        case "/reasoning":
+            _handle_reasoning_command(engine, arg)
         case "/doctor":
             report = await run_doctor(
                 engine._config,
@@ -1737,6 +1813,31 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 _print_help()
 
 
+def _parse_reasoning_toggle(arg: str, current: bool) -> tuple[bool | None, str]:
+    raw = arg.strip().lower()
+    if not raw or raw == "toggle":
+        return not current, ""
+    if raw in {"on", "true", "1", "show", "open"}:
+        return True, ""
+    if raw in {"off", "false", "0", "hide", "close"}:
+        return False, ""
+    return None, "用法: /reasoning on|off|toggle"
+
+
+def _handle_reasoning_command(engine: Any, arg: str) -> None:
+    global _show_reasoning_text
+    enabled, error = _parse_reasoning_toggle(arg, _show_reasoning_text)
+    if enabled is None:
+        console.print(f"[yellow]{error}[/yellow]")
+        return
+    _show_reasoning_text = enabled
+    config = getattr(engine, "_config", None)
+    if config is not None and getattr(config, "ui", None) is not None:
+        config.ui.show_reasoning = enabled
+    status = "开启" if enabled else "关闭"
+    console.print(f"[green]reasoning 文本显示已{status}[/green]")
+
+
 def _print_banner(engine: Any) -> None:
     from naumi_agent import __version__
     from naumi_agent.assets import BANNER_TEXT
@@ -1760,6 +1861,7 @@ def _print_help() -> None:
         ("/help", "显示帮助"),
         ("/keybindings", "显示当前快捷键配置"),
         ("/style", "显示当前主题和输出风格"),
+        ("/reasoning [on|off|toggle]", "显示或隐藏模型 reasoning/thinking 明文"),
         ("/doctor", "运行环境诊断"),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
@@ -2851,7 +2953,7 @@ def _replay_session_to_cli(cli: Any, session: Any, engine: Any = None) -> None:
     from naumi_agent.cli.renderers import CLIRenderer
     from naumi_agent.ui.messages.replay import replay_messages
 
-    renderer = CLIRenderer()
+    renderer = CLIRenderer(show_reasoning=_show_reasoning_text)
     ui_messages = replay_messages(session.messages)
 
     cli.append_output(

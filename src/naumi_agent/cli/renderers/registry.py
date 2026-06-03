@@ -80,13 +80,12 @@ def _render_system_notice(msg: SystemNoticeMessage) -> str | None:
     return f"\033[{color}m{msg.content}\033[0m\n"
 
 
-def _render_thinking(msg: ThinkingMessage) -> str | None:
+def _render_thinking(msg: ThinkingMessage, *, show_reasoning: bool = False) -> str | None:
     if msg.phase == "start":
         return f"{_sep()}\n\033[2m💭 思考中...\033[0m\n"
     if msg.phase == "delta":
-        return f"\033[2m{msg.content}\033[0m"
-    # end
-    return f"\033[0m\n{_sep()}\n"
+        return f"\033[2m{msg.content}\033[0m" if show_reasoning else None
+    return ""
 
 
 def _render_assistant_stream(msg: AssistantStreamMessage) -> str | None:
@@ -315,9 +314,10 @@ class CLIRenderer:
 
     _NONE_SENTINEL = "<__naumi_none__>"
 
-    def __init__(self, *, cache_size: int = 2_048) -> None:
+    def __init__(self, *, cache_size: int = 2_048, show_reasoning: bool = False) -> None:
         self._registry: dict[MessageType, _RendererFunc] = {}
         self._cache: RenderLRUCache[tuple[str, str], str] = RenderLRUCache(cache_size)
+        self._show_reasoning = show_reasoning
         self._register_defaults()
 
     def register(self, msg_type: MessageType, fn: _RendererFunc) -> None:
@@ -352,7 +352,9 @@ class CLIRenderer:
         self._registry.update({
             MessageType.USER: _render_user,
             MessageType.SYSTEM_NOTICE: _render_system_notice,
-            MessageType.THINKING: _render_thinking,
+            MessageType.THINKING: lambda msg: _render_thinking(
+                msg, show_reasoning=self._show_reasoning
+            ),
             MessageType.ASSISTANT_STREAM: _render_assistant_stream,
             MessageType.TOOL_PREPARE: _render_tool_prepare,
             MessageType.TOOL_USE: _render_tool_use,

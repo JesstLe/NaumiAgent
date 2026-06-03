@@ -4,8 +4,11 @@ import { EventEmitter } from "node:events";
 import {
   attachJsonlLineReader,
   createEventSender,
+  normalizeServerRecord,
   parseArgs,
   parseBridgeCommandJson,
+  PROTOCOL_CONTRACT,
+  PROTOCOL_VERSION,
   splitShellLike,
 } from "../src/protocol.js";
 
@@ -54,6 +57,81 @@ test("event sender writes versioned JSONL records", () => {
     version: 1,
     payload: { text: "hi" },
   });
+});
+
+test("protocol contract drives client and server event validation", () => {
+  assert.equal(PROTOCOL_VERSION, PROTOCOL_CONTRACT.version);
+  assert(PROTOCOL_CONTRACT.client_events.includes("submit"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("task_panel"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("ui/message"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("runtime/status"));
+  assert.deepEqual(PROTOCOL_CONTRACT.ui_messages.tool_prepare.phases, ["start", "snapshot", "end"]);
+  assert(PROTOCOL_CONTRACT.ui_messages.tool_prepare.fields.includes("tool_call_id"));
+  assert(PROTOCOL_CONTRACT.ui_messages.tool_prepare.fields.includes("content_lines"));
+  assert(PROTOCOL_CONTRACT.ui_messages.tool_prepare.fields.includes("elapsed_ms"));
+  assert(PROTOCOL_CONTRACT.ui_messages.tool_use.fields.includes("tool_call_id"));
+
+  const chunks = [];
+  const send = createEventSender({ write: (chunk) => chunks.push(chunk) });
+
+  assert.throws(
+    () => send("not_a_real_event", {}),
+    /未知客户端事件/,
+  );
+  assert.equal(chunks.length, 0);
+});
+
+test("normalizeServerRecord stabilizes bridge payloads", () => {
+  assert.deepEqual(normalizeServerRecord({
+    id: 42,
+    seq: "7",
+    type: "user/message",
+    version: "1",
+    payload: { content: 123 },
+  }), {
+    id: "42",
+    seq: 7,
+    type: "user/message",
+    version: 1,
+    payload: { content: "123" },
+  });
+
+  assert.deepEqual(normalizeServerRecord({
+    type: "session/replayed",
+    payload: { session_id: 100, title: null, message_count: "4", clear: "false" },
+  }).payload, {
+    session_id: "100",
+    title: "",
+    message_count: 4,
+    clear: false,
+  });
+
+  assert.deepEqual(normalizeServerRecord({
+    type: "permission/resolved",
+    payload: { request_id: 99, choice: "BYPASS" },
+  }).payload, {
+    request_id: "99",
+    choice: "bypass",
+  });
+});
+
+test("normalizeServerRecord rejects invalid bridge records", () => {
+  assert.throws(
+    () => normalizeServerRecord({ type: "surprise", payload: {} }),
+    /未知 Bridge 事件/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({ type: "ready", version: 99, payload: {} }),
+    /协议版本不兼容/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({ type: "ready", payload: [] }),
+    /payload 必须是对象/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({ type: "ui/message", payload: {} }),
+    /缺少 type/,
+  );
 });
 
 test("jsonl reader emits complete lines across chunk boundaries", () => {

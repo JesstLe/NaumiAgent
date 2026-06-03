@@ -24,6 +24,9 @@ _ARCHIVED_TOOL_RESULT_MARKER = "[大型工具结果已归档]"
 _IMAGE_DATA_URL_RE = re.compile(
     r"data:image/(?P<format>[a-zA-Z0-9.+-]+);base64,(?P<data>[A-Za-z0-9+/=_-]+)"
 )
+_BARE_IMAGE_BASE64_RE = re.compile(
+    r"(?P<data>(?P<prefix>iVBORw0KGgo|/9j/|UklGR)[A-Za-z0-9+/=_-]{1024,})"
+)
 _MULTIMODAL_IMAGE_TYPES = {"image_url", "input_image"}
 
 COMPACTION_PROMPT = """\
@@ -271,16 +274,20 @@ class ContextCompactor:
 
     def _estimate_tokens(self, messages: list[dict[str, Any]]) -> int:
         """使用 litellm token_counter 估算 token 数."""
+        sanitized_messages, _ = self.sanitize_visual_payloads(messages)
         try:
             model = self._router.resolve_model(ModelTier.CAPABLE)
-            return litellm.token_counter(model=model, messages=messages)
+            return litellm.token_counter(model=model, messages=sanitized_messages)
         except Exception:
             # Fallback: 1 token ≈ 4 chars
-            total_chars = sum(_fallback_token_chars(m.get("content", "")) for m in messages)
-            for m in messages:
+            total_chars = sum(
+                _fallback_token_chars(m.get("content", "")) for m in sanitized_messages
+            )
+            for m in sanitized_messages:
                 for tc in m.get("tool_calls", []):
                     func = tc.get("function", {})
-                    total_chars += _fallback_token_chars(func.get("arguments", ""))
+                    sanitized_args, _ = _sanitize_visual_value(func.get("arguments", ""))
+                    total_chars += _fallback_token_chars(sanitized_args)
             return total_chars // 4
 
     async def _extract_memories(self, messages: list[dict[str, Any]]) -> None:
@@ -396,7 +403,7 @@ def _sanitize_visual_value(value: Any) -> tuple[Any, int]:
 def _sanitize_visual_string(value: str) -> tuple[str, int]:
     replacements = 0
 
-    def replace(match: re.Match[str]) -> str:
+    def replace_data_url(match: re.Match[str]) -> str:
         nonlocal replacements
         replacements += 1
         return (
@@ -405,7 +412,19 @@ def _sanitize_visual_string(value: str) -> tuple[str, int]:
             f"base64_chars={len(match.group('data'))}]"
         )
 
-    sanitized = _IMAGE_DATA_URL_RE.sub(replace, value)
+    sanitized = _IMAGE_DATA_URL_RE.sub(replace_data_url, value)
+
+    def replace_bare_image(match: re.Match[str]) -> str:
+        nonlocal replacements
+        data = match.group("data")
+        replacements += 1
+        return (
+            "[图片内容已省略: "
+            f"{_guess_image_base64_format(match.group('prefix'))}_base64, "
+            f"base64_chars={len(data)}]"
+        )
+
+    sanitized = _BARE_IMAGE_BASE64_RE.sub(replace_bare_image, sanitized)
     return sanitized, replacements
 
 
@@ -417,12 +436,27 @@ def _visual_payload_placeholder(value: Any) -> dict[str, str]:
             f"data:image/{data_url_match.group('format')};base64, "
             f"base64_chars={len(data_url_match.group('data'))}"
         )
+    elif bare_match := _BARE_IMAGE_BASE64_RE.search(text):
+        description = (
+            f"{_guess_image_base64_format(bare_match.group('prefix'))}_base64, "
+            f"base64_chars={len(bare_match.group('data'))}"
+        )
     else:
         description = f"image_payload_chars={len(text)}"
     return {
         "type": "text",
         "text": f"[图片内容已省略: {description}]",
     }
+
+
+def _guess_image_base64_format(prefix: str) -> str:
+    if prefix == "iVBORw0KGgo":
+        return "png"
+    if prefix == "/9j/":
+        return "jpeg"
+    if prefix == "UklGR":
+        return "webp"
+    return "image"
 
 
 def _fallback_token_chars(value: Any) -> int:

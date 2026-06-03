@@ -27,10 +27,22 @@ class ClientEventType(StrEnum):
     SUBMIT = "submit"
     SET_MODE = "set_mode"
     CYCLE_MODE = "cycle_mode"
+    SET_REASONING = "set_reasoning"
     PERMISSION_RESPONSE = "permission_response"
     RESUME = "resume"
+    TASK_PANEL = "task_panel"
+    TASK_CANCEL = "task_cancel"
+    PERMISSIONS_PANEL = "permissions_panel"
+    DOCTOR = "doctor"
     PING = "ping"
     SHUTDOWN = "shutdown"
+
+
+_CLIENT_EVENT_NAMES = {str(event) for event in ClientEventType}
+_PAYLOAD_LIMIT_DEFAULTS = {
+    ClientEventType.TASK_PANEL: 12,
+    ClientEventType.PERMISSIONS_PANEL: 12,
+}
 
 
 class ServerEventType(StrEnum):
@@ -102,3 +114,137 @@ def decode_jsonl_line(line: str) -> dict[str, Any]:
     if "type" not in value:
         raise ValueError("JSONL 记录缺少 type 字段。")
     return value
+
+
+def normalize_client_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Normalize and validate one client event before bridge dispatch."""
+    if not isinstance(record, dict):
+        raise ValueError("客户端事件必须是对象。")
+
+    event_type = str(record.get("type") or "")
+    if not event_type:
+        raise ValueError("客户端事件缺少 type 字段。")
+    if event_type not in _CLIENT_EVENT_NAMES:
+        raise ValueError(f"未知客户端事件: {event_type}")
+
+    version = record.get("version")
+    if version is not None:
+        try:
+            parsed_version = int(version)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("协议 version 必须是整数。") from exc
+        if parsed_version != PROTOCOL_VERSION:
+            raise ValueError(
+                f"协议 version 不兼容: {parsed_version}，当前支持 {PROTOCOL_VERSION}。"
+            )
+
+    payload = record.get("payload", {})
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise ValueError("payload 必须是对象。")
+
+    normalized = dict(record)
+    normalized["type"] = event_type
+    normalized["version"] = PROTOCOL_VERSION
+    if "id" in normalized and normalized["id"] is not None:
+        normalized["id"] = str(normalized["id"])
+    if "request_id" in normalized and normalized["request_id"] is not None:
+        normalized["request_id"] = str(normalized["request_id"])
+    normalized["payload"] = _normalize_client_payload(ClientEventType(event_type), payload)
+    return normalized
+
+
+def _normalize_client_payload(
+    event_type: ClientEventType,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    if event_type == ClientEventType.SUBMIT:
+        return {"text": str(payload.get("text") or "")}
+
+    if event_type == ClientEventType.SET_MODE:
+        return {"mode": str(payload.get("mode") or "").strip().lower()}
+
+    if event_type == ClientEventType.SET_REASONING:
+        return {"enabled": _to_bool(payload.get("enabled"))}
+
+    if event_type == ClientEventType.PERMISSION_RESPONSE:
+        choice = str(payload.get("choice") or "").strip().lower()
+        if choice not in {"allow", "deny", "bypass"}:
+            raise ValueError("权限选择无效，可用值: allow / deny / bypass。")
+        return {
+            "request_id": str(payload.get("request_id") or ""),
+            "choice": choice,
+        }
+
+    if event_type == ClientEventType.RESUME:
+        normalized: dict[str, Any] = {
+            "session_id": str(payload.get("session_id") or "").strip(),
+        }
+        if "clear" in payload:
+            normalized["clear"] = _to_bool(payload.get("clear"))
+        return normalized
+
+    if event_type == ClientEventType.TASK_PANEL:
+        detail_id = str(
+            payload.get("detail_id") or payload.get("detail") or ""
+        ).strip()
+        normalized = {
+            "limit": _bounded_int(
+                payload.get("limit"),
+                _PAYLOAD_LIMIT_DEFAULTS[event_type],
+                lower=1,
+                upper=50,
+            ),
+            "source": str(payload.get("source") or "all").strip().lower().replace("-", "_"),
+            "status": str(payload.get("status") or "all").strip().lower().replace("-", "_"),
+            "pinned": _to_bool(payload.get("pinned")),
+            "refresh": _to_bool(payload.get("refresh")),
+        }
+        if detail_id:
+            normalized["detail_id"] = detail_id
+        return normalized
+
+    if event_type == ClientEventType.TASK_CANCEL:
+        task_id = str(
+            payload.get("task_id") or payload.get("id") or payload.get("run_id") or ""
+        ).strip()
+        source = str(payload.get("source") or "all").strip().lower().replace("-", "_")
+        reason = str(payload.get("reason") or "用户从任务面板取消。").strip()
+        if not task_id:
+            raise ValueError("任务取消缺少 task_id。")
+        return {
+            "task_id": task_id,
+            "source": source or "all",
+            "reason": reason or "用户从任务面板取消。",
+        }
+
+    if event_type == ClientEventType.PERMISSIONS_PANEL:
+        return {
+            "limit": _bounded_int(
+                payload.get("limit"),
+                _PAYLOAD_LIMIT_DEFAULTS[event_type],
+                lower=1,
+                upper=50,
+            ),
+        }
+
+    return dict(payload)
+
+
+def _bounded_int(raw: Any, default: int, *, lower: int, upper: int) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = default
+    return max(lower, min(value, upper))
+
+
+def _to_bool(raw: Any) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    if isinstance(raw, str):
+        return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False

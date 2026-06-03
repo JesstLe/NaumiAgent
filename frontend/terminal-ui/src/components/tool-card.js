@@ -1,5 +1,6 @@
 import { ANSI, color } from "../ansi.js";
 import { boxComponent, line, renderComponent } from "./core.js";
+import { renderActivityProgress } from "./activity-card.js";
 import { ToolOutput } from "./markdown.js";
 
 export function ToolCard({ tool }) {
@@ -18,6 +19,12 @@ export function renderToolCard(tool, width, ctx = { width }) {
   const children = [line(titleLine)];
   if (tool.prepareTitle) {
     children.push(line(color(ANSI.dim, tool.prepareTitle)));
+    const prepareProgress = renderActivityProgress({
+      phase: tool.preparePhase,
+      metrics: tool.prepareMetrics,
+      status: "running",
+    });
+    if (prepareProgress) children.push(line(prepareProgress));
     for (const detail of tool.prepareDetails ?? []) {
       if (detail && detail !== "已交给工具执行") children.push(line(color(ANSI.dim, detail)));
     }

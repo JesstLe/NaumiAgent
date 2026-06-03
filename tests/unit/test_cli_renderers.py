@@ -71,9 +71,17 @@ class TestThinkingRendering:
         assert text is not None
         assert "思考中" in text
 
-    def test_thinking_delta_preserves_content(
+    def test_thinking_delta_hides_content(
         self, adapter: EngineEventAdapter, renderer: CLIRenderer
     ) -> None:
+        msg = adapter.adapt("thinking_delta", {"content": "I should verify"})
+        text = renderer.render(msg)
+        assert text is None
+
+    def test_thinking_delta_can_show_content(
+        self, adapter: EngineEventAdapter
+    ) -> None:
+        renderer = CLIRenderer(show_reasoning=True)
         msg = adapter.adapt("thinking_delta", {"content": "I should verify"})
         text = renderer.render(msg)
         assert text is not None
