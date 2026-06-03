@@ -16,13 +16,28 @@ class TestSystemPromptAssembly:
         assert is_generated_system_prompt(prompt)
         assert "You are NaumiAgent" in prompt
         assert "## Your Capabilities" in prompt
-        assert "## Analysis Modes" in prompt
+        assert "## Analysis Tools" in prompt
+        assert "## Operating Principles" in prompt
         assert "## Task Management" in prompt
+        assert "## Context Hygiene" in prompt
         assert "## Output Discipline" in prompt
         assert "do not paste full file contents" in prompt
         assert "## Tool Discovery" in prompt
         assert "tool_search" in prompt
-        assert "## Decision Commitment" in prompt
+        assert "## UI Protocol Contract" in prompt
+        assert "## Decision Discipline" in prompt
+        assert "## Completion Discipline" in prompt
+        assert "中文优先" in prompt
+        assert "raw screenshots" in prompt
+        assert "JSONL bridge events" in prompt
+
+    def test_default_prompt_does_not_inline_full_analysis_catalog(self) -> None:
+        prompt = build_system_prompt()
+
+        assert "analysis_watchdog" not in prompt
+        assert "analysis_chaos" not in prompt
+        assert "Use analysis tools only when" in prompt
+        assert len(prompt) < 7000
 
     def test_embeds_runtime_defaults_when_available(self) -> None:
         prompt = build_system_prompt(
