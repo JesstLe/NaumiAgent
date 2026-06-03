@@ -12,6 +12,10 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/doctor", description: "运行环境诊断" },
   { command: "/mode", description: "切换 runtime 模式 default / plan / bypass" },
   { command: "/reasoning", description: "显示/切换思考过程输出" },
+  { command: "/folds", description: "显示可折叠代码片段列表" },
+  { command: "/fold", description: "切换指定折叠项（按编号或类型）" },
+  { command: "/expand", description: "展开指定折叠项（按编号/全部）" },
+  { command: "/collapse", description: "折叠指定折叠项（按编号/全部）" },
   { command: "/clear", aliases: ["/c"], description: "清空当前会话显示" },
   { command: "/debug", description: "显示前端与后端调试路径" },
   { command: "/pwd", description: "显示工作区与会话库路径" },
@@ -43,7 +47,10 @@ function mergeAliasesIntoEntry(existing, aliases) {
 }
 
 function normalizeSlashCommandList(rawCommands) {
-  const sourceCommands = Array.isArray(rawCommands) && rawCommands.length ? rawCommands : DEFAULT_SLASH_COMMAND_CANDIDATES;
+  const sourceCommands =
+    Array.isArray(rawCommands) && rawCommands.length
+      ? [...rawCommands, ...DEFAULT_SLASH_COMMAND_CANDIDATES]
+      : DEFAULT_SLASH_COMMAND_CANDIDATES;
   const normalized = new Map();
   for (const item of sourceCommands) {
     if (!item || typeof item !== "object") continue;
@@ -685,9 +692,7 @@ export function handleSubmitText(state, text, send) {
     return;
   }
   if (text === "/permissions" || text.startsWith("/permissions ")) {
-    const rawLimit = text.slice(12).trim();
-    const limit = parseTaskPanelLimit(rawLimit, 12);
-    send("permissions_panel", { limit });
+    send("submit", { text });
     return;
   }
   if (text === "/doctor") {
@@ -702,7 +707,7 @@ export function handleSubmitText(state, text, send) {
     handleReasoningCommand(state, text, send);
     return;
   }
-  if (text === "/clear") {
+  if (text === "/clear" || text === "/c") {
     state.messages = [];
     state.tools = [];
     state.activeAssistant = null;
@@ -710,6 +715,7 @@ export function handleSubmitText(state, text, send) {
     state.folds = {};
     state.foldCursor = 0;
     clearRenderCache(state.renderCache);
+    send("submit", { text });
     return;
   }
   if (text === "/debug") {
