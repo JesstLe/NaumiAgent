@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import io
 import json
+import sys
+import types
 from dataclasses import fields
 from pathlib import Path
 from types import SimpleNamespace
@@ -459,6 +462,70 @@ async def test_bridge_unknown_slash_command_emits_error() -> None:
     error_records = [record for record in records if record["type"] == "error"]
     assert error_records, "预期收到错误事件"
     assert error_records[-1]["payload"]["code"] == "unknown_command"
+
+
+@pytest.mark.asyncio
+async def test_bridge_cli_backed_slash_commands_are_dispatched_via_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        ui_bridge,
+        "_load_cli_slash_commands_with_alias",
+        lambda: [
+            "/help",
+            "/pursue",
+            "/diff",
+            "/chaos",
+            "/c",
+            "/h",
+            "/r",
+            "/l",
+            "/task",
+            "/m",
+            "/u",
+            "/v",
+        ],
+    )
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    async def fake_handle_command(_: Any, cmd: str) -> None:
+        captured.append(cmd)
+
+    captured: list[str] = []
+
+    async def fake_capture_async(func: Any) -> str:
+        result = func()
+        if inspect.isawaitable(result):
+            await result
+        return f"handled {captured[-1] if captured else ''}"
+
+    fake_main_module = types.ModuleType("naumi_agent.main")
+    fake_main_module._handle_command = fake_handle_command
+    fake_main_module._capture_async = fake_capture_async
+    fake_main_module.__dict__["__file__"] = __file__
+    monkeypatch.setitem(sys.modules, "naumi_agent.main", fake_main_module)
+
+    await bridge.handle_client_record({
+        "id": "pursue-forward-1",
+        "type": ClientEventType.SUBMIT,
+        "payload": {"text": "/pursue 生成 HTML"},
+    })
+
+    records = _records(writer)
+    notice_records = [
+        record
+        for record in records
+        if (
+            record["type"] == "ui/message"
+            and record["payload"].get("type") == "system_notice"
+            and record["payload"].get("title") == "command"
+        )
+    ]
+    assert notice_records, "预期 /pursue 走 CLI 并回显"
+    assert "handled /pursue 生成 HTML" in notice_records[-1]["payload"]["content"]
 
 
 @pytest.mark.asyncio

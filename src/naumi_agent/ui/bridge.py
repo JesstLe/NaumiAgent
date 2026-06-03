@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
 from naumi_agent import __version__
+from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
 from naumi_agent.log_setup import setup_logging
@@ -32,6 +33,18 @@ if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
 
 EngineFactory = Callable[[AppConfig], "AgentEngine"]
+
+_SLASH_ALIAS_MAP: dict[str, str] = {
+    "/h": "/help",
+    "/r": "/resume",
+    "/l": "/load",
+    "/task": "/tasks",
+    "/t": "/tools",
+    "/c": "/clear",
+    "/m": "/model",
+    "/u": "/usage",
+    "/v": "/version",
+}
 
 
 def resolve_config_path(path: str) -> str:
@@ -100,17 +113,39 @@ def _load_cli_slash_commands() -> list[dict[str, Any]]:
     return commands
 
 
+def _normalize_slash_alias(command: str) -> str:
+    return _SLASH_ALIAS_MAP.get(command, command)
+
+
+def _load_cli_slash_commands_with_alias() -> list[str]:
+    """Load command names from CLI completer and normalize to lower-case set."""
+    commands = set[str]()
+    try:
+        from naumi_agent.cli.completer import COMMANDS
+    except Exception:
+        for item in _fallback_slash_command_registry():
+            commands.add(str(item.get("command", "")).strip())
+            for alias in item.get("aliases", []):
+                if alias:
+                    commands.add(str(alias))
+        commands.update(_SLASH_ALIAS_MAP)
+        return sorted(commands)
+
+    for item in COMMANDS:
+        if not item or len(item) < 1:
+            continue
+        command = str(item[0]).strip().lower()
+        if command.startswith("/"):
+            commands.add(command)
+    for alias in _SLASH_ALIAS_MAP:
+        commands.add(alias)
+    return sorted(commands)
+
+
 def _normalize_slash_commands(commands: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    fallback_aliases: dict[str, list[str]] = {
-        "/help": ["/h"],
-        "/resume": ["/r"],
-        "/load": ["/l"],
-        "/tasks": ["/task"],
-        "/clear": ["/c"],
-        "/model": ["/m"],
-        "/usage": ["/u"],
-        "/version": ["/v"],
-    }
+    alias_map: dict[str, list[str]] = {}
+    for alias, canonical in _SLASH_ALIAS_MAP.items():
+        alias_map.setdefault(canonical, []).append(alias)
     canonical: dict[str, dict[str, Any]] = {}
     for item in commands:
         if not item or not isinstance(item, dict):
@@ -124,7 +159,7 @@ def _normalize_slash_commands(commands: list[dict[str, Any]]) -> list[dict[str, 
             {
                 "command": canonical_name,
                 "description": str(item.get("description", "") or ""),
-                "aliases": list(fallback_aliases.get(command, [])),
+                "aliases": list(alias_map.get(command, [])),
             },
         )
         existing_aliases = set(entry.get("aliases") or [])
@@ -186,6 +221,7 @@ class JsonlEngineBridge:
         self._writer: TextIO | None = None
         self._writer_lock = asyncio.Lock()
         self._run_task: asyncio.Task[Any] | None = None
+        self._cli_supported_commands = _load_cli_slash_commands_with_alias()
         self._pending_permissions: dict[str, asyncio.Future[str]] = {}
         self._pending_permission_payloads: dict[str, dict[str, Any]] = {}
         config = getattr(self.engine, "_config", None)
@@ -536,10 +572,11 @@ class JsonlEngineBridge:
 
         parts = trimmed.split(maxsplit=1)
         command = f"/{parts[0].lower()}"
+        canonical = _normalize_slash_alias(command)
         arg = parts[1].strip() if len(parts) > 1 else ""
 
-        match command:
-            case "/help" | "/h":
+        match canonical:
+            case "/help":
                 await self._emit_system_notice(
                     "help",
                     self._slash_help_text(),
@@ -553,12 +590,28 @@ class JsonlEngineBridge:
             case "/load":
                 await self._load_session_command(arg, request_id=request_id)
                 return True
-            case "/resume" | "/r":
+            case "/resume":
                 await self.resume_session({}, request_id=request_id)
                 return True
             case "/tasks":
                 await self.show_task_panel(
                     self._parse_task_panel_command(arg),
+                    request_id=request_id,
+                )
+                return True
+            case "/permissions":
+                try:
+                    limit = int(arg.strip()) if arg.strip() else 12
+                except ValueError:
+                    await self._emit_system_notice(
+                        "permissions",
+                        "用法: /permissions [limit]",
+                        "warning",
+                        request_id=request_id,
+                    )
+                    return True
+                await self.show_permissions_panel(
+                    {"limit": max(1, min(limit, 50))},
                     request_id=request_id,
                 )
                 return True
@@ -630,19 +683,15 @@ class JsonlEngineBridge:
                 config = getattr(self.engine, "_config", None)
                 if config is not None:
                     info += (
-                        f"会话库: {getattr(config.memory, 'session_db_path', '-') }\n"
-                        f"向量库: {getattr(config.memory, 'vector_db_path', '-') }\n"
+                        f"会话库: {getattr(config.memory, 'session_db_path', '-')}\n"
+                        f"向量库: {getattr(config.memory, 'vector_db_path', '-')}\n"
                     )
                 await self._emit_system_notice("pwd", info, "info", request_id=request_id)
                 return True
             case "/tools":
-                tools = self.engine.tool_registry.all()
-                lines = ["可用工具："]
-                for tool in tools:
-                    lines.append(f"{tool.name} · {tool.description}")
                 await self._emit_system_notice(
                     "tools",
-                    "\n".join(lines) if lines else "未发现可用工具。",
+                    self._list_tools_text(),
                     "info",
                     request_id=request_id,
                 )
@@ -677,33 +726,76 @@ class JsonlEngineBridge:
                 )
                 return True
 
-        await self.emit_error(
-            f"未知斜杠命令: {command}。输入 /help 查看可用命令。",
-            code="unknown_command",
+        if canonical not in self._cli_supported_commands:
+            await self.emit_error(
+                f"未知斜杠命令: {canonical}。输入 /help 查看可用命令。",
+                code="unknown_command",
+                request_id=request_id,
+            )
+            return True
+
+        await self._run_cli_slash_command(
+            f"{canonical}{' ' + arg if arg else ''}",
             request_id=request_id,
         )
         return True
 
+    async def _run_cli_slash_command(self, cmd: str, *, request_id: str) -> None:
+        """Execute a slash command through the legacy CLI command handlers."""
+        from naumi_agent.main import _capture_async, _handle_command
+
+        try:
+            output = await _capture_async(lambda: _handle_command(self.engine, cmd))
+        except Exception as exc:
+            logger.exception("UI bridge slash command execution failed")
+            if self.debug_trace is not None:
+                self.debug_trace.exception("ui_bridge.slash", exc)
+            await self.emit_error(
+                f"执行命令失败: {cmd}",
+                code="slash_failed",
+                request_id=request_id,
+            )
+            return
+
+        text = strip_ansi(output).strip()
+        if text:
+            await self._emit_system_notice(
+                "command",
+                text,
+                "info",
+                request_id=request_id,
+            )
+        else:
+            await self._emit_system_notice(
+                "command",
+                f"命令已执行: {cmd}",
+                "info",
+                request_id=request_id,
+            )
+        await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    def _list_tools_text(self) -> str:
+        tools = self.engine.tool_registry.all()
+        lines = ["可用工具："]
+        for tool in tools:
+            lines.append(f"{tool.name} · {tool.description}")
+        return "\n".join(lines) if lines else "未发现可用工具。"
+
     def _slash_help_text(self) -> str:
-        return (
-            "当前支持的命令:\n"
-            "/help /h\n"
-            "/history [关键词]\n"
-            "/load <id|编号>\n"
-            "/resume /r\n"
-            "/tasks\n"
-            "/permissions [limit]\n"
-            "/doctor\n"
-            "/mode <default|plan|bypass>\n"
-            "/reasoning [on|off|toggle]\n"
-            "/clear\n"
-            "/debug\n"
-            "/pwd\n"
-            "/tools\n"
-            "/model\n"
-            "/usage\n"
-            "/version"
-        )
+        lines = ["当前支持的命令："]
+        for entry in _slash_command_payload():
+            command = str(entry.get("command", "")).strip()
+            if not command.startswith("/"):
+                continue
+            aliases = sorted(
+                str(alias)
+                for alias in (entry.get("aliases") or [])
+                if str(alias).strip()
+            )
+            suffix = f"（别名: {', '.join(aliases)}）" if aliases else ""
+            description = str(entry.get("description", "") or "").strip() or "-"
+            lines.append(f"{command}{suffix} · {description}")
+        return "\n".join(lines)
 
     def _coerce_reasoning_visibility(self, raw: str) -> bool | None:
         value = raw.strip().lower()

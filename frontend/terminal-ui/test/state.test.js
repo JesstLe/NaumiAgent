@@ -643,15 +643,18 @@ test("slash commands route through protocol without adding chat noise", () => {
   state.messages.push({ kind: "assistant", content: "old" });
   state.folds["message:old:code:0"] = { expanded: true };
   handleSubmitText(state, "/clear", send);
+  handleSubmitText(state, "/c", send);
   handleSubmitText(state, "你好", send);
 
   assert.deepEqual(sent, [
     { type: "set_mode", payload: { mode: "bypass" } },
     { type: "resume", payload: { session_id: "abc123" } },
     { type: "task_panel", payload: { limit: 5, source: "all", status: "all", pinned: false, refresh: false } },
-    { type: "permissions_panel", payload: { limit: 6 } },
+    { type: "submit", payload: { text: "/permissions 6" } },
     { type: "doctor", payload: {} },
     { type: "set_reasoning", payload: { enabled: true } },
+    { type: "submit", payload: { text: "/clear" } },
+    { type: "submit", payload: { text: "/c" } },
     { type: "submit", payload: { text: "你好" } },
   ]);
   assert.deepEqual(state.messages, []);
@@ -962,6 +965,9 @@ test("slash completion lists candidates when input is only slash", () => {
   assert.equal(candidates.length >= 10, true);
   assert.equal(candidates.some((item) => item.command === "/help"), true);
   assert.equal(candidates.some((item) => item.aliases.includes("/h")), true);
+  assert.equal(candidates.some((item) => item.command === "/folds"), true);
+  assert.equal(candidates.some((item) => item.command === "/expand"), true);
+  assert.equal(candidates.some((item) => item.command === "/collapse"), true);
 });
 
 test("slash completion uses complete backend registry without truncation", () => {
@@ -972,9 +978,16 @@ test("slash completion uses complete backend registry without truncation", () =>
   }));
   const candidates = getSlashCommandCompletions("/", longList);
 
-  assert.equal(candidates.length, 30);
+  assert.equal(candidates.length >= 30, true);
   assert.equal(candidates.some((item) => item.command === "/cmd-00"), true);
   assert.equal(candidates.some((item) => item.command === "/cmd-29"), true);
+});
+
+test("slash completion merges backend and local commands", () => {
+  const candidates = getSlashCommandCompletions("/", [{ command: "/help", description: "后端帮助" }]);
+
+  assert.equal(candidates.some((item) => item.command === "/help"), true);
+  assert.equal(candidates.some((item) => item.command === "/folds"), true);
 });
 
 test("slash completion filters by partial command", () => {
