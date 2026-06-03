@@ -46,8 +46,14 @@ export function messageRenderKey(message, ctx) {
     name: message.name ?? "",
     primary: message.primary ?? "",
     status: message.status ?? "",
+    toolCallId: message.toolCallId ?? "",
+    toolName: message.toolName ?? "",
+    phase: message.phase ?? "",
+    metrics: message.metrics ?? null,
     details: message.details ?? [],
     prepareTitle: message.prepareTitle ?? "",
+    preparePhase: message.preparePhase ?? "",
+    prepareMetrics: message.prepareMetrics ?? null,
     prepareDetails: message.prepareDetails ?? [],
     durationMs: message.durationMs ?? 0,
     output: message.output ?? "",
@@ -56,6 +62,12 @@ export function messageRenderKey(message, ctx) {
     title: message.title ?? "",
     message: message.message ?? null,
     folds: ctx.state?.folds ?? {},
+    taskPanel: {
+      selectedId: ctx.state?.taskPanel?.selectedId ?? "",
+      focused: ctx.state?.taskPanel?.focused ?? false,
+      expandedIds: ctx.state?.taskPanel?.expandedIds ?? {},
+      collapsedTimelineSources: ctx.state?.taskPanel?.collapsedTimelineSources ?? {},
+    },
   });
 }
 

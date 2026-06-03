@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
 import { ANSI } from "./ansi.js";
+import { bridgeEnvironment, isIgnorableBridgeStderr } from "./bridge-stderr.js";
 import { createDebugLog } from "./debug-log.js";
 import {
   INPUT_KEYS,
@@ -12,16 +13,32 @@ import {
   moveInputCursor,
   navigateInputHistory,
   rememberSubmittedInput,
-  splitInputChunk,
+  splitInputStreamChunk,
 } from "./input-buffer.js";
 import {
   attachJsonlLineReader,
   createEventSender,
+  normalizeServerRecord,
   parseArgs,
   parseBridgeCommandJson,
   splitShellLike,
 } from "./protocol.js";
-import { handleSubmitText, pushSystemMessage, reduceServerEvent, createInitialState, createUiSnapshot, applyUiSnapshot } from "./state.js";
+import {
+  handleSubmitText,
+  hasTaskPanelFocus,
+  cancelTaskPanelItem,
+  jumpToTaskPanelRecord,
+  openSelectedTaskPanelItem,
+  pushSystemMessage,
+  reduceServerEvent,
+  selectTaskPanelOffset,
+  setTaskPanelFocus,
+  setTaskPanelItemExpanded,
+  toggleTaskPanelItemExpanded,
+  createInitialState,
+  createUiSnapshot,
+  applyUiSnapshot,
+} from "./state.js";
 import { renderScreen } from "./render.js";
 import { getUiSnapshot, loadUiStateStore, saveUiStateStore, setUiSnapshot } from "./ui-state-store.js";
 
@@ -35,6 +52,7 @@ let bridge = null;
 let send = null;
 let redrawTimer = null;
 let quitting = false;
+let pendingInputEscape = "";
 
 main();
 
@@ -44,9 +62,16 @@ function main() {
   send = createEventSender(bridge.stdin, { debugLog });
   attachJsonlLineReader(bridge.stdout, handleBridgeLine);
   bridge.stderr.on("data", (chunk) => {
-    const text = chunk.toString("utf8").trim();
-    debugLog?.log("bridge.stderr", { text });
-    pushSystemMessage(state, "bridge stderr", text, "warning");
+    const lines = chunk.toString("utf8").split(/\r?\n/);
+    for (const rawLine of lines) {
+      const text = rawLine.trim();
+      if (!text) continue;
+      const ignored = isIgnorableBridgeStderr(text);
+      debugLog?.log("bridge.stderr", { text, ignored });
+      if (!ignored) {
+        pushSystemMessage(state, "bridge stderr", text, "warning");
+      }
+    }
   });
   bridge.on("exit", (code, signal) => {
     debugLog?.log("bridge.exit", { code, signal, quitting });
@@ -66,18 +91,19 @@ function main() {
 }
 
 function startBridge() {
+  const env = bridgeEnvironment(process.env);
   if (args.bridgeCommandJson) {
     const [cmd, ...cmdArgs] = parseBridgeCommandJson(args.bridgeCommandJson);
-    return spawn(cmd, cmdArgs, { stdio: ["pipe", "pipe", "pipe"], cwd: process.cwd() });
+    return spawn(cmd, cmdArgs, { stdio: ["pipe", "pipe", "pipe"], cwd: process.cwd(), env });
   }
   if (args.bridgeCommand) {
     const [cmd, ...cmdArgs] = splitShellLike(args.bridgeCommand);
-    return spawn(cmd, cmdArgs, { stdio: ["pipe", "pipe", "pipe"], cwd: process.cwd() });
+    return spawn(cmd, cmdArgs, { stdio: ["pipe", "pipe", "pipe"], cwd: process.cwd(), env });
   }
   return spawn(
     "uv",
     ["run", "python", "-m", "naumi_agent.ui.bridge", "--config", args.config],
-    { stdio: ["pipe", "pipe", "pipe"], cwd: process.cwd() },
+    { stdio: ["pipe", "pipe", "pipe"], cwd: process.cwd(), env },
   );
 }
 
@@ -121,10 +147,11 @@ function handleBridgeLine(line) {
   debugLog?.log("protocol.receive.line", { line });
   let record;
   try {
-    record = JSON.parse(line);
-  } catch {
-    debugLog?.log("protocol.receive.error", { line, error: "JSON.parse failed" });
-    pushSystemMessage(state, "bridge json", line, "error");
+    record = normalizeServerRecord(JSON.parse(line));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    debugLog?.log("protocol.receive.error", { line, error: message });
+    pushSystemMessage(state, "bridge protocol", message, "error");
     return;
   }
   debugLog?.log("protocol.receive.record", { type: record.type, request_id: record.request_id, seq: record.seq, payload: record.payload });
@@ -132,6 +159,16 @@ function handleBridgeLine(line) {
   for (const action of actions) {
     if (action.type === "session_replayed") {
       restoreUiSnapshot(action.sessionId);
+    }
+    if (action.type === "refresh_task_panel") {
+      send("task_panel", {
+        limit: action.limit ?? 12,
+        source: action.source ?? "all",
+        status: action.status ?? "all",
+        ...(action.detailId ? { detail_id: action.detailId } : {}),
+        pinned: true,
+        refresh: true,
+      });
     }
   }
   if (actions.some((action) => action.type === "exit")) {
@@ -143,11 +180,14 @@ function handleBridgeLine(line) {
 }
 
 function handleKeyInput(chunk) {
+  const parsed = splitInputStreamChunk(chunk, pendingInputEscape);
+  pendingInputEscape = parsed.pending;
   debugLog?.log("input.chunk", {
     chars: String(chunk),
     char_count: Array.from(String(chunk)).length,
+    pending_escape_chars: pendingInputEscape.length,
   });
-  for (const key of splitInputChunk(chunk)) {
+  for (const key of parsed.keys) {
     handleSingleKeyInput(key);
   }
 }
@@ -177,6 +217,10 @@ function handleSingleKeyInput(chunk) {
     send("cycle_mode", {});
     return;
   }
+  if (!state.input.trim() && hasTaskPanelFocus(state) && handleTaskPanelFocusedKey(chunk)) {
+    scheduleRedraw();
+    return;
+  }
   if (chunk === "\r" || chunk === "\n") {
     const text = state.input.trim();
     if (text) {
@@ -185,6 +229,8 @@ function handleSingleKeyInput(chunk) {
       clearInput(state);
       state.scrollOffset = 0;
       persistUiSnapshot();
+    } else if (hasTaskPanelFocus(state)) {
+      openSelectedTaskPanelItem(state, send);
     }
     scheduleRedraw();
     return;
@@ -209,14 +255,29 @@ function handleSingleKeyInput(chunk) {
     scheduleRedraw();
     return;
   }
-  if (chunk === INPUT_KEYS.up || chunk === INPUT_KEYS.upAlt) {
+  if (chunk === INPUT_KEYS.up) {
     navigateInputHistory(state, "up");
     scheduleRedraw();
     return;
   }
-  if (chunk === INPUT_KEYS.down || chunk === INPUT_KEYS.downAlt) {
+  if (chunk === INPUT_KEYS.down) {
     navigateInputHistory(state, "down");
     scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.upAlt) {
+    adjustScrollOffset(state, "up");
+    persistUiSnapshot();
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.downAlt) {
+    adjustScrollOffset(state, "down");
+    persistUiSnapshot();
+    scheduleRedraw();
+    return;
+  }
+  if (/^[Oo][ABab]$/.test(chunk)) {
     return;
   }
   if (chunk === INPUT_KEYS.home || chunk === INPUT_KEYS.homeAlt || chunk === INPUT_KEYS.homeSs3 || chunk === INPUT_KEYS.ctrlA) {
@@ -245,6 +306,52 @@ function handleSingleKeyInput(chunk) {
     insertInputText(state, chunk);
     scheduleRedraw();
   }
+}
+
+function adjustScrollOffset(state, direction) {
+  const step = Math.max(3, Math.floor((process.stdout.rows ?? 24) / 2));
+  if (direction === "up") {
+    state.scrollOffset += step;
+  } else {
+    state.scrollOffset = Math.max(0, state.scrollOffset - step);
+  }
+}
+
+function handleTaskPanelFocusedKey(chunk) {
+  const key = String(chunk ?? "").toLowerCase();
+  if (chunk === "\u001b") {
+    setTaskPanelFocus(state, false);
+    return true;
+  }
+  if (chunk === "\t" || key === "n") {
+    selectTaskPanelOffset(state, 1);
+    return true;
+  }
+  if (key === "p") {
+    selectTaskPanelOffset(state, -1);
+    return true;
+  }
+  if (chunk === "\r" || chunk === "\n" || key === "o") {
+    openSelectedTaskPanelItem(state, send);
+    return true;
+  }
+  if (key === "j") {
+    jumpToTaskPanelRecord(state);
+    return true;
+  }
+  if (key === "e") {
+    toggleTaskPanelItemExpanded(state);
+    return true;
+  }
+  if (key === "c") {
+    setTaskPanelItemExpanded(state, "", false);
+    return true;
+  }
+  if (key === "x") {
+    cancelTaskPanelItem(state, send);
+    return true;
+  }
+  return false;
 }
 
 function restoreUiSnapshot(sessionId) {

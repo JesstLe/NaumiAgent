@@ -85,12 +85,17 @@ class ToolPrepareMessage(UIMessage):
     """Tool arguments are being streamed from the model (preparation phase)."""
 
     tool_name: str = ""
+    tool_call_id: str = ""
     phase: str = ""  # "start" | "snapshot" | "end"
     path: str = ""
     argument_chars: int = 0
     content_chars: int = 0
     content_lines: int = 0
     elapsed_ms: int = 0
+    todo_total: int = 0
+    todo_completed: int = 0
+    todo_open: int = 0
+    todo_items: tuple[Any, ...] = ()
 
     def summary(self) -> str:
         return f"[tool_prepare] {self.tool_name} {self.phase} {self.elapsed_ms}ms"
@@ -295,8 +300,10 @@ class ErrorMessage(UIMessage):
 class SystemNoticeMessage(UIMessage):
     """Generic system notice (catch-all for events not yet mapped)."""
 
+    title: str = ""
     content: str = ""
     level: str = "info"  # "info" | "warning" | "debug"
 
     def summary(self) -> str:
-        return f"[system:{self.level}] {self.content[:60]}"
+        label = self.title or self.level
+        return f"[system:{label}] {self.content[:60]}"

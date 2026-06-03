@@ -20,6 +20,7 @@ export function renderScreen(state, width, height, env = {}) {
   const footer = clampFooterSections(renderFooterSections(state, width, env), height);
   const footerHeight = footer.length;
   const bodyHeight = Math.max(1, height - footerHeight);
+  ctx.bodyHeight = bodyHeight;
   const bodyLines = renderBodyWindow(state, width, bodyHeight, state.scrollOffset, ctx);
   const target = bodyHeight + state.scrollOffset;
   const start = Math.max(0, bodyLines.length - target);

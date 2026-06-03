@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -74,6 +75,7 @@ _REPEATED_TOOL_CALL_MESSAGE = (
     "同一个工具调用已经连续重复，系统已跳过本次重复执行。"
     "请基于已有工具结果继续判断；如需要继续操作，请选择有明确差异的下一步。"
 )
+_DEFAULT_COMPACTION_RESERVED_TOKENS = 20_000
 
 _TASK_EVENT_TOOLS = {
     "delegate_task",
@@ -213,6 +215,79 @@ def _extract_tool_arg_field(arguments: str, keys: tuple[str, ...]) -> str:
     return ""
 
 
+def _extract_todo_prepare_preview(tool_name: str, arguments: str) -> dict[str, Any]:
+    """Extract compact todo progress from streamed todo_write arguments."""
+    if tool_name != "todo_write" or '"todos"' not in arguments:
+        return {}
+
+    raw_items: list[dict[str, Any]] = []
+    try:
+        parsed = json.loads(arguments)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if isinstance(parsed, dict) and isinstance(parsed.get("todos"), list):
+        raw_items = [item for item in parsed["todos"] if isinstance(item, dict)]
+    else:
+        raw_items = _extract_partial_todo_items(arguments)
+
+    if not raw_items:
+        return {}
+
+    items = [_normalize_todo_prepare_item(item) for item in raw_items]
+    items = [item for item in items if item["subject"]]
+    if not items:
+        return {}
+
+    open_items = [item for item in items if item["status"] != "completed"]
+    return {
+        "todo_total": len(items),
+        "todo_completed": len(items) - len(open_items),
+        "todo_open": len(open_items),
+        "todo_items": open_items,
+    }
+
+
+def _extract_partial_todo_items(arguments: str) -> list[dict[str, Any]]:
+    """Extract already completed object fragments from a streamed todos array."""
+    items: list[dict[str, Any]] = []
+    for match in re.finditer(
+        r"\{[^{}]*(?:\"content\"|\"subject\"|\"status\"|\"id\")[^{}]*\}",
+        arguments,
+    ):
+        fragment = match.group(0)
+        item: dict[str, Any] = {}
+        for key in ("id", "content", "subject", "active_form", "status"):
+            value = _extract_tool_arg_field(fragment, (key,))
+            if value:
+                item[key] = value
+        if item:
+            items.append(item)
+    return items
+
+
+def _normalize_todo_prepare_item(item: dict[str, Any]) -> dict[str, str]:
+    subject = (
+        item.get("active_form")
+        or item.get("subject")
+        or item.get("content")
+        or item.get("title")
+        or ""
+    )
+    status = str(item.get("status") or "pending").strip().lower()
+    if status in {"done", "complete"}:
+        status = "completed"
+    if status in {"running", "active"}:
+        status = "in_progress"
+    if status not in {"pending", "in_progress", "completed", "blocked"}:
+        status = "pending"
+    return {
+        "id": str(item.get("id") or "..."),
+        "status": status,
+        "subject": str(subject).strip(),
+    }
+
+
 def _summarize_tool_prepare_snapshot(
     snapshot: Any,
     *,
@@ -248,6 +323,7 @@ def _summarize_tool_prepare_snapshot(
     if content:
         data["content_chars"] = len(content)
         data["content_lines"] = content.count("\n") + 1
+    data.update(_extract_todo_prepare_preview(name, arguments))
     return data
 
 
@@ -261,6 +337,9 @@ def _tool_prepare_signature(data: dict[str, Any]) -> str:
             "argument_chars",
             "content_chars",
             "content_lines",
+            "todo_total",
+            "todo_completed",
+            "todo_open",
         )
     )
 
@@ -936,8 +1015,17 @@ class AgentEngine:
 
     def _append_message(self, msg: dict[str, Any]) -> None:
         """Append to both _messages and _full_history."""
-        self._messages.append(msg)
-        self._full_history.append(msg)
+        sanitized_messages, visual_replacements = self._compactor.sanitize_visual_payloads(
+            [msg]
+        )
+        safe_msg = sanitized_messages[0] if sanitized_messages else msg
+        if visual_replacements:
+            logger.info(
+                "Sanitized %d inline visual payloads before appending history",
+                visual_replacements,
+            )
+        self._messages.append(safe_msg)
+        self._full_history.append(safe_msg)
 
     async def _inject_background_notifications(
         self,
@@ -1040,10 +1128,12 @@ class AgentEngine:
     async def _maybe_compact(self, on_event: EventCallback | None = None) -> None:
         """检查并执行上下文压缩."""
         model = self._router.resolve_model(ModelTier.CAPABLE)
-        context_window = self._router.get_context_window(model)
-        # 用户配置的 max_input_tokens 作为硬上限兜底
-        hard_cap = self._config.safety.max_input_tokens
-        max_tokens = min(context_window, hard_cap)
+        context_budget, reserve_tokens = self._compute_context_budget(model)
+        if context_budget <= 0:
+            logger.warning(
+                "Context budget invalid (model=%s, reserve=%d)", model, reserve_tokens
+            )
+            return
 
         self._messages, visual_replacements = self._compactor.sanitize_visual_payloads(
             self._messages
@@ -1060,7 +1150,7 @@ class AgentEngine:
 
         if (
             not archived_tool_results
-            and not self._compactor.should_compact(self._messages, max_tokens)
+            and not self._compactor.should_compact(self._messages, context_budget)
         ):
             return
 
@@ -1070,18 +1160,18 @@ class AgentEngine:
         )
         self._messages = await self._compactor.compact(
             self._messages,
-            max_tokens,
+            context_budget,
             runtime_snapshot=runtime_snapshot,
         )
         after = len(self._messages)
 
         if after < before or archived_tool_results:
             logger.info(
-                "Context compacted: %d → %d messages (window=%d, cap=%d, archived=%d)",
+                "Context compacted: %d → %d messages (usable=%d, reserve=%d, archived=%d)",
                 before,
                 after,
-                context_window,
-                hard_cap,
+                context_budget,
+                reserve_tokens,
                 len(archived_tool_results),
             )
             if on_event:
@@ -2883,7 +2973,7 @@ class AgentEngine:
     def get_context_info(self) -> dict[str, Any]:
         """Return context window usage estimate."""
         model = self._router.resolve_model(ModelTier.CAPABLE)
-        window = self._router.get_context_window(model)
+        window = self._compute_context_budget(model)[0]
         sanitized, _ = self._compactor.sanitize_visual_payloads(self._messages)
         used = self._compactor._estimate_tokens(sanitized)
         return {
@@ -2892,6 +2982,26 @@ class AgentEngine:
             "used": used,
             "percentage": min(100, round(used / window * 100, 1)) if window > 0 else 0,
         }
+
+    def _compute_context_budget(self, model: str) -> tuple[int, int]:
+        """计算可用于会话构建的上下文预算（保留输出缓冲区）。"""
+        context_window = self._router.get_context_window(model)
+        hard_cap = min(context_window, self._config.safety.max_input_tokens)
+        if hard_cap <= 0:
+            return 0, 0
+
+        output_cap = self._router.get_max_output(model)
+        reserve = self._config.memory.compaction_reserved_tokens
+        if reserve <= 0:
+            reserve = _DEFAULT_COMPACTION_RESERVED_TOKENS
+
+        if output_cap > 0:
+            reserve = min(reserve, output_cap)
+
+        budget = max(0, hard_cap - reserve)
+        if budget <= 0:
+            return hard_cap, 0
+        return budget, reserve
 
     def get_budget_info(self) -> dict[str, Any]:
         """Return budget consumption info."""

@@ -49,6 +49,18 @@ class TestContextCompactor:
         assert estimated > 0
         assert estimated < 500  # sanity upper bound
 
+    def test_estimate_tokens_ignores_inline_image_payload_size(
+        self,
+        compactor: ContextCompactor,
+    ) -> None:
+        data_url = "data:image/png;base64," + ("A" * 120_000)
+        messages = [{"role": "user", "content": f"截图：{data_url}"}]
+
+        estimated = compactor._estimate_tokens(messages)
+
+        assert estimated > 0
+        assert estimated < 500
+
     def test_messages_to_text(self, compactor: ContextCompactor) -> None:
         messages = [
             {"role": "user", "content": "Hello"},
@@ -129,6 +141,20 @@ class TestContextCompactor:
             "type": "text",
             "text": "[图片内容已省略: data:image/png;base64, base64_chars=2048]",
         }
+
+    def test_sanitize_visual_payloads_replaces_bare_image_base64(
+        self,
+        compactor: ContextCompactor,
+    ) -> None:
+        bare_png = "iVBORw0KGgo" + ("A" * 4096)
+        messages = [{"role": "tool", "content": f"截图内容：{bare_png}"}]
+
+        updated, count = compactor.sanitize_visual_payloads(messages)
+
+        assert count == 1
+        assert "png_base64" in updated[0]["content"]
+        assert "base64_chars=4107" in updated[0]["content"]
+        assert "A" * 512 not in str(updated)
 
     async def test_compact_preserves_system(self, compactor: ContextCompactor) -> None:
         messages = [

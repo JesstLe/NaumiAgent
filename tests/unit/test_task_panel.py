@@ -67,7 +67,10 @@ class FakeSubagentManager:
 
 @dataclass
 class FakeBackgroundRunner:
+    calls: int = 0
+
     def list_tasks(self) -> list[BackgroundTask]:
+        self.calls += 1
         return [
             BackgroundTask(
                 id="bg_0001",
@@ -75,8 +78,25 @@ class FakeBackgroundRunner:
                 cwd="/tmp/project",
                 status=BackgroundStatus.RUNNING,
                 output_path="/tmp/bg.log",
+                pid=4242,
+                port_hints=[8765],
                 started_at="2026-01-01T00:00:00",
                 output_preview="collecting\nrunning tests",
+            )
+        ]
+
+
+class FakeCancelledBackgroundRunner:
+    def list_tasks(self) -> list[BackgroundTask]:
+        return [
+            BackgroundTask(
+                id="bg_cancel",
+                command="sleep 60",
+                cwd="/tmp/project",
+                status=BackgroundStatus.CANCELLED,
+                output_path="/tmp/bg-cancel.log",
+                exit_code=-15,
+                output_preview="terminated",
             )
         ]
 
@@ -89,7 +109,12 @@ class FakeBrowserTaskRunner:
                 "instruction": "打开页面并检查按钮",
                 "status": "needs_input",
                 "stepCount": 3,
+                "currentStep": "等待用户选择页面元素",
                 "createdAt": "2026-06-01T12:00:00",
+                "artifacts": {
+                    "trace": {"path": "/tmp/browser-trace.zip"},
+                    "screenshots": [{"path": "/tmp/screen.png"}],
+                },
             }
         ][:limit]
 
@@ -97,8 +122,10 @@ class FakeBrowserTaskRunner:
 class FakeEngine:
     task_store = FakeTaskStore()
     subagent_manager = FakeSubagentManager()
-    background_runner = FakeBackgroundRunner()
     task_runner = FakeBrowserTaskRunner()
+
+    def __init__(self) -> None:
+        self.background_runner = FakeBackgroundRunner()
 
     def get_recent_permission_bubbles(self, limit: int = 12) -> list[dict[str, str]]:
         return [
@@ -111,19 +138,58 @@ class FakeEngine:
         ][:limit]
 
 
+class FakeCancelledBackgroundEngine(FakeEngine):
+    task_store = None
+    subagent_manager = None
+    task_runner = None
+
+    def __init__(self) -> None:
+        self.background_runner = FakeCancelledBackgroundRunner()
+
+    def get_recent_permission_bubbles(self, limit: int = 12) -> list[dict[str, str]]:
+        return []
+
+
 @pytest.mark.asyncio
 async def test_build_task_panel_snapshot_normalizes_all_sources() -> None:
-    snapshot = await build_task_panel_snapshot(FakeEngine(), limit=10)
+    engine = FakeEngine()
+    snapshot = await build_task_panel_snapshot(engine, limit=10)
 
     assert len(snapshot.todo_items) == 3
     assert snapshot.todo_items[1].text == "正在接入 TUI"
+    assert snapshot.todo_details[1].owner == "coder"
+    assert snapshot.todo_details[2].blocked_by == ("2",)
     assert snapshot.agents[0].name == "coder"
     assert snapshot.agents[0].phase == TaskPhase.RUNNING
+    assert "tasks=2" in snapshot.agents[0].description
     assert snapshot.subagent_events[0]["task_id"] == "sub_1"
     assert snapshot.permission_bubbles[0]["tool_name"] == "bash_run"
     assert snapshot.background_tasks[0].task_id == "bg_0001"
+    assert snapshot.background_details[0].cwd == "/tmp/project"
+    assert snapshot.background_details[0].pid == 4242
+    assert snapshot.background_details[0].port_hints == (8765,)
+    assert snapshot.background_details[0].started_at == "2026-01-01T00:00:00"
     assert snapshot.browser_tasks[0].run_id == "run_1"
+    assert snapshot.browser_tasks[0].current_step == "等待用户选择页面元素"
+    assert snapshot.browser_tasks[0].record_paths == (
+        "/tmp/browser-trace.zip",
+        "/tmp/screen.png",
+    )
+    assert {event.source for event in snapshot.timeline_events} >= {
+        "todo",
+        "subagent",
+        "permissions",
+        "background",
+        "browser",
+    }
+    assert any(event.task_id == "bg_0001" for event in snapshot.timeline_events)
+    background_event = next(
+        event for event in snapshot.timeline_events
+        if event.task_id == "bg_0001"
+    )
+    assert background_event.timestamp == "2026-01-01T00:00:00"
     assert snapshot.warnings == ()
+    assert engine.background_runner.calls == 1
 
 
 @pytest.mark.asyncio
@@ -131,15 +197,106 @@ async def test_render_task_panel_contains_expected_sections() -> None:
     text = await render_task_panel(FakeEngine(), limit=10)
 
     assert "任务面板" in text
+    assert "Timeline" in text
+    assert "source=background" in text
     assert "Todo" in text
     assert "正在接入 TUI" in text
+    assert "owner=coder" in text
+    assert "blocked_by=2" in text
     assert "Subagent" in text
     assert "coder" in text
     assert "权限冒泡" in text
     assert "Background" in text
     assert "running tests" in text
+    assert "cwd=/tmp/project" in text
+    assert "ports=8765" in text
     assert "Browser Runs" in text
     assert "打开页面并检查按钮" in text
+    assert "current=等待用户选择页面元素" in text
+    assert "records=/tmp/browser-trace.zip" in text
+
+
+@pytest.mark.asyncio
+async def test_render_task_panel_detail_matches_task_sources() -> None:
+    background_text = await render_task_panel(
+        FakeEngine(),
+        limit=10,
+        detail_id="bg_0001",
+    )
+
+    assert "filter: source=all status=all detail=bg_0001" in background_text
+    assert "Detail" in background_text
+    assert "类型: Background" in background_text
+    assert "ID: bg_0001" in background_text
+    assert "命令: pytest tests/unit/test_task_panel.py" in background_text
+    assert "CWD: /tmp/project" in background_text
+    assert "Started: 2026-01-01T00:00:00" in background_text
+    assert "最近输出: collecting" in background_text
+
+    browser_text = await render_task_panel(
+        FakeEngine(),
+        limit=10,
+        detail_id="run_1",
+    )
+
+    assert "类型: Browser Run" in browser_text
+    assert "ID: run_1" in browser_text
+    assert "Current: 等待用户选择页面元素" in browser_text
+    assert "Records: /tmp/browser-trace.zip, /tmp/screen.png" in browser_text
+
+    missing_text = await render_task_panel(
+        FakeEngine(),
+        limit=10,
+        detail_id="missing",
+    )
+
+    assert "未找到 ID: missing" in missing_text
+
+
+@pytest.mark.asyncio
+async def test_render_task_panel_filters_by_source_and_status() -> None:
+    todo_text = await render_task_panel(
+        FakeEngine(),
+        limit=10,
+        source="todo",
+        status="open",
+    )
+
+    assert "filter: source=todo status=open" in todo_text
+    assert "正在接入 TUI" in todo_text
+    assert "等待用户确认" in todo_text
+    assert "设计任务面板" not in todo_text
+    assert "Background" in todo_text
+    assert "暂无后台任务" in todo_text
+    assert "打开页面并检查按钮" not in todo_text
+
+    browser_text = await render_task_panel(
+        FakeEngine(),
+        limit=10,
+        source="browser",
+        status="needs_input",
+    )
+
+    assert "filter: source=browser status=needs_input" in browser_text
+    assert "打开页面并检查按钮" in browser_text
+    assert "source=browser" in browser_text
+    assert "正在接入 TUI" not in browser_text
+    assert "running tests" not in browser_text
+
+
+@pytest.mark.asyncio
+async def test_render_task_panel_filters_background_by_raw_lifecycle_status() -> None:
+    text = await render_task_panel(
+        FakeCancelledBackgroundEngine(),
+        limit=10,
+        source="background",
+        status="cancelled",
+    )
+
+    assert "filter: source=background status=cancelled" in text
+    assert "bg_cancel" in text
+    assert "sleep 60" in text
+    assert "exit=-15" in text
 
 
 def test_render_task_panel_snapshot_handles_empty_state() -> None:

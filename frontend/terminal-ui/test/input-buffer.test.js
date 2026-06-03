@@ -13,6 +13,7 @@ import {
   renderInputWithCursor,
   setInputText,
   splitInputChunk,
+  splitInputStreamChunk,
 } from "../src/input-buffer.js";
 import { createInitialState } from "../src/state.js";
 
@@ -24,6 +25,8 @@ test("input tokenizer preserves CSI keys and batches printable paste chunks", ()
     INPUT_KEYS.delete,
     "\n",
   ]);
+  assert.deepEqual(splitInputChunk("OA"), [INPUT_KEYS.upAlt]);
+  assert.deepEqual(splitInputChunk("ob"), [INPUT_KEYS.downAlt]);
   assert.deepEqual(splitInputChunk(`${INPUT_KEYS.shiftTab}${INPUT_KEYS.pageUp}${INPUT_KEYS.pageDown}`), [
     INPUT_KEYS.shiftTab,
     INPUT_KEYS.pageUp,
@@ -39,6 +42,37 @@ test("input tokenizer preserves CSI keys and batches printable paste chunks", ()
     INPUT_KEYS.homeSs3,
     INPUT_KEYS.endSs3,
   ]);
+});
+
+test("stream tokenizer buffers split SS3 cursor keys from trackpads", () => {
+  let pending = "";
+
+  let parsed = splitInputStreamChunk("\x1b", pending);
+  assert.deepEqual(parsed.keys, []);
+  pending = parsed.pending;
+
+  parsed = splitInputStreamChunk("O", pending);
+  assert.deepEqual(parsed.keys, []);
+  pending = parsed.pending;
+
+  parsed = splitInputStreamChunk("A", pending);
+  assert.deepEqual(parsed.keys, [INPUT_KEYS.upAlt]);
+  assert.equal(parsed.pending, "");
+
+  parsed = splitInputStreamChunk("\x1bO", "");
+  assert.deepEqual(parsed.keys, []);
+  parsed = splitInputStreamChunk("B", parsed.pending);
+  assert.deepEqual(parsed.keys, [INPUT_KEYS.downAlt]);
+
+  parsed = splitInputStreamChunk("\x1bo", "");
+  assert.deepEqual(parsed.keys, []);
+  parsed = splitInputStreamChunk("a", parsed.pending);
+  assert.deepEqual(parsed.keys, [INPUT_KEYS.upAlt]);
+
+  parsed = splitInputStreamChunk("\x1bo", "");
+  assert.deepEqual(parsed.keys, []);
+  parsed = splitInputStreamChunk("b", parsed.pending);
+  assert.deepEqual(parsed.keys, [INPUT_KEYS.downAlt]);
 });
 
 test("input history navigates submitted commands and restores draft text", () => {

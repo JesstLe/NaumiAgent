@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import sys
 
+_NOISY_THIRD_PARTY_LOGGERS = ("litellm", "LiteLLM")
+
 
 def setup_logging(level: str = "INFO") -> None:
     logging.basicConfig(
@@ -13,3 +15,5 @@ def setup_logging(level: str = "INFO") -> None:
         datefmt="%H:%M:%S",
         stream=sys.stderr,
     )
+    for logger_name in _NOISY_THIRD_PARTY_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.ERROR)

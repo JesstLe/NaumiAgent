@@ -3,6 +3,9 @@ import { MarkdownExcerpt } from "./markdown.js";
 import { renderComponent } from "./core.js";
 import { ActivityCard } from "./activity-card.js";
 import { EventCard } from "./event-card.js";
+import { PermissionCard } from "./permission-card.js";
+import { PermissionPanel } from "./permission-panel.js";
+import { TaskPanel } from "./task-panel.js";
 import { ToolCard } from "./tool-card.js";
 
 export function Message({ message }) {
@@ -21,9 +24,9 @@ export function renderMessage(message, width, ctx = { width }) {
     return ["", ...renderComponent(MarkdownExcerpt({ text: message.content, foldKey: `message:${message.id ?? ""}` }), ctx)];
   }
   if (message.kind === "thinking") {
-    const content = compactText(message.content || "思考中...");
-    const label = message.done ? "thinking" : "thinking...";
-    return ["", color(ANSI.dim, `${label}: ${content}`)];
+    const content = compactText(message.content || "");
+    const suffix = content ? `: ${content}` : "";
+    return ["", color(ANSI.dim, `thinking${message.done ? "" : "..."}${suffix}`)];
   }
   if (message.kind === "tool") {
     return renderComponent(ToolCard({ tool: message }), ctx);
@@ -32,11 +35,19 @@ export function renderMessage(message, width, ctx = { width }) {
     return renderComponent(ActivityCard({ activity: message }), ctx);
   }
   if (message.kind === "permission") {
-    return ["", color(ANSI.yellow, `permission: ${message.message.tool_name} · ${message.message.status}`)];
+    return renderComponent(PermissionCard({ permission: message }), ctx);
   }
   if (message.kind === "system") {
+    if (message.title === "tasks") {
+      return renderComponent(TaskPanel({ content: message.content, taskPanel: ctx.state?.taskPanel }), ctx);
+    }
+    if (message.title === "permissions") {
+      return renderComponent(PermissionPanel({ content: message.content }), ctx);
+    }
     const style = message.level === "error" ? ANSI.red : message.level === "warning" ? ANSI.yellow : ANSI.dim;
-    return ["", color(style, `${message.title}: ${message.content}`)];
+    const contentLines = String(message.content ?? "").split("\n");
+    const first = `${message.title}: ${contentLines.shift() ?? ""}`;
+    return ["", color(style, first), ...contentLines.map((item) => color(style, item))];
   }
   if ([
     "runtime_notification",

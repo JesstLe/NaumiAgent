@@ -50,7 +50,7 @@ from naumi_agent.ui.tool_activity import format_tool_prepare_status
 
 logger = logging.getLogger(__name__)
 
-_TERMINAL_NOISE_LOGGERS = ("litellm", "LiteLLM")
+_TERMINAL_NOISE_LOGGERS = ("litellm", "LiteLLM", "naumi_agent")
 
 
 @contextlib.contextmanager
@@ -211,6 +211,7 @@ class ChatPanel(VerticalScroll):
         self._thinking_text = ""
         self._thinking_content_widget: Static | None = None
         self._thinking_collapsible: Collapsible | None = None
+        self._show_reasoning = False
         self._current_tool_widget: Static | None = None
         self._model_widget: Static | None = None
 
@@ -242,6 +243,7 @@ class ChatPanel(VerticalScroll):
             self._thinking_content_widget,
             title="💭 思考过程",
             classes="thinking-block",
+            collapsed=self._show_reasoning,
         )
         self.mount(self._thinking_collapsible)
         self.scroll_end(animate=False)
@@ -249,15 +251,14 @@ class ChatPanel(VerticalScroll):
     def add_thinking_chunk(self, content: str) -> None:
         self._trace_output("tui.thinking", content)
         self._thinking_text += content
-        if self._thinking_content_widget:
+        if self._show_reasoning and self._thinking_content_widget:
             self._thinking_content_widget.update(RichMarkdown(self._thinking_text))
             self.scroll_end(animate=False)
 
     def end_thinking(self) -> None:
         self._trace_event("tui.thinking_end", {"chars": len(self._thinking_text)})
-        if not self._thinking_text:
-            if self._thinking_collapsible:
-                self._thinking_collapsible.remove()
+        if self._thinking_collapsible and not self._show_reasoning:
+            self._thinking_collapsible.remove()
         elif self._thinking_collapsible:
             self._thinking_collapsible.collapsed = True
         self._thinking_text = ""
@@ -267,6 +268,9 @@ class ChatPanel(VerticalScroll):
     def add_completed_thinking(self, content: str) -> None:
         """从历史消息中恢复已完成的思考过程."""
         if not content:
+            return
+        if not self._show_reasoning:
+            self._trace_event("tui.thinking_restored_hidden", {"chars": len(content)})
             return
         thinking_widget = Static(_THINKING_LABEL, classes="thinking-content")
         collapsible = Collapsible(
@@ -1022,6 +1026,7 @@ class StatusBar(Static):
 
     status_text: reactive[str] = reactive("就绪")
     mode_text: reactive[str] = reactive("default")
+    session_text: reactive[str] = reactive("会话:-")
     debug_trace: Any | None = None
 
     def watch_mode_text(self, text: str) -> None:
@@ -1035,7 +1040,7 @@ class StatusBar(Static):
         self._refresh()
 
     def _refresh(self) -> None:
-        self.update(f"mode: {self.mode_text} | {self.status_text}")
+        self.update(f"mode: {self.mode_text} | {self.status_text} | {self.session_text}")
 
 
 class TodoBar(Static):
@@ -1197,6 +1202,7 @@ class NaumiApp(App):
         debug_trace: Any | None = None,
         keybindings: KeybindingSet | None = None,
         style_config: UIStyleConfig | None = None,
+        show_reasoning: bool = False,
         **kwargs: Any,
     ) -> None:
         self._keybindings = keybindings or build_keybindings()
@@ -1206,6 +1212,7 @@ class NaumiApp(App):
         super().__init__(**kwargs)
         self.engine = engine
         self.debug_trace = debug_trace
+        self._show_reasoning = show_reasoning
         self.engine.set_permission_confirmer(self.confirm_permission)
 
     def compose(self) -> ComposeResult:
@@ -1231,8 +1238,11 @@ class NaumiApp(App):
         """Initialize UI on startup."""
         chat = self.query_one(ChatPanel)
         chat.debug_trace = self.debug_trace
+        chat._show_reasoning = self._show_reasoning
         status = self.query_one(StatusBar)
         status.debug_trace = self.debug_trace
+        current_session = self.engine._session.id if self.engine._session else None
+        status.session_text = f"会话:{current_session[:8]}" if current_session else "会话:-"
         todo = self.query_one(TodoBar)
         todo.debug_trace = self.debug_trace
         if self.debug_trace is not None:
@@ -1357,6 +1367,7 @@ class NaumiApp(App):
                         pass
                 self.engine.reset()
                 chat.clear()
+                status.session_text = "会话:-"
                 status.status_text = "新会话已开始"
             case "/help" | "/h":
                 help_text = (
@@ -1364,6 +1375,7 @@ class NaumiApp(App):
                     "- `/help` — 显示帮助\n"
                     "- `/keybindings` — 显示当前快捷键配置\n"
                     "- `/style` — 显示当前主题和输出风格\n"
+                    "- `/reasoning on|off|toggle` — 显示或隐藏模型 reasoning/thinking 明文\n"
                     "- `/doctor` — 运行环境诊断\n"
                     "- `/copy [all|last|error]` — 复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)\n"
                     "- `/debug` — 显示本次结构化调试日志位置\n"
@@ -1452,6 +1464,8 @@ class NaumiApp(App):
                         classes="agent-msg",
                     )
                 )
+            case "/reasoning":
+                self._handle_reasoning_command(arg)
             case "/doctor":
                 self._run_doctor()
             case "/debug":
@@ -1793,6 +1807,33 @@ class NaumiApp(App):
                         classes="agent-msg",
                     )
                 )
+
+    def _handle_reasoning_command(self, arg: str) -> None:
+        raw = arg.strip().lower()
+        if not raw or raw == "toggle":
+            enabled = not self._show_reasoning
+        elif raw in {"on", "true", "1", "show", "open"}:
+            enabled = True
+        elif raw in {"off", "false", "0", "hide", "close"}:
+            enabled = False
+        else:
+            self.query_one(ChatPanel).mount(
+                Markdown("用法: `/reasoning on|off|toggle`", classes="agent-msg")
+            )
+            return
+        self._show_reasoning = enabled
+        chat = self.query_one(ChatPanel)
+        chat._show_reasoning = enabled
+        config = getattr(self.engine, "_config", None)
+        if config is not None and getattr(config, "ui", None) is not None:
+            config.ui.show_reasoning = enabled
+        chat.mount(
+            Markdown(
+                "reasoning 文本显示已开启。" if enabled else "reasoning 文本显示已关闭。",
+                classes="agent-msg",
+            )
+        )
+        self.query_one(StatusBar).status_text = "reasoning: on" if enabled else "reasoning: off"
 
     @work(exclusive=True, exit_on_error=False)
     async def _run_agent(self, task: str) -> None:
@@ -2404,6 +2445,7 @@ class NaumiApp(App):
             return
 
         session = self.engine._session
+        status.session_text = f"会话:{session.id[:8]}"
         chat.clear()
 
         # 回放历史消息 — 用 _full_history（原始未截断数据）展示

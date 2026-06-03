@@ -1,6 +1,8 @@
 # NaumiAgent CLI/TUI Claude Code 化路线图
 
-本文档规划 NaumiAgent CLI/TUI 交互层的三阶段重构路线。目标不是复制 Claude Code 的源码，而是吸收其成熟产品结构：事件模型、消息组件、工具生命周期、权限交互、固定布局、长历史渲染、任务面板和诊断体系，并用 NaumiAgent 当前 Python 架构重实现。
+本文档规划 NaumiAgent CLI/TUI 交互层的三阶段重构路线。早期假设是不引入 Claude Code 源码；当前用户已确认本地 `/Users/lv/Workspace/claude-code` 可开源复用，因此路线调整为：审查并映射迁入 Claude Code 的终端 UI 结构、状态模型、组件设计和交互细节，同时保持 NaumiAgent 的 Python `AgentEngine/tools/memory/safety/task/background/debug_trace` 作为后端能力核心。
+
+本轮源码审计和迁入映射见 `docs/14-claude-code-source-audit.md` 与 `frontend/terminal-ui/cc-source-map.json`。
 
 ## 总体目标
 
@@ -31,10 +33,10 @@ Claude Code README 中体现出的关键结构：
 
 NaumiAgent 的迁移原则：
 
-- 不引入 Claude Code 专有源码。
-- 不强行把 Python 项目改成 TypeScript / Bun / Ink。
-- 把 Claude Code 的架构模式映射到 Naumi 的 `prompt_toolkit` CLI 和 Textual TUI。
-- 先建立 UI message model，再做各类渲染功能。
+- 已确认可复用的 Claude Code 源码可以作为 UI 基座或组件参考迁入。
+- Python 引擎、工具、记忆、安全、任务和 debug trace 仍归 NaumiAgent 后端所有。
+- 前后端通过稳定 UI Event Protocol 解耦；后续可替换 renderer，而不重写 AgentEngine。
+- 第一阶段先用轻量 Node terminal frontend 跑通完整链路；后续评估是否直接引入 React/Ink renderer。
 - 每个功能独立实现、独立验证、独立提交。
 
 ## 阶段一：可用版，3-5 天
@@ -887,13 +889,20 @@ codex/docs-13-claude-code-roadmap
 已完成（阶段一）：
 
 - ✅ 统一 UI 事件协议：`UIMessage` / `EngineEventAdapter` / 完整 dispatch table。
+- ✅ 共享 UI Event Protocol 契约：`frontend/terminal-ui/protocol-contract.json` 固化 client/server 事件清单和阶段一关键 `ui/message` 类型字段，Node 前端运行时校验 bridge 输出，Python 回归测试校验枚举与 UIMessage dataclass 字段一致性，并随 wheel 一起打包。
+- ✅ Python bridge 进程级验证：terminal-ui 测试通过 `uv run python test/fixtures/python-bridge-fixture.py` 启动真实 `JsonlEngineBridge`，覆盖 submit、权限确认、tool card、task panel 和 resume replay 的 stdio JSONL 链路。
+- ✅ Legacy fallback 命令级验证：`naumi ui` 默认启动新 terminal-ui，`naumi ui --legacy` 明确进入旧 Textual TUI；新 UI 启动失败时提示 `naumi ui --legacy` / `naumi chat --tui`。
 - ✅ CLI/TUI message renderer registry：`CLIRenderer` 表驱动，新增类型不改主循环。
 - ✅ 工具调用独立 card 化：`ToolCardSummary` + tool-specific extractors。
+- ✅ 工具准备阶段动态可视化：terminal-ui 将 `tool_prepare_start/snapshot/end` 的真实 path、argument chars、content chars、content lines、elapsed ms 渲染为 activity card；工具完成后同一份 prepare progress 摘要保留在最终 tool card 中，避免快速写文件时用户看不到变化。
+- ✅ 真实工具事件顺序与缓存稳定性：terminal-ui 支持生产链路中的 `tool_prepare_start -> snapshot -> end -> tool_use` 顺序，`prepare_end` 会保留到后续 tool card 消费；`tool_prepare.tool_call_id` 与 `tool_use.tool_call_id` 会精确匹配，ID 不一致时不会把准备摘要挂到错误工具；render cache key 纳入 activity/tool prepare phase 和 metrics，连续工具不会串用上一项准备摘要。
 - ✅ 长代码块/diff/文件写入摘要：`code_excerpt` / `file_summary_renderer`。
 - ✅ 底部布局稳定化：`BottomBarState` + `clip_to_width` + output guard。
 - ✅ 权限 prompt 闭环：`PermissionBubbleMessage` + y/n/Shift+Tab。
+- ✅ Runtime mode 端到端语义：`default -> plan -> bypass` 通过 Shift+Tab 循环；`plan` 映射 Python 权限层 `strict` 并阻断写入类工具，`bypass` 映射 `bypass`；terminal-ui 进程测试通过真实 Python `JsonlEngineBridge` fixture 验证 `mode/changed.status.permission_mode`。
 - ✅ Resume 渲染恢复：`replay_messages()` 将 session 历史转为 UIMessage 走 renderer。
 - ✅ Debug trace 集成：`DebugTrace` 记录所有 engine event + UIMessage + 渲染异常。
+- ✅ 真实 Engine/Bridge 工具生命周期验证：`tests/unit/test_ui_bridge.py` 使用真实 `AgentEngine.run_streaming()`、patched router 和 patched tool execution，验证 `submit -> tool_prepare -> tool_use -> tool_result -> run_completed` 能完整穿过 `JsonlEngineBridge`，不依赖外部 API。
 
 已完成（阶段二）：
 
@@ -902,6 +911,12 @@ codex/docs-13-claude-code-roadmap
 - ✅ Virtualized CLI message history：`VirtualizedCLIHistory` + `VirtualizedHistoryControl`，CLI 输出区按行懒渲染，保留 PageUp/PageDown、live/finalize、resume replay 行为。
 - ✅ Debug log viewer：`/debug` 展示当前日志路径 + 最近 debug-runs 索引，`/debug-replay` 回放结构化事件，`/copy last|error` 导出诊断片段。
 - ✅ Task / Todo / Subagent 面板：`ui.task_panel` 聚合持久 todo、subagent 生命周期/事件、权限冒泡、background 任务和 browser runs；CLI `/tasks` 与 TUI 任务侧栏共用同一套快照/渲染逻辑。
+- ✅ Task panel 前端选择交互：terminal-ui 从 `/tasks` 内容抽取可选任务 ID，支持 `/tasks select|next|prev|open|jump` 和空输入 `Tab` / `Enter` 选择并打开详情；`/tasks jump [id]` 展示 background output 或 browser artifacts/reports 的真实记录路径；`/tasks cancel [id]` 通过 `task_cancel` 协议真实取消 background/browser 任务，todo 删除不混作取消。
+- ✅ Task panel 焦点与动作栏：任务面板聚焦时支持空输入 `Tab/n` 下一项、`p` 上一项、`Enter/o` 详情、`j` 记录、`x` 取消、`Esc` 退出焦点；失焦后这些按键恢复为普通输入。
+- ✅ Task panel 轻量事件流展开：`e` 或 `/tasks expand [id]` 展开任务项结构化字段为 `event flow`，`c` 或 `/tasks collapse [id]` 折叠；展开/选中/focus 状态参与 render cache key，避免 UI 状态变化后复用旧渲染。
+- ✅ Task panel 跨来源 Timeline：`ui.task_panel` 从 todo、subagent events、permission bubbles、background tasks、browser runs 生成统一 `Timeline` 区段，并继承 source/status 过滤；terminal-ui 将其作为可选、可展开任务行渲染。
+- ✅ Task panel Timeline 来源折叠：terminal-ui 在 Timeline 区段显示来源计数，支持 `/tasks timeline collapse|expand|toggle <source>` 和 `/tasks timeline clear` 本地折叠高噪声来源；折叠状态参与 render cache key。
+- ✅ Task panel 有界渲染：真实屏幕渲染时按 body 高度截断超长面板，保留顶部 `tasks` 标题、摘要、前部关键行和隐藏行数提示，避免 `/tasks` 新打开后视图追到面板尾部。
 - ✅ Structured diff viewer：`ui.diff_viewer` 解析 git unified diff，按文件展示 hunk/additions/deletions、折叠大 diff、标出未跟踪文件；CLI/TUI 支持 `/diff [all|worktree|staged]`。
 
 已完成（阶段三）：

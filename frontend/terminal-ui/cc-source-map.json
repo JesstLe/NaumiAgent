@@ -1,0 +1,142 @@
+{
+  "source": {
+    "name": "local-claude-code",
+    "workspace_path": "/Users/lv/Workspace/claude-code",
+    "readme_claim": "本项目内容可自由复用、参考和学习",
+    "reviewed_at": "2026-06-02"
+  },
+  "mapping": [
+    {
+      "area": "entrypoint",
+      "claude_code": [
+        "src/main.tsx",
+        "src/entrypoints/cli.tsx",
+        "src/screens/REPL.tsx"
+      ],
+      "naumi_agent": [
+        "src/naumi_agent/main.py",
+        "src/naumi_agent/ui/protocol.py",
+        "frontend/terminal-ui/protocol-contract.json",
+        "frontend/terminal-ui/src/index.js",
+        "src/naumi_agent/ui/bridge.py"
+      ],
+      "phase_one_status": "implemented",
+      "notes": "naumi ui starts a Node 20+ terminal frontend and a Python JSONL bridge while preserving legacy fallback; launcher validates the Node runtime before spawning the UI. Client/server event names are pinned in protocol-contract.json and checked by both frontend runtime validation and Python regression tests. terminal-ui now has a process-level fixture that launches the real Python JsonlEngineBridge over stdio and verifies submit, permission confirmation, tool cards, task panel rendering, and resume replay through the Node UI."
+    },
+    {
+      "area": "terminal-renderer",
+      "claude_code": [
+        "src/ink/render-to-screen.ts",
+        "src/ink/render-node-to-output.ts",
+        "src/ink/parse-keypress.ts",
+        "src/components/FullscreenLayout.tsx",
+        "src/components/StatusLine.tsx"
+      ],
+      "naumi_agent": [
+        "frontend/terminal-ui/src/render.js",
+        "frontend/terminal-ui/src/input-buffer.js",
+        "frontend/terminal-ui/src/components/footer.js",
+        "frontend/terminal-ui/src/components/core.js"
+      ],
+      "phase_one_status": "implemented",
+      "notes": "Naumi uses a small renderer with explicit footer reservation, ANSI width handling, key tokenization, and bounded viewport rendering."
+    },
+    {
+      "area": "message-components",
+      "claude_code": [
+        "src/components/messages/AssistantTextMessage.tsx",
+        "src/components/messages/AssistantToolUseMessage.tsx",
+        "src/components/messages/GroupedToolUseContent.tsx",
+        "src/components/Markdown.tsx",
+        "src/components/HighlightedCode.tsx"
+      ],
+      "naumi_agent": [
+        "src/naumi_agent/ui/messages/base.py",
+        "src/naumi_agent/ui/messages/events.py",
+        "src/naumi_agent/ui/messages/adapter.py",
+        "frontend/terminal-ui/src/components/message.js",
+        "frontend/terminal-ui/src/components/markdown.js",
+        "frontend/terminal-ui/src/components/tool-card.js"
+      ],
+      "phase_one_status": "implemented",
+      "notes": "Python engine events are converted into typed UI messages; terminal components render bounded markdown, code, diff, and tool cards. tool_prepare start/snapshot/end events now drive a live activity card with path, argument size, content size, line count, elapsed time, tool_call_id, and an unknown-total activity meter; prepare_end is retained until the matching following tool_use consumes it, and the final tool card preserves the same prepare progress summary. Mismatched tool_call_id values are not attached to the next tool card. Render cache keys include prepare phase, metrics, and identity so live progress and sequential tools do not reuse stale cards."
+    },
+    {
+      "area": "state-and-resume",
+      "claude_code": [
+        "src/state/AppState.tsx",
+        "src/state/AppStateStore.ts",
+        "src/assistant/sessionHistory.ts",
+        "src/screens/ResumeConversation.tsx"
+      ],
+      "naumi_agent": [
+        "src/naumi_agent/ui/messages/replay.py",
+        "frontend/terminal-ui/src/state.js",
+        "frontend/terminal-ui/src/ui-state-store.js",
+        "src/naumi_agent/ui/bridge.py"
+      ],
+      "phase_one_status": "implemented",
+      "notes": "The bridge replays persisted engine messages as typed UI messages; the frontend persists local folds and scroll state per session."
+    },
+    {
+      "area": "permissions-and-modes",
+      "claude_code": [
+        "src/components/permissions/PermissionPrompt.tsx",
+        "src/components/permissions/PermissionDialog.tsx",
+        "src/types/permissions.ts",
+        "src/keybindings/defaultBindings.ts"
+      ],
+      "naumi_agent": [
+        "src/naumi_agent/safety/permissions.py",
+        "src/naumi_agent/ui/bridge.py",
+        "src/naumi_agent/ui/permission_panel.py",
+        "frontend/terminal-ui/src/index.js",
+        "frontend/terminal-ui/src/components/permission-card.js",
+        "frontend/terminal-ui/src/components/permission-panel.js",
+        "frontend/terminal-ui/src/components/footer.js",
+        "src/naumi_agent/ui/keybindings.py"
+      ],
+      "phase_one_status": "implemented",
+      "notes": "default, plan, and bypass modes are exposed through the bridge; Shift+Tab cycles default -> plan -> bypass and the real Python bridge fixture verifies that plan reports permission_mode=strict while bypass reports permission_mode=bypass. Permission requests support y/n/b and Shift+Tab bypass. /permissions renders pending requests, recent permission history, real rule sources, risk levels, confirmation strategy, and bypass scope without mutating state."
+    },
+    {
+      "area": "tasks-and-progress",
+      "claude_code": [
+        "src/components/TaskListV2.tsx",
+        "src/components/tasks/BackgroundTaskStatus.tsx",
+        "src/components/tasks/renderToolActivity.tsx",
+        "src/tasks/types.ts"
+      ],
+      "naumi_agent": [
+        "src/naumi_agent/tasks/store.py",
+        "src/naumi_agent/tasks/tools.py",
+        "src/naumi_agent/ui/task_status_renderer.py",
+        "src/naumi_agent/ui/task_panel.py",
+        "src/naumi_agent/ui/bridge.py",
+        "frontend/terminal-ui/src/state.js",
+        "frontend/terminal-ui/src/components/activity-card.js",
+        "frontend/terminal-ui/src/components/task-panel.js",
+        "frontend/terminal-ui/src/components/footer.js"
+      ],
+      "phase_one_status": "implemented",
+      "notes": "Phase one has sticky todo/progress feedback, streamed todo_write previews, persistent footer task activity counts, and a /tasks protocol path for the aggregate task panel. /tasks pin keeps one task panel message refreshed in place when task activity changes and preserves source/status/detail filters. The panel renders real todo owner/blocking metadata, subagent events, permission bubbles, background cwd/pid/ports/output paths, browser run step/current/error details, and a normalized Timeline section built from all visible task sources. /tasks supports read-only source/status filtering such as todo open, background running, and browser needs_input, plus /tasks detail <id> for a read-only detail view. The frontend extracts selectable task ids and supports /tasks select, /tasks next, /tasks prev, /tasks open, /tasks jump, plus empty-input Tab/Enter selection flow. Focused task panels expose a multi-key action bar: Tab/n next, p previous, Enter/o detail, e/c expand-collapse, j records, x cancel, Esc blur; blurred panels restore normal text input. Expanded rows render a lightweight event flow from structured task fields and participate in render-cache keys. Timeline rows now show source counts and support local source folding with /tasks timeline collapse|expand|toggle <source> and /tasks timeline clear; this folding state is included in render-cache keys and has a terminal process test through the JSONL fake bridge. Oversized task panels are bounded by the current body height during full-screen rendering, preserving the top header/summary and an omitted-line notice instead of opening at the panel tail. /tasks jump [id] shows real background output paths or browser artifact/report paths. /tasks cancel [id] sends task_cancel and the bridge dispatches real background_runner.cancel or task_runner.abort_run for background/browser tasks. Full TaskListV2 interactions such as a full-screen list layout remain a later phase."
+    },
+    {
+      "area": "debug-and-diagnostics",
+      "claude_code": [
+        "src/screens/Doctor.tsx",
+        "src/bridge/bridgeDebug.ts",
+        "src/components/StatusNotices.tsx"
+      ],
+      "naumi_agent": [
+        "src/naumi_agent/debug_trace.py",
+        "src/naumi_agent/ui/bridge.py",
+        "frontend/terminal-ui/src/debug-log.js",
+        "src/naumi_agent/ui/doctor.py",
+        "frontend/terminal-ui/src/state.js"
+      ],
+      "phase_one_status": "implemented",
+      "notes": "Frontend and bridge write structured JSONL traces; /debug exposes trace paths and /doctor calls the Python diagnostics backend through the UI protocol."
+    }
+  ]
+}

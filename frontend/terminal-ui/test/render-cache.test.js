@@ -31,6 +31,58 @@ test("render cache misses when streaming content changes", () => {
   assert(plain.includes("AB"));
 });
 
+test("render cache misses when live activity progress changes", () => {
+  const state = createInitialState();
+  const activity = {
+    kind: "activity",
+    id: "activity-1",
+    status: "running",
+    title: "准备 file_write",
+    phase: "start",
+    metrics: { argumentChars: 128, contentChars: 0, contentLines: 0, elapsedMs: 40 },
+    details: ["路径: demo.html"],
+  };
+  state.messages.push(activity);
+
+  renderScreen(state, 90, 14, { cwd: "/tmp", home: "/Users/lv" });
+  activity.phase = "snapshot";
+  activity.metrics = { argumentChars: 4096, contentChars: 12000, contentLines: 88, elapsedMs: 2400 };
+  const plain = renderScreen(state, 90, 14, { cwd: "/tmp", home: "/Users/lv" }).map(stripAnsi).join("\n");
+
+  assert.equal(state.renderCache.misses, 2);
+  assert(plain.includes("生成中 ["));
+  assert(plain.includes("88 lines"));
+  assert(plain.includes("2.4s"));
+});
+
+test("render cache misses when tool prepare progress summary changes", () => {
+  const state = createInitialState();
+  const tool = {
+    kind: "tool",
+    id: "tool-1",
+    callId: "call-1",
+    name: "file_write",
+    primary: "demo.html",
+    status: "success",
+    prepareTitle: "准备 file_write",
+    preparePhase: "start",
+    prepareMetrics: { argumentChars: 128, contentChars: 0, contentLines: 0, elapsedMs: 40 },
+    prepareDetails: ["路径: demo.html"],
+    output: "done",
+  };
+  state.messages.push(tool);
+
+  renderScreen(state, 90, 14, { cwd: "/tmp", home: "/Users/lv" });
+  tool.preparePhase = "snapshot";
+  tool.prepareMetrics = { argumentChars: 4096, contentChars: 12000, contentLines: 88, elapsedMs: 2400 };
+  const plain = renderScreen(state, 90, 14, { cwd: "/tmp", home: "/Users/lv" }).map(stripAnsi).join("\n");
+
+  assert.equal(state.renderCache.misses, 2);
+  assert(plain.includes("生成中 ["));
+  assert(plain.includes("88 lines"));
+  assert(plain.includes("2.4s"));
+});
+
 test("fold commands clear render cache before re-rendering expanded content", () => {
   const state = createInitialState();
   const send = () => {};
@@ -45,6 +97,32 @@ test("fold commands clear render cache before re-rendering expanded content", ()
 
   const plain = renderScreen(state, 120, 80, { cwd: "/tmp", home: "/Users/lv" }).map(stripAnsi).join("\n");
   assert(plain.includes("value44"));
+});
+
+test("task timeline source collapse clears render cache before re-rendering", () => {
+  const state = createInitialState();
+  const send = () => {};
+  state.messages.push({
+    kind: "system",
+    id: "tasks-1",
+    title: "tasks",
+    content: [
+      "任务面板",
+      "Timeline",
+      "  - run_7 [needs_input] 浏览器时间线事件 | source=browser; records=/tmp/browser.zip",
+    ].join("\n"),
+  });
+  state.taskPanel.messageId = "tasks-1";
+
+  renderScreen(state, 100, 16, { cwd: "/tmp", home: "/Users/lv" });
+  assert(state.renderCache.entries.size > 0);
+
+  handleSubmitText(state, "/tasks timeline collapse browser", send);
+  assert.equal(state.renderCache.entries.size, 0);
+
+  const plain = renderScreen(state, 100, 16, { cwd: "/tmp", home: "/Users/lv" }).map(stripAnsi).join("\n");
+  assert(!plain.includes("浏览器时间线事件"));
+  assert(plain.includes("browser 1 folded"));
 });
 
 test("viewport rendering does not render every historical message near the bottom", () => {

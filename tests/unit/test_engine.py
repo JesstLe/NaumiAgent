@@ -17,7 +17,11 @@ from naumi_agent.config.settings import AppConfig, MemoryConfig, SafetyConfig
 from naumi_agent.hooks import HookContext, HookPoint
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelResponse, ModelTier, StreamChunk, TokenUsage
-from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
+from naumi_agent.orchestrator.engine import (
+    AgentEngine,
+    AgentRuntimeMode,
+    _summarize_tool_prepare_snapshot,
+)
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.orchestrator.subagent_manager import SubTask
 from naumi_agent.safety.budget import TokenBudget
@@ -192,6 +196,39 @@ class TestContextVisualPayloads:
 
         assert info["used"] < 200
         assert info["percentage"] < 1
+
+
+class TestContextBudget:
+    def test_compute_context_budget_reserves_output_tokens(
+        self,
+        engine: AgentEngine,
+        mock_router: MagicMock,
+    ) -> None:
+        engine._router = mock_router
+        engine._config.memory.compaction_reserved_tokens = 20_000
+        mock_router.get_context_window.return_value = 120_000
+        mock_router.get_max_output.return_value = 8_000
+
+        budget, reserve = engine._compute_context_budget("model-x")
+
+        assert budget == 112_000
+        assert reserve == 8_000
+
+    def test_compute_context_budget_falls_back_when_reserve_exceeds_window(
+        self,
+        engine: AgentEngine,
+        mock_router: MagicMock,
+    ) -> None:
+        engine._router = mock_router
+        engine._config.memory.compaction_reserved_tokens = 200_000
+        mock_router.get_context_window.return_value = 120_000
+        mock_router.get_max_output.return_value = 300_000
+
+        budget, reserve = engine._compute_context_budget("model-x")
+
+        # 当预留超过窗口时，回退为原始窗口，避免 unusable 的可用预算。
+        assert budget == 120_000
+        assert reserve == 0
 
 
 class TestSetSystemPrompt:
@@ -734,6 +771,87 @@ class TestHookIntegration:
 
 
 class TestTaskVisualization:
+    def test_todo_write_prepare_snapshot_includes_progress_preview(self) -> None:
+        snapshot = {
+            0: {
+                "id": "call-1",
+                "function": {
+                    "name": "todo_write",
+                    "arguments": json.dumps(
+                        {
+                            "todos": [
+                                {"content": "读取实现", "status": "completed"},
+                                {"content": "补测试", "status": "in_progress"},
+                                {"content": "验证", "status": "pending"},
+                            ],
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            }
+        }
+
+        result = _summarize_tool_prepare_snapshot(
+            snapshot,
+            started_at=1.0,
+            now=1.25,
+        )
+
+        assert result["todo_total"] == 3
+        assert result["todo_completed"] == 1
+        assert result["todo_open"] == 2
+        assert result["todo_items"][0]["subject"] == "补测试"
+
+    def test_todo_write_prepare_snapshot_parses_partial_streamed_arguments(self) -> None:
+        snapshot = {
+            0: {
+                "id": "call-1",
+                "function": {
+                    "name": "todo_write",
+                    "arguments": (
+                        '{"todos":['
+                        '{"content":"创建文件","status":"in_progress"},'
+                        '{"content":"验证页面","status":"pending"}'
+                    ),
+                },
+            }
+        }
+
+        result = _summarize_tool_prepare_snapshot(
+            snapshot,
+            started_at=1.0,
+            now=1.25,
+        )
+
+        assert result["todo_total"] == 2
+        assert result["todo_completed"] == 0
+        assert result["todo_open"] == 2
+        assert result["todo_items"][0]["subject"] == "创建文件"
+
+    def test_append_message_sanitizes_visual_payloads_before_context(self, tmp_path) -> None:
+        engine = AgentEngine(AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db"))
+        ))
+        try:
+            engine._append_message({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "看这个页面"},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64," + ("A" * 4096),
+                        },
+                    },
+                ],
+            })
+
+            stored = str(engine._messages[-1])
+            assert "A" * 128 not in stored
+            assert "图片内容已省略" in stored
+        finally:
+            asyncio.run(engine.shutdown())
+
     @pytest.mark.asyncio
     async def test_task_tool_emits_snapshot_event(self, engine: AgentEngine) -> None:
         session = await engine.get_or_create_session()

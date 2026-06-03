@@ -9,25 +9,29 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TYPE_CHECKING, Any, TextIO
 
+from naumi_agent import __version__
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
 from naumi_agent.log_setup import setup_logging
-from naumi_agent.orchestrator.engine import AgentEngine
-from naumi_agent.ui.messages import EngineEventAdapter
+from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNoticeMessage
 from naumi_agent.ui.protocol import (
     ClientEventType,
     ServerEventType,
     decode_jsonl_line,
     encode_jsonl,
     make_envelope,
+    normalize_client_record,
     ui_message_payload,
 )
 
 logger = logging.getLogger(__name__)
 
-EngineFactory = Callable[[AppConfig], AgentEngine]
+if TYPE_CHECKING:
+    from naumi_agent.orchestrator.engine import AgentEngine
+
+EngineFactory = Callable[[AppConfig], "AgentEngine"]
 
 
 def resolve_config_path(path: str) -> str:
@@ -90,6 +94,10 @@ class JsonlEngineBridge:
         self._writer_lock = asyncio.Lock()
         self._run_task: asyncio.Task[Any] | None = None
         self._pending_permissions: dict[str, asyncio.Future[str]] = {}
+        self._pending_permission_payloads: dict[str, dict[str, Any]] = {}
+        config = getattr(self.engine, "_config", None)
+        ui_config = getattr(config, "ui", None)
+        self._show_reasoning = bool(getattr(ui_config, "show_reasoning", False))
         self._closed = False
 
         self.engine.set_permission_confirmer(self.confirm_permission)
@@ -155,6 +163,7 @@ class JsonlEngineBridge:
             "permission_mode": str(
                 getattr(self.engine.permission_mode, "value", self.engine.permission_mode)
             ),
+            "session_id": str(getattr(getattr(self.engine, "_session", None), "id", "")),
             "model": model,
             "workspace_root": str(workspace_root),
             "usage": {
@@ -165,19 +174,71 @@ class JsonlEngineBridge:
             },
             "context": context,
             "budget": budget,
+            "tasks": self._task_activity_payload(),
+            "ui": {
+                "show_reasoning": self._show_reasoning,
+            },
             "git": _git_snapshot(workspace_root),
             "config_path": self.config_path,
         }
+
+    def _task_activity_payload(self) -> dict[str, int]:
+        """Return compact task/activity counts for persistent footer rendering."""
+        payload = {
+            "background_running": 0,
+            "background_attention": 0,
+            "subagents_active": 0,
+            "browser_active": 0,
+            "permissions_pending": len(self._pending_permissions),
+        }
+
+        try:
+            runner = getattr(self.engine, "background_runner", None)
+            if runner is not None:
+                for task in runner.list_tasks():
+                    raw_status = getattr(task, "status", "")
+                    status = str(getattr(raw_status, "value", raw_status))
+                    if status == "running":
+                        payload["background_running"] += 1
+                    elif status in {"failed", "timed_out"}:
+                        payload["background_attention"] += 1
+        except Exception:
+            payload["background_attention"] += 1
+
+        try:
+            manager = getattr(self.engine, "subagent_manager", None)
+            if manager is not None:
+                for agent in manager.list_agents():
+                    state = str(agent.get("state") or "")
+                    if state in {"spawned", "running"}:
+                        payload["subagents_active"] += 1
+        except Exception:
+            payload["subagents_active"] += 1
+
+        try:
+            task_runner = getattr(self.engine, "task_runner", None)
+            if task_runner is not None:
+                for run in task_runner.list_runs(limit=20):
+                    status = str(run.get("status") or "")
+                    if status not in {"completed", "failed", "cancelled", "timeout", "timed_out"}:
+                        payload["browser_active"] += 1
+        except Exception:
+            payload["browser_active"] += 1
+
+        return payload
 
     async def handle_client_record(self, record: dict[str, Any]) -> None:
         """Dispatch one client protocol record."""
         if not record:
             return
+        try:
+            record = normalize_client_record(record)
+        except ValueError as exc:
+            bad_request_id = str(record.get("id") or record.get("request_id") or "")
+            await self.emit_error(str(exc), code="bad_request", request_id=bad_request_id)
+            return
         event_type = str(record.get("type", ""))
         payload = record.get("payload", {})
-        if not isinstance(payload, dict):
-            await self.emit_error("payload 必须是对象。", request_id=str(record.get("id", "")))
-            return
         request_id = str(record.get("id") or record.get("request_id") or "")
 
         if self.debug_trace is not None:
@@ -206,6 +267,10 @@ class JsonlEngineBridge:
             await self.emit(ServerEventType.STATUS, self.status_payload())
             return
 
+        if event_type == ClientEventType.SET_REASONING:
+            await self.set_reasoning(bool(payload.get("enabled")), request_id=request_id)
+            return
+
         if event_type == ClientEventType.PERMISSION_RESPONSE:
             await self.resolve_permission(payload, request_id=request_id)
             return
@@ -218,11 +283,35 @@ class JsonlEngineBridge:
             await self.resume_session(payload, request_id=request_id)
             return
 
+        if event_type == ClientEventType.TASK_PANEL:
+            await self.show_task_panel(payload, request_id=request_id)
+            return
+
+        if event_type == ClientEventType.TASK_CANCEL:
+            await self.cancel_task(payload, request_id=request_id)
+            return
+
+        if event_type == ClientEventType.PERMISSIONS_PANEL:
+            await self.show_permissions_panel(payload, request_id=request_id)
+            return
+
+        if event_type == ClientEventType.DOCTOR:
+            await self.show_doctor_report(request_id=request_id)
+            return
+
         if event_type == ClientEventType.SHUTDOWN:
             await self.shutdown()
             return
 
         await self.emit_error(f"未知客户端事件: {event_type}", request_id=request_id)
+
+    async def set_reasoning(self, enabled: bool, *, request_id: str) -> None:
+        self._show_reasoning = enabled
+        await self.emit(
+            ServerEventType.STATUS,
+            self.status_payload(),
+            request_id=request_id,
+        )
 
     async def set_mode(self, mode: str, *, request_id: str) -> None:
         try:
@@ -245,6 +334,8 @@ class JsonlEngineBridge:
         text = text.strip("\n")
         if not text.strip():
             await self.emit_error("输入不能为空。", code="empty_input", request_id=request_id)
+            return
+        if await self._handle_slash_command(text, request_id=request_id):
             return
         if self._run_task is not None and not self._run_task.done():
             await self.emit_error(
@@ -334,6 +425,540 @@ class JsonlEngineBridge:
             await self.emit(ServerEventType.UI_MESSAGE, ui_message_payload(message))
         await self.emit(ServerEventType.STATUS, self.status_payload())
 
+    async def _handle_slash_command(self, text: str, *, request_id: str) -> bool:
+        raw = text.strip()
+        if not raw.startswith("/"):
+            return False
+
+        trimmed = raw[1:].strip()
+        if not trimmed:
+            await self._emit_system_notice(
+                "help",
+                self._slash_help_text(),
+                "info",
+                request_id=request_id,
+            )
+            return True
+
+        parts = trimmed.split(maxsplit=1)
+        command = f"/{parts[0].lower()}"
+        arg = parts[1].strip() if len(parts) > 1 else ""
+
+        match command:
+            case "/help" | "/h":
+                await self._emit_system_notice(
+                    "help",
+                    self._slash_help_text(),
+                    "info",
+                    request_id=request_id,
+                )
+                return True
+            case "/history":
+                await self._show_history_command(arg, request_id=request_id)
+                return True
+            case "/load":
+                await self._load_session_command(arg, request_id=request_id)
+                return True
+            case "/resume" | "/r":
+                await self.resume_session({}, request_id=request_id)
+                return True
+            case "/tasks":
+                await self.show_task_panel(
+                    self._parse_task_panel_command(arg),
+                    request_id=request_id,
+                )
+                return True
+            case "/doctor":
+                await self.show_doctor_report(request_id=request_id)
+                return True
+            case "/mode":
+                normalized_mode = self._normalize_runtime_mode(arg)
+                if normalized_mode is None:
+                    await self._emit_system_notice(
+                        "mode",
+                        "用法: /mode <default|plan|bypass>",
+                        "warning",
+                        request_id=request_id,
+                    )
+                    return True
+                await self.set_mode(normalized_mode, request_id=request_id)
+                return True
+            case "/reasoning":
+                next_reasoning = self._coerce_reasoning_visibility(arg)
+                if next_reasoning is None:
+                    await self._emit_system_notice(
+                        "reasoning",
+                        "用法: /reasoning on|off|toggle",
+                        "warning",
+                        request_id=request_id,
+                    )
+                    return True
+                await self.set_reasoning(next_reasoning, request_id=request_id)
+                return True
+            case "/clear":
+                if hasattr(self.engine, "reset"):
+                    self.engine.reset()
+                await self._emit_system_notice(
+                    "clear",
+                    "已清理会话（后端状态已重置）。",
+                    "info",
+                    request_id=request_id,
+                )
+                await self.emit(ServerEventType.STATUS, self.status_payload())
+                return True
+            case "/debug":
+                debug_events = self.debug_trace.events_path if self.debug_trace else "-"
+                debug_run_id = self.debug_trace.run_id if self.debug_trace else "-"
+                config = getattr(self.engine, "_config", None)
+                session_db_path = "-"
+                vector_db_path = "-"
+                if config is not None:
+                    session_db_path = getattr(config.memory, "session_db_path", "-")
+                    vector_db_path = getattr(config.memory, "vector_db_path", "-")
+                await self._emit_system_notice(
+                    "debug",
+                    (
+                        f"会话数据库: {session_db_path}\n"
+                        f"向量数据库: {vector_db_path}\n"
+                        f"Bridge events: {debug_events}\n"
+                        f"Bridge run: {debug_run_id}\n"
+                    ),
+                    "info",
+                    request_id=request_id,
+                )
+                return True
+            case "/pwd":
+                workspace_root = getattr(self.engine, "workspace_root", Path.cwd())
+                info = (
+                    f"工作区: {workspace_root}\n"
+                    f"当前目录: {Path.cwd()}\n"
+                )
+                config = getattr(self.engine, "_config", None)
+                if config is not None:
+                    info += (
+                        f"会话库: {getattr(config.memory, 'session_db_path', '-') }\n"
+                        f"向量库: {getattr(config.memory, 'vector_db_path', '-') }\n"
+                    )
+                await self._emit_system_notice("pwd", info, "info", request_id=request_id)
+                return True
+            case "/tools":
+                tools = self.engine.tool_registry.all()
+                lines = ["可用工具："]
+                for tool in tools:
+                    lines.append(f"{tool.name} · {tool.description}")
+                await self._emit_system_notice(
+                    "tools",
+                    "\n".join(lines) if lines else "未发现可用工具。",
+                    "info",
+                    request_id=request_id,
+                )
+                return True
+            case "/model":
+                models = (
+                    f"默认: {self.engine.router.resolve_model('capable')}\n"
+                    f"快速: {self.engine.router.resolve_model('fast')}\n"
+                    f"推理: {self.engine.router.resolve_model('reasoning')}"
+                )
+                await self._emit_system_notice("model", models, "info", request_id=request_id)
+                return True
+            case "/usage":
+                usage = self.engine.usage
+                total_cost = getattr(usage, "total_cost_usd", 0.0)
+                await self._emit_system_notice(
+                    "usage",
+                    (
+                        f"Token: {usage.total_input_tokens + usage.total_output_tokens} "
+                        f"| 轮次: {usage.turns} | 费用: ${total_cost:.4f}"
+                    ),
+                    "info",
+                    request_id=request_id,
+                )
+                return True
+            case "/version":
+                await self._emit_system_notice(
+                    "version",
+                    f"NaumiAgent v{__version__}",
+                    "info",
+                    request_id=request_id,
+                )
+                return True
+
+        await self.emit_error(
+            f"未知斜杠命令: {command}。输入 /help 查看可用命令。",
+            code="unknown_command",
+            request_id=request_id,
+        )
+        return True
+
+    def _slash_help_text(self) -> str:
+        return (
+            "当前支持的命令:\n"
+            "/help /h\n"
+            "/history [关键词]\n"
+            "/load <id|编号>\n"
+            "/resume /r\n"
+            "/tasks\n"
+            "/permissions [limit]\n"
+            "/doctor\n"
+            "/mode <default|plan|bypass>\n"
+            "/reasoning [on|off|toggle]\n"
+            "/clear\n"
+            "/debug\n"
+            "/pwd\n"
+            "/tools\n"
+            "/model\n"
+            "/usage\n"
+            "/version"
+        )
+
+    def _coerce_reasoning_visibility(self, raw: str) -> bool | None:
+        value = raw.strip().lower()
+        if not value:
+            return not self._show_reasoning
+        if value in {"on", "true", "1", "show", "open", "yes"}:
+            return True
+        if value in {"off", "false", "0", "hide", "close", "no"}:
+            return False
+        if value == "toggle":
+            return not self._show_reasoning
+        return None
+
+    def _normalize_runtime_mode(self, raw: str) -> str | None:
+        value = raw.strip().lower()
+        if value in {"default", "plan", "bypass"}:
+            return value
+        return None
+
+    def _parse_task_panel_command(self, raw: str) -> dict[str, Any]:
+        parts = raw.split() if raw else []
+        payload: dict[str, Any] = {
+            "limit": 12,
+            "source": "all",
+            "status": "all",
+            "pinned": False,
+            "refresh": False,
+        }
+        if not parts:
+            return payload
+
+        if parts[0].lower() == "off":
+            payload["limit"] = 12
+            payload["source"] = "all"
+            payload["status"] = "all"
+            payload["pinned"] = False
+            payload["refresh"] = False
+            return payload
+
+        for token in parts:
+            if token.isdigit():
+                payload["limit"] = min(max(int(token), 1), 50)
+            elif token == "pin":
+                payload["pinned"] = True
+            elif token.startswith("source="):
+                value = token.split("=", 1)[1]
+                if value:
+                    payload["source"] = value.lower().replace("-", "_")
+            elif token.startswith("status="):
+                value = token.split("=", 1)[1]
+                if value:
+                    payload["status"] = value.lower().replace("-", "_")
+
+        return payload
+
+    async def _show_history_command(self, arg: str, *, request_id: str) -> None:
+        from naumi_agent.ui.history_screen import (
+            build_history_snapshot,
+            render_history_preview,
+            render_history_screen,
+        )
+
+        parts = arg.strip().split(maxsplit=1)
+        subcommand = parts[0].lower() if parts else ""
+        sub_arg = parts[1].strip() if len(parts) > 1 else ""
+
+        if subcommand == "preview":
+            if not sub_arg:
+                await self._emit_system_notice(
+                    "history",
+                    "用法: /history preview <session_id>",
+                    "warning",
+                    request_id=request_id,
+                )
+                return
+            session = await self.engine.session_store.load(sub_arg)
+            if session is None:
+                await self._emit_system_notice(
+                    "history",
+                    f"会话不存在: {sub_arg}",
+                    "warning",
+                    request_id=request_id,
+                )
+                return
+            await self._emit_system_notice(
+                "history",
+                render_history_preview(session),
+                "info",
+                request_id=request_id,
+            )
+            return
+
+        query = arg.strip()
+        sessions, total = await self.engine.list_sessions(page=1, page_size=20, query=query)
+        snapshot = build_history_snapshot(
+            sessions,
+            total=total,
+            query=query,
+            current_session_id=(
+                self.engine._session.id if getattr(self.engine, "_session", None) else None
+            ),
+            fallback_workspace=str(getattr(self.engine, "workspace_root", "")),
+            fallback_git_branch=self._git_snapshot_branch(),
+        )
+        await self._emit_system_notice(
+            "history",
+            render_history_screen(snapshot),
+            "info",
+            request_id=request_id,
+        )
+
+    async def _load_session_command(self, arg: str, *, request_id: str) -> None:
+        if not arg:
+            sessions, _ = await self.engine.list_sessions(page=1, page_size=10)
+            if not sessions:
+                await self._emit_system_notice(
+                    "load",
+                    "暂无可恢复会话。",
+                    "warning",
+                    request_id=request_id,
+                )
+                return
+            lines = ["可恢复会话（输入 /load <编号> 或 /load <id>）："]
+            for index, session in enumerate(sessions, 1):
+                message_count = len(getattr(session, "messages", []) or [])
+                title = getattr(session, "title", "新会话") or "新会话"
+                if len(title) > 28:
+                    title = f"{title[:25]}…"
+                lines.append(f"{index}. {session.id} · {title} · {message_count}条消息")
+            await self._emit_system_notice("load", "\n".join(lines), "info", request_id=request_id)
+            return
+
+        if arg.isdigit():
+            sessions, _ = await self.engine.list_sessions(page=1, page_size=20)
+            index = int(arg) - 1
+            if 0 <= index < len(sessions):
+                await self.resume_session(
+                    {"session_id": str(sessions[index].id)},
+                    request_id=request_id,
+                )
+                return
+            await self._emit_system_notice(
+                "load",
+                f"编号无效: {arg}",
+                "warning",
+                request_id=request_id,
+            )
+            return
+
+        loaded = await self.engine.load_session(arg)
+        if not loaded:
+            await self._emit_system_notice(
+                "load",
+                f"会话不存在: {arg}",
+                "warning",
+                request_id=request_id,
+            )
+            return
+        await self.resume_session({"session_id": arg}, request_id=request_id)
+
+    def _git_snapshot_branch(self) -> str:
+        return _git_snapshot(getattr(self.engine, "workspace_root", Path.cwd())).get("branch", "")
+
+    async def _emit_system_notice(
+        self,
+        title: str,
+        content: str,
+        level: str = "info",
+        *,
+        request_id: str,
+    ) -> None:
+        await self.emit(
+            ServerEventType.UI_MESSAGE,
+            ui_message_payload(
+                SystemNoticeMessage(
+                    type=MessageType.SYSTEM_NOTICE,
+                    title=title,
+                    content=content,
+                    level=level,
+                )
+            ),
+            request_id=request_id,
+        )
+
+    async def show_task_panel(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Render the read-only task panel through the UI protocol."""
+        from naumi_agent.ui.task_panel import render_task_panel
+
+        raw_limit = payload.get("limit", 12)
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            limit = 12
+        content = await render_task_panel(
+            self.engine,
+            limit=limit,
+            source=str(payload.get("source") or "all"),
+            status=str(payload.get("status") or "all"),
+            detail_id=str(payload.get("detail_id") or payload.get("detail") or ""),
+        )
+        await self.emit(
+            ServerEventType.UI_MESSAGE,
+            ui_message_payload(
+                SystemNoticeMessage(
+                    type=MessageType.SYSTEM_NOTICE,
+                    title="tasks",
+                    content=content,
+                    level="info",
+                )
+            ),
+            request_id=request_id,
+        )
+        await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def cancel_task(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Cancel a concrete task owned by a backend runner."""
+        task_id = str(payload.get("task_id") or "").strip()
+        source = str(payload.get("source") or "all").strip().lower().replace("-", "_")
+        reason = str(payload.get("reason") or "用户从任务面板取消。").strip()
+        if not task_id:
+            await self.emit_error(
+                "任务取消缺少 task_id。",
+                code="task_cancel_missing_id",
+                request_id=request_id,
+            )
+            return
+
+        message = ""
+        level = "info"
+
+        if source in {"all", "background"}:
+            runner = getattr(self.engine, "background_runner", None)
+            if runner is not None:
+                task = None
+                getter = getattr(runner, "get", None)
+                if callable(getter):
+                    task = getter(task_id)
+                if task is not None:
+                    cancelled = await runner.cancel(task_id)
+                    status = getattr(getattr(cancelled, "status", ""), "value", "")
+                    message = f"已请求取消后台任务 {task_id}。当前状态: {status or '-'}"
+                elif source == "background":
+                    message = f"未找到后台任务 {task_id}。"
+                    level = "warning"
+
+        if not message and source in {"all", "browser"}:
+            task_runner = getattr(self.engine, "task_runner", None)
+            if task_runner is not None:
+                try:
+                    run = task_runner.abort_run(
+                        task_id,
+                        reason=reason or "用户从任务面板取消。",
+                    )
+                except ValueError as exc:
+                    if source == "browser":
+                        message = f"浏览器任务取消失败: {exc}"
+                        level = "warning"
+                else:
+                    status = str(run.get("status") or "-")
+                    message = f"已请求取消浏览器任务 {task_id}。当前状态: {status}"
+
+        if not message:
+            message = (
+                f"任务 {task_id} 当前来源不支持直接取消。"
+                "支持来源: background / browser。"
+            )
+            level = "warning"
+
+        await self.emit(
+            ServerEventType.UI_MESSAGE,
+            ui_message_payload(
+                SystemNoticeMessage(
+                    type=MessageType.SYSTEM_NOTICE,
+                    title="tasks",
+                    content=message,
+                    level=level,
+                )
+            ),
+            request_id=request_id,
+        )
+        await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def show_permissions_panel(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Render the read-only permission panel through the UI protocol."""
+        from naumi_agent.ui.permission_panel import render_permission_panel
+
+        raw_limit = payload.get("limit", 12)
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            limit = 12
+        content = render_permission_panel(
+            self.engine,
+            pending=self._pending_permission_payloads,
+            limit=limit,
+        )
+        await self.emit(
+            ServerEventType.UI_MESSAGE,
+            ui_message_payload(
+                SystemNoticeMessage(
+                    type=MessageType.SYSTEM_NOTICE,
+                    title="permissions",
+                    content=content,
+                    level="info",
+                )
+            ),
+            request_id=request_id,
+        )
+        await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def show_doctor_report(self, *, request_id: str) -> None:
+        """Render deterministic local diagnostics through the UI protocol."""
+        from naumi_agent.ui.doctor import render_doctor_report, run_doctor
+
+        config = getattr(self.engine, "_config", AppConfig())
+        report = await run_doctor(
+            config,
+            workspace_root=self.engine.workspace_root,
+            mcp_manager=getattr(self.engine, "mcp_manager", None),
+        )
+        await self.emit(
+            ServerEventType.UI_MESSAGE,
+            ui_message_payload(
+                SystemNoticeMessage(
+                    type=MessageType.SYSTEM_NOTICE,
+                    title="doctor",
+                    content=render_doctor_report(report),
+                    level=report.status,
+                )
+            ),
+            request_id=request_id,
+        )
+        await self.emit(ServerEventType.STATUS, self.status_payload())
+
     async def _find_latest_resumable_session_id(self) -> str:
         page = 1
         page_size = 20
@@ -379,11 +1004,13 @@ class JsonlEngineBridge:
         loop = asyncio.get_running_loop()
         future: asyncio.Future[str] = loop.create_future()
         self._pending_permissions[request_id] = future
+        self._pending_permission_payloads[request_id] = dict(payload)
         await self.emit(ServerEventType.PERMISSION_REQUEST, payload, request_id=request_id)
         try:
             return await future
         finally:
             self._pending_permissions.pop(request_id, None)
+            self._pending_permission_payloads.pop(request_id, None)
 
     async def resolve_permission(self, payload: dict[str, Any], *, request_id: str) -> None:
         permission_id = str(payload.get("request_id") or request_id)
@@ -465,11 +1092,15 @@ async def serve_stdio(bridge: JsonlEngineBridge) -> None:
 async def create_bridge(
     *,
     config_path: str,
-    engine_factory: EngineFactory = AgentEngine,
+    engine_factory: EngineFactory | None = None,
 ) -> JsonlEngineBridge:
     resolved = resolve_config_path(config_path)
     config = AppConfig.from_yaml(resolved)
     setup_logging(config.log_level)
+    if engine_factory is None:
+        from naumi_agent.orchestrator.engine import AgentEngine
+
+        engine_factory = AgentEngine
     engine = engine_factory(config)
     debug_trace = DebugTrace.create(
         interface="terminal-ui-bridge",

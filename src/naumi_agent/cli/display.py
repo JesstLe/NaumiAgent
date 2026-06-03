@@ -117,14 +117,11 @@ def print_tool_output(name: str, content: str) -> None:
 async def cli_event_handler(event: str, data: dict[str, Any]) -> None:
     """实时显示 Agent 思考、工具调用过程."""
     if event == "thinking_delta":
-        console.print(
-            f"[dim bright_black]{data.get('content', '')}[/dim bright_black]",
-            end="",
-        )
+        return
     elif event == "thinking_start":
         console.print("[dim]💭 思考中...[/dim]")
     elif event == "thinking_end":
-        console.print()
+        return
     elif event == "tool_start":
         name = data.get("name", "?")
         args = data.get("args", {})

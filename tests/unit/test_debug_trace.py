@@ -123,6 +123,27 @@ def test_debug_trace_builds_error_diagnostic_from_stream_error(tmp_path: Path) -
     assert "bash_run" in text
 
 
+def test_debug_trace_exception_records_traceback_for_diagnostics(tmp_path: Path) -> None:
+    trace = DebugTrace.create(interface="tui", base_dir=tmp_path)
+    trace.input("tui.input", "触发 AttributeError")
+
+    try:
+        raise AttributeError("'str' object has no attribute 'error_text'")
+    except AttributeError as exc:
+        trace.exception("tui.render", exc)
+
+    text = trace.build_diagnostic_text("error")
+    events = _read_events(trace.events_path)
+    exception_event = next(event for event in events if event["event"] == "exception")
+
+    assert "最近错误诊断记录" in text
+    assert "触发 AttributeError" in text
+    assert "Traceback (most recent call last)" in text
+    assert "test_debug_trace_exception_records_traceback_for_diagnostics" in text
+    assert exception_event["data"]["type"] == "AttributeError"
+    assert "trace" in exception_event["data"]
+
+
 def test_cli_app_records_outputs_and_submit_failure(tmp_path: Path) -> None:
     trace = DebugTrace.create(interface="cli", base_dir=tmp_path)
     cli = CLIApp(debug_trace=trace)

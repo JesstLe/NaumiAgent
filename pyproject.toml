@@ -68,6 +68,7 @@ packages = ["src/naumi_agent"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "frontend/terminal-ui/package.json" = "naumi_agent/frontend/terminal-ui/package.json"
+"frontend/terminal-ui/protocol-contract.json" = "naumi_agent/frontend/terminal-ui/protocol-contract.json"
 "frontend/terminal-ui/src" = "naumi_agent/frontend/terminal-ui/src"
 
 [tool.pytest.ini_options]

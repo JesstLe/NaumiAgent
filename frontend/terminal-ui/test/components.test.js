@@ -5,7 +5,10 @@ import { boxComponent, line, renderComponent, stack } from "../src/components/co
 import { Footer, PermissionFooter, TodoFooter } from "../src/components/footer.js";
 import { Message } from "../src/components/message.js";
 import { ActivityCard } from "../src/components/activity-card.js";
+import { PermissionCard } from "../src/components/permission-card.js";
+import { parsePermissionPanel, PermissionPanel } from "../src/components/permission-panel.js";
 import { ToolCard } from "../src/components/tool-card.js";
+import { parseTaskPanel, TaskPanel } from "../src/components/task-panel.js";
 import { createInitialState } from "../src/state.js";
 
 test("component core composes nested stacks and boxes within width", () => {
@@ -66,6 +69,9 @@ test("tool card component preserves existing diff folding behavior", () => {
         name: "file_write",
         primary: "large.md",
         status: "success",
+        prepareTitle: "准备 file_write",
+        preparePhase: "snapshot",
+        prepareMetrics: { argumentChars: 4096, contentLines: 80, elapsedMs: 1800 },
         output: Array.from({ length: 80 }, (_, index) => (index % 2 === 0 ? `+line ${index}` : ` line ${index}`)).join("\n"),
       },
     }),
@@ -73,6 +79,8 @@ test("tool card component preserves existing diff folding behavior", () => {
   );
 
   assert(card.some((item) => stripAnsi(item).includes("file_write large.md")));
+  assert(card.some((item) => stripAnsi(item).includes("生成中 [")));
+  assert(card.some((item) => stripAnsi(item).includes("80 lines")));
   assert(!stripAnsi(card.join("\n")).includes("+line 78"));
 });
 
@@ -82,6 +90,13 @@ test("activity card renders live operation details within width", () => {
       activity: {
         status: "running",
         title: "准备 file_write",
+        phase: "snapshot",
+        metrics: {
+          argumentChars: 4096,
+          contentChars: 12000,
+          contentLines: 88,
+          elapsedMs: 2400,
+        },
         details: ["路径: showcase/index.html", "内容: 88 行", "参数: 4096 字符"],
       },
     }),
@@ -91,8 +106,82 @@ test("activity card renders live operation details within width", () => {
 
   assert(plain.includes("activity"));
   assert(plain.includes("running 准备 file_write"));
+  assert(plain.includes("生成中 ["));
+  assert(plain.includes("参数 4.1K chars"));
+  assert(plain.includes("88 lines"));
+  assert(plain.includes("2.4s"));
   assert(plain.includes("路径: showcase/index.html"));
   assert(card.every((item) => visibleWidth(item) <= 72));
+});
+
+test("permission card renders confirmation path as a structured dialog", () => {
+  const card = renderComponent(
+    PermissionCard({
+      permission: {
+        message: {
+          tool_name: "bash_run",
+          status: "needs_confirmation",
+          reason: "需要启动本地预览服务。",
+          requires_confirmation: true,
+        },
+      },
+    }),
+    { width: 78 },
+  );
+  const plain = stripAnsi(card.join("\n"));
+
+  assert(plain.includes("+ permission"));
+  assert(plain.includes("需要确认 permission: bash_run"));
+  assert(plain.includes("原因: 需要启动本地预览服务。"));
+  assert(plain.includes("y=允许一次"));
+  assert(card.every((item) => visibleWidth(item) <= 78));
+});
+
+test("permission messages delegate to the structured permission card", () => {
+  const rendered = renderComponent(
+    Message({
+      message: {
+        kind: "permission",
+        requestId: "perm-1",
+        message: {
+          tool_name: "file_write",
+          status: "allowed",
+          choice: "allow",
+          reason: "写入 demo 文件。",
+          requires_confirmation: false,
+        },
+      },
+    }),
+    { width: 80 },
+  );
+  const plain = stripAnsi(rendered.join("\n"));
+
+  assert(plain.includes("+ permission"));
+  assert(plain.includes("已允许 permission: file_write"));
+  assert(plain.includes("结果: 允许"));
+});
+
+test("permission panel summarizes pending and history sections", () => {
+  const content = [
+    "权限面板",
+    "mode: bypass | permission: bypass",
+    "Pending",
+    "  - perm-1 main -> bash_run [needs_confirmation] 风险:high · 来源:TOOL_PERMISSIONS:bash_run · 模式:bypass/permissive/moderate · 确认:需要确认 · bypass 允许；跳过逐次确认和路径沙箱，危险命令仍拦截 | 需要确认",
+    "History",
+    "  - hist-1 coder -> file_write [confirmed] 用户已允许",
+  ].join("\n");
+  const model = parsePermissionPanel(content);
+  const rendered = renderComponent(PermissionPanel({ content }), { width: 90 });
+  const plain = stripAnsi(rendered.join("\n"));
+
+  assert(model.summary.includes("pending 1"));
+  assert(model.summary.includes("history 1"));
+  assert(plain.includes("+ permissions"));
+  assert(plain.includes("perm-1 main -> bash_run"));
+  assert(plain.includes("来源:TOOL_PERMISSIONS:bash_run"));
+  assert(plain.includes("确认:需要确认"));
+  assert(plain.includes("bypass 允许"));
+  assert(rendered.every((item) => visibleWidth(item) <= 90));
 });
 
 test("semantic event messages render as structured cards instead of JSON fallback", () => {
@@ -132,4 +221,110 @@ test("semantic event messages render as structured cards instead of JSON fallbac
   assert(plain.includes("recovery"));
   assert(!plain.includes('{"source"'));
   assert(rendered.every((item) => visibleWidth(item) <= 88));
+});
+
+test("task panel component structures task sections like a dedicated UI surface", () => {
+  const content = [
+    "\x1b[1m任务面板\x1b[0m",
+    "\x1b[2mfilter: source=background status=running detail=bg_0001\x1b[0m",
+    "\x1b[2m📋 1/3 [██░░░░]\x1b[0m",
+    "",
+    "\x1b[1mTimeline\x1b[0m",
+    "  - bg_0001 [running] npm run dev | time=-; source=background; event=background:bg_0001; cwd=/tmp/project",
+    "  - run_hidden [needs_input] 浏览器时间线事件 | time=2026-06-01T12:00:00; source=browser; event=browser:run_hidden; records=/tmp/browser.zip",
+    "",
+    "\x1b[1mDetail\x1b[0m",
+    "  类型: Background",
+    "  ID: bg_0001",
+    "  命令: npm run dev",
+    "",
+    "\x1b[1mTodo\x1b[0m",
+    "  ▶ 编写 CSS",
+    "  - #2 [in_progress] 编写 CSS | owner=coder; blocked_by=1; blocks=3",
+    "  ○ 浏览器验证",
+    "",
+    "\x1b[1mSubagent\x1b[0m",
+    "  当前没有可见子 Agent 活动",
+    "",
+    "\x1b[1mBackground\x1b[0m",
+    "  ▶ ⏱12s npm run dev",
+    "  - bg_0001 [running] npm run dev | cwd=/tmp/project; pid=4242; ports=5173; output=/tmp/bg.log",
+    "",
+    "\x1b[1mBrowser Runs\x1b[0m",
+    "  - run_1 [needs_input] 打开页面 | steps=3; created=2026-06-01T12:00:00; current=等待用户选择页面元素",
+  ].join("\n");
+  const model = parseTaskPanel(content);
+  const rendered = renderComponent(
+    TaskPanel({
+      content,
+      taskPanel: {
+        selectedId: "bg_0001",
+        expandedIds: { bg_0001: true },
+        collapsedTimelineSources: { browser: true },
+        focused: true,
+      },
+    }),
+    { width: 84 },
+  );
+  const plain = stripAnsi(rendered.join("\n"));
+
+  assert.equal(model.summary, "filter source=background status=running detail=bg_0001 | todo 1/3 | timeline 2 | background 1 | browser 1");
+  assert(plain.includes("filter source=background status=running detail=bg_0001"));
+  assert(plain.includes("Timeline"));
+  assert(plain.includes("sources: background 1"));
+  assert(plain.includes("browser 1 folded"));
+  assert(!plain.includes("浏览器时间线事件"));
+  assert(plain.includes("event=background:bg_0001"));
+  assert(plain.includes("Detail"));
+  assert(plain.includes("类型: Background"));
+  assert(plain.includes("ID: bg_0001"));
+  assert(plain.includes("Todo"));
+  assert(plain.includes("编写 CSS"));
+  assert(plain.includes("owner=coder"));
+  assert(plain.includes("blocked_by=1"));
+  assert(plain.includes("Background"));
+  assert(plain.includes("> - bg_0001 [running] npm run dev"));
+  assert(plain.includes("event flow"));
+  assert(plain.includes("cwd=/tmp/project"));
+  assert(plain.includes("ports=5173"));
+  assert(plain.includes("current=等待用户选择页面元素"));
+  assert(rendered.every((item) => visibleWidth(item) <= 84));
+});
+
+test("system task notices use the dedicated task panel renderer", () => {
+  const rendered = renderComponent(
+    Message({
+      message: {
+        kind: "system",
+        title: "tasks",
+        level: "info",
+        content: "任务面板\nTodo\n  - #1 [running] 写入页面\nBackground\n  暂无后台任务",
+      },
+    }),
+    { width: 80 },
+  );
+  const plain = stripAnsi(rendered.join("\n"));
+
+  assert(plain.includes("+ tasks"));
+  assert(plain.includes("tasks todo 1"));
+  assert(plain.includes("#1 [running] 写入页面"));
+  assert(!plain.includes("tasks: 任务面板"));
+});
+
+test("task panel off notice renders as plain system text", () => {
+  const rendered = renderComponent(
+    Message({
+      message: {
+        kind: "system",
+        title: "任务面板",
+        level: "info",
+        content: "已取消钉住。",
+      },
+    }),
+    { width: 80 },
+  );
+  const plain = stripAnsi(rendered.join("\n"));
+
+  assert(!plain.includes("+ tasks"));
+  assert(plain.includes("任务面板: 已取消钉住。"));
 });
