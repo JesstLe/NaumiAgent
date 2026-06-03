@@ -96,6 +96,22 @@ test("footer shows compact task activity when backend reports active work", () =
   assert(footer.includes("tasks: bg 2 bg! 1 agent 3 browser 1 perm 1"));
 });
 
+test("footer shows 首字时间", () => {
+  const state = createInitialState();
+  state.status = {
+    model: "openai/kimi-for-coding",
+    workspace_root: "/Users/lv/Workspace/NaumiAgent",
+    usage: { total_tokens: 0 },
+    context: { used: 0, window: 256000, percentage: 0 },
+    budget: { used_usd: 0, max_usd: 5 },
+  };
+  state.lastFirstTokenLatencyMs = 1532;
+
+  const footer = renderFooter(state, 220, { cwd: "/tmp", home: "/Users/lv" }).map(stripAnsi).join("\n");
+
+  assert(footer.includes("首字: 1.5s"));
+});
+
 test("screen renderer reserves footer lines and keeps prompt visible", () => {
   const state = createInitialState();
   state.input = "hello";

@@ -75,9 +75,14 @@ export function StatusFooter({ state, env = {} }) {
       const context = status.context ?? {};
       const budget = status.budget ?? {};
       const git = status.git ?? {};
+      const lastFirstTokenLatencyMs = Number(state.lastFirstTokenLatencyMs ?? 0);
       const tasks = formatTaskActivity(status.tasks);
       const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
       const session = state.currentSessionId ? `会话:${state.currentSessionId.slice(0, 8)}` : "会话:-";
+      const firstToken =
+        Number.isFinite(lastFirstTokenLatencyMs) && lastFirstTokenLatencyMs > 0
+          ? `首字: ${(lastFirstTokenLatencyMs / 1000).toFixed(1)}s`
+          : null;
       const parts = [
         time,
         `mode: ${state.mode}`,
@@ -88,6 +93,7 @@ export function StatusFooter({ state, env = {} }) {
         status.model || "model: -",
         `工作区: ${shortPath(status.workspace_root || env.cwd || process.cwd(), env.home ?? process.env.HOME)}`,
         `Token: ${status.usage?.total_tokens ?? 0}`,
+        ...(firstToken ? [firstToken] : []),
         `上下文: ${formatContext(context)}`,
         `预算: ${formatMoney(budget.used_usd)}/${formatMoney(budget.max_usd)}`,
       ];
@@ -116,7 +122,7 @@ export function HelpFooter() {
 export function CommandCompletionFooter({ state }) {
   return {
     render(ctx) {
-      const completions = getSlashCommandCompletions(state.input);
+      const completions = getSlashCommandCompletions(state.input, state.slashCommands);
       if (!completions.length) return [];
       const rows = completions.map((item, index) => {
         const alias = item.aliases.length ? `(${item.aliases.join(", ")})` : "";

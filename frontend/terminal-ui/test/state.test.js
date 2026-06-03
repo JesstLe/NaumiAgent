@@ -964,6 +964,19 @@ test("slash completion lists candidates when input is only slash", () => {
   assert.equal(candidates.some((item) => item.aliases.includes("/h")), true);
 });
 
+test("slash completion uses complete backend registry without truncation", () => {
+  const longList = Array.from({ length: 30 }, (_, index) => ({
+    command: `/cmd-${String(index).padStart(2, "0")}`,
+    aliases: [`/c${String(index).padStart(2, "0")}`],
+    description: `命令 ${index}`,
+  }));
+  const candidates = getSlashCommandCompletions("/", longList);
+
+  assert.equal(candidates.length, 30);
+  assert.equal(candidates.some((item) => item.command === "/cmd-00"), true);
+  assert.equal(candidates.some((item) => item.command === "/cmd-29"), true);
+});
+
 test("slash completion filters by partial command", () => {
   const candidates = getSlashCommandCompletions("/h");
 

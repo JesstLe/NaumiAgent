@@ -53,6 +53,99 @@ def _find_default_config_path(start_path: Path) -> Path | None:
     return None
 
 
+def _fallback_slash_command_registry() -> list[dict[str, Any]]:
+    return [
+        {"command": "/help", "aliases": ["/h"], "description": "显示帮助"},
+        {"command": "/history", "description": "查看历史会话列表"},
+        {"command": "/load", "aliases": ["/l"], "description": "加载会话并继续对话"},
+        {"command": "/resume", "aliases": ["/r"], "description": "继续最近一次对话"},
+        {
+            "command": "/tasks",
+            "aliases": ["/task"],
+            "description": "显示/更新任务面板（支持 list/open/cancel/refresh）",
+        },
+        {"command": "/permissions", "description": "显示待确认权限面板"},
+        {"command": "/doctor", "description": "运行环境诊断"},
+        {
+            "command": "/mode",
+            "aliases": ["/mode"],
+            "description": "切换 runtime 模式 default / plan / bypass",
+        },
+        {"command": "/reasoning", "description": "显示/切换思考过程输出"},
+        {"command": "/clear", "aliases": ["/c"], "description": "清空当前会话显示"},
+        {"command": "/debug", "description": "显示前端与后端调试路径"},
+        {"command": "/pwd", "description": "显示工作区与会话库路径"},
+        {"command": "/tools", "description": "列出可用工具"},
+        {"command": "/model", "aliases": ["/m"], "description": "查看当前模型配置"},
+        {"command": "/usage", "aliases": ["/u"], "description": "查看 Token 与费用"},
+        {"command": "/version", "aliases": ["/v"], "description": "查看当前版本"},
+    ]
+
+
+def _load_cli_slash_commands() -> list[dict[str, Any]]:
+    try:
+        from naumi_agent.cli.completer import COMMANDS
+    except Exception:
+        return []
+
+    commands = []
+    for item in COMMANDS:
+        if not item or len(item) < 2:
+            continue
+        command = str(item[0]).strip()
+        if not command.startswith("/"):
+            continue
+        description = str(item[1]).strip()
+        commands.append({"command": command, "description": description})
+    return commands
+
+
+def _normalize_slash_commands(commands: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    fallback_aliases: dict[str, list[str]] = {
+        "/help": ["/h"],
+        "/resume": ["/r"],
+        "/load": ["/l"],
+        "/tasks": ["/task"],
+        "/clear": ["/c"],
+        "/model": ["/m"],
+        "/usage": ["/u"],
+        "/version": ["/v"],
+    }
+    canonical: dict[str, dict[str, Any]] = {}
+    for item in commands:
+        if not item or not isinstance(item, dict):
+            continue
+        command = str(item.get("command", "")).strip()
+        if not command.startswith("/"):
+            continue
+        canonical_name = command
+        entry = canonical.setdefault(
+            canonical_name,
+            {
+                "command": canonical_name,
+                "description": str(item.get("description", "") or ""),
+                "aliases": list(fallback_aliases.get(command, [])),
+            },
+        )
+        existing_aliases = set(entry.get("aliases") or [])
+        for alias in item.get("aliases") if isinstance(item.get("aliases"), list) else []:
+            if alias:
+                existing_aliases.add(str(alias))
+        entry["aliases"] = sorted(existing_aliases)
+        if not entry["description"] and item.get("description"):
+            entry["description"] = str(item.get("description") or "")
+    if not canonical:
+        return _fallback_slash_command_registry()
+    return sorted(canonical.values(), key=lambda item: item["command"])
+
+
+def _slash_command_payload() -> list[dict[str, Any]]:
+    cli_commands = _load_cli_slash_commands()
+    return _normalize_slash_commands(
+        cli_commands if cli_commands else _fallback_slash_command_registry()
+    )
+
+
 def _git_snapshot(cwd: Path) -> dict[str, Any]:
     """Return current git branch and dirty bit for status rendering."""
     result: dict[str, Any] = {"branch": "", "dirty": False}
@@ -163,6 +256,7 @@ class JsonlEngineBridge:
             "permission_mode": str(
                 getattr(self.engine.permission_mode, "value", self.engine.permission_mode)
             ),
+            "slash_commands": _slash_command_payload(),
             "session_id": str(getattr(getattr(self.engine, "_session", None), "id", "")),
             "model": model,
             "workspace_root": str(workspace_root),

@@ -2,7 +2,7 @@ import { looksLikeDiff } from "./ansi.js";
 import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
 import { clearRenderCache, createRenderCache } from "./render-cache.js";
 
-export const SLASH_COMMAND_CANDIDATES = [
+export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/help", aliases: ["/h"], description: "显示帮助" },
   { command: "/history", description: "查看历史会话列表" },
   { command: "/load", aliases: ["/l"], description: "加载会话并继续对话" },
@@ -21,7 +21,81 @@ export const SLASH_COMMAND_CANDIDATES = [
   { command: "/version", aliases: ["/v"], description: "查看当前版本" },
 ];
 
-const MAX_SLASH_COMMAND_COMPLETIONS = 12;
+const SLASH_COMMAND_ALIAS_HINTS = Object.freeze({
+  "/help": ["/h"],
+  "/resume": ["/r"],
+  "/load": ["/l"],
+  "/tasks": ["/task"],
+  "/clear": ["/c"],
+  "/model": ["/m"],
+  "/usage": ["/u"],
+  "/version": ["/v"],
+});
+
+function mergeAliasesIntoEntry(existing, aliases) {
+  const merged = new Set(existing.aliases || []);
+  for (const alias of aliases) {
+    if (typeof alias === "string" && alias.trim()) {
+      merged.add(alias.trim());
+    }
+  }
+  existing.aliases = [...merged];
+}
+
+function normalizeSlashCommandList(rawCommands) {
+  const sourceCommands = Array.isArray(rawCommands) && rawCommands.length ? rawCommands : DEFAULT_SLASH_COMMAND_CANDIDATES;
+  const normalized = new Map();
+  for (const item of sourceCommands) {
+    if (!item || typeof item !== "object") continue;
+    const command = String(item.command || "").trim().toLowerCase();
+    if (!command.startsWith("/")) continue;
+    const canonical = command;
+    const description = String(item.description || "").trim();
+    const existing = normalized.get(canonical);
+    if (existing) {
+      if (!existing.description && description) {
+        existing.description = description;
+      }
+      mergeAliasesIntoEntry(existing, Array.isArray(item.aliases) ? item.aliases : []);
+      continue;
+    }
+    const aliases = Array.isArray(item.aliases) ? item.aliases : [];
+    const entry = {
+      command: canonical,
+      aliases: [...aliases],
+      description,
+    };
+    normalized.set(canonical, entry);
+  }
+  if (!normalized.size) {
+    return DEFAULT_SLASH_COMMAND_CANDIDATES;
+  }
+  if (normalized.has("/help") && !normalized.get("/help").aliases.includes("/h")) {
+    normalized.get("/help").aliases.push("/h");
+  }
+  if (normalized.has("/resume") && !normalized.get("/resume").aliases.includes("/r")) {
+    normalized.get("/resume").aliases.push("/r");
+  }
+  if (normalized.has("/load") && !normalized.get("/load").aliases.includes("/l")) {
+    normalized.get("/load").aliases.push("/l");
+  }
+  if (normalized.has("/tasks") && !normalized.get("/tasks").aliases.includes("/task")) {
+    normalized.get("/tasks").aliases.push("/task");
+  }
+  if (normalized.has("/clear") && !normalized.get("/clear").aliases.includes("/c")) {
+    normalized.get("/clear").aliases.push("/c");
+  }
+  if (normalized.has("/model") && !normalized.get("/model").aliases.includes("/m")) {
+    normalized.get("/model").aliases.push("/m");
+  }
+  if (normalized.has("/usage") && !normalized.get("/usage").aliases.includes("/u")) {
+    normalized.get("/usage").aliases.push("/u");
+  }
+  if (normalized.has("/version") && !normalized.get("/version").aliases.includes("/v")) {
+    normalized.get("/version").aliases.push("/v");
+  }
+  return [...normalized.values()].map((entry) => ({ ...entry, aliases: [...entry.aliases] }));
+}
 
 function hasAlias(alias, query) {
   if (!alias) return false;
@@ -29,13 +103,14 @@ function hasAlias(alias, query) {
   return normalizedAlias.includes(query) || normalizedAlias.startsWith(query);
 }
 
-export function getSlashCommandCompletions(input) {
+export function getSlashCommandCompletions(input, slashCommands) {
   if (!String(input || "").startsWith("/")) return [];
   const raw = String(input).slice(1).trim();
   if (raw.includes(" ")) return [];
 
   const query = raw.toLowerCase();
-  const matched = SLASH_COMMAND_CANDIDATES.filter((entry) => {
+  const candidates = normalizeSlashCommandList(slashCommands);
+  const matched = candidates.filter((entry) => {
     if (!query) return true;
     const command = entry.command.slice(1).toLowerCase();
     if (command.includes(query)) return true;
@@ -43,15 +118,13 @@ export function getSlashCommandCompletions(input) {
   });
 
   return matched
-    .slice()
     .sort((a, b) => a.command.localeCompare(b.command))
     .map((entry) => ({
       command: entry.command,
       aliases: [...(entry.aliases || [])],
       description: entry.description,
       selected: false,
-    }))
-    .slice(0, MAX_SLASH_COMMAND_COMPLETIONS);
+    }));
 }
 
 export function createInitialState() {
@@ -66,6 +139,10 @@ export function createInitialState() {
     mode: "default",
     status: {},
     showReasoning: false,
+    slashCommands: DEFAULT_SLASH_COMMAND_CANDIDATES,
+    currentTurnStartedAtMs: null,
+    currentTurnFirstTokenAtMs: null,
+    lastFirstTokenLatencyMs: null,
     messages: [],
     tools: [],
     activeAssistant: null,
@@ -141,9 +218,18 @@ export function reduceServerEvent(state, record) {
       break;
     case "run/started":
       state.running = true;
+      state.currentTurnStartedAtMs = Date.now();
+      state.currentTurnFirstTokenAtMs = null;
       break;
     case "run/completed":
       state.running = false;
+      if (state.currentTurnStartedAtMs && state.currentTurnFirstTokenAtMs) {
+        state.lastFirstTokenLatencyMs = state.currentTurnFirstTokenAtMs - state.currentTurnStartedAtMs;
+      } else {
+        state.lastFirstTokenLatencyMs = null;
+      }
+      state.currentTurnStartedAtMs = null;
+      state.currentTurnFirstTokenAtMs = null;
       finishActiveToolPrepare(state, "本轮执行已结束");
       state.activeToolPrepare = null;
       state.activeRuntimePhase = "";
@@ -152,6 +238,9 @@ export function reduceServerEvent(state, record) {
     case "session/replayed":
       state.currentSessionId = payload.session_id || state.currentSessionId;
       state.running = false;
+      state.currentTurnStartedAtMs = null;
+      state.currentTurnFirstTokenAtMs = null;
+      state.lastFirstTokenLatencyMs = null;
       state.permission = null;
       state.todo = null;
       state.activeToolPrepare = null;
@@ -184,6 +273,9 @@ export function mergeStatus(state, payload) {
   state.status = { ...state.status, ...payload };
   if ("session_id" in payload) {
     state.currentSessionId = String(payload.session_id || "");
+  }
+  if (Array.isArray(payload.slash_commands)) {
+    state.slashCommands = normalizeSlashCommandList(payload.slash_commands);
   }
   if (payload.mode) {
     state.mode = payload.mode;
@@ -302,9 +394,17 @@ function modeNoticeLevel(mode) {
 
 export function handleAssistantStream(state, message) {
   if (message.phase === "start") {
+    if (state.currentTurnStartedAtMs && !state.currentTurnFirstTokenAtMs) {
+      state.currentTurnFirstTokenAtMs = Date.now();
+      state.lastFirstTokenLatencyMs = state.currentTurnFirstTokenAtMs - state.currentTurnStartedAtMs;
+    }
     state.activeAssistant = { kind: "assistant", id: nextMessageId(state, "assistant"), content: "" };
     state.messages.push(state.activeAssistant);
   } else if (message.phase === "token") {
+    if (state.currentTurnStartedAtMs && !state.currentTurnFirstTokenAtMs) {
+      state.currentTurnFirstTokenAtMs = Date.now();
+      state.lastFirstTokenLatencyMs = state.currentTurnFirstTokenAtMs - state.currentTurnStartedAtMs;
+    }
     if (!state.activeAssistant) {
       const assistant = { kind: "assistant", id: nextMessageId(state, "assistant"), content: message.content ?? "" };
       state.messages.push(assistant);
