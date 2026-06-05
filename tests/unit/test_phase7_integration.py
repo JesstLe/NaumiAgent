@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -167,6 +168,90 @@ class TestSlashCommandRouting:
         engine = MagicMock()
         await _handle_command(engine, "/btemplate-compare")
         # Should print usage
+
+    @pytest.mark.asyncio
+    async def test_tool_slash_commands_dispatch_to_tool_execution(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from naumi_agent.main import _handle_command
+        from naumi_agent.tools.base import ToolResult
+
+        engine = MagicMock()
+        engine.tool_registry = {
+            "glob": MagicMock(),
+            "file_read": MagicMock(),
+            "file_write": MagicMock(),
+        }
+        engine._execute_tool = AsyncMock(
+            return_value=ToolResult(
+                call_id="call-1", status="success", content="ok"
+            )
+        )
+        engine._execute_tool.__name__ = "_execute_tool"  # for compatibility
+
+        await _handle_command(engine, '/glob "src/**/*.py" "."')
+        await _handle_command(engine, "/read src/main.py")
+        await _handle_command(engine, "/write src/tmp.txt hello")
+
+        assert engine._execute_tool.await_count == 3
+        tool_names = []
+        args_payload = []
+        for call in engine._execute_tool.await_args_list:
+            tool_call = call.args[0]
+            tool_names.append(tool_call.name)
+            args_payload.append(json.loads(tool_call.arguments))
+        assert tool_names == ["glob", "file_read", "file_write"]
+        assert args_payload[0]["pattern"] == "src/**/*.py"
+        assert args_payload[0]["directory"] == "."
+        assert args_payload[1]["path"] == "src/main.py"
+        assert args_payload[2]["path"] == "src/tmp.txt"
+
+
+class TestSlashBatchParsing:
+    @pytest.mark.asyncio
+    async def test_execute_slash_command_splits_and_normalizes_batch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import shlex
+
+        import naumi_agent.main as main
+        from naumi_agent.cli.slash_router import execute_slash_command
+
+        recorded = []
+
+        async def fake_handle_command(_: MagicMock, command: str) -> None:
+            recorded.append(command)
+
+        monkeypatch.setattr(main, "_handle_command", fake_handle_command)
+        await execute_slash_command(
+            MagicMock(),
+            '/glob "src/**/*.py" .; /read src/main.py && /write src/todo.txt hi',
+        )
+
+        assert [shlex.split(cmd) for cmd in recorded] == [
+            ["/glob", "src/**/*.py", "."],
+            ["/read", "src/main.py"],
+            ["/write", "src/todo.txt", "hi"],
+        ]
+
+    @pytest.mark.asyncio
+    async def test_execute_slash_command_preserves_quoted_path_arguments(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import shlex
+
+        import naumi_agent.main as main
+        from naumi_agent.cli.slash_router import execute_slash_command
+
+        recorded = []
+
+        async def fake_handle_command(_: MagicMock, command: str) -> None:
+            recorded.append(command)
+
+        monkeypatch.setattr(main, "_handle_command", fake_handle_command)
+        await execute_slash_command(MagicMock(), '/read "src files/main file.py"')
+
+        assert shlex.split(recorded[0]) == ["/read", "src files/main file.py"]
 
 
 class TestCLICompleterCommands:
