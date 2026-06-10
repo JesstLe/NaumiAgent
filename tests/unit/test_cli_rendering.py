@@ -162,6 +162,19 @@ async def test_fullscreen_cli_tool_end_includes_tool_output() -> None:
     assert "tool output · file_edit" in text
 
 
+def test_tool_output_highlights_fenced_code() -> None:
+    rendered = _capture(
+        lambda: _print_tool_output(
+            "file_write",
+            "✅ 已创建 demo.py\n\n```python\nprint('ok')\n```",
+        )
+    )
+
+    assert "tool output · file_write" in rendered
+    assert "print" in rendered
+    assert "\x1b[" in rendered
+
+
 def test_context_compacted_rendering_includes_preserved_state_and_warnings() -> None:
     rendered = _format_context_compacted({
         "before": 64,

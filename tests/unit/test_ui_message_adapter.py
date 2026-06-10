@@ -213,6 +213,8 @@ class TestToolLifecycle:
         assert msg.duration_ms == 150
         assert msg.content_preview == "file contents here"
         assert msg.content_length == 18
+        assert msg.preview_format == "text"
+        assert msg.preview_language == ""
 
     def test_tool_end_large_content_truncated(self, adapter: EngineEventAdapter) -> None:
         """Large tool output must be truncated in preview."""
@@ -225,6 +227,35 @@ class TestToolLifecycle:
         assert isinstance(msg, ToolResultMessage)
         assert len(msg.content_preview) <= 600  # truncated
         assert msg.content_length == len(big_content)
+        assert msg.content_truncated
+
+    def test_tool_end_detects_fenced_code_preview(
+        self,
+        adapter: EngineEventAdapter,
+    ) -> None:
+        msg = adapter.adapt("tool_end", {
+            "name": "file_write",
+            "status": "success",
+            "content": "✅ 已创建 demo.py\n\n```python\nprint('ok')\n```",
+        })
+
+        assert isinstance(msg, ToolResultMessage)
+        assert msg.preview_format == "code"
+        assert msg.preview_language == "python"
+
+    def test_tool_end_detects_fenced_diff_preview(
+        self,
+        adapter: EngineEventAdapter,
+    ) -> None:
+        msg = adapter.adapt("tool_end", {
+            "name": "file_edit",
+            "status": "success",
+            "content": "```diff\n--- a.py\n+++ a.py\n@@ -1 +1 @@\n-old\n+new\n```",
+        })
+
+        assert isinstance(msg, ToolResultMessage)
+        assert msg.preview_format == "diff"
+        assert msg.preview_language == "diff"
 
     def test_tool_end_error(self, adapter: EngineEventAdapter) -> None:
         msg = adapter.adapt("tool_end", {

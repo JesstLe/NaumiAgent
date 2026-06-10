@@ -24,6 +24,10 @@ class TestSystemPromptAssembly:
         assert "do not paste full file contents" in prompt
         assert "## Tool Discovery" in prompt
         assert "tool_search" in prompt
+        assert "## File Discovery Discipline" in prompt
+        assert "glob/grep" in prompt
+        assert "read after identifying" in prompt
+        assert "match count" in prompt
         assert "## UI Protocol Contract" in prompt
         assert "## Decision Discipline" in prompt
         assert "## Completion Discipline" in prompt

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from naumi_agent.ui.messages.adapter import _detect_preview_format
 from naumi_agent.ui.messages.base import MessageType, UIMessage
 from naumi_agent.ui.messages.events import (
     AssistantStreamMessage,
@@ -92,13 +93,21 @@ def replay_messages(raw_messages: list[dict[str, Any]]) -> list[UIMessage]:
             tool_call_id = str(raw.get("tool_call_id") or "")
             # Derive a status from the content
             status = _infer_tool_result_status(content)
+            content_preview = _tool_content_preview(content)
+            preview_format, preview_language = _detect_preview_format(
+                tool_names_by_id.get(tool_call_id, ""),
+                content_preview,
+            )
             result.append(ToolResultMessage(
                 type=MessageType.TOOL_RESULT,
                 tool_name=tool_names_by_id.get(tool_call_id, ""),
                 tool_call_id=tool_call_id,
                 status=status,
-                content_preview=_tool_content_preview(content),
+                content_preview=content_preview,
                 content_length=len(content) if content else 0,
+                preview_format=preview_format,
+                preview_language=preview_language,
+                content_truncated=len(content_preview) < len(content),
             ))
 
     return result

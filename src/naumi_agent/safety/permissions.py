@@ -840,7 +840,10 @@ class PermissionChecker:
         command_argument_names = (
             metadata.command_argument_names if metadata else ("command",)
         )
-        if tool_name in {"bash_run", "background_run", "runtime_mcp_connect"}:
+        if (
+            self._mode != PermissionMode.BYPASS
+            and tool_name in {"bash_run", "background_run", "runtime_mcp_connect"}
+        ):
             for arg_name in command_argument_names:
                 if arg_name not in args or not args[arg_name]:
                     continue

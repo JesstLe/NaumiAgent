@@ -12,6 +12,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
 
+from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.ui.code_excerpt import (
     DEFAULT_CODE_BLOCK_MAX_LINES,
@@ -29,7 +31,6 @@ from naumi_agent.ui.code_excerpt import (
 )
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
 from naumi_agent.ui.keybindings import build_keybindings, render_keybinding_help
-from naumi_agent.ui.theme import build_ui_style_from_config, render_style_help
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -80,6 +81,18 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+
+
+def _build_ui_style_from_config(config: Any):
+    from naumi_agent.ui.theme import build_ui_style_from_config
+
+    return build_ui_style_from_config(config)
+
+
+def _build_style_help_text(config: Any) -> str:
+    from naumi_agent.ui.theme import render_style_help
+
+    return render_style_help(_build_ui_style_from_config(config))
 
 
 class TerminalUiLaunchError(RuntimeError):
@@ -403,7 +416,7 @@ def _launch_tui(config_path: str) -> None:
     with _capture_tui_launch_noise() as (stdout_buf, stderr_buf):
         engine = AgentEngine(config)
         keybindings = build_keybindings(config.keybindings)
-        style_config = build_ui_style_from_config(config)
+        style_config = _build_ui_style_from_config(config)
     debug_trace = DebugTrace.create(
         interface="tui",
         base_dir=Path(config.memory.session_db_path).parent / "debug-runs",
@@ -511,12 +524,29 @@ def _print_tool_output(name: str, content: str) -> None:
     elif _looks_like_diff(lines):
         renderables.append(Syntax(content, "diff", theme="ansi_dark", line_numbers=False))
     elif "```" in content:
-        # Code block — show the full block up to 80 lines
-        max_lines = 80
-        preview = "\n".join(lines[:max_lines])
-        if len(lines) > max_lines:
-            preview += f"\n  ... ({len(lines) - max_lines} more lines)"
-        renderables.append(Text(preview, style="dim"))
+        code_block = _extract_code_block(content)
+        if code_block is None:
+            renderables.append(Text(content, style="dim"))
+        else:
+            prefix, language, code_text, suffix = code_block
+            if prefix:
+                renderables.append(Text(prefix.rstrip(), style="dim"))
+            code_lines = code_text.splitlines()
+            max_lines = 80
+            preview = "\n".join(code_lines[:max_lines])
+            if len(code_lines) > max_lines:
+                preview += f"\n... ({len(code_lines) - max_lines} more code lines)"
+            renderables.append(
+                Syntax(
+                    preview,
+                    language or "text",
+                    theme="ansi_dark",
+                    line_numbers=False,
+                    word_wrap=True,
+                )
+            )
+            if suffix:
+                renderables.append(Text(suffix.lstrip(), style="dim"))
     elif name in ("file_read",):
         preview = "\n".join(lines[:50])
         if len(lines) > 50:
@@ -702,6 +732,27 @@ def _extract_diff_block(content: str) -> tuple[str, str, str] | None:
     if end < 0:
         return None
     return content[:start], content[body_start:end].rstrip("\n"), content[end + 3 :]
+
+
+def _extract_code_block(content: str) -> tuple[str, str, str, str] | None:
+    """Return prefix, language, fenced code body, suffix for first code fence."""
+    start = content.find("```")
+    if start < 0:
+        return None
+    header_end = content.find("\n", start)
+    if header_end < 0:
+        return None
+    language = content[start + 3:header_end].strip().split(maxsplit=1)[0]
+    body_start = header_end + 1
+    end = content.find("```", body_start)
+    if end < 0:
+        return None
+    return (
+        content[:start],
+        language,
+        content[body_start:end].rstrip("\n"),
+        content[end + 3:],
+    )
 
 
 def _looks_like_diff(lines: list[str]) -> bool:
@@ -1047,7 +1098,7 @@ async def _chat(config_path: str) -> None:
     _check_api_key(config)
     engine = AgentEngine(config)
     keybindings = build_keybindings(config.keybindings)
-    style_config = build_ui_style_from_config(config)
+    style_config = _build_ui_style_from_config(config)
     debug_trace = DebugTrace.create(
         interface="cli",
         base_dir=Path(config.memory.session_db_path).parent / "debug-runs",
@@ -1088,10 +1139,7 @@ async def _chat(config_path: str) -> None:
 
         if text.startswith("/"):
             cli.record_debug_event("cli.command_start", {"command": text})
-            async def _run_cmd() -> None:
-                await _handle_command(engine, text)
-
-            output = await _capture_async(_run_cmd)
+            output = await execute_slash_command(engine, text)
             cli.append_output(output)
             cli.record_debug_event("cli.command_end", {"command": text, "output": output})
             return
@@ -1368,11 +1416,205 @@ def _render_result(
     c.print()
 
 
+def _parse_bool_arg(raw: str) -> bool:
+    value = raw.strip().lower()
+    if value in {"1", "true", "on", "yes", "y"}:
+        return True
+    if value in {"0", "false", "off", "no", "n"}:
+        return False
+    raise ValueError(f"布尔参数无效: {raw}")
+
+
+def _parse_int_arg(raw: str, *, name: str, default: int | None = None) -> int:
+    if raw == "":
+        if default is not None:
+            return default
+        raise ValueError(f"{name} 参数不能为空")
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} 需为整数: {raw}") from exc
+
+
+def _normalize_tool_kv_tokens(raw: str) -> tuple[dict[str, str], list[str]]:
+    try:
+        tokens = shlex.split(raw)
+    except ValueError as exc:
+        raise ValueError(f"参数解析失败: {exc}")
+
+    kv: dict[str, str] = {}
+    args: list[str] = []
+    for token in tokens:
+        if token.startswith("--") and "=" in token:
+            key, value = token[2:].split("=", 1)
+            kv[key.strip().lower()] = value
+        elif "=" in token:
+            key, value = token.split("=", 1)
+            kv[key.strip().lower()] = value
+        else:
+            args.append(token)
+    return kv, args
+
+
+def _build_tool_arg_for_glob(arg: str) -> dict[str, Any]:
+    kv, args = _normalize_tool_kv_tokens(arg)
+    pattern = kv.get("pattern") or (args[0] if args else "")
+    if not pattern:
+        raise ValueError("用法: /glob <pattern> [directory='.' ]")
+
+    directory = kv.get("directory") or kv.get("path") or (args[1] if len(args) > 1 else ".")
+    parsed: dict[str, Any] = {"pattern": pattern, "directory": directory}
+
+    if "limit" in kv:
+        parsed["limit"] = _parse_int_arg(kv["limit"], name="limit")
+    if "include_hidden" in kv:
+        parsed["include_hidden"] = _parse_bool_arg(kv["include_hidden"])
+    if "hidden" in kv:
+        parsed["include_hidden"] = _parse_bool_arg(kv["hidden"])
+    return parsed
+
+
+def _build_tool_arg_for_grep(arg: str) -> dict[str, Any]:
+    kv, args = _normalize_tool_kv_tokens(arg)
+    pattern = kv.get("pattern") or (args[0] if args else "")
+    if not pattern:
+        raise ValueError("用法: /grep <pattern> [path='.']")
+
+    parsed: dict[str, Any] = {
+        "pattern": pattern,
+        "path": kv.get("path") or (args[1] if len(args) > 1 else "."),
+    }
+    if "glob" in kv:
+        parsed["glob"] = kv["glob"]
+    if "file_type" in kv:
+        parsed["file_type"] = kv["file_type"]
+    if "literal" in kv:
+        parsed["literal"] = _parse_bool_arg(kv["literal"])
+    if "case_sensitive" in kv:
+        parsed["case_sensitive"] = _parse_bool_arg(kv["case_sensitive"])
+    if "max_matches" in kv:
+        parsed["max_matches"] = _parse_int_arg(kv["max_matches"], name="max_matches")
+    return parsed
+
+
+def _build_tool_arg_for_read(arg: str) -> dict[str, Any]:
+    kv, args = _normalize_tool_kv_tokens(arg)
+    path = kv.get("path") or (args[0] if args else "")
+    if not path:
+        raise ValueError("用法: /read <path> [offset=0] [limit=-1]")
+
+    parsed = {"path": path}
+    if "offset" in kv:
+        parsed["offset"] = _parse_int_arg(kv["offset"], name="offset", default=0)
+    elif len(args) > 1:
+        parsed["offset"] = _parse_int_arg(args[1], name="offset")
+    if "limit" in kv:
+        parsed["limit"] = _parse_int_arg(kv["limit"], name="limit", default=-1)
+    elif len(args) > 2:
+        parsed["limit"] = _parse_int_arg(args[2], name="limit")
+    return parsed
+
+
+def _build_tool_arg_for_file_write(arg: str) -> dict[str, Any]:
+    kv, args = _normalize_tool_kv_tokens(arg)
+    path = kv.get("path") or (args[0] if args else "")
+    if not path:
+        raise ValueError("用法: /file_write <path> <content>")
+
+    if "content" in kv:
+        content = kv["content"]
+    else:
+        if len(args) < 2:
+            raise ValueError("用法: /file_write <path> <content>")
+        content = " ".join(args[1:])
+    return {"path": path, "content": content}
+
+
+def _build_tool_arg_for_file_edit(arg: str) -> dict[str, Any]:
+    kv, args = _normalize_tool_kv_tokens(arg)
+    path = kv.get("path") or (args[0] if args else "")
+    if not path:
+        raise ValueError("用法: /file_edit <path> <old_text> <new_text>")
+
+    if "old_text" in kv and "new_text" in kv:
+        old_text = kv["old_text"]
+        new_text = kv["new_text"]
+    else:
+        if len(args) < 3:
+            raise ValueError("用法: /file_edit <path> <old_text> <new_text>")
+        old_text = args[1]
+        new_text = " ".join(args[2:])
+    return {"path": path, "old_text": old_text, "new_text": new_text}
+
+
+_SLASH_TOOL_COMMANDS: dict[str, tuple[str, Any]] = {
+    "/glob": ("glob", _build_tool_arg_for_glob),
+    "/grep": ("grep", _build_tool_arg_for_grep),
+    "/read": ("file_read", _build_tool_arg_for_read),
+    "/file_read": ("file_read", _build_tool_arg_for_read),
+    "/write": ("file_write", _build_tool_arg_for_file_write),
+    "/file_write": ("file_write", _build_tool_arg_for_file_write),
+    "/edit": ("file_edit", _build_tool_arg_for_file_edit),
+    "/file_edit": ("file_edit", _build_tool_arg_for_file_edit),
+}
+
+
+async def _run_tool_slash_command(
+    engine: Any,
+    *,
+    slash_command: str,
+    tool_name: str,
+    parse_args: Any,
+    arg: str,
+) -> None:
+    from naumi_agent.tools.base import ToolCall
+
+    try:
+        kwargs = parse_args(arg)
+    except ValueError as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        return
+
+    tool = engine.tool_registry.get(tool_name)
+    if tool is None:
+        console.print(f"[red]工具未注册: {tool_name}[/red]")
+        return
+
+    tool_call = ToolCall(
+        id=f"slash-{slash_command}-{uuid.uuid4()}",
+        name=tool_name,
+        arguments=json.dumps(kwargs, ensure_ascii=False),
+    )
+    result = await engine._execute_tool(tool_call, agent_name="cli")
+    if result.status != "success":
+        console.print(f"[yellow]{result.content}[/yellow]")
+        return
+    if result.content:
+        console.print(result.content)
+    else:
+        console.print(f"[green]命令已执行: {slash_command}[/green]")
+
+
 async def _handle_command(engine: Any, cmd: str) -> None:
     """处理斜杠命令."""
     parts = cmd.strip().split(maxsplit=1)
-    command = parts[0]
+    if not parts:
+        return
+    command = parts[0].lower()
+    if command == "/":
+        command = "/help"
     arg = parts[1] if len(parts) > 1 else ""
+
+    if command in _SLASH_TOOL_COMMANDS:
+        tool_name, parse_args = _SLASH_TOOL_COMMANDS[command]
+        await _run_tool_slash_command(
+            engine,
+            slash_command=command,
+            tool_name=tool_name,
+            parse_args=parse_args,
+            arg=arg,
+        )
+        return
 
     match command:
         case "/h" | "/help":
@@ -1388,7 +1630,7 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 console.print(Markdown(render_keybinding_help(keybindings, interface="cli")))
         case "/style" | "/theme":
             config = getattr(engine, "_config", None)
-            console.print(Markdown(render_style_help(build_ui_style_from_config(config))))
+            console.print(Markdown(_build_style_help_text(config)))
         case "/reasoning":
             _handle_reasoning_command(engine, arg)
         case "/doctor":
@@ -1412,6 +1654,30 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 replay_base = Path(engine._config.memory.session_db_path).parent / "debug-runs"
                 replay_target = find_latest_run(replay_base) or replay_base
             console.print(render_debug_replay(replay_target))
+        case "/permissions":
+            from naumi_agent.ui.permission_panel import render_permission_panel
+
+            if arg:
+                console.print("[yellow]权限面板不接受参数，已忽略额外参数。[/yellow]")
+            pending = {}
+            confirmer = getattr(engine, "_permission_confirmer", None)
+            try:
+                raw_pending = getattr(confirmer, "pending_permissions", {})
+                if isinstance(raw_pending, dict):
+                    pending = {
+                        str(key): dict(value)
+                        for key, value in raw_pending.items()
+                        if isinstance(value, dict)
+                    }
+            except Exception:
+                pending = {}
+
+            panel = render_permission_panel(
+                engine,
+                pending=pending,
+                limit=12,
+            )
+            console.print(Markdown(panel))
         case "/diff":
             from rich.text import Text
 
@@ -1424,7 +1690,7 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                     render_git_diff_viewer(
                         workspace_root,
                         scope=scope,
-                        style_config=build_ui_style_from_config(getattr(engine, "_config", None)),
+                        style_config=_build_ui_style_from_config(getattr(engine, "_config", None)),
                     )
                 )
             )
@@ -1452,6 +1718,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             console.print("[bold]可用工具:[/bold]")
             for t in tools:
                 console.print(f"  • [cyan]{t.name}[/cyan] — {t.description}")
+        case "/q" | "/quit" | "/exit":
+            console.print("[green]退出命令已接收，请关闭界面或发送新会话。[/green]")
         case "/clear" | "/c":
             engine.reset()
             if _active_cli:
@@ -1481,7 +1749,7 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _show_history(engine, arg)
         case "/memory":
             await _handle_memory(engine, arg)
-        case "/load":
+        case "/load" | "/l":
             await _interactive_load(engine, arg)
         case "/resume" | "/r":
             await _resume_latest(engine)
@@ -1873,6 +2141,12 @@ def _print_help() -> None:
         ("/usage", "显示 token 用量"),
         ("/hooks", "显示已注册的钩子"),
         ("/skills", "列出已加载的 Skill"),
+        ("/glob <pattern> [directory='.' ]", "按 glob 规则搜索工作区文件路径"),
+        ("/grep <pattern> [path='.'] [glob='**/*.py'] [max_matches=200] [case_sensitive=false]",
+         "搜索文件内容（可配置过滤）"),
+        ("/read <path> [offset=0] [limit=-1]", "读取文件内容（可分页）"),
+        ("/write <path> <内容>", "写入文件（覆盖）"),
+        ("/edit <path> <旧文本> <新文本>", "按文本替换更新文件"),
         ("/history", "查看历史会话列表"),
         ("/memory [子命令]", "记忆管理 (stats/search/clean/export)"),
         ("/load <编号或id>", "加载会话 (无参数显示列表)"),
@@ -1948,6 +2222,8 @@ def _print_help() -> None:
         ("/btemplate-compare <id>", "比较模板运行结果"),
         ("/new", "保存当前会话并开始新对话"),
         ("/clear", "清除当前会话（不保存）"),
+        ("/permissions", "显示待确认权限面板"),
+        ("/q", "退出"),
         ("/quit", "退出"),
     ]
     for cmd, desc in commands:

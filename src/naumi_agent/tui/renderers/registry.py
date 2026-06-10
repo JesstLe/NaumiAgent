@@ -141,8 +141,21 @@ def _render_tool_result(
         label,
         msg.status,
         msg.duration_ms,
-        msg.content_preview,
+        _highlightable_tool_preview(msg),
     )
+
+
+def _highlightable_tool_preview(msg: ToolResultMessage) -> str:
+    """Wrap raw previews with a fence when adapter supplied a highlight hint."""
+    content = msg.content_preview
+    if not content or "```" in content:
+        return content
+    if msg.preview_format == "diff":
+        return f"```diff\n{content}\n```"
+    if msg.preview_format == "code":
+        language = msg.preview_language or "text"
+        return f"```{language}\n{content}\n```"
+    return content
 
 
 def _render_hook_trace(

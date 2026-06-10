@@ -465,6 +465,33 @@ async def test_bridge_unknown_slash_command_emits_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bridge_quit_slash_command_shuts_down_bridge() -> None:
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "slash-quit-1",
+        "type": ClientEventType.SUBMIT,
+        "payload": {"text": "/q"},
+    })
+
+    records = _records(writer)
+    assert engine.shutdown_called
+    assert records[-1]["type"] == "shutdown"
+    assert records[-1]["payload"] == {"ok": True}
+    assert not [
+        record
+        for record in records
+        if (
+            record["type"] == "ui/message"
+            and record["payload"].get("type") == "system_notice"
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_bridge_cli_backed_slash_commands_are_dispatched_via_capture(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -13,6 +13,16 @@ test("markdown code blocks show a bounded excerpt with lightweight highlighting"
   assert(rendered.some((line) => line.includes(`${ANSI.cyan}const${ANSI.reset}`)));
 });
 
+test("tool output metadata can force raw content to render as code", () => {
+  const rendered = renderToolOutput("return True", 120, {
+    format: "code",
+    language: "python",
+  });
+
+  assert(rendered.some((line) => line.includes(`${ANSI.cyan}return${ANSI.reset}`)));
+  assert(rendered.some((line) => line.includes(`${ANSI.yellow}True${ANSI.reset}`)));
+});
+
 test("markdown and diff folds can be expanded through persisted fold state", () => {
   const codeLines = Array.from({ length: 45 }, (_, index) => `const value${index} = ${index};`);
   const collapsedCode = renderMarkdownExcerpt(["```js", ...codeLines, "```"].join("\n"), 120, {

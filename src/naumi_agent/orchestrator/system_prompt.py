@@ -98,6 +98,14 @@ TOOL_DISCOVERY_SECTION = """\
 - Tool names and availability can change at runtime; prefer discovery over relying on stale prompt text.
 """
 
+FILE_DISCOVERY_SECTION = """\
+## File Discovery Discipline
+- For requests like "find files", "list candidates", "workspace 下的展示文件", or "where is X", first use glob/grep or a concrete rg/find command before answering.
+- Report the search scope, query, filters, match count, and the relevant candidate paths. If there is more than one plausible match, list multiple candidates and do not present the first one as the only result.
+- If a search result is truncated, archived, or obviously broad, rerun with a narrower query or explicit count command before making a final claim.
+- Only use read after identifying the candidate set; separate "found these files" from "this file appears to be the best match".
+"""
+
 BROWSER_USAGE_SECTION = """\
 ## Browser Tool Usage
 - **browser_goto**: Navigate to a URL. Call ONCE per URL. Returns SoM elements and page data. Do NOT call again for the same URL.
@@ -140,6 +148,7 @@ DEFAULT_PROMPT_SECTIONS = (
     PromptSection("context_hygiene", CONTEXT_HYGIENE_SECTION),
     PromptSection("output_discipline", OUTPUT_DISCIPLINE_SECTION),
     PromptSection("tool_discovery", TOOL_DISCOVERY_SECTION),
+    PromptSection("file_discovery", FILE_DISCOVERY_SECTION),
     PromptSection("browser_usage", BROWSER_USAGE_SECTION),
     PromptSection("ui_protocol", UI_PROTOCOL_SECTION),
     PromptSection("decision_commitment", DECISION_COMMITMENT_SECTION),

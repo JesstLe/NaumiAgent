@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,33 @@ def _resolve_workspace_path(path: str, workspace_root: Path) -> Path:
     return candidate.resolve()
 
 
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _relative_workspace_path(path: Path, workspace_root: Path) -> str:
+    return path.relative_to(workspace_root).as_posix()
+
+
+def _has_ignored_path_part(path: Path, workspace_root: Path, *, include_hidden: bool) -> bool:
+    try:
+        parts = path.relative_to(workspace_root).parts
+    except ValueError:
+        return True
+    for part in parts[:-1]:
+        if part in _FIND_EXCLUDED_DIRS:
+            return True
+        if not include_hidden and part.startswith("."):
+            return True
+    if parts and not include_hidden and parts[-1].startswith("."):
+        return True
+    return False
+
+
 def _looks_like_background_shell(command: str) -> bool:
     """Detect shell backgrounding that would bypass BackgroundRunner tracking."""
     stripped = command.strip()
@@ -27,6 +56,331 @@ def _looks_like_background_shell(command: str) -> bool:
     if re.search(r"(^|[;&|]\s*)disown(\s|$)", stripped):
         return True
     return stripped.endswith("&")
+
+
+_FIND_EXCLUDED_DIRS = {
+    ".cache",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".next",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svn",
+    ".turbo",
+    ".venv",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "venv",
+}
+
+def _normalize_extensions(extensions: Any) -> set[str]:
+    if extensions is None:
+        return set()
+    if isinstance(extensions, str):
+        raw_items = re.split(r"[\s,]+", extensions)
+    elif isinstance(extensions, list):
+        raw_items = [str(item) for item in extensions]
+    else:
+        raw_items = [str(extensions)]
+    normalized = set()
+    for item in raw_items:
+        value = item.strip().lower()
+        if not value:
+            continue
+        normalized.add(value if value.startswith(".") else f".{value}")
+    return normalized
+
+
+class GlobTool(Tool):
+    """Find files by glob pattern under the workspace."""
+
+    def __init__(self, workspace_root: str | Path | None = None) -> None:
+        root = Path.cwd() if workspace_root is None else Path(workspace_root)
+        self._workspace_root = root.expanduser().resolve()
+
+    @property
+    def name(self) -> str:
+        return "glob"
+
+    @property
+    def description(self) -> str:
+        return "按 glob 模式搜索工作区文件路径，例如 `src/**/*.py` 或 `**/*.html`。"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            path_argument_names=("directory",),
+            user_facing_name="Glob 文件路径搜索",
+            search_hint="glob files paths pattern workspace find list",
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "glob 模式，例如 `src/**/*.py`、`**/*.html`",
+                },
+                "directory": {
+                    "type": "string",
+                    "description": "工作区内搜索目录，默认整个工作区",
+                    "default": ".",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "最多返回多少条路径，默认 100，最大 500",
+                    "default": 100,
+                },
+                "include_hidden": {
+                    "type": "boolean",
+                    "description": "是否包含隐藏文件/目录，默认 false",
+                    "default": False,
+                },
+            },
+            "required": ["pattern"],
+        }
+
+    async def execute(
+        self,
+        *,
+        pattern: str,
+        directory: str = ".",
+        limit: int = 100,
+        include_hidden: bool = False,
+        **kwargs: Any,
+    ) -> str:
+        normalized_pattern = str(pattern or "").strip()
+        if not normalized_pattern:
+            return "Error: pattern 不能为空。"
+        if Path(normalized_pattern).is_absolute() or ".." in Path(normalized_pattern).parts:
+            return "Error: pattern 必须是工作区内的相对 glob 模式。"
+        search_root = _resolve_workspace_path(directory or ".", self._workspace_root)
+        if not search_root.is_dir():
+            return f"Error: 搜索目录不存在: {directory} (resolved: {search_root})"
+        if not _is_relative_to(search_root, self._workspace_root):
+            return f"Error: 搜索目录必须位于工作区内: {search_root}"
+
+        safe_limit = max(1, min(int(limit or 100), 500))
+        matches: list[str] = []
+        for path in search_root.glob(normalized_pattern):
+            resolved = path.resolve()
+            if not resolved.is_file():
+                continue
+            if not _is_relative_to(resolved, self._workspace_root):
+                continue
+            if _has_ignored_path_part(
+                resolved, self._workspace_root, include_hidden=include_hidden,
+            ):
+                continue
+            matches.append(_relative_workspace_path(resolved, self._workspace_root))
+
+        matches = sorted(set(matches), key=str.lower)
+        shown = matches[:safe_limit]
+        lines = [
+            "Glob 文件路径搜索结果",
+            f"- 工作区: {self._workspace_root}",
+            f"- 搜索目录: {search_root}",
+            f"- 模式: {normalized_pattern}",
+            f"- 匹配总数: {len(matches)}",
+            f"- 显示数量: {len(shown)}",
+        ]
+        if len(matches) > len(shown):
+            lines.append(f"- 还有 {len(matches) - len(shown)} 个匹配未显示，请提高 limit。")
+        if not shown:
+            lines.append("未找到匹配文件。")
+            return "\n".join(lines)
+        lines.append("")
+        lines.append("候选文件:")
+        lines.extend(f"{idx}. `{path}`" for idx, path in enumerate(shown, start=1))
+        return "\n".join(lines)
+
+
+class GrepTool(Tool):
+    """Search file contents with regex or literal matching."""
+
+    def __init__(self, workspace_root: str | Path | None = None) -> None:
+        root = Path.cwd() if workspace_root is None else Path(workspace_root)
+        self._workspace_root = root.expanduser().resolve()
+
+    @property
+    def name(self) -> str:
+        return "grep"
+
+    @property
+    def description(self) -> str:
+        return "按内容搜索文件，支持正则/字面量、指定目录、glob 和文件类型过滤。"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            path_argument_names=("path",),
+            user_facing_name="Grep 内容搜索",
+            search_hint="grep search content regex literal file type workspace",
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "要搜索的正则或字面量文本",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "工作区内文件或目录，默认整个工作区",
+                    "default": ".",
+                },
+                "glob": {
+                    "type": "string",
+                    "description": "可选文件路径 glob 过滤，例如 `**/*.py`",
+                },
+                "file_type": {
+                    "type": "string",
+                    "description": "可选扩展名过滤，例如 py、html、md",
+                },
+                "literal": {
+                    "type": "boolean",
+                    "description": "按字面量搜索而不是正则，默认 false",
+                    "default": False,
+                },
+                "case_sensitive": {
+                    "type": "boolean",
+                    "description": "是否大小写敏感，默认 false",
+                    "default": False,
+                },
+                "max_matches": {
+                    "type": "integer",
+                    "description": "最多返回多少条匹配，默认 50，最大 200",
+                    "default": 50,
+                },
+            },
+            "required": ["pattern"],
+        }
+
+    async def execute(
+        self,
+        *,
+        pattern: str,
+        path: str = ".",
+        glob: str | None = None,
+        file_type: str | None = None,
+        literal: bool = False,
+        case_sensitive: bool = False,
+        max_matches: int = 50,
+        **kwargs: Any,
+    ) -> str:
+        raw_pattern = str(pattern or "")
+        if not raw_pattern:
+            return "Error: pattern 不能为空。"
+        target = _resolve_workspace_path(path or ".", self._workspace_root)
+        if not _is_relative_to(target, self._workspace_root):
+            return f"Error: 搜索路径必须位于工作区内: {target}"
+        if not target.exists():
+            return f"Error: 搜索路径不存在: {path} (resolved: {target})"
+
+        flags = 0 if case_sensitive else re.IGNORECASE
+        try:
+            regex = re.compile(re.escape(raw_pattern) if literal else raw_pattern, flags)
+        except re.error as exc:
+            return f"Error: 正则表达式无效: {exc}"
+
+        extension_filter = _normalize_extensions(file_type)
+        path_glob = str(glob or "").strip()
+        safe_limit = max(1, min(int(max_matches or 50), 200))
+        searched_files = 0
+        skipped_large = 0
+        matches: list[str] = []
+
+        for candidate in self._iter_search_files(target, path_glob, extension_filter):
+            if candidate.stat().st_size > 2_000_000:
+                skipped_large += 1
+                continue
+            searched_files += 1
+            try:
+                lines = candidate.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            rel = _relative_workspace_path(candidate, self._workspace_root)
+            for line_no, line in enumerate(lines, start=1):
+                if regex.search(line):
+                    matches.append(f"`{rel}`:{line_no}: {line.strip()}")
+                    if len(matches) >= safe_limit:
+                        break
+            if len(matches) >= safe_limit:
+                break
+
+        lines = [
+            "Grep 内容搜索结果",
+            f"- 工作区: {self._workspace_root}",
+            f"- 搜索路径: {target}",
+            f"- pattern: {raw_pattern}",
+            f"- 模式: {'字面量' if literal else '正则'}",
+            f"- glob: {path_glob or '(不限)'}",
+            f"- 文件类型: {', '.join(sorted(extension_filter)) if extension_filter else '(不限)'}",
+            f"- 已搜索文件数: {searched_files}",
+            f"- 跳过大文件数: {skipped_large}",
+            f"- 返回匹配数: {len(matches)}",
+        ]
+        if len(matches) >= safe_limit:
+            lines.append("- 结果达到上限，请缩小 path/glob/file_type 或提高 max_matches。")
+        if not matches:
+            lines.append("未找到内容匹配。")
+            return "\n".join(lines)
+        lines.append("")
+        lines.append("匹配:")
+        lines.extend(matches)
+        return "\n".join(lines)
+
+    def _iter_search_files(
+        self,
+        target: Path,
+        path_glob: str,
+        extension_filter: set[str],
+    ) -> list[Path]:
+        if target.is_file():
+            candidates = [target]
+        else:
+            candidates = []
+            for root, dirs, files in os.walk(target):
+                root_path = Path(root)
+                dirs[:] = [
+                    dirname
+                    for dirname in dirs
+                    if dirname not in _FIND_EXCLUDED_DIRS and not dirname.startswith(".")
+                ]
+                candidates.extend(root_path / filename for filename in files)
+
+        filtered = []
+        for candidate in candidates:
+            resolved = candidate.resolve()
+            if not resolved.is_file():
+                continue
+            if not _is_relative_to(resolved, self._workspace_root):
+                continue
+            if _has_ignored_path_part(resolved, self._workspace_root, include_hidden=False):
+                continue
+            if extension_filter and resolved.suffix.lower() not in extension_filter:
+                continue
+            rel = _relative_workspace_path(resolved, self._workspace_root)
+            if path_glob and not fnmatch.fnmatch(rel, path_glob):
+                continue
+            filtered.append(resolved)
+        return sorted(
+            filtered,
+            key=lambda item: _relative_workspace_path(item, self._workspace_root),
+        )
 
 
 class FileReadTool(Tool):
@@ -98,6 +452,27 @@ class FileReadTool(Tool):
             return f"{header}\n```{lang}\n{result}```"
         except Exception as e:
             return f"Error reading file: {type(e).__name__}: {e}"
+
+
+class ReadTool(FileReadTool):
+    """Claude Code-style alias for reading a file."""
+
+    @property
+    def name(self) -> str:
+        return "read"
+
+    @property
+    def description(self) -> str:
+        return "读取文件完整内容；也支持 offset 和 limit 读取局部内容。"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="Read 读取文件",
+            search_hint="read file content full offset limit",
+        )
 
 
 class FileWriteTool(Tool):
@@ -457,6 +832,9 @@ class BashRunTool(Tool):
 def create_builtin_tools(workspace_root: str | Path | None = None) -> list[Tool]:
     """创建所有内置工具实例."""
     return [
+        GlobTool(workspace_root),
+        GrepTool(workspace_root),
+        ReadTool(workspace_root),
         FileReadTool(workspace_root),
         FileWriteTool(workspace_root),
         FileEditTool(workspace_root),

@@ -9,16 +9,22 @@ export function MarkdownExcerpt({ text, foldKey = "" }) {
   };
 }
 
-export function ToolOutput({ text, foldKey = "" }) {
+export function ToolOutput({ text, foldKey = "", format = "text", language = "" }) {
   return {
     render(ctx) {
-      return renderToolOutput(text, ctx.width, { foldKey, folds: ctx.state?.folds });
+      return renderToolOutput(text, ctx.width, {
+        foldKey,
+        folds: ctx.state?.folds,
+        format,
+        language,
+      });
     },
   };
 }
 
 export function renderToolOutput(text, width, options = {}) {
-  if (looksLikeDiff(text)) {
+  const normalized = normalizeToolOutputText(text, options);
+  if (options.format === "diff" || looksLikeDiff(normalized)) {
     const folded = foldLines(text.split("\n"), {
       folds: options.folds,
       key: options.foldKey,
@@ -31,7 +37,20 @@ export function renderToolOutput(text, width, options = {}) {
     }
     return lines;
   }
-  return renderMarkdownExcerpt(text, width, options).slice(0, DIFF_FOLD_VISIBLE_LINES);
+  return renderMarkdownExcerpt(normalized, width, options).slice(0, DIFF_FOLD_VISIBLE_LINES);
+}
+
+function normalizeToolOutputText(text, options = {}) {
+  const raw = String(text ?? "");
+  if (!raw || raw.includes("```")) return raw;
+  if (options.format === "code") {
+    const language = String(options.language || "text").trim() || "text";
+    return `\`\`\`${language}\n${raw}\n\`\`\``;
+  }
+  if (options.format === "diff") {
+    return `\`\`\`diff\n${raw}\n\`\`\``;
+  }
+  return raw;
 }
 
 export function renderMarkdownExcerpt(text, width, options = {}) {

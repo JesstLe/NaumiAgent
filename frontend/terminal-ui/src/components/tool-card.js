@@ -15,7 +15,14 @@ export function renderToolCard(tool, width, ctx = { width }) {
   const title = `${tool.name}${tool.primary ? ` ${tool.primary}` : ""}`;
   const statusStyle = tool.status === "success" ? ANSI.green : tool.status === "running" ? ANSI.cyan : ANSI.red;
   const titleLine = `${color(statusStyle, tool.status === "running" ? "running" : tool.status)} ${title}`;
-  const output = tool.output ? ToolOutput({ text: tool.output, foldKey: `tool:${tool.callId || tool.id || tool.name}` }) : null;
+  const output = tool.output
+    ? ToolOutput({
+      text: tool.output,
+      foldKey: `tool:${tool.callId || tool.id || tool.name}`,
+      format: tool.outputFormat,
+      language: tool.outputLanguage,
+    })
+    : null;
   const children = [line(titleLine)];
   if (tool.prepareTitle) {
     children.push(line(color(ANSI.dim, tool.prepareTitle)));

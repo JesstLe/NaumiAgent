@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -80,6 +81,9 @@ class TestEngineInit:
 
     def test_has_builtin_tools(self, engine: AgentEngine) -> None:
         names = engine.tool_registry.names
+        assert "glob" in names
+        assert "grep" in names
+        assert "read" in names
         assert "file_read" in names
         assert "file_write" in names
         assert "file_edit" in names
@@ -578,6 +582,30 @@ class TestToolExecution:
         result = await engine._execute_tool(tc)
         assert result.status == "success"
         assert "bypass_ok" in result.content
+
+    @pytest.mark.asyncio
+    async def test_bypass_mode_runs_dangerous_shell_command(
+        self,
+        engine: AgentEngine,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / "showcase-page"
+        target.mkdir()
+        (target / "index.html").write_text("<h1>demo</h1>", encoding="utf-8")
+
+        engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
+        command = f"rm -rf {shlex.quote(str(target))} && echo removed"
+        tc = ToolCall(
+            id="x",
+            name="bash_run",
+            arguments=json.dumps({"command": command}),
+        )
+
+        result = await engine._execute_tool(tc)
+
+        assert result.status == "success"
+        assert "removed" in result.content
+        assert not target.exists()
 
     @pytest.mark.asyncio
     async def test_task_create_tool_passes_permission_layer(self, tmp_path) -> None:
@@ -2136,6 +2164,128 @@ class TestPlanInjection:
             if m.get("role") == "system" and "执行计划指导" in m.get("content", "")
         ]
         assert len(system_msgs) == 0
+
+
+class TestStreamingStartupLatency:
+    @pytest.mark.asyncio
+    async def test_streaming_skips_preplanning_for_normal_turn(self, tmp_path) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        async def stream_response(**_: object):
+            yield StreamChunk(token="ok")
+            yield StreamChunk(finish_reason="stop")
+
+        try:
+            with (
+                patch.object(engine._router, "stream", new=stream_response),
+                patch.object(
+                    engine._planner,
+                    "plan",
+                    new_callable=AsyncMock,
+                ) as mock_plan,
+                patch.object(
+                    engine.long_term_memory,
+                    "recall",
+                    new_callable=AsyncMock,
+                    return_value=[],
+                ),
+            ):
+                result = await engine.run_streaming("直接回答这个问题", on_event)
+
+            assert result.status == "completed"
+            assert result.response == "ok"
+            mock_plan.assert_not_awaited()
+            planning = [
+                data for event, data in events
+                if event == "perf_phase" and data.get("phase") == "planning"
+            ]
+            assert planning[-1]["mode"] == "skipped_for_streaming"
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_streaming_preplans_when_user_explicitly_requests_orchestration(
+        self,
+        tmp_path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        events: list[tuple[str, dict[str, object]]] = []
+        plan = Plan(
+            understanding="orchestrate",
+            approach="direct",
+            steps=[
+                Step(
+                    id="s1",
+                    description="do it",
+                    tool=None,
+                    depends_on=[],
+                    parallelizable=False,
+                    complexity=Complexity.SIMPLE,
+                ),
+            ],
+            mode=ExecutionMode.SINGLE_TURN,
+        )
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        async def stream_response(**_: object):
+            yield StreamChunk(token="ok")
+            yield StreamChunk(finish_reason="stop")
+
+        try:
+            with (
+                patch.object(engine._router, "stream", new=stream_response),
+                patch.object(
+                    engine._planner,
+                    "plan",
+                    new_callable=AsyncMock,
+                    return_value=plan,
+                ) as mock_plan,
+                patch.object(
+                    engine.long_term_memory,
+                    "recall",
+                    new_callable=AsyncMock,
+                    return_value=[],
+                ),
+            ):
+                result = await engine.run_streaming("请先规划并任务分解这个改造", on_event)
+
+            assert result.status == "completed"
+            mock_plan.assert_awaited_once()
+            planning = [
+                data for event, data in events
+                if event == "perf_phase" and data.get("phase") == "planning"
+            ]
+            assert planning[-1]["mode"] == str(ExecutionMode.SINGLE_TURN)
+        finally:
+            await engine.shutdown()
+
+    def test_openai_tool_schemas_are_cached_until_registry_changes(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        first = engine._get_openai_tools_cached()
+        second = engine._get_openai_tools_cached()
+
+        assert first is second
+
+        engine.tool_registry.register(FakeTool())
+        third = engine._get_openai_tools_cached()
+
+        assert third is not first
+        assert third is not None
+        assert any(tool["function"]["name"] == "fake_tool" for tool in third)
 
 
 class TestConvergenceMessagesDisabled:

@@ -235,6 +235,30 @@ test("tool results prefer stable call id before falling back to tool name", () =
   assert.equal(state.tools[1].status, "running");
 });
 
+test("tool result stores preview highlight metadata", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "tool_use", tool_call_id: "call-code", tool_name: "file_write", file_path: "demo.py" },
+  });
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: {
+      type: "tool_result",
+      tool_call_id: "call-code",
+      tool_name: "file_write",
+      status: "success",
+      content_preview: "print('ok')",
+      preview_format: "code",
+      preview_language: "python",
+    },
+  });
+
+  assert.equal(state.tools[0].outputFormat, "code");
+  assert.equal(state.tools[0].outputLanguage, "python");
+});
+
 test("tool prepare creates a durable activity message before tool cards", () => {
   const state = createInitialState();
 
@@ -650,7 +674,7 @@ test("slash commands route through protocol without adding chat noise", () => {
     { type: "set_mode", payload: { mode: "bypass" } },
     { type: "resume", payload: { session_id: "abc123" } },
     { type: "task_panel", payload: { limit: 5, source: "all", status: "all", pinned: false, refresh: false } },
-    { type: "submit", payload: { text: "/permissions 6" } },
+    { type: "permissions_panel", payload: { limit: 6 } },
     { type: "doctor", payload: {} },
     { type: "set_reasoning", payload: { enabled: true } },
     { type: "submit", payload: { text: "/clear" } },
