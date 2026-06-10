@@ -65,7 +65,17 @@
       "fields": ["tool_name", "tool_call_id", "primary_arg", "file_path", "command", "query", "url"]
     },
     "tool_result": {
-      "fields": ["tool_name", "tool_call_id", "status", "duration_ms", "content_preview", "content_length"]
+      "fields": [
+        "tool_name",
+        "tool_call_id",
+        "status",
+        "duration_ms",
+        "content_preview",
+        "content_length",
+        "preview_format",
+        "preview_language",
+        "content_truncated"
+      ]
     },
     "todo_status": {
       "fields": ["source", "total_count", "open_count", "completed_count", "items", "summary_text"]

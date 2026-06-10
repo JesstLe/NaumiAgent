@@ -131,6 +131,9 @@ class ToolResultMessage(UIMessage):
     duration_ms: int = 0
     content_preview: str = ""  # truncated output for display
     content_length: int = 0  # full output length
+    preview_format: str = "text"  # "text" | "code" | "diff" | "markdown"
+    preview_language: str = ""  # language hint for syntax highlighting
+    content_truncated: bool = False
 
     def summary(self) -> str:
         return f"[tool_result] {self.tool_name} {self.status} {self.duration_ms}ms"

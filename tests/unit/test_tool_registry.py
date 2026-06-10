@@ -8,6 +8,9 @@ from naumi_agent.tools.builtin import (
     FileEditTool,
     FileReadTool,
     FileWriteTool,
+    GlobTool,
+    GrepTool,
+    ReadTool,
     YamlValidateTool,
     create_builtin_tools,
 )
@@ -23,11 +26,14 @@ def registry() -> ToolRegistry:
 
 class TestToolRegistry:
     def test_register_and_get(self, registry: ToolRegistry) -> None:
+        assert "glob" in registry
+        assert "grep" in registry
+        assert "read" in registry
         assert "file_read" in registry
         assert "file_write" in registry
         assert "file_edit" in registry
         assert "bash_run" in registry
-        assert len(registry) >= 4
+        assert len(registry) >= 7
 
     def test_get_nonexistent(self, registry: ToolRegistry) -> None:
         assert registry.get("nonexistent") is None
@@ -45,16 +51,30 @@ class TestToolRegistry:
         self,
         registry: ToolRegistry,
     ) -> None:
+        glob_tool = registry.get("glob")
+        grep_tool = registry.get("grep")
+        read_alias = registry.get("read")
         read_tool = registry.get("file_read")
         write_tool = registry.get("file_write")
         bash_tool = registry.get("bash_run")
         yaml_tool = registry.get("yaml_validate")
 
+        assert glob_tool is not None
+        assert grep_tool is not None
+        assert read_alias is not None
         assert read_tool is not None
         assert write_tool is not None
         assert bash_tool is not None
         assert yaml_tool is not None
 
+        assert glob_tool.is_read_only
+        assert glob_tool.is_concurrency_safe
+        assert glob_tool.metadata.path_argument_names == ("directory",)
+        assert grep_tool.is_read_only
+        assert grep_tool.is_concurrency_safe
+        assert grep_tool.metadata.path_argument_names == ("path",)
+        assert read_alias.is_read_only
+        assert read_alias.is_concurrency_safe
         assert read_tool.is_read_only
         assert read_tool.is_concurrency_safe
         assert write_tool.is_destructive
@@ -84,6 +104,61 @@ class TestToolRegistry:
 
         with pytest.raises(ValueError, match="Invalid JSON arguments"):
             tool.parse_arguments(None)
+
+
+class TestGlobGrepReadTools:
+    async def test_glob_finds_multiple_paths_by_pattern(self, tmp_path) -> None:
+        (tmp_path / "site").mkdir()
+        (tmp_path / "site" / "index.html").write_text("<h1>Site</h1>")
+        (tmp_path / "demo").mkdir()
+        (tmp_path / "demo" / "index.html").write_text("<h1>Demo</h1>")
+        (tmp_path / "notes.txt").write_text("skip")
+        tool = GlobTool(workspace_root=tmp_path)
+
+        result = await tool.execute(pattern="**/*.html", limit=10)
+
+        assert "匹配总数: 2" in result
+        assert "`demo/index.html`" in result
+        assert "`site/index.html`" in result
+        assert "notes.txt" not in result
+
+    async def test_glob_rejects_parent_escape_pattern(self, tmp_path) -> None:
+        tool = GlobTool(workspace_root=tmp_path)
+
+        result = await tool.execute(pattern="../*.html")
+
+        assert "pattern 必须是工作区内的相对 glob 模式" in result
+
+    async def test_grep_searches_content_with_file_type_filter(self, tmp_path) -> None:
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "app.py").write_text("def run():\n    return 'Showcase'\n")
+        (tmp_path / "src" / "app.txt").write_text("Showcase in text\n")
+        tool = GrepTool(workspace_root=tmp_path)
+
+        result = await tool.execute(pattern="showcase", path="src", file_type="py")
+
+        assert "已搜索文件数: 1" in result
+        assert "返回匹配数: 1" in result
+        assert "`src/app.py`:2:" in result
+        assert "app.txt" not in result
+
+    async def test_grep_reports_invalid_regex(self, tmp_path) -> None:
+        tool = GrepTool(workspace_root=tmp_path)
+
+        result = await tool.execute(pattern="[", path=".")
+
+        assert "正则表达式无效" in result
+
+    async def test_read_alias_reads_complete_file_content(self, tmp_path) -> None:
+        target = tmp_path / "README.md"
+        target.write_text("hello\nworld\n")
+        tool = ReadTool(workspace_root=tmp_path)
+
+        result = await tool.execute(path="README.md")
+
+        assert "hello" in result
+        assert "world" in result
+        assert str(target) in result
 
 
 class TestFileReadTool:

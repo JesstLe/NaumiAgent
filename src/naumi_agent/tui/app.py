@@ -16,6 +16,7 @@ from rich.markdown import Markdown as RichMarkdown
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
+from textual.events import Key
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.message import Message
@@ -32,8 +33,9 @@ from textual.widgets import (
     Static,
 )
 
+from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.cli_completer import COMMANDS
-from naumi_agent.clipboard import copy_or_save_transcript
+from naumi_agent.clipboard import copy_or_save_transcript, strip_ansi
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
@@ -113,6 +115,8 @@ def _format_tool_output_markdown(content: str) -> str:
         return text
     if _looks_like_diff(lines):
         return f"```diff\n{text}\n```"
+    if _looks_like_markdown(lines):
+        return text
     return f"```\n{text}\n```"
 
 
@@ -123,10 +127,82 @@ def _looks_like_diff(lines: list[str]) -> bool:
         for line in sample
     )
 
+
+def _looks_like_markdown(lines: list[str]) -> bool:
+    for line in lines[:20]:
+        text = line.strip()
+        if not text:
+            continue
+        if text.startswith(("### ", "## ", "# ")):
+            return True
+        if text.startswith(("- ", "* ", "> ", "|", "```")):
+            return True
+        if text[:2].isdigit() and text[2:3] in {".", "、"}:
+            return True
+    return False
+
+
+class _TuiSlashCommandFrontend:
+    """Adapter passed to shared CLI slash command backend."""
+
+    def __init__(self, app: "NaumiApp") -> None:
+        self._app = app
+
+    def keybinding_help(self) -> str:
+        return render_keybinding_help(self._app._keybindings, interface="tui")
+
+    def debug_info(self) -> str:
+        if self._app.debug_trace is not None:
+            return self._app.debug_trace.describe()
+        return "当前 TUI 未启用结构化调试日志。"
+
+    def copy_transcript(self, scope: str = "all") -> None:
+        self._app.action_copy_transcript(scope)
+
+    def set_mode_status(self, mode: str) -> None:
+        status = self._app.query_one(StatusBar)
+        status.mode_text = mode
+
+    def set_status(self, text: str) -> None:
+        status = self._app.query_one(StatusBar)
+        status.status_text = text
+
+    def clear_output(self) -> None:
+        self._app.query_one(ChatPanel).clear()
+        status = self._app.query_one(StatusBar)
+        status.status_text = "就绪"
+        status.session_text = "会话:-"
+
+    def set_todo_status(self, text: str) -> None:
+        todo = self._app.query_one(TodoBar)
+        todo.todo_text = text
+
 _SLASH_SUGGESTIONS = SuggestFromList(
     [cmd for cmd, _, _ in COMMANDS],
     case_sensitive=True,
 )
+
+
+def _fuzzy_match(query: str, text: str) -> bool:
+    if not query:
+        return True
+    qi = 0
+    for ch in text:
+        if qi < len(query) and ch.lower() == query[qi].lower():
+            qi += 1
+    return qi == len(query)
+
+
+def _matches_slash_command(query: str, command: str) -> bool:
+    """Match slash command by substring and fuzzy fallback."""
+    if not command.startswith("/"):
+        return False
+    target = command[1:]
+    if not query:
+        return True
+    if query.lower() in target.lower():
+        return True
+    return _fuzzy_match(query, target)
 
 
 def _build_textual_bindings(keybindings: KeybindingSet) -> list[Binding]:
@@ -876,6 +952,13 @@ class InputBar(Horizontal):
         margin-left: 1;
     }
     """
+    _slash_candidates: list[str] = []
+    _slash_candidate_index: int = -1
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._slash_candidates = []
+        self._slash_candidate_index = -1
 
     def compose(self) -> ComposeResult:
         yield Input(
@@ -900,6 +983,66 @@ class InputBar(Horizontal):
         if text:
             self.app.post_message(UserInputMessage(text))
             input_widget.value = ""
+
+    def _build_slash_candidates(self, query: str) -> list[str]:
+        candidates = [
+            cmd
+            for cmd, _, _ in COMMANDS
+            if _matches_slash_command(query, cmd)
+        ]
+        return sorted(candidates)
+
+    @on(Input.Changed)
+    def on_input_changed(self, event: Input.Changed) -> None:
+        value = event.value or ""
+        if not value.startswith("/") or " " in value:
+            self._slash_candidates = []
+            self._slash_candidate_index = -1
+            return
+
+        query = value[1:]
+        candidates = self._build_slash_candidates(query)
+        self._slash_candidates = candidates
+        if not candidates:
+            self._slash_candidate_index = -1
+            return
+
+        normalized = value.lower()
+        try:
+            self._slash_candidate_index = [cmd.lower() for cmd in candidates].index(
+                normalized
+            )
+        except ValueError:
+            self._slash_candidate_index = 0
+
+    def on_key(self, event: Key) -> None:
+        if event.key not in {"up", "down"}:
+            return
+
+        input_widget = self.query_one("#msg-input", Input)
+        if self.app.focused is not input_widget:
+            return
+        if not self._slash_candidates:
+            return
+
+        if event.key == "down":
+            if self._slash_candidate_index < 0:
+                self._slash_candidate_index = 0
+            else:
+                self._slash_candidate_index = (self._slash_candidate_index + 1) % len(
+                    self._slash_candidates
+                )
+        else:
+            if self._slash_candidate_index < 0:
+                self._slash_candidate_index = len(self._slash_candidates) - 1
+            else:
+                self._slash_candidate_index = (self._slash_candidate_index - 1) % len(
+                    self._slash_candidates
+                )
+
+        input_widget.value = self._slash_candidates[self._slash_candidate_index]
+        event.prevent_default()
+        event.stop()
 
 
 class BrowserPanel(VerticalScroll):
@@ -1213,6 +1356,7 @@ class NaumiApp(App):
         self.engine = engine
         self.debug_trace = debug_trace
         self._show_reasoning = show_reasoning
+        self._slash_frontend = _TuiSlashCommandFrontend(self)
         self.engine.set_permission_confirmer(self.confirm_permission)
 
     def compose(self) -> ComposeResult:
@@ -1344,469 +1488,66 @@ class NaumiApp(App):
     def _handle_slash_command(self, text: str) -> None:
         if self.debug_trace is not None:
             self.debug_trace.event("tui.command_start", {"command": text})
-        parts = text.split(maxsplit=1)
-        cmd = parts[0]
-        arg = parts[1] if len(parts) > 1 else ""
+        raw = text.strip()
+        if not raw:
+            return
+        self._run_cli_slash_command(raw)
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_cli_slash_command(self, text: str) -> None:
         chat = self.query_one(ChatPanel)
         status = self.query_one(StatusBar)
+        parts = text.strip().split(maxsplit=1)
+        if not parts:
+            return
 
-        match cmd:
-            case "/clear" | "/c":
-                chat.clear()
-                self.engine.reset()
-                status.status_text = "会话已清除"
-            case "/new" | "/n":
-                if self.engine._messages and any(
-                    m.get("role") == "user" for m in self.engine._messages
-                ):
-                    try:
-                        import asyncio
+        command = parts[0].lower()
+        raw_command = parts[0]
+        if command in {"/quit", "/q", "/exit"}:
+            if self.debug_trace is not None:
+                self.debug_trace.event("tui.exit_requested", {"command": text})
+            self.exit()
+            return
 
-                        asyncio.get_event_loop().run_until_complete(self.engine._save_session())
-                    except Exception:
-                        pass
-                self.engine.reset()
-                chat.clear()
-                status.session_text = "会话:-"
-                status.status_text = "新会话已开始"
-            case "/help" | "/h":
-                help_text = (
-                    "## 可用命令\n"
-                    "- `/help` — 显示帮助\n"
-                    "- `/keybindings` — 显示当前快捷键配置\n"
-                    "- `/style` — 显示当前主题和输出风格\n"
-                    "- `/reasoning on|off|toggle` — 显示或隐藏模型 reasoning/thinking 明文\n"
-                    "- `/doctor` — 运行环境诊断\n"
-                    "- `/copy [all|last|error]` — 复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)\n"
-                    "- `/debug` — 显示本次结构化调试日志位置\n"
-                    "- `/debug-replay [路径]` — 回放 debug-runs 结构化事件\n"
-                    "- `/diff [all|worktree|staged]` — 查看本轮结构化 git diff\n"
-                    "- `/pwd` — 显示当前工作目录\n"
-                    "- `/tools` — 列出可用工具\n"
-                    "- `/model` — 显示模型配置\n"
-                    "- `/usage` — 显示 token 用量\n"
-                    "- `/history` — 查看历史会话列表\n"
-                    "- `/load <id>` — 加载指定会话\n"
-                    "- `/resume` — 继续最近的对话 (/r)\n"
-                    "- `/chaos [目标]` — 灾难演练 (SPOF)\n"
-                    "- `/scale [QPS]` — 并发海啸测试\n"
-                    "- `/state` — 云原生状态审查\n"
-                    "- `/vibe <描述>` — 极速构建 Demo\n"
-                    "- `/eval <路径>` — 评测驱动 (EDD)\n"
-                    "- `/page` — 内存分页调度\n"
-                    "- `/heal <错误>` — 自愈修复\n"
-                    "- `/dspy [描述]` — DSPy 编译优化\n"
-                    "- `/graph [路径]` — 图谱推演 (GraphRAG)\n"
-                    "- `/mcts <问题>` — 蒙特卡洛树搜索\n"
-                    "- `/route <任务>` — MoE 混合专家调度\n"
-                    "- `/speculate <路径>` — 推测解码\n"
-                    "- `/jit <任务>` — JIT 即时工具生成\n"
-                    "- `/pointer <路径>` — 语义指针(SPA)\n"
-                    "- `/cooe <任务>` — 认知乱序执行(COOE)\n"
-                    "- `/sleep` — 昼夜节律突触修剪\n"
-                    "- `/entropy <文本>` — 耗散结构熵减\n"
-                    "- `/ooda <路径>` — OODA 战场指挥\n"
-                    "- `/probe <需求>` — 黑盒探测\n"
-                    "- `/hook <目标>` — 逆向插桩\n"
-                    "- `/vision <目标>` — AI 视觉数据提取\n"
-                    "- `/spar <目标>` — 对抗自博弈 (GAN for Code)\n"
-                    "- `/world <目标>` — 世界模型审计\n"
-                    "- `/fusion <目标>` — 决定论-概率论融合审计\n"
-                    "- `/consensus <目标>` — 拜占庭容错共识\n"
-                    "- `/pid <目标>` — PID 闭环纠偏\n"
-                    "- `/zkp <目标>` — 零知识证明与轨迹校验\n"
-                    "- `/genesis <目标>` — 系统自重构与热演化\n"
-                    "- `/macro <目标>` — 多智能体自由市场博弈\n"
-                    "- `/cosmos <目标>` — 创世引擎审计\n"
-                    "- `/watchdog <目标>` — 看门狗与灾难隔离\n"
-                    "- `/supervisor <目标>` — Erlang 守护者树\n"
-                    "- `/autopsy <目标>` — 执行迹切片与 Bug 解剖\n"
-                    "- `/pursue <目标>` — 目标追踪（自主循环直至达成）\n"
-                    "- `/worktree <子命令>` — 隔离执行区 create/status/bind/keep/remove\n"
-                    "- `/background <子命令>` — 后台任务 run/status/list/cancel/output/cleanup\n"
-                    "- `/todo <子命令>` — todo 清单 list/add/start/done/pending/delete/clear\n"
-                    "- `/team <子命令>` — 团队协议 status/handoff/blocker/decision/request/result\n"
-                    "- `/runtime [分区]` — 运行时状态 "
-                    "all/context/todo/team/subagent/hooks/resources\n"
-                    "- `/browse <url>` — 打开 URL 并显示 SoM 元素\n"
-                    "- `/autobrowse <任务>` — 自主浏览器任务\n"
-                    "- `/browser-stop` — 停止浏览器\n"
-                    "- `/browser-state` — 显示浏览器状态\n"
-                    "- `/browser-screenshot` — 截取页面截图\n"
-                    "- `/bdaemon <子命令>` — 外部浏览器 daemon health/start/run/watch\n"
-                    "- `/tasks` — 打开 todo/subagent/background/browser 任务面板\n"
-                    "- `/task <id>` — 查看任务详情\n"
-                    "- `/task-reply <id> <指令>` — 回复等待中的任务\n"
-                    "- `/task-abort <id>` — 中止任务\n"
-                    "- `/task-resume <id>` — 恢复手动控制任务\n"
-                    "- `/scan <url>` — 快速安全扫描\n"
-                    "- `/scan-full <url>` — 完整 25 模块安全扫描\n"
-                    "- `/scan-report [format]` — 导出扫描报告\n"
-                    "- `/scan-baseline <url>` — 保存扫描为基线\n"
-                    "- `/btemplate-list` — 列出浏览器任务模板\n"
-                    "- `/btemplate-run <id>` — 从模板创建运行\n"
-                    "- `/btemplate-compare <id>` — 比较模板运行结果\n"
-                    "- `/clear` — 清除当前会话\n"
-                    "- `/quit` — 退出\n"
-                )
-                chat.mount(Markdown(help_text, classes="agent-msg"))
-            case "/keybindings" | "/keys":
-                chat.mount(
-                    Markdown(
-                        render_keybinding_help(self._keybindings, interface="tui"),
-                        classes="agent-msg",
-                    )
-                )
-            case "/style" | "/theme":
-                chat.mount(
-                    Markdown(
-                        render_style_help(self._style_config),
-                        classes="agent-msg",
-                    )
-                )
-            case "/reasoning":
-                self._handle_reasoning_command(arg)
-            case "/doctor":
-                self._run_doctor()
-            case "/debug":
-                info = (
-                    self.debug_trace.describe()
-                    if self.debug_trace is not None
-                    else "当前 TUI 未启用结构化调试日志。"
-                )
-                chat.mount(Markdown(f"```\n{info}\n```", classes="agent-msg"))
-            case "/debug-replay":
-                from naumi_agent.debug_trace import find_latest_run, render_debug_replay
+        if command == "/n":
+            command = "/new"
+            text = command + (f" {parts[1]}" if len(parts) > 1 else "")
+        elif command != raw_command:
+            text = command + (f" {parts[1]}" if len(parts) > 1 else "")
 
-                if arg:
-                    replay_target = Path(arg)
-                else:
-                    replay_base = (
-                        Path(self.engine._config.memory.session_db_path).parent
-                        / "debug-runs"
-                    )
-                    replay_target = find_latest_run(replay_base) or replay_base
-                chat.mount(
-                    Markdown(
-                        f"```\n{render_debug_replay(replay_target)}\n```",
-                        classes="agent-msg",
-                    )
+        status.status_text = "命令执行中..."
+        try:
+            raw_output = await execute_slash_command(
+                self.engine,
+                text,
+                frontend=self._slash_frontend,
+            )
+        except Exception as exc:
+            logger.exception("TUI slash command execution failed")
+            if self.debug_trace is not None:
+                self.debug_trace.exception("tui.command.failed", exc)
+            chat.mount(
+                Markdown(
+                    f"**命令执行失败**: {type(exc).__name__} — {exc}",
+                    classes="agent-msg",
                 )
-            case "/diff":
-                from naumi_agent.ui.diff_viewer import render_git_diff_viewer
+            )
+            status.status_text = "命令执行失败"
+            return
 
-                scope = arg.strip() or "all"
-                workspace_root = getattr(self.engine, "workspace_root", Path.cwd())
-                chat.mount(
-                    Static(
-                        Text.from_ansi(
-                            render_git_diff_viewer(
-                                workspace_root,
-                                scope=scope,
-                                style_config=self._style_config,
-                            )
-                        ),
-                        classes="agent-msg",
-                    )
+        output = strip_ansi(raw_output).strip()
+        if output:
+            chat.mount(
+                Markdown(
+                    _format_tool_output_markdown(output),
+                    classes="agent-msg",
                 )
-            case "/copy":
-                self.action_copy_transcript(arg or "all")
-            case "/pwd":
-                cwd = Path.cwd()
-                workspace_root = getattr(self.engine, "workspace_root", cwd)
-                config = getattr(self.engine, "_config", None)
-                extra_lines = ""
-                if config is not None:
-                    extra_lines = (
-                        "\n\n"
-                        f"会话库：`{Path(config.memory.session_db_path).resolve()}`\n\n"
-                        f"向量库：`{Path(config.memory.vector_db_path).resolve()}`\n\n"
-                        "完整调试路径可用 `/debug` 查看。"
-                    )
-                chat.mount(
-                    Markdown(
-                        f"## 当前路径\n\n工作区根目录：`{workspace_root}`\n\n"
-                        f"启动目录：`{cwd}`\n\n"
-                        "工具里的相对路径会按工作区根目录解析。"
-                        f"{extra_lines}",
-                        classes="agent-msg",
-                    )
-                )
-                status.status_text = f"工作区: {workspace_root}"
-            case "/tools" | "/t":
-                tools = self.engine.tool_registry.all()
-                lines = ["## 可用工具\n"]
-                for t in tools:
-                    lines.append(f"- **{t.name}** — {t.description}")
-                chat.mount(Markdown("\n".join(lines), classes="agent-msg"))
-            case "/model" | "/m":
-                info = (
-                    f"## 模型配置\n"
-                    f"- 默认: `{self.engine.router.resolve_model('capable')}`\n"
-                    f"- 快速: `{self.engine.router.resolve_model('fast')}`\n"
-                    f"- 推理: `{self.engine.router.resolve_model('reasoning')}`\n"
-                )
-                chat.mount(Markdown(info, classes="agent-msg"))
-            case "/usage" | "/u":
-                u = self.engine.usage
-                total_tok = u.total_input_tokens + u.total_output_tokens
-                info = (
-                    f"## 用量统计\n"
-                    f"- Token: {total_tok}\n"
-                    f"- 费用: ${u.total_cost_usd:.4f}\n"
-                    f"- 轮次: {u.turns}\n"
-                )
-                chat.mount(Markdown(info, classes="agent-msg"))
-            case "/history":
-                self._run_history_command(arg)
-            case "/load":
-                if not arg:
-                    self.action_toggle_history()
-                else:
-                    self._load_and_show_session(arg)
-            case "/resume" | "/r":
-                self._resume_latest()
-            case "/chaos":
-                self._run_analysis_mode("chaos", arg or "当前项目")
-            case "/scale":
-                self._run_analysis_mode("scale", arg or "当前项目")
-            case "/state":
-                self._run_analysis_mode("state", arg or "当前项目")
-            case "/vibe":
-                if not arg:
-                    status.status_text = "用法: /vibe <功能描述>"
-                else:
-                    self._run_analysis_mode("vibe", arg)
-            case "/eval":
-                if not arg:
-                    status.status_text = "用法: /eval <文件或目录路径>"
-                else:
-                    self._run_analysis_mode("eval", arg)
-            case "/page":
-                self._run_analysis_mode("page", "memory")
-            case "/heal":
-                if not arg:
-                    status.status_text = "用法: /heal <错误日志或错误描述>"
-                else:
-                    self._run_analysis_mode("heal", arg)
-            case "/dspy":
-                self._run_analysis_mode("dspy", arg or "")
-            case "/graph":
-                self._run_analysis_mode("graph", arg or "")
-            case "/mcts":
-                if not arg:
-                    status.status_text = "用法: /mcts <问题描述>"
-                else:
-                    self._run_analysis_mode("mcts", arg)
-            case "/route":
-                if not arg:
-                    status.status_text = "用法: /route <任务描述>"
-                else:
-                    self._run_analysis_mode("route", arg)
-            case "/speculate":
-                if not arg:
-                    status.status_text = "用法: /speculate <文件或目录路径>"
-                else:
-                    self._run_analysis_mode("speculate", arg)
-            case "/jit":
-                if not arg:
-                    status.status_text = "用法: /jit <计算任务描述>"
-                else:
-                    self._run_analysis_mode("jit", arg)
-            case "/pointer":
-                if not arg:
-                    status.status_text = "用法: /pointer <文件或目录路径>"
-                else:
-                    self._run_analysis_mode("pointer", arg)
-            case "/cooe":
-                if not arg:
-                    status.status_text = "用法: /cooe <多步骤任务描述>"
-                else:
-                    self._run_analysis_mode("cooe", arg)
-            case "/sleep":
-                self._run_analysis_mode("sleep", arg or "")
-            case "/entropy":
-                if not arg:
-                    status.status_text = "用法: /entropy <长文本或上下文>"
-                else:
-                    self._run_analysis_mode("entropy", arg)
-            case "/ooda":
-                if not arg:
-                    status.status_text = "用法: /ooda <文件或目录路径>"
-                else:
-                    self._run_analysis_mode("ooda", arg)
-            case "/probe":
-                if not arg:
-                    status.status_text = "用法: /probe <功能需求描述>"
-                else:
-                    self._run_analysis_mode("probe", arg)
-            case "/vision":
-                if not arg:
-                    status.status_text = "用法: /vision <数据提取目标描述>"
-                else:
-                    self._run_analysis_mode("vision", arg)
-            case "/spar":
-                if not arg:
-                    status.status_text = "用法: /spar <目标代码路径或功能描述>"
-                else:
-                    self._run_analysis_mode("spar", arg)
-            case "/world":
-                if not arg:
-                    status.status_text = "用法: /world <代码路径或系统描述>"
-                else:
-                    self._run_analysis_mode("world", arg)
-            case "/fusion":
-                if not arg:
-                    status.status_text = "用法: /fusion <代码路径或系统描述>"
-                else:
-                    self._run_analysis_mode("fusion", arg)
-            case "/consensus":
-                if not arg:
-                    status.status_text = "用法: /consensus <代码路径或系统描述>"
-                else:
-                    self._run_analysis_mode("consensus", arg)
-            case "/pid":
-                if not arg:
-                    status.status_text = "用法: /pid <代码路径或流程描述>"
-                else:
-                    self._run_analysis_mode("pid", arg)
-            case "/zkp":
-                if not arg:
-                    status.status_text = "用法: /zkp <代码路径或系统描述>"
-                else:
-                    self._run_analysis_mode("zkp", arg)
-            case "/genesis":
-                if not arg:
-                    status.status_text = "用法: /genesis <代码路径或系统描述>"
-                else:
-                    self._run_analysis_mode("genesis", arg)
-            case "/macro":
-                if not arg:
-                    status.status_text = "用法: /macro <任务或系统描述>"
-                else:
-                    self._run_analysis_mode("macro", arg)
-            case "/cosmos":
-                if not arg:
-                    status.status_text = "用法: /cosmos <代码路径或系统描述>"
-                else:
-                    self._run_analysis_mode("cosmos", arg)
-            case "/watchdog":
-                if not arg:
-                    status.status_text = "用法: /watchdog <代码路径或系统描述>"
-                else:
-                    self._run_analysis_mode("watchdog", arg)
-            case "/supervisor":
-                if not arg:
-                    status.status_text = "用法: /supervisor <代码路径或系统描述>"
-                else:
-                    self._run_analysis_mode("supervisor", arg)
-            case "/autopsy":
-                if not arg:
-                    status.status_text = "用法: /autopsy <代码路径或 Bug 描述>"
-                else:
-                    self._run_analysis_mode("autopsy", arg)
-            case "/hook":
-                if not arg:
-                    status.status_text = "用法: /hook <逆向目标描述>"
-                else:
-                    self._run_analysis_mode("hook", arg)
-            case "/pursue":
-                if not arg:
-                    status.status_text = "用法: /pursue <目标描述>"
-                else:
-                    self._run_pursue(arg)
-            case "/worktree":
-                self._run_worktree_command(arg)
-            case "/background":
-                self._run_background_command(arg)
-            case "/schedule":
-                self._run_schedule_command(arg)
-            case "/todo":
-                self._run_todo_command(arg)
-            case "/team":
-                self._run_team_command(arg)
-            case "/runtime":
-                self._run_runtime_command(arg)
-            case "/browse":
-                if not arg:
-                    status.status_text = "用法: /browse <url>"
-                else:
-                    self._run_browse(arg)
-            case "/autobrowse":
-                if not arg:
-                    status.status_text = "用法: /autobrowse <任务描述>"
-                else:
-                    self._run_autobrowse(arg)
-            case "/browser-stop":
-                self._run_browser_stop()
-            case "/browser-state":
-                self._run_browser_state()
-            case "/browser-screenshot":
-                self._run_browser_screenshot()
-            case "/bdaemon":
-                self._run_browser_daemon(arg)
-            case "/tasks":
-                self._show_tasks()
-            case "/task":
-                if not arg:
-                    status.status_text = "用法: /task <id>"
-                else:
-                    self._show_task_detail(arg)
-            case "/task-reply":
-                if not arg:
-                    status.status_text = "用法: /task-reply <id> <指令>"
-                else:
-                    self._run_task_reply(arg)
-            case "/task-abort":
-                if not arg:
-                    status.status_text = "用法: /task-abort <id>"
-                else:
-                    self._run_task_abort(arg)
-            case "/task-resume":
-                if not arg:
-                    status.status_text = "用法: /task-resume <id>"
-                else:
-                    self._run_task_resume(arg)
-            case "/scan":
-                if not arg:
-                    status.status_text = "用法: /scan <url>"
-                else:
-                    self._run_security_scan(arg, profile="quick")
-            case "/scan-full":
-                if not arg:
-                    status.status_text = "用法: /scan-full <url>"
-                else:
-                    self._run_security_scan(arg, profile="full")
-            case "/scan-report":
-                self._run_scan_report(arg)
-            case "/scan-baseline":
-                if not arg:
-                    status.status_text = "用法: /scan-baseline <url>"
-                else:
-                    self._run_scan_baseline(arg)
-            case "/btemplate-list":
-                self._show_btemplate_list()
-            case "/btemplate-run":
-                if not arg:
-                    status.status_text = "用法: /btemplate-run <id>"
-                else:
-                    self._run_btemplate_run(arg)
-            case "/btemplate-compare":
-                if not arg:
-                    status.status_text = "用法: /btemplate-compare <id>"
-                else:
-                    self._show_btemplate_compare(arg)
-            case "/quit" | "/exit":
-                if self.debug_trace is not None:
-                    self.debug_trace.event("tui.exit_requested", {"command": text})
-                self.exit()
-            case _:
-                chat.mount(
-                    Markdown(
-                        f"**未知命令**: `{cmd}`\n输入 `/help` 查看可用命令",
-                        classes="agent-msg",
-                    )
-                )
+            )
+        else:
+            chat.mount(
+                Markdown(f"**命令已执行**: `{text}`", classes="agent-msg")
+            )
+        status.status_text = "就绪"
 
     def _handle_reasoning_command(self, arg: str) -> None:
         raw = arg.strip().lower()

@@ -106,6 +106,15 @@ class TestPermissionChecker:
             assert result.risk_level == PermissionRiskLevel.HIGH
             assert "高风险模式" in result.reason
 
+    def test_bypass_skips_dangerous_command_filter(self) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+        result = checker.check(
+            "bash_run",
+            {"command": "rm -rf /Users/lv/Workspace/showcase-page && echo done"},
+        )
+        assert result.allowed
+        assert not result.requires_confirmation
+
     def test_safe_commands(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
         assert checker.check("bash_run", {"command": "ls -la"}).allowed

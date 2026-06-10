@@ -11,7 +11,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
-from naumi_agent import __version__
 from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
@@ -38,13 +37,13 @@ _SLASH_ALIAS_MAP: dict[str, str] = {
     "/h": "/help",
     "/r": "/resume",
     "/l": "/load",
-    "/task": "/tasks",
     "/t": "/tools",
     "/c": "/clear",
     "/m": "/model",
     "/u": "/usage",
     "/v": "/version",
 }
+_EXIT_COMMANDS = {"/q", "/quit", "/exit", "exit"}
 
 
 def resolve_config_path(path: str) -> str:
@@ -69,14 +68,15 @@ def _find_default_config_path(start_path: Path) -> Path | None:
 def _fallback_slash_command_registry() -> list[dict[str, Any]]:
     return [
         {"command": "/help", "aliases": ["/h"], "description": "显示帮助"},
+        {"command": "/q", "description": "退出"},
         {"command": "/history", "description": "查看历史会话列表"},
         {"command": "/load", "aliases": ["/l"], "description": "加载会话并继续对话"},
         {"command": "/resume", "aliases": ["/r"], "description": "继续最近一次对话"},
         {
             "command": "/tasks",
-            "aliases": ["/task"],
             "description": "显示/更新任务面板（支持 list/open/cancel/refresh）",
         },
+        {"command": "/task", "description": "查看任务运行详情"},
         {"command": "/permissions", "description": "显示待确认权限面板"},
         {"command": "/doctor", "description": "运行环境诊断"},
         {
@@ -92,6 +92,14 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
         {"command": "/model", "aliases": ["/m"], "description": "查看当前模型配置"},
         {"command": "/usage", "aliases": ["/u"], "description": "查看 Token 与费用"},
         {"command": "/version", "aliases": ["/v"], "description": "查看当前版本"},
+        {"command": "/glob", "description": "按 glob 规则搜索工作区文件路径"},
+        {"command": "/grep", "description": "搜索文件内容（可配置过滤）"},
+        {"command": "/read", "description": "读取文件内容"},
+        {"command": "/file_read", "aliases": ["/read"], "description": "读取文件内容（别名）"},
+        {"command": "/write", "description": "写入文件（覆盖）"},
+        {"command": "/file_write", "aliases": ["/write"], "description": "写入文件（覆盖）"},
+        {"command": "/edit", "description": "按文本替换更新文件"},
+        {"command": "/file_edit", "aliases": ["/edit"], "description": "按文本替换更新文件"},
     ]
 
 
@@ -111,10 +119,6 @@ def _load_cli_slash_commands() -> list[dict[str, Any]]:
         description = str(item[1]).strip()
         commands.append({"command": command, "description": description})
     return commands
-
-
-def _normalize_slash_alias(command: str) -> str:
-    return _SLASH_ALIAS_MAP.get(command, command)
 
 
 def _load_cli_slash_commands_with_alias() -> list[str]:
@@ -179,6 +183,11 @@ def _slash_command_payload() -> list[dict[str, Any]]:
     return _normalize_slash_commands(
         cli_commands if cli_commands else _fallback_slash_command_registry()
     )
+
+
+def _is_exit_command(text: str) -> bool:
+    """Return whether user input should close the JSONL bridge."""
+    return text.strip().lower() in _EXIT_COMMANDS
 
 
 def _git_snapshot(cwd: Path) -> dict[str, Any]:
@@ -465,7 +474,12 @@ class JsonlEngineBridge:
         if not text.strip():
             await self.emit_error("输入不能为空。", code="empty_input", request_id=request_id)
             return
-        if await self._handle_slash_command(text, request_id=request_id):
+        normalized_text = text.strip()
+        if _is_exit_command(normalized_text):
+            await self.shutdown()
+            return
+        if normalized_text.startswith("/"):
+            await self._run_cli_slash_command(normalized_text, request_id=request_id)
             return
         if self._run_task is not None and not self._run_task.done():
             await self.emit_error(
@@ -555,197 +569,18 @@ class JsonlEngineBridge:
             await self.emit(ServerEventType.UI_MESSAGE, ui_message_payload(message))
         await self.emit(ServerEventType.STATUS, self.status_payload())
 
-    async def _handle_slash_command(self, text: str, *, request_id: str) -> bool:
-        raw = text.strip()
-        if not raw.startswith("/"):
-            return False
-
-        trimmed = raw[1:].strip()
-        if not trimmed:
-            await self._emit_system_notice(
-                "help",
-                self._slash_help_text(),
-                "info",
-                request_id=request_id,
-            )
-            return True
-
-        parts = trimmed.split(maxsplit=1)
-        command = f"/{parts[0].lower()}"
-        canonical = _normalize_slash_alias(command)
-        arg = parts[1].strip() if len(parts) > 1 else ""
-
-        match canonical:
-            case "/help":
-                await self._emit_system_notice(
-                    "help",
-                    self._slash_help_text(),
-                    "info",
-                    request_id=request_id,
-                )
-                return True
-            case "/history":
-                await self._show_history_command(arg, request_id=request_id)
-                return True
-            case "/load":
-                await self._load_session_command(arg, request_id=request_id)
-                return True
-            case "/resume":
-                await self.resume_session({}, request_id=request_id)
-                return True
-            case "/tasks":
-                await self.show_task_panel(
-                    self._parse_task_panel_command(arg),
-                    request_id=request_id,
-                )
-                return True
-            case "/permissions":
-                try:
-                    limit = int(arg.strip()) if arg.strip() else 12
-                except ValueError:
-                    await self._emit_system_notice(
-                        "permissions",
-                        "用法: /permissions [limit]",
-                        "warning",
-                        request_id=request_id,
-                    )
-                    return True
-                await self.show_permissions_panel(
-                    {"limit": max(1, min(limit, 50))},
-                    request_id=request_id,
-                )
-                return True
-            case "/doctor":
-                await self.show_doctor_report(request_id=request_id)
-                return True
-            case "/mode":
-                normalized_mode = self._normalize_runtime_mode(arg)
-                if normalized_mode is None:
-                    await self._emit_system_notice(
-                        "mode",
-                        "用法: /mode <default|plan|bypass>",
-                        "warning",
-                        request_id=request_id,
-                    )
-                    return True
-                await self.set_mode(normalized_mode, request_id=request_id)
-                return True
-            case "/reasoning":
-                next_reasoning = self._coerce_reasoning_visibility(arg)
-                if next_reasoning is None:
-                    await self._emit_system_notice(
-                        "reasoning",
-                        "用法: /reasoning on|off|toggle",
-                        "warning",
-                        request_id=request_id,
-                    )
-                    return True
-                await self.set_reasoning(next_reasoning, request_id=request_id)
-                return True
-            case "/clear":
-                if hasattr(self.engine, "reset"):
-                    self.engine.reset()
-                await self._emit_system_notice(
-                    "clear",
-                    "已清理会话（后端状态已重置）。",
-                    "info",
-                    request_id=request_id,
-                )
-                await self.emit(ServerEventType.STATUS, self.status_payload())
-                return True
-            case "/debug":
-                debug_events = self.debug_trace.events_path if self.debug_trace else "-"
-                debug_run_id = self.debug_trace.run_id if self.debug_trace else "-"
-                config = getattr(self.engine, "_config", None)
-                session_db_path = "-"
-                vector_db_path = "-"
-                if config is not None:
-                    session_db_path = getattr(config.memory, "session_db_path", "-")
-                    vector_db_path = getattr(config.memory, "vector_db_path", "-")
-                await self._emit_system_notice(
-                    "debug",
-                    (
-                        f"会话数据库: {session_db_path}\n"
-                        f"向量数据库: {vector_db_path}\n"
-                        f"Bridge events: {debug_events}\n"
-                        f"Bridge run: {debug_run_id}\n"
-                    ),
-                    "info",
-                    request_id=request_id,
-                )
-                return True
-            case "/pwd":
-                workspace_root = getattr(self.engine, "workspace_root", Path.cwd())
-                info = (
-                    f"工作区: {workspace_root}\n"
-                    f"当前目录: {Path.cwd()}\n"
-                )
-                config = getattr(self.engine, "_config", None)
-                if config is not None:
-                    info += (
-                        f"会话库: {getattr(config.memory, 'session_db_path', '-')}\n"
-                        f"向量库: {getattr(config.memory, 'vector_db_path', '-')}\n"
-                    )
-                await self._emit_system_notice("pwd", info, "info", request_id=request_id)
-                return True
-            case "/tools":
-                await self._emit_system_notice(
-                    "tools",
-                    self._list_tools_text(),
-                    "info",
-                    request_id=request_id,
-                )
-                return True
-            case "/model":
-                models = (
-                    f"默认: {self.engine.router.resolve_model('capable')}\n"
-                    f"快速: {self.engine.router.resolve_model('fast')}\n"
-                    f"推理: {self.engine.router.resolve_model('reasoning')}"
-                )
-                await self._emit_system_notice("model", models, "info", request_id=request_id)
-                return True
-            case "/usage":
-                usage = self.engine.usage
-                total_cost = getattr(usage, "total_cost_usd", 0.0)
-                await self._emit_system_notice(
-                    "usage",
-                    (
-                        f"Token: {usage.total_input_tokens + usage.total_output_tokens} "
-                        f"| 轮次: {usage.turns} | 费用: ${total_cost:.4f}"
-                    ),
-                    "info",
-                    request_id=request_id,
-                )
-                return True
-            case "/version":
-                await self._emit_system_notice(
-                    "version",
-                    f"NaumiAgent v{__version__}",
-                    "info",
-                    request_id=request_id,
-                )
-                return True
-
-        if canonical not in self._cli_supported_commands:
-            await self.emit_error(
-                f"未知斜杠命令: {canonical}。输入 /help 查看可用命令。",
-                code="unknown_command",
-                request_id=request_id,
-            )
-            return True
-
-        await self._run_cli_slash_command(
-            f"{canonical}{' ' + arg if arg else ''}",
-            request_id=request_id,
-        )
-        return True
-
     async def _run_cli_slash_command(self, cmd: str, *, request_id: str) -> None:
         """Execute a slash command through the legacy CLI command handlers."""
-        from naumi_agent.main import _capture_async, _handle_command
+        from naumi_agent.cli.slash_router import execute_slash_command
+
+        parse_reasoning_toggle = None
+        try:
+            from naumi_agent.main import _parse_reasoning_toggle as parse_reasoning_toggle
+        except Exception:
+            parse_reasoning_toggle = None
 
         try:
-            output = await _capture_async(lambda: _handle_command(self.engine, cmd))
+            output = await execute_slash_command(self.engine, cmd)
         except Exception as exc:
             logger.exception("UI bridge slash command execution failed")
             if self.debug_trace is not None:
@@ -757,7 +592,32 @@ class JsonlEngineBridge:
             )
             return
 
-        text = strip_ansi(output).strip()
+        plain_output = strip_ansi(output).strip()
+        if plain_output.startswith("未知命令:"):
+            command = str(cmd).split(maxsplit=1)[0]
+            await self.emit_error(
+                f"未知命令: {command}",
+                code="unknown_command",
+                request_id=request_id,
+            )
+            return
+
+        raw = str(cmd).strip()
+        if raw.lower().startswith("/reasoning"):
+            parts = raw.split(maxsplit=1)
+            arg = parts[1] if len(parts) > 1 else ""
+            try:
+                if parse_reasoning_toggle is None:
+                    raise ValueError
+                enabled, _ = parse_reasoning_toggle(arg, self._show_reasoning)
+            except TypeError:
+                enabled = None
+            except ValueError:
+                enabled = self._show_reasoning
+            if enabled is not None:
+                self._show_reasoning = enabled
+
+        text = plain_output
         if text:
             await self._emit_system_notice(
                 "command",
@@ -773,139 +633,6 @@ class JsonlEngineBridge:
                 request_id=request_id,
             )
         await self.emit(ServerEventType.STATUS, self.status_payload())
-
-    def _list_tools_text(self) -> str:
-        tools = self.engine.tool_registry.all()
-        lines = ["可用工具："]
-        for tool in tools:
-            lines.append(f"{tool.name} · {tool.description}")
-        return "\n".join(lines) if lines else "未发现可用工具。"
-
-    def _slash_help_text(self) -> str:
-        lines = ["当前支持的命令："]
-        for entry in _slash_command_payload():
-            command = str(entry.get("command", "")).strip()
-            if not command.startswith("/"):
-                continue
-            aliases = sorted(
-                str(alias)
-                for alias in (entry.get("aliases") or [])
-                if str(alias).strip()
-            )
-            suffix = f"（别名: {', '.join(aliases)}）" if aliases else ""
-            description = str(entry.get("description", "") or "").strip() or "-"
-            lines.append(f"{command}{suffix} · {description}")
-        return "\n".join(lines)
-
-    def _coerce_reasoning_visibility(self, raw: str) -> bool | None:
-        value = raw.strip().lower()
-        if not value:
-            return not self._show_reasoning
-        if value in {"on", "true", "1", "show", "open", "yes"}:
-            return True
-        if value in {"off", "false", "0", "hide", "close", "no"}:
-            return False
-        if value == "toggle":
-            return not self._show_reasoning
-        return None
-
-    def _normalize_runtime_mode(self, raw: str) -> str | None:
-        value = raw.strip().lower()
-        if value in {"default", "plan", "bypass"}:
-            return value
-        return None
-
-    def _parse_task_panel_command(self, raw: str) -> dict[str, Any]:
-        parts = raw.split() if raw else []
-        payload: dict[str, Any] = {
-            "limit": 12,
-            "source": "all",
-            "status": "all",
-            "pinned": False,
-            "refresh": False,
-        }
-        if not parts:
-            return payload
-
-        if parts[0].lower() == "off":
-            payload["limit"] = 12
-            payload["source"] = "all"
-            payload["status"] = "all"
-            payload["pinned"] = False
-            payload["refresh"] = False
-            return payload
-
-        for token in parts:
-            if token.isdigit():
-                payload["limit"] = min(max(int(token), 1), 50)
-            elif token == "pin":
-                payload["pinned"] = True
-            elif token.startswith("source="):
-                value = token.split("=", 1)[1]
-                if value:
-                    payload["source"] = value.lower().replace("-", "_")
-            elif token.startswith("status="):
-                value = token.split("=", 1)[1]
-                if value:
-                    payload["status"] = value.lower().replace("-", "_")
-
-        return payload
-
-    async def _show_history_command(self, arg: str, *, request_id: str) -> None:
-        from naumi_agent.ui.history_screen import (
-            build_history_snapshot,
-            render_history_preview,
-            render_history_screen,
-        )
-
-        parts = arg.strip().split(maxsplit=1)
-        subcommand = parts[0].lower() if parts else ""
-        sub_arg = parts[1].strip() if len(parts) > 1 else ""
-
-        if subcommand == "preview":
-            if not sub_arg:
-                await self._emit_system_notice(
-                    "history",
-                    "用法: /history preview <session_id>",
-                    "warning",
-                    request_id=request_id,
-                )
-                return
-            session = await self.engine.session_store.load(sub_arg)
-            if session is None:
-                await self._emit_system_notice(
-                    "history",
-                    f"会话不存在: {sub_arg}",
-                    "warning",
-                    request_id=request_id,
-                )
-                return
-            await self._emit_system_notice(
-                "history",
-                render_history_preview(session),
-                "info",
-                request_id=request_id,
-            )
-            return
-
-        query = arg.strip()
-        sessions, total = await self.engine.list_sessions(page=1, page_size=20, query=query)
-        snapshot = build_history_snapshot(
-            sessions,
-            total=total,
-            query=query,
-            current_session_id=(
-                self.engine._session.id if getattr(self.engine, "_session", None) else None
-            ),
-            fallback_workspace=str(getattr(self.engine, "workspace_root", "")),
-            fallback_git_branch=self._git_snapshot_branch(),
-        )
-        await self._emit_system_notice(
-            "history",
-            render_history_screen(snapshot),
-            "info",
-            request_id=request_id,
-        )
 
     async def _load_session_command(self, arg: str, *, request_id: str) -> None:
         if not arg:

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from naumi_agent.ui.messages.base import MessageType, UIMessage
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 # Maximum length for tool argument summaries (avoids storing huge payloads).
 _ARGS_SUMMARY_MAX = 200
 _CONTENT_PREVIEW_MAX = 500
+_FENCE_RE = re.compile(r"```([A-Za-z0-9_+#.-]*)[^\n]*\n", re.MULTILINE)
 
 
 def _safe_str(value: Any, default: str = "") -> str:
@@ -87,6 +89,47 @@ def _content_preview(content: Any) -> tuple[str, int]:
     if length <= _CONTENT_PREVIEW_MAX:
         return text, length
     return text[: _CONTENT_PREVIEW_MAX] + "…", length
+
+
+def _detect_preview_format(tool_name: str, content: str) -> tuple[str, str]:
+    """Infer how a frontend should highlight a tool output preview."""
+    text = content.strip()
+    if not text:
+        return "text", ""
+
+    fence = _FENCE_RE.search(text)
+    if fence:
+        language = fence.group(1).strip().lower()
+        if language == "diff":
+            return "diff", "diff"
+        return "code", language or _guess_language_from_tool(tool_name)
+
+    lines = [line for line in text.splitlines()[:12] if line.strip()]
+    if _looks_like_diff_lines(lines):
+        return "diff", "diff"
+    if _looks_like_markdown_lines(lines):
+        return "markdown", "markdown"
+    return "text", ""
+
+
+def _looks_like_diff_lines(lines: list[str]) -> bool:
+    return any(line.startswith(("---", "+++", "@@")) for line in lines) and any(
+        line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+        for line in lines
+    )
+
+
+def _looks_like_markdown_lines(lines: list[str]) -> bool:
+    return any(
+        line.startswith(("# ", "## ", "### ", "- ", "* ", "> ", "|"))
+        for line in lines
+    )
+
+
+def _guess_language_from_tool(tool_name: str) -> str:
+    if tool_name == "code_execute":
+        return "python"
+    return ""
 
 
 def _to_tuple(value: Any) -> tuple[Any, ...]:
@@ -353,6 +396,10 @@ class EngineEventAdapter:
     ) -> ToolResultMessage:
         raw_content = data.get("content", "")
         preview, length = _content_preview(raw_content)
+        preview_format, preview_language = _detect_preview_format(
+            _safe_str(data.get("name")),
+            preview,
+        )
         return ToolResultMessage(
             type=MessageType.TOOL_RESULT,
             tool_name=_safe_str(data.get("name")),
@@ -361,6 +408,9 @@ class EngineEventAdapter:
             duration_ms=_safe_int(data.get("duration_ms")),
             content_preview=preview,
             content_length=length,
+            preview_format=preview_format,
+            preview_language=preview_language,
+            content_truncated=length > len(preview),
             raw_event=event,
             raw_data=None,
         )

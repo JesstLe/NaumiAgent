@@ -105,6 +105,8 @@ class TestReplayConversion:
         assert isinstance(result[0], ToolResultMessage)
         assert result[0].content_preview.count("```") % 2 == 0
         assert "已隐藏" in result[0].content_preview
+        assert result[0].preview_format == "code"
+        assert result[0].preview_language == "python"
 
     def test_tool_result_error(self) -> None:
         msgs = [

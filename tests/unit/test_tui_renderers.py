@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from naumi_agent.tui.renderers.registry import TUIRenderer
-from naumi_agent.ui.messages import EngineEventAdapter
+from naumi_agent.tui.renderers.registry import TUIRenderer, _highlightable_tool_preview
+from naumi_agent.ui.messages import EngineEventAdapter, ToolResultMessage
+from naumi_agent.ui.messages.base import MessageType
 
 
 class FakeChat:
@@ -15,6 +16,15 @@ class FakeChat:
 
     def start_tool(self, name: str) -> None:
         self.started_tool = name
+
+    def end_tool(
+        self,
+        label: str,
+        status: str,
+        duration_ms: int,
+        content_preview: str,
+    ) -> None:
+        self.mounted.append((label, status, duration_ms, content_preview))
 
     def mount(self, widget: Any) -> None:
         self.mounted.append(widget)
@@ -74,6 +84,19 @@ def test_permission_renderer_keeps_literal_status_text() -> None:
     mounted = _mounted_plain_text(chat)
     assert "[needs_confirmation]" in mounted
     assert "bash_run" in mounted
+
+
+def test_tool_result_wraps_code_preview_with_language_fence() -> None:
+    msg = ToolResultMessage(
+        type=MessageType.TOOL_RESULT,
+        tool_name="code_execute",
+        status="success",
+        content_preview="print('ok')",
+        preview_format="code",
+        preview_language="python",
+    )
+
+    assert _highlightable_tool_preview(msg) == "```python\nprint('ok')\n```"
 
 
 def test_recovery_renderer_escapes_markup_sensitive_text() -> None:

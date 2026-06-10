@@ -403,6 +403,8 @@ class AgentEngine:
         self.emitter = EventEmitter()
         self.hooks = HookManager()
         self._session: Session | None = None
+        self._openai_tools_cache_key: tuple[tuple[str, int], ...] = ()
+        self._openai_tools_cache: list[dict[str, Any]] | None = None
         self._browser_session = BrowserRuntime(
             Path(config.memory.session_db_path).parent / "browser"
         )
@@ -554,6 +556,38 @@ class AgentEngine:
             self._tool_registry.register(tool)
 
         self._reaper_started = False
+
+    def _get_openai_tools_cached(self) -> list[dict[str, Any]] | None:
+        """Return cached OpenAI tool schemas while the registry is unchanged."""
+        if len(self._tool_registry) <= 0:
+            return None
+        tools = self._tool_registry.all()
+        cache_key = tuple((tool.name, id(tool)) for tool in tools)
+        if self._openai_tools_cache is None or cache_key != self._openai_tools_cache_key:
+            self._openai_tools_cache_key = cache_key
+            self._openai_tools_cache = [tool.to_openai_tool() for tool in tools]
+        return self._openai_tools_cache
+
+    @staticmethod
+    def _should_preplan_streaming(task: str) -> bool:
+        """Keep streaming responsive unless the user explicitly asks for orchestration."""
+        text = task.lower()
+        explicit_markers = (
+            "多智能体",
+            "子 agent",
+            "子agent",
+            "subagent",
+            "sub-agent",
+            "orchestrator",
+            "orchestrate",
+            "并行执行",
+            "并行规划",
+            "任务分解",
+            "制定计划",
+            "先规划",
+            "执行计划",
+        )
+        return any(marker in text for marker in explicit_markers)
 
     def _register_shell_hooks(self) -> None:
         """从 config.yaml 的 hooks 段注册 shell 命令 hook."""
@@ -1739,7 +1773,7 @@ class AgentEngine:
         task = hooked_task
         self._append_message({"role": "user", "content": task})
         await self._inject_relevant_memories(task)
-        tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
+        tools = self._get_openai_tools_cached()
 
         session_id = self._session.id if self._session else ""
         await self._fire_hook(HookContext(
@@ -1834,7 +1868,7 @@ class AgentEngine:
         await self._inject_relevant_memories(task)
         await emit_perf_phase("memory_recall", "记忆召回", phase_start)
         phase_start = time.perf_counter()
-        tools = self._tool_registry.get_openai_tools() if len(self._tool_registry) > 0 else None
+        tools = self._get_openai_tools_cached()
         await emit_perf_phase(
             "tool_schema",
             "工具 Schema",
@@ -1853,17 +1887,26 @@ class AgentEngine:
 
         try:
             phase_start = time.perf_counter()
-            plan = await self._planner.plan(task)
+            if self._should_preplan_streaming(task):
+                plan = await self._planner.plan(task)
+                planning_mode = str(plan.mode)
+            else:
+                plan = None
+                planning_mode = "skipped_for_streaming"
             await emit_perf_phase(
                 "planning",
                 "规划",
                 phase_start,
-                mode=str(plan.mode),
+                mode=planning_mode,
             )
             exceeded = self._check_budget()
             if exceeded:
                 result = exceeded
-            elif plan.mode == ExecutionMode.ORCHESTRATOR and hasattr(self, "subagent_manager"):
+            elif (
+                plan is not None
+                and plan.mode == ExecutionMode.ORCHESTRATOR
+                and hasattr(self, "subagent_manager")
+            ):
                 result = await self._run_orchestrated(plan, tools)
             else:
                 result = await self._react_loop_streaming(tools, on_event, plan=plan)

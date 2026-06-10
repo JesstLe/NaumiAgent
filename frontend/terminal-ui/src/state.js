@@ -16,6 +16,11 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/fold", description: "切换指定折叠项（按编号或类型）" },
   { command: "/expand", description: "展开指定折叠项（按编号/全部）" },
   { command: "/collapse", description: "折叠指定折叠项（按编号/全部）" },
+  { command: "/glob", description: "按 glob 规则搜索工作区文件路径" },
+  { command: "/grep", description: "搜索文件内容（可配置过滤）" },
+  { command: "/read", description: "读取文件内容（可分页）", aliases: ["/file_read"] },
+  { command: "/write", description: "写入文件（覆盖）", aliases: ["/file_write"] },
+  { command: "/edit", description: "按文本替换更新文件", aliases: ["/file_edit"] },
   { command: "/clear", aliases: ["/c"], description: "清空当前会话显示" },
   { command: "/debug", description: "显示前端与后端调试路径" },
   { command: "/pwd", description: "显示工作区与会话库路径" },
@@ -602,6 +607,8 @@ export function handleToolResult(state, message) {
     status: "running",
     durationMs: 0,
     output: "",
+    outputFormat: "text",
+    outputLanguage: "",
   };
   if (!tool) {
     state.tools.push(target);
@@ -611,6 +618,8 @@ export function handleToolResult(state, message) {
   target.durationMs = message.duration_ms;
   target.output = message.content_preview ?? "";
   target.outputLength = message.content_length ?? 0;
+  target.outputFormat = message.preview_format ?? "text";
+  target.outputLanguage = message.preview_language ?? "";
 }
 
 export function handleTodoStatus(state, message) {
@@ -692,7 +701,13 @@ export function handleSubmitText(state, text, send) {
     return;
   }
   if (text === "/permissions" || text.startsWith("/permissions ")) {
-    send("submit", { text });
+    const raw = text.slice("/permissions".length).trim();
+    const limit = Number.parseInt(raw, 10);
+    if (raw && Number.isFinite(limit) && limit > 0) {
+      send("permissions_panel", { limit });
+    } else {
+      send("permissions_panel", {});
+    }
     return;
   }
   if (text === "/doctor") {
