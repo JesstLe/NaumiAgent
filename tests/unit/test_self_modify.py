@@ -496,6 +496,29 @@ class TestValidateAndApply:
         assert result["validation"]["ruff_check"]["passed"] is True
         assert result["validation"]["pytest"]["passed"] is True
 
+    def test_validates_in_isolated_copy_without_applying(self, tmp_path: Path):
+        source_dir = tmp_path / "src" / "naumi_agent"
+        tools_dir = source_dir / "tools"
+        tools_dir.mkdir(parents=True)
+        (source_dir / "__init__.py").write_text("", encoding="utf-8")
+        (tools_dir / "__init__.py").write_text("", encoding="utf-8")
+        target = tools_dir / "dummy_tool.py"
+        original = '"""Dummy tool."""\n\nx = 1\n'
+        target.write_text(original, encoding="utf-8")
+
+        with patch("naumi_agent.tools.self_modify._AGENT_SOURCE_DIR", source_dir):
+            result = validate_and_apply(
+                "tools/dummy_tool.py",
+                '"""Dummy tool."""\n\nx = 2\n',
+                "change x",
+                apply_to_workspace=False,
+            )
+
+        assert result["status"] == "validated"
+        assert result["validation"]["import_test"]["passed"] is True
+        assert result["validation"]["pytest"]["passed"] is True
+        assert target.read_text(encoding="utf-8") == original
+
 
 class TestSelfModifyTool:
     def test_tool_name(self):
@@ -590,6 +613,60 @@ class TestSelfModifyTool:
             )
         assert "已应用" in result
         assert "tools/analysis.py" in result
+
+    @pytest.mark.asyncio
+    async def test_execute_validates_in_isolation_without_modifying_source(
+        self,
+        tmp_path: Path,
+    ):
+        source_dir = tmp_path / "src" / "naumi_agent"
+        tools_dir = source_dir / "tools"
+        tools_dir.mkdir(parents=True)
+        (source_dir / "__init__.py").write_text("", encoding="utf-8")
+        target = tools_dir / "dummy_tool.py"
+        original = '"""Dummy tool."""\n\nx = 1\n'
+        target.write_text(original, encoding="utf-8")
+        new_content = '"""Dummy tool."""\n\nx = 2\n'
+
+        tool = SelfModifyTool()
+
+        with (
+            patch("naumi_agent.tools.self_modify._AGENT_SOURCE_DIR", source_dir),
+            patch(
+                "naumi_agent.tools.self_modify._is_modifiable_file",
+                return_value=True,
+            ),
+            patch(
+                "naumi_agent.tools.self_modify._is_protected_file",
+                return_value=False,
+            ),
+            patch(
+                "naumi_agent.tools.self_modify._run_ruff",
+                return_value=(True, ""),
+            ),
+            patch(
+                "naumi_agent.tools.self_modify._run_ruff_format",
+                return_value=(True, ""),
+            ),
+            patch(
+                "naumi_agent.tools.self_modify._run_import_test",
+                return_value=(True, ""),
+            ),
+            patch(
+                "naumi_agent.tools.self_modify._run_tests",
+                return_value=(True, "1 passed"),
+            ),
+        ):
+            output = await tool.execute(
+                target_file="tools/dummy_tool.py",
+                new_content=new_content,
+                description="change x to 2",
+            )
+
+        assert target.read_text(encoding="utf-8") == original
+        assert "已在隔离区验证" in output
+        assert "主工作区未修改" in output
+        assert "+x = 2" in output
 
     @pytest.mark.asyncio
     async def test_execute_reports_rejected(self):
