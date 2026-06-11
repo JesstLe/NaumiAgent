@@ -363,6 +363,19 @@ def test_bridge_status_payload_includes_slash_command_list(monkeypatch: pytest.M
     assert slash_commands == [{"command": "/help", "aliases": ["/h"], "description": "显示帮助"}]
 
 
+def test_bridge_status_payload_exposes_runtime_slash_commands() -> None:
+    engine = _FakeEngine()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+
+    slash_commands = bridge.status_payload().get("slash_commands")
+    command_names = {item["command"] for item in slash_commands}
+
+    assert "/browse" in command_names
+    assert "/tasks" in command_names
+    assert "/scan-full" in command_names
+    assert "/btemplate-list" in command_names
+
+
 @pytest.mark.asyncio
 async def test_bridge_status_payload_includes_compact_task_activity() -> None:
     engine = _FakeEngine()
