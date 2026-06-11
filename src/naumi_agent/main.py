@@ -2432,7 +2432,22 @@ async def _run_pursue(engine: Any, goal: str) -> None:
         progress.add_task("追踪中...", total=None)
 
         try:
-            result = await tool.execute(goal=goal)
+            execute_tool = getattr(engine, "_execute_tool", None)
+            if callable(execute_tool):
+                from naumi_agent.tools.base import ToolCall
+
+                tool_call = ToolCall(
+                    id=f"slash-pursue-{uuid.uuid4()}",
+                    name="pursue_goal",
+                    arguments=json.dumps({"goal": goal}, ensure_ascii=False),
+                )
+                tool_result = await execute_tool(tool_call, agent_name="cli")
+                if tool_result.status != "success":
+                    console.print(f"[yellow]{tool_result.content}[/yellow]")
+                    return
+                result = tool_result.content
+            else:
+                result = await tool.execute(goal=goal)
         except KeyboardInterrupt:
             console.print("\n[yellow]⚠️ 目标追踪被中断[/yellow]")
             return
