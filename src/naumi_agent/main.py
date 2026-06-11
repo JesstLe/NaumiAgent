@@ -2517,7 +2517,22 @@ async def _run_worktree(engine: Any, arg: str) -> None:
         if not tool:
             console.print(f"[red]工具未注册: {tool_name}[/red]")
             return
-        result = await tool.execute(**kwargs)
+        execute_tool = getattr(engine, "_execute_tool", None)
+        if callable(execute_tool):
+            from naumi_agent.tools.base import ToolCall
+
+            tool_call = ToolCall(
+                id=f"slash-worktree-{tool_name}-{uuid.uuid4()}",
+                name=tool_name,
+                arguments=json.dumps(kwargs, ensure_ascii=False),
+            )
+            tool_result = await execute_tool(tool_call, agent_name="cli")
+            if tool_result.status != "success":
+                console.print(f"[yellow]{tool_result.content}[/yellow]")
+                return
+            result = tool_result.content
+        else:
+            result = await tool.execute(**kwargs)
         console.print(
             Panel(
                 Markdown(result),
