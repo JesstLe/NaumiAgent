@@ -464,6 +464,37 @@ class TestToolExecution:
         assert "Error: File not found" in result.content or "权限拒绝" in result.content
 
     @pytest.mark.asyncio
+    async def test_managed_worktree_storage_is_permission_allowed(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        state_dir = tmp_path / "state"
+        worktree_file = state_dir / "worktrees" / "pursue-demo" / "demo.py"
+        worktree_file.parent.mkdir(parents=True)
+        worktree_file.write_text("x = 1\n", encoding="utf-8")
+
+        config = AppConfig()
+        config.workspace_root = str(workspace)
+        config.memory.session_db_path = str(state_dir / "sessions.db")
+        config.safety.allowed_dirs = []
+        engine = AgentEngine(config)
+        try:
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="x",
+                    name="file_read",
+                    arguments=json.dumps({"path": str(worktree_file)}),
+                )
+            )
+        finally:
+            await engine.shutdown()
+
+        assert result.status == "success"
+        assert "x = 1" in result.content
+
+    @pytest.mark.asyncio
     async def test_confirmation_required_tool_blocked(self, engine: AgentEngine) -> None:
         tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo should_not_run"}')
         result = await engine._execute_tool(tc)

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.143] - 2026-06-11
+
+### Fixed
+- **Managed Worktree Permission Scope** — Engine 现在会把自身管理的 `worktrees` 存储目录加入权限允许目录，确保 `/pursue` 重定位到隔离 worktree 的 file/bash 路径继续通过 `PermissionChecker` 审计而不会被误判为越界。
+
 ## [0.1.142] - 2026-06-11
 
 ### Changed
