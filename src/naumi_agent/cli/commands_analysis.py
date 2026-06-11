@@ -6,46 +6,76 @@ from typing import Any
 
 from naumi_agent.cli.display import console
 
+ANALYSIS_TOOL_NAMES = {
+    "chaos": "analysis_chaos",
+    "scale": "analysis_scale",
+    "state": "analysis_state",
+    "vibe": "analysis_vibe",
+    "eval": "analysis_eval",
+    "page": "analysis_page",
+    "heal": "analysis_heal",
+    "dspy": "analysis_dspy",
+    "graph": "analysis_graph",
+    "mcts": "analysis_mcts",
+    "route": "analysis_route",
+    "speculate": "analysis_speculate",
+    "jit": "analysis_jit",
+    "pointer": "analysis_pointer",
+    "cooe": "analysis_cooe",
+    "sleep": "analysis_sleep",
+    "entropy": "analysis_entropy",
+    "ooda": "analysis_ooda",
+    "probe": "analysis_probe",
+    "hook": "analysis_hook",
+    "vision": "analysis_vision",
+    "spar": "analysis_spar",
+    "world": "analysis_world",
+    "fusion": "analysis_fusion",
+    "consensus": "analysis_consensus",
+    "pid": "analysis_pid",
+    "zkp": "analysis_zkp",
+    "genesis": "analysis_genesis",
+    "macro": "analysis_macro",
+    "cosmos": "analysis_cosmos",
+    "watchdog": "analysis_watchdog",
+    "supervisor": "analysis_supervisor",
+    "autopsy": "analysis_autopsy",
+}
+
+
+def _build_analysis_kwargs(mode: str, target: str) -> dict[str, Any]:
+    """Build execute kwargs matching the current analysis tool contracts."""
+    if mode == "vibe":
+        return {"description": target}
+    if mode == "page":
+        return {"session_context": target}
+    if mode == "heal":
+        return {"error_log": target}
+    if mode == "dspy":
+        return {"prompt_target": target}
+    if mode == "mcts":
+        return {"problem": target}
+    if mode in {
+        "route",
+        "jit",
+        "cooe",
+        "probe",
+        "hook",
+        "vision",
+        "spar",
+        "macro",
+    }:
+        return {"task": target}
+    if mode == "sleep":
+        return {"session_context": target}
+    if mode == "entropy":
+        return {"context": target}
+    return {"target": target}
+
 
 async def run_analysis(engine: Any, mode: str, target: str) -> None:
     """执行分析模式命令."""
-    tool_names = {
-        "chaos": "chaos_analysis",
-        "scale": "scale_analysis",
-        "state": "state_analysis",
-        "vibe": "vibe_codegen",
-        "eval": "eval_driven_dev",
-        "page": "page_analysis",
-        "heal": "heal_repair",
-        "dspy": "dspy_compile",
-        "graph": "graph_rag",
-        "mcts": "mcts_search",
-        "route": "moe_route",
-        "speculate": "speculate_decode",
-        "jit": "jit_tool",
-        "pointer": "pointer_spa",
-        "cooe": "cooe_execute",
-        "sleep": "sleep_prune",
-        "entropy": "entropy_reduce",
-        "ooda": "ooda_command",
-        "probe": "probe_detect",
-        "hook": "hook_instrument",
-        "vision": "vision_extract",
-        "spar": "spar_adversarial",
-        "world": "world_model",
-        "fusion": "dp_fusion",
-        "consensus": "byzantine_consensus",
-        "pid": "pid_correction",
-        "zkp": "zkp_verify",
-        "genesis": "genesis_restructure",
-        "macro": "macro_simulation",
-        "cosmos": "cosmos_audit",
-        "watchdog": "watchdog_guard",
-        "supervisor": "supervisor_tree",
-        "autopsy": "autopsy_slice",
-    }
-
-    tool_name = tool_names.get(mode)
+    tool_name = ANALYSIS_TOOL_NAMES.get(mode)
     if not tool_name:
         console.print(f"[red]未知分析模式: {mode}[/red]")
         return
@@ -57,7 +87,7 @@ async def run_analysis(engine: Any, mode: str, target: str) -> None:
 
     console.print(f"[bold magenta]🔬 {mode} 分析中...[/bold magenta]")
     with console.status("[bold green]分析中...[/bold green]"):
-        result = await tool.execute(target=target)
+        result = await tool.execute(**_build_analysis_kwargs(mode, target))
 
     from rich.markdown import Markdown
     from rich.panel import Panel
@@ -127,7 +157,7 @@ def get_analysis_command_map() -> dict[str, tuple[str, str]]:
     }
 
 
-def get_analysis_commands_with_args() -> dict[str, tuple[str, str]]:
+def get_analysis_commands_with_args() -> dict[str, str]:
     """Return commands that require arguments."""
     return {
         "/vibe": "vibe",
