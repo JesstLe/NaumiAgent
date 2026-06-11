@@ -38,6 +38,21 @@ class TestPermissionChecker:
         result = checker.check("file_read", {"path": "/workspace/test.txt"})
         assert result.allowed
 
+    def test_lockdown_allows_claude_style_read_only_tools_without_metadata(self) -> None:
+        checker = PermissionChecker(PermissionMode.LOCKDOWN, allowed_dirs=["/workspace"])
+
+        cases = [
+            ("glob", {"pattern": "**/*.py", "directory": "/workspace"}),
+            ("grep", {"pattern": "PermissionRule", "directory": "/workspace"}),
+            ("read", {"path": "/workspace/test.txt"}),
+        ]
+
+        for tool_name, args in cases:
+            result = checker.check(tool_name, args)
+
+            assert result.allowed, f"{tool_name}: {result.reason}"
+            assert not result.requires_confirmation
+
     def test_unknown_tool_blocked(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
         result = checker.check("unknown_tool", {})
