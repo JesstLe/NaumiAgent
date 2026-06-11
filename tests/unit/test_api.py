@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from naumi_agent import __version__
 from naumi_agent.api.routes.messages import (
     _engine_event_to_stream_event,
     _stream_response,
@@ -26,7 +27,12 @@ class TestSchemas:
         assert s.title is None
 
     def test_health_response(self) -> None:
-        h = HealthResponse(status="healthy", version="0.1.0", uptime_seconds=0.0, active_sessions=0)
+        h = HealthResponse(
+            status="healthy",
+            version=__version__,
+            uptime_seconds=0.0,
+            active_sessions=0,
+        )
         assert h.status == "healthy"
 
 
@@ -40,7 +46,7 @@ class TestHealthEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "healthy"
-        assert data["version"] == "0.1.0"
+        assert data["version"] == __version__
 
 
 class _FakeSessionStore:

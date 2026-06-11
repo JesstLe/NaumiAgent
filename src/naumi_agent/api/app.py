@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from naumi_agent import __version__
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 
@@ -32,7 +33,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="NaumiAgent API",
-        version="0.1.0",
+        version=__version__,
         description="通用智能 Agent 的 REST API 与 WebSocket 接口",
         lifespan=lifespan,
     )
