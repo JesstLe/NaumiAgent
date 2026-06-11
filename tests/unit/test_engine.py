@@ -531,6 +531,28 @@ class TestToolExecution:
         assert result.status == "success"
         assert "pyproject.toml" in result.content
 
+    def test_plan_runtime_mode_read_only_name_allowlist_matches_registered_tools(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        tool = FakeTool()
+
+        for tool_name in [
+            "background_status",
+            "background_list",
+            "background_read_output",
+            "schedule_list",
+            "worktree_status",
+        ]:
+            assert engine._tool_allowed_in_plan_mode(tool_name, tool)
+
+        for tool_name in [
+            "background_run",
+            "schedule_create",
+            "worktree_create",
+        ]:
+            assert not engine._tool_allowed_in_plan_mode(tool_name, tool)
+
     def test_runtime_mode_cycle_updates_permission_mode(self, engine: AgentEngine) -> None:
         assert engine.runtime_mode == AgentRuntimeMode.DEFAULT
 

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.136] - 2026-06-11
+
+### Fixed
+- **Plan Mode Read-Only Tool Allowlist** — 修正 Plan 模式只读工具白名单中的漂移工具名，允许当前真实的 `background_list`、`background_read_output`、`schedule_list`、`worktree_status`，避免状态查看类命令被误判为写操作。
+
 ## [0.1.135] - 2026-06-11
 
 ### Changed

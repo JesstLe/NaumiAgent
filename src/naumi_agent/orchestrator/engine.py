@@ -121,9 +121,10 @@ _PLAN_MODE_READ_ONLY_TOOLS = {
     "pursuit_status",
     "pursuit_list",
     "background_status",
-    "background_output",
-    "scheduler_list",
-    "worktree_list",
+    "background_list",
+    "background_read_output",
+    "schedule_list",
+    "worktree_status",
 }
 
 
