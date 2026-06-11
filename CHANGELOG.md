@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.133] - 2026-06-11
+
+### Changed
+- **Forge Slash Execution Boundary** — `/forge` 保存与验证生成工具时现在优先通过 Engine `_execute_tool` 执行 `forge_tool`，保留无执行器场景的直接调用回退，使工具锻造入口进入权限、Hook 和审计链。
+
 ## [0.1.132] - 2026-06-11
 
 ### Changed
