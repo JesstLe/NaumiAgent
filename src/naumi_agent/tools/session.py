@@ -197,6 +197,62 @@ class SessionLoadTool(Tool):
         return str(getattr(sessions[index], "id", "") or "") or None
 
 
+class SessionDeleteTool(Tool):
+    """Delete a persisted session by explicit id."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "session_delete"
+
+    @property
+    def description(self) -> str:
+        return (
+            "删除指定历史会话，对应用户斜杠命令 /delete。"
+            "这是不可逆的破坏性操作，必须提供明确会话 ID。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "要删除的明确会话 ID。不支持数字编号，避免误删。",
+                },
+            },
+            "required": ["session_id"],
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            concurrency_safe=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="删除会话",
+            search_hint="delete session /delete 删除 会话",
+        )
+
+    async def execute(self, session_id: str) -> str:
+        """Delete a session by explicit id."""
+        target = (session_id or "").strip()
+        if not target:
+            return "用法：session_delete(session_id='<会话ID>')"
+        if target.isdigit():
+            return "为避免误删，session_delete 只接受明确会话 ID，不接受数字编号。"
+
+        deleted = await self._engine.delete_session(target)
+        if not deleted:
+            return f"会话 {target} 不存在。"
+        return f"已删除会话：{target}"
+
+
 def create_session_tools(engine: Any) -> list[Tool]:
     """Create session-related tools."""
-    return [SessionHistoryTool(engine), SessionLoadTool(engine)]
+    return [SessionHistoryTool(engine), SessionLoadTool(engine), SessionDeleteTool(engine)]

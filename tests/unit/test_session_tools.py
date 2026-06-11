@@ -10,7 +10,7 @@ import pytest
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.memory.session import Session
 from naumi_agent.orchestrator.engine import AgentEngine
-from naumi_agent.tools.session import SessionHistoryTool, SessionLoadTool
+from naumi_agent.tools.session import SessionDeleteTool, SessionHistoryTool, SessionLoadTool
 
 
 def _session(session_id: str = "s1", title: str = "Demo") -> Session:
@@ -109,3 +109,51 @@ def test_engine_registers_session_load_tool(tmp_path) -> None:
 
     assert tool is not None
     assert tool.metadata.read_only is False
+
+
+@pytest.mark.asyncio
+async def test_session_delete_tool_deletes_by_session_id() -> None:
+    engine = MagicMock()
+    engine.delete_session = AsyncMock(return_value=True)
+    tool = SessionDeleteTool(engine)
+
+    output = await tool.execute(session_id="s2")
+
+    assert "已删除会话：s2" in output
+    engine.delete_session.assert_awaited_once_with("s2")
+
+
+@pytest.mark.asyncio
+async def test_session_delete_tool_reports_missing_session() -> None:
+    engine = MagicMock()
+    engine.delete_session = AsyncMock(return_value=False)
+    tool = SessionDeleteTool(engine)
+
+    output = await tool.execute(session_id="missing")
+
+    assert "会话 missing 不存在" in output
+    engine.delete_session.assert_awaited_once_with("missing")
+
+
+@pytest.mark.asyncio
+async def test_session_delete_tool_rejects_numeric_index() -> None:
+    engine = MagicMock()
+    engine.delete_session = AsyncMock(return_value=True)
+    tool = SessionDeleteTool(engine)
+
+    output = await tool.execute(session_id="1")
+
+    assert "只接受明确会话 ID" in output
+    engine.delete_session.assert_not_awaited()
+
+
+def test_engine_registers_session_delete_tool_as_destructive(tmp_path) -> None:
+    engine = AgentEngine(
+        AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+    )
+
+    tool = engine.tool_registry.get("session_delete")
+
+    assert tool is not None
+    assert tool.metadata.destructive is True
+    assert tool.metadata.requires_confirmation is True

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.118] - 2026-06-11
+
+### Added
+- **Session Delete Tool** — 新增 `session_delete` Tool，将 `/delete` 的历史会话删除能力暴露给 Agent 自主调用，并声明 `destructive` 与确认要求；工具只接受明确会话 ID，避免数字编号误删。
+
 ## [0.1.117] - 2026-06-11
 
 ### Added
