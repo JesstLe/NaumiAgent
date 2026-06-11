@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.142] - 2026-06-11
+
+### Changed
+- **Pursuit File Read Worktree Scope** — `/pursue` 的 `file_read` generic tool 参数现在会在已有 `worktree_path` 时重定位 `path`，拒绝逃逸 worktree 的读取路径，并保留 `offset`、`limit` 等其他参数。
+
 ## [0.1.141] - 2026-06-11
 
 ### Changed

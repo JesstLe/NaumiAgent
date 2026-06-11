@@ -1705,6 +1705,15 @@ class GoalPursuitLoop:
         if text.startswith("```"):
             text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
         params = json.loads(text)
+        if tool_name == "file_read" and isinstance(params.get("path"), str):
+            try:
+                params["path"] = self._rebase_file_path_for_worktree(params["path"])
+            except ValueError as e:
+                return {
+                    "action_id": action_id,
+                    "status": "error",
+                    "output": str(e),
+                }
 
         if self._execute_tool_call is not None:
             tool_result = await self._execute_tool_call(
