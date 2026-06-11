@@ -2245,6 +2245,43 @@ def _parse_scale_arg(arg: str) -> tuple[str, int]:
     return raw, 10000
 
 
+def _build_main_analysis_kwargs(
+    mode: str,
+    target: str,
+    *,
+    effective_qps: int,
+) -> dict[str, Any]:
+    """Build execute kwargs for main CLI analysis commands."""
+    if mode == "vibe":
+        return {"description": target}
+    if mode == "scale":
+        return {"target": target, "qps": effective_qps}
+    if mode == "page":
+        return {"session_context": target}
+    if mode == "heal":
+        return {"error_log": target}
+    if mode == "dspy":
+        return {"prompt_target": target}
+    if mode == "mcts":
+        return {"problem": target}
+    if mode in {
+        "route",
+        "jit",
+        "cooe",
+        "probe",
+        "hook",
+        "vision",
+        "spar",
+        "macro",
+    }:
+        return {"task": target}
+    if mode == "sleep":
+        return {"session_context": target}
+    if mode == "entropy":
+        return {"context": target}
+    return {"target": target}
+
+
 async def _run_analysis(engine: Any, mode: str, target: str, *, qps: int | None = None) -> None:
     """执行分析模式命令."""
     effective_qps = qps or 10000
@@ -2329,70 +2366,27 @@ async def _run_analysis(engine: Any, mode: str, target: str, *, qps: int | None 
 
     console.print(f"[bold yellow]⚡ {label} 分析中...[/bold yellow]")
     with console.status("[bold green]分析中...[/bold green]"):
-        if mode == "vibe":
-            result = await tool.execute(description=target)
-        elif mode == "scale":
-            result = await tool.execute(target=target, qps=effective_qps)
-        elif mode == "eval":
-            result = await tool.execute(target=target)
-        elif mode == "page":
-            result = await tool.execute(session_context=target)
-        elif mode == "heal":
-            result = await tool.execute(error_log=target)
-        elif mode == "dspy":
-            result = await tool.execute(prompt_target=target)
-        elif mode == "graph":
-            result = await tool.execute(target=target)
-        elif mode == "mcts":
-            result = await tool.execute(problem=target)
-        elif mode == "route":
-            result = await tool.execute(task=target)
-        elif mode == "speculate":
-            result = await tool.execute(target=target)
-        elif mode == "jit":
-            result = await tool.execute(task=target)
-        elif mode == "pointer":
-            result = await tool.execute(target=target)
-        elif mode == "cooe":
-            result = await tool.execute(task=target)
-        elif mode == "sleep":
-            result = await tool.execute(session_context=target)
-        elif mode == "entropy":
-            result = await tool.execute(context=target)
-        elif mode == "ooda":
-            result = await tool.execute(target=target)
-        elif mode == "probe":
-            result = await tool.execute(task=target)
-        elif mode == "hook":
-            result = await tool.execute(task=target)
-        elif mode == "vision":
-            result = await tool.execute(task=target)
-        elif mode == "spar":
-            result = await tool.execute(task=target)
-        elif mode == "world":
-            result = await tool.execute(target=target)
-        elif mode == "fusion":
-            result = await tool.execute(target=target)
-        elif mode == "consensus":
-            result = await tool.execute(target=target)
-        elif mode == "pid":
-            result = await tool.execute(target=target)
-        elif mode == "zkp":
-            result = await tool.execute(target=target)
-        elif mode == "genesis":
-            result = await tool.execute(target=target)
-        elif mode == "macro":
-            result = await tool.execute(task=target)
-        elif mode == "cosmos":
-            result = await tool.execute(target=target)
-        elif mode == "watchdog":
-            result = await tool.execute(target=target)
-        elif mode == "supervisor":
-            result = await tool.execute(target=target)
-        elif mode == "autopsy":
-            result = await tool.execute(target=target)
+        kwargs = _build_main_analysis_kwargs(
+            mode,
+            target,
+            effective_qps=effective_qps,
+        )
+        execute_tool = getattr(engine, "_execute_tool", None)
+        if callable(execute_tool):
+            from naumi_agent.tools.base import ToolCall
+
+            tool_call = ToolCall(
+                id=f"slash-analysis-{mode}-{uuid.uuid4()}",
+                name=tool_name,
+                arguments=json.dumps(kwargs, ensure_ascii=False),
+            )
+            tool_result = await execute_tool(tool_call, agent_name="cli")
+            if tool_result.status != "success":
+                console.print(f"[yellow]{tool_result.content}[/yellow]")
+                return
+            result = tool_result.content
         else:
-            result = await tool.execute(target=target)
+            result = await tool.execute(**kwargs)
 
     console.print()
     console.print(

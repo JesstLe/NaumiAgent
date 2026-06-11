@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.126] - 2026-06-11
+
+### Changed
+- **Main Analysis Execution Boundary** — 主 CLI `_run_analysis` 在 Engine 暴露 `_execute_tool` 时改为构造 `ToolCall` 并以 `agent_name="cli"` 进入统一执行器，保留无执行器场景的直接调用回退，避免手动分析命令绕过权限、Hook 和审计链。
+
 ## [0.1.125] - 2026-06-11
 
 ### Fixed
