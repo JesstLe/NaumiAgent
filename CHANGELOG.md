@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.144] - 2026-06-11
+
+### Fixed
+- **Browser Daemon Completion Description** — `/bdaemon` 的旧 CLI 与新 CLI 补全描述现在完整列出 `reply/resume/abort/manual` 控制子命令，避免用户只从补全中误以为 daemon 只能查询到 `watch`。
+
 ## [0.1.143] - 2026-06-11
 
 ### Fixed

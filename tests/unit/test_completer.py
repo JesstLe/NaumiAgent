@@ -61,6 +61,12 @@ class TestSlashCommandCompleter:
         assert "/quit" in results
         assert "/exit" in results
 
+    def test_browser_daemon_description_lists_control_subcommands(self):
+        metadata = {cmd.name: cmd for cmd in COMMANDS_META}
+        description = metadata["/bdaemon"].description
+        for subcommand in ("reply", "resume", "abort", "manual"):
+            assert subcommand in description
+
     def test_optional_analysis_commands_expose_argument_hints(self):
         metadata = {cmd.name: cmd for cmd in COMMANDS_META}
         flat_takes_arg = {cmd: takes_arg for cmd, _, takes_arg in COMMANDS}

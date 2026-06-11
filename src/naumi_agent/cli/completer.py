@@ -125,7 +125,7 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/browser-stop", "停止浏览器会话", readonly=False, category="元命令"),
         CommandMeta("/browser-state", "显示浏览器调试状态", readonly=True, category="元命令"),
         CommandMeta("/browser-screenshot", "截取当前页面截图", readonly=True, category="元命令"),
-        CommandMeta("/bdaemon", "外部浏览器 daemon — start/health/run/list/status/watch", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
+        CommandMeta("/bdaemon", "外部浏览器 daemon — start/health/run/list/status/watch/reply/resume/abort/manual", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
         CommandMeta("/tasks", "任务面板 — todo/subagent/background/browser", readonly=True, category="元命令"),
         CommandMeta("/task", "查看任务运行详情", takes_arg=True, arg_hint="<id>", readonly=True, category="元命令"),
         CommandMeta("/task-reply", "回复等待中的任务", takes_arg=True, arg_hint="<id> <指令>", readonly=False, category="元命令"),
