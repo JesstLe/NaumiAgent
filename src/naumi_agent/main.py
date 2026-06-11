@@ -1762,7 +1762,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
         case "/chaos":
             await _run_analysis(engine, "chaos", arg or "当前项目")
         case "/scale":
-            await _run_analysis(engine, "scale", arg or "当前项目")
+            scale_target, scale_qps = _parse_scale_arg(arg)
+            await _run_analysis(engine, "scale", scale_target, qps=scale_qps)
         case "/state":
             await _run_analysis(engine, "state", arg or "当前项目")
         case "/vibe":
@@ -2231,8 +2232,22 @@ def _print_help() -> None:
     console.print()
 
 
-async def _run_analysis(engine: Any, mode: str, target: str) -> None:
+def _parse_scale_arg(arg: str) -> tuple[str, int]:
+    """Parse `/scale [QPS]` while preserving legacy target-path input."""
+    raw = arg.strip()
+    if not raw:
+        return "当前项目", 10000
+
+    normalized = raw.replace(",", "").replace("_", "")
+    if normalized.isdigit():
+        return "当前项目", max(1, int(normalized))
+
+    return raw, 10000
+
+
+async def _run_analysis(engine: Any, mode: str, target: str, *, qps: int | None = None) -> None:
     """执行分析模式命令."""
+    effective_qps = qps or 10000
     tool_names = {
         "chaos": "analysis_chaos",
         "scale": "analysis_scale",
@@ -2271,7 +2286,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
 
     labels = {
         "chaos": "灾难演练",
-        "scale": "并发海啸 (10K QPS)",
+        "scale": f"并发海啸 ({effective_qps:,} QPS)",
         "state": "状态审查",
         "vibe": "极速构建",
         "eval": "评测驱动开发 (EDD)",
@@ -2317,7 +2332,7 @@ async def _run_analysis(engine: Any, mode: str, target: str) -> None:
         if mode == "vibe":
             result = await tool.execute(description=target)
         elif mode == "scale":
-            result = await tool.execute(target=target, qps=10000)
+            result = await tool.execute(target=target, qps=effective_qps)
         elif mode == "eval":
             result = await tool.execute(target=target)
         elif mode == "page":
