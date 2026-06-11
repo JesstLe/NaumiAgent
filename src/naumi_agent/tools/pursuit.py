@@ -24,6 +24,7 @@ def set_pursuit_dependencies(
     tool_registry: Any,
     subagent_manager: Any,
     store: Any | None = None,
+    execute_tool_call: Any | None = None,
 ) -> None:
     """Inject dependencies needed by the pursuit tool."""
     global _global_pursuit_loop
@@ -32,6 +33,7 @@ def set_pursuit_dependencies(
         tool_registry=tool_registry,
         subagent_manager=subagent_manager,
         store=store,
+        execute_tool_call=execute_tool_call,
     )
 
 
@@ -117,6 +119,7 @@ class PursueTool(Tool):
             subagent_manager=loop._manager,
             store=loop._store,
             config=config,
+            execute_tool_call=loop._execute_tool_call,
         )
 
         try:

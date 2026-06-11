@@ -13,12 +13,16 @@ This is NOT a demo generator. The loop runs until true success or honest failure
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
+
+from naumi_agent.tools.base import ToolCall, ToolResult
 
 if TYPE_CHECKING:
     from naumi_agent.model.router import ModelRouter
@@ -27,6 +31,8 @@ if TYPE_CHECKING:
     from naumi_agent.tools.base import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+ToolExecutor = Callable[[ToolCall], Awaitable[ToolResult]]
 
 _EXIT_CODE_RE = re.compile(r"\[exit code:\s*(-?\d+)\]", re.IGNORECASE)
 _LEGACY_FAILURE_RE = re.compile(
@@ -332,12 +338,14 @@ class GoalPursuitLoop:
         subagent_manager: SubAgentManager,
         store: PursuitStore | None = None,
         config: PursuitConfig | None = None,
+        execute_tool_call: ToolExecutor | None = None,
     ) -> None:
         self._router = router
         self._tools = tool_registry
         self._manager = subagent_manager
         self._store = store
         self._config = config or PursuitConfig()
+        self._execute_tool_call = execute_tool_call
         self._history: list[IterationCheckpoint] = []
         self._start_time = 0.0
         self._total_tokens = 0
@@ -1199,6 +1207,23 @@ class GoalPursuitLoop:
                 "action_id": action_id,
                 "status": "error",
                 "output": "Could not determine file path from description",
+            }
+
+        if self._execute_tool_call is not None:
+            tool_result = await self._execute_tool_call(
+                ToolCall(
+                    id=f"pursuit-{action_id}",
+                    name="file_write",
+                    arguments=json.dumps(
+                        {"path": path, "content": text},
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            return {
+                "action_id": action_id,
+                "status": "completed" if tool_result.status == "success" else "error",
+                "output": tool_result.content[:3000],
             }
 
         output = await tool.execute(path=path, content=text)
