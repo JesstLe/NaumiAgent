@@ -76,7 +76,7 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/new", "保存当前会话并开始新对话", readonly=False, category="会话"),
         # 分析 — 无参数或可选参数
         CommandMeta("/chaos", "灾难演练 — SPOF 分析", takes_arg=True, arg_hint="[目标]", readonly=True, category="分析"),
-        CommandMeta("/scale", "并发海啸 — 高并发分析", takes_arg=True, arg_hint="[QPS]", readonly=True, category="分析"),
+        CommandMeta("/scale", "并发海啸 — 高并发分析", takes_arg=True, arg_hint="[目标|QPS]", readonly=True, category="分析"),
         CommandMeta("/state", "状态审查 — 云原生合规", readonly=True, category="分析"),
         CommandMeta("/page", "内存分页 — 上下文压力分析", readonly=True, category="分析"),
         CommandMeta("/sleep", "昼夜节律突触修剪 — 知识压缩", readonly=True, category="分析"),

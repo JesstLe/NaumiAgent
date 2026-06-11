@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.137] - 2026-06-11
+
+### Fixed
+- **Scale Slash Argument Contract** — 将 `/scale` 的 AGENTS 协议、CLI help 与补全参数提示统一为 `[目标|QPS]`，匹配实际支持“纯数字作为 QPS，否则作为分析目标”的分发行为。
+
 ## [0.1.136] - 2026-06-11
 
 ### Fixed

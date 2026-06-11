@@ -2154,7 +2154,7 @@ def _print_help() -> None:
         ("/resume", "继续最近的对话 (/r)"),
         ("/delete <id>", "删除指定会话"),
         ("/chaos [目标]", "灾难演练 — SPOF 分析"),
-        ("/scale [QPS]", "并发海啸 — 高并发分析"),
+        ("/scale [目标|QPS]", "并发海啸 — 高并发分析"),
         ("/state", "状态审查 — 云原生合规"),
         ("/vibe <描述>", "极速构建 — 生成 Demo"),
         ("/eval <路径>", "评测驱动 — 生成 pytest 测试"),
@@ -2233,7 +2233,7 @@ def _print_help() -> None:
 
 
 def _parse_scale_arg(arg: str) -> tuple[str, int]:
-    """Parse `/scale [QPS]` while preserving legacy target-path input."""
+    """Parse `/scale [target|QPS]` while preserving legacy target-path input."""
     raw = arg.strip()
     if not raw:
         return "当前项目", 10000

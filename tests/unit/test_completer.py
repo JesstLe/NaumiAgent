@@ -66,7 +66,7 @@ class TestSlashCommandCompleter:
         flat_takes_arg = {cmd: takes_arg for cmd, _, takes_arg in COMMANDS}
         expected_hints = {
             "/chaos": "[目标]",
-            "/scale": "[QPS]",
+            "/scale": "[目标|QPS]",
             "/dspy": "[描述]",
             "/graph": "[路径]",
         }
