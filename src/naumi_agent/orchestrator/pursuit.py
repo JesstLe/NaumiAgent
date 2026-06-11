@@ -20,6 +20,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from naumi_agent.tools.base import ToolCall, ToolResult
@@ -1197,10 +1198,20 @@ class GoalPursuitLoop:
         """
         import os
         path = self._extract_target_path(description)
+        tool_path = ""
+        if path:
+            try:
+                tool_path = self._rebase_file_path_for_worktree(path)
+            except ValueError as e:
+                return {
+                    "action_id": action_id,
+                    "status": "error",
+                    "output": str(e),
+                }
 
         # If file already exists, use edit instead of overwrite
-        if path:
-            resolved = os.path.expanduser(path)
+        if tool_path:
+            resolved = os.path.expanduser(tool_path)
             if os.path.isfile(resolved):
                 edit_tool = self._tools.get("file_edit")
                 if edit_tool:
@@ -1210,8 +1221,8 @@ class GoalPursuitLoop:
 
         # File doesn't exist yet — generate from scratch
         existing = ""
-        if path:
-            resolved = os.path.expanduser(path)
+        if tool_path:
+            resolved = os.path.expanduser(tool_path)
             try:
                 if os.path.isfile(resolved):
                     with open(resolved, encoding="utf-8") as f:
@@ -1259,7 +1270,7 @@ class GoalPursuitLoop:
                     id=f"pursuit-{action_id}",
                     name="file_write",
                     arguments=json.dumps(
-                        {"path": path, "content": text},
+                        {"path": tool_path, "content": text},
                         ensure_ascii=False,
                     ),
                 )
@@ -1270,12 +1281,33 @@ class GoalPursuitLoop:
                 "output": tool_result.content[:3000],
             }
 
-        output = await tool.execute(path=path, content=text)
+        output = await tool.execute(path=tool_path, content=text)
         return {
             "action_id": action_id,
             "status": "completed",
             "output": str(output)[:3000],
         }
+
+    def _rebase_file_path_for_worktree(self, path: str) -> str:
+        """Resolve pursuit file paths inside the managed worktree when present."""
+        if not self._run or not self._run.worktree_path:
+            return path
+
+        worktree = Path(self._run.worktree_path).expanduser().resolve()
+        requested = Path(path).expanduser()
+        candidate = (
+            requested.resolve()
+            if requested.is_absolute()
+            else (worktree / requested).resolve()
+        )
+
+        try:
+            candidate.relative_to(worktree)
+        except ValueError as e:
+            raise ValueError(
+                f"路径越界：`{path}` 不在 pursuit worktree 内，已拒绝执行。"
+            ) from e
+        return str(candidate)
 
     async def _execute_file_edit(
         self, tool: Any, description: str, action_id: str,
