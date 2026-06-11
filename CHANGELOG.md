@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.128] - 2026-06-11
+
+### Changed
+- **Pursue Meta Execution Boundary** — `/pursue list/status/resume` 现在优先通过 Engine `_execute_tool` 执行对应的 `pursuit_*` 工具，保留无执行器场景的直接调用回退，使目标追踪状态命令同样进入权限、Hook 和审计链。
+
 ## [0.1.127] - 2026-06-11
 
 ### Changed
