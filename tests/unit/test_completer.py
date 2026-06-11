@@ -6,13 +6,19 @@ from unittest.mock import patch
 
 from prompt_toolkit.document import Document
 
-from naumi_agent.cli.completer import COMMANDS, SlashCommandCompleter
+from naumi_agent.cli.completer import COMMANDS, COMMANDS_META, SlashCommandCompleter
 
 
 def _complete(text: str) -> list[str]:
     c = SlashCommandCompleter()
     doc = Document(text, len(text))
     return [r.text for r in c.get_completions(doc, None)]
+
+
+def _complete_display(text: str) -> dict[str, str]:
+    c = SlashCommandCompleter()
+    doc = Document(text, len(text))
+    return {r.text: str(r.display_text) for r in c.get_completions(doc, None)}
 
 
 class TestSlashCommandCompleter:
@@ -54,6 +60,22 @@ class TestSlashCommandCompleter:
         results = _complete("/")
         assert "/quit" in results
         assert "/exit" in results
+
+    def test_optional_analysis_commands_expose_argument_hints(self):
+        metadata = {cmd.name: cmd for cmd in COMMANDS_META}
+        flat_takes_arg = {cmd: takes_arg for cmd, _, takes_arg in COMMANDS}
+        expected_hints = {
+            "/chaos": "[目标]",
+            "/scale": "[QPS]",
+            "/dspy": "[描述]",
+            "/graph": "[路径]",
+        }
+
+        for command, hint in expected_hints.items():
+            assert metadata[command].takes_arg is True
+            assert metadata[command].arg_hint == hint
+            assert flat_takes_arg[command] is True
+            assert _complete_display(command)[command] == f"{command} {hint}"
 
     def test_prompt_with_completion_fallback(self):
         with patch(
