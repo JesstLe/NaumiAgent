@@ -2984,11 +2984,24 @@ async def _run_evolve(engine: Any, arg: str) -> None:
     console.print("[dim]Phase 2: 验证并应用修改...[/dim]")
 
     with console.status("[bold green]验证中...[/bold green]"):
-        modify_result_str = await self_modify.execute(
-            target_file=target_file,
-            new_content=new_content,
-            description=change_desc,
-        )
+        kwargs = {
+            "target_file": target_file,
+            "new_content": new_content,
+            "description": change_desc,
+        }
+        execute_tool = getattr(engine, "_execute_tool", None)
+        if callable(execute_tool):
+            from naumi_agent.tools.base import ToolCall
+
+            tool_call = ToolCall(
+                id=f"slash-evolve-self-modify-{uuid.uuid4()}",
+                name="self_modify",
+                arguments=json.dumps(kwargs, ensure_ascii=False),
+            )
+            tool_result = await execute_tool(tool_call, agent_name="cli")
+            modify_result_str = tool_result.content
+        else:
+            modify_result_str = await self_modify.execute(**kwargs)
 
     # Check if modification was applied
     if "已应用" not in modify_result_str:
