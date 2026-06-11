@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.120] - 2026-06-11
+
+### Changed
+- **Pursuit Evidence Execution Boundary** — `/pursue` 状态证据采集中的 diff、文件快照、pytest 和 ruff 命令优先通过注入的 Engine ToolCall 执行 `bash_run`，保留本地工具回退，避免证据采集绕过权限、Hook 和审计链。
+
 ## [0.1.119] - 2026-06-11
 
 ### Changed

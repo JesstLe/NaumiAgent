@@ -2093,13 +2093,13 @@ class GoalPursuitLoop:
         evidence_parts: list[str] = []
 
         bash_tool = self._tools.get("bash_run")
-        if bash_tool:
+        if bash_tool or self._execute_tool_call is not None:
             # Collect git diff since pursuit started
             # Use both working-tree diff and cached diff to catch
             # staged changes that git diff HEAD might miss
             if self._start_time > 0:
                 try:
-                    diff_result = await bash_tool.execute(
+                    diff_result = await self._run_bash_evidence_command(
                         command=(
                             "git diff --stat 2>/dev/null; "
                             "git diff --cached --stat 2>/dev/null; "
@@ -2107,6 +2107,7 @@ class GoalPursuitLoop:
                             "git diff 2>/dev/null | head -80; "
                             "git diff --cached 2>/dev/null | head -80"
                         ),
+                        evidence_id="diff",
                     )
                     if diff_result and "fatal" not in diff_result:
                         evidence_parts.append(
@@ -2118,8 +2119,9 @@ class GoalPursuitLoop:
             # Read files mentioned in the goal
             for path in self._extract_file_paths(spec.original_goal):
                 try:
-                    file_result = await bash_tool.execute(
+                    file_result = await self._run_bash_evidence_command(
                         command=f"cat {path} 2>/dev/null | head -80",
+                        evidence_id=f"file-{len(evidence_parts)}",
                     )
                     if file_result and "No such file" not in file_result:
                         evidence_parts.append(f"文件 {path}:\n{file_result}")
@@ -2131,8 +2133,9 @@ class GoalPursuitLoop:
                 for path in self._extract_file_paths(c.verification_command):
                     if path not in self._extract_file_paths(spec.original_goal):
                         try:
-                            file_result = await bash_tool.execute(
+                            file_result = await self._run_bash_evidence_command(
                                 command=f"cat {path} 2>/dev/null | head -80",
+                                evidence_id=f"criterion-file-{c.id}",
                             )
                             if file_result and "No such file" not in file_result:
                                 evidence_parts.append(f"文件 {path}:\n{file_result}")
@@ -2140,16 +2143,18 @@ class GoalPursuitLoop:
                             pass
 
             try:
-                test_result = await bash_tool.execute(
+                test_result = await self._run_bash_evidence_command(
                     command="python3 -m pytest tests/ -q --tb=no 2>&1 | tail -5",
+                    evidence_id="pytest",
                 )
                 evidence_parts.append(f"测试状态:\n{test_result}")
             except Exception:
                 pass
 
             try:
-                lint_result = await bash_tool.execute(
+                lint_result = await self._run_bash_evidence_command(
                     command="ruff check src/ 2>&1 | tail -5",
+                    evidence_id="ruff",
                 )
                 evidence_parts.append(f"Lint 状态:\n{lint_result}")
             except Exception:
@@ -2164,6 +2169,26 @@ class GoalPursuitLoop:
                 )
 
         return "\n\n".join(evidence_parts) if evidence_parts else "暂无状态证据"
+
+    async def _run_bash_evidence_command(self, *, command: str, evidence_id: str) -> str:
+        """Run one evidence shell command through the engine when available."""
+        if self._execute_tool_call is not None:
+            tool_result = await self._execute_tool_call(
+                ToolCall(
+                    id=f"pursuit-evidence-{evidence_id}",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": command},
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            return tool_result.content
+
+        bash_tool = self._tools.get("bash_run")
+        if bash_tool is None:
+            return ""
+        return str(await bash_tool.execute(command=command))
 
     @staticmethod
     def _extract_target_path(description: str) -> str:
