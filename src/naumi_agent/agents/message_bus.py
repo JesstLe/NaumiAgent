@@ -94,21 +94,21 @@ class AgentMessageBus:
             self._history.append(message)
             if len(self._history) > self._max_history:
                 self._history = self._history[-self._max_history:]
+            handlers = list(self._subscribers.get(message.topic, []))
 
-            handlers = self._subscribers.get(message.topic, [])
-            for handler in handlers:
-                try:
-                    await handler(message)
-                except Exception:
-                    logger.exception(
-                        "Message handler error on topic %s", message.topic,
-                    )
+        for handler in handlers:
+            try:
+                await handler(message)
+            except Exception:
+                logger.exception(
+                    "Message handler error on topic %s", message.topic,
+                )
 
-            logger.debug(
-                "Published to topic '%s' from '%s' → %d subscribers",
-                message.topic, message.sender, len(handlers),
-            )
-            return len(handlers)
+        logger.debug(
+            "Published to topic '%s' from '%s' → %d subscribers",
+            message.topic, message.sender, len(handlers),
+        )
+        return len(handlers)
 
     def subscribe(
         self, topic: str, handler: MessageHandler,
