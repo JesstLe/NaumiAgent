@@ -136,6 +136,19 @@ class BaseAgent:
         total_cost = 0.0
 
         for turn in range(self.config.max_turns):
+            if total_cost >= self.config.max_budget_usd:
+                return AgentResult(
+                    status="error",
+                    response=messages[-1].get("content", "") if messages else "",
+                    total_tokens=total_tokens,
+                    total_cost_usd=total_cost,
+                    turns=turn,
+                    error=(
+                        "子 Agent 预算已耗尽："
+                        f"{total_cost:.6f} / {self.config.max_budget_usd:.6f} USD"
+                    ),
+                )
+
             try:
                 await hooks.fire(HookContext(
                     point=HookPoint.LLM_CALL_START,
