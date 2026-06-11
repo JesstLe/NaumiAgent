@@ -2,7 +2,7 @@
 
 import pytest
 
-from naumi_agent.agents.base import AgentCapability, AgentConfig
+from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.subagent_manager import SubAgentManager, SubTask
@@ -56,6 +56,34 @@ class TestSubAgentManager:
         )
         assert manager._reaper_task is not None
         await manager.stop_reaper()
+
+    @pytest.mark.asyncio
+    async def test_execute_dag_blocks_downstream_when_dependency_fails(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        executed: list[str] = []
+
+        async def fake_delegate(task: SubTask, **kwargs: object) -> AgentResult:
+            executed.append(task.id)
+            if task.id == "a":
+                return AgentResult(status="error", error="boom")
+            return AgentResult(status="completed", response="unexpected")
+
+        monkeypatch.setattr(manager, "delegate", fake_delegate)
+
+        results = await manager.execute_dag(
+            [
+                SubTask(id="a", description="upstream"),
+                SubTask(id="b", description="downstream", depends_on=["a"]),
+            ]
+        )
+
+        assert executed == ["a"]
+        assert results["a"].status == "error"
+        assert results["b"].status == "error"
+        assert "Failed dependencies" in (results["b"].error or "")
 
 
 class TestSubTask:
