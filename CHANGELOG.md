@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.139] - 2026-06-11
+
+### Changed
+- **Pursuit Verification Worktree Scope** — `/pursue` 已创建隔离 worktree 时，成功标准验证命令与状态取证命令现在同样携带 `cwd=worktree_path` 执行，使执行、验证、取证的 bash 路径保持在同一个隔离工作区。
+
 ## [0.1.138] - 2026-06-11
 
 ### Changed

@@ -1949,13 +1949,14 @@ class GoalPursuitLoop:
 
             # Try to run the verification command
             try:
+                bash_args = self._build_bash_args(cmd)
                 if self._execute_tool_call is not None:
                     tool_result = await self._execute_tool_call(
                         ToolCall(
                             id=f"pursuit-verify-{criterion.id}",
                             name="bash_run",
                             arguments=json.dumps(
-                                {"command": cmd},
+                                bash_args,
                                 ensure_ascii=False,
                             ),
                         )
@@ -1969,7 +1970,7 @@ class GoalPursuitLoop:
                     bash_tool = self._tools.get("bash_run")
                     if not bash_tool:
                         continue
-                    output = await bash_tool.execute(command=cmd)
+                    output = await bash_tool.execute(**bash_args)
                     passed = _verification_command_passed(output)
 
                 if passed:
@@ -2212,13 +2213,14 @@ class GoalPursuitLoop:
 
     async def _run_bash_evidence_command(self, *, command: str, evidence_id: str) -> str:
         """Run one evidence shell command through the engine when available."""
+        bash_args = self._build_bash_args(command)
         if self._execute_tool_call is not None:
             tool_result = await self._execute_tool_call(
                 ToolCall(
                     id=f"pursuit-evidence-{evidence_id}",
                     name="bash_run",
                     arguments=json.dumps(
-                        {"command": command},
+                        bash_args,
                         ensure_ascii=False,
                     ),
                 )
@@ -2228,7 +2230,7 @@ class GoalPursuitLoop:
         bash_tool = self._tools.get("bash_run")
         if bash_tool is None:
             return ""
-        return str(await bash_tool.execute(command=command))
+        return str(await bash_tool.execute(**bash_args))
 
     @staticmethod
     def _extract_target_path(description: str) -> str:
