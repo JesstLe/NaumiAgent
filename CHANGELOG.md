@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.141] - 2026-06-11
+
+### Changed
+- **Pursuit File Edit Worktree Scope** — `/pursue` 已创建隔离 worktree 时，`file_edit` 会在 worktree 内读取目标文件并把同一个重定位路径传给 `file_edit` ToolCall，避免从主工作区读取内容再编辑隔离区文件的错配。
+
 ## [0.1.140] - 2026-06-11
 
 ### Changed

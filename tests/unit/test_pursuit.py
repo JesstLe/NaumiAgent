@@ -873,6 +873,75 @@ class TestPursuitExecutionStrategy:
         assert target.read_text(encoding="utf-8") == original
 
     @pytest.mark.asyncio
+    async def test_file_edit_rebases_relative_path_to_worktree(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine = _make_engine()
+        execute_tool_call = AsyncMock(
+            return_value=ToolResult(
+                call_id="pursuit-a1-edit-1",
+                status="success",
+                content="✅ 已编辑",
+            )
+        )
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=execute_tool_call,
+        )
+        main_target = tmp_path / "demo.py"
+        main_target.write_text("x = 100\n", encoding="utf-8")
+        worktree_path = tmp_path / "pursue-demo"
+        worktree_path.mkdir()
+        worktree_target = worktree_path / "demo.py"
+        worktree_target.write_text("x = 1\n", encoding="utf-8")
+
+        seen_prompts: list[str] = []
+
+        async def fake_llm_call(system: str, prompt: str) -> str:
+            seen_prompts.append(prompt)
+            return "[SEARCH]\nx = 1\n[REPLACE]\nx = 2\n[END]"
+
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="修改 demo.py",
+            status=PursuitRunStatus.RUNNING,
+            phase="test",
+            started_at=time.time(),
+            updated_at=time.time(),
+            worktree_path=str(worktree_path),
+        )
+        loop._llm_call = AsyncMock(side_effect=fake_llm_call)  # type: ignore[method-assign]
+        monkeypatch.setattr(loop, "_extract_target_path", lambda description: "demo.py")
+        edit_tool = MagicMock()
+        edit_tool.execute = AsyncMock(return_value="direct edit should not run")
+
+        result = await loop._execute_file_edit(
+            edit_tool,
+            "修改 demo.py 把 x 改成 2",
+            "a1",
+        )
+
+        assert result["status"] == "completed"
+        assert seen_prompts
+        assert "x = 1" in seen_prompts[0]
+        assert "x = 100" not in seen_prompts[0]
+        edit_tool.execute.assert_not_awaited()
+        execute_tool_call.assert_awaited_once()
+        tool_call = execute_tool_call.await_args.args[0]
+        assert tool_call.name == "file_edit"
+        assert json.loads(tool_call.arguments) == {
+            "path": str(worktree_target),
+            "old_text": "x = 1",
+            "new_text": "x = 2",
+        }
+        assert main_target.read_text(encoding="utf-8") == "x = 100\n"
+        assert worktree_target.read_text(encoding="utf-8") == "x = 1\n"
+
+    @pytest.mark.asyncio
     async def test_file_write_uses_injected_tool_executor(
         self,
         monkeypatch: pytest.MonkeyPatch,
