@@ -16,9 +16,9 @@ from rich.markdown import Markdown as RichMarkdown
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
-from textual.events import Key
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
+from textual.events import Key
 from textual.message import Message
 from textual.reactive import reactive
 from textual.screen import ModalScreen
@@ -47,7 +47,7 @@ from naumi_agent.ui.keybindings import (
     render_keybinding_help,
     to_textual_key,
 )
-from naumi_agent.ui.theme import UIStyleConfig, build_ui_style_config, render_style_help
+from naumi_agent.ui.theme import UIStyleConfig, build_ui_style_config
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
 
 logger = logging.getLogger(__name__)
@@ -145,7 +145,7 @@ def _looks_like_markdown(lines: list[str]) -> bool:
 class _TuiSlashCommandFrontend:
     """Adapter passed to shared CLI slash command backend."""
 
-    def __init__(self, app: "NaumiApp") -> None:
+    def __init__(self, app: NaumiApp) -> None:
         self._app = app
 
     def keybinding_help(self) -> str:
@@ -1952,168 +1952,6 @@ class NaumiApp(App):
         send_btn.disabled = not enabled
         if enabled:
             msg_input.focus()
-
-    @work(exclusive=True, exit_on_error=False)
-    async def _run_analysis_mode(self, mode: str, target: str) -> None:
-        """执行分析模式 (chaos/scale/state/vibe) — 走工具的 execute 路径."""
-        tool_names = {
-            "chaos": "analysis_chaos",
-            "scale": "analysis_scale",
-            "state": "analysis_state",
-            "vibe": "analysis_vibe",
-            "eval": "analysis_eval",
-            "page": "analysis_page",
-            "heal": "analysis_heal",
-            "dspy": "analysis_dspy",
-            "graph": "analysis_graph",
-            "mcts": "analysis_mcts",
-            "route": "analysis_route",
-            "speculate": "analysis_speculate",
-            "jit": "analysis_jit",
-            "pointer": "analysis_pointer",
-            "cooe": "analysis_cooe",
-            "sleep": "analysis_sleep",
-            "entropy": "analysis_entropy",
-            "ooda": "analysis_ooda",
-            "probe": "analysis_probe",
-            "hook": "analysis_hook",
-            "vision": "analysis_vision",
-            "spar": "analysis_spar",
-            "world": "analysis_world",
-            "fusion": "analysis_fusion",
-            "consensus": "analysis_consensus",
-            "pid": "analysis_pid",
-            "zkp": "analysis_zkp",
-            "genesis": "analysis_genesis",
-            "macro": "analysis_macro",
-            "cosmos": "analysis_cosmos",
-            "watchdog": "analysis_watchdog",
-            "supervisor": "analysis_supervisor",
-            "autopsy": "analysis_autopsy",
-        }
-        labels = {
-            "chaos": "⚡ 灾难演练",
-            "scale": "🌊 并发海啸 (10K QPS)",
-            "state": "☁️ 状态审查",
-            "vibe": "🚀 极速构建",
-            "eval": "🧪 评测驱动 (EDD)",
-            "page": "💾 内存分页",
-            "heal": "🏥 自愈修复",
-            "dspy": "🔧 DSPy 编译优化",
-            "graph": "🕸️ 图谱推演 (GraphRAG)",
-            "mcts": "🌳 蒙特卡洛树搜索",
-            "route": "🧠 MoE 混合专家调度",
-            "speculate": "⚡推测解码 (Draft+Review)",
-            "jit": "🛠️ JIT 即时工具生成",
-            "pointer": "🔗 语义指针架构 (SPA)",
-            "cooe": "🔀 认知乱序执行 (COOE)",
-            "sleep": "🧬 昼夜节律突触修剪",
-            "entropy": "🌡️ 耗散结构熵减",
-            "ooda": "⚔️ OODA 战场指挥",
-            "probe": "🔦 黑盒探测 (Probe)",
-            "hook": "💉 逆向插桩 (Hook)",
-            "vision": "👁️ AI 视觉数据提取 (Vision)",
-            "spar": "⚔️ 对抗性自博弈 (GAN for Code)",
-            "world": "🌍 世界模型审计 (World Model)",
-            "fusion": "⚖️ 决定论-概率论融合 (Fusion)",
-            "consensus": "🏛️ 拜占庭容错共识 (Consensus)",
-            "pid": "🎛️ PID 闭环纠偏 (Control Theory)",
-            "zkp": "🔐 零知识证明与轨迹校验 (ZKP)",
-            "genesis": "🧬 系统自重构与热演化 (Genesis)",
-            "macro": "🏦 多智能体自由市场博弈 (Agentic Economy)",
-            "cosmos": "🌌 创世引擎审计 (Cosmos)",
-            "watchdog": "🛡️ 看门狗与灾难隔离 (Watchdog)",
-            "supervisor": "⚙️ Erlang 守护者树 (Supervisor)",
-            "autopsy": "🔬 执行迹切片与爆炸半径隔离 (DTS-CHE)",
-        }
-
-        chat = self.query_one(ChatPanel)
-        status = self.query_one(StatusBar)
-        label = labels[mode]
-
-        tool = self.engine.tool_registry.get(tool_names[mode])
-        if tool is None:
-            chat.mount(Markdown(f"**工具未注册**: {tool_names[mode]}", classes="agent-msg"))
-            return
-
-        chat.mount(Markdown(f"**{label}** 扫描 + 分析中...", classes="agent-msg"))
-        status.status_text = f"{label} 分析中..."
-        self._set_input_enabled(False)
-        self.query_one(Spinner)._active = True
-
-        try:
-            if mode == "vibe":
-                result = await tool.execute(description=target)
-            elif mode == "scale":
-                result = await tool.execute(target=target, qps=10000)
-            elif mode == "eval":
-                result = await tool.execute(target=target)
-            elif mode == "page":
-                result = await tool.execute()
-            elif mode == "heal":
-                result = await tool.execute(error_log=target)
-            elif mode == "dspy":
-                result = await tool.execute(prompt_target=target)
-            elif mode == "graph":
-                result = await tool.execute(target=target)
-            elif mode == "mcts":
-                result = await tool.execute(problem=target)
-            elif mode == "route":
-                result = await tool.execute(task=target)
-            elif mode == "speculate":
-                result = await tool.execute(target=target)
-            elif mode == "jit":
-                result = await tool.execute(task=target)
-            elif mode == "pointer":
-                result = await tool.execute(target=target)
-            elif mode == "cooe":
-                result = await tool.execute(task=target)
-            elif mode == "sleep":
-                result = await tool.execute(session_context=target)
-            elif mode == "entropy":
-                result = await tool.execute(context=target)
-            elif mode == "ooda":
-                result = await tool.execute(target=target)
-            elif mode == "probe":
-                result = await tool.execute(task=target)
-            elif mode == "hook":
-                result = await tool.execute(task=target)
-            elif mode == "vision":
-                result = await tool.execute(task=target)
-            elif mode == "spar":
-                result = await tool.execute(task=target)
-            elif mode == "world":
-                result = await tool.execute(target=target)
-            elif mode == "fusion":
-                result = await tool.execute(target=target)
-            elif mode == "consensus":
-                result = await tool.execute(target=target)
-            elif mode == "pid":
-                result = await tool.execute(target=target)
-            elif mode == "zkp":
-                result = await tool.execute(target=target)
-            elif mode == "genesis":
-                result = await tool.execute(target=target)
-            elif mode == "macro":
-                result = await tool.execute(task=target)
-            elif mode == "cosmos":
-                result = await tool.execute(target=target)
-            elif mode == "watchdog":
-                result = await tool.execute(target=target)
-            elif mode == "supervisor":
-                result = await tool.execute(target=target)
-            elif mode == "autopsy":
-                result = await tool.execute(target=target)
-            else:
-                result = await tool.execute(target=target)
-            chat.mount(Markdown(result, classes="agent-msg"))
-            status.status_text = f"✅ {label} 完成"
-        except Exception as e:
-            chat.mount(Markdown(f"**分析失败**: {e}", classes="agent-msg"))
-            status.status_text = f"❌ 分析失败: {e}"
-        finally:
-            self.query_one(Spinner)._active = False
-            self._set_input_enabled(True)
 
     def action_toggle_activity(self) -> None:
         activity = self.query_one(ActivityPanel)

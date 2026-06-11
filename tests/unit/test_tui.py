@@ -73,6 +73,9 @@ class TestNaumiApp:
         assert "#00ff00" in app.CSS
         assert "StatusBar" in app.CSS
 
+    def test_tui_does_not_keep_legacy_analysis_router(self) -> None:
+        assert not hasattr(NaumiApp, "_run_analysis_mode")
+
     def test_tool_output_markdown_wraps_raw_diff(self) -> None:
         rendered = _format_tool_output_markdown("--- a\n+++ b\n@@\n-old\n+new")
 
