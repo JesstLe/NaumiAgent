@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.132] - 2026-06-11
+
+### Changed
+- **Self-Review Slash Execution Boundary** — `/self-review` 现在优先通过 Engine `_execute_tool` 执行 `self_review`，保留无执行器场景的直接调用回退，使自我审查命令进入权限、Hook 和审计链。
+
 ## [0.1.131] - 2026-06-11
 
 ### Changed

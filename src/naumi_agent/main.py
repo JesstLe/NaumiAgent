@@ -2798,7 +2798,23 @@ async def _run_self_review(engine: Any, arg: str) -> None:
 
     console.print("[bold yellow]🔍 自我审查启动...[/bold yellow]")
     with console.status("[bold green]扫描自身源码中...[/bold green]"):
-        result = await tool.execute(focus=focus, module=module)
+        kwargs = {"focus": focus, "module": module}
+        execute_tool = getattr(engine, "_execute_tool", None)
+        if callable(execute_tool):
+            from naumi_agent.tools.base import ToolCall
+
+            tool_call = ToolCall(
+                id=f"slash-self-review-{uuid.uuid4()}",
+                name="self_review",
+                arguments=json.dumps(kwargs, ensure_ascii=False),
+            )
+            tool_result = await execute_tool(tool_call, agent_name="cli")
+            if tool_result.status != "success":
+                console.print(f"[yellow]{tool_result.content}[/yellow]")
+                return
+            result = tool_result.content
+        else:
+            result = await tool.execute(**kwargs)
 
     console.print()
     console.print(
