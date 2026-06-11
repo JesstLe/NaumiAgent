@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.119] - 2026-06-11
+
+### Changed
+- **Pursuit Worktree Execution Boundary** — `/pursue` 自动创建隔离 worktree 时优先通过注入的 Engine ToolCall 执行 `worktree_create`，保留无注入执行器时的本地回退，避免绕过权限、Hook 和审计链。
+
 ## [0.1.118] - 2026-06-11
 
 ### Added

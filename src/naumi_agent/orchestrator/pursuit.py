@@ -523,12 +523,24 @@ class GoalPursuitLoop:
         if not self._looks_like_code_goal(spec):
             return
         tool = self._tools.get("worktree_create")
-        if tool is None:
+        if tool is None and self._execute_tool_call is None:
             return
 
         name = self._make_worktree_name(spec.original_goal)
         try:
-            output = await tool.execute(name=name)
+            if self._execute_tool_call is not None:
+                tool_result = await self._execute_tool_call(
+                    ToolCall(
+                        id=f"pursuit-worktree-{name}",
+                        name="worktree_create",
+                        arguments=json.dumps({"name": name}, ensure_ascii=False),
+                    )
+                )
+                output = tool_result.content
+                if tool_result.status != "success":
+                    raise RuntimeError(output[:500])
+            else:
+                output = await tool.execute(name=name)
         except Exception as e:
             self._run.add_evidence(PursuitEvidence(
                 kind="worktree",

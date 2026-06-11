@@ -493,6 +493,59 @@ class TestPursuitExecutionStrategy:
         worktree.execute.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_code_goal_uses_injected_executor_for_worktree(self) -> None:
+        engine = _make_engine()
+        execute_tool_call = AsyncMock(
+            return_value=ToolResult(
+                call_id="pursuit-worktree",
+                status="success",
+                content=(
+                    "已创建隔离 worktree。\n\n"
+                    "### Worktree: pursue-demo\n"
+                    "- 路径：`/tmp/pursue-demo`\n"
+                ),
+            )
+        )
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=execute_tool_call,
+        )
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="修改 src/demo.py 并添加 tests/test_demo.py",
+            status=PursuitRunStatus.RUNNING,
+            phase="test",
+            started_at=time.time(),
+            updated_at=time.time(),
+        )
+        spec = _make_spec(
+            goal="修改 src/demo.py 并添加 tests/test_demo.py",
+            criteria=[
+                SuccessCriterion(
+                    id="c1",
+                    description="代码和测试已更新",
+                    verification_command="pytest tests/test_demo.py",
+                )
+            ],
+        )
+        worktree = MagicMock()
+        worktree.execute = AsyncMock(return_value="direct should not run")
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=worktree)
+
+        await loop._ensure_worktree_for_code_goal(spec)
+
+        assert loop._run.worktree_name.startswith("pursue-")
+        assert loop._run.worktree_path == "/tmp/pursue-demo"
+        worktree.execute.assert_not_awaited()
+        execute_tool_call.assert_awaited_once()
+        tool_call = execute_tool_call.await_args.args[0]
+        assert tool_call.name == "worktree_create"
+        assert json.loads(tool_call.arguments) == {"name": loop._run.worktree_name}
+
+    @pytest.mark.asyncio
     async def test_long_bash_action_runs_in_background_and_schedules_followup(self) -> None:
         engine = _make_engine()
         loop = GoalPursuitLoop(
