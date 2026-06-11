@@ -165,7 +165,10 @@ class MoERouteTool(Tool):
         from naumi_agent.agents.message_bus import AgentMessage
         from naumi_agent.orchestrator.subagent_manager import SubTask
 
-        await manager.message_bus.reset()
+        await manager.message_bus.reset(
+            preserve_blackboard_prefixes=("team/",),
+            preserve_mailboxes=True,
+        )
 
         await manager.message_bus.blackboard_set(
             "task",
@@ -286,7 +289,10 @@ class MoERouteTool(Tool):
 
         for name in spawned_names:
             manager.destroy(name)
-        await manager.message_bus.reset()
+        await manager.message_bus.reset(
+            preserve_blackboard_prefixes=("team/",),
+            preserve_mailboxes=True,
+        )
 
         bus_stats = manager.message_bus.stats()
 

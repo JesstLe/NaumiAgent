@@ -168,7 +168,10 @@ class SparTool(Tool):
 
         spar_caps = [AgentCapability.FILE_OPS, AgentCapability.CODE_EXEC]
 
-        await manager.message_bus.reset()
+        await manager.message_bus.reset(
+            preserve_blackboard_prefixes=("team/",),
+            preserve_mailboxes=True,
+        )
 
         await manager.message_bus.blackboard_set(
             "target",
@@ -296,7 +299,10 @@ class SparTool(Tool):
             manager.destroy("spar_red_breaker")
 
         bus_stats = manager.message_bus.stats()
-        await manager.message_bus.reset()
+        await manager.message_bus.reset(
+            preserve_blackboard_prefixes=("team/",),
+            preserve_mailboxes=True,
+        )
 
         rounds_completed = len([r for r in rounds_log if "蓝军" in r and "输出" in r])
         synthesis_msg = (
