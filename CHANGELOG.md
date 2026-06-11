@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.116] - 2026-06-11
+
+### Added
+- **Session History Tool** — 新增只读 `session_history` Tool，将 `/history` 的历史会话列表与预览能力暴露给 Agent 自主调用，并在 Engine 工具注册表中注册，为会话命令补齐双通道能力的第一步。
+
 ## [0.1.110] - 2026-06-01
 
 ### Changed

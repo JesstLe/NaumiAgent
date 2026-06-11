@@ -501,8 +501,11 @@ class AgentEngine:
         from naumi_agent.tools.doctor import DoctorDiagnosticsTool
         from naumi_agent.tools.runtime import create_runtime_tools
         from naumi_agent.tools.search import create_tool_search_tools
+        from naumi_agent.tools.session import create_session_tools
 
         self._tool_registry.register(DoctorDiagnosticsTool(self))
+        for tool in create_session_tools(self):
+            self._tool_registry.register(tool)
         for tool in create_runtime_tools(self):
             self._tool_registry.register(tool)
         for tool in create_tool_search_tools(self._tool_registry):
