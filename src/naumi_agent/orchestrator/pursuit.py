@@ -1325,9 +1325,17 @@ class GoalPursuitLoop:
                 "status": "error",
                 "output": "Could not determine file path",
             }
+        try:
+            tool_path = self._rebase_file_path_for_worktree(path)
+        except ValueError as e:
+            return {
+                "action_id": action_id,
+                "status": "error",
+                "output": str(e),
+            }
 
         # Read raw file content
-        resolved = os.path.expanduser(path)
+        resolved = os.path.expanduser(tool_path)
         existing = ""
         try:
             if os.path.isfile(resolved):
@@ -1340,7 +1348,7 @@ class GoalPursuitLoop:
             return {
                 "action_id": action_id,
                 "status": "error",
-                "output": f"File {path} not found or empty",
+                "output": f"File {tool_path} not found or empty",
             }
 
         line_count = existing.count("\n") + 1
@@ -1348,11 +1356,11 @@ class GoalPursuitLoop:
 
         if line_count <= 200:
             return await self._edit_small_file(
-                tool, path, existing, description, action_id, context,
+                tool, tool_path, existing, description, action_id, context,
             )
         else:
             return await self._edit_large_file(
-                tool, path, existing, description, action_id, context,
+                tool, tool_path, existing, description, action_id, context,
             )
 
     async def _apply_file_edit_replacement(
