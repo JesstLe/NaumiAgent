@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Managed Worktree Permission Scope** — Engine 现在会把自身管理的 `worktrees` 存储目录加入权限允许目录，确保 `/pursue` 重定位到隔离 worktree 的 file/bash 路径继续通过 `PermissionChecker` 审计而不会被误判为越界。
+- **Version Source Alignment** — API app、health endpoint 与 `pyproject.toml` 现在对齐运行时 `naumi_agent.__version__`，避免 OpenAPI、健康检查和包元数据展示不同版本。
 
 ## [0.1.142] - 2026-06-11
 

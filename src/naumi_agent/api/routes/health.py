@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Request
 
+from naumi_agent import __version__
 from naumi_agent.api.schemas import HealthResponse
 
 router = APIRouter(tags=["health"])
@@ -11,7 +12,7 @@ router = APIRouter(tags=["health"])
 async def health_check(request: Request):
     return HealthResponse(
         status="healthy",
-        version="0.1.0",
+        version=__version__,
         uptime_seconds=0.0,
         active_sessions=0,
     )
