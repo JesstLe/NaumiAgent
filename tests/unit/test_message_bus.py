@@ -121,6 +121,25 @@ class TestPubSub:
         await bus.publish(_make_msg(topic="resilient"))
         assert len(received) == 1
 
+    @pytest.mark.asyncio
+    async def test_publish_handler_can_touch_blackboard_without_deadlock(
+        self, bus: AgentMessageBus,
+    ) -> None:
+        async def handler(msg: AgentMessage) -> None:
+            await bus.blackboard_set("latest", msg.content, author="subscriber")
+
+        bus.subscribe("analysis", handler)
+
+        count = await asyncio.wait_for(
+            bus.publish(_make_msg(topic="analysis", content="finding")),
+            timeout=0.2,
+        )
+
+        entry = await bus.blackboard_get("latest")
+        assert count == 1
+        assert entry is not None
+        assert entry.value == "finding"
+
 
 class TestDirectMessaging:
     @pytest.mark.asyncio
