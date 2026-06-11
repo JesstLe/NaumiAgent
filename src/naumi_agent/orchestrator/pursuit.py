@@ -1729,13 +1729,14 @@ class GoalPursuitLoop:
                 if background is not None:
                     return background
 
+            bash_args = self._build_bash_args(command)
             if self._execute_tool_call is not None:
                 tool_result = await self._execute_tool_call(
                     ToolCall(
                         id=f"pursuit-{action_id}",
                         name="bash_run",
                         arguments=json.dumps(
-                            {"command": command},
+                            bash_args,
                             ensure_ascii=False,
                         ),
                     )
@@ -1746,7 +1747,7 @@ class GoalPursuitLoop:
                     and _verification_command_passed(output)
                 )
             else:
-                output = await bash_tool.execute(command=command)
+                output = await bash_tool.execute(**bash_args)
                 passed = _verification_command_passed(output)
 
             status = "completed" if passed else "error"
@@ -1761,6 +1762,13 @@ class GoalPursuitLoop:
                 "status": "error",
                 "output": f"{type(e).__name__}: {e}",
             }
+
+    def _build_bash_args(self, command: str) -> dict[str, str]:
+        """Build bash_run arguments scoped to the pursuit worktree when present."""
+        args = {"command": command}
+        if self._run and self._run.worktree_path:
+            args["cwd"] = self._run.worktree_path
+        return args
 
     async def _start_background_action(
         self,

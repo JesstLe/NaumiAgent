@@ -702,6 +702,49 @@ class TestPursuitExecutionStrategy:
         assert json.loads(tool_call.arguments) == {"command": "python -m pytest"}
 
     @pytest.mark.asyncio
+    async def test_bash_action_uses_worktree_cwd_when_available(self) -> None:
+        engine = _make_engine()
+        execute_tool_call = AsyncMock(
+            return_value=ToolResult(
+                call_id="pursuit-a1",
+                status="success",
+                content="done\n[exit code: 0]",
+            )
+        )
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=execute_tool_call,
+        )
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="修改 src/demo.py",
+            status=PursuitRunStatus.RUNNING,
+            phase="test",
+            started_at=time.time(),
+            updated_at=time.time(),
+            worktree_path="/tmp/pursue-demo",
+        )
+        loop._llm_call = AsyncMock(return_value="python -m pytest")  # type: ignore[method-assign]
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=None)
+        bash = MagicMock()
+        bash.execute = AsyncMock(return_value="direct should not run")
+
+        result = await loop._execute_via_bash(bash, "Run pytest", "a1")
+
+        assert result["status"] == "completed"
+        bash.execute.assert_not_awaited()
+        execute_tool_call.assert_awaited_once()
+        tool_call = execute_tool_call.await_args.args[0]
+        assert tool_call.name == "bash_run"
+        assert json.loads(tool_call.arguments) == {
+            "command": "python -m pytest",
+            "cwd": "/tmp/pursue-demo",
+        }
+
+    @pytest.mark.asyncio
     async def test_file_edit_uses_file_edit_tool_instead_of_direct_write(
         self,
         tmp_path,
