@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from naumi_agent.hooks import HookContext, HookPoint
+from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tools.base import ToolCall
 
 if TYPE_CHECKING:
@@ -74,6 +75,21 @@ class BaseAgent:
         self.config = config
         self.engine = engine
         self._tool_names = self._resolve_tools()
+        self._permission_checker = self._build_permission_checker()
+
+    def _build_permission_checker(self) -> PermissionChecker:
+        """Build the sub-agent permission boundary from its config."""
+        app_config = getattr(self.engine, "_config", None)
+        safety_config = getattr(app_config, "safety", None)
+        allowed_dirs = list(getattr(safety_config, "allowed_dirs", []) or [])
+        workspace_root = str(getattr(self.engine, "workspace_root", "") or "")
+        if workspace_root:
+            allowed_dirs.append(workspace_root)
+        return PermissionChecker(
+            PermissionMode(self.config.permission_level),
+            allowed_dirs=allowed_dirs or None,
+            workspace_root=workspace_root or None,
+        )
 
     def _resolve_tools(self) -> list[str]:
         """根据能力和显式配置解析工具列表."""
@@ -197,6 +213,29 @@ class BaseAgent:
                                 "role": "tool",
                                 "tool_call_id": call_id,
                                 "content": f"未知工具：{tool_name}",
+                            }
+                        )
+                        continue
+
+                    try:
+                        args = tool.parse_arguments(args_str)
+                    except ValueError as e:
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "content": str(e),
+                            }
+                        )
+                        continue
+
+                    decision = self._permission_checker.check(tool_name, args, tool=tool)
+                    if not decision.allowed:
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "content": f"子 Agent 权限拒绝：{decision.reason}",
                             }
                         )
                         continue

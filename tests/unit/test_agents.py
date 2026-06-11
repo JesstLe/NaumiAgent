@@ -177,3 +177,57 @@ class TestBaseAgent:
         assert result.status == "error"
         assert result.total_cost_usd == 0.02
         assert "预算" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_subagent_permission_level_blocks_disallowed_tools_before_parent_execution(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        agent = BaseAgent(
+            AgentConfig(
+                name="strict_worker",
+                description="Strict test agent",
+                capabilities=[AgentCapability.SHELL_EXEC],
+                max_turns=2,
+                permission_level="strict",
+            ),
+            engine,
+        )
+        tool_call = {
+            "id": "call_bash",
+            "function": {
+                "name": "bash_run",
+                "arguments": json.dumps({"command": "echo hi"}),
+            },
+        }
+        responses = [
+            ModelResponse(
+                content="",
+                tool_calls=[tool_call],
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test",
+            ),
+            ModelResponse(
+                content="已收到权限拒绝",
+                usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+                model="test",
+            ),
+        ]
+
+        with (
+            patch.object(
+                engine.router,
+                "call",
+                new_callable=AsyncMock,
+                side_effect=responses,
+            ) as call,
+            patch.object(engine, "_execute_tool", new_callable=AsyncMock) as execute_tool,
+        ):
+            result = await agent.execute("运行命令")
+
+        assert execute_tool.await_count == 0
+        assert call.await_count == 2
+        followup_messages = call.await_args_list[1].kwargs["messages"]
+        tool_messages = [m for m in followup_messages if m.get("role") == "tool"]
+        assert result.status == "completed"
+        assert "权限拒绝" in tool_messages[-1]["content"]
