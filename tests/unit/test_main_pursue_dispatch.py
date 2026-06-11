@@ -52,3 +52,30 @@ async def test_run_pursue_routes_goal_through_engine_tool_executor() -> None:
     assert agent_name == "cli"
     assert tool_call.name == "pursue_goal"
     assert json.loads(tool_call.arguments) == {"goal": "修复一个真实缺陷"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "tool_name", "expected_args"),
+    [
+        ("list --active", "pursuit_list", {"active_only": True}),
+        ("status run-1", "pursuit_status", {"run_id": "run-1"}),
+        ("resume run-1", "pursuit_resume", {"run_id": "run-1"}),
+    ],
+)
+async def test_run_pursue_meta_routes_through_engine_tool_executor(
+    command: str,
+    tool_name: str,
+    expected_args: dict[str, object],
+) -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake(tool_name, tool)
+
+    await _run_pursue(engine, command)
+
+    assert tool.calls == []
+    assert len(engine.executed) == 1
+    tool_call, agent_name = engine.executed[0]
+    assert agent_name == "cli"
+    assert tool_call.name == tool_name
+    assert json.loads(tool_call.arguments) == expected_args

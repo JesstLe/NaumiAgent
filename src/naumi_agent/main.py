@@ -2477,9 +2477,26 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
         console.print(f"[yellow]用法: /pursue {subcommand} <运行ID>[/yellow]")
         return
     if subcommand == "list":
-        result = await tool.execute(active_only="--active" in arg.split())
+        kwargs = {"active_only": "--active" in arg.split()}
     else:
-        result = await tool.execute(run_id=arg.strip())
+        kwargs = {"run_id": arg.strip()}
+
+    execute_tool = getattr(engine, "_execute_tool", None)
+    if callable(execute_tool):
+        from naumi_agent.tools.base import ToolCall
+
+        tool_call = ToolCall(
+            id=f"slash-pursue-{subcommand}-{uuid.uuid4()}",
+            name=tool_name,
+            arguments=json.dumps(kwargs, ensure_ascii=False),
+        )
+        tool_result = await execute_tool(tool_call, agent_name="cli")
+        if tool_result.status != "success":
+            console.print(f"[yellow]{tool_result.content}[/yellow]")
+            return
+        result = tool_result.content
+    else:
+        result = await tool.execute(**kwargs)
     console.print(
         Panel(
             Markdown(result),
