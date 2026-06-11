@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.127] - 2026-06-11
+
+### Changed
+- **Pursue Slash Execution Boundary** — `/pursue <目标>` 现在优先通过 Engine `_execute_tool` 执行 `pursue_goal`，保留无执行器场景的直接调用回退，使目标追踪启动入口进入权限、Hook 和审计链。
+
 ## [0.1.126] - 2026-06-11
 
 ### Changed
