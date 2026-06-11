@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.135] - 2026-06-11
+
+### Changed
+- **Browser Daemon Slash Execution Boundary** — `/bdaemon health/start/dashboard/run/list/status/watch/reply/resume/abort/manual` 现在优先通过 Engine `_execute_tool` 执行对应 `browser_daemon_*` 工具，保留无执行器场景的直接调用回退，使浏览器 daemon 控制入口进入权限、Hook 和审计链。
+
 ## [0.1.134] - 2026-06-11
 
 ### Changed
