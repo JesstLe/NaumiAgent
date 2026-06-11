@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -267,7 +269,15 @@ def _find_test_file(file_path: Path) -> Path | None:
     return test_file if test_file.exists() else None
 
 
-def _run_tests(file_path: Path) -> tuple[bool, str]:
+def _pythonpath_with_source(source_dir: Path) -> str:
+    existing = os.environ.get("PYTHONPATH", "")
+    entries = [str(source_dir.parent)]
+    if existing:
+        entries.append(existing)
+    return os.pathsep.join(entries)
+
+
+def _run_tests(file_path: Path, *, source_dir: Path | None = None) -> tuple[bool, str]:
     """Run pytest on the corresponding test file.
 
     Returns:
@@ -278,6 +288,9 @@ def _run_tests(file_path: Path) -> tuple[bool, str]:
         return True, "无对应测试文件，跳过测试"
 
     try:
+        env = os.environ.copy()
+        if source_dir is not None:
+            env["PYTHONPATH"] = _pythonpath_with_source(source_dir)
         result = subprocess.run(
             [
                 sys.executable, "-m", "pytest",
@@ -288,6 +301,7 @@ def _run_tests(file_path: Path) -> tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=60,
+            env=env,
         )
         passed = result.returncode == 0
         output = result.stdout.strip() + "\n" + result.stderr.strip()
@@ -298,13 +312,13 @@ def _run_tests(file_path: Path) -> tuple[bool, str]:
         return True, "pytest 不可用，跳过测试"
 
 
-def _run_import_test(file_path: Path) -> tuple[bool, str]:
+def _run_import_test(file_path: Path, *, source_dir: Path | None = None) -> tuple[bool, str]:
     """Test that the modified module can be imported without errors.
 
     Returns:
         (passed, error_message)
     """
-    source_dir = _find_agent_source_dir()
+    source_dir = source_dir or _find_agent_source_dir()
     try:
         relative = file_path.relative_to(source_dir)
     except ValueError:
@@ -313,6 +327,8 @@ def _run_import_test(file_path: Path) -> tuple[bool, str]:
     module_name = "naumi_agent." + str(relative.with_suffix("")).replace("/", ".")
 
     try:
+        env = os.environ.copy()
+        env["PYTHONPATH"] = _pythonpath_with_source(source_dir)
         result = subprocess.run(
             [
                 sys.executable, "-c",
@@ -321,6 +337,7 @@ def _run_import_test(file_path: Path) -> tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=15,
+            env=env,
         )
         passed = result.returncode == 0
         output = result.stderr.strip() if not passed else ""
@@ -348,6 +365,8 @@ def validate_and_apply(
     target_file: str,
     new_content: str,
     description: str,
+    *,
+    apply_to_workspace: bool = True,
 ) -> dict[str, Any]:
     """Validate a proposed modification and apply if safe.
 
@@ -447,6 +466,16 @@ def validate_and_apply(
     finally:
         tmp_path.unlink(missing_ok=True)
 
+    if not apply_to_workspace:
+        return _validate_in_isolated_source_tree(
+            file_path=file_path,
+            target_file=target_file,
+            new_content=new_content,
+            description=description,
+            diff=diff,
+            validation_results=validation_results,
+        )
+
     # 7. Git backup
     backup_ref = _create_git_backup(file_path)
 
@@ -509,6 +538,77 @@ def validate_and_apply(
     }
 
 
+def _validate_in_isolated_source_tree(
+    *,
+    file_path: Path,
+    target_file: str,
+    new_content: str,
+    description: str,
+    diff: str,
+    validation_results: dict[str, Any],
+) -> dict[str, Any]:
+    source_dir = _find_agent_source_dir().resolve()
+    relative = file_path.resolve().relative_to(source_dir)
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="naumi-self-modify-") as tmp_dir:
+            isolated_source = Path(tmp_dir) / "naumi_agent"
+            shutil.copytree(source_dir, isolated_source)
+            isolated_target = isolated_source / relative
+            isolated_target.write_text(new_content, encoding="utf-8")
+
+            import_passed, import_output = _run_import_test(
+                isolated_target,
+                source_dir=isolated_source,
+            )
+            validation_results["import_test"] = {
+                "passed": import_passed,
+                "output": import_output,
+            }
+            if not import_passed:
+                return {
+                    "status": "rejected",
+                    "file": target_file,
+                    "error": "隔离导入测试失败，主工作区未修改",
+                    "validation": validation_results,
+                    "diff": diff,
+                }
+
+            test_passed, test_output = _run_tests(
+                isolated_target,
+                source_dir=isolated_source,
+            )
+            validation_results["pytest"] = {
+                "passed": test_passed,
+                "output": test_output[:2000],
+            }
+            if not test_passed:
+                return {
+                    "status": "rejected",
+                    "file": target_file,
+                    "error": "隔离测试未通过，主工作区未修改",
+                    "validation": validation_results,
+                    "diff": diff,
+                }
+    except Exception as e:
+        return {
+            "status": "error",
+            "file": target_file,
+            "error": f"隔离验证失败，主工作区未修改: {e}",
+            "validation": validation_results,
+            "diff": diff,
+        }
+
+    return {
+        "status": "validated",
+        "file": target_file,
+        "description": description,
+        "diff": diff,
+        "validation": validation_results,
+        "message": "已在隔离源码副本中完成验证，主工作区未修改。",
+    }
+
+
 class SelfModifyTool(Tool):
     """自我修改 — Agent 修改自身工具代码并验证."""
 
@@ -520,9 +620,10 @@ class SelfModifyTool(Tool):
     def description(self) -> str:
         return (
             "自我修改 — 修改 Agent 自身的工具代码。"
-            "提交修改后自动执行静态检查和测试验证，通过后热重载生效。"
+            "提交候选修改后先在隔离源码副本中执行静态检查和测试验证，"
+            "通过后返回 diff 与合并提示，默认不写入主工作区。"
             "仅允许修改 tools/memory/skills 目录下的模块，核心引擎受保护。"
-            "修改失败会自动回滚到修改前的状态。"
+            "验证失败不会污染当前源码。"
         )
 
     @property
@@ -581,7 +682,12 @@ class SelfModifyTool(Tool):
                 ]
             )
 
-        result = validate_and_apply(target_file, new_content, description)
+        result = validate_and_apply(
+            target_file,
+            new_content,
+            description,
+            apply_to_workspace=False,
+        )
 
         parts: list[str] = ["## 自我修改结果"]
         status = result["status"]
@@ -609,6 +715,30 @@ class SelfModifyTool(Tool):
                 parts.append("```")
             parts.append("")
             parts.append("💡 修改已写入磁盘并通过验证。使用 `hot_reload` 工具重载模块使改动生效。")
+
+        elif status == "validated":
+            parts.append("**状态**: ✅ 已在隔离区验证")
+            parts.append(f"**文件**: `{file_name}`")
+            parts.append("**主工作区**: 未修改")
+            parts.append(f"**说明**: {description}")
+            parts.append("")
+            parts.append("### 验证详情")
+            for check_name, check_result in result.get("validation", {}).items():
+                icon = "✅" if check_result["passed"] else "❌"
+                status_text = (
+                    "通过"
+                    if check_result["passed"]
+                    else check_result.get("output", "失败")
+                )
+                parts.append(f"- {icon} **{check_name}**: {status_text}")
+            if result.get("diff"):
+                parts.append("")
+                parts.append("### 待审查变更")
+                parts.append("```diff")
+                parts.append(result["diff"][:3000])
+                parts.append("```")
+            parts.append("")
+            parts.append("💡 主工作区未修改。请审查 diff；确认后再由受控应用流程合并。")
 
         elif status == "rolled_back":
             parts.append("**状态**: 🔄 已回滚（测试未通过）")
