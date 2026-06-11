@@ -285,6 +285,48 @@ class TestVerification:
         assert spec.success_criteria[0].status != CriterionStatus.VERIFIED
 
     @pytest.mark.asyncio
+    async def test_verify_trusts_zero_exit_output_even_when_text_mentions_fail(
+        self,
+    ) -> None:
+        engine = _make_engine()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+        )
+        spec = _make_spec()
+        mock_bash = MagicMock()
+        mock_bash.execute = AsyncMock(
+            return_value="pytest collected marker named failover\n0 passed, 0 failed",
+        )
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=mock_bash)
+
+        await loop._verify_criteria(spec)
+
+        assert spec.success_criteria[0].status == CriterionStatus.VERIFIED
+
+    @pytest.mark.asyncio
+    async def test_verify_fails_on_nonzero_exit_code_even_without_error_words(
+        self,
+    ) -> None:
+        engine = _make_engine()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+        )
+        spec = _make_spec()
+        mock_bash = MagicMock()
+        mock_bash.execute = AsyncMock(return_value="done\n[exit code: 1]")
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=mock_bash)
+
+        await loop._verify_criteria(spec)
+
+        assert spec.success_criteria[0].status == CriterionStatus.FAILED
+
+    @pytest.mark.asyncio
     async def test_final_verification_all_verified(self) -> None:
         engine = _make_engine()
         loop = GoalPursuitLoop(
