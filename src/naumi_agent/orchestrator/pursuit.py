@@ -1638,8 +1638,27 @@ class GoalPursuitLoop:
                 if background is not None:
                     return background
 
-            output = await bash_tool.execute(command=command)
-            status = "completed" if _verification_command_passed(output) else "error"
+            if self._execute_tool_call is not None:
+                tool_result = await self._execute_tool_call(
+                    ToolCall(
+                        id=f"pursuit-{action_id}",
+                        name="bash_run",
+                        arguments=json.dumps(
+                            {"command": command},
+                            ensure_ascii=False,
+                        ),
+                    )
+                )
+                output = tool_result.content
+                passed = (
+                    tool_result.status == "success"
+                    and _verification_command_passed(output)
+                )
+            else:
+                output = await bash_tool.execute(command=command)
+                passed = _verification_command_passed(output)
+
+            status = "completed" if passed else "error"
             return {
                 "action_id": action_id,
                 "status": status,
