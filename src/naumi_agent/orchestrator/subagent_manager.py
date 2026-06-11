@@ -436,7 +436,7 @@ class SubAgentManager:
                 and "event_callback" in signature(agent.execute).parameters
             ):
                 execute_kwargs["event_callback"] = event_callback
-            timeout_seconds = agent.config.timeout_seconds
+            timeout_seconds = _agent_timeout_seconds(agent)
             if timeout_seconds > 0 and math.isfinite(timeout_seconds):
                 result = await asyncio.wait_for(
                     agent.execute(**execute_kwargs),
@@ -456,7 +456,7 @@ class SubAgentManager:
                 agent_name=agent_name,
             ))
         except TimeoutError:
-            timeout_seconds = agent.config.timeout_seconds
+            timeout_seconds = _agent_timeout_seconds(agent)
             logger.warning(
                 "Agent %s timed out while executing task %s after %.2fs",
                 agent_name,
@@ -778,6 +778,12 @@ async def _emit_subagent_event_payload(
     if callback is None:
         return
     await callback("subagent_event", payload)
+
+
+def _agent_timeout_seconds(agent: Any) -> float:
+    config = getattr(agent, "config", None)
+    timeout = getattr(config, "timeout_seconds", 300.0)
+    return float(timeout) if isinstance(timeout, int | float) else 300.0
 
 
 def _agent_result_message(result: AgentResult) -> str:

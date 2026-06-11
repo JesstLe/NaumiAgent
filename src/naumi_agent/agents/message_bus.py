@@ -273,12 +273,30 @@ class AgentMessageBus:
     #  Lifecycle
     # ------------------------------------------------------------------
 
-    async def reset(self) -> None:
-        """Clear all state for a fresh orchestration session."""
+    async def reset(
+        self,
+        *,
+        preserve_blackboard_prefixes: tuple[str, ...] = (),
+        preserve_mailboxes: bool = False,
+    ) -> None:
+        """Clear state for a fresh orchestration session.
+
+        Team coordination can span tool invocations, so callers that only need
+        to clear analysis scratch state may preserve team blackboard entries
+        and direct handoff mailboxes.
+        """
         async with self._lock:
-            self._mailboxes.clear()
+            if not preserve_mailboxes:
+                self._mailboxes.clear()
             self._subscribers.clear()
-            self._blackboard.clear()
+            if preserve_blackboard_prefixes:
+                self._blackboard = {
+                    key: entry
+                    for key, entry in self._blackboard.items()
+                    if key.startswith(preserve_blackboard_prefixes)
+                }
+            else:
+                self._blackboard.clear()
             self._history.clear()
 
     def stats(self) -> dict[str, Any]:

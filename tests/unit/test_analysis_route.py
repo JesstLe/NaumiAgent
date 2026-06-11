@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from naumi_agent.agents.base import AgentResult
+from naumi_agent.agents.message_bus import AgentMessage, AgentMessageBus
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.tools.analysis import MoERouteTool, _build_route_report, _scan_route
 from naumi_agent.tools.analysis_tools.route import MoERouteTool as SplitMoERouteTool
@@ -159,3 +161,66 @@ class TestMoERouteTool:
         assert "## MoE 确定性专家路由" in output
         assert "## LLM MoE 综合增强" in output
         assert "注入 MoE 综合" in output
+
+    @pytest.mark.asyncio
+    async def test_subagent_moe_preserves_existing_team_bus_state(self) -> None:
+        class FakeManager:
+            def __init__(self) -> None:
+                self.message_bus = AgentMessageBus()
+
+            def spawn_for_task(self, **kwargs: object) -> None:
+                pass
+
+            async def execute_parallel(self, subtasks: list[object]) -> list[AgentResult]:
+                return [
+                    AgentResult(
+                        status="completed",
+                        response="专家结论",
+                        total_tokens=3,
+                        total_cost_usd=0.01,
+                    )
+                    for _ in subtasks
+                ]
+
+            def destroy(self, name: str) -> bool:
+                return True
+
+        manager = FakeManager()
+        await manager.message_bus.blackboard_set(
+            "team/handoff/coder/1",
+            {"content": "请接手"},
+            author="coder",
+        )
+        await manager.message_bus.send(
+            AgentMessage(
+                sender="coder",
+                recipient="researcher",
+                topic="team.handoff",
+                content="请接手",
+            )
+        )
+
+        async def run_analysis(router: object, system_prompt: str, user_msg: str) -> str:
+            if "EXPERT|" in system_prompt:
+                return "EXPERT|Review|quality|审查实现风险"
+            return "综合结论"
+
+        tool = SplitMoERouteTool(
+            router_getter=lambda: "router",
+            run_analysis=run_analysis,
+            subagent_manager_getter=lambda router: manager,
+        )
+
+        output = await tool._execute_with_agents(
+            router="router",
+            manager=manager,
+            task="审查 agent 协作",
+            scan_evidence="- 需要多专家",
+            source_text="",
+        )
+        blackboard = await manager.message_bus.blackboard_get_all()
+        pending = await manager.message_bus.peek("researcher")
+
+        assert "MoE 混合专家调度报告" in output
+        assert "team/handoff/coder/1" in blackboard
+        assert pending[0].content == "请接手"
