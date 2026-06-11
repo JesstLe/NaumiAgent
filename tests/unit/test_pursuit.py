@@ -265,6 +265,38 @@ class TestVerification:
         assert spec.success_criteria[0].status == CriterionStatus.VERIFIED
 
     @pytest.mark.asyncio
+    async def test_verify_uses_injected_tool_executor_for_bash_command(self) -> None:
+        engine = _make_engine()
+        execute_tool_call = AsyncMock(
+            return_value=ToolResult(
+                call_id="pursuit-verify-c1",
+                status="success",
+                content="ok\n[exit code: 0]",
+            )
+        )
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=execute_tool_call,
+        )
+        spec = _make_spec()
+
+        mock_bash = MagicMock()
+        mock_bash.execute = AsyncMock(return_value="direct should not run")
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=mock_bash)
+
+        await loop._verify_criteria(spec)
+
+        assert spec.success_criteria[0].status == CriterionStatus.VERIFIED
+        mock_bash.execute.assert_not_awaited()
+        execute_tool_call.assert_awaited_once()
+        tool_call = execute_tool_call.await_args.args[0]
+        assert tool_call.name == "bash_run"
+        assert json.loads(tool_call.arguments) == {"command": "echo ok"}
+
+    @pytest.mark.asyncio
     async def test_verify_with_failing_command(self) -> None:
         engine = _make_engine()
         loop = GoalPursuitLoop(
