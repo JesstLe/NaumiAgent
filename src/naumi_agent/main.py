@@ -2336,7 +2336,7 @@ async def _run_analysis(engine: Any, mode: str, target: str, *, qps: int | None 
         elif mode == "eval":
             result = await tool.execute(target=target)
         elif mode == "page":
-            result = await tool.execute()
+            result = await tool.execute(session_context=target)
         elif mode == "heal":
             result = await tool.execute(error_log=target)
         elif mode == "dspy":

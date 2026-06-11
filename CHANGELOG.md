@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.125] - 2026-06-11
+
+### Fixed
+- **Page Analysis CLI Context** — 主 CLI `_run_analysis(..., "page", target)` 现在会把输入上下文传给 `analysis_page` 的 `session_context`，与共享分析命令入口保持一致，避免 `/page` 在不同入口下丢失上下文。
+
 ## [0.1.124] - 2026-06-11
 
 ### Fixed
