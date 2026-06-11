@@ -297,6 +297,50 @@ class TestVerification:
         assert json.loads(tool_call.arguments) == {"command": "echo ok"}
 
     @pytest.mark.asyncio
+    async def test_verify_uses_worktree_cwd_when_available(self) -> None:
+        engine = _make_engine()
+        execute_tool_call = AsyncMock(
+            return_value=ToolResult(
+                call_id="pursuit-verify-c1",
+                status="success",
+                content="ok\n[exit code: 0]",
+            )
+        )
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=execute_tool_call,
+        )
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="修改 src/demo.py",
+            status=PursuitRunStatus.RUNNING,
+            phase="test",
+            started_at=time.time(),
+            updated_at=time.time(),
+            worktree_path="/tmp/pursue-demo",
+        )
+        spec = _make_spec()
+
+        mock_bash = MagicMock()
+        mock_bash.execute = AsyncMock(return_value="direct should not run")
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=mock_bash)
+
+        await loop._verify_criteria(spec)
+
+        assert spec.success_criteria[0].status == CriterionStatus.VERIFIED
+        mock_bash.execute.assert_not_awaited()
+        execute_tool_call.assert_awaited_once()
+        tool_call = execute_tool_call.await_args.args[0]
+        assert tool_call.name == "bash_run"
+        assert json.loads(tool_call.arguments) == {
+            "command": "echo ok",
+            "cwd": "/tmp/pursue-demo",
+        }
+
+    @pytest.mark.asyncio
     async def test_verify_with_failing_command(self) -> None:
         engine = _make_engine()
         loop = GoalPursuitLoop(
@@ -958,6 +1002,56 @@ class TestPursuitExecutionStrategy:
         bash.execute.assert_not_awaited()
         assert executor.await_count == 5
         assert all(call.args[0].name == "bash_run" for call in executor.await_args_list)
+
+    @pytest.mark.asyncio
+    async def test_gather_state_evidence_uses_worktree_cwd_when_available(self) -> None:
+        engine = _make_engine()
+        executor = AsyncMock(
+            return_value=ToolResult(
+                call_id="pursuit-evidence",
+                status="success",
+                content="ok",
+            )
+        )
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=executor,
+        )
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="修改 src/demo.py",
+            status=PursuitRunStatus.RUNNING,
+            phase="test",
+            started_at=time.time(),
+            updated_at=time.time(),
+            worktree_path="/tmp/pursue-demo",
+        )
+        loop._start_time = time.time()
+        bash = MagicMock()
+        bash.execute = AsyncMock(return_value="direct should not run")
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=bash)
+        spec = _make_spec(
+            goal="修改 src/demo.py",
+            criteria=[
+                SuccessCriterion(
+                    id="c1",
+                    description="测试通过",
+                    verification_command="pytest tests/test_demo.py",
+                )
+            ],
+        )
+
+        await loop._gather_state_evidence(spec)
+
+        bash.execute.assert_not_awaited()
+        assert executor.await_count == 5
+        for call in executor.await_args_list:
+            tool_call = call.args[0]
+            assert tool_call.name == "bash_run"
+            assert json.loads(tool_call.arguments)["cwd"] == "/tmp/pursue-demo"
 
     @pytest.mark.asyncio
     async def test_collect_background_results_records_hard_evidence(self) -> None:
