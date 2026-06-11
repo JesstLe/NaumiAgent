@@ -1279,6 +1279,34 @@ class GoalPursuitLoop:
                 tool, path, existing, description, action_id, context,
             )
 
+    async def _apply_file_edit_replacement(
+        self,
+        tool: Any,
+        *,
+        path: str,
+        old_text: str,
+        new_text: str,
+        action_id: str,
+        replacement_index: int,
+    ) -> str:
+        """Apply one file_edit replacement through the engine boundary when available."""
+        edit_args = {
+            "path": path,
+            "old_text": old_text,
+            "new_text": new_text,
+        }
+        if self._execute_tool_call is not None:
+            tool_result = await self._execute_tool_call(
+                ToolCall(
+                    id=f"pursuit-{action_id}-edit-{replacement_index}",
+                    name="file_edit",
+                    arguments=json.dumps(edit_args, ensure_ascii=False),
+                )
+            )
+            return tool_result.content
+
+        return str(await tool.execute(**edit_args))
+
     async def _edit_small_file(
         self,
         tool: Any,
@@ -1352,12 +1380,15 @@ class GoalPursuitLoop:
         updated = existing
         applied = 0
         errors: list[str] = []
-        for old_text, new_text in replacements:
+        for replacement_index, (old_text, new_text) in enumerate(replacements, start=1):
             if old_text in updated:
-                output = await tool.execute(
+                output = await self._apply_file_edit_replacement(
+                    tool,
                     path=path,
                     old_text=old_text,
                     new_text=new_text,
+                    action_id=action_id,
+                    replacement_index=replacement_index,
                 )
                 if str(output).startswith("Error"):
                     errors.append(str(output)[:200])
@@ -1485,12 +1516,15 @@ class GoalPursuitLoop:
         updated = existing
         applied = 0
         errors: list[str] = []
-        for old_text, new_text in replacements:
+        for replacement_index, (old_text, new_text) in enumerate(replacements, start=1):
             if old_text in updated:
-                output = await tool.execute(
+                output = await self._apply_file_edit_replacement(
+                    tool,
                     path=path,
                     old_text=old_text,
                     new_text=new_text,
+                    action_id=action_id,
+                    replacement_index=replacement_index,
                 )
                 if str(output).startswith("Error"):
                     errors.append(str(output)[:200])

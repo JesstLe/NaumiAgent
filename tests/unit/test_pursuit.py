@@ -685,6 +685,54 @@ class TestPursuitExecutionStrategy:
         assert target.read_text(encoding="utf-8") == original
 
     @pytest.mark.asyncio
+    async def test_file_edit_uses_injected_tool_executor(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine = _make_engine()
+        execute_tool_call = AsyncMock(
+            return_value=ToolResult(
+                call_id="pursuit-a1-edit-1",
+                status="success",
+                content="✅ 已编辑",
+            )
+        )
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=execute_tool_call,
+        )
+        target = tmp_path / "demo.py"
+        original = "x = 1\n"
+        target.write_text(original, encoding="utf-8")
+        loop._llm_call = AsyncMock(  # type: ignore[method-assign]
+            return_value="[SEARCH]\nx = 1\n[REPLACE]\nx = 2\n[END]"
+        )
+        monkeypatch.setattr(loop, "_extract_target_path", lambda description: str(target))
+        edit_tool = MagicMock()
+        edit_tool.execute = AsyncMock(return_value="direct edit should not run")
+
+        result = await loop._execute_file_edit(
+            edit_tool,
+            f"修改 {target} 把 x 改成 2",
+            "a1",
+        )
+
+        assert result["status"] == "completed"
+        edit_tool.execute.assert_not_awaited()
+        execute_tool_call.assert_awaited_once()
+        tool_call = execute_tool_call.await_args.args[0]
+        assert tool_call.name == "file_edit"
+        assert json.loads(tool_call.arguments) == {
+            "path": str(target),
+            "old_text": "x = 1",
+            "new_text": "x = 2",
+        }
+        assert target.read_text(encoding="utf-8") == original
+
+    @pytest.mark.asyncio
     async def test_file_write_uses_injected_tool_executor(
         self,
         monkeypatch: pytest.MonkeyPatch,
