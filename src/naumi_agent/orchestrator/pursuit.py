@@ -1247,15 +1247,16 @@ class GoalPursuitLoop:
 
         if line_count <= 200:
             return await self._edit_small_file(
-                path, existing, description, action_id, context,
+                tool, path, existing, description, action_id, context,
             )
         else:
             return await self._edit_large_file(
-                path, existing, description, action_id, context,
+                tool, path, existing, description, action_id, context,
             )
 
     async def _edit_small_file(
         self,
+        tool: Any,
         path: str,
         existing: str,
         description: str,
@@ -1328,27 +1329,18 @@ class GoalPursuitLoop:
         errors: list[str] = []
         for old_text, new_text in replacements:
             if old_text in updated:
+                output = await tool.execute(
+                    path=path,
+                    old_text=old_text,
+                    new_text=new_text,
+                )
+                if str(output).startswith("Error"):
+                    errors.append(str(output)[:200])
+                    continue
                 updated = updated.replace(old_text, new_text, 1)
                 applied += 1
-            else:
-                # Try fuzzy: strip trailing whitespace per line
-                old_fuzzy = "\n".join(line.rstrip() for line in old_text.split("\n"))
-                updated_fuzzy = "\n".join(line.rstrip() for line in updated.split("\n"))
-                if old_fuzzy in updated_fuzzy:
-                    # Find the position and replace
-                    idx = updated_fuzzy.index(old_fuzzy)
-                    new_fuzzy = "\n".join(line.rstrip() for line in new_text.split("\n"))
-                    updated_fuzzy = (
-                        updated_fuzzy[:idx]
-                        + new_fuzzy
-                        + updated_fuzzy[idx + len(old_fuzzy):]
-                    )
-                    updated = "\n".join(line.rstrip() for line in updated.split("\n"))
-                    idx = updated.index(old_fuzzy)
-                    updated = updated[:idx] + new_text + updated[idx + len(old_fuzzy):]
-                    applied += 1
-                else:
-                    errors.append(f"OLD_TEXT not found: {old_text[:80]}...")
+                continue
+            errors.append(f"OLD_TEXT not found: {old_text[:80]}...")
 
         if applied == 0:
             return {
@@ -1356,10 +1348,6 @@ class GoalPursuitLoop:
                 "status": "error",
                 "output": f"All replacements failed: {'; '.join(errors)}",
             }
-
-        resolved = __import__("os").path.expanduser(path)
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(updated)
 
         msg = f"Applied {applied}/{len(replacements)} replacements"
         if errors:
@@ -1402,6 +1390,7 @@ class GoalPursuitLoop:
 
     async def _edit_large_file(
         self,
+        tool: Any,
         path: str,
         existing: str,
         description: str,
@@ -1473,6 +1462,14 @@ class GoalPursuitLoop:
         errors: list[str] = []
         for old_text, new_text in replacements:
             if old_text in updated:
+                output = await tool.execute(
+                    path=path,
+                    old_text=old_text,
+                    new_text=new_text,
+                )
+                if str(output).startswith("Error"):
+                    errors.append(str(output)[:200])
+                    continue
                 updated = updated.replace(old_text, new_text, 1)
                 applied += 1
             else:
@@ -1484,10 +1481,6 @@ class GoalPursuitLoop:
                 "status": "error",
                 "output": f"All replacements failed: {'; '.join(errors)}",
             }
-
-        resolved = __import__("os").path.expanduser(path)
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(updated)
 
         msg = (
             f"Applied {applied}/{len(replacements)} replacements "
