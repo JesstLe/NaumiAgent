@@ -1803,17 +1803,36 @@ class GoalPursuitLoop:
 
             # Try to run the verification command
             try:
-                bash_tool = self._tools.get("bash_run")
-                if bash_tool:
+                if self._execute_tool_call is not None:
+                    tool_result = await self._execute_tool_call(
+                        ToolCall(
+                            id=f"pursuit-verify-{criterion.id}",
+                            name="bash_run",
+                            arguments=json.dumps(
+                                {"command": cmd},
+                                ensure_ascii=False,
+                            ),
+                        )
+                    )
+                    output = tool_result.content
+                    passed = (
+                        tool_result.status == "success"
+                        and _verification_command_passed(output)
+                    )
+                else:
+                    bash_tool = self._tools.get("bash_run")
+                    if not bash_tool:
+                        continue
                     output = await bash_tool.execute(command=cmd)
                     passed = _verification_command_passed(output)
-                    if passed:
-                        criterion.status = CriterionStatus.VERIFIED
-                        criterion.evidence = f"Command output: {str(output)[:500]}"
-                    else:
-                        criterion.status = CriterionStatus.FAILED
-                        criterion.evidence = f"Failed: {str(output)[:500]}"
-                    criterion.last_checked = time.time()
+
+                if passed:
+                    criterion.status = CriterionStatus.VERIFIED
+                    criterion.evidence = f"Command output: {str(output)[:500]}"
+                else:
+                    criterion.status = CriterionStatus.FAILED
+                    criterion.evidence = f"Failed: {str(output)[:500]}"
+                criterion.last_checked = time.time()
             except Exception as e:
                 criterion.status = CriterionStatus.FAILED
                 criterion.evidence = f"Verification error: {e}"
