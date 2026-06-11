@@ -1621,9 +1621,7 @@ class GoalPursuitLoop:
                     return background
 
             output = await bash_tool.execute(command=command)
-            status = "completed"
-            if "[exit code:" in str(output) and "0" not in str(output).split("[exit code:")[-1][:3]:
-                status = "error"
+            status = "completed" if _verification_command_passed(output) else "error"
             return {
                 "action_id": action_id,
                 "status": status,

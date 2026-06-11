@@ -503,6 +503,24 @@ class TestPursuitExecutionStrategy:
         schedule.execute.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_bash_action_treats_multi_digit_exit_code_as_error(self) -> None:
+        engine = _make_engine()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+        )
+        loop._llm_call = AsyncMock(return_value="python -m pytest")  # type: ignore[method-assign]
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=None)
+        bash = MagicMock()
+        bash.execute = AsyncMock(return_value="done\n[exit code: 10]")
+
+        result = await loop._execute_via_bash(bash, "Run pytest", "a1")
+
+        assert result["status"] == "error"
+
+    @pytest.mark.asyncio
     async def test_collect_background_results_records_hard_evidence(self) -> None:
         engine = _make_engine()
         loop = GoalPursuitLoop(
