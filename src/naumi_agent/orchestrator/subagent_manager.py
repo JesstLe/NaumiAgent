@@ -586,8 +586,32 @@ class SubAgentManager:
         while remaining and iteration < max_iterations:
             iteration += 1
 
-            # 找到所有依赖已完成的任务
-            ready = [t for t in remaining if all(dep in results for dep in (t.depends_on or []))]
+            blocked: list[SubTask] = []
+            for task in remaining:
+                failed_deps = [
+                    dep_id
+                    for dep_id in (task.depends_on or [])
+                    if dep_id in results and results[dep_id].status != "completed"
+                ]
+                if failed_deps:
+                    results[task.id] = AgentResult(
+                        status="error",
+                        error=f"Failed dependencies: {failed_deps}",
+                    )
+                    blocked.append(task)
+
+            for task in blocked:
+                remaining.remove(task)
+
+            # 找到所有依赖已成功完成的任务
+            ready = [
+                t
+                for t in remaining
+                if all(
+                    dep in results and results[dep].status == "completed"
+                    for dep in (t.depends_on or [])
+                )
+            ]
 
             if not ready:
                 # 死锁：所有剩余任务都有未满足的依赖
