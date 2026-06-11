@@ -1140,6 +1140,64 @@ class TestBudgetCheck:
         assert "费用" in result.response
 
 
+class TestOrchestratedExecution:
+    @pytest.mark.asyncio
+    async def test_orchestrated_run_reports_failed_step_and_tracks_subagent_usage(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        plan = Plan(
+            understanding="需要多 Agent 协作",
+            approach="并行编排",
+            steps=[
+                Step(
+                    id="ok",
+                    description="完成可行步骤",
+                    tool=None,
+                    depends_on=[],
+                    parallelizable=True,
+                    complexity=Complexity.SIMPLE,
+                ),
+                Step(
+                    id="bad",
+                    description="暴露失败步骤",
+                    tool=None,
+                    depends_on=[],
+                    parallelizable=True,
+                    complexity=Complexity.SIMPLE,
+                ),
+            ],
+            mode=ExecutionMode.ORCHESTRATOR,
+        )
+        engine.subagent_manager = MagicMock()
+        engine.subagent_manager.stop_reaper = AsyncMock()
+        engine.subagent_manager.execute_dag = AsyncMock(
+            return_value={
+                "ok": AgentResult(
+                    status="completed",
+                    response="完成了",
+                    total_tokens=9,
+                    total_cost_usd=0.25,
+                ),
+                "bad": AgentResult(
+                    status="error",
+                    error="子任务失败",
+                    total_tokens=7,
+                    total_cost_usd=0.2,
+                ),
+            }
+        )
+
+        result = await engine._run_orchestrated(plan, tools=None)
+        budget = engine._budget_tracker.get_summary()
+
+        assert result.status == "error"
+        assert "暴露失败步骤" in result.response
+        assert "子任务失败" in (result.error or "")
+        assert budget.total_output_tokens == 16
+        assert budget.total_cost_usd == 0.45
+
+
 class TestContextCompactionPreservation:
     @pytest.mark.asyncio
     async def test_maybe_compact_archives_large_tool_results(
