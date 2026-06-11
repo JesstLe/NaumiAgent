@@ -537,6 +537,68 @@ class TestPursuitExecutionStrategy:
         schedule.execute.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_long_bash_action_uses_injected_executor_for_background(self) -> None:
+        engine = _make_engine()
+
+        async def execute_tool_call(call):
+            if call.name == "background_run":
+                return ToolResult(
+                    call_id=call.id,
+                    status="success",
+                    content="后台任务已启动。\n\n- 任务 ID：`bg_0002`",
+                )
+            if call.name == "schedule_create":
+                return ToolResult(
+                    call_id=call.id,
+                    status="success",
+                    content="调度任务已创建。",
+                )
+            return ToolResult(
+                call_id=call.id,
+                status="error",
+                content=f"unexpected tool: {call.name}",
+            )
+
+        executor = AsyncMock(side_effect=execute_tool_call)
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=executor,
+        )
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="运行完整测试",
+            status=PursuitRunStatus.RUNNING,
+            phase="execute",
+            started_at=time.time(),
+            updated_at=time.time(),
+        )
+        loop._llm_call = AsyncMock(return_value="python -m pytest tests/ -q")  # type: ignore[method-assign]
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=None)
+        bash = MagicMock()
+        bash.execute = AsyncMock(return_value="direct should not run")
+
+        result = await loop._execute_via_bash(bash, "Run pytest tests/ slowly", "a1")
+
+        assert result["status"] == "waiting"
+        assert result["background_task_id"] == "bg_0002"
+        assert loop._pending_background[0].task_id == "bg_0002"
+        bash.execute.assert_not_awaited()
+        tool_calls = executor.await_args_list
+        assert [call.args[0].name for call in tool_calls] == [
+            "background_run",
+            "schedule_create",
+        ]
+        background_args = json.loads(tool_calls[0].args[0].arguments)
+        assert background_args == {
+            "command": "python -m pytest tests/ -q",
+            "cwd": "",
+            "timeout_seconds": 1800,
+        }
+
+    @pytest.mark.asyncio
     async def test_bash_action_treats_multi_digit_exit_code_as_error(self) -> None:
         engine = _make_engine()
         loop = GoalPursuitLoop(

@@ -1680,16 +1680,33 @@ class GoalPursuitLoop:
     ) -> dict[str, Any] | None:
         """Start a long-running command through background tools."""
         background_tool = self._tools.get("background_run")
-        if background_tool is None:
+        if background_tool is None and self._execute_tool_call is None:
             return None
 
         cwd = self._run.worktree_path if self._run and self._run.worktree_path else ""
         try:
-            output = str(await background_tool.execute(
-                command=command,
-                cwd=cwd,
-                timeout_seconds=1800,
-            ))
+            background_args = {
+                "command": command,
+                "cwd": cwd,
+                "timeout_seconds": 1800,
+            }
+            if self._execute_tool_call is not None:
+                tool_result = await self._execute_tool_call(
+                    ToolCall(
+                        id=f"pursuit-background-{action_id}",
+                        name="background_run",
+                        arguments=json.dumps(background_args, ensure_ascii=False),
+                    )
+                )
+                output = tool_result.content
+                if tool_result.status != "success":
+                    return {
+                        "action_id": action_id,
+                        "status": "error",
+                        "output": f"启动后台任务失败：{output[:500]}",
+                    }
+            else:
+                output = str(await background_tool.execute(**background_args))
         except Exception as e:
             return {
                 "action_id": action_id,
@@ -1734,7 +1751,7 @@ class GoalPursuitLoop:
     async def _schedule_background_followup(self, task_id: str) -> None:
         """Schedule a reminder to revisit a pending background task."""
         schedule_tool = self._tools.get("schedule_create")
-        if schedule_tool is None:
+        if schedule_tool is None and self._execute_tool_call is None:
             return
         from datetime import datetime, timedelta
 
@@ -1745,11 +1762,22 @@ class GoalPursuitLoop:
             "读取 background_status 和 background_read_output 后判断下一步。"
         )
         try:
-            output = str(await schedule_tool.execute(
-                kind="once",
-                expression=when.isoformat(),
-                prompt=prompt,
-            ))
+            schedule_args = {
+                "kind": "once",
+                "expression": when.isoformat(),
+                "prompt": prompt,
+            }
+            if self._execute_tool_call is not None:
+                tool_result = await self._execute_tool_call(
+                    ToolCall(
+                        id=f"pursuit-followup-{task_id}",
+                        name="schedule_create",
+                        arguments=json.dumps(schedule_args, ensure_ascii=False),
+                    )
+                )
+                output = tool_result.content
+            else:
+                output = str(await schedule_tool.execute(**schedule_args))
         except Exception as e:
             output = f"创建复查提醒失败：{type(e).__name__}: {e}"
         if self._run is not None:
