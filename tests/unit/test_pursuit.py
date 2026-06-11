@@ -771,6 +771,47 @@ class TestPursuitExecutionStrategy:
         assert arguments == {"path": "demo.py", "content": "x = 2"}
 
     @pytest.mark.asyncio
+    async def test_generic_tool_uses_injected_tool_executor(self) -> None:
+        engine = _make_engine()
+        execute_tool_call = AsyncMock(
+            return_value=ToolResult(
+                call_id="pursuit-a1",
+                status="success",
+                content="工具已执行",
+            )
+        )
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=execute_tool_call,
+        )
+        loop._llm_call = AsyncMock(return_value='{"query": "abc"}')  # type: ignore[method-assign]
+        tool = MagicMock()
+        tool.parameters_schema = {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "查询"}},
+            "required": ["query"],
+        }
+        tool.execute = AsyncMock(return_value="direct should not run")
+
+        result = await loop._execute_generic_tool(
+            tool,
+            "custom_search",
+            "搜索 abc",
+            "a1",
+        )
+
+        assert result["status"] == "completed"
+        assert result["output"] == "工具已执行"
+        tool.execute.assert_not_awaited()
+        execute_tool_call.assert_awaited_once()
+        tool_call = execute_tool_call.await_args.args[0]
+        assert tool_call.id == "pursuit-a1"
+        assert tool_call.name == "custom_search"
+        assert json.loads(tool_call.arguments) == {"query": "abc"}
+
+    @pytest.mark.asyncio
     async def test_collect_background_results_records_hard_evidence(self) -> None:
         engine = _make_engine()
         loop = GoalPursuitLoop(

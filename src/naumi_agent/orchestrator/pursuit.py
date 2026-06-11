@@ -1622,10 +1622,23 @@ class GoalPursuitLoop:
             text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
         params = json.loads(text)
 
-        output = await tool.execute(**params)
+        if self._execute_tool_call is not None:
+            tool_result = await self._execute_tool_call(
+                ToolCall(
+                    id=f"pursuit-{action_id}",
+                    name=tool_name,
+                    arguments=json.dumps(params, ensure_ascii=False),
+                )
+            )
+            output = tool_result.content
+            status = "completed" if tool_result.status == "success" else "error"
+        else:
+            output = await tool.execute(**params)
+            status = "completed"
+
         return {
             "action_id": action_id,
-            "status": "completed",
+            "status": status,
             "output": str(output)[:3000],
         }
 
