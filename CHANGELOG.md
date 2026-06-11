@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.122] - 2026-06-11
+
+### Fixed
+- **Shared Analysis Command Dispatch** — 修复 `cli.commands_analysis.run_analysis` 仍使用旧分析 Tool 名称的问题，并统一非 `target` 参数构造，避免复用共享分析命令模块的入口报“工具未注册”或传错参数。
+
 ## [0.1.121] - 2026-06-11
 
 ### Changed
