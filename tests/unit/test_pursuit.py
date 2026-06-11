@@ -1,6 +1,7 @@
 """Goal Pursuit Loop tests."""
 
 import asyncio
+import json
 import time
 from unittest.mock import AsyncMock, MagicMock
 
@@ -23,6 +24,7 @@ from naumi_agent.orchestrator.pursuit import (
 )
 from naumi_agent.orchestrator.pursuit_store import PursuitStore, format_run
 from naumi_agent.orchestrator.subagent_manager import SubAgentManager
+from naumi_agent.tools.base import ToolResult
 from naumi_agent.tools.pursuit import (
     PursueTool,
     PursuitListTool,
@@ -557,6 +559,44 @@ class TestPursuitExecutionStrategy:
         assert target.read_text(encoding="utf-8") == original
 
     @pytest.mark.asyncio
+    async def test_file_write_uses_injected_tool_executor(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine = _make_engine()
+        execute_tool_call = AsyncMock(
+            return_value=ToolResult(
+                call_id="pursuit-a1",
+                status="success",
+                content="✅ 已写入",
+            )
+        )
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=execute_tool_call,
+        )
+        loop._llm_call = AsyncMock(return_value="x = 2\n")  # type: ignore[method-assign]
+        monkeypatch.setattr(loop, "_extract_target_path", lambda description: "demo.py")
+        file_write = MagicMock()
+        file_write.execute = AsyncMock(return_value="direct write should not run")
+
+        result = await loop._execute_file_write(
+            file_write,
+            "创建 demo.py",
+            "a1",
+        )
+
+        assert result["status"] == "completed"
+        file_write.execute.assert_not_awaited()
+        execute_tool_call.assert_awaited_once()
+        tool_call = execute_tool_call.await_args.args[0]
+        assert tool_call.name == "file_write"
+        arguments = json.loads(tool_call.arguments)
+        assert arguments == {"path": "demo.py", "content": "x = 2"}
+
+    @pytest.mark.asyncio
     async def test_collect_background_results_records_hard_evidence(self) -> None:
         engine = _make_engine()
         loop = GoalPursuitLoop(
@@ -714,6 +754,8 @@ class TestCancel:
 
 class TestPursueToolRegistration:
     def test_tool_registered_in_engine(self) -> None:
+        import naumi_agent.tools.pursuit as pursuit_mod
+
         engine = _make_engine()
         tool = engine.tool_registry.get("pursue_goal")
         assert tool is not None
@@ -722,6 +764,8 @@ class TestPursueToolRegistration:
         assert engine.tool_registry.get("pursuit_status") is not None
         assert engine.tool_registry.get("pursuit_resume") is not None
         assert hasattr(engine, "pursuit_store")
+        assert pursuit_mod._global_pursuit_loop is not None
+        assert pursuit_mod._global_pursuit_loop._execute_tool_call == engine._execute_tool
 
     def test_pursuit_tools_expose_permission_metadata(self) -> None:
         assert PursueTool().metadata.requires_confirmation is True

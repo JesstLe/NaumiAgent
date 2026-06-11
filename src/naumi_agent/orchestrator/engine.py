@@ -550,6 +550,7 @@ class AgentEngine:
             tool_registry=self._tool_registry,
             subagent_manager=self.subagent_manager,
             store=self.pursuit_store,
+            execute_tool_call=self._execute_tool,
         )
         from naumi_agent.tools.pursuit import create_pursuit_tool
         for tool in create_pursuit_tool():
