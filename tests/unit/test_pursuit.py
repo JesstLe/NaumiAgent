@@ -1110,6 +1110,160 @@ class TestPursuitExecutionStrategy:
         assert json.loads(tool_call.arguments) == {"query": "abc"}
 
     @pytest.mark.asyncio
+    async def test_file_read_generic_rebases_relative_path_to_worktree(
+        self,
+        tmp_path,
+    ) -> None:
+        engine = _make_engine()
+        execute_tool_call = AsyncMock(
+            return_value=ToolResult(
+                call_id="pursuit-a1",
+                status="success",
+                content="x = 1\n",
+            )
+        )
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=execute_tool_call,
+        )
+        worktree_path = tmp_path / "pursue-demo"
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="读取 demo.py",
+            status=PursuitRunStatus.RUNNING,
+            phase="test",
+            started_at=time.time(),
+            updated_at=time.time(),
+            worktree_path=str(worktree_path),
+        )
+        loop._llm_call = AsyncMock(return_value='{"path": "demo.py"}')  # type: ignore[method-assign]
+        tool = MagicMock()
+        tool.parameters_schema = {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "路径"}},
+            "required": ["path"],
+        }
+        tool.execute = AsyncMock(return_value="direct should not run")
+
+        result = await loop._execute_generic_tool(
+            tool,
+            "file_read",
+            "读取 demo.py",
+            "a1",
+        )
+
+        assert result["status"] == "completed"
+        tool.execute.assert_not_awaited()
+        execute_tool_call.assert_awaited_once()
+        tool_call = execute_tool_call.await_args.args[0]
+        assert tool_call.name == "file_read"
+        assert json.loads(tool_call.arguments) == {
+            "path": str(worktree_path / "demo.py"),
+        }
+
+    @pytest.mark.asyncio
+    async def test_file_read_generic_rejects_worktree_path_escape(
+        self,
+    ) -> None:
+        engine = _make_engine()
+        execute_tool_call = AsyncMock()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=execute_tool_call,
+        )
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="读取 ../escape.py",
+            status=PursuitRunStatus.RUNNING,
+            phase="test",
+            started_at=time.time(),
+            updated_at=time.time(),
+            worktree_path="/tmp/pursue-demo",
+        )
+        loop._llm_call = AsyncMock(return_value='{"path": "../escape.py"}')  # type: ignore[method-assign]
+        tool = MagicMock()
+        tool.parameters_schema = {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "路径"}},
+            "required": ["path"],
+        }
+        tool.execute = AsyncMock(return_value="direct should not run")
+
+        result = await loop._execute_generic_tool(
+            tool,
+            "file_read",
+            "读取 ../escape.py",
+            "a1",
+        )
+
+        assert result["status"] == "error"
+        assert "worktree" in result["output"]
+        tool.execute.assert_not_awaited()
+        execute_tool_call.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_file_read_generic_preserves_offset_and_limit(
+        self,
+        tmp_path,
+    ) -> None:
+        engine = _make_engine()
+        execute_tool_call = AsyncMock(
+            return_value=ToolResult(
+                call_id="pursuit-a1",
+                status="success",
+                content="x = 1\n",
+            )
+        )
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=execute_tool_call,
+        )
+        worktree_path = tmp_path / "pursue-demo"
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="读取 demo.py",
+            status=PursuitRunStatus.RUNNING,
+            phase="test",
+            started_at=time.time(),
+            updated_at=time.time(),
+            worktree_path=str(worktree_path),
+        )
+        loop._llm_call = AsyncMock(  # type: ignore[method-assign]
+            return_value='{"path": "demo.py", "offset": 10, "limit": 20}'
+        )
+        tool = MagicMock()
+        tool.parameters_schema = {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "路径"},
+                "offset": {"type": "integer", "description": "偏移"},
+                "limit": {"type": "integer", "description": "行数"},
+            },
+            "required": ["path"],
+        }
+        tool.execute = AsyncMock(return_value="direct should not run")
+
+        await loop._execute_generic_tool(
+            tool,
+            "file_read",
+            "读取 demo.py",
+            "a1",
+        )
+
+        tool_call = execute_tool_call.await_args.args[0]
+        assert json.loads(tool_call.arguments) == {
+            "path": str(worktree_path / "demo.py"),
+            "offset": 10,
+            "limit": 20,
+        }
+
+    @pytest.mark.asyncio
     async def test_gather_state_evidence_uses_injected_bash_executor(self) -> None:
         engine = _make_engine()
 
