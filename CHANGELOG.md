@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.123] - 2026-06-11
+
+### Changed
+- **Shared Analysis Execution Boundary** — `cli.commands_analysis.run_analysis` 在 Engine 暴露 `_execute_tool` 时改为构造 `ToolCall` 并以 `agent_name="cli"` 进入统一执行器，使复用共享分析命令的入口不再绕过权限、Hook 和审计链；同时对齐 `/scale [QPS]` 的共享参数解析，保留无执行器场景的兼容回退。
+
 ## [0.1.122] - 2026-06-11
 
 ### Fixed

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
+from uuid import uuid4
 
 from naumi_agent.cli.display import console
+from naumi_agent.tools.base import ToolCall
 
 ANALYSIS_TOOL_NAMES = {
     "chaos": "analysis_chaos",
@@ -45,6 +48,11 @@ ANALYSIS_TOOL_NAMES = {
 
 def _build_analysis_kwargs(mode: str, target: str) -> dict[str, Any]:
     """Build execute kwargs matching the current analysis tool contracts."""
+    if mode == "scale":
+        normalized = target.strip()
+        if normalized.isdigit():
+            return {"target": "当前项目", "qps": int(normalized)}
+        return {"target": target}
     if mode == "vibe":
         return {"description": target}
     if mode == "page":
@@ -87,7 +95,21 @@ async def run_analysis(engine: Any, mode: str, target: str) -> None:
 
     console.print(f"[bold magenta]🔬 {mode} 分析中...[/bold magenta]")
     with console.status("[bold green]分析中...[/bold green]"):
-        result = await tool.execute(**_build_analysis_kwargs(mode, target))
+        kwargs = _build_analysis_kwargs(mode, target)
+        execute_tool = getattr(engine, "_execute_tool", None)
+        if callable(execute_tool):
+            tool_call = ToolCall(
+                id=f"slash-analysis-{mode}-{uuid4()}",
+                name=tool_name,
+                arguments=json.dumps(kwargs, ensure_ascii=False),
+            )
+            tool_result = await execute_tool(tool_call, agent_name="cli")
+            if tool_result.status != "success":
+                console.print(f"[yellow]{tool_result.content}[/yellow]")
+                return
+            result = tool_result.content
+        else:
+            result = await tool.execute(**kwargs)
 
     from rich.markdown import Markdown
     from rich.panel import Panel
