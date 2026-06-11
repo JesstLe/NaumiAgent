@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.124] - 2026-06-11
+
+### Fixed
+- **Slash Completion Optional Args** — 对齐 `/chaos [目标]`、`/scale [QPS]`、`/dspy [描述]`、`/graph [路径]` 的 canonical 补全 metadata，并同步旧兼容补全的参数标记。
+
 ## [0.1.123] - 2026-06-11
 
 ### Changed
