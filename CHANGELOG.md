@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.117] - 2026-06-11
+
+### Added
+- **Session Load Tool** — 新增 `session_load` Tool，将 `/load` 的历史会话恢复能力暴露给 Agent 自主调用，支持会话 ID 和最近列表编号加载，继续补齐会话命令双通道能力。
+
 ## [0.1.116] - 2026-06-11
 
 ### Added

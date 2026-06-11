@@ -122,6 +122,81 @@ class SessionHistoryTool(Tool):
         return str(getattr(session, "id", "") or "") or None
 
 
+class SessionLoadTool(Tool):
+    """Load a persisted session into the active agent context."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "session_load"
+
+    @property
+    def description(self) -> str:
+        return (
+            "加载历史会话并恢复上下文，对应用户斜杠命令 /load。"
+            "可传会话 ID，也可传最近列表中的数字编号。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "要加载的会话 ID，或最近 10 个会话列表中的数字编号。",
+                },
+            },
+            "required": ["session_id"],
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=False,
+            user_facing_name="加载会话",
+            search_hint="load session /load 会话 恢复 上下文",
+        )
+
+    async def execute(self, session_id: str) -> str:
+        """Load a session by id or recent-list index."""
+        target = (session_id or "").strip()
+        if not target:
+            return "用法：session_load(session_id='<会话ID或编号>')"
+
+        resolved_id = await self._resolve_session_id(target)
+        if resolved_id is None:
+            return f"没有找到编号为 {target} 的历史会话。"
+
+        loaded = await self._engine.load_session(resolved_id)
+        if not loaded:
+            return f"会话 {resolved_id} 不存在。"
+
+        active = getattr(self._engine, "_session", None)
+        title = str(getattr(active, "title", "") or "新会话")
+        active_id = str(getattr(active, "id", resolved_id) or resolved_id)
+        message_count = len(list(getattr(active, "messages", []) or []))
+        return (
+            f"已加载会话：{title}\n"
+            f"- ID：`{active_id}`\n"
+            f"- 消息数：{message_count}\n"
+            "上下文已恢复，可继续对话。"
+        )
+
+    async def _resolve_session_id(self, session_id: str) -> str | None:
+        if not session_id.isdigit():
+            return session_id
+
+        sessions, _ = await self._engine.list_sessions(page=1, page_size=10)
+        index = int(session_id) - 1
+        if index < 0 or index >= len(sessions):
+            return None
+        return str(getattr(sessions[index], "id", "") or "") or None
+
+
 def create_session_tools(engine: Any) -> list[Tool]:
     """Create session-related tools."""
-    return [SessionHistoryTool(engine)]
+    return [SessionHistoryTool(engine), SessionLoadTool(engine)]
