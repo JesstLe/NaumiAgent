@@ -911,6 +911,95 @@ class TestPursuitExecutionStrategy:
         assert arguments == {"path": "demo.py", "content": "x = 2"}
 
     @pytest.mark.asyncio
+    async def test_file_write_rebases_relative_path_to_worktree(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine = _make_engine()
+        execute_tool_call = AsyncMock(
+            return_value=ToolResult(
+                call_id="pursuit-a1",
+                status="success",
+                content="✅ 已写入",
+            )
+        )
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=execute_tool_call,
+        )
+        worktree_path = tmp_path / "pursue-demo"
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="创建 demo.py",
+            status=PursuitRunStatus.RUNNING,
+            phase="test",
+            started_at=time.time(),
+            updated_at=time.time(),
+            worktree_path=str(worktree_path),
+        )
+        loop._llm_call = AsyncMock(return_value="x = 2\n")  # type: ignore[method-assign]
+        monkeypatch.setattr(loop, "_extract_target_path", lambda description: "demo.py")
+        file_write = MagicMock()
+        file_write.execute = AsyncMock(return_value="direct write should not run")
+
+        result = await loop._execute_file_write(
+            file_write,
+            "创建 demo.py",
+            "a1",
+        )
+
+        assert result["status"] == "completed"
+        file_write.execute.assert_not_awaited()
+        execute_tool_call.assert_awaited_once()
+        tool_call = execute_tool_call.await_args.args[0]
+        assert tool_call.name == "file_write"
+        assert json.loads(tool_call.arguments) == {
+            "path": str(worktree_path / "demo.py"),
+            "content": "x = 2",
+        }
+
+    @pytest.mark.asyncio
+    async def test_file_write_rejects_worktree_path_escape(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine = _make_engine()
+        execute_tool_call = AsyncMock()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=execute_tool_call,
+        )
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="创建 ../escape.py",
+            status=PursuitRunStatus.RUNNING,
+            phase="test",
+            started_at=time.time(),
+            updated_at=time.time(),
+            worktree_path="/tmp/pursue-demo",
+        )
+        loop._llm_call = AsyncMock(return_value="x = 2\n")  # type: ignore[method-assign]
+        monkeypatch.setattr(loop, "_extract_target_path", lambda description: "../escape.py")
+        file_write = MagicMock()
+        file_write.execute = AsyncMock(return_value="direct write should not run")
+
+        result = await loop._execute_file_write(
+            file_write,
+            "创建 ../escape.py",
+            "a1",
+        )
+
+        assert result["status"] == "error"
+        assert "worktree" in result["output"]
+        file_write.execute.assert_not_awaited()
+        execute_tool_call.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_generic_tool_uses_injected_tool_executor(self) -> None:
         engine = _make_engine()
         execute_tool_call = AsyncMock(

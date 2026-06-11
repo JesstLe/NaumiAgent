@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.140] - 2026-06-11
+
+### Changed
+- **Pursuit File Write Worktree Scope** — `/pursue` 已创建隔离 worktree 时，`file_write` 新文件写入会把相对路径重定位到 `worktree_path`，并拒绝 `..` 等逃逸 worktree 的路径，继续通过 Engine 与权限检查执行。
+
 ## [0.1.139] - 2026-06-11
 
 ### Changed
