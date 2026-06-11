@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from naumi_agent.agents.base import AgentCapability, BaseAgent
+from naumi_agent.agents.base import AgentCapability, AgentConfig, BaseAgent
 from naumi_agent.agents.presets import (
     ALL_AGENT_CONFIGS,
     BROWSER_CONFIG,
@@ -125,3 +125,55 @@ class TestBaseAgent:
             assert engine.get_recent_permission_bubbles()
         finally:
             await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_subagent_stops_before_next_turn_when_budget_is_exhausted(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        agent = BaseAgent(
+            AgentConfig(
+                name="budgeted",
+                description="Budgeted test agent",
+                capabilities=[],
+                max_turns=2,
+                max_budget_usd=0.01,
+            ),
+            engine,
+        )
+        responses = [
+            ModelResponse(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call_unknown",
+                        "function": {"name": "unknown_tool", "arguments": "{}"},
+                    }
+                ],
+                usage=TokenUsage(
+                    input_tokens=10,
+                    output_tokens=10,
+                    total_tokens=20,
+                    cost_usd=0.02,
+                ),
+                model="test",
+            ),
+            ModelResponse(
+                content="should not be called",
+                usage=TokenUsage(total_tokens=1, cost_usd=0.01),
+                model="test",
+            ),
+        ]
+
+        with patch.object(
+            engine.router,
+            "call",
+            new_callable=AsyncMock,
+            side_effect=responses,
+        ) as call:
+            result = await agent.execute("需要多轮")
+
+        assert call.await_count == 1
+        assert result.status == "error"
+        assert result.total_cost_usd == 0.02
+        assert "预算" in (result.error or "")
