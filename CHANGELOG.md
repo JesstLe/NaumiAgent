@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.138] - 2026-06-11
+
+### Changed
+- **Pursuit Bash Worktree Scope** — `/pursue` 已创建隔离 worktree 时，普通 `bash_run` 动作现在会携带 `cwd=worktree_path` 执行，避免命令动作默认落回主工作区；无 worktree 时保持原参数形状不变。
+
 ## [0.1.137] - 2026-06-11
 
 ### Fixed
