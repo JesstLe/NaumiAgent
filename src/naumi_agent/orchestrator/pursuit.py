@@ -570,13 +570,17 @@ class GoalPursuitLoop:
             return
         status_tool = self._tools.get("background_status")
         output_tool = self._tools.get("background_read_output")
-        if status_tool is None:
+        if status_tool is None and self._execute_tool_call is None:
             return
 
         still_waiting: list[PursuitBackgroundWait] = []
         for pending in self._pending_background:
             try:
-                status_text = str(await status_tool.execute(task_id=pending.task_id))
+                status_text = await self._run_background_query_tool(
+                    tool=status_tool,
+                    tool_name="background_status",
+                    task_id=pending.task_id,
+                )
             except Exception as e:
                 self._run.add_evidence(PursuitEvidence(
                     kind="background",
@@ -593,9 +597,13 @@ class GoalPursuitLoop:
                 continue
 
             output_text = ""
-            if output_tool is not None:
+            if output_tool is not None or self._execute_tool_call is not None:
                 try:
-                    output_text = str(await output_tool.execute(task_id=pending.task_id))
+                    output_text = await self._run_background_query_tool(
+                        tool=output_tool,
+                        tool_name="background_read_output",
+                        task_id=pending.task_id,
+                    )
                 except Exception as e:
                     output_text = f"读取输出失败：{type(e).__name__}: {e}"
 
@@ -613,6 +621,30 @@ class GoalPursuitLoop:
             self._run.status = PursuitRunStatus.RUNNING
             self._run.phase = "assess"
         self._persist_run()
+
+    async def _run_background_query_tool(
+        self,
+        *,
+        tool: Any,
+        tool_name: str,
+        task_id: str,
+    ) -> str:
+        """Run a background query through the engine boundary when available."""
+        if self._execute_tool_call is not None:
+            tool_result = await self._execute_tool_call(
+                ToolCall(
+                    id=f"pursuit-{tool_name}-{task_id}",
+                    name=tool_name,
+                    arguments=json.dumps({"task_id": task_id}, ensure_ascii=False),
+                )
+            )
+            if tool_result.status != "success":
+                raise RuntimeError(tool_result.content[:500])
+            return tool_result.content
+
+        if tool is None:
+            return ""
+        return str(await tool.execute(task_id=task_id))
 
     async def _completion_decision(self, spec: GoalSpec) -> PursuitStopDecision:
         """Decide whether the goal is objectively complete."""

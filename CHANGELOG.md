@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.121] - 2026-06-11
+
+### Changed
+- **Pursuit Background Result Boundary** — `/pursue` 回收后台任务状态与输出时优先通过注入的 Engine ToolCall 执行 `background_status` 和 `background_read_output`，保留本地回退，避免后台证据回收绕过权限、Hook 和审计链。
+
 ## [0.1.120] - 2026-06-11
 
 ### Changed
