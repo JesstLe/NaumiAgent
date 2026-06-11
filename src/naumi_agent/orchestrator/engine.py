@@ -369,6 +369,8 @@ class AgentEngine:
     def __init__(self, config: AppConfig) -> None:
         self._config = config
         self.workspace_root = config.resolve_workspace_root()
+        self._runtime_data_dir = Path(config.memory.session_db_path).parent
+        self._worktree_storage_dir = self._runtime_data_dir / "worktrees"
         self._router = ModelRouter(config.models)
         self._tool_registry = ToolRegistry()
         self._messages: list[dict[str, Any]] = []
@@ -383,7 +385,11 @@ class AgentEngine:
         self._output_guardrail = OutputGuardrail()
         self._permission_checker = PermissionChecker(
             mode=PermissionMode(config.safety.permission_mode),
-            allowed_dirs=[*config.safety.allowed_dirs, str(self.workspace_root)],
+            allowed_dirs=[
+                *config.safety.allowed_dirs,
+                str(self.workspace_root),
+                str(self._worktree_storage_dir),
+            ],
             workspace_root=str(self.workspace_root),
         )
         self._default_permission_mode = self._permission_checker.mode
@@ -407,11 +413,11 @@ class AgentEngine:
         self._openai_tools_cache_key: tuple[tuple[str, int], ...] = ()
         self._openai_tools_cache: list[dict[str, Any]] | None = None
         self._browser_session = BrowserRuntime(
-            Path(config.memory.session_db_path).parent / "browser"
+            self._runtime_data_dir / "browser"
         )
         self.browser_daemon = BrowserDaemonClient(
             config.browser_daemon,
-            log_dir=Path(config.memory.session_db_path).parent / "browser-daemon",
+            log_dir=self._runtime_data_dir / "browser-daemon",
         )
         self._planner = AdaptivePlanner(
             self._router,
@@ -423,17 +429,17 @@ class AgentEngine:
 
         self.task_store = TaskStore(config.memory.session_db_path)
         self.background_runner = BackgroundRunner(
-            BackgroundTaskStore(Path(config.memory.session_db_path).parent / "background")
+            BackgroundTaskStore(self._runtime_data_dir / "background")
         )
         self.scheduler_runner = SchedulerRunner(
-            SchedulerStore(Path(config.memory.session_db_path).parent / "scheduler")
+            SchedulerStore(self._runtime_data_dir / "scheduler")
         )
         self.pursuit_store = PursuitStore(
-            Path(config.memory.session_db_path).parent / "pursuit"
+            self._runtime_data_dir / "pursuit"
         )
         self.worktree_manager = WorktreeManager(
             repo_root=self.workspace_root,
-            storage_dir=Path(config.memory.session_db_path).parent / "worktrees",
+            storage_dir=self._worktree_storage_dir,
             task_store=self.task_store,
         )
 
