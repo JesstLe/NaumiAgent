@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.134] - 2026-06-11
+
+### Changed
+- **Evolve Self-Modify Execution Boundary** — `/evolve` 应用自我修改时现在优先通过 Engine `_execute_tool` 执行 `self_modify`，保留无执行器场景的直接调用回退，使自我修改写文件阶段进入权限、Hook 和审计链。
+
 ## [0.1.133] - 2026-06-11
 
 ### Changed
