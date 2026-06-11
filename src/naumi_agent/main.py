@@ -3188,7 +3188,22 @@ async def _run_forge(engine: Any, arg: str) -> None:
         kwargs = {"description": description}
         if llm_output:
             kwargs["llm_output"] = llm_output
-        result_str = await forge_tool_instance.execute(**kwargs)
+        execute_tool = getattr(engine, "_execute_tool", None)
+        if callable(execute_tool):
+            from naumi_agent.tools.base import ToolCall
+
+            tool_call = ToolCall(
+                id=f"slash-forge-{uuid.uuid4()}",
+                name="forge_tool",
+                arguments=json.dumps(kwargs, ensure_ascii=False),
+            )
+            tool_result = await execute_tool(tool_call, agent_name="cli")
+            if tool_result.status != "success":
+                console.print(f"[yellow]{tool_result.content}[/yellow]")
+                return
+            result_str = tool_result.content
+        else:
+            result_str = await forge_tool_instance.execute(**kwargs)
 
     console.print()
     console.print(
