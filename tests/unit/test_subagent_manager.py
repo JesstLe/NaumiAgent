@@ -1,11 +1,17 @@
 """Agent 调度器测试."""
 
+import asyncio
+
 import pytest
 
 from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
-from naumi_agent.orchestrator.subagent_manager import SubAgentManager, SubTask
+from naumi_agent.orchestrator.subagent_manager import (
+    AgentState,
+    SubAgentManager,
+    SubTask,
+)
 
 
 @pytest.fixture
@@ -84,6 +90,44 @@ class TestSubAgentManager:
         assert results["a"].status == "error"
         assert results["b"].status == "error"
         assert "Failed dependencies" in (results["b"].error or "")
+
+    @pytest.mark.asyncio
+    async def test_delegate_times_out_stuck_agent_and_restores_idle_state(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        manager.spawn(
+            AgentConfig(
+                name="stuck_agent",
+                description="agent that never returns",
+                capabilities=[],
+                timeout_seconds=0.01,
+            )
+        )
+        agent = manager.get_agent("stuck_agent")
+        assert agent is not None
+        started = asyncio.Event()
+
+        async def stuck_execute(**kwargs: object) -> AgentResult:
+            started.set()
+            await asyncio.sleep(3600)
+            return AgentResult(status="completed", response="unexpected")
+
+        monkeypatch.setattr(agent, "execute", stuck_execute)
+
+        result = await manager.delegate(
+            SubTask(
+                id="hang",
+                description="hang forever",
+                agent_name="stuck_agent",
+            )
+        )
+
+        assert started.is_set()
+        assert result.status == "timeout"
+        assert "超时" in (result.error or "")
+        assert manager.get_state("stuck_agent") == AgentState.IDLE
 
 
 class TestSubTask:
