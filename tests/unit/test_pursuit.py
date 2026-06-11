@@ -865,6 +865,58 @@ class TestPursuitExecutionStrategy:
         assert json.loads(tool_call.arguments) == {"query": "abc"}
 
     @pytest.mark.asyncio
+    async def test_gather_state_evidence_uses_injected_bash_executor(self) -> None:
+        engine = _make_engine()
+
+        async def execute_tool_call(call):
+            args = json.loads(call.arguments)
+            command = args["command"]
+            if command.startswith("git diff"):
+                content = "src/demo.py | 2 ++"
+            elif "cat src/demo.py" in command:
+                content = "def demo():\n    return 1"
+            elif "pytest" in command:
+                content = "1 passed"
+            elif "ruff" in command:
+                content = "All checks passed!"
+            else:
+                content = f"unexpected command: {command}"
+            return ToolResult(call_id=call.id, status="success", content=content)
+
+        executor = AsyncMock(side_effect=execute_tool_call)
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=executor,
+        )
+        loop._start_time = time.time()
+        bash = MagicMock()
+        bash.execute = AsyncMock(return_value="direct should not run")
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=bash)
+        spec = _make_spec(
+            goal="修改 src/demo.py",
+            criteria=[
+                SuccessCriterion(
+                    id="c1",
+                    description="测试通过",
+                    verification_command="pytest tests/test_demo.py",
+                )
+            ],
+        )
+
+        evidence = await loop._gather_state_evidence(spec)
+
+        assert "Git 变更" in evidence
+        assert "文件 src/demo.py" in evidence
+        assert "测试状态" in evidence
+        assert "Lint 状态" in evidence
+        bash.execute.assert_not_awaited()
+        assert executor.await_count == 5
+        assert all(call.args[0].name == "bash_run" for call in executor.await_args_list)
+
+    @pytest.mark.asyncio
     async def test_collect_background_results_records_hard_evidence(self) -> None:
         engine = _make_engine()
         loop = GoalPursuitLoop(
