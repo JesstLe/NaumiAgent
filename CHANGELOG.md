@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.130] - 2026-06-11
+
+### Changed
+- **Worktree Slash Execution Boundary** — `/worktree status/create/bind/keep/remove` 现在优先通过 Engine `_execute_tool` 执行对应的 `worktree_*` 工具，保留无执行器场景的直接调用回退，使隔离执行区命令进入权限、Hook 和审计链。
+
 ## [0.1.129] - 2026-06-11
 
 ### Changed
