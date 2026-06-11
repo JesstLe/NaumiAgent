@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -435,7 +436,14 @@ class SubAgentManager:
                 and "event_callback" in signature(agent.execute).parameters
             ):
                 execute_kwargs["event_callback"] = event_callback
-            result = await agent.execute(**execute_kwargs)
+            timeout_seconds = agent.config.timeout_seconds
+            if timeout_seconds > 0 and math.isfinite(timeout_seconds):
+                result = await asyncio.wait_for(
+                    agent.execute(**execute_kwargs),
+                    timeout=timeout_seconds,
+                )
+            else:
+                result = await agent.execute(**execute_kwargs)
             await self._hooks.fire(HookContext(
                 point=HookPoint.AGENT_EXECUTE_END,
                 data={
@@ -444,6 +452,30 @@ class SubAgentManager:
                     "status": result.status,
                     "tokens": result.total_tokens,
                     "cost": result.total_cost_usd,
+                },
+                agent_name=agent_name,
+            ))
+        except TimeoutError:
+            timeout_seconds = agent.config.timeout_seconds
+            logger.warning(
+                "Agent %s timed out while executing task %s after %.2fs",
+                agent_name,
+                task.id,
+                timeout_seconds,
+            )
+            result = AgentResult(
+                status="timeout",
+                error=f"子 Agent 执行超时：超过 {timeout_seconds:g} 秒未完成。",
+            )
+            await self._hooks.fire(HookContext(
+                point=HookPoint.AGENT_EXECUTE_END,
+                data={
+                    "task_id": task.id,
+                    "agent_name": agent_name,
+                    "status": result.status,
+                    "tokens": result.total_tokens,
+                    "cost": result.total_cost_usd,
+                    "error": result.error,
                 },
                 agent_name=agent_name,
             ))

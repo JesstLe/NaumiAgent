@@ -36,6 +36,7 @@ class AgentConfig:
     system_prompt: str = ""
     max_turns: int = 20
     max_budget_usd: float = float("inf")
+    timeout_seconds: float = 300.0
     tools: list[str] = field(default_factory=list)
     permission_level: str = "moderate"
 
