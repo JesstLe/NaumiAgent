@@ -124,6 +124,25 @@ class TestSlashCommandRouting:
         # Should print usage
 
     @pytest.mark.asyncio
+    async def test_scale_numeric_arg_routes_to_qps(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import naumi_agent.main as main
+
+        recorded: list[tuple[str, str, dict[str, object]]] = []
+
+        async def fake_run_analysis(
+            _: MagicMock, mode: str, target: str, **kwargs: object
+        ) -> None:
+            recorded.append((mode, target, kwargs))
+
+        monkeypatch.setattr(main, "_run_analysis", fake_run_analysis)
+
+        await main._handle_command(MagicMock(), "/scale 5000")
+
+        assert recorded == [("scale", "当前项目", {"qps": 5000})]
+
+    @pytest.mark.asyncio
     async def test_scan_full_no_arg(self) -> None:
         from naumi_agent.main import _handle_command
 
