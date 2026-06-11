@@ -962,6 +962,78 @@ class TestPursuitExecutionStrategy:
             for evidence in loop._run.evidence
         )
 
+    @pytest.mark.asyncio
+    async def test_collect_background_results_uses_injected_tool_executor(self) -> None:
+        engine = _make_engine()
+
+        async def execute_tool_call(call):
+            if call.name == "background_status":
+                return ToolResult(
+                    call_id=call.id,
+                    status="success",
+                    content="### 后台任务 bg_0001\n- 状态：已完成",
+                )
+            if call.name == "background_read_output":
+                return ToolResult(
+                    call_id=call.id,
+                    status="success",
+                    content="1089 passed",
+                )
+            return ToolResult(
+                call_id=call.id,
+                status="error",
+                content=f"unexpected tool: {call.name}",
+            )
+
+        executor = AsyncMock(side_effect=execute_tool_call)
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+            execute_tool_call=executor,
+        )
+        loop._run = PursuitRun(
+            id="pursuit_test",
+            goal="等待后台任务",
+            status=PursuitRunStatus.WAITING,
+            phase="waiting",
+            started_at=time.time(),
+            updated_at=time.time(),
+        )
+        loop._pending_background = [
+            PursuitBackgroundWait(
+                task_id="bg_0001",
+                action_id="a1",
+                command="python -m pytest tests/ -q",
+                created_at=time.time(),
+            )
+        ]
+        status = MagicMock()
+        status.execute = AsyncMock(return_value="direct status should not run")
+        output = MagicMock()
+        output.execute = AsyncMock(return_value="direct output should not run")
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(
+            side_effect=lambda name: {
+                "background_status": status,
+                "background_read_output": output,
+            }.get(name)
+        )
+
+        await loop._collect_background_results()
+
+        assert loop._pending_background == []
+        assert loop._run.status == PursuitRunStatus.RUNNING
+        status.execute.assert_not_awaited()
+        output.execute.assert_not_awaited()
+        tool_calls = executor.await_args_list
+        assert [call.args[0].name for call in tool_calls] == [
+            "background_status",
+            "background_read_output",
+        ]
+        assert json.loads(tool_calls[0].args[0].arguments) == {"task_id": "bg_0001"}
+        assert json.loads(tool_calls[1].args[0].arguments) == {"task_id": "bg_0001"}
+
 
 class TestPursuitPersistence:
     def test_store_round_trips_run_evidence_and_waits(self, tmp_path) -> None:
