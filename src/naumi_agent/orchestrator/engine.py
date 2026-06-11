@@ -1959,32 +1959,49 @@ class AgentEngine:
         combined_parts = []
         total_tokens = 0
         total_cost = 0.0
+        failures: list[str] = []
         for step in plan.steps:
             r = results.get(step.id)
             if r and r.status == "completed":
                 combined_parts.append(f"## {step.description}\n{r.response[:2000]}")
-                total_tokens += r.total_tokens
-                total_cost += r.total_cost_usd
             elif r:
+                failure = f"{step.description}: {r.status}"
+                if r.error:
+                    failure += f" - {r.error}"
+                failures.append(failure)
                 combined_parts.append(
                     f"## {step.description}\n⚠️ {r.status}: {r.error or ''}"
                 )
+            else:
+                failures.append(f"{step.description}: missing_result")
+                combined_parts.append(
+                    f"## {step.description}\n⚠️ missing_result: 子任务没有返回结果"
+                )
 
-        self._accumulate_usage(
+            if r:
+                total_tokens += r.total_tokens
+                total_cost += r.total_cost_usd
+
+        self._track_model_usage(
             TokenUsage(
                 input_tokens=0,
                 output_tokens=total_tokens,
                 total_tokens=total_tokens,
                 cost_usd=total_cost,
-            )
+            ),
+            "subagent-orchestrator",
         )
+        budget_result = self._check_budget()
+        if budget_result is not None:
+            return budget_result
 
         response = "\n\n".join(combined_parts)
         self._append_message({"role": "assistant", "content": response})
         return AgentResult(
-            status="completed",
+            status="error" if failures else "completed",
             response=response,
             usage=self._usage,
+            error="\n".join(failures) if failures else None,
         )
 
     def _is_repeated_tool_call(
