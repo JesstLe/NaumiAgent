@@ -14,6 +14,7 @@ This is NOT a demo generator. The loop runs until true success or honest failure
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass
 from enum import StrEnum
@@ -26,6 +27,21 @@ if TYPE_CHECKING:
     from naumi_agent.tools.base import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+_EXIT_CODE_RE = re.compile(r"\[exit code:\s*(-?\d+)\]", re.IGNORECASE)
+_LEGACY_FAILURE_RE = re.compile(
+    r"(^|\n)\s*(error:|traceback\b|fail\b)|\bnot found\b",
+    re.IGNORECASE,
+)
+
+
+def _verification_command_passed(output: Any) -> bool:
+    """Return whether a shell verification output represents success."""
+    text = str(output)
+    matches = _EXIT_CODE_RE.findall(text)
+    if matches:
+        return int(matches[-1]) == 0
+    return _LEGACY_FAILURE_RE.search(text) is None
 
 # ---------------------------------------------------------------------------
 #  Data structures
@@ -1774,13 +1790,7 @@ class GoalPursuitLoop:
                 bash_tool = self._tools.get("bash_run")
                 if bash_tool:
                     output = await bash_tool.execute(command=cmd)
-                    lower_output = output.lower()
-                    passed = (
-                        "error" not in lower_output
-                        and "fail" not in lower_output
-                        and "traceback" not in lower_output
-                        and "not found" not in lower_output
-                    )
+                    passed = _verification_command_passed(output)
                     if passed:
                         criterion.status = CriterionStatus.VERIFIED
                         criterion.evidence = f"Command output: {str(output)[:500]}"
