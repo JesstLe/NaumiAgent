@@ -94,7 +94,11 @@ except Exception:  # pragma: no cover - backward-compatible fallback path
         ("/browser-stop", "停止浏览器会话", False),
         ("/browser-state", "显示浏览器调试状态", False),
         ("/browser-screenshot", "截取当前页面截图", False),
-        ("/bdaemon", "外部浏览器 daemon — start/health/run/list/status/watch", True),
+        (
+            "/bdaemon",
+            "外部浏览器 daemon — start/health/run/list/status/watch/reply/resume/abort/manual",
+            True,
+        ),
         ("/tasks", "任务面板 — todo/subagent/background/browser", False),
         ("/task", "查看任务运行详情", True),
         ("/task-reply", "回复等待中的任务", True),
