@@ -294,7 +294,7 @@ def _run_tests(file_path: Path, *, source_dir: Path | None = None) -> tuple[bool
     """
     test_file = _find_test_file(file_path)
     if test_file is None:
-        return True, "无对应测试文件，跳过测试"
+        return False, "缺少对应测试文件，无法证明自我修改行为正确。"
 
     try:
         env = os.environ.copy()
@@ -318,7 +318,7 @@ def _run_tests(file_path: Path, *, source_dir: Path | None = None) -> tuple[bool
     except subprocess.TimeoutExpired:
         return False, "测试超时 (60s)"
     except FileNotFoundError:
-        return True, "pytest 不可用，跳过测试"
+        return False, "pytest 不可用，无法执行自我修改回归测试。"
 
 
 def _run_import_test(file_path: Path, *, source_dir: Path | None = None) -> tuple[bool, str]:
@@ -584,7 +584,7 @@ def _validate_in_isolated_source_tree(
                 }
 
             test_passed, test_output = _run_tests(
-                isolated_target,
+                file_path,
                 source_dir=isolated_source,
             )
             validation_results["pytest"] = {
