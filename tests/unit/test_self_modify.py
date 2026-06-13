@@ -535,6 +535,12 @@ class TestSelfModifyTool:
         assert "description" in schema["properties"]
         assert len(schema["required"]) == 3
 
+    def test_schema_exposes_apply_to_workspace_as_explicit_boolean(self):
+        schema = SelfModifyTool().parameters_schema
+
+        assert schema["properties"]["apply_to_workspace"]["type"] == "boolean"
+        assert "apply_to_workspace" not in schema["required"]
+
     def test_metadata_marks_self_modification_as_confirmed_state_change(self):
         metadata = SelfModifyTool().metadata
         assert metadata.destructive is True
@@ -585,6 +591,33 @@ class TestSelfModifyTool:
         apply_mock.assert_not_called()
         assert "已拒绝" in result
         assert "new_content 过大" in result
+
+    @pytest.mark.asyncio
+    async def test_execute_forwards_explicit_workspace_application_flag(self):
+        tool = SelfModifyTool()
+
+        with patch(
+            "naumi_agent.tools.self_modify.validate_and_apply",
+            return_value={
+                "status": "applied",
+                "file": "tools/example.py",
+                "validation": {},
+            },
+        ) as validate:
+            output = await tool.execute(
+                target_file="tools/example.py",
+                new_content="x = 1\n",
+                description="测试写回",
+                apply_to_workspace=True,
+            )
+
+        validate.assert_called_once_with(
+            "tools/example.py",
+            "x = 1\n",
+            "测试写回",
+            apply_to_workspace=True,
+        )
+        assert "已应用并验证" in output
 
     @pytest.mark.asyncio
     async def test_execute_reports_applied(self):

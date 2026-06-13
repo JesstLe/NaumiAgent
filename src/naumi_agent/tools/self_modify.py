@@ -40,6 +40,15 @@ MAX_SELF_MODIFY_DESCRIPTION_CHARS = 2_000
 _AGENT_SOURCE_DIR: Path | None = None
 
 
+def _normalize_apply_to_workspace(value: Any) -> bool:
+    """Normalize the explicit workspace application switch."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    raise ValueError("apply_to_workspace 必须是布尔值。")
+
+
 def _normalize_self_modify_inputs(
     target_file: Any,
     new_content: Any,
@@ -655,6 +664,14 @@ class SelfModifyTool(Tool):
                     "type": "string",
                     "description": "修改说明：做了什么、为什么",
                 },
+                "apply_to_workspace": {
+                    "type": "boolean",
+                    "description": (
+                        "是否在验证通过后写入主工作区。默认 false，仅做隔离验证；"
+                        "用户显式触发的受控进化流程可设为 true。"
+                    ),
+                    "default": False,
+                },
             },
             "required": ["target_file", "new_content", "description"],
         }
@@ -665,6 +682,7 @@ class SelfModifyTool(Tool):
         target_file: str,
         new_content: str,
         description: str,
+        apply_to_workspace: bool = False,
         **kwargs: Any,
     ) -> str:
         try:
@@ -673,6 +691,7 @@ class SelfModifyTool(Tool):
                 new_content,
                 description,
             )
+            apply_to_workspace = _normalize_apply_to_workspace(apply_to_workspace)
         except ValueError as e:
             return "\n".join(
                 [
@@ -686,7 +705,7 @@ class SelfModifyTool(Tool):
             target_file,
             new_content,
             description,
-            apply_to_workspace=False,
+            apply_to_workspace=apply_to_workspace,
         )
 
         parts: list[str] = ["## 自我修改结果"]

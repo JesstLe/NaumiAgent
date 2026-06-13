@@ -84,5 +84,6 @@ async def test_run_evolve_routes_self_modify_through_engine_tool_executor() -> N
         "target_file": "tools/analysis.py",
         "new_content": "# improved content\n",
         "description": "改进分析工具",
+        "apply_to_workspace": True,
     }
     assert engine.reload_domains == ["tools"]

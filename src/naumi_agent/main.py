@@ -2988,6 +2988,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
             "target_file": target_file,
             "new_content": new_content,
             "description": change_desc,
+            "apply_to_workspace": True,
         }
         execute_tool = getattr(engine, "_execute_tool", None)
         if callable(execute_tool):

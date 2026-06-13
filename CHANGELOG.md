@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.145] - 2026-06-13
+
+### Fixed
+- **Self-Evolve Workspace Application Contract** — `self_modify` 现在显式暴露 `apply_to_workspace` 布尔开关，默认仍只做隔离验证；用户主动触发的 `/evolve` 会通过 Engine 写入主工作区，避免把隔离验证成功误判为“未通过验证”。
+
 ## [0.1.144] - 2026-06-11
 
 ### Fixed
