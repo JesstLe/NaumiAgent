@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.166] - 2026-06-13
+
+### Fixed
+- **Self-Modify String Boolean Return Mode** — `self_modify` 现在接受 `"true"` / `"false"` 形式的 `return_json` 参数，提升 LLM 工具调用轻微错型时的结构化结果稳定性。
+
 ## [0.1.165] - 2026-06-13
 
 ### Fixed
