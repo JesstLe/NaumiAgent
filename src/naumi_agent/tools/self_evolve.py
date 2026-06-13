@@ -68,8 +68,7 @@ def _normalize_evolution_inputs(
             f"{MAX_EVOLUTION_DESCRIPTION_CHARS} 个字符。"
         )
 
-    if isinstance(round_number, bool) or not isinstance(round_number, int):
-        raise ValueError("round 必须是整数。")
+    round_number = _normalize_round_number(round_number)
     if round_number < 1 or round_number > _MAX_REFLECTIVE_ROUNDS:
         raise ValueError(f"round 必须在 1 到 {_MAX_REFLECTIVE_ROUNDS} 之间。")
 
@@ -83,6 +82,16 @@ def _normalize_evolution_inputs(
         round_number,
         apply_decision,
     )
+
+
+def _normalize_round_number(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("round 必须是整数。")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    raise ValueError("round 必须是整数。")
 
 
 def _normalize_apply_decision(value: Any) -> bool:
