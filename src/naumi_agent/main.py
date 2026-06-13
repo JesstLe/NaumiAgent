@@ -3116,6 +3116,9 @@ async def _run_evolve(engine: Any, arg: str) -> None:
                 raise TypeError("cycle_result 必须是对象")
             if not isinstance(eval_report, str):
                 raise TypeError("report 必须是字符串")
+            apply_result = cycle_result.get("apply_result")
+            if apply_result is not None and not isinstance(apply_result, dict):
+                raise TypeError("apply_result 必须是对象")
         except (KeyError, TypeError, json.JSONDecodeError) as e:
             console.print(f"[red]无法解析自我进化评估结果: {e}[/red]")
             return

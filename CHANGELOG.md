@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.168] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Rollback Payload Guard** — `/evolve` 现在会校验 `self_evolve` 回滚结果中的 `apply_result` 必须是对象，避免工具返回畸形结构时导致自我进化流程崩溃。
+
 ## [0.1.167] - 2026-06-13
 
 ### Fixed
