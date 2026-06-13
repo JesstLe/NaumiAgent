@@ -665,6 +665,29 @@ class TestSelfEvolveTool:
         assert "已拒绝" in payload["report"]
 
     @pytest.mark.asyncio
+    async def test_execute_returns_structured_rejection_for_malformed_cycle_result(self):
+        with patch(
+            "naumi_agent.tools.self_evolve.run_evolution_cycle",
+            return_value={
+                "action": "commit",
+                "eval_result": {"decision": "adopt"},
+                "message": "缺少质量对比数据。",
+            },
+        ):
+            result = await SelfEvolveTool().execute(
+                target_file="tools/test.py",
+                original_content=NO_DOC_SOURCE,
+                new_content=FULL_DOC_SOURCE,
+                description="畸形循环结果",
+                return_json=True,
+            )
+
+        payload = json.loads(result)
+        assert payload["cycle_result"]["action"] == "rejected"
+        assert "自我进化循环结果格式错误" in payload["cycle_result"]["message"]
+        assert "已拒绝" in payload["report"]
+
+    @pytest.mark.asyncio
     async def test_execute_improvement(self):
         _reset_history()
         tool = SelfEvolveTool()
