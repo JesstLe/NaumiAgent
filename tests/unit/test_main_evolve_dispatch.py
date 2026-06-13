@@ -153,6 +153,48 @@ async def test_run_evolve_extracts_json_object_from_llm_explanation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_evolve_prefers_json_fence_over_earlier_code_fence() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    proposal = json.dumps(
+        {
+            "target_file": "tools/analysis.py",
+            "new_content": "# improved content\n",
+            "description": "改进分析工具",
+        },
+        ensure_ascii=False,
+    )
+    engine._router.response_content = (
+        "先参考一个片段：\n"
+        "```python\n"
+        "print('not proposal')\n"
+        "```\n"
+        "真正的修改方案：\n"
+        f"```json\n{proposal}\n```"
+    )
+    engine.tool_outputs["self_evolve"] = json.dumps(
+        {
+            "report": "report",
+            "cycle_result": {
+                "action": "commit",
+                "apply_result": {"action": "adopted", "message": "已记录采纳决策。"},
+                "message": "修改质量提升，建议提交。",
+            },
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "改进分析工具")
+
+    assert [call.name for call, _ in engine.executed] == [
+        "self_modify",
+        "self_evolve",
+    ]
+    assert engine.reload_domains == ["tools"]
+
+
+@pytest.mark.asyncio
 async def test_run_evolve_stops_when_llm_proposal_fields_are_not_strings() -> None:
     tool = _FakeTool()
     engine = _EngineToolCallFake("self_modify", tool)

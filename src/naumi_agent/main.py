@@ -2964,13 +2964,20 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         return
 
     def extract_evolve_proposal_json(text: str) -> str:
-        json_match = re.search(
-            r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL
-        )
-        if json_match:
-            return json_match.group(1)
-
         decoder = json.JSONDecoder()
+        json_fence = re.search(r"```json\s*\n?(.*?)\n?```", text, re.DOTALL | re.IGNORECASE)
+        if json_fence:
+            return json_fence.group(1)
+
+        for fence in re.finditer(r"```\s*\n?(.*?)\n?```", text, re.DOTALL):
+            candidate_text = fence.group(1).strip()
+            try:
+                candidate, _ = decoder.raw_decode(candidate_text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                return candidate_text
+
         for index, char in enumerate(text):
             if char != "{":
                 continue
