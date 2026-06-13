@@ -829,11 +829,26 @@ class SelfEvolveTool(Tool):
             apply_decision=apply_decision,
         )
 
-        report = format_evolution_report(
-            cycle_result["eval_result"],
-            apply_result=cycle_result.get("apply_result"),
-        )
-        report += f"\n\n**下一步**: {cycle_result['message']}"
+        try:
+            report = format_evolution_report(
+                cycle_result["eval_result"],
+                apply_result=cycle_result.get("apply_result"),
+            )
+            report += f"\n\n**下一步**: {cycle_result['message']}"
+        except (KeyError, TypeError, ValueError) as e:
+            message = f"自我进化循环结果格式错误: {e}"
+            report = "\n".join(
+                [
+                    "## 自我进化报告",
+                    "**状态**: ❌ 已拒绝",
+                    f"**原因**: {message}",
+                ]
+            )
+            cycle_result = {
+                "action": "rejected",
+                "message": message,
+                "target_file": target_file,
+            }
 
         if return_json:
             return json.dumps(
