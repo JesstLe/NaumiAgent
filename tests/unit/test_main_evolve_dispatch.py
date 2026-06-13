@@ -199,6 +199,18 @@ async def test_run_evolve_prioritizes_relevant_nested_context() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_evolve_matches_spaced_keywords_to_snake_case_context() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+
+    await _run_evolve(engine, "改进 self review 自我审查工具")
+
+    user_prompt = engine._router.calls[0]["messages"][1]["content"]
+    assert "### tools/analysis_support/self_review.py" in user_prompt
+
+
+@pytest.mark.asyncio
 async def test_run_evolve_routes_self_modify_through_engine_tool_executor() -> None:
     tool = _FakeTool()
     engine = _EngineToolCallFake("self_modify", tool)
