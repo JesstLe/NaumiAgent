@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.187] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Quoted Target Normalization** — `/evolve` 现在会剥离 LLM 输出目标文件外层的普通单/双引号，避免 `"tools/analysis.py"` 这类二次引用路径被拒绝。
+
 ## [0.1.186] - 2026-06-13
 
 ### Fixed

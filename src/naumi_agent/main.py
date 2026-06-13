@@ -3005,6 +3005,8 @@ async def _run_evolve(engine: Any, arg: str) -> None:
     def normalize_evolve_target_file(value: str) -> str:
         normalized = value.strip().replace("\\", "/")
         normalized = re.sub(r"^`+([^`]+?)`+$", r"\1", normalized).strip()
+        if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in {"'", '"'}:
+            normalized = normalized[1:-1].strip()
         while normalized.startswith("./"):
             normalized = normalized[2:]
         normalized = re.sub(r"(?<=\.py):\d+(?::\d+)?$", "", normalized)
