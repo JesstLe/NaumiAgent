@@ -12,7 +12,7 @@ from naumi_agent.tools.analysis_support.self_review import (
     find_agent_source_dir,
     scan_self_review,
 )
-from naumi_agent.tools.base import Tool
+from naumi_agent.tools.base import Tool, ToolMetadata
 
 RouterGetter = Callable[[], Any]
 RunAnalysis = Callable[[Any, str, str], Awaitable[str]]
@@ -89,6 +89,14 @@ class SelfReviewTool(Tool):
             "审查 NaumiAgent 自身源代码。"
             "静态扫描代码质量、架构脆弱性、工具系统健康度、安全性，"
             "再由 LLM 综合推理出改进建议和自进化候选。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            user_facing_name="自我审查",
+            search_hint="self review source code quality architecture safety evolvability",
         )
 
     @property

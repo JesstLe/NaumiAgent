@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.148] - 2026-06-13
+
+### Fixed
+- **Self-Review Plan Mode Access** — `self_review` 现在显式声明为只读工具，Plan 模式下可以先审查自身源码与自进化候选，再决定是否进入写入/进化流程。
+
 ## [0.1.147] - 2026-06-13
 
 ### Fixed

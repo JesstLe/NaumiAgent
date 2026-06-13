@@ -584,6 +584,12 @@ class TestToolExecution:
         ]:
             assert not engine._tool_allowed_in_plan_mode(tool_name, tool)
 
+    def test_plan_runtime_mode_allows_self_review(self, engine: AgentEngine) -> None:
+        tool = engine.tool_registry.get("self_review")
+        assert tool is not None
+
+        assert engine._tool_allowed_in_plan_mode("self_review", tool)
+
     def test_runtime_mode_cycle_updates_permission_mode(self, engine: AgentEngine) -> None:
         assert engine.runtime_mode == AgentRuntimeMode.DEFAULT
 
