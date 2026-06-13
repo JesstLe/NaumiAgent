@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.160] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Candidate-Bound Proposal Prompt** — `/evolve` 现在明确要求 LLM 的 `target_file` 必须来自可修改文件列表，减少 proposal 指向受保护或不存在路径后再被执行阶段拒绝的无效自我进化回合。
+
 ## [0.1.159] - 2026-06-13
 
 ### Fixed
