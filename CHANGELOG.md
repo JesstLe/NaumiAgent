@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.162] - 2026-06-13
+
+### Fixed
+- **Structured Self-Evolve Rejections** — `self_evolve(return_json=True)` 现在在输入被拒绝时也返回 `{report, cycle_result}` JSON，避免反思评估工具的结构化调用在错误路径收到 Markdown。
+
 ## [0.1.161] - 2026-06-13
 
 ### Fixed
