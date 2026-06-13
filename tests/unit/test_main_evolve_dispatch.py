@@ -135,6 +135,46 @@ async def test_run_evolve_stops_when_llm_proposal_fields_are_not_strings() -> No
 
 
 @pytest.mark.asyncio
+async def test_run_evolve_rejects_protected_target_before_self_modify() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    engine._router.response_content = json.dumps(
+        {
+            "target_file": "orchestrator/engine.py",
+            "new_content": "# should never be applied\n",
+            "description": "尝试修改核心引擎",
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "尝试修改核心引擎")
+
+    assert engine.executed == []
+    assert engine.reload_domains == []
+
+
+@pytest.mark.asyncio
+async def test_run_evolve_rejects_unmodifiable_target_before_self_modify() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    engine._router.response_content = json.dumps(
+        {
+            "target_file": "api/app.py",
+            "new_content": "# should never be applied\n",
+            "description": "尝试修改 API",
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "尝试修改 API")
+
+    assert engine.executed == []
+    assert engine.reload_domains == []
+
+
+@pytest.mark.asyncio
 async def test_run_evolve_routes_self_modify_through_engine_tool_executor() -> None:
     tool = _FakeTool()
     engine = _EngineToolCallFake("self_modify", tool)
