@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.181] - 2026-06-13
+
+### Fixed
+- **CLI Evolve JSON Fence Priority** — `/evolve` 现在会优先解析显式 `json` 代码块，避免 LLM 回复中较早出现的 Python 等非 JSON 代码块干扰修改方案提取。
+
 ## [0.1.180] - 2026-06-13
 
 ### Fixed
