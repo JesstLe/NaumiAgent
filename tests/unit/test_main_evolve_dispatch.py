@@ -175,6 +175,18 @@ async def test_run_evolve_rejects_unmodifiable_target_before_self_modify() -> No
 
 
 @pytest.mark.asyncio
+async def test_run_evolve_prompt_lists_nested_modifiable_modules() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+
+    await _run_evolve(engine, "改进自我审查工具")
+
+    user_prompt = engine._router.calls[0]["messages"][1]["content"]
+    assert "- tools/analysis_support/self_review.py" in user_prompt
+
+
+@pytest.mark.asyncio
 async def test_run_evolve_routes_self_modify_through_engine_tool_executor() -> None:
     tool = _FakeTool()
     engine = _EngineToolCallFake("self_modify", tool)

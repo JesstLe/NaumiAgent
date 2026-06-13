@@ -2906,7 +2906,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         for domain_dir in ["tools", "memory", "skills"]:
             domain_path = source_dir / domain_dir
             if domain_path.is_dir():
-                for py_file in domain_path.glob("*.py"):
+                for py_file in sorted(domain_path.rglob("*.py")):
                     if (
                         py_file.name != "__init__.py"
                         and not _is_protected_file(py_file)
