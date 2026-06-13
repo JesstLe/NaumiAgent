@@ -701,6 +701,54 @@ class TestSelfModifyTool:
         assert "已拒绝" in payload["report"]
 
     @pytest.mark.asyncio
+    async def test_execute_accepts_string_true_for_structured_result(self):
+        tool = SelfModifyTool()
+        mock_result = {
+            "status": "applied",
+            "file": "tools/example.py",
+            "validation": {},
+        }
+
+        with patch(
+            "naumi_agent.tools.self_modify.validate_and_apply",
+            return_value=mock_result,
+        ):
+            output = await tool.execute(
+                target_file="tools/example.py",
+                new_content="x = 1\n",
+                description="字符串布尔",
+                return_json="true",
+            )
+
+        payload = json.loads(output)
+        assert payload["result"] == mock_result
+
+    @pytest.mark.asyncio
+    async def test_execute_accepts_string_false_for_markdown_result(self):
+        tool = SelfModifyTool()
+
+        with patch(
+            "naumi_agent.tools.self_modify.validate_and_apply",
+            return_value={
+                "status": "applied",
+                "file": "tools/example.py",
+                "validation": {},
+            },
+        ) as validate:
+            output = await tool.execute(
+                target_file="tools/example.py",
+                new_content="x = 1\n",
+                description="字符串布尔",
+                return_json="false",
+            )
+
+        validate.assert_called_once()
+        assert output.startswith("## 自我修改结果")
+        assert "已应用并验证" in output
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(output)
+
+    @pytest.mark.asyncio
     async def test_execute_reports_applied(self):
         tool = SelfModifyTool()
         mock_result = {
