@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.188] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Target Field Alias** — `/evolve` 现在会接受 LLM 修改方案中的 `file_path` 作为 `target_file` 别名，避免常见字段命名差异中断自我修改流程。
+
 ## [0.1.187] - 2026-06-13
 
 ### Fixed
