@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -87,3 +88,34 @@ async def test_run_evolve_routes_self_modify_through_engine_tool_executor() -> N
         "apply_to_workspace": True,
     }
     assert engine.reload_domains == ["tools"]
+
+
+@pytest.mark.asyncio
+async def test_run_evolve_uses_self_evolve_safe_apply_decision() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+
+    with (
+        patch("naumi_agent.tools.self_evolve.format_evolution_report", return_value="report"),
+        patch(
+            "naumi_agent.tools.self_evolve.run_evolution_cycle",
+            return_value={
+                "action": "rollback",
+                "eval_result": {},
+                "apply_result": {
+                    "action": "rollback_blocked",
+                    "message": (
+                        "当前文件内容已不同于本轮评估的新内容，"
+                        "为避免覆盖后续改动，拒绝自动回滚。"
+                    ),
+                },
+                "message": "修改质量下降，但回滚未执行：拒绝自动回滚。",
+            },
+        ) as cycle,
+        patch("naumi_agent.tools.self_modify._rollback_file") as rollback,
+    ):
+        await _run_evolve(engine, "改进分析工具")
+
+    assert cycle.call_args.kwargs["apply_decision"] is True
+    rollback.assert_not_called()

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.150] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Safe Rollback Path** — `/evolve` 现在通过 `run_evolution_cycle(apply_decision=True)` 复用 `self_evolve` 的安全闭环与阻断原因，不再绕过该逻辑直接 `git checkout` 回滚目标文件。
+
 ## [0.1.149] - 2026-06-13
 
 ### Fixed
