@@ -2962,9 +2962,20 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         console.print(Panel(llm_output[:2000], title="[red]LLM 输出[/red]"))
         return
 
+    if not isinstance(proposal, dict):
+        console.print("[red]LLM 修改方案格式错误: 必须是 JSON 对象[/red]")
+        return
+
     target_file = proposal.get("target_file", "")
     new_content = proposal.get("new_content", "")
     change_desc = proposal.get("description", description)
+
+    if not isinstance(target_file, str) or not isinstance(new_content, str):
+        console.print("[red]LLM 修改方案格式错误: target_file 和 new_content 必须是字符串[/red]")
+        return
+    if not isinstance(change_desc, str):
+        console.print("[red]LLM 修改方案格式错误: description 必须是字符串[/red]")
+        return
 
     if not target_file or not new_content:
         console.print("[red]修改方案缺少 target_file 或 new_content[/red]")
