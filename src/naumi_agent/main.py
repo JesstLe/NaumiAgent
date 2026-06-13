@@ -2979,6 +2979,13 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         console.print("[red]LLM 修改方案格式错误: 必须是 JSON 对象[/red]")
         return
 
+    def normalize_evolve_target_file(value: str) -> str:
+        normalized = value.strip()
+        for prefix in ("src/naumi_agent/", "naumi_agent/"):
+            if normalized.startswith(prefix):
+                return normalized[len(prefix):]
+        return normalized
+
     target_file = proposal.get("target_file", "")
     new_content = proposal.get("new_content", "")
     change_desc = proposal.get("description", description)
@@ -2989,6 +2996,8 @@ async def _run_evolve(engine: Any, arg: str) -> None:
     if not isinstance(change_desc, str):
         console.print("[red]LLM 修改方案格式错误: description 必须是字符串[/red]")
         return
+
+    target_file = normalize_evolve_target_file(target_file)
 
     if not target_file or not new_content:
         console.print("[red]修改方案缺少 target_file 或 new_content[/red]")

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.177] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Target Path Prefix Normalization** — `/evolve` 现在会把 LLM 输出中的 `src/naumi_agent/` 或 `naumi_agent/` 前缀归一化为工具期望的相对路径，避免合法自我修改目标因路径前缀小错被拒绝。
+
 ## [0.1.176] - 2026-06-13
 
 ### Fixed
