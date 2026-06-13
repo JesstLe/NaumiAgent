@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.186] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Current Directory Target Normalization** — `/evolve` 现在会把 LLM 输出的 `./tools/analysis.py` 这类当前目录相对路径归一化为 `tools/analysis.py`，让自我修改工具收到稳定的目标文件路径。
+
 ## [0.1.185] - 2026-06-13
 
 ### Fixed
