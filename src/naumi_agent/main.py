@@ -2963,10 +2963,26 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         console.print(f"[red]LLM 调用失败: {e}[/red]")
         return
 
-    json_match = re.search(
-        r"```(?:json)?\s*\n?(.*?)\n?```", llm_output, re.DOTALL
-    )
-    json_str = json_match.group(1) if json_match else llm_output
+    def extract_evolve_proposal_json(text: str) -> str:
+        json_match = re.search(
+            r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL
+        )
+        if json_match:
+            return json_match.group(1)
+
+        decoder = json.JSONDecoder()
+        for index, char in enumerate(text):
+            if char != "{":
+                continue
+            try:
+                candidate, end = decoder.raw_decode(text[index:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                return text[index:index + end]
+        return text
+
+    json_str = extract_evolve_proposal_json(llm_output)
 
     try:
         proposal = json.loads(json_str)

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.180] - 2026-06-13
+
+### Fixed
+- **CLI Evolve JSON Object Extraction** — `/evolve` 现在能从 LLM 输出的说明文字中抽取首个 JSON 对象，避免模型在修改方案前后添加解释文字时直接中断自我进化流程。
+
 ## [0.1.179] - 2026-06-13
 
 ### Fixed
