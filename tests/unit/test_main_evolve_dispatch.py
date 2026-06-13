@@ -70,11 +70,36 @@ class _EngineToolCallFake:
 
 
 @pytest.mark.asyncio
-async def test_run_evolve_routes_self_modify_through_engine_tool_executor() -> None:
+async def test_run_evolve_requires_self_evolve_before_modifying() -> None:
     tool = _FakeTool()
     engine = _EngineToolCallFake("self_modify", tool)
 
     await _run_evolve(engine, "改进分析工具")
+
+    assert engine._router.calls == []
+    assert engine.executed == []
+    assert engine.reload_domains == []
+
+
+@pytest.mark.asyncio
+async def test_run_evolve_routes_self_modify_through_engine_tool_executor() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+
+    with (
+        patch("naumi_agent.tools.self_evolve.format_evolution_report", return_value="report"),
+        patch(
+            "naumi_agent.tools.self_evolve.run_evolution_cycle",
+            return_value={
+                "action": "commit",
+                "eval_result": {},
+                "apply_result": {"action": "adopted", "message": "已记录采纳决策。"},
+                "message": "修改质量提升，建议提交。",
+            },
+        ),
+    ):
+        await _run_evolve(engine, "改进分析工具")
 
     assert tool.calls == []
     assert len(engine.executed) == 1
