@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.165] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Rejected Modify Reporting** — `/evolve` 现在把 `self_modify` 的 `rejected` 结果展示为“自我修改已拒绝”，不再误标为“修改未通过验证”。
+
 ## [0.1.164] - 2026-06-13
 
 ### Fixed

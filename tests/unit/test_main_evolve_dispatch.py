@@ -342,6 +342,32 @@ async def test_run_evolve_reports_noop_without_validation_failure(capsys) -> Non
 
 
 @pytest.mark.asyncio
+async def test_run_evolve_reports_rejected_without_validation_failure(capsys) -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    engine.tool_outputs["self_modify"] = json.dumps(
+        {
+            "report": "## 自我修改结果\n**状态**: ❌ 已拒绝\n**原因**: 目标受保护",
+            "result": {
+                "status": "rejected",
+                "file": "tools/base.py",
+                "error": "目标受保护",
+            },
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "改进分析工具")
+
+    output = capsys.readouterr().out
+    assert "已拒绝" in output
+    assert "修改未通过验证" not in output
+    assert [call.name for call, _ in engine.executed] == ["self_modify"]
+    assert engine.reload_domains == []
+
+
+@pytest.mark.asyncio
 async def test_run_evolve_stops_on_malformed_self_modify_payload() -> None:
     tool = _FakeTool()
     engine = _EngineToolCallFake("self_modify", tool)
