@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -50,6 +51,7 @@ class _EngineToolCallFake:
         self.tool_registry = {tool_name: tool}
         self.executed: list[tuple[ToolCall, str | None]] = []
         self.reload_domains: list[str] = []
+        self.tool_outputs: dict[str, str] = {}
 
     async def _execute_tool(
         self,
@@ -61,7 +63,7 @@ class _EngineToolCallFake:
         return ToolResult(
             call_id=tool_call.id,
             status="success",
-            content="自我修改已应用。",
+            content=self.tool_outputs.get(tool_call.name, "自我修改已应用。"),
         )
 
     async def reload_tools(self, domain: str) -> dict[str, int]:
@@ -86,23 +88,22 @@ async def test_run_evolve_routes_self_modify_through_engine_tool_executor() -> N
     tool = _FakeTool()
     engine = _EngineToolCallFake("self_modify", tool)
     engine.tool_registry["self_evolve"] = object()
-
-    with (
-        patch("naumi_agent.tools.self_evolve.format_evolution_report", return_value="report"),
-        patch(
-            "naumi_agent.tools.self_evolve.run_evolution_cycle",
-            return_value={
+    engine.tool_outputs["self_evolve"] = json.dumps(
+        {
+            "report": "report",
+            "cycle_result": {
                 "action": "commit",
-                "eval_result": {},
                 "apply_result": {"action": "adopted", "message": "已记录采纳决策。"},
                 "message": "修改质量提升，建议提交。",
             },
-        ),
-    ):
-        await _run_evolve(engine, "改进分析工具")
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "改进分析工具")
 
     assert tool.calls == []
-    assert len(engine.executed) == 1
+    assert len(engine.executed) == 2
     tool_call, agent_name = engine.executed[0]
     assert agent_name == "cli"
     assert tool_call.name == "self_modify"
@@ -112,6 +113,19 @@ async def test_run_evolve_routes_self_modify_through_engine_tool_executor() -> N
         "description": "改进分析工具",
         "apply_to_workspace": True,
     }
+    evolve_call, evolve_agent_name = engine.executed[1]
+    assert evolve_agent_name == "cli"
+    assert evolve_call.name == "self_evolve"
+    assert json.loads(evolve_call.arguments) == {
+        "target_file": "tools/analysis.py",
+        "original_content": (Path.cwd() / "src/naumi_agent/tools/analysis.py").read_text(
+            encoding="utf-8"
+        ),
+        "new_content": "# improved content\n",
+        "description": "改进分析工具",
+        "apply_decision": True,
+        "return_json": True,
+    }
     assert engine.reload_domains == ["tools"]
 
 
@@ -120,14 +134,11 @@ async def test_run_evolve_uses_self_evolve_safe_apply_decision() -> None:
     tool = _FakeTool()
     engine = _EngineToolCallFake("self_modify", tool)
     engine.tool_registry["self_evolve"] = object()
-
-    with (
-        patch("naumi_agent.tools.self_evolve.format_evolution_report", return_value="report"),
-        patch(
-            "naumi_agent.tools.self_evolve.run_evolution_cycle",
-            return_value={
+    engine.tool_outputs["self_evolve"] = json.dumps(
+        {
+            "report": "report",
+            "cycle_result": {
                 "action": "rollback",
-                "eval_result": {},
                 "apply_result": {
                     "action": "rollback_blocked",
                     "message": (
@@ -137,10 +148,13 @@ async def test_run_evolve_uses_self_evolve_safe_apply_decision() -> None:
                 },
                 "message": "修改质量下降，但回滚未执行：拒绝自动回滚。",
             },
-        ) as cycle,
-        patch("naumi_agent.tools.self_modify._rollback_file") as rollback,
-    ):
+        },
+        ensure_ascii=False,
+    )
+
+    with patch("naumi_agent.tools.self_modify._rollback_file") as rollback:
         await _run_evolve(engine, "改进分析工具")
 
-    assert cycle.call_args.kwargs["apply_decision"] is True
+    evolve_call, _ = engine.executed[1]
+    assert json.loads(evolve_call.arguments)["apply_decision"] is True
     rollback.assert_not_called()
