@@ -3031,7 +3031,10 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         return normalized
 
     target_file = proposal.get("target_file", proposal.get("file_path", ""))
-    new_content = proposal.get("new_content", proposal.get("content", ""))
+    new_content = proposal.get(
+        "new_content",
+        proposal.get("content", proposal.get("new_file_content", "")),
+    )
     change_desc = proposal.get("description", description)
 
     if not isinstance(target_file, str) or not isinstance(new_content, str):
