@@ -3030,7 +3030,11 @@ async def _run_evolve(engine: Any, arg: str) -> None:
                 return "/".join(parts) + ".py"
         return normalized
 
-    target_file = proposal.get("target_file", proposal.get("file_path", proposal.get("path", "")))
+    target_file = (
+        proposal.get("target_file")
+        or proposal.get("file_path")
+        or proposal.get("path", "")
+    )
     new_content = proposal.get(
         "new_content",
         proposal.get(
