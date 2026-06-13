@@ -73,8 +73,7 @@ def _normalize_evolution_inputs(
     if round_number < 1 or round_number > _MAX_REFLECTIVE_ROUNDS:
         raise ValueError(f"round 必须在 1 到 {_MAX_REFLECTIVE_ROUNDS} 之间。")
 
-    if not isinstance(apply_decision, bool):
-        raise ValueError("apply_decision 必须是布尔值。")
+    apply_decision = _normalize_apply_decision(apply_decision)
 
     return (
         target_file,
@@ -84,6 +83,20 @@ def _normalize_evolution_inputs(
         round_number,
         apply_decision,
     )
+
+
+def _normalize_apply_decision(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized == "true":
+            return True
+        if normalized == "false":
+            return False
+    if value is None:
+        return False
+    raise ValueError("apply_decision 必须是布尔值。")
 
 
 def _normalize_return_json(value: Any) -> bool:
@@ -758,6 +771,7 @@ class SelfEvolveTool(Tool):
     ) -> str:
         try:
             return_json = _normalize_return_json(return_json)
+            apply_decision = _normalize_apply_decision(apply_decision)
             (
                 target_file,
                 original_content,

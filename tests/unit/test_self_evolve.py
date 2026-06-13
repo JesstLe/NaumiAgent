@@ -727,6 +727,59 @@ class TestSelfEvolveTool:
         assert target.read_text(encoding="utf-8") == BETTER_SOURCE
 
     @pytest.mark.asyncio
+    async def test_execute_accepts_string_true_for_apply_decision(
+        self,
+        tmp_path: Path,
+    ):
+        _reset_history()
+        target = tmp_path / "tools" / "evolve_case.py"
+        target.parent.mkdir()
+        target.write_text(WORSE_SOURCE, encoding="utf-8")
+
+        with patch(
+            "naumi_agent.tools.self_modify._find_agent_source_dir",
+            return_value=tmp_path,
+        ):
+            result = await SelfEvolveTool().execute(
+                target_file="tools/evolve_case.py",
+                original_content=BETTER_SOURCE,
+                new_content=WORSE_SOURCE,
+                description="字符串布尔触发回滚",
+                apply_decision="true",
+            )
+
+        assert "执行闭环" in result
+        assert "写回原始内容" in result
+        assert target.read_text(encoding="utf-8") == BETTER_SOURCE
+
+    @pytest.mark.asyncio
+    async def test_execute_accepts_string_false_for_apply_decision(
+        self,
+        tmp_path: Path,
+    ):
+        _reset_history()
+        target = tmp_path / "tools" / "evolve_case.py"
+        target.parent.mkdir()
+        target.write_text(WORSE_SOURCE, encoding="utf-8")
+
+        with patch(
+            "naumi_agent.tools.self_modify._find_agent_source_dir",
+            return_value=tmp_path,
+        ):
+            result = await SelfEvolveTool().execute(
+                target_file="tools/evolve_case.py",
+                original_content=BETTER_SOURCE,
+                new_content=WORSE_SOURCE,
+                description="字符串布尔跳过回滚",
+                apply_decision="false",
+            )
+
+        assert "执行闭环" not in result
+        assert "已拒绝" not in result
+        assert "回滚" in result
+        assert target.read_text(encoding="utf-8") == WORSE_SOURCE
+
+    @pytest.mark.asyncio
     async def test_execute_can_return_structured_cycle_result(self):
         _reset_history()
         result = await SelfEvolveTool().execute(

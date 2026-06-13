@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.169] - 2026-06-13
+
+### Fixed
+- **Self-Evolve String Boolean Apply Decision** — `self_evolve` 现在接受 `"true"` / `"false"` 形式的 `apply_decision` 参数，让 Agent 工具调用轻微错型时仍能正确执行或跳过反思闭环动作。
+
 ## [0.1.168] - 2026-06-13
 
 ### Fixed
