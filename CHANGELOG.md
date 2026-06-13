@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.197] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Modification Wrapper Unwrap** — `/evolve` 现在会在顶层缺少有效修改字段时解包 LLM 输出中的 `modification` 对象，避免常见外层修改包装中断自我修改流程。
+
 ## [0.1.196] - 2026-06-13
 
 ### Fixed
