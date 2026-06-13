@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.199] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Single Change List Unwrap** — `/evolve` 现在会在顶层缺少有效修改字段时解包单项 `changes` 列表，避免 LLM 输出 `{"changes": [{...}]}` 这类单文件修改结构时中断自我修改流程。
+
 ## [0.1.198] - 2026-06-13
 
 ### Fixed
