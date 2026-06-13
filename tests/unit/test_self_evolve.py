@@ -344,6 +344,20 @@ class TestRunEvolutionCycle:
         )
         assert result["action"] == "rollback"
 
+    def test_revert_decision_without_apply_does_not_claim_rollback(self):
+        result = run_evolution_cycle(
+            target_file="tools/test.py",
+            original_content=BETTER_SOURCE,
+            new_content=WORSE_SOURCE,
+            description="broke",
+            apply_decision=False,
+        )
+
+        assert result["action"] == "rollback"
+        assert result["apply_result"] is None
+        assert "建议回滚" in result["message"]
+        assert "已回滚" not in result["message"]
+
     def test_iterate_when_ambiguous(self):
         src1 = 'def foo(x: int) -> int:\n    """Foo."""\n    return x\n'
         src2 = 'def foo(x: int) -> int:\n    """Foo."""\n    return x + 1\n'

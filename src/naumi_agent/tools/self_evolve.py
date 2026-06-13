@@ -630,11 +630,16 @@ def run_evolution_cycle(
 
     # Step 3: If revert — rollback
     if decision == "revert":
+        message = (
+            "修改质量下降，已回滚。"
+            if apply_result and apply_result.get("action") == "reverted"
+            else "修改质量下降，建议回滚；当前尚未执行回滚。"
+        )
         return {
             "action": "rollback",
             "eval_result": eval_result,
             "apply_result": apply_result,
-            "message": "修改质量下降，已回滚。",
+            "message": message,
         }
 
     # Step 4: If iterate — suggest next round if rounds remain
