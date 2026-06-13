@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.183] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Target Line Reference Normalization** — `/evolve` 现在会剥离 LLM 输出目标文件中的 `.py:行号` 和 `#L行号` 引用，避免有效源码目标因携带代码位置提示被拒绝。
+
 ## [0.1.182] - 2026-06-13
 
 ### Fixed
