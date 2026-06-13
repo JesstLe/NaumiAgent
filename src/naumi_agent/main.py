@@ -3059,13 +3059,14 @@ async def _run_evolve(engine: Any, arg: str) -> None:
 
     # Check if modification was applied
     if modify_result.get("status") != "applied":
-        is_noop = modify_result.get("status") == "noop"
-        title = (
-            "[bold yellow]⏭️ 无变更，已停止自我进化[/bold yellow]"
-            if is_noop
-            else "[bold red]❌ 修改未通过验证[/bold red]"
-        )
-        border_style = "yellow" if is_noop else "red"
+        status = modify_result.get("status")
+        title = "[bold red]❌ 修改未通过验证[/bold red]"
+        border_style = "red"
+        if status == "noop":
+            title = "[bold yellow]⏭️ 无变更，已停止自我进化[/bold yellow]"
+            border_style = "yellow"
+        elif status == "rejected":
+            title = "[bold red]❌ 自我修改已拒绝[/bold red]"
         console.print()
         console.print(
             Panel(
