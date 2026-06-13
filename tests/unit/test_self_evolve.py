@@ -741,3 +741,34 @@ class TestSelfEvolveTool:
         assert payload["cycle_result"]["action"] == "commit"
         assert payload["cycle_result"]["eval_result"]["decision"] == "adopt"
         assert "自我进化报告" in payload["report"]
+
+    @pytest.mark.asyncio
+    async def test_execute_accepts_string_true_for_structured_cycle_result(self):
+        _reset_history()
+        result = await SelfEvolveTool().execute(
+            target_file="tools/test.py",
+            original_content=NO_DOC_SOURCE,
+            new_content=FULL_DOC_SOURCE,
+            description="字符串布尔",
+            return_json="true",
+        )
+
+        payload = json.loads(result)
+        assert payload["cycle_result"]["action"] == "commit"
+        assert "自我进化报告" in payload["report"]
+
+    @pytest.mark.asyncio
+    async def test_execute_accepts_string_false_for_markdown_result(self):
+        _reset_history()
+        result = await SelfEvolveTool().execute(
+            target_file="tools/test.py",
+            original_content=NO_DOC_SOURCE,
+            new_content=FULL_DOC_SOURCE,
+            description="字符串布尔",
+            return_json="false",
+        )
+
+        assert "自我进化报告" in result
+        assert "采纳" in result
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(result)

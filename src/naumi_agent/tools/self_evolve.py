@@ -89,6 +89,12 @@ def _normalize_evolution_inputs(
 def _normalize_return_json(value: Any) -> bool:
     if isinstance(value, bool):
         return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized == "true":
+            return True
+        if normalized == "false":
+            return False
     if value is None:
         return False
     raise ValueError("return_json 必须是布尔值。")
