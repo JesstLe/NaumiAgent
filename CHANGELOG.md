@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.156] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Target Boundary Guard** — `/evolve` 现在在读取原始文件和调用 `self_modify` 前拒绝受保护或不可修改目标，复用自我修改工具的边界规则，避免 LLM proposal 绕进受限源码域。
+
 ## [0.1.155] - 2026-06-13
 
 ### Fixed

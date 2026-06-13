@@ -2985,10 +2985,20 @@ async def _run_evolve(engine: Any, arg: str) -> None:
     console.print(f"[dim]修改说明: {change_desc}[/dim]")
 
     # Read original content for evolution evaluation
-    from naumi_agent.tools.self_modify import _resolve_target_path
+    from naumi_agent.tools.self_modify import (
+        _is_modifiable_file,
+        _is_protected_file,
+        _resolve_target_path,
+    )
 
     try:
         original_path = _resolve_target_path(target_file)
+        if _is_protected_file(original_path):
+            console.print("[red]目标文件受保护，已停止自我修改流程[/red]")
+            return
+        if not _is_modifiable_file(original_path):
+            console.print("[red]目标文件不在可修改范围内，已停止自我修改流程[/red]")
+            return
         original_content = original_path.read_text(encoding="utf-8")
     except Exception as e:
         console.print(f"[red]无法读取原始文件: {e}[/red]")
