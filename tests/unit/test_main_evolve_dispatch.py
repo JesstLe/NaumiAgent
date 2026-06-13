@@ -21,9 +21,12 @@ class _FakeResponse:
 class _FakeRouter:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.response_content: str | None = None
 
     async def call(self, **kwargs: Any) -> _FakeResponse:
         self.calls.append(kwargs)
+        if self.response_content is not None:
+            return _FakeResponse(self.response_content)
         return _FakeResponse(
             json.dumps(
                 {
@@ -94,6 +97,39 @@ async def test_run_evolve_requires_self_evolve_before_modifying() -> None:
     await _run_evolve(engine, "改进分析工具")
 
     assert engine._router.calls == []
+    assert engine.executed == []
+    assert engine.reload_domains == []
+
+
+@pytest.mark.asyncio
+async def test_run_evolve_stops_when_llm_proposal_is_not_object() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    engine._router.response_content = json.dumps(["tools/analysis.py"])
+
+    await _run_evolve(engine, "改进分析工具")
+
+    assert engine.executed == []
+    assert engine.reload_domains == []
+
+
+@pytest.mark.asyncio
+async def test_run_evolve_stops_when_llm_proposal_fields_are_not_strings() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    engine._router.response_content = json.dumps(
+        {
+            "target_file": 123,
+            "new_content": ["not", "source"],
+            "description": {"bad": "shape"},
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "改进分析工具")
+
     assert engine.executed == []
     assert engine.reload_domains == []
 

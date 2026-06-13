@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.155] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Proposal Shape Guard** — `/evolve` 现在校验 LLM 修改方案必须是 JSON 对象，并要求 `target_file`、`new_content` 与 `description` 为字符串，避免非对象或错型字段绕进自我修改流程。
+
 ## [0.1.154] - 2026-06-13
 
 ### Fixed
