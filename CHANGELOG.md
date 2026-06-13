@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.184] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Backticked Target Normalization** — `/evolve` 现在会剥离 LLM 输出目标文件外层的 Markdown 反引号，避免 `` `tools/analysis.py` `` 这类有效源码目标被拒绝。
+
 ## [0.1.183] - 2026-06-13
 
 ### Fixed
