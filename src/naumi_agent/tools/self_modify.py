@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -47,6 +48,15 @@ def _normalize_apply_to_workspace(value: Any) -> bool:
     if value is None:
         return False
     raise ValueError("apply_to_workspace 必须是布尔值。")
+
+
+def _normalize_return_json(value: Any) -> bool:
+    """Normalize the structured result switch for agent callers."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    raise ValueError("return_json 必须是布尔值。")
 
 
 def _normalize_self_modify_inputs(
@@ -672,6 +682,11 @@ class SelfModifyTool(Tool):
                     ),
                     "default": False,
                 },
+                "return_json": {
+                    "type": "boolean",
+                    "description": "是否返回结构化 JSON，供 Agent/CLI 可靠读取验证状态。",
+                    "default": False,
+                },
             },
             "required": ["target_file", "new_content", "description"],
         }
@@ -683,9 +698,11 @@ class SelfModifyTool(Tool):
         new_content: str,
         description: str,
         apply_to_workspace: bool = False,
+        return_json: bool = False,
         **kwargs: Any,
     ) -> str:
         try:
+            return_json = _normalize_return_json(return_json)
             target_file, new_content, description = _normalize_self_modify_inputs(
                 target_file,
                 new_content,
@@ -794,4 +811,14 @@ class SelfModifyTool(Tool):
             parts.append(f"**文件**: `{file_name}`")
             parts.append(f"**原因**: {result.get('error', '未知错误')}")
 
-        return "\n".join(parts)
+        report = "\n".join(parts)
+        if return_json:
+            return json.dumps(
+                {
+                    "report": report,
+                    "result": result,
+                },
+                ensure_ascii=False,
+            )
+
+        return report
