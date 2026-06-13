@@ -757,6 +757,30 @@ class TestSelfModifyTool:
         assert "已拒绝" in payload["report"]
 
     @pytest.mark.asyncio
+    async def test_execute_returns_structured_rejection_for_malformed_validation_result(self):
+        tool = SelfModifyTool()
+
+        with patch(
+            "naumi_agent.tools.self_modify.validate_and_apply",
+            return_value={
+                "status": "applied",
+                "file": "tools/example.py",
+                "validation": {"ruff_check": "passed"},
+            },
+        ):
+            output = await tool.execute(
+                target_file="tools/example.py",
+                new_content="x = 1\n",
+                description="畸形验证结果",
+                return_json=True,
+            )
+
+        payload = json.loads(output)
+        assert payload["result"]["status"] == "rejected"
+        assert "自我修改结果格式错误" in payload["result"]["error"]
+        assert "已拒绝" in payload["report"]
+
+    @pytest.mark.asyncio
     async def test_execute_accepts_string_true_for_structured_result(self):
         tool = SelfModifyTool()
         mock_result = {

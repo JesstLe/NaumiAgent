@@ -101,6 +101,24 @@ def _normalize_self_modify_inputs(
     return target_file.strip(), new_content, description.strip()
 
 
+def _normalize_validation_results(value: Any) -> dict[str, dict[str, Any]]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("validation 必须是对象。")
+
+    normalized: dict[str, dict[str, Any]] = {}
+    for check_name, check_result in value.items():
+        if not isinstance(check_name, str) or not check_name:
+            raise ValueError("validation 的检查名称必须是非空字符串。")
+        if not isinstance(check_result, dict):
+            raise ValueError(f"validation.{check_name} 必须是对象。")
+        if not isinstance(check_result.get("passed"), bool):
+            raise ValueError(f"validation.{check_name}.passed 必须是布尔值。")
+        normalized[check_name] = check_result
+    return normalized
+
+
 def _find_agent_source_dir() -> Path:
     """Locate the naumi_agent source directory."""
     global _AGENT_SOURCE_DIR
@@ -753,8 +771,20 @@ class SelfModifyTool(Tool):
         )
 
         parts: list[str] = ["## 自我修改结果"]
-        status = result["status"]
-        file_name = result.get("file", target_file)
+        try:
+            status = result["status"]
+            validation = _normalize_validation_results(result.get("validation"))
+            file_name = result.get("file", target_file)
+        except (KeyError, TypeError, ValueError) as e:
+            message = f"自我修改结果格式错误: {e}"
+            result = {
+                "status": "rejected",
+                "file": target_file,
+                "error": message,
+            }
+            status = "rejected"
+            validation = {}
+            file_name = target_file
 
         if status == "applied":
             parts.append("**状态**: ✅ 已应用并验证")
@@ -762,7 +792,7 @@ class SelfModifyTool(Tool):
             parts.append(f"**说明**: {description}")
             parts.append("")
             parts.append("### 验证详情")
-            for check_name, check_result in result.get("validation", {}).items():
+            for check_name, check_result in validation.items():
                 icon = "✅" if check_result["passed"] else "❌"
                 status_text = (
                     "通过"
@@ -786,7 +816,7 @@ class SelfModifyTool(Tool):
             parts.append(f"**说明**: {description}")
             parts.append("")
             parts.append("### 验证详情")
-            for check_name, check_result in result.get("validation", {}).items():
+            for check_name, check_result in validation.items():
                 icon = "✅" if check_result["passed"] else "❌"
                 status_text = (
                     "通过"
@@ -810,7 +840,7 @@ class SelfModifyTool(Tool):
             parts.append(f"**回滚**: {'成功' if rollback_ok else '⚠️ 回滚失败，请手动检查'}")
             parts.append("")
             parts.append("### 验证详情")
-            for check_name, check_result in result.get("validation", {}).items():
+            for check_name, check_result in validation.items():
                 icon = "✅" if check_result["passed"] else "❌"
                 output = check_result.get("output", "")
                 if not check_result["passed"]:
@@ -822,10 +852,10 @@ class SelfModifyTool(Tool):
             parts.append("**状态**: ❌ 已拒绝")
             parts.append(f"**文件**: `{file_name}`")
             parts.append(f"**原因**: {result.get('error', '未知')}")
-            if result.get("validation"):
+            if validation:
                 parts.append("")
                 parts.append("### 验证详情")
-                for check_name, check_result in result["validation"].items():
+                for check_name, check_result in validation.items():
                     icon = "✅" if check_result["passed"] else "❌"
                     parts.append(f"- {icon} **{check_name}**: {check_result.get('output', '失败')}")
 

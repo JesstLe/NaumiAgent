@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.173] - 2026-06-13
+
+### Fixed
+- **Self-Modify Malformed Validation Guard** — `self_modify` 现在会把畸形验证结果转换为结构化拒绝报告，避免验证条目缺少 `passed` 等字段时让自我修改工具调用直接崩溃。
+
 ## [0.1.172] - 2026-06-13
 
 ### Fixed
