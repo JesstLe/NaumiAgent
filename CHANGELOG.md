@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.174] - 2026-06-13
+
+### Fixed
+- **Self-Modify Validation Exception Guard** — `self_modify` 现在会把验证/应用过程中的意外异常转换为结构化拒绝报告，避免自我修改工具调用因验证器崩溃而中断 Agent 闭环。
+
 ## [0.1.173] - 2026-06-13
 
 ### Fixed
