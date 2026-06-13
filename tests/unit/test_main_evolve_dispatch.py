@@ -42,7 +42,13 @@ class _FakeTool:
 
     async def execute(self, **kwargs: Any) -> str:
         self.calls.append(kwargs)
-        return "自我修改已应用。"
+        return json.dumps(
+            {
+                "report": "自我修改已应用。",
+                "result": {"status": "applied", "file": "tools/analysis.py"},
+            },
+            ensure_ascii=False,
+        )
 
 
 class _EngineToolCallFake:
@@ -63,7 +69,16 @@ class _EngineToolCallFake:
         return ToolResult(
             call_id=tool_call.id,
             status="success",
-            content=self.tool_outputs.get(tool_call.name, "自我修改已应用。"),
+            content=self.tool_outputs.get(
+                tool_call.name,
+                json.dumps(
+                    {
+                        "report": "自我修改已应用。",
+                        "result": {"status": "applied", "file": "tools/analysis.py"},
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
         )
 
     async def reload_tools(self, domain: str) -> dict[str, int]:
@@ -112,6 +127,7 @@ async def test_run_evolve_routes_self_modify_through_engine_tool_executor() -> N
         "new_content": "# improved content\n",
         "description": "改进分析工具",
         "apply_to_workspace": True,
+        "return_json": True,
     }
     evolve_call, evolve_agent_name = engine.executed[1]
     assert evolve_agent_name == "cli"
@@ -158,3 +174,41 @@ async def test_run_evolve_uses_self_evolve_safe_apply_decision() -> None:
     evolve_call, _ = engine.executed[1]
     assert json.loads(evolve_call.arguments)["apply_decision"] is True
     rollback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_evolve_stops_when_self_modify_status_is_not_applied() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    engine.tool_outputs["self_modify"] = json.dumps(
+        {
+            "report": "隔离验证通过，但主工作区未应用；这里故意包含已应用字样。",
+            "result": {"status": "validated", "file": "tools/analysis.py"},
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "改进分析工具")
+
+    assert [call.name for call, _ in engine.executed] == ["self_modify"]
+    assert engine.reload_domains == []
+
+
+@pytest.mark.asyncio
+async def test_run_evolve_stops_on_malformed_self_modify_payload() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    engine.tool_outputs["self_modify"] = json.dumps(
+        {
+            "report": "格式错误",
+            "result": "applied",
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "改进分析工具")
+
+    assert [call.name for call, _ in engine.executed] == ["self_modify"]
+    assert engine.reload_domains == []

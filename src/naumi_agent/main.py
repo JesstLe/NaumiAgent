@@ -2992,6 +2992,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
             "new_content": new_content,
             "description": change_desc,
             "apply_to_workspace": True,
+            "return_json": True,
         }
         execute_tool = getattr(engine, "_execute_tool", None)
         if callable(execute_tool):
@@ -3003,16 +3004,31 @@ async def _run_evolve(engine: Any, arg: str) -> None:
                 arguments=json.dumps(kwargs, ensure_ascii=False),
             )
             tool_result = await execute_tool(tool_call, agent_name="cli")
+            if tool_result.status != "success":
+                console.print(f"[red]自我修改执行失败: {tool_result.content}[/red]")
+                return
             modify_result_str = tool_result.content
         else:
             modify_result_str = await self_modify.execute(**kwargs)
 
+    try:
+        modify_payload = json.loads(modify_result_str)
+        modify_result = modify_payload["result"]
+        modify_report = modify_payload["report"]
+        if not isinstance(modify_result, dict):
+            raise TypeError("result 必须是对象")
+        if not isinstance(modify_report, str):
+            raise TypeError("report 必须是字符串")
+    except (KeyError, TypeError, json.JSONDecodeError) as e:
+        console.print(f"[red]无法解析自我修改结果: {e}[/red]")
+        return
+
     # Check if modification was applied
-    if "已应用" not in modify_result_str:
+    if modify_result.get("status") != "applied":
         console.print()
         console.print(
             Panel(
-                Markdown(modify_result_str),
+                Markdown(modify_report),
                 title="[bold red]❌ 修改未通过验证[/bold red]",
                 border_style="red",
                 padding=(1, 2),

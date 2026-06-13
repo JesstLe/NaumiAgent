@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -651,6 +652,34 @@ class TestSelfModifyTool:
             apply_to_workspace=True,
         )
         assert "已应用并验证" in output
+
+    @pytest.mark.asyncio
+    async def test_execute_can_return_structured_result_for_agent_callers(self):
+        tool = SelfModifyTool()
+        mock_result = {
+            "status": "applied",
+            "file": "tools/example.py",
+            "validation": {
+                "ruff_check": {"passed": True, "output": ""},
+            },
+        }
+
+        with patch(
+            "naumi_agent.tools.self_modify.validate_and_apply",
+            return_value=mock_result,
+        ):
+            output = await tool.execute(
+                target_file="tools/example.py",
+                new_content="x = 1\n",
+                description="结构化返回",
+                apply_to_workspace=True,
+                return_json=True,
+            )
+
+        payload = json.loads(output)
+        assert payload["result"] == mock_result
+        assert payload["report"].startswith("## 自我修改结果")
+        assert "已应用并验证" in payload["report"]
 
     @pytest.mark.asyncio
     async def test_execute_reports_applied(self):

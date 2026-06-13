@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.153] - 2026-06-13
+
+### Fixed
+- **Structured Self-Modify Evolve Gate** — `self_modify` 现在支持结构化 JSON 返回，`/evolve` 通过 `result.status == "applied"` 判断是否进入反思评估，避免被中文报告文本中的“已应用”字样误导。
+
 ## [0.1.152] - 2026-06-13
 
 ### Fixed
