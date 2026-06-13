@@ -2981,6 +2981,11 @@ async def _run_evolve(engine: Any, arg: str) -> None:
 
     def normalize_evolve_target_file(value: str) -> str:
         normalized = value.strip()
+        try:
+            resolved = Path(normalized).expanduser().resolve()
+            return str(resolved.relative_to(source_dir.resolve()))
+        except (OSError, ValueError):
+            pass
         for prefix in ("src/naumi_agent/", "naumi_agent/"):
             if normalized.startswith(prefix):
                 return normalized[len(prefix):]

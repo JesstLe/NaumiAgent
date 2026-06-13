@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.178] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Absolute Target Path Normalization** — `/evolve` 现在会把当前 `naumi_agent` 源码目录内的绝对 `target_file` 路径归一化为相对路径，避免 LLM 输出本机完整路径时把合法自我修改目标传给工具层。
+
 ## [0.1.177] - 2026-06-13
 
 ### Fixed
