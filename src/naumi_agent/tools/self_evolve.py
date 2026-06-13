@@ -768,13 +768,28 @@ class SelfEvolveTool(Tool):
                 apply_decision,
             )
         except ValueError as e:
-            return "\n".join(
+            report = "\n".join(
                 [
                     "## 自我进化报告",
                     "**状态**: ❌ 已拒绝",
                     f"**原因**: {e}",
                 ]
             )
+            if return_json is True:
+                return json.dumps(
+                    {
+                        "report": report,
+                        "cycle_result": {
+                            "action": "rejected",
+                            "message": str(e),
+                            "target_file": target_file
+                            if isinstance(target_file, str)
+                            else "",
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+            return report
 
         cycle_result = run_evolution_cycle(
             target_file=target_file,

@@ -647,6 +647,24 @@ class TestSelfEvolveTool:
         assert "new_content 过大" in result
 
     @pytest.mark.asyncio
+    async def test_execute_returns_structured_rejection_for_agent_callers(self):
+        with patch("naumi_agent.tools.self_evolve.run_evolution_cycle") as cycle_mock:
+            result = await SelfEvolveTool().execute(
+                target_file="",
+                original_content=NO_DOC_SOURCE,
+                new_content=FULL_DOC_SOURCE,
+                description="结构化拒绝",
+                return_json=True,
+            )
+
+        cycle_mock.assert_not_called()
+        payload = json.loads(result)
+        assert payload["cycle_result"]["action"] == "rejected"
+        assert "target_file 不能为空" in payload["cycle_result"]["message"]
+        assert payload["report"].startswith("## 自我进化报告")
+        assert "已拒绝" in payload["report"]
+
+    @pytest.mark.asyncio
     async def test_execute_improvement(self):
         _reset_history()
         tool = SelfEvolveTool()
