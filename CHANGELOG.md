@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.159] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Snake Case Context Matching** — `/evolve` 的源码上下文排序现在会把下划线代码标识拆成子词，使 `self review` 这类自然写法也能命中 `self_review.py` 等相关模块。
+
 ## [0.1.158] - 2026-06-13
 
 ### Fixed

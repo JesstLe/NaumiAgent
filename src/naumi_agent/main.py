@@ -2918,10 +2918,16 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         file_list = "\n".join(f"- {f}" for f in modifiable_files)
         prompt += f"\n可修改的文件列表:\n{file_list}"
 
-        query_tokens = set(re.findall(r"[a-z0-9_]+", description.lower()))
+        def code_tokens(text: str) -> set[str]:
+            tokens = set(re.findall(r"[a-z0-9_]+", text.lower()))
+            for token in list(tokens):
+                tokens.update(part for part in token.split("_") if part)
+            return tokens
+
+        query_tokens = code_tokens(description)
 
         def context_rank(file_name: str) -> tuple[int, str]:
-            path_tokens = set(re.findall(r"[a-z0-9_]+", file_name.lower()))
+            path_tokens = code_tokens(file_name)
             return (-len(query_tokens & path_tokens), file_name)
 
         file_contexts = []
