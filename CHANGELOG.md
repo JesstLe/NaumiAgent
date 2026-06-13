@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.147] - 2026-06-13
+
+### Fixed
+- **Self-Evolve Rollback Reporting** — `self_evolve` 现在只在闭环实际写回成功时报告“已回滚”；默认只评估不应用时会明确提示“建议回滚，尚未执行”，避免反思循环误判状态。
+
 ## [0.1.146] - 2026-06-13
 
 ### Fixed
