@@ -3035,15 +3035,12 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         or proposal.get("file_path")
         or proposal.get("path", "")
     )
-    new_content = proposal.get(
-        "new_content",
-        proposal.get(
-            "content",
-            proposal.get(
-                "new_file_content",
-                proposal.get("updated_content", proposal.get("code", "")),
-            ),
-        ),
+    new_content = (
+        proposal.get("new_content")
+        or proposal.get("content")
+        or proposal.get("new_file_content")
+        or proposal.get("updated_content")
+        or proposal.get("code", "")
     )
     change_desc = proposal.get("description", description)
 

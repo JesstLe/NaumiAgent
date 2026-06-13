@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.195] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Blank Content Field Fallback** — `/evolve` 现在会在 `new_content` 为空时继续尝试 `content` / `new_file_content` / `updated_content` / `code` 别名，避免 LLM 输出空标准字段但有效内容别名时中断自我修改流程。
+
 ## [0.1.194] - 2026-06-13
 
 ### Fixed
