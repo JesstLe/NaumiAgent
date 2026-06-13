@@ -383,3 +383,31 @@ async def test_run_evolve_stops_on_unknown_self_evolve_action() -> None:
         "self_evolve",
     ]
     assert engine.reload_domains == []
+
+
+@pytest.mark.asyncio
+async def test_run_evolve_shows_rejected_self_evolve_report(capsys) -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    engine.tool_outputs["self_evolve"] = json.dumps(
+        {
+            "report": "## 自我进化报告\n**状态**: ❌ 已拒绝\n**原因**: 输入过大",
+            "cycle_result": {
+                "action": "rejected",
+                "message": "输入过大",
+            },
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "改进分析工具")
+
+    output = capsys.readouterr().out
+    assert "已拒绝" in output
+    assert "未知自我进化动作" not in output
+    assert [call.name for call, _ in engine.executed] == [
+        "self_modify",
+        "self_evolve",
+    ]
+    assert engine.reload_domains == []

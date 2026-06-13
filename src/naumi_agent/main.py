@@ -3113,7 +3113,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
             return
 
         action = cycle_result.get("action")
-        if action not in {"commit", "iterate", "rollback"}:
+        if action not in {"commit", "iterate", "rejected", "rollback"}:
             console.print(f"[red]未知自我进化动作: {action}[/red]")
             return
 
@@ -3128,6 +3128,11 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         )
 
         # Phase 4: Act on decision
+        if action == "rejected":
+            console.print(f"[yellow]⚠️ {cycle_result.get('message', '自我进化评估已拒绝')}[/yellow]")
+            console.print()
+            return
+
         if action == "rollback":
             apply_result = cycle_result.get("apply_result") or {}
             if apply_result.get("action") == "reverted":
