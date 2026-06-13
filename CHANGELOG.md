@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.146] - 2026-06-13
+
+### Fixed
+- **Self-Modify Test Evidence Gate** — 自我修改验证现在要求目标模块存在并通过对应 pytest 文件；缺少测试或 pytest 不可用都会拒绝修改，避免自进化在没有行为证据时误判为已验证。
+
 ## [0.1.145] - 2026-06-13
 
 ### Fixed

@@ -223,10 +223,11 @@ class TestRunTests:
         assert isinstance(passed, bool)
         assert isinstance(output, str)
 
-    def test_handles_missing_test_file(self):
+    def test_requires_corresponding_test_file(self):
         src = SOURCE_DIR / "tools" / "nonexistent.py"
         passed, output = _run_tests(src)
-        assert passed  # No test file → skip → consider passed
+        assert not passed
+        assert "缺少对应测试文件" in output
 
 
 class TestCreateGitBackup:
@@ -499,9 +500,17 @@ class TestValidateAndApply:
     def test_validates_in_isolated_copy_without_applying(self, tmp_path: Path):
         source_dir = tmp_path / "src" / "naumi_agent"
         tools_dir = source_dir / "tools"
+        tests_dir = tmp_path / "tests" / "unit"
         tools_dir.mkdir(parents=True)
+        tests_dir.mkdir(parents=True)
         (source_dir / "__init__.py").write_text("", encoding="utf-8")
         (tools_dir / "__init__.py").write_text("", encoding="utf-8")
+        (tests_dir / "test_dummy_tool.py").write_text(
+            "def test_dummy_tool_contract():\n"
+            "    from naumi_agent.tools import dummy_tool\n"
+            "    assert dummy_tool.x == 2\n",
+            encoding="utf-8",
+        )
         target = tools_dir / "dummy_tool.py"
         original = '"""Dummy tool."""\n\nx = 1\n'
         target.write_text(original, encoding="utf-8")
@@ -517,6 +526,30 @@ class TestValidateAndApply:
         assert result["status"] == "validated"
         assert result["validation"]["import_test"]["passed"] is True
         assert result["validation"]["pytest"]["passed"] is True
+        assert target.read_text(encoding="utf-8") == original
+
+    def test_rejects_isolated_validation_without_corresponding_test(self, tmp_path: Path):
+        source_dir = tmp_path / "src" / "naumi_agent"
+        tools_dir = source_dir / "tools"
+        tools_dir.mkdir(parents=True)
+        (source_dir / "__init__.py").write_text("", encoding="utf-8")
+        (tools_dir / "__init__.py").write_text("", encoding="utf-8")
+        target = tools_dir / "dummy_tool.py"
+        original = '"""Dummy tool."""\n\nx = 1\n'
+        target.write_text(original, encoding="utf-8")
+
+        with patch("naumi_agent.tools.self_modify._AGENT_SOURCE_DIR", source_dir):
+            result = validate_and_apply(
+                "tools/dummy_tool.py",
+                '"""Dummy tool."""\n\nx = 2\n',
+                "change x",
+                apply_to_workspace=False,
+            )
+
+        assert result["status"] == "rejected"
+        assert "隔离测试未通过" in result["error"]
+        assert result["validation"]["pytest"]["passed"] is False
+        assert "缺少对应测试文件" in result["validation"]["pytest"]["output"]
         assert target.read_text(encoding="utf-8") == original
 
 
