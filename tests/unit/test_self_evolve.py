@@ -437,6 +437,32 @@ class TestRunEvolutionCycle:
         assert target.read_text(encoding="utf-8") == "# user edited after evaluation\n"
         assert get_evolution_history()[-1].status == "rollback_blocked"
 
+    def test_cycle_message_surfaces_blocked_rollback_reason(
+        self,
+        tmp_path: Path,
+    ):
+        target = tmp_path / "tools" / "evolve_case.py"
+        target.parent.mkdir()
+        target.write_text("# user edited after evaluation\n", encoding="utf-8")
+
+        with patch(
+            "naumi_agent.tools.self_modify._find_agent_source_dir",
+            return_value=tmp_path,
+        ):
+            result = run_evolution_cycle(
+                target_file="tools/evolve_case.py",
+                original_content=BETTER_SOURCE,
+                new_content=WORSE_SOURCE,
+                description="rollback bad change",
+                apply_decision=True,
+            )
+
+        assert result["action"] == "rollback"
+        assert result["apply_result"]["action"] == "rollback_blocked"
+        assert "拒绝自动回滚" in result["message"]
+        assert "尚未执行回滚" not in result["message"]
+        assert target.read_text(encoding="utf-8") == "# user edited after evaluation\n"
+
 
 class TestEvolutionStep:
     def test_auto_id(self):

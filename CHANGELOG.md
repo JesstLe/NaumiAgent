@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.149] - 2026-06-13
+
+### Fixed
+- **Self-Evolve Rollback Blocker Propagation** — 当 `apply_decision=True` 但安全闭环拒绝自动回滚时，`run_evolution_cycle` 现在会把底层阻断原因传给上层消息，避免 Agent 误以为只是普通“尚未执行”状态。
+
 ## [0.1.148] - 2026-06-13
 
 ### Fixed
