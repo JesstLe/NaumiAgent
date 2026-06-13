@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.175] - 2026-06-13
+
+### Fixed
+- **Self-Evolve Cycle Exception Guard** — `self_evolve` 现在会把反思循环中的意外异常转换为结构化拒绝报告，避免评估器崩溃时中断 Agent 自我进化闭环。
+
 ## [0.1.174] - 2026-06-13
 
 ### Fixed

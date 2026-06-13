@@ -820,14 +820,38 @@ class SelfEvolveTool(Tool):
                 )
             return report
 
-        cycle_result = run_evolution_cycle(
-            target_file=target_file,
-            original_content=original_content,
-            new_content=new_content,
-            description=description,
-            current_round=round,
-            apply_decision=apply_decision,
-        )
+        try:
+            cycle_result = run_evolution_cycle(
+                target_file=target_file,
+                original_content=original_content,
+                new_content=new_content,
+                description=description,
+                current_round=round,
+                apply_decision=apply_decision,
+            )
+        except Exception as e:
+            message = f"自我进化循环失败: {e}"
+            report = "\n".join(
+                [
+                    "## 自我进化报告",
+                    "**状态**: ❌ 已拒绝",
+                    f"**原因**: {message}",
+                ]
+            )
+            cycle_result = {
+                "action": "rejected",
+                "message": message,
+                "target_file": target_file,
+            }
+            if return_json:
+                return json.dumps(
+                    {
+                        "report": report,
+                        "cycle_result": cycle_result,
+                    },
+                    ensure_ascii=False,
+                )
+            return report
 
         try:
             report = format_evolution_report(
