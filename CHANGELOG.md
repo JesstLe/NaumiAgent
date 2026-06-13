@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.164] - 2026-06-13
+
+### Fixed
+- **CLI Evolve No-Op Reporting** — `/evolve` 现在把 `self_modify` 的 `noop` 结果展示为“无变更，已停止自我进化”，不再误标为“修改未通过验证”。
+
 ## [0.1.163] - 2026-06-13
 
 ### Fixed
