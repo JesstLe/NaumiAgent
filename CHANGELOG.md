@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.194] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Blank Target Field Fallback** — `/evolve` 现在会在 `target_file` 为空时继续尝试 `file_path` / `path` 别名，避免 LLM 输出空标准字段但有效别名时中断自我修改流程。
+
 ## [0.1.193] - 2026-06-13
 
 ### Fixed
