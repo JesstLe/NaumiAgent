@@ -3032,10 +3032,12 @@ async def _run_evolve(engine: Any, arg: str) -> None:
                 original_content=original_content,
                 new_content=new_content,
                 description=change_desc,
+                apply_decision=True,
             )
 
         eval_report = format_evolution_report(
-            cycle_result["eval_result"]
+            cycle_result["eval_result"],
+            apply_result=cycle_result.get("apply_result"),
         )
 
         action = cycle_result["action"]
@@ -3051,15 +3053,12 @@ async def _run_evolve(engine: Any, arg: str) -> None:
 
         # Phase 4: Act on decision
         if action == "rollback":
-            console.print("[bold red]🔄 质量下降，正在回滚...[/bold red]")
-            from naumi_agent.tools.self_modify import _rollback_file
-
-            rolled_back = _rollback_file(original_path)
-            if rolled_back:
-                console.print("[green]✅ 已回滚到修改前的状态[/green]")
+            apply_result = cycle_result.get("apply_result") or {}
+            if apply_result.get("action") == "reverted":
+                console.print("[green]✅ 已通过安全闭环回滚到修改前状态[/green]")
             else:
                 console.print(
-                    "[yellow]⚠️ 自动回滚失败，请手动 git checkout[/yellow]"
+                    f"[yellow]⚠️ {cycle_result.get('message', '建议检查后手动处理')}[/yellow]"
                 )
             console.print()
             return
