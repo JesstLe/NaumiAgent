@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.185] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Src Module Target Normalization** — `/evolve` 现在会把 LLM 输出的 `src.naumi_agent.tools.analysis` 这类模块名归一化为 `tools/analysis.py`，避免 Python 源码布局前缀导致合法目标被拒绝。
+
 ## [0.1.184] - 2026-06-13
 
 ### Fixed
