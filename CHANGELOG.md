@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.158] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Relevant Source Context** — `/evolve` 现在按请求描述中的代码关键词优先选择源码上下文，让 LLM 在修改嵌套工具时先看到相关实现，而不只是排序靠前的文件。
+
 ## [0.1.157] - 2026-06-13
 
 ### Fixed
