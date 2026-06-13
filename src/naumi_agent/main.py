@@ -3015,7 +3015,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
     wrapped_proposal = next(
         (
             proposal.get(key)
-            for key in ("proposal", "modification")
+            for key in ("proposal", "modification", "result")
             if isinstance(proposal.get(key), dict)
         ),
         None,
