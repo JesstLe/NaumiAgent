@@ -212,3 +212,50 @@ async def test_run_evolve_stops_on_malformed_self_modify_payload() -> None:
 
     assert [call.name for call, _ in engine.executed] == ["self_modify"]
     assert engine.reload_domains == []
+
+
+@pytest.mark.asyncio
+async def test_run_evolve_stops_on_malformed_self_evolve_payload() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    engine.tool_outputs["self_evolve"] = json.dumps(
+        {
+            "report": "格式错误",
+            "cycle_result": "commit",
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "改进分析工具")
+
+    assert [call.name for call, _ in engine.executed] == [
+        "self_modify",
+        "self_evolve",
+    ]
+    assert engine.reload_domains == []
+
+
+@pytest.mark.asyncio
+async def test_run_evolve_stops_on_unknown_self_evolve_action() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    engine.tool_outputs["self_evolve"] = json.dumps(
+        {
+            "report": "未知动作",
+            "cycle_result": {
+                "action": "teleport",
+                "message": "未知动作不应被当作采纳。",
+            },
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "改进分析工具")
+
+    assert [call.name for call, _ in engine.executed] == [
+        "self_modify",
+        "self_evolve",
+    ]
+    assert engine.reload_domains == []

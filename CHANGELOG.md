@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.154] - 2026-06-13
+
+### Fixed
+- **Structured Self-Evolve Result Guard** — `/evolve` 现在校验 `self_evolve` 返回的 `cycle_result` 与报告类型，并拒绝未知 action，避免格式异常时崩溃或把未知决策误当作采纳。
+
 ## [0.1.153] - 2026-06-13
 
 ### Fixed
