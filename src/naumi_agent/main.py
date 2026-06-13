@@ -2898,7 +2898,8 @@ async def _run_evolve(engine: Any, arg: str) -> None:
             "1. 只能修改 tools/memory/skills 目录下的模块\n"
             "2. 不能修改 engine/safety/config 等核心模块\n"
             "3. 修改后的代码必须保持所有现有接口兼容\n"
-            '4. 输出 JSON: {"target_file": "路径", '
+            "4. target_file 必须从下方可修改文件列表中选择，不能自行构造路径\n"
+            '5. 输出 JSON: {"target_file": "路径", '
             '"new_content": "内容", "description": "说明"}\n'
         )
 

@@ -211,6 +211,18 @@ async def test_run_evolve_matches_spaced_keywords_to_snake_case_context() -> Non
 
 
 @pytest.mark.asyncio
+async def test_run_evolve_prompt_requires_target_from_candidate_list() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+
+    await _run_evolve(engine, "改进分析工具")
+
+    user_prompt = engine._router.calls[0]["messages"][1]["content"]
+    assert "target_file 必须从下方可修改文件列表中选择" in user_prompt
+
+
+@pytest.mark.asyncio
 async def test_run_evolve_routes_self_modify_through_engine_tool_executor() -> None:
     tool = _FakeTool()
     engine = _EngineToolCallFake("self_modify", tool)
