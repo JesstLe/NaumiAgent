@@ -3070,11 +3070,19 @@ async def _run_evolve(engine: Any, arg: str) -> None:
             evolution_payload = json.loads(evolution_result_str)
             cycle_result = evolution_payload["cycle_result"]
             eval_report = evolution_payload["report"]
+            if not isinstance(cycle_result, dict):
+                raise TypeError("cycle_result 必须是对象")
+            if not isinstance(eval_report, str):
+                raise TypeError("report 必须是字符串")
         except (KeyError, TypeError, json.JSONDecodeError) as e:
             console.print(f"[red]无法解析自我进化评估结果: {e}[/red]")
             return
 
-        action = cycle_result["action"]
+        action = cycle_result.get("action")
+        if action not in {"commit", "iterate", "rollback"}:
+            console.print(f"[red]未知自我进化动作: {action}[/red]")
+            return
+
         console.print()
         console.print(
             Panel(
