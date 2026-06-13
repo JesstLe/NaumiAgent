@@ -3163,9 +3163,12 @@ async def _run_evolve(engine: Any, arg: str) -> None:
             console.print("[green]✅ 质量提升，采纳修改[/green]")
 
     # Phase 5: Hot-reload
-    console.print("[bold yellow]🔄 正在热重载修改后的模块...[/bold yellow]")
+    reload_domain = target_file.split("/", 1)[0]
+    if reload_domain not in {"tools", "memory", "skills"}:
+        reload_domain = "tools"
+    console.print(f"[bold yellow]🔄 正在热重载 {reload_domain} 域...[/bold yellow]")
     try:
-        reload_result = await engine.reload_tools("tools")
+        reload_result = await engine.reload_tools(reload_domain)
         msg = f"✅ 重载完成: {reload_result['reloaded']} 个模块"
         console.print(f"[green]{msg}[/green]")
     except Exception as e:

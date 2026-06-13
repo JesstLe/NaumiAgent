@@ -270,6 +270,43 @@ async def test_run_evolve_routes_self_modify_through_engine_tool_executor() -> N
 
 
 @pytest.mark.asyncio
+async def test_run_evolve_reloads_modified_memory_domain() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    engine._router.response_content = json.dumps(
+        {
+            "target_file": "memory/session.py",
+            "new_content": "# improved memory content\n",
+            "description": "改进记忆模块",
+        },
+        ensure_ascii=False,
+    )
+    engine.tool_outputs["self_modify"] = json.dumps(
+        {
+            "report": "自我修改已应用。",
+            "result": {"status": "applied", "file": "memory/session.py"},
+        },
+        ensure_ascii=False,
+    )
+    engine.tool_outputs["self_evolve"] = json.dumps(
+        {
+            "report": "report",
+            "cycle_result": {
+                "action": "commit",
+                "apply_result": {"action": "adopted", "message": "已记录采纳决策。"},
+                "message": "修改质量提升，建议提交。",
+            },
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "改进记忆模块")
+
+    assert engine.reload_domains == ["memory"]
+
+
+@pytest.mark.asyncio
 async def test_run_evolve_uses_self_evolve_safe_apply_decision() -> None:
     tool = _FakeTool()
     engine = _EngineToolCallFake("self_modify", tool)

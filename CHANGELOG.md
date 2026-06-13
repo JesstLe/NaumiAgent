@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.176] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Domain Hot Reload** — `/evolve` 现在会根据 `target_file` 所属的 `tools` / `memory` / `skills` 域执行热重载，避免修改记忆或技能模块后仍错误重载 tools 域。
+
 ## [0.1.175] - 2026-06-13
 
 ### Fixed
