@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.167] - 2026-06-13
+
+### Fixed
+- **Self-Evolve String Boolean Return Mode** — `self_evolve` 现在接受 `"true"` / `"false"` 形式的 `return_json` 参数，让反思评估工具在 LLM 调用轻微错型时仍能稳定返回期望格式。
+
 ## [0.1.166] - 2026-06-13
 
 ### Fixed
