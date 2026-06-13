@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.163] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Rejected Evaluation Handling** — `/evolve` 现在识别 `self_evolve` 的 `rejected` 决策，会展示反思评估报告并停止流程，而不是把合法拒绝结果当成未知动作。
+
 ## [0.1.162] - 2026-06-13
 
 ### Fixed
