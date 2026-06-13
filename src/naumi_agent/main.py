@@ -3020,6 +3020,14 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         ),
         None,
     )
+    changes = proposal.get("changes")
+    if (
+        wrapped_proposal is None
+        and isinstance(changes, list)
+        and len(changes) == 1
+        and isinstance(changes[0], dict)
+    ):
+        wrapped_proposal = changes[0]
     if wrapped_proposal and not any(proposal.get(key) for key in direct_proposal_keys):
         proposal = wrapped_proposal
 
