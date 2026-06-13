@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.171] - 2026-06-13
+
+### Fixed
+- **Self-Evolve String Number Round** — `self_evolve` 现在接受 `"1"` / `"2"` / `"3"` 形式的 `round` 参数，让 Agent 工具调用轻微错型时仍能进入正确的反思轮次，并继续拒绝越界或非数字轮次。
+
 ## [0.1.170] - 2026-06-13
 
 ### Fixed

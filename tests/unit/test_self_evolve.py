@@ -704,6 +704,44 @@ class TestSelfEvolveTool:
         assert "进化" in result
 
     @pytest.mark.asyncio
+    async def test_execute_accepts_string_number_for_round(self):
+        _reset_history()
+        cycle_result = {
+            "action": "commit",
+            "eval_result": {
+                "decision": "adopt",
+                "score_delta": 10.0,
+                "comparison": {
+                    "before_score": 50.0,
+                    "after_score": 60.0,
+                    "score_delta": 10.0,
+                    "deltas": {},
+                    "improvements": ["质量提升"],
+                    "regressions": [],
+                },
+                "reason": "质量提升",
+            },
+            "apply_result": None,
+            "message": "修改质量提升，建议提交。",
+        }
+
+        with patch(
+            "naumi_agent.tools.self_evolve.run_evolution_cycle",
+            return_value=cycle_result,
+        ) as cycle_mock:
+            result = await SelfEvolveTool().execute(
+                target_file="tools/test.py",
+                original_content=SIMPLE_SOURCE,
+                new_content=BETTER_SOURCE,
+                description="字符串轮次",
+                round="2",
+            )
+
+        cycle_mock.assert_called_once()
+        assert cycle_mock.call_args.kwargs["current_round"] == 2
+        assert "自我进化报告" in result
+
+    @pytest.mark.asyncio
     async def test_execute_apply_decision_includes_closed_loop(self, tmp_path: Path):
         _reset_history()
         target = tmp_path / "tools" / "evolve_case.py"
