@@ -1003,6 +1003,44 @@ async def test_run_evolve_accepts_proposal_wrapper_object() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_evolve_accepts_modification_wrapper_object() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    engine._router.response_content = json.dumps(
+        {
+            "modification": {
+                "target_file": "tools/analysis.py",
+                "new_content": "# improved content\n",
+                "description": "改进分析工具",
+            },
+        },
+        ensure_ascii=False,
+    )
+    engine.tool_outputs["self_evolve"] = json.dumps(
+        {
+            "report": "report",
+            "cycle_result": {
+                "action": "commit",
+                "apply_result": {"action": "adopted", "message": "已记录采纳决策。"},
+                "message": "修改质量提升，建议提交。",
+            },
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "改进分析工具")
+
+    assert [call.name for call, _ in engine.executed] == [
+        "self_modify",
+        "self_evolve",
+    ]
+    modify_call, _ = engine.executed[0]
+    assert json.loads(modify_call.arguments)["target_file"] == "tools/analysis.py"
+    assert engine.reload_domains == ["tools"]
+
+
+@pytest.mark.asyncio
 async def test_run_evolve_reloads_modified_memory_domain() -> None:
     tool = _FakeTool()
     engine = _EngineToolCallFake("self_modify", tool)

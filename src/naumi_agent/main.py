@@ -3012,11 +3012,15 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         "updated_content",
         "code",
     )
-    wrapped_proposal = proposal.get("proposal")
-    if (
-        isinstance(wrapped_proposal, dict)
-        and not any(proposal.get(key) for key in direct_proposal_keys)
-    ):
+    wrapped_proposal = next(
+        (
+            proposal.get(key)
+            for key in ("proposal", "modification")
+            if isinstance(proposal.get(key), dict)
+        ),
+        None,
+    )
+    if wrapped_proposal and not any(proposal.get(key) for key in direct_proposal_keys):
         proposal = wrapped_proposal
 
     def normalize_evolve_target_file(value: str) -> str:
