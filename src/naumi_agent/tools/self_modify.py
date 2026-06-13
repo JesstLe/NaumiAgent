@@ -763,12 +763,19 @@ class SelfModifyTool(Tool):
                 )
             return report
 
-        result = validate_and_apply(
-            target_file,
-            new_content,
-            description,
-            apply_to_workspace=apply_to_workspace,
-        )
+        try:
+            result = validate_and_apply(
+                target_file,
+                new_content,
+                description,
+                apply_to_workspace=apply_to_workspace,
+            )
+        except Exception as e:
+            result = {
+                "status": "rejected",
+                "file": target_file,
+                "error": f"自我修改验证失败: {e}",
+            }
 
         parts: list[str] = ["## 自我修改结果"]
         try:
