@@ -710,13 +710,28 @@ class SelfModifyTool(Tool):
             )
             apply_to_workspace = _normalize_apply_to_workspace(apply_to_workspace)
         except ValueError as e:
-            return "\n".join(
+            report = "\n".join(
                 [
                     "## 自我修改结果",
                     "**状态**: ❌ 已拒绝",
                     f"**原因**: {e}",
                 ]
             )
+            if return_json is True:
+                return json.dumps(
+                    {
+                        "report": report,
+                        "result": {
+                            "status": "rejected",
+                            "file": target_file
+                            if isinstance(target_file, str)
+                            else "",
+                            "error": str(e),
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+            return report
 
         result = validate_and_apply(
             target_file,

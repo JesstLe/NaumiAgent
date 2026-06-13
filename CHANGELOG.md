@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.161] - 2026-06-13
+
+### Fixed
+- **Structured Self-Modify Rejections** — `self_modify(return_json=True)` 现在在输入被拒绝时也返回 `{report, result}` JSON，避免 Agent/CLI 结构化调用在错误路径收到 Markdown 后解析失败。
+
 ## [0.1.160] - 2026-06-13
 
 ### Fixed

@@ -682,6 +682,25 @@ class TestSelfModifyTool:
         assert "已应用并验证" in payload["report"]
 
     @pytest.mark.asyncio
+    async def test_execute_returns_structured_rejection_for_agent_callers(self):
+        tool = SelfModifyTool()
+
+        with patch("naumi_agent.tools.self_modify.validate_and_apply") as apply_mock:
+            output = await tool.execute(
+                target_file="",
+                new_content="x = 1\n",
+                description="结构化拒绝",
+                return_json=True,
+            )
+
+        apply_mock.assert_not_called()
+        payload = json.loads(output)
+        assert payload["result"]["status"] == "rejected"
+        assert "target_file 不能为空" in payload["result"]["error"]
+        assert payload["report"].startswith("## 自我修改结果")
+        assert "已拒绝" in payload["report"]
+
+    @pytest.mark.asyncio
     async def test_execute_reports_applied(self):
         tool = SelfModifyTool()
         mock_result = {
