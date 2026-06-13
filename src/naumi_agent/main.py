@@ -2874,6 +2874,9 @@ async def _run_evolve(engine: Any, arg: str) -> None:
     if not self_modify:
         console.print("[red]自我修改工具未注册[/red]")
         return
+    if not self_evolve:
+        console.print("[red]自我进化评估工具未注册，已停止修改流程[/red]")
+        return
 
     console.print(f"[bold yellow]🧬 自我进化: {description}[/bold yellow]")
 

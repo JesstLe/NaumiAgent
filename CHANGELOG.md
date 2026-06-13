@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.151] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Requires Reflective Evaluator** — `/evolve` 现在要求 `self_modify` 与 `self_evolve` 同时注册；缺少反思评估工具时会在生成/写入前停止，避免只修改不评估的半闭环进化。
+
 ## [0.1.150] - 2026-06-13
 
 ### Fixed
