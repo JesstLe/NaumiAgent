@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.179] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Backslash Target Path Normalization** — `/evolve` 现在会把 LLM 输出中的反斜杠目标路径归一化为 POSIX 风格路径，避免 Windows 风格 `src\\naumi_agent\\...` 合法目标被错误拒绝。
+
 ## [0.1.178] - 2026-06-13
 
 ### Fixed

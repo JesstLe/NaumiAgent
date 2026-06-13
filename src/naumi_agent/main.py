@@ -2980,7 +2980,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         return
 
     def normalize_evolve_target_file(value: str) -> str:
-        normalized = value.strip()
+        normalized = value.strip().replace("\\", "/")
         try:
             resolved = Path(normalized).expanduser().resolve()
             return str(resolved.relative_to(source_dir.resolve()))
