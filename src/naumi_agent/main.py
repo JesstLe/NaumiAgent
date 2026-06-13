@@ -3012,6 +3012,11 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         for prefix in ("src/naumi_agent/", "naumi_agent/"):
             if normalized.startswith(prefix):
                 return normalized[len(prefix):]
+        if "/" not in normalized and not normalized.endswith(".py") and " " not in normalized:
+            module_name = normalized.removeprefix("naumi_agent.")
+            parts = module_name.split(".")
+            if len(parts) >= 2 and parts[0] in {"tools", "memory", "skills"}:
+                return "/".join(parts) + ".py"
         return normalized
 
     target_file = proposal.get("target_file", "")
