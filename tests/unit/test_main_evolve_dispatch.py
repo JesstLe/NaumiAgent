@@ -409,6 +409,32 @@ async def test_run_evolve_stops_on_malformed_self_evolve_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_evolve_stops_on_malformed_self_evolve_apply_result() -> None:
+    tool = _FakeTool()
+    engine = _EngineToolCallFake("self_modify", tool)
+    engine.tool_registry["self_evolve"] = object()
+    engine.tool_outputs["self_evolve"] = json.dumps(
+        {
+            "report": "回滚结果格式错误",
+            "cycle_result": {
+                "action": "rollback",
+                "apply_result": "reverted",
+                "message": "不应因为 apply_result 错型而崩溃。",
+            },
+        },
+        ensure_ascii=False,
+    )
+
+    await _run_evolve(engine, "改进分析工具")
+
+    assert [call.name for call, _ in engine.executed] == [
+        "self_modify",
+        "self_evolve",
+    ]
+    assert engine.reload_domains == []
+
+
+@pytest.mark.asyncio
 async def test_run_evolve_stops_on_unknown_self_evolve_action() -> None:
     tool = _FakeTool()
     engine = _EngineToolCallFake("self_modify", tool)
