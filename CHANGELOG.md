@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.152] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Evaluator Tool Boundary** — `/evolve` 的反思评估现在通过 `self_evolve` ToolCall 执行，并使用结构化 JSON 返回读取决策，确保评估、回滚与阻断原因都进入 Engine 权限、Hook 和审计链。
+
 ## [0.1.151] - 2026-06-13
 
 ### Fixed

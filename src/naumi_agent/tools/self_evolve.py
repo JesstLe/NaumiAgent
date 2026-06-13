@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import tempfile
@@ -83,6 +84,14 @@ def _normalize_evolution_inputs(
         round_number,
         apply_decision,
     )
+
+
+def _normalize_return_json(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    raise ValueError("return_json 必须是布尔值。")
 
 
 @dataclass
@@ -720,6 +729,11 @@ class SelfEvolveTool(Tool):
                     "description": "是否执行安全闭环：采纳仅记录，回滚仅在内容精确匹配时写回。",
                     "default": False,
                 },
+                "return_json": {
+                    "type": "boolean",
+                    "description": "是否返回结构化 JSON，供 CLI/TUI 在同一工具执行链中读取决策。",
+                    "default": False,
+                },
             },
             "required": ["target_file", "original_content", "new_content", "description"],
         }
@@ -733,9 +747,11 @@ class SelfEvolveTool(Tool):
         description: str,
         round: int = 1,
         apply_decision: bool = False,
+        return_json: bool = False,
         **kwargs: Any,
     ) -> str:
         try:
+            return_json = _normalize_return_json(return_json)
             (
                 target_file,
                 original_content,
@@ -774,5 +790,14 @@ class SelfEvolveTool(Tool):
             apply_result=cycle_result.get("apply_result"),
         )
         report += f"\n\n**下一步**: {cycle_result['message']}"
+
+        if return_json:
+            return json.dumps(
+                {
+                    "report": report,
+                    "cycle_result": cycle_result,
+                },
+                ensure_ascii=False,
+            )
 
         return report

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -706,3 +707,19 @@ class TestSelfEvolveTool:
         assert "执行闭环" in result
         assert "写回原始内容" in result
         assert target.read_text(encoding="utf-8") == BETTER_SOURCE
+
+    @pytest.mark.asyncio
+    async def test_execute_can_return_structured_cycle_result(self):
+        _reset_history()
+        result = await SelfEvolveTool().execute(
+            target_file="tools/test.py",
+            original_content=NO_DOC_SOURCE,
+            new_content=FULL_DOC_SOURCE,
+            description="add docs",
+            return_json=True,
+        )
+
+        payload = json.loads(result)
+        assert payload["cycle_result"]["action"] == "commit"
+        assert payload["cycle_result"]["eval_result"]["decision"] == "adopt"
+        assert "自我进化报告" in payload["report"]

@@ -3025,23 +3025,38 @@ async def _run_evolve(engine: Any, arg: str) -> None:
 
     if self_evolve:
         with console.status("[bold green]评估质量变化...[/bold green]"):
-            from naumi_agent.tools.self_evolve import (
-                format_evolution_report,
-                run_evolution_cycle,
-            )
+            evolution_kwargs = {
+                "target_file": target_file,
+                "original_content": original_content,
+                "new_content": new_content,
+                "description": change_desc,
+                "apply_decision": True,
+                "return_json": True,
+            }
+            execute_tool = getattr(engine, "_execute_tool", None)
+            if callable(execute_tool):
+                from naumi_agent.tools.base import ToolCall
 
-            cycle_result = run_evolution_cycle(
-                target_file=target_file,
-                original_content=original_content,
-                new_content=new_content,
-                description=change_desc,
-                apply_decision=True,
-            )
+                tool_call = ToolCall(
+                    id=f"slash-evolve-self-evolve-{uuid.uuid4()}",
+                    name="self_evolve",
+                    arguments=json.dumps(evolution_kwargs, ensure_ascii=False),
+                )
+                tool_result = await execute_tool(tool_call, agent_name="cli")
+                if tool_result.status != "success":
+                    console.print(f"[red]自我进化评估失败: {tool_result.content}[/red]")
+                    return
+                evolution_result_str = tool_result.content
+            else:
+                evolution_result_str = await self_evolve.execute(**evolution_kwargs)
 
-        eval_report = format_evolution_report(
-            cycle_result["eval_result"],
-            apply_result=cycle_result.get("apply_result"),
-        )
+        try:
+            evolution_payload = json.loads(evolution_result_str)
+            cycle_result = evolution_payload["cycle_result"]
+            eval_report = evolution_payload["report"]
+        except (KeyError, TypeError, json.JSONDecodeError) as e:
+            console.print(f"[red]无法解析自我进化评估结果: {e}[/red]")
+            return
 
         action = cycle_result["action"]
         console.print()
