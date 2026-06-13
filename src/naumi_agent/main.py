@@ -3002,6 +3002,23 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         console.print("[red]LLM 修改方案格式错误: 必须是 JSON 对象[/red]")
         return
 
+    direct_proposal_keys = (
+        "target_file",
+        "file_path",
+        "path",
+        "new_content",
+        "content",
+        "new_file_content",
+        "updated_content",
+        "code",
+    )
+    wrapped_proposal = proposal.get("proposal")
+    if (
+        isinstance(wrapped_proposal, dict)
+        and not any(proposal.get(key) for key in direct_proposal_keys)
+    ):
+        proposal = wrapped_proposal
+
     def normalize_evolve_target_file(value: str) -> str:
         normalized = value.strip().replace("\\", "/")
         normalized = re.sub(r"^`+([^`]+?)`+$", r"\1", normalized).strip()
