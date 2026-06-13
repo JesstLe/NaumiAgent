@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.157] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Recursive Candidate Discovery** — `/evolve` 现在递归列出 `tools`、`memory`、`skills` 下的可修改 Python 模块，并保持确定性排序，让自我进化能发现嵌套工具实现而不只看到顶层文件。
+
 ## [0.1.156] - 2026-06-13
 
 ### Fixed
