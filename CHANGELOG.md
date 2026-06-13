@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.189] - 2026-06-13
+
+### Fixed
+- **CLI Evolve Content Field Alias** — `/evolve` 现在会接受 LLM 修改方案中的 `content` 作为 `new_content` 别名，避免常见内容字段命名差异中断自我修改流程。
+
 ## [0.1.188] - 2026-06-13
 
 ### Fixed
