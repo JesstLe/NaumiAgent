@@ -654,6 +654,62 @@ class TestSelfModifyTool:
         assert "已应用并验证" in output
 
     @pytest.mark.asyncio
+    async def test_execute_accepts_string_true_for_workspace_application_flag(self):
+        tool = SelfModifyTool()
+
+        with patch(
+            "naumi_agent.tools.self_modify.validate_and_apply",
+            return_value={
+                "status": "applied",
+                "file": "tools/example.py",
+                "validation": {},
+            },
+        ) as validate:
+            output = await tool.execute(
+                target_file="tools/example.py",
+                new_content="x = 1\n",
+                description="字符串布尔写回",
+                apply_to_workspace="true",
+            )
+
+        validate.assert_called_once_with(
+            "tools/example.py",
+            "x = 1\n",
+            "字符串布尔写回",
+            apply_to_workspace=True,
+        )
+        assert "已应用并验证" in output
+
+    @pytest.mark.asyncio
+    async def test_execute_accepts_string_false_for_workspace_application_flag(self):
+        tool = SelfModifyTool()
+
+        with patch(
+            "naumi_agent.tools.self_modify.validate_and_apply",
+            return_value={
+                "status": "validated",
+                "file": "tools/example.py",
+                "validation": {},
+            },
+        ) as validate:
+            output = await tool.execute(
+                target_file="tools/example.py",
+                new_content="x = 1\n",
+                description="字符串布尔只验证",
+                apply_to_workspace="false",
+            )
+
+        validate.assert_called_once_with(
+            "tools/example.py",
+            "x = 1\n",
+            "字符串布尔只验证",
+            apply_to_workspace=False,
+        )
+        assert "已在隔离区验证" in output
+        assert "主工作区" in output
+        assert "未修改" in output
+
+    @pytest.mark.asyncio
     async def test_execute_can_return_structured_result_for_agent_callers(self):
         tool = SelfModifyTool()
         mock_result = {

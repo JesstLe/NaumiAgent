@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.170] - 2026-06-13
+
+### Fixed
+- **Self-Modify String Boolean Workspace Apply** — `self_modify` 现在接受 `"true"` / `"false"` 形式的 `apply_to_workspace` 参数，让 Agent 工具调用轻微错型时仍能正确选择写回或仅验证。
+
 ## [0.1.169] - 2026-06-13
 
 ### Fixed

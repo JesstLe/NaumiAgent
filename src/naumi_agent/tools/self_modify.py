@@ -45,6 +45,12 @@ def _normalize_apply_to_workspace(value: Any) -> bool:
     """Normalize the explicit workspace application switch."""
     if isinstance(value, bool):
         return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized == "true":
+            return True
+        if normalized == "false":
+            return False
     if value is None:
         return False
     raise ValueError("apply_to_workspace 必须是布尔值。")
