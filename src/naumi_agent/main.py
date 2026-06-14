@@ -34,6 +34,7 @@ from naumi_agent.ui.keybindings import build_keybindings, render_keybinding_help
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_CLI_STREAM_FRAME_INTERVAL_SECONDS = 0.2
 
 
 def _get_git_info() -> dict[str, str | bool]:
@@ -965,13 +966,30 @@ def _cli_event_factory(cli: Any):
     last_token_time = 0.0
     turn_start_time = 0.0
     markdown_highlighter = _StreamingMarkdownHighlighter()
+    stream_buffer: list[str] = []
+    last_stream_flush_time: float | None = None
     adapter = EngineEventAdapter()
     renderer = CLIRenderer(show_reasoning=_show_reasoning_text)
+
+    def flush_stream_buffer(*, force: bool = False) -> None:
+        nonlocal last_stream_flush_time
+        if not stream_buffer:
+            return
+        now = time.monotonic()
+        if (
+            not force
+            and last_stream_flush_time is not None
+            and now - last_stream_flush_time + 1e-9 < _CLI_STREAM_FRAME_INTERVAL_SECONDS
+        ):
+            return
+        cli.append_live("".join(stream_buffer))
+        stream_buffer.clear()
+        last_stream_flush_time = now
 
     async def handler(event: str, data: dict[str, Any]) -> None:
         nonlocal thinking_started, has_streamed_tokens
         nonlocal model_name, token_count, first_token_time, last_token_time
-        nonlocal turn_start_time
+        nonlocal turn_start_time, last_stream_flush_time
         if hasattr(cli, "record_debug_event"):
             cli.record_debug_event("engine.stream_event", {"event": event, "data": data})
 
@@ -988,6 +1006,8 @@ def _cli_event_factory(cli: Any):
             # Fall through to adapter for ⚙ model display
         elif event == "response_start":
             markdown_highlighter.reset()
+            stream_buffer.clear()
+            last_stream_flush_time = None
             cli.finalize_live()
             # Fall through to adapter for separator line
         elif event == "token":
@@ -999,13 +1019,19 @@ def _cli_event_factory(cli: Any):
                     first_token_time = now
                 last_token_time = now
                 token_count += 1
-                cli.append_live(markdown_highlighter.feed(content))
+                rendered = markdown_highlighter.feed(content)
+                if rendered:
+                    stream_buffer.append(rendered)
+                    flush_stream_buffer()
             return  # streaming block owns token rendering
         elif event == "response_end":
             tail = markdown_highlighter.flush()
             if tail:
-                cli.append_live(tail)
+                stream_buffer.append(tail)
+            flush_stream_buffer(force=True)
             return  # streaming block owns response_end rendering
+
+        flush_stream_buffer(force=True)
 
         # --- Adapter-driven rendering for all other events ---
         msg = adapter.adapt(event, data)
