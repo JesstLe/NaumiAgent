@@ -1,6 +1,6 @@
 [project]
 name = "naumi-agent"
-version = "0.1.201"
+version = "0.1.202"
 description = "通用智能 Agent 系统"
 requires-python = ">=3.12"
 

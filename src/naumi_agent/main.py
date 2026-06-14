@@ -736,7 +736,12 @@ def _extract_diff_block(content: str) -> tuple[str, str, str] | None:
 
 
 def _extract_code_block(content: str) -> tuple[str, str, str, str] | None:
-    """Return prefix, language, fenced code body, suffix for first code fence."""
+    """Return prefix, language, fenced code body, suffix for first code fence.
+
+    Tool previews may be truncated before the closing fence. Treat the remaining
+    text as the code body so the preview stays readable instead of showing raw
+    Markdown fence markers.
+    """
     start = content.find("```")
     if start < 0:
         return None
@@ -747,7 +752,7 @@ def _extract_code_block(content: str) -> tuple[str, str, str, str] | None:
     body_start = header_end + 1
     end = content.find("```", body_start)
     if end < 0:
-        return None
+        return content[:start], language, content[body_start:].rstrip("\n"), ""
     return (
         content[:start],
         language,
