@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.200] - 2026-06-14
+
+### Fixed
+- **Model Router Tool Result Gap Repair** — 模型调用前会修复历史中间缺失的 `tool_call_id` 响应，避免 OpenAI-compatible 接口因 assistant tool_calls 后缺少 tool 消息而拒绝请求，并防止恢复路径继续放大为 `IndexError`。
+
 ## [0.1.199] - 2026-06-13
 
 ### Fixed

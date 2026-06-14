@@ -19,6 +19,7 @@ litellm.suppress_debug_info = True
 _FALLBACK_CONTEXT = 128_000
 _FALLBACK_MAX_OUTPUT = 4_096
 _FALLBACK_COST = {"input": 3.0, "output": 15.0}
+_MISSING_TOOL_RESULT_PLACEHOLDER = "[工具调用结果缺失 — 会话恢复时未能找到对应结果]"
 
 
 class ModelTier(StrEnum):
@@ -224,6 +225,7 @@ class ModelRouter:
             for msg in sanitized
             if msg.get("role") != "tool" or msg.get("tool_call_id") in valid_tool_call_ids
         ]
+        sanitized = ModelRouter._repair_middle_tool_call_gaps(sanitized)
 
         # Trim trailing incomplete assistant sequences, but keep complete
         # assistant(tool_calls) -> tool(result) pairs. A valid ReAct turn often
@@ -247,6 +249,61 @@ class ModelRouter:
             break
 
         return sanitized
+
+    @staticmethod
+    def _repair_middle_tool_call_gaps(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Fill historical tool-call gaps while leaving trailing partial turns trimable."""
+        repaired: list[dict[str, Any]] = []
+        i = 0
+        while i < len(messages):
+            msg = messages[i]
+            if msg.get("role") != "assistant" or not msg.get("tool_calls"):
+                if msg.get("role") != "tool":
+                    repaired.append(msg)
+                i += 1
+                continue
+
+            expected_ids = [
+                tc.get("id")
+                for tc in msg.get("tool_calls", [])
+                if isinstance(tc, dict) and tc.get("id")
+            ]
+            expected_set = set(expected_ids)
+            tool_results: dict[str, dict[str, Any]] = {}
+            ordered_tool_messages: list[dict[str, Any]] = []
+
+            j = i + 1
+            while j < len(messages) and messages[j].get("role") == "tool":
+                tool_msg = messages[j]
+                tc_id = tool_msg.get("tool_call_id")
+                if tc_id in expected_set and tc_id not in tool_results:
+                    tool_results[tc_id] = tool_msg
+                    ordered_tool_messages.append(tool_msg)
+                j += 1
+
+            missing_ids = [
+                tc_id for tc_id in expected_ids if tc_id not in tool_results
+            ]
+            if expected_ids and missing_ids and j < len(messages):
+                repaired.append(msg)
+                for tc_id in expected_ids:
+                    repaired.append(
+                        tool_results.get(tc_id)
+                        or {
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": _MISSING_TOOL_RESULT_PLACEHOLDER,
+                        }
+                    )
+            else:
+                repaired.append(msg)
+                repaired.extend(ordered_tool_messages)
+
+            i = j
+
+        return repaired
 
     @staticmethod
     def _has_complete_trailing_tool_results(messages: list[dict[str, Any]]) -> bool:
