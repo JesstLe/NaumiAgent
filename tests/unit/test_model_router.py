@@ -296,3 +296,34 @@ class TestSanitizeMessages:
         sanitized = ModelRouter._sanitize_messages(messages)
 
         assert sanitized == [{"role": "user", "content": "read file"}]
+
+    def test_fills_missing_middle_tool_result_before_next_user_message(self) -> None:
+        messages = [
+            {"role": "user", "content": "read file"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "file_read", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call_2",
+                        "type": "function",
+                        "function": {"name": "file_read", "arguments": "{}"},
+                    },
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "file content"},
+            {"role": "user", "content": "发生了什么"},
+        ]
+
+        sanitized = ModelRouter._sanitize_messages(messages)
+
+        assert sanitized[2]["tool_call_id"] == "call_1"
+        assert sanitized[3]["role"] == "tool"
+        assert sanitized[3]["tool_call_id"] == "call_2"
+        assert "工具调用结果缺失" in sanitized[3]["content"]
+        assert sanitized[4] == {"role": "user", "content": "发生了什么"}
