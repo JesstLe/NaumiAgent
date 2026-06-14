@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.202] - 2026-06-14
+
+### Fixed
+- **CLI Truncated Tool Code Preview** — 工具输出预览在 Markdown 代码围栏内被截断时，CLI 现在仍会按代码块渲染，避免把 ```python 这类 fence 标记原样显示在 tool output 面板里。
+
 ## [0.1.201] - 2026-06-14
 
 ### Changed

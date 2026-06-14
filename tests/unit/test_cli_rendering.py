@@ -175,6 +175,25 @@ def test_tool_output_highlights_fenced_code() -> None:
     assert "\x1b[" in rendered
 
 
+def test_tool_output_highlights_truncated_open_fenced_code() -> None:
+    rendered = _capture(
+        lambda: _print_tool_output(
+            "self_review",
+            (
+                "## Self-Review Inventory Script\n"
+                "```python\n"
+                "from __future__ import annotations\n"
+                "class Inventory:\n"
+                "    pass\n"
+            ),
+        )
+    )
+
+    assert "```python" not in rendered
+    assert "Inventory" in rendered
+    assert "\x1b[" in rendered
+
+
 def test_context_compacted_rendering_includes_preserved_state_and_warnings() -> None:
     rendered = _format_context_compacted({
         "before": 64,
