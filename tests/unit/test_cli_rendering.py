@@ -405,6 +405,53 @@ async def test_fullscreen_cli_streaming_tokens_highlight_code_blocks() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fullscreen_cli_streaming_tokens_are_throttled_to_five_fps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cli = FakeCLI()
+    now = 10.0
+
+    monkeypatch.setattr("time.monotonic", lambda: now)
+    handler = _cli_event_factory(cli)
+
+    await handler("response_start", {})
+    baseline = len(cli.live)
+    await handler("token", {"content": "A"})
+    assert cli.live[baseline:] == ["A"]
+
+    for offset, token in [(0.05, "B"), (0.10, "C"), (0.19, "D")]:
+        now = 10.0 + offset
+        await handler("token", {"content": token})
+
+    assert cli.live[baseline:] == ["A"]
+
+    now = 10.20
+    await handler("token", {"content": "E"})
+
+    assert cli.live[baseline:] == ["A", "BCDE"]
+
+
+@pytest.mark.asyncio
+async def test_fullscreen_cli_response_end_flushes_throttled_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cli = FakeCLI()
+    now = 20.0
+
+    monkeypatch.setattr("time.monotonic", lambda: now)
+    handler = _cli_event_factory(cli)
+
+    await handler("response_start", {})
+    baseline = len(cli.live)
+    await handler("token", {"content": "A"})
+    now = 20.05
+    await handler("token", {"content": "B"})
+    await handler("response_end", {})
+
+    assert cli.live[baseline:] == ["A", "B"]
+
+
+@pytest.mark.asyncio
 async def test_fullscreen_cli_permission_confirmation_returns_choice() -> None:
     cli_layout = pytest.importorskip("naumi_agent.cli.layout")
     cli_app = cli_layout.CLIApp

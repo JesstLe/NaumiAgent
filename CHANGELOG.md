@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.201] - 2026-06-14
+
+### Changed
+- **CLI Streaming Render Cadence** — 全屏 CLI 的流式 token 输出现在按 5 FPS 渲染预算批量刷新，`response_end` 与关键事件会立即 flush，减少高频 token 重绘造成的抖动与终端压力。
+
 ## [0.1.200] - 2026-06-14
 
 ### Fixed
