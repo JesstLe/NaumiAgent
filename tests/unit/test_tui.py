@@ -15,6 +15,7 @@ from naumi_agent.tui.app import (
     _build_textual_bindings,
     _capture_tui_terminal_noise,
     _captured_terminal_text,
+    _find_latest_user_session_id,
     _format_tool_output_markdown,
 )
 from naumi_agent.ui.keybindings import build_keybindings
@@ -27,6 +28,26 @@ class FakeMarkdown:
 
     def update(self, content: str) -> None:
         self.content = content
+
+
+class _FakeSession:
+    def __init__(self, session_id: str, messages: list[dict[str, str]]) -> None:
+        self.id = session_id
+        self.messages = messages
+
+
+class _PagedSessionEngine:
+    def __init__(self, sessions: list[_FakeSession]) -> None:
+        self.sessions = sessions
+
+    async def list_sessions(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[_FakeSession], int]:
+        start = (page - 1) * page_size
+        end = start + page_size
+        return self.sessions[start:end], len(self.sessions)
 
 
 class TestNaumiApp:
@@ -75,6 +96,17 @@ class TestNaumiApp:
 
     def test_tui_does_not_keep_legacy_analysis_router(self) -> None:
         assert not hasattr(NaumiApp, "_run_analysis_mode")
+
+    @pytest.mark.asyncio
+    async def test_resume_helper_skips_empty_recent_sessions(self) -> None:
+        engine = _PagedSessionEngine([
+            _FakeSession("empty", [{"role": "system", "content": "prompt"}]),
+            _FakeSession("real", [{"role": "user", "content": "继续"}]),
+        ])
+
+        session_id = await _find_latest_user_session_id(engine, page_size=1)
+
+        assert session_id == "real"
 
     def test_tool_output_markdown_wraps_raw_diff(self) -> None:
         rendered = _format_tool_output_markdown("--- a\n+++ b\n@@\n-old\n+new")
