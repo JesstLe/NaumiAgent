@@ -8,6 +8,7 @@ import pytest
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
 from naumi_agent.tui.app import (
+    ActivityPanel,
     ChatPanel,
     NaumiApp,
     StatusBar,
@@ -229,3 +230,21 @@ class TestNaumiApp:
             todo.todo_text = ""
             await pilot.pause(0.1)
             assert "hidden" in todo.classes
+
+    @pytest.mark.asyncio
+    async def test_clear_chat_removes_runtime_task_panels(self) -> None:
+        engine = AgentEngine(AppConfig())
+        app = NaumiApp(engine)
+        async with app.run_test(size=(100, 30)) as pilot:
+            todo = app.query_one(TodoBar)
+            activity = app.query_one(ActivityPanel)
+            todo.todo_text = "todo: 0/1 完成 | ● #1 正在实现"
+            activity.add_tool_log("subagent", {"task": "scan"}, "success", 10)
+            await pilot.pause(0.1)
+
+            app.action_clear_chat()
+            await pilot.pause(0.1)
+
+            assert todo.todo_text == ""
+            assert "hidden" in todo.classes
+            assert len(activity.children) == 0

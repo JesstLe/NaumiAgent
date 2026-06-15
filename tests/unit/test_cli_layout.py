@@ -246,6 +246,18 @@ class TestCLIAppScrolling:
                 assert cli._output_win is not None
                 assert cli._output_win.auto_scroll is True
 
+    def test_clear_output_removes_sticky_runtime_bars(self) -> None:
+        with create_pipe_input() as pipe_input:
+            with create_app_session(input=pipe_input, output=DummyOutput()):
+                cli = _build_cli_app()
+                cli.set_todo_status("todo: 0/1 完成 | ● #1 正在实现")
+                cli.set_activity_status("subagent 正在执行")
+
+                cli.clear_output()
+
+                assert cli._todo_text == ""
+                assert cli._activity_text == ""
+
     def test_border_line_uses_exact_render_width(self) -> None:
         assert _border_line(1, "╭", "─", "╮")[0][1] == "╭"
         assert _border_line(2, "╭", "─", "╮")[0][1] == "╭╮"

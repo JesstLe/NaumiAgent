@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.205] - 2026-06-15
+
+### Fixed
+- **Runtime Panel Clear State** — CLI/TUI 清空输出时会同步清理常驻 todo 与活动/子智能体面板，避免新会话或清屏后继续显示上一轮任务状态。
+
 ## [0.1.204] - 2026-06-15
 
 ### Fixed

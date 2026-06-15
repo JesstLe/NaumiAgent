@@ -541,6 +541,8 @@ class CLIApp:
             },
         )
         self._history.clear()
+        self._todo_text = ""
+        self._activity_text = ""
         if self._output_win:
             self._output_win.scroll_to_bottom()
         self._invalidate()
