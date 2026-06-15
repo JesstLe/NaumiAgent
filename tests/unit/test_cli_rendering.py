@@ -114,6 +114,20 @@ def test_cli_status_updates_fixed_status_not_output(monkeypatch) -> None:
     assert cli.output == []
 
 
+def test_startup_banner_stays_in_transcript_after_first_user_message() -> None:
+    banner = main_module._render_startup_banner(FakeEngine())
+    cli = FakeCLI()
+
+    cli.append_output(banner)
+    cli.append_output("\033[32m❯\033[0m 你好\n")
+
+    transcript = "".join(cli.output)
+    assert "| \\ | |" in transcript
+    assert "通用智能 Agent" in transcript
+    assert "test-model" in transcript
+    assert "你好" in transcript
+
+
 def test_fullscreen_result_omits_environment_stats(monkeypatch) -> None:
     monkeypatch.setattr("naumi_agent.main._get_git_info", lambda: {"branch": "main", "dirty": True})
     result = SimpleNamespace(
