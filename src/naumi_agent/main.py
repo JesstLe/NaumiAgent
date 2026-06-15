@@ -25,6 +25,7 @@ from rich.text import Text
 
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.log_setup import suppress_startup_import_warnings
 from naumi_agent.ui.code_excerpt import (
     DEFAULT_CODE_BLOCK_MAX_LINES,
     excerpt_markdown_code_blocks,
@@ -32,6 +33,8 @@ from naumi_agent.ui.code_excerpt import (
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
 from naumi_agent.ui.keybindings import build_keybindings, render_keybinding_help
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
+
+suppress_startup_import_warnings()
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _CLI_STREAM_FRAME_INTERVAL_SECONDS = 0.2
