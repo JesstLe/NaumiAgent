@@ -32,6 +32,20 @@ def _normalize_slash_alias(raw: str) -> str:
     return _SLASH_ALIAS_MAP.get(lowered, lowered)
 
 
+def _join_slash_args(parts: list[str]) -> str:
+    """Join slash-command arguments while keeping shlex round-trip semantics."""
+    rendered: list[str] = []
+    for part in parts:
+        if part == "":
+            rendered.append("''")
+            continue
+        if any(char.isspace() for char in part) or any(char in part for char in {"'", "\""}):
+            rendered.append("'" + part.replace("'", "'\"'\"'") + "'")
+            continue
+        rendered.append(part)
+    return " ".join(rendered)
+
+
 def _split_command_batch(raw: str) -> list[str]:
     """Split a slash input into multiple slash command segments.
 
@@ -112,7 +126,7 @@ def _normalize_command(raw_command: str) -> str:
 
     normalized_command = _normalize_slash_alias(parts[0])
     if len(parts) > 1:
-        normalized_command = f"{normalized_command} {shlex.join(parts[1:])}"
+        normalized_command = f"{normalized_command} {_join_slash_args(parts[1:])}"
     if normalized_command == "/":
         normalized_command = "/help"
     return normalized_command
