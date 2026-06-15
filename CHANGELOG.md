@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.208] - 2026-06-15
+
+### Changed
+- **README Current-Codebase Refresh** — README 更新为当前全屏 CLI、运行态面板、会话恢复、自进化、Node UI/API/Docker 与开发命令说明，移除过时的入口优先级描述。
+
 ## [0.1.207] - 2026-06-15
 
 ### Changed
