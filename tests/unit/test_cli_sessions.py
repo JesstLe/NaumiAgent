@@ -130,3 +130,38 @@ class TestResumeLatest:
         assert "Token: 999" not in transcript
         assert "上下文:" not in transcript
         assert "test-model" in cli.status
+
+    def test_replay_session_uses_engine_full_history_when_available(self) -> None:
+        cli = _ReplayCLI()
+        session = _FakeSession(
+            "s1",
+            [
+                {"role": "user", "content": "读文件"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "function": {"name": "file_read", "arguments": "{}"},
+                        }
+                    ],
+                },
+            ],
+            title="缺失工具结果",
+        )
+        engine = _ReplayEngine()
+        engine._full_history = [
+            *session.messages,
+            {
+                "role": "tool",
+                "tool_call_id": "call_1",
+                "content": "[工具调用结果缺失 — 会话恢复时未能找到对应结果]",
+            },
+        ]
+
+        _replay_session_to_cli(cli, session, engine=engine)
+
+        transcript = cli.transcript()
+        assert "工具调用结果缺失" in transcript
+        assert "file_read" in transcript

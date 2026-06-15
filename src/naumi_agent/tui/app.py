@@ -55,6 +55,27 @@ logger = logging.getLogger(__name__)
 _TERMINAL_NOISE_LOGGERS = ("litellm", "LiteLLM", "naumi_agent")
 
 
+async def _find_latest_user_session_id(
+    engine: Any,
+    *,
+    page_size: int = 20,
+) -> str | None:
+    """Find the newest persisted session that contains real user messages."""
+    page = 1
+    checked = 0
+    while True:
+        sessions, total = await engine.list_sessions(page=page, page_size=page_size)
+        if not sessions:
+            return None
+        for session in sessions:
+            if any(m.get("role") == "user" for m in session.messages):
+                return session.id
+        checked += len(sessions)
+        if checked >= total:
+            return None
+        page += 1
+
+
 @contextlib.contextmanager
 def _capture_tui_terminal_noise() -> Any:
     """Capture stray terminal writes and mute noisy model client loggers."""
@@ -1457,15 +1478,12 @@ class NaumiApp(App):
     async def _auto_resume_latest(self) -> None:
         """Auto-load the most recent session with user conversation."""
         try:
-            sessions, _ = await self.engine.list_sessions(page=1, page_size=1)
+            session_id = await _find_latest_user_session_id(self.engine)
         except Exception:
             return
-        if not sessions:
+        if session_id is None:
             return
-        session = sessions[0]
-        if not any(m.get("role") == "user" for m in session.messages):
-            return
-        await self._load_and_show_session(session.id)
+        await self._load_and_show_session(session_id)
 
     def on_user_input_message(self, msg: UserInputMessage) -> None:
         text = msg.content.strip()
@@ -2126,14 +2144,14 @@ class NaumiApp(App):
         """加载最近一个历史会话."""
         status = self.query_one(StatusBar)
         try:
-            sessions, _ = await self.engine.list_sessions(page=1, page_size=1)
+            session_id = await _find_latest_user_session_id(self.engine)
         except Exception:
             status.status_text = "加载失败"
             return
-        if not sessions:
+        if session_id is None:
             status.status_text = "暂无历史会话"
             return
-        await self._load_and_show_session(sessions[0].id)
+        await self._load_and_show_session(session_id)
 
     def action_clear_chat(self) -> None:
         chat = self.query_one(ChatPanel)

@@ -3572,13 +3572,18 @@ def _replay_session_to_cli(cli: Any, session: Any, engine: Any = None) -> None:
         cli.clear_output()
 
     title = session.title or session.id
-    msg_count = len(session.messages)
+    display_messages = (
+        getattr(engine, "_full_history", None)
+        if engine is not None
+        else None
+    ) or session.messages
+    msg_count = len(display_messages)
 
     from naumi_agent.cli.renderers import CLIRenderer
     from naumi_agent.ui.messages.replay import replay_messages
 
     renderer = CLIRenderer(show_reasoning=_show_reasoning_text)
-    ui_messages = replay_messages(session.messages)
+    ui_messages = replay_messages(display_messages)
 
     cli.append_output(
         f"\033[2m━━━ 恢复会话: {title} ({msg_count}条消息) ━━━\033[0m\n"

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.203] - 2026-06-15
+
+### Fixed
+- **Resume Replay Consistency** — CLI `/resume` 现在优先回放 `engine._full_history` 中已清理的消息，避免屏幕历史与实际模型上下文不一致；TUI `/resume` 与自动恢复会跳过仅包含 system prompt 的空会话。
+
 ## [0.1.202] - 2026-06-14
 
 ### Fixed
