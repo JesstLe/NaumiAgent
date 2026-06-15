@@ -272,6 +272,25 @@ class TestSlashBatchParsing:
 
         assert shlex.split(recorded[0]) == ["/read", "src files/main file.py"]
 
+    @pytest.mark.asyncio
+    async def test_execute_slash_command_accepts_history_typo_alias(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import shlex
+
+        import naumi_agent.main as main
+        from naumi_agent.cli.slash_router import execute_slash_command
+
+        recorded = []
+
+        async def fake_handle_command(_: MagicMock, command: str) -> None:
+            recorded.append(command)
+
+        monkeypatch.setattr(main, "_handle_command", fake_handle_command)
+        await execute_slash_command(MagicMock(), "/histroy preview abc123")
+
+        assert shlex.split(recorded[0]) == ["/history", "preview", "abc123"]
+
 
 class TestCLICompleterCommands:
     """Tests requiring prompt_toolkit — skip if unavailable."""

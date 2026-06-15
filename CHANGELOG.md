@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.204] - 2026-06-15
+
+### Fixed
+- **History Typo Alias** — 共享 slash command 路由现在接受 `/histroy` 作为 `/history` 的常见拼写容错，避免用户输错后落入未知命令。
+
 ## [0.1.203] - 2026-06-15
 
 ### Fixed
