@@ -11,6 +11,7 @@ from rich.console import Console
 
 _SLASH_ALIAS_MAP: dict[str, str] = {
     "/h": "/help",
+    "/histroy": "/history",
     "/r": "/resume",
     "/l": "/load",
     "/task": "/task",
