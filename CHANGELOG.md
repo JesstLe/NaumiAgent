@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.207] - 2026-06-15
+
+### Changed
+- **Persistent CLI Startup Banner** — CLI 启动大 Logo 被明确渲染为开场 transcript 条目，并增加回归测试保护，确保开始对话后第一条用户输入不会清掉 Logo。
+
 ## [0.1.206] - 2026-06-15
 
 ### Fixed

@@ -1151,7 +1151,7 @@ async def _chat(config_path: str) -> None:
     global _active_cli
     _active_cli = cli
 
-    cli.append_output(_capture(lambda: _print_banner(engine)))
+    cli.append_output(_render_startup_banner(engine))
 
     # Inject git info into prompt prefix
     git = _get_git_info()
@@ -1325,6 +1325,11 @@ def _capture(func: Any) -> str:
     finally:
         _self.console = orig
     return buf.getvalue()
+
+
+def _render_startup_banner(engine: Any) -> str:
+    """Render the opening banner as a persistent transcript entry."""
+    return _capture(lambda: _print_banner(engine))
 
 
 async def _capture_async(func: Any) -> str:
