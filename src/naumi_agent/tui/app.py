@@ -190,6 +190,7 @@ class _TuiSlashCommandFrontend:
 
     def clear_output(self) -> None:
         self._app.query_one(ChatPanel).clear()
+        self._app._clear_runtime_task_panels()
         status = self._app.query_one(StatusBar)
         status.status_text = "就绪"
         status.session_text = "会话:-"
@@ -617,6 +618,10 @@ class ActivityPanel(VerticalScroll):
             )
         )
         self.scroll_end(animate=False)
+
+    def clear_logs(self) -> None:
+        for child in list(self.children):
+            child.remove()
 
 
 class HistoryPanel(VerticalScroll):
@@ -2156,8 +2161,13 @@ class NaumiApp(App):
     def action_clear_chat(self) -> None:
         chat = self.query_one(ChatPanel)
         chat.clear()
+        self._clear_runtime_task_panels()
         self.engine.reset()
         self._show_startup_status()
+
+    def _clear_runtime_task_panels(self) -> None:
+        self.query_one(TodoBar).todo_text = ""
+        self.query_one(ActivityPanel).clear_logs()
 
     def action_copy_transcript(self, scope: str = "all") -> None:
         """Copy or export diagnostic transcript content."""
