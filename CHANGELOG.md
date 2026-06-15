@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.210] - 2026-06-15
+
+### Fixed
+- **CI-Portable Test Fixtures** — 配置加载与 source-map 测试不再依赖本机私有 `config.yaml` 或外部 `claude-code` checkout；bridge 缺省配置查找会回退到仓库内 `config.yaml.example`。
+
 ## [0.1.209] - 2026-06-15
 
 ### Fixed

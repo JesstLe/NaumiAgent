@@ -62,6 +62,9 @@ def _find_default_config_path(start_path: Path) -> Path | None:
         config_path = directory / "config.yaml"
         if config_path.exists():
             return config_path
+        example_path = directory / "config.yaml.example"
+        if example_path.exists():
+            return example_path
     return None
 
 

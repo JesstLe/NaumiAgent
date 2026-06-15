@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import pytest
 
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+EXAMPLE_CONFIG = PROJECT_ROOT / "config.yaml.example"
 
 
 class TestSmokeInit:
@@ -86,18 +92,16 @@ class TestSmokeConfig:
         assert config.safety.max_turns == 30
 
     def test_yaml_config(self) -> None:
-        import os
-
         os.environ["NAUMI_MODELS__API_KEY"] = "test-key"
         try:
-            config = AppConfig.from_yaml("config.yaml")
+            config = AppConfig.from_yaml(EXAMPLE_CONFIG)
             assert config.models.default_model == "openai/kimi-for-coding"
             assert config.models.api_key == "test-key"
         finally:
             del os.environ["NAUMI_MODELS__API_KEY"]
 
     def test_model_info_override(self) -> None:
-        config = AppConfig.from_yaml("config.yaml")
+        config = AppConfig.from_yaml(EXAMPLE_CONFIG)
         meta = config.models.model_info.get("openai/kimi-for-coding")
         assert meta is not None
         assert meta.max_context == 256000
