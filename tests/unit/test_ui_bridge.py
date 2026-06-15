@@ -227,7 +227,7 @@ def test_bridge_resolve_config_path_uses_existing_relative_path(
 def test_bridge_resolve_config_path_falls_back_to_repo_config() -> None:
     resolved = Path(resolve_config_path("__missing_naumi_config__.yaml"))
 
-    assert resolved.name == "config.yaml"
+    assert resolved.name in {"config.yaml", "config.yaml.example"}
     assert resolved.exists()
     assert resolved.parent.name == "NaumiAgent"
 

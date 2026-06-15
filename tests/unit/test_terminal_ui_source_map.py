@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLAUDE_CODE_ROOT = Path("/Users/lv/Workspace/claude-code")
 
@@ -41,6 +43,8 @@ def test_terminal_ui_source_map_points_to_verified_claude_code_sources() -> None
     readme = CLAUDE_CODE_ROOT / "README.md"
 
     assert Path(payload["source"]["workspace_path"]) == CLAUDE_CODE_ROOT
+    if not readme.exists():
+        pytest.skip(f"claude-code checkout not available at {CLAUDE_CODE_ROOT}")
     assert readme.exists()
     readme_text = readme.read_text(encoding="utf-8")
     assert "React + [Ink]" in readme_text
