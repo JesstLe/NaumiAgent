@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.206] - 2026-06-15
+
+### Fixed
+- **LiteLLM Startup Warning Noise** — CLI 入口会在模型层导入前压制 LiteLLM 可选 provider 预加载 warning，避免 Bedrock/SageMaker 缺少可选依赖的提示抢在启动 banner 前显示。
+
 ## [0.1.205] - 2026-06-15
 
 ### Fixed

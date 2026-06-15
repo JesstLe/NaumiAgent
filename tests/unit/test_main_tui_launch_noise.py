@@ -1,6 +1,8 @@
 """main.py TUI 启动噪声拦截测试."""
 
 import logging
+import subprocess
+import sys
 
 import pytest
 
@@ -32,3 +34,27 @@ def test_capture_tui_launch_noise_captures_stdout_stderr_and_loggers(
     finally:
         noisy.setLevel(old_noisy_level)
         engine_logger.setLevel(old_engine_level)
+
+
+def test_main_import_suppresses_litellm_provider_preload_warnings() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import naumi_agent.main; "
+                "from naumi_agent.orchestrator.engine import AgentEngine; "
+                "print('imported')"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, combined
+    assert "imported" in result.stdout
+    assert "could not pre-load bedrock-runtime" not in combined
+    assert "could not pre-load sagemaker-runtime" not in combined
