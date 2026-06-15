@@ -619,8 +619,10 @@ class JsonlEngineBridge:
 
         text = plain_output
         if text:
+            command_name = raw.split(maxsplit=1)[0].lower()
+            notice_title = "help" if command_name in {"/help", "/h"} else "command"
             await self._emit_system_notice(
-                "command",
+                notice_title,
                 text,
                 "info",
                 request_id=request_id,

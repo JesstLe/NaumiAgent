@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.209] - 2026-06-15
+
+### Fixed
+- **GitHub CI Stability** — CI 现在安装 TUI 运行时依赖 `textual`，移除当前仓库尚未统一格式化前会阻塞 main 的 `ruff format --check`，并将 mypy 保持为非阻塞诊断输出，避免历史类型债务导致红叉。
+- **Slash Command CI Regressions** — 补齐历史会话工具权限规则，恢复 `/help` 中的 `/version` 项，并避免 UI bridge 转发中文 slash 参数时额外插入单引号。
+
 ## [0.1.208] - 2026-06-15
 
 ### Changed

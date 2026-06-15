@@ -2179,6 +2179,7 @@ def _print_help() -> None:
         ("/tools", "列出可用工具"),
         ("/model", "显示模型配置"),
         ("/usage", "显示 token 用量"),
+        ("/version", "显示版本号"),
         ("/hooks", "显示已注册的钩子"),
         ("/skills", "列出已加载的 Skill"),
         ("/glob <pattern> [directory='.' ]", "按 glob 规则搜索工作区文件路径"),

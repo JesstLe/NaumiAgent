@@ -231,6 +231,36 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         ],
         requires_confirmation=False,
     ),
+    "session_history": PermissionRule(
+        tool_name="session_history",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+            PermissionMode.LOCKDOWN,
+        ],
+        requires_confirmation=False,
+    ),
+    "session_load": PermissionRule(
+        tool_name="session_load",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+    ),
+    "session_delete": PermissionRule(
+        tool_name="session_delete",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+        ],
+        requires_confirmation=True,
+    ),
     "delegate_task": PermissionRule(
         tool_name="delegate_task",
         allowed_modes=[
