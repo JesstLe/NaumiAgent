@@ -1,15 +1,24 @@
 import SwiftUI
 
-/// Read-only Task Market page.
+/// Task Market page with minimal claim/release actions.
 ///
-/// Displays issue rows derived from ``WorkbenchSnapshotDTO``. Claim/bid/write
-/// operations are intentionally omitted in this MVP slice; bids are shown as
-/// zero because the current snapshot format does not expose bid data.
+/// Issue selection drives the inspector. The inspector exposes the command form
+/// used to claim an open issue or release an existing lease. All mutations go
+/// through ``DaemonController`` and the REST API; the local snapshot is only
+/// updated by a fresh fetch after a successful write.
 public struct TaskMarketView: View {
     @Bindable public var appState: AppState
+    public let daemonController: DaemonController
 
-    public init(appState: AppState) {
+    @State private var selectedTaskID: String? = nil
+    @State private var agentID: String = "local-agent"
+    @State private var durationMinutes: Int = 30
+    @State private var worktreeName: String = ""
+    @State private var isProcessing: Bool = false
+
+    public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
+        self.daemonController = daemonController
     }
 
     public var body: some View {
@@ -40,6 +49,8 @@ public struct TaskMarketView: View {
 
     private func marketContent(snapshot: WorkbenchSnapshotDTO) -> some View {
         let presentation = TaskMarketSnapshotPresentation(snapshot: snapshot)
+        let selectedRow = presentation.rows.first { $0.taskID == selectedTaskID }
+            ?? presentation.rows.first
 
         return VStack(alignment: .leading, spacing: 20) {
             summaryStrip(summary: presentation.summary)
@@ -49,7 +60,7 @@ public struct TaskMarketView: View {
                 HSplitView {
                     issueTable(rows: presentation.rows)
                         .frame(minWidth: 360)
-                    inspector(row: presentation.rows.first)
+                    inspector(row: selectedRow)
                         .frame(minWidth: 240)
                 }
                 .frame(minHeight: 320)
@@ -116,6 +127,15 @@ public struct TaskMarketView: View {
 
             ForEach(rows, id: \.taskID) { row in
                 tableRow(row: row)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        selectedTaskID = row.taskID
+                    }
+                    .background(
+                        selectedTaskID == row.taskID
+                            ? Color.accentColor.opacity(0.12)
+                            : Color.clear
+                    )
                 if row.taskID != rows.last?.taskID {
                     Divider()
                         .padding(.horizontal, 12)
@@ -124,6 +144,11 @@ public struct TaskMarketView: View {
         }
         .background(Color.secondary.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .onAppear {
+            if selectedTaskID == nil, let first = rows.first {
+                selectedTaskID = first.taskID
+            }
+        }
     }
 
     private var tableHeader: some View {
@@ -261,6 +286,8 @@ public struct TaskMarketView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+
+                    commandSection(row: row)
                 }
             } else {
                 Text(AppStrings.TaskMarket.emptyIssues(appState.locale))
@@ -282,6 +309,89 @@ public struct TaskMarketView: View {
             Text(value)
                 .font(.body)
                 .fontWeight(.medium)
+        }
+    }
+
+    // MARK: - Commands
+
+    private func commandSection(row: TaskMarketIssueRow) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(AppStrings.TaskMarket.commandSectionTitle(appState.locale))
+                .font(.headline)
+
+            TextField(AppStrings.TaskMarket.agentIDLabel(appState.locale), text: $agentID)
+                .textFieldStyle(.roundedBorder)
+
+            Stepper(value: $durationMinutes, in: 1...1440) {
+                Text("\(durationMinutes) \(AppStrings.TaskMarket.durationLabel(appState.locale))")
+            }
+
+            TextField(AppStrings.TaskMarket.columnWorktree(appState.locale), text: $worktreeName)
+                .textFieldStyle(.roundedBorder)
+
+            if row.leaseState == .open {
+                Button {
+                    performClaim(row: row)
+                } label: {
+                    Text(buttonTitle(for: .claim))
+                }
+                .disabled(!canClaim)
+            } else if let leaseID = row.leaseID {
+                Button {
+                    performRelease(leaseID: leaseID)
+                } label: {
+                    Text(buttonTitle(for: .release))
+                }
+                .disabled(isProcessing)
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private var canClaim: Bool {
+        !isProcessing && !agentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private enum Command {
+        case claim
+        case release
+    }
+
+    private func buttonTitle(for command: Command) -> String {
+        let locale = appState.locale
+        if isProcessing {
+            return AppStrings.TaskMarket.processingLabel(locale)
+        }
+        switch command {
+        case .claim:
+            return AppStrings.TaskMarket.claimButton(locale)
+        case .release:
+            return AppStrings.TaskMarket.releaseButton(locale)
+        }
+    }
+
+    private func performClaim(row: TaskMarketIssueRow) {
+        let trimmedAgentID = agentID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedWorktree = worktreeName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedAgentID.isEmpty else { return }
+
+        isProcessing = true
+        Task { @MainActor in
+            await daemonController.claimIssue(
+                taskID: row.taskID,
+                agentID: trimmedAgentID,
+                durationMinutes: durationMinutes,
+                worktreeName: trimmedWorktree
+            )
+            isProcessing = false
+        }
+    }
+
+    private func performRelease(leaseID: String) {
+        isProcessing = true
+        Task { @MainActor in
+            await daemonController.releaseLease(leaseID: leaseID)
+            isProcessing = false
         }
     }
 

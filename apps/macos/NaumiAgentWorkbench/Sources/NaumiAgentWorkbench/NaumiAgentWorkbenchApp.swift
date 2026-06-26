@@ -42,7 +42,10 @@ struct ContentView: View {
         case .dashboard:
             DashboardView(appState: environment.appState)
         case .taskMarket:
-            TaskMarketView(appState: environment.appState)
+            TaskMarketView(
+                appState: environment.appState,
+                daemonController: environment.daemonController
+            )
         case .worktrees, .reviews, .timeline, .settings:
             PlaceholderRouteView(
                 route: route,
