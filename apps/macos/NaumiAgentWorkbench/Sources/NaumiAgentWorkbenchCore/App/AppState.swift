@@ -13,6 +13,7 @@ public final class AppState: Sendable {
     public var capabilities: CapabilitiesDTO? = nil
     public var snapshot: WorkbenchSnapshotDTO? = nil
     public var timelineEvents: [EventDTO] = []
+    public var validationRuns: [ValidationRunDTO] = []
     public var lastError: APIError? = nil
     public var locale: AppLocale = .default
 

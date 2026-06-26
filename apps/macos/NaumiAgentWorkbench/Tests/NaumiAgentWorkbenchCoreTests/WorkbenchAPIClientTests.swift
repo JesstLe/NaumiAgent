@@ -194,6 +194,85 @@ final class WorkbenchAPIClientTests {
         #expect(event.payload == ["title": .string("Mac Workbench")])
     }
 
+    @Test func fetchValidationRunsWithTaskID() async throws {
+        let taskID = "task 001/审查"
+        let json = Data(
+            """
+            {"validation_runs":[{"id":"run-001","session_id":"sess-001","task_id":"task 001/审查","actor":"ValidationRunner","command":["pytest","test.py"],"cwd":"/workspace","status":"passed","exit_code":0,"output":"ok","started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:01"}],"task_id":"task 001/审查","limit":25}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.path == "/api/v1/workbench/sessions/sess-001/validation-runs",
+                  query["limit"] == "25",
+                  query["task_id"] == taskID else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchValidationRuns(sessionID: "sess-001", taskID: taskID, limit: 25)
+
+        #expect(response.taskID == taskID)
+        #expect(response.limit == 25)
+        #expect(response.validationRuns.count == 1)
+
+        let run = try #require(response.validationRuns.first)
+        #expect(run.id == "run-001")
+        #expect(run.sessionID == "sess-001")
+        #expect(run.taskID == taskID)
+        #expect(run.actor == "ValidationRunner")
+        #expect(run.command == ["pytest", "test.py"])
+        #expect(run.cwd == "/workspace")
+        #expect(run.status == "passed")
+        #expect(run.exitCode == 0)
+        #expect(run.output == "ok")
+        #expect(run.startedAt == "2026-06-27T06:00:00")
+        #expect(run.completedAt == "2026-06-27T06:00:01")
+    }
+
+    @Test func fetchValidationRunsWithoutTaskID() async throws {
+        let json = Data(
+            """
+            {"validation_runs":[],"task_id":null,"limit":50}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/validation-runs?limit=50" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchValidationRuns(sessionID: "sess-001", taskID: nil, limit: 50)
+
+        #expect(response.taskID == nil)
+        #expect(response.limit == 50)
+        #expect(response.validationRuns.isEmpty)
+    }
+
     @Test func claimIssue() async throws {
         let leaseJSON = Data(
             """

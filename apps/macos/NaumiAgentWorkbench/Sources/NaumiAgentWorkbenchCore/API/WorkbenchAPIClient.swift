@@ -44,6 +44,21 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         try await get(path: "workbench/sessions/\(sessionID)/events?limit=\(limit)")
     }
 
+    public func fetchValidationRuns(
+        sessionID: String,
+        taskID: String?,
+        limit: Int
+    ) async throws(APIError) -> ValidationRunsDTO {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let taskID, !taskID.isEmpty {
+            queryItems.append(URLQueryItem(name: "task_id", value: taskID))
+        }
+        return try await get(
+            path: "workbench/sessions/\(sessionID)/validation-runs",
+            queryItems: queryItems
+        )
+    }
+
     public func claimIssue(
         sessionID: String,
         taskID: String,
@@ -74,6 +89,22 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         }
 
         return try await performRequest(URLRequest(url: url))
+    }
+
+    private func get<T: Decodable & Sendable>(
+        path: String,
+        queryItems: [URLQueryItem]
+    ) async throws(APIError) -> T {
+        guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            throw .invalidURL
+        }
+        components.queryItems = queryItems
+        guard let requestURL = components.url else {
+            throw .invalidURL
+        }
+
+        return try await performRequest(URLRequest(url: requestURL))
     }
 
     private func post<T: Decodable & Sendable, B: Encodable & Sendable>(

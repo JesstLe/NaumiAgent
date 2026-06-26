@@ -312,6 +312,70 @@ public enum AppStrings {
 
     }
 
+    // MARK: - Reviews
+    public enum Reviews {
+        public static func title(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "验证审查" : "Validation Reviews"
+        }
+
+        public static func runCount(_ locale: AppLocale, count: Int) -> String {
+            locale == .zhCN ? "\(count) 条验证" : "\(count) validation runs"
+        }
+
+        public static func refreshButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "刷新" : "Refresh"
+        }
+
+        public static func emptyRuns(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无验证记录"
+                : "No validation runs yet"
+        }
+
+        public static func statusLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "状态" : "Status"
+        }
+
+        public static func taskIDLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "任务 ID" : "Task ID"
+        }
+
+        public static func actorLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "执行者" : "Actor"
+        }
+
+        public static func exitCodeLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "退出码" : "Exit Code"
+        }
+
+        public static func commandLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "命令" : "Command"
+        }
+
+        public static func cwdLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "工作目录" : "Working Directory"
+        }
+
+        public static func completedAtLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "完成时间" : "Completed At"
+        }
+
+        public static func outputLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "输出摘要" : "Output Summary"
+        }
+
+        public static func statusPassed(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "通过" : "Passed"
+        }
+
+        public static func statusFailed(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "失败" : "Failed"
+        }
+
+        public static func statusUnknown(_ locale: AppLocale, status: String) -> String {
+            locale == .zhCN ? "未知: \(status)" : "Unknown: \(status)"
+        }
+    }
+
     // MARK: - Timeline
     public enum Timeline {
         public static func title(_ locale: AppLocale) -> String {
