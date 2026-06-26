@@ -30,6 +30,12 @@ struct AppStringsTaskMarketTests {
         #expect(AppStrings.TaskMarket.bidsNotAvailable(.zhCN) == "当前快照未提供竞标数据")
         #expect(AppStrings.TaskMarket.leaseAgentLabel(.zhCN) == "租约代理")
         #expect(AppStrings.TaskMarket.leaseExpiresAtLabel(.zhCN) == "过期时间")
+        #expect(AppStrings.TaskMarket.commandSectionTitle(.zhCN) == "操作")
+        #expect(AppStrings.TaskMarket.agentIDLabel(.zhCN) == "代理 ID")
+        #expect(AppStrings.TaskMarket.durationLabel(.zhCN) == "时长（分钟）")
+        #expect(AppStrings.TaskMarket.claimButton(.zhCN) == "认领")
+        #expect(AppStrings.TaskMarket.releaseButton(.zhCN) == "释放租约")
+        #expect(AppStrings.TaskMarket.processingLabel(.zhCN) == "处理中…")
     }
 
     @Test func coreTaskMarketStringsEnUS() {
@@ -59,6 +65,12 @@ struct AppStringsTaskMarketTests {
         #expect(AppStrings.TaskMarket.bidsNotAvailable(.enUS) == "Bid data is not available in the current snapshot")
         #expect(AppStrings.TaskMarket.leaseAgentLabel(.enUS) == "Lease Agent")
         #expect(AppStrings.TaskMarket.leaseExpiresAtLabel(.enUS) == "Expires At")
+        #expect(AppStrings.TaskMarket.commandSectionTitle(.enUS) == "Actions")
+        #expect(AppStrings.TaskMarket.agentIDLabel(.enUS) == "Agent ID")
+        #expect(AppStrings.TaskMarket.durationLabel(.enUS) == "Duration (minutes)")
+        #expect(AppStrings.TaskMarket.claimButton(.enUS) == "Claim")
+        #expect(AppStrings.TaskMarket.releaseButton(.enUS) == "Release Lease")
+        #expect(AppStrings.TaskMarket.processingLabel(.enUS) == "Processing…")
     }
 
     @Test func allTaskMarketStringsAreNonEmpty() {
@@ -89,6 +101,12 @@ struct AppStringsTaskMarketTests {
             AppStrings.TaskMarket.bidsNotAvailable,
             AppStrings.TaskMarket.leaseAgentLabel,
             AppStrings.TaskMarket.leaseExpiresAtLabel,
+            AppStrings.TaskMarket.commandSectionTitle,
+            AppStrings.TaskMarket.agentIDLabel,
+            AppStrings.TaskMarket.durationLabel,
+            AppStrings.TaskMarket.claimButton,
+            AppStrings.TaskMarket.releaseButton,
+            AppStrings.TaskMarket.processingLabel,
         ]
 
         for string in strings {

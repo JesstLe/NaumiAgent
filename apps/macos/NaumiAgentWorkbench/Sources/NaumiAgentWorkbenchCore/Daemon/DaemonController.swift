@@ -48,7 +48,12 @@ public final class DaemonController: Sendable {
         }
     }
 
-    private func refreshSnapshot() async {
+    /// Refreshes the snapshot for the currently selected session.
+    ///
+    /// When no session is selected, the most recent session from `GET /sessions`
+    /// is chosen automatically. Failures are written to `appState.lastError` and
+    /// the snapshot is cleared to avoid showing stale data.
+    func refreshSnapshot() async {
         let sessionID: String
         if let existingID = appState.selectedSessionID {
             sessionID = existingID
@@ -74,6 +79,58 @@ public final class DaemonController: Sendable {
         } catch {
             appState.lastError = error
             appState.snapshot = nil
+        }
+    }
+
+    /// Claims an issue on behalf of an agent and refreshes the snapshot on success.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the local snapshot is never mutated directly.
+    public func claimIssue(
+        taskID: String,
+        agentID: String,
+        durationMinutes: Int,
+        worktreeName: String
+    ) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            _ = try await apiProvider.claimIssue(
+                sessionID: sessionID,
+                taskID: taskID,
+                agentID: agentID,
+                durationMinutes: durationMinutes,
+                worktreeName: worktreeName
+            )
+            await refreshSnapshot()
+        } catch {
+            appState.lastError = error
+        }
+    }
+
+    /// Releases a lease and refreshes the snapshot on success.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the local snapshot is never mutated directly.
+    public func releaseLease(leaseID: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            _ = try await apiProvider.releaseLease(
+                sessionID: sessionID,
+                leaseID: leaseID
+            )
+            await refreshSnapshot()
+        } catch {
+            appState.lastError = error
         }
     }
 }

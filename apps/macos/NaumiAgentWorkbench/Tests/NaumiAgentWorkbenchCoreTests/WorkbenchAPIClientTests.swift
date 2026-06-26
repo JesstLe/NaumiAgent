@@ -155,6 +155,87 @@ final class WorkbenchAPIClientTests {
         #expect(session.status == "active")
     }
 
+    @Test func claimIssue() async throws {
+        let leaseJSON = Data(
+            """
+            {"id":"lease-001","session_id":"sess-001","task_id":"task-001","agent_id":"agent-001","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/issues/task-001/claim" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["agent_id"] as? String == "agent-001",
+                  json?["duration_minutes"] as? Int == 60,
+                  json?["worktree_name"] as? String == "wt-001" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, leaseJSON)
+        }
+
+        let client = makeClient()
+        let lease = try await client.claimIssue(
+            sessionID: "sess-001",
+            taskID: "task-001",
+            agentID: "agent-001",
+            durationMinutes: 60,
+            worktreeName: "wt-001"
+        )
+
+        #expect(lease.id == "lease-001")
+        #expect(lease.sessionID == "sess-001")
+        #expect(lease.taskID == "task-001")
+        #expect(lease.agentID == "agent-001")
+        #expect(lease.state == "active")
+        #expect(lease.worktreeName == "wt-001")
+    }
+
+    @Test func releaseLease() async throws {
+        let leaseJSON = Data(
+            """
+            {"id":"lease-001","session_id":"sess-001","task_id":"task-001","agent_id":"agent-001","state":"released","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:30:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/leases/lease-001/release" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, leaseJSON)
+        }
+
+        let client = makeClient()
+        let lease = try await client.releaseLease(sessionID: "sess-001", leaseID: "lease-001")
+
+        #expect(lease.id == "lease-001")
+        #expect(lease.state == "released")
+    }
+
     // MARK: - Helpers
 
     private func makeClient() -> WorkbenchAPIClient {
@@ -162,5 +243,23 @@ final class WorkbenchAPIClientTests {
         configuration.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: configuration)
         return WorkbenchAPIClient(session: session)
+    }
+}
+
+private extension InputStream {
+    func httpBodyStreamData() -> Data? {
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        open()
+        defer { close() }
+        while hasBytesAvailable {
+            let bytesRead = read(&buffer, maxLength: buffer.count)
+            if bytesRead > 0 {
+                data.append(buffer, count: bytesRead)
+            } else {
+                break
+            }
+        }
+        return data.isEmpty ? nil : data
     }
 }

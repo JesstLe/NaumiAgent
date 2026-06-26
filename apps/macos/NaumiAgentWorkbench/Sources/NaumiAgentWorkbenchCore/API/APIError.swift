@@ -4,6 +4,7 @@ import Foundation
 public enum APIError: Error, Equatable, Sendable {
     case invalidURL
     case invalidResponse
+    case missingSelectedSession
     case httpStatus(Int)
     case decodingFailed(String)
     case networkFailure(String)
@@ -14,6 +15,8 @@ public enum APIError: Error, Equatable, Sendable {
             return AppStrings.Error.invalidURL(locale)
         case .invalidResponse:
             return AppStrings.Error.invalidResponse(locale)
+        case .missingSelectedSession:
+            return AppStrings.Error.missingSelectedSession(locale)
         case .httpStatus(let code):
             return AppStrings.Error.httpStatus(locale, code: code)
         case .decodingFailed:
@@ -29,6 +32,8 @@ public enum APIError: Error, Equatable, Sendable {
             return "invalidURL"
         case .invalidResponse:
             return "invalidResponse"
+        case .missingSelectedSession:
+            return "missingSelectedSession"
         case .httpStatus(let code):
             return "httpStatus(\(code))"
         case .decodingFailed(let detail):

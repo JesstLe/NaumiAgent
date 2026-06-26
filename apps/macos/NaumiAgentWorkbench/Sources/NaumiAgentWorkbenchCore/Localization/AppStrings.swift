@@ -286,6 +286,30 @@ public enum AppStrings {
             locale == .zhCN ? "过期时间" : "Expires At"
         }
 
+        public static func commandSectionTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "操作" : "Actions"
+        }
+
+        public static func agentIDLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "代理 ID" : "Agent ID"
+        }
+
+        public static func durationLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "时长（分钟）" : "Duration (minutes)"
+        }
+
+        public static func claimButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "认领" : "Claim"
+        }
+
+        public static func releaseButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "释放租约" : "Release Lease"
+        }
+
+        public static func processingLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "处理中…" : "Processing…"
+        }
+
     }
 
     // MARK: - Errors
@@ -300,6 +324,10 @@ public enum AppStrings {
 
         public static func invalidResponse(_ locale: AppLocale) -> String {
             locale == .zhCN ? "接口返回异常" : "Invalid response"
+        }
+
+        public static func missingSelectedSession(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "请先选择一个会话" : "Select a session first"
         }
 
         public static func httpStatus(_ locale: AppLocale, code: Int) -> String {

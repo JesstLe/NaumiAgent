@@ -9,4 +9,16 @@ public protocol WorkbenchAPIProviding: Sendable {
     func fetchCapabilities() async throws(APIError) -> CapabilitiesDTO
     func fetchSnapshot(sessionID: String) async throws(APIError) -> WorkbenchSnapshotDTO
     func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO
+
+    /// Claims an open issue for the given agent, creating a new lease.
+    func claimIssue(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        durationMinutes: Int,
+        worktreeName: String
+    ) async throws(APIError) -> LeaseDTO
+
+    /// Releases an existing lease, returning the updated lease record.
+    func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO
 }

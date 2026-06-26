@@ -8,6 +8,8 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var capabilitiesResult: Result<CapabilitiesDTO, APIError>?
     var snapshotResult: Result<WorkbenchSnapshotDTO, APIError>?
     var sessionsResult: Result<SessionListDTO, APIError>?
+    var claimIssueResult: Result<LeaseDTO, APIError>?
+    var releaseLeaseResult: Result<LeaseDTO, APIError>?
 
     func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
         guard let result = statusResult else {
@@ -32,6 +34,26 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
 
     func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO {
         guard let result = sessionsResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func claimIssue(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        durationMinutes: Int,
+        worktreeName: String
+    ) async throws(APIError) -> LeaseDTO {
+        guard let result = claimIssueResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
+        guard let result = releaseLeaseResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -263,6 +285,65 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == nil)
         #expect(appState.lastError == .httpStatus(500))
     }
+
+    @Test @MainActor func claimIssueSuccessRefreshesSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let lease = makeLease(id: "lease-001", taskID: "task-001", state: "active")
+        let snapshot = makeSnapshot(sessionID: "sess-001", lease: lease)
+
+        await api.setClaimIssueResult(.success(lease))
+        await api.setSnapshotResult(.success(snapshot))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.claimIssue(
+            taskID: "task-001",
+            agentID: "local-agent",
+            durationMinutes: 30,
+            worktreeName: "wt-001"
+        )
+
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func claimIssueWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.claimIssue(
+            taskID: "task-001",
+            agentID: "local-agent",
+            durationMinutes: 30,
+            worktreeName: "wt-001"
+        )
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.snapshot == nil)
+    }
+
+    @Test @MainActor func releaseLeaseSuccessRefreshesSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let lease = makeLease(id: "lease-001", taskID: "task-001", state: "released")
+        let snapshot = makeSnapshot(sessionID: "sess-001", lease: lease)
+
+        await api.setReleaseLeaseResult(.success(lease))
+        await api.setSnapshotResult(.success(snapshot))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.releaseLease(leaseID: "lease-001")
+
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+    }
 }
 
 extension FakeWorkbenchAPIProvider {
@@ -280,6 +361,14 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setSessionsResult(_ result: Result<SessionListDTO, APIError>) {
         sessionsResult = result
+    }
+
+    fileprivate func setClaimIssueResult(_ result: Result<LeaseDTO, APIError>) {
+        claimIssueResult = result
+    }
+
+    fileprivate func setReleaseLeaseResult(_ result: Result<LeaseDTO, APIError>) {
+        releaseLeaseResult = result
     }
 }
 
@@ -303,5 +392,67 @@ private func makeCapabilities() -> CapabilitiesDTO {
         supportsCloudSync: false,
         supportedLocales: ["zh-CN", "en-US"],
         protocolVersion: 1
+    )
+}
+
+private func makeSnapshot(sessionID: String, lease: LeaseDTO) -> WorkbenchSnapshotDTO {
+    let task = makeTask(id: lease.taskID, subject: "Sample Task", status: "open")
+    let issue = makeIssue(taskID: lease.taskID)
+    return WorkbenchSnapshotDTO(
+        sessionID: sessionID,
+        missions: [],
+        tasks: [task],
+        issues: [issue],
+        leases: [lease],
+        failures: [],
+        events: []
+    )
+}
+
+private func makeTask(id: String, subject: String, status: String) -> TaskDTO {
+    TaskDTO(
+        id: id,
+        sessionID: "sess-001",
+        subject: subject,
+        description: "",
+        status: status,
+        activeForm: nil,
+        owner: nil,
+        blocks: [],
+        blockedBy: [],
+        createdAt: "2026-06-27T06:00:00",
+        updatedAt: "2026-06-27T06:00:00"
+    )
+}
+
+private func makeIssue(taskID: String) -> IssueDTO {
+    IssueDTO(
+        sessionID: "sess-001",
+        taskID: taskID,
+        missionID: "mission-001",
+        parallelMode: "sequential",
+        riskLevel: "medium",
+        requiresHumanApproval: false,
+        acceptanceCriteria: [],
+        expectedArtifacts: [],
+        relatedBranch: "",
+        relatedWorktree: "",
+        relatedPR: "",
+        createdAt: "2026-06-27T06:00:00",
+        updatedAt: "2026-06-27T06:00:00"
+    )
+}
+
+private func makeLease(id: String, taskID: String, state: String) -> LeaseDTO {
+    LeaseDTO(
+        id: id,
+        sessionID: "sess-001",
+        taskID: taskID,
+        agentID: "local-agent",
+        state: state,
+        expiresAt: "2026-06-27T08:00:00",
+        worktreeName: "wt-001",
+        createdAt: "2026-06-27T06:00:00",
+        updatedAt: "2026-06-27T06:00:00"
     )
 }
