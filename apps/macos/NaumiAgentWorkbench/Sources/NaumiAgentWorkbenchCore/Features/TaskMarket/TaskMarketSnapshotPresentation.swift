@@ -1,10 +1,7 @@
 import Foundation
 
-/// Lease state derived from task ownership.
-///
-/// The current ``WorkbenchSnapshotDTO`` does not include a dedicated `leases`
-/// array, so we approximate lease state from the task's `owner` field. This is
-/// an intentional limitation documented in the UI rather than fabricated data.
+/// Lease state derived from active lease data, with a fallback to task ownership
+/// for compatibility with older snapshots that do not include a `leases` array.
 public enum TaskMarketLeaseState: Equatable, Sendable {
     case claimed
     case open
@@ -18,12 +15,20 @@ public struct TaskMarketSnapshotPresentation: Equatable, Sendable {
     public init(snapshot: WorkbenchSnapshotDTO) {
         let taskByID = Dictionary(uniqueKeysWithValues: snapshot.tasks.map { ($0.id, $0) })
 
+        // Build an active lease lookup. The backend guarantees at most one active
+        // lease per task, but we still reduce defensively to avoid duplicate keys.
+        var activeLeaseByTaskID: [String: LeaseDTO] = [:]
+        for lease in snapshot.leases where lease.state.lowercased() == "active" {
+            activeLeaseByTaskID[lease.taskID] = lease
+        }
+
         // Build one row per issue that can be matched to a task. Issues without
         // a matching task are dropped because the market table needs task-level
         // fields (status, owner, dependencies).
         let unsortedRows: [(index: Int, row: TaskMarketIssueRow)] = snapshot.issues.enumerated().compactMap { index, issue in
             guard let task = taskByID[issue.taskID] else { return nil }
-            return (index, TaskMarketIssueRow(issue: issue, task: task))
+            let activeLease = activeLeaseByTaskID[issue.taskID]
+            return (index, TaskMarketIssueRow(issue: issue, task: task, activeLease: activeLease))
         }
 
         self.rows = TaskMarketSnapshotPresentation.sortRows(unsortedRows)
@@ -89,6 +94,9 @@ public struct TaskMarketIssueRow: Equatable, Sendable {
     public let dependencyCount: Int
     public let bidCount: Int
     public let leaseState: TaskMarketLeaseState
+    public let leaseID: String?
+    public let leaseAgentID: String?
+    public let leaseExpiresAt: String?
     public let worktreeLabel: String?
     public let ownerLabel: String?
     public let requiresHumanApproval: Bool
@@ -103,7 +111,7 @@ public struct TaskMarketIssueRow: Equatable, Sendable {
         return lowercased == "high" || lowercased == "critical"
     }
 
-    public init(issue: IssueDTO, task: TaskDTO) {
+    public init(issue: IssueDTO, task: TaskDTO, activeLease: LeaseDTO? = nil) {
         self.taskID = task.id
         self.subject = task.subject
         self.status = task.status
@@ -111,13 +119,31 @@ public struct TaskMarketIssueRow: Equatable, Sendable {
         self.riskLevel = issue.riskLevel
         self.dependencyCount = task.blockedBy.count
         // The current snapshot does not expose a bid list, so the market table
-        // shows zero bids until the backend adds bid/lease fields.
+        // shows zero bids until the backend adds bid fields.
         self.bidCount = 0
-        self.leaseState = task.owner == nil ? .open : .claimed
-        self.worktreeLabel = TaskMarketIssueRow.deriveWorktreeLabel(from: issue)
-        self.ownerLabel = task.owner
+        self.leaseID = activeLease?.id
+        self.leaseAgentID = activeLease?.agentID
+        self.leaseExpiresAt = activeLease?.expiresAt
+        if let lease = activeLease {
+            self.leaseState = .claimed
+            self.ownerLabel = lease.agentID
+            self.worktreeLabel = Self.deriveWorktreeLabel(from: lease)
+                ?? Self.deriveWorktreeLabel(from: issue)
+        } else {
+            // Fallback for older snapshots that do not include lease data.
+            self.leaseState = task.owner == nil ? .open : .claimed
+            self.ownerLabel = task.owner
+            self.worktreeLabel = Self.deriveWorktreeLabel(from: issue)
+        }
         self.requiresHumanApproval = issue.requiresHumanApproval
         self.acceptanceCriteriaCount = issue.acceptanceCriteria.count
+    }
+
+    private static func deriveWorktreeLabel(from lease: LeaseDTO) -> String? {
+        if !lease.worktreeName.isEmpty {
+            return lease.worktreeName
+        }
+        return nil
     }
 
     private static func deriveWorktreeLabel(from issue: IssueDTO) -> String? {

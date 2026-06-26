@@ -223,6 +223,18 @@ public struct TaskMarketView: View {
                         label: AppStrings.Dashboard.ownerLabel(appState.locale),
                         value: row.ownerLabel ?? AppStrings.TaskMarket.ownerPlaceholder(appState.locale)
                     )
+                    if let agentID = row.leaseAgentID {
+                        inspectorItem(
+                            label: AppStrings.TaskMarket.leaseAgentLabel(appState.locale),
+                            value: agentID
+                        )
+                    }
+                    if let expiresAt = row.leaseExpiresAt {
+                        inspectorItem(
+                            label: AppStrings.TaskMarket.leaseExpiresAtLabel(appState.locale),
+                            value: expiresAt
+                        )
+                    }
                     inspectorItem(
                         label: AppStrings.TaskMarket.columnWorktree(appState.locale),
                         value: worktreeText(for: row.worktreeLabel)

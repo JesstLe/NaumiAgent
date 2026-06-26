@@ -278,6 +278,14 @@ public enum AppStrings {
             locale == .zhCN ? "当前快照未提供竞标数据" : "Bid data is not available in the current snapshot"
         }
 
+        public static func leaseAgentLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "租约代理" : "Lease Agent"
+        }
+
+        public static func leaseExpiresAtLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "过期时间" : "Expires At"
+        }
+
     }
 
     // MARK: - Errors

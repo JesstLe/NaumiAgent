@@ -12,8 +12,16 @@ struct DTODecodeTests {
         #expect(snapshot.missions.count == 1)
         #expect(snapshot.tasks.count == 2)
         #expect(snapshot.issues.count == 1)
+        #expect(snapshot.leases.count == 1)
         #expect(snapshot.failures.count == 1)
         #expect(snapshot.events.count == 2)
+
+        let lease = try #require(snapshot.leases.first)
+        #expect(lease.id == "lzh-001")
+        #expect(lease.taskID == "2")
+        #expect(lease.agentID == "agent-a")
+        #expect(lease.state == "active")
+        #expect(lease.worktreeName == "wt-api-client")
 
         let mission = try #require(snapshot.missions.first)
         #expect(mission.title == "实现 SwiftUI 工作台骨架")
@@ -43,8 +51,13 @@ struct DTODecodeTests {
         #expect(snapshot.missions.count == 1)
         #expect(snapshot.tasks.count == 2)
         #expect(snapshot.issues.count == 1)
+        #expect(snapshot.leases.count == 1)
         #expect(snapshot.failures.count == 1)
         #expect(snapshot.events.count == 2)
+
+        let lease = try #require(snapshot.leases.first)
+        #expect(lease.id == "len-001")
+        #expect(lease.state == "active")
 
         let mission = try #require(snapshot.missions.first)
         #expect(mission.title == "Build SwiftUI Workbench Shell")
