@@ -20,6 +20,24 @@ public struct EventDTO: Decodable, Equatable, Sendable {
         case timestamp
     }
 
+    public init(
+        id: String,
+        sessionID: String,
+        type: String,
+        actor: String,
+        subjectID: String,
+        payload: [String: JSONValue],
+        timestamp: String
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.type = type
+        self.actor = actor
+        self.subjectID = subjectID
+        self.payload = payload
+        self.timestamp = timestamp
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
