@@ -47,6 +47,12 @@ class TaskMarket:
             expires_at=expires_at,
             worktree_name=worktree_name,
         )
+        if worktree_name:
+            await self._workbench_store.set_issue_worktree(
+                session_id=self._task_store.session_id,
+                task_id=task_id,
+                worktree_name=worktree_name,
+            )
         await self._task_store.update_task(
             task_id,
             status=TaskStatus.IN_PROGRESS,

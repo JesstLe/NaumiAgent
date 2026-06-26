@@ -62,3 +62,20 @@ async def test_expire_leases_returns_task_to_pending(stores) -> None:
     assert refreshed is not None
     assert refreshed.status == TaskStatus.PENDING
     assert refreshed.owner is None
+
+
+@pytest.mark.asyncio
+async def test_claim_records_related_worktree_on_issue(stores) -> None:
+    task_store, workbench_store, task = stores
+    market = TaskMarket(task_store=task_store, workbench_store=workbench_store)
+
+    await market.claim(
+        task_id=task.id,
+        agent_id="Backend-Agent",
+        duration_minutes=45,
+        worktree_name="issue-1-backend",
+    )
+
+    issue = await workbench_store.get_issue("s", task.id)
+    assert issue is not None
+    assert issue.related_worktree == "issue-1-backend"
