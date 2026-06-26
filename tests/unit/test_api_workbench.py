@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import asdict
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
+from naumi_agent import __version__
 from naumi_agent.api.routes.workbench import (
     ClaimIssue,
     IssueAttach,
@@ -16,6 +20,8 @@ from naumi_agent.api.routes.workbench import (
     claim_workbench_issue,
     create_workbench_mission,
     expire_workbench_leases,
+    get_daemon_status,
+    get_workbench_capabilities,
     get_workbench_snapshot,
     release_workbench_lease,
 )
@@ -158,6 +164,30 @@ class _FakeEngine:
 
 def _fake_request(engine: _FakeEngine):
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(engine=engine)))
+
+
+class _FakeSessionStoreWithCount:
+    def __init__(self, total: int) -> None:
+        self.total = total
+
+    async def list_sessions(
+        self, page: int = 1, page_size: int = 20, query: str = ""
+    ) -> tuple[list, int]:
+        return ([], self.total)
+
+
+def _fake_status_request(
+    engine: _FakeEngine,
+    started_at: str = "2026-06-27T10:00:00+00:00",
+    hostname: str = "127.0.0.1",
+    port: int = 8765,
+):
+    return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(engine=engine, started_at=started_at)
+        ),
+        url=SimpleNamespace(hostname=hostname, port=port),
+    )
 
 
 @pytest.mark.asyncio
@@ -381,3 +411,70 @@ async def test_expire_leases_endpoint_returns_expired_list() -> None:
     assert engine.loaded == ["sess-1"]
     assert market.expired_calls == 1
     assert response == {"expired": [asdict(lease)]}
+
+
+@pytest.mark.asyncio
+async def test_daemon_status_returns_expected_fields() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store = _FakeSessionStoreWithCount(total=7)
+    request = _fake_status_request(
+        engine,
+        started_at="2026-06-27T10:00:00+00:00",
+        hostname="localhost",
+        port=9876,
+    )
+
+    response = await get_daemon_status(request, auth="test")
+
+    assert response.status == "running"
+    assert response.version == __version__
+    assert response.pid == os.getpid()
+    assert response.host == "localhost"
+    assert response.port == 9876
+    assert response.started_at == "2026-06-27T10:00:00+00:00"
+    assert response.workspace_count == 7
+
+
+@pytest.mark.asyncio
+async def test_daemon_status_uses_current_time_when_started_at_missing() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store = _FakeSessionStoreWithCount(total=0)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(engine=engine)),
+        url=SimpleNamespace(hostname="127.0.0.1", port=8765),
+    )
+
+    before = datetime.now(UTC).replace(microsecond=0)
+    response = await get_daemon_status(request, auth="test")
+    after = datetime.now(UTC).replace(microsecond=0)
+
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", response.started_at)
+    parsed = datetime.fromisoformat(response.started_at)
+    assert parsed.tzinfo is not None
+    assert before <= parsed <= after
+
+
+@pytest.mark.asyncio
+async def test_daemon_status_workspace_count_zero_when_session_store_missing() -> None:
+    engine = _FakeEngine(exists=True)
+    del engine.session_store
+    request = _fake_status_request(engine)
+
+    response = await get_daemon_status(request, auth="test")
+
+    assert response.status == "running"
+    assert response.workspace_count == 0
+
+
+@pytest.mark.asyncio
+async def test_workbench_capabilities_returns_expected_values() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_workbench_capabilities(_fake_request(engine), auth="test")
+
+    assert response.supports_daemon_management is False
+    assert response.supports_workspace_registry is False
+    assert response.supports_validation_runner is True
+    assert response.supports_cloud_sync is False
+    assert response.supported_locales == ["zh-CN", "en-US"]
+    assert response.protocol_version == 1
