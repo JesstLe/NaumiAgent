@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
 from naumi_agent.api.routes.workbench import (
+    ClaimIssue,
     IssueAttach,
     MissionCreate,
     attach_workbench_issue,
+    claim_workbench_issue,
     create_workbench_mission,
+    expire_workbench_leases,
     get_workbench_snapshot,
+    release_workbench_lease,
 )
-from naumi_agent.workbench.models import Mission, ParallelMode, RiskLevel
+from naumi_agent.workbench.models import Lease, LeaseState, Mission, ParallelMode, RiskLevel
 
 
 class _FakeSessionStore:
@@ -90,10 +95,60 @@ class _FakeWorkbenchService:
         }
 
 
+class FakeTaskMarket:
+    def __init__(self) -> None:
+        self.claimed: list[dict] = []
+        self.released: list[str] = []
+        self.expired_calls = 0
+        self._lease: Lease | None = None
+        self._expired: list[Lease] = []
+        self._claim_error: ValueError | None = None
+
+    def set_lease(self, lease: Lease | None) -> None:
+        self._lease = lease
+
+    def set_expired(self, leases: list[Lease]) -> None:
+        self._expired = leases
+
+    def set_claim_error(self, error: ValueError) -> None:
+        self._claim_error = error
+
+    async def claim(
+        self,
+        *,
+        task_id: str,
+        agent_id: str,
+        duration_minutes: int = 45,
+        worktree_name: str = "",
+    ) -> Lease:
+        if self._claim_error is not None:
+            raise self._claim_error
+        self.claimed.append(
+            {
+                "task_id": task_id,
+                "agent_id": agent_id,
+                "duration_minutes": duration_minutes,
+                "worktree_name": worktree_name,
+            }
+        )
+        if self._lease is None:
+            raise RuntimeError("FakeTaskMarket: lease not configured")
+        return self._lease
+
+    async def release(self, lease_id: str) -> Lease | None:
+        self.released.append(lease_id)
+        return self._lease
+
+    async def expire_overdue_leases(self, *, now=None) -> list[Lease]:
+        self.expired_calls += 1
+        return list(self._expired)
+
+
 class _FakeEngine:
-    def __init__(self, exists: bool) -> None:
+    def __init__(self, exists: bool, workbench_market=None) -> None:
         self.session_store = _FakeSessionStore(exists)
         self.workbench_service = _FakeWorkbenchService()
+        self.workbench_market = workbench_market
         self.loaded: list[str] = []
 
     async def load_session(self, session_id: str) -> bool:
@@ -203,3 +258,126 @@ async def test_attach_issue_endpoint_returns_attached_issue() -> None:
     assert response["acceptance_criteria"] == ["AC1", "AC2"]
     assert response["parallel_mode"] == ParallelMode.COOPERATIVE
     assert response["risk_level"] == RiskLevel.HIGH
+
+
+@pytest.mark.asyncio
+async def test_claim_issue_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False, workbench_market=FakeTaskMarket())
+    body = ClaimIssue(agent_id="Agent-1")
+
+    with pytest.raises(HTTPException) as exc:
+        await claim_workbench_issue("missing", "task-1", body, _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_claim_issue_endpoint_returns_created_lease() -> None:
+    market = FakeTaskMarket()
+    lease = Lease(
+        id="lease-1",
+        session_id="sess-1",
+        task_id="task-1",
+        agent_id="Agent-1",
+        state=LeaseState.ACTIVE,
+        expires_at="2024-01-01T01:00:00",
+        worktree_name="wt-1",
+    )
+    market.set_lease(lease)
+    engine = _FakeEngine(exists=True, workbench_market=market)
+    body = ClaimIssue(agent_id="Agent-1", duration_minutes=30, worktree_name="wt-1")
+
+    request = _fake_request(engine)
+    response = await claim_workbench_issue(
+        "sess-1", "task-1", body, request, auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert market.claimed == [
+        {
+            "task_id": "task-1",
+            "agent_id": "Agent-1",
+            "duration_minutes": 30,
+            "worktree_name": "wt-1",
+        }
+    ]
+    assert response["id"] == "lease-1"
+    assert response["task_id"] == "task-1"
+    assert response["agent_id"] == "Agent-1"
+    assert response["state"] == LeaseState.ACTIVE
+    assert response["worktree_name"] == "wt-1"
+
+
+@pytest.mark.asyncio
+async def test_claim_issue_endpoint_maps_value_error_to_400() -> None:
+    market = FakeTaskMarket()
+    market.set_claim_error(ValueError("任务 #task-1 不存在"))
+    engine = _FakeEngine(exists=True, workbench_market=market)
+    body = ClaimIssue(agent_id="Agent-1")
+
+    with pytest.raises(HTTPException) as exc:
+        await claim_workbench_issue("sess-1", "task-1", body, _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "任务 #task-1 不存在"
+
+
+@pytest.mark.asyncio
+async def test_release_lease_endpoint_returns_404_when_missing() -> None:
+    market = FakeTaskMarket()
+    market.set_lease(None)
+    engine = _FakeEngine(exists=True, workbench_market=market)
+
+    with pytest.raises(HTTPException) as exc:
+        await release_workbench_lease("sess-1", "lease-missing", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert market.released == ["lease-missing"]
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "租约不存在"
+
+
+@pytest.mark.asyncio
+async def test_release_lease_endpoint_returns_released_lease() -> None:
+    market = FakeTaskMarket()
+    lease = Lease(
+        id="lease-2",
+        session_id="sess-1",
+        task_id="task-2",
+        agent_id="Agent-2",
+        state=LeaseState.RELEASED,
+        expires_at="2024-01-01T02:00:00",
+    )
+    market.set_lease(lease)
+    engine = _FakeEngine(exists=True, workbench_market=market)
+
+    request = _fake_request(engine)
+    response = await release_workbench_lease(
+        "sess-1", "lease-2", request, auth="test"
+    )
+
+    assert market.released == ["lease-2"]
+    assert response["id"] == "lease-2"
+    assert response["state"] == LeaseState.RELEASED
+
+
+@pytest.mark.asyncio
+async def test_expire_leases_endpoint_returns_expired_list() -> None:
+    market = FakeTaskMarket()
+    lease = Lease(
+        id="lease-3",
+        session_id="sess-1",
+        task_id="task-3",
+        agent_id="Agent-3",
+        state=LeaseState.EXPIRED,
+        expires_at="2024-01-01T00:00:00",
+    )
+    market.set_expired([lease])
+    engine = _FakeEngine(exists=True, workbench_market=market)
+
+    response = await expire_workbench_leases("sess-1", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert market.expired_calls == 1
+    assert response == {"expired": [asdict(lease)]}
