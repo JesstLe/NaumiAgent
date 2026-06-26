@@ -13,6 +13,8 @@ from naumi_agent.workbench.models import (
     DecisionKind,
     IntentLock,
     IssueMetadata,
+    Lease,
+    LeaseState,
     Mission,
     ParallelMode,
     RiskLevel,
@@ -90,6 +92,20 @@ CREATE TABLE IF NOT EXISTS workbench_intent_locks (
 )
 """
 
+_CREATE_LEASES = """
+CREATE TABLE IF NOT EXISTS workbench_leases (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    worktree_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+"""
+
 
 class WorkbenchStore:
     """SQLite-backed state for the workbench dashboard."""
@@ -106,6 +122,7 @@ class WorkbenchStore:
         await db.execute(_CREATE_DECISIONS)
         await db.execute(_CREATE_EVENTS)
         await db.execute(_CREATE_INTENT_LOCKS)
+        await db.execute(_CREATE_LEASES)
         await db.commit()
         self._initialized = True
 
@@ -370,6 +387,95 @@ class WorkbenchStore:
             rows = await cursor.fetchall()
         return [_row_to_intent_lock(dict(row)) for row in rows]
 
+    async def create_lease(
+        self,
+        *,
+        session_id: str,
+        task_id: str,
+        agent_id: str,
+        expires_at: str,
+        worktree_name: str = "",
+    ) -> Lease:
+        lease = Lease(
+            id=uuid.uuid4().hex[:12],
+            session_id=session_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            state=LeaseState.ACTIVE,
+            expires_at=expires_at,
+            worktree_name=worktree_name,
+        )
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                """INSERT INTO workbench_leases
+                   (id, session_id, task_id, agent_id, state, expires_at, worktree_name,
+                    created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    lease.id,
+                    lease.session_id,
+                    lease.task_id,
+                    lease.agent_id,
+                    lease.state.value,
+                    lease.expires_at,
+                    lease.worktree_name,
+                    lease.created_at,
+                    lease.updated_at,
+                ),
+            )
+            await db.commit()
+        return lease
+
+    async def get_active_lease(self, session_id: str, task_id: str) -> Lease | None:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_leases
+                   WHERE session_id = ? AND task_id = ? AND state = ?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (session_id, task_id, LeaseState.ACTIVE.value),
+            )
+            row = await cursor.fetchone()
+        return _row_to_lease(dict(row)) if row else None
+
+    async def update_lease_state(self, lease_id: str, state: LeaseState) -> Lease | None:
+        now = now_iso()
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                "UPDATE workbench_leases SET state = ?, updated_at = ? WHERE id = ?",
+                (state.value, now, lease_id),
+            )
+            await db.commit()
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM workbench_leases WHERE id = ?", (lease_id,))
+            row = await cursor.fetchone()
+        return _row_to_lease(dict(row)) if row else None
+
+    async def list_overdue_leases(self, session_id: str, now: str) -> list[Lease]:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_leases
+                   WHERE session_id = ? AND state = ? AND expires_at <= ?
+                   ORDER BY expires_at""",
+                (session_id, LeaseState.ACTIVE.value, now),
+            )
+            rows = await cursor.fetchall()
+        return [_row_to_lease(dict(row)) for row in rows]
+
+    async def force_lease_expiry_for_test(self, lease_id: str, expires_at: str) -> None:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                "UPDATE workbench_leases SET expires_at = ? WHERE id = ?",
+                (expires_at, lease_id),
+            )
+            await db.commit()
+
 
 def _row_to_issue(row: dict[str, Any]) -> IssueMetadata:
     return IssueMetadata(
@@ -425,4 +531,18 @@ def _row_to_intent_lock(row: dict[str, Any]) -> IntentLock:
         require_proposal_for_risk=RiskLevel(row["require_proposal_for_risk"]),
         active=bool(row["active"]),
         created_at=row["created_at"],
+    )
+
+
+def _row_to_lease(row: dict[str, Any]) -> Lease:
+    return Lease(
+        id=row["id"],
+        session_id=row["session_id"],
+        task_id=row["task_id"],
+        agent_id=row["agent_id"],
+        state=LeaseState(row["state"]),
+        expires_at=row["expires_at"],
+        worktree_name=row["worktree_name"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
