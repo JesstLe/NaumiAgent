@@ -52,6 +52,9 @@ from naumi_agent.tools.builtin import create_builtin_tools
 from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
 from naumi_agent.tools.web import create_web_tools
+from naumi_agent.workbench import WorkbenchStore
+from naumi_agent.workbench.service import WorkbenchService
+from naumi_agent.workbench.tools import create_workbench_tools
 from naumi_agent.worktree import WorktreeManager, create_worktree_tools
 
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -428,6 +431,11 @@ class AgentEngine:
         self._permission_confirmer: PermissionConfirmationCallback | None = None
 
         self.task_store = TaskStore(config.memory.session_db_path)
+        self.workbench_store = WorkbenchStore(config.memory.session_db_path)
+        self.workbench_service = WorkbenchService(
+            task_store=self.task_store,
+            workbench_store=self.workbench_store,
+        )
         self.background_runner = BackgroundRunner(
             BackgroundTaskStore(self._runtime_data_dir / "background")
         )
@@ -502,6 +510,10 @@ class AgentEngine:
 
         # Worktree isolation tools
         for tool in create_worktree_tools(self.worktree_manager):
+            self._tool_registry.register(tool)
+
+        # Workbench read/proposal tools
+        for tool in create_workbench_tools(self.workbench_service):
             self._tool_registry.register(tool)
 
         # Runtime status tools

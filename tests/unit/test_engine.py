@@ -73,6 +73,24 @@ def mock_router() -> MagicMock:
     return router
 
 
+@pytest.mark.asyncio
+async def test_engine_registers_safe_workbench_tools(tmp_path) -> None:
+    from naumi_agent.config.settings import AppConfig, MemoryConfig
+    from naumi_agent.orchestrator.engine import AgentEngine
+
+    engine = AgentEngine(
+        AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+    )
+    try:
+        names = set(engine.tool_registry.names)
+        assert {
+            "workbench_snapshot",
+            "workbench_propose_issue",
+        }.issubset(names)
+    finally:
+        await engine.shutdown()
+
+
 class TestEngineInit:
     def test_creates_with_default_config(self) -> None:
         engine = AgentEngine(AppConfig())
