@@ -13,6 +13,13 @@ public protocol WorkbenchAPIProviding: Sendable {
     /// Fetches the most recent audit events for the given session.
     func fetchEvents(sessionID: String, limit: Int) async throws(APIError) -> WorkbenchEventsDTO
 
+    /// Fetches validation runs for the given session, optionally filtered by task.
+    func fetchValidationRuns(
+        sessionID: String,
+        taskID: String?,
+        limit: Int
+    ) async throws(APIError) -> ValidationRunsDTO
+
     /// Claims an open issue for the given agent, creating a new lease.
     func claimIssue(
         sessionID: String,

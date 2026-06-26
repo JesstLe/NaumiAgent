@@ -71,6 +71,33 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Fetches validation runs for the currently selected session.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success the runs are
+    /// written to `appState.validationRuns`; on failure `appState.lastError` is
+    /// set. Missing session clears the local validation run list to avoid showing
+    /// stale data from another session. API failures leave the local list
+    /// unchanged (no fake local runs).
+    public func refreshValidationRuns(taskID: String? = nil, limit: Int = 50) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.validationRuns = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchValidationRuns(
+                sessionID: sessionID,
+                taskID: taskID,
+                limit: limit
+            )
+            appState.validationRuns = response.validationRuns
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Refreshes the snapshot for the currently selected session.
     ///
     /// When no session is selected, the most recent session from `GET /sessions`

@@ -51,7 +51,12 @@ struct ContentView: View {
                 appState: environment.appState,
                 daemonController: environment.daemonController
             )
-        case .worktrees, .reviews, .settings:
+        case .reviews:
+            ReviewsView(
+                appState: environment.appState,
+                daemonController: environment.daemonController
+            )
+        case .worktrees, .settings:
             PlaceholderRouteView(
                 route: route,
                 locale: environment.appState.locale

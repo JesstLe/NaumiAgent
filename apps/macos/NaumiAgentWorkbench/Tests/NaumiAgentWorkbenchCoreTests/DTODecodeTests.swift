@@ -63,6 +63,47 @@ struct DTODecodeTests {
         #expect(mission.title == "Build SwiftUI Workbench Shell")
     }
 
+    @Test func decodeValidationRuns() throws {
+        let data = Data(
+            """
+            {"validation_runs":[{"id":"run-001","session_id":"sess-001","task_id":"task-001","actor":"ValidationRunner","command":["pytest","test.py"],"cwd":"/workspace","status":"passed","exit_code":0,"output":"ok","started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:01"}],"task_id":"task-001","limit":25}
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(ValidationRunsDTO.self, from: data)
+
+        #expect(response.taskID == "task-001")
+        #expect(response.limit == 25)
+        #expect(response.validationRuns.count == 1)
+
+        let run = try #require(response.validationRuns.first)
+        #expect(run.id == "run-001")
+        #expect(run.sessionID == "sess-001")
+        #expect(run.taskID == "task-001")
+        #expect(run.actor == "ValidationRunner")
+        #expect(run.command == ["pytest", "test.py"])
+        #expect(run.cwd == "/workspace")
+        #expect(run.status == "passed")
+        #expect(run.exitCode == 0)
+        #expect(run.output == "ok")
+        #expect(run.startedAt == "2026-06-27T06:00:00")
+        #expect(run.completedAt == "2026-06-27T06:00:01")
+    }
+
+    @Test func decodeValidationRunsWithoutTaskID() throws {
+        let data = Data(
+            """
+            {"validation_runs":[],"task_id":null,"limit":50}
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(ValidationRunsDTO.self, from: data)
+
+        #expect(response.taskID == nil)
+        #expect(response.limit == 50)
+        #expect(response.validationRuns.isEmpty)
+    }
+
     @Test func decodeEventPayloadWithNonStringValues() throws {
         let data = Data(
             """

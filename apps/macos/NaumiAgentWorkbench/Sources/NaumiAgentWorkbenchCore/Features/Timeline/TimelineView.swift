@@ -244,6 +244,14 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         WorkbenchEventsDTO(events: [], limit: limit)
     }
 
+    func fetchValidationRuns(
+        sessionID: String,
+        taskID: String?,
+        limit: Int
+    ) async throws(APIError) -> ValidationRunsDTO {
+        ValidationRunsDTO(validationRuns: [], taskID: taskID, limit: limit)
+    }
+
     func claimIssue(
         sessionID: String,
         taskID: String,
