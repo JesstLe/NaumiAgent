@@ -55,3 +55,18 @@ async def test_decision_and_audit_event_are_persisted(store: WorkbenchStore) -> 
 
     assert [d.id for d in await store.list_decisions("s", mission.id)] == [decision.id]
     assert [e.id for e in await store.list_events("s")] == [event.id]
+
+
+@pytest.mark.asyncio
+async def test_intent_locks_round_trip(store: WorkbenchStore) -> None:
+    mission = await store.create_mission("s", "M", "G")
+    lock = await store.add_intent_lock(
+        session_id="s",
+        mission_id=mission.id,
+        rule="本轮不动 UI",
+        blocked_paths=["frontend/"],
+        require_proposal_for_risk=RiskLevel.MEDIUM,
+    )
+
+    locks = await store.list_intent_locks("s", mission.id)
+    assert locks == [lock]
