@@ -32,7 +32,45 @@ struct ContentView: View {
             }
             .navigationSplitViewColumnWidth(min: 160, ideal: 180)
         } detail: {
-            DashboardView(appState: environment.appState)
+            routeView(for: appState.currentRoute)
         }
+    }
+
+    @ViewBuilder
+    private func routeView(for route: AppRoute) -> some View {
+        switch route {
+        case .dashboard:
+            DashboardView(appState: environment.appState)
+        case .taskMarket:
+            TaskMarketView(appState: environment.appState)
+        case .worktrees, .reviews, .timeline, .settings:
+            PlaceholderRouteView(
+                route: route,
+                locale: environment.appState.locale
+            )
+        }
+    }
+}
+
+/// Lightweight placeholder for routes that are not yet implemented.
+private struct PlaceholderRouteView: View {
+    let route: AppRoute
+    let locale: AppLocale
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: route.systemImage)
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+            Text(route.displayName(locale: locale))
+                .font(.title2)
+                .fontWeight(.semibold)
+            Text(AppStrings.Navigation.pageUnderConstruction(locale))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle(route.displayName(locale: locale))
     }
 }

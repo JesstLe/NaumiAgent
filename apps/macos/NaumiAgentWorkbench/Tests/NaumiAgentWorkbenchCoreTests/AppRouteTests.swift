@@ -27,4 +27,9 @@ struct AppRouteTests {
             #expect(!route.displayName(locale: .enUS).isEmpty)
         }
     }
+
+    @Test func routePlaceholderStrings() {
+        #expect(AppStrings.Navigation.pageUnderConstruction(.zhCN) == "页面建设中")
+        #expect(AppStrings.Navigation.pageUnderConstruction(.enUS) == "Page under construction")
+    }
 }

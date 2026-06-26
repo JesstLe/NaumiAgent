@@ -28,6 +28,10 @@ public enum AppStrings {
         public static func settings(_ locale: AppLocale) -> String {
             locale == .zhCN ? "设置" : "Settings"
         }
+
+        public static func pageUnderConstruction(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "页面建设中" : "Page under construction"
+        }
     }
 
     // MARK: - Connection State
@@ -174,6 +178,106 @@ public enum AppStrings {
         public static func emptyEvents(_ locale: AppLocale) -> String {
             locale == .zhCN ? "暂无事件" : "No events"
         }
+    }
+
+    // MARK: - Task Market
+    public enum TaskMarket {
+        public static func title(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "任务市场" : "Task Market"
+        }
+
+        public static func totalIssues(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "全部问题" : "Total Issues"
+        }
+
+        public static func openIssues(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "待认领" : "Open"
+        }
+
+        public static func claimedIssues(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "已认领" : "Claimed"
+        }
+
+        public static func blockedIssues(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "被阻塞" : "Blocked"
+        }
+
+        public static func approvalRequiredIssues(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "需审批" : "Approval Required"
+        }
+
+        public static func columnIssue(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "任务" : "Issue"
+        }
+
+        public static func columnParallelMode(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "并行模式" : "Parallel Mode"
+        }
+
+        public static func columnRisk(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "风险" : "Risk"
+        }
+
+        public static func columnDependencies(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "依赖" : "Dependencies"
+        }
+
+        public static func columnBids(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "竞标" : "Bids"
+        }
+
+        public static func columnLease(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "租约" : "Lease"
+        }
+
+        public static func columnWorktree(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "工作区" : "Worktree"
+        }
+
+        public static func columnStatus(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "状态" : "Status"
+        }
+
+        public static func leaseStateClaimed(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "已认领" : "Claimed"
+        }
+
+        public static func leaseStateOpen(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "可认领" : "Open"
+        }
+
+        public static func worktreePlaceholder(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "未绑定" : "Unbound"
+        }
+
+        public static func ownerPlaceholder(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "无负责人" : "No owner"
+        }
+
+        public static func emptyIssues(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无可认领任务" : "No issues available"
+        }
+
+        public static func noSnapshot(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无快照数据" : "No snapshot data"
+        }
+
+        public static func inspectorTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "详情" : "Details"
+        }
+
+        public static func acceptanceCriteriaTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "验收标准" : "Acceptance Criteria"
+        }
+
+        public static func requiresApprovalLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "需要人工审批" : "Requires human approval"
+        }
+
+        public static func bidsNotAvailable(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "当前快照未提供竞标数据" : "Bid data is not available in the current snapshot"
+        }
+
     }
 
     // MARK: - Errors
