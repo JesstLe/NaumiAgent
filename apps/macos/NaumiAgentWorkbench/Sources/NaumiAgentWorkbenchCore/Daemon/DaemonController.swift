@@ -216,6 +216,25 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Expires overdue leases in the selected session and refreshes the snapshot on success.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the local snapshot is never mutated directly.
+    public func expireLeases() async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            _ = try await apiProvider.expireLeases(sessionID: sessionID)
+            await refreshSnapshot()
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Creates a mission in the selected session and refreshes the snapshot on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in

@@ -443,6 +443,41 @@ final class WorkbenchAPIClientTests {
         #expect(lease.state == "released")
     }
 
+    @Test func expireLeasesUsesPOSTAndEncodesPath() async throws {
+        let sessionID = "sess 中文"
+        let responseJSON = Data(
+            """
+            {"expired":[{"id":"lease-001","session_id":"sess 中文","task_id":"task-001","agent_id":"agent-001","state":"expired","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}]}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/leases/expire" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient()
+        let result = try await client.expireLeases(sessionID: sessionID)
+
+        #expect(result.expired.count == 1)
+        let lease = try #require(result.expired.first)
+        #expect(lease.id == "lease-001")
+        #expect(lease.sessionID == sessionID)
+        #expect(lease.state == "expired")
+    }
+
     @Test func createMission() async throws {
         let missionJSON = Data(
             """
