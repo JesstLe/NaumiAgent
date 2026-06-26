@@ -100,6 +100,10 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         try await post(path: "workbench/sessions/\(sessionID)/leases/\(leaseID)/release")
     }
 
+    public func expireLeases(sessionID: String) async throws(APIError) -> ExpiredLeasesDTO {
+        try await post(path: "workbench/sessions/\(sessionID)/leases/expire")
+    }
+
     public func createMission(
         sessionID: String,
         title: String,

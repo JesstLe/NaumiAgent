@@ -347,6 +347,10 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func expireLeases(sessionID: String) async throws(APIError) -> ExpiredLeasesDTO {
+        ExpiredLeasesDTO(expired: [])
+    }
+
     func createMission(
         sessionID: String,
         title: String,
