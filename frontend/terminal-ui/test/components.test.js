@@ -8,7 +8,7 @@ import { ActivityCard } from "../src/components/activity-card.js";
 import { PermissionCard } from "../src/components/permission-card.js";
 import { parsePermissionPanel, PermissionPanel } from "../src/components/permission-panel.js";
 import { ToolCard } from "../src/components/tool-card.js";
-import { parseTaskPanel, TaskPanel } from "../src/components/task-panel.js";
+import { parseTaskPanel, renderTaskPanel, TaskPanel } from "../src/components/task-panel.js";
 import { createInitialState } from "../src/state.js";
 
 test("component core composes nested stacks and boxes within width", () => {
@@ -309,6 +309,30 @@ test("system task notices use the dedicated task panel renderer", () => {
   assert(plain.includes("tasks todo 1"));
   assert(plain.includes("#1 [running] 写入页面"));
   assert(!plain.includes("tasks: 任务面板"));
+});
+
+test("task panel enriches todo rows with workbench issue metadata", () => {
+  const content = ["任务面板", "Todo", "  ● #1 实现任务市场"].join("\n");
+  const rendered = renderTaskPanel(content, 90, {
+    width: 90,
+    state: {
+      workbench: {
+        issues: [
+          {
+            task_id: "1",
+            risk_level: "high",
+            parallel_mode: "exclusive",
+            related_worktree: "issue-1-backend",
+          },
+        ],
+      },
+    },
+  });
+  const plain = stripAnsi(rendered.join("\n"));
+
+  assert(plain.includes("risk:high"));
+  assert(plain.includes("exclusive"));
+  assert(plain.includes("issue-1-backend"));
 });
 
 test("task panel off notice renders as plain system text", () => {

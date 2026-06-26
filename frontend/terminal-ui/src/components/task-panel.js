@@ -15,11 +15,13 @@ export function TaskPanel({ content, taskPanel = null }) {
 export function renderTaskPanel(content, width, ctx = { width }) {
   const model = parseTaskPanel(content);
   const taskPanel = ctx.taskPanel ?? ctx.state?.taskPanel ?? {};
+  const workbenchIssues = ctx.state?.workbench?.issues ?? [];
+  const issuesByTaskId = issueByTaskId(workbenchIssues);
   const children = [
     line(`${color(ANSI.cyan, "tasks")} ${model.summary}`),
     ...renderSection("Timeline", model.sections.Timeline, ANSI.green, taskPanel),
     ...renderSection("Detail", model.sections.Detail, ANSI.green, taskPanel),
-    ...renderSection("Todo", model.sections.Todo, ANSI.cyan, taskPanel),
+    ...renderSection("Todo", model.sections.Todo, ANSI.cyan, taskPanel, issuesByTaskId),
     ...renderSection("Subagent", model.sections.Subagent, ANSI.magenta, taskPanel),
     ...renderSection("Background", model.sections.Background, ANSI.yellow, taskPanel),
     ...renderSection("Browser Runs", model.sections["Browser Runs"], ANSI.blue, taskPanel),
@@ -72,7 +74,11 @@ export function parseTaskPanel(content) {
   };
 }
 
-function renderSection(title, rows = [], style = ANSI.dim, taskPanel = {}) {
+function issueByTaskId(issues = []) {
+  return new Map(issues.map((issue) => [String(issue.task_id), issue]));
+}
+
+function renderSection(title, rows = [], style = ANSI.dim, taskPanel = {}, issuesByTaskId = new Map()) {
   if (!rows.length) return [];
   if (title === "Timeline") {
     return renderTimelineSection(rows, style, taskPanel);
@@ -81,7 +87,7 @@ function renderSection(title, rows = [], style = ANSI.dim, taskPanel = {}) {
   const hidden = rows.length - visible.length;
   return [
     line(color(style, title)),
-    ...visible.flatMap((item) => renderTaskRow(title, item, taskPanel)),
+    ...visible.flatMap((item) => renderTaskRow(title, item, taskPanel, issuesByTaskId)),
     hidden > 0 ? line(color(ANSI.dim, `  ... 还有 ${hidden} 项`)) : null,
   ].filter(Boolean);
 }
@@ -121,23 +127,34 @@ function timelineSourceForRow(row) {
   return detailField(detail, "source");
 }
 
-function renderTaskRow(section, item, taskPanel = {}) {
+function renderTaskRow(section, item, taskPanel = {}, issuesByTaskId = new Map()) {
   const parsed = parseTaskRow(item);
   const rowId = taskRowId(section, parsed.primary);
   const selected = rowId && rowId === taskPanel.selectedId;
   const expanded = rowId && taskPanel.expandedIds?.[rowId];
   const prefix = selected ? color(ANSI.green, "> ") : "  ";
+  const primary = section === "Todo" ? enrichTodoPrimary(parsed.primary, rowId, issuesByTaskId) : parsed.primary;
   if (!parsed.detail) {
-    return [line(`${prefix}${taskLineStyle(section, item)}`)];
+    return [line(`${prefix}${taskLineStyle(section, primary)}`)];
   }
   const rows = [
-    line(`${prefix}${taskLineStyle(section, parsed.primary)}`),
+    line(`${prefix}${taskLineStyle(section, primary)}`),
     line(color(ANSI.dim, `    ${compactText(parsed.detail, 180)}`)),
   ];
   if (expanded) {
     rows.push(...renderExpandedTaskDetail(parsed.detail));
   }
   return rows;
+}
+
+function enrichTodoPrimary(primary, rowId, issuesByTaskId) {
+  const issue = issuesByTaskId.get(String(rowId));
+  if (!issue) return primary;
+  const parts = [];
+  if (issue.risk_level) parts.push(`risk:${issue.risk_level}`);
+  if (issue.parallel_mode) parts.push(issue.parallel_mode);
+  if (issue.related_worktree) parts.push(issue.related_worktree);
+  return parts.length ? `${primary} [${parts.join(" · ")}]` : primary;
 }
 
 function parseTaskRow(item) {
