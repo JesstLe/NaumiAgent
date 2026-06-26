@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from naumi_agent.tasks.store import TaskStore
-from naumi_agent.workbench.models import ContextHealth
+from naumi_agent.workbench.models import ContextHealth, LeaseState
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 
@@ -33,6 +33,65 @@ async def test_dashboard_snapshot_contains_core_cards(tmp_path) -> None:
     assert snapshot["missions"][0]["title"] == "Mac 工作台"
     assert snapshot["issues"][0]["task_id"] == task.id
     assert snapshot["tasks"][0]["subject"] == "实现任务市场"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_snapshot_includes_only_active_leases(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    mission = await service.create_mission(
+        session_id="s",
+        title="Mac 工作台",
+        goal="可视化治理多 Agent 研发",
+    )
+    active_task = await task_store.create_task("active lease task")
+    released_task = await task_store.create_task("released lease task")
+    expired_task = await task_store.create_task("expired lease task")
+    for t in (active_task, released_task, expired_task):
+        await service.attach_issue(
+            session_id="s",
+            mission_id=mission.id,
+            task_id=t.id,
+            acceptance_criteria=["AC"],
+        )
+
+    active_lease = await workbench_store.create_lease(
+        session_id="s",
+        task_id=active_task.id,
+        agent_id="agent-a",
+        expires_at="2099-01-01T00:00:00",
+        worktree_name="wt-a",
+    )
+    released_lease = await workbench_store.create_lease(
+        session_id="s",
+        task_id=released_task.id,
+        agent_id="agent-b",
+        expires_at="2099-01-01T00:00:00",
+        worktree_name="wt-b",
+    )
+    await workbench_store.update_lease_state(released_lease.id, LeaseState.RELEASED)
+    expired_lease = await workbench_store.create_lease(
+        session_id="s",
+        task_id=expired_task.id,
+        agent_id="agent-c",
+        expires_at="2099-01-01T00:00:00",
+        worktree_name="wt-c",
+    )
+    await workbench_store.update_lease_state(expired_lease.id, LeaseState.EXPIRED)
+
+    snapshot = await service.dashboard_snapshot("s")
+
+    assert "leases" in snapshot
+    assert len(snapshot["leases"]) == 1
+    lease_data = snapshot["leases"][0]
+    assert lease_data["id"] == active_lease.id
+    assert lease_data["task_id"] == active_task.id
+    assert lease_data["agent_id"] == "agent-a"
+    assert lease_data["state"] == "active"
+    assert lease_data["worktree_name"] == "wt-a"
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,7 @@ from dataclasses import asdict
 from typing import Any
 
 from naumi_agent.tasks.store import TaskStore
-from naumi_agent.workbench.models import Mission, ParallelMode, RiskLevel
+from naumi_agent.workbench.models import Lease, Mission, ParallelMode, RiskLevel
 from naumi_agent.workbench.store import WorkbenchStore
 
 
@@ -60,18 +60,30 @@ class WorkbenchService:
         events = await self._workbench_store.list_events(session_id, limit=50)
         failures = await self._workbench_store.list_failures(session_id)
         issues = []
+        leases = []
         for task in tasks:
             issue = await self._workbench_store.get_issue(session_id, task.id)
             if issue is not None:
                 issues.append(asdict(issue))
+            lease = await self._workbench_store.get_active_lease(session_id, task.id)
+            if lease is not None:
+                leases.append(self._lease_to_dict(lease))
         return {
             "session_id": session_id,
             "missions": await self._list_missions_for_snapshot(session_id),
             "tasks": [asdict(task) for task in tasks],
             "issues": issues,
+            "leases": leases,
             "failures": failures,
             "events": [event.to_dict() for event in events],
         }
+
+    @staticmethod
+    def _lease_to_dict(lease: Lease) -> dict[str, Any]:
+        data = asdict(lease)
+        # Ensure enum values are JSON-friendly strings.
+        data["state"] = data["state"].value
+        return data
 
     async def list_events(self, session_id: str, limit: int = 50) -> list[dict[str, Any]]:
         events = await self._workbench_store.list_events(session_id, limit=limit)

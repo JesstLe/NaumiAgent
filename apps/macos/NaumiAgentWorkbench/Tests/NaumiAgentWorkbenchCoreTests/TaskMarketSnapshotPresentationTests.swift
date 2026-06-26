@@ -25,7 +25,10 @@ struct TaskMarketSnapshotPresentationTests {
         #expect(row.dependencyCount == 0)
         #expect(row.bidCount == 0)
         #expect(row.leaseState == .claimed)
-        #expect(row.worktreeLabel == nil)
+        #expect(row.leaseID == "lzh-001")
+        #expect(row.leaseAgentID == "agent-a")
+        #expect(row.leaseExpiresAt == "2026-06-27T07:00:00")
+        #expect(row.worktreeLabel == "wt-api-client")
         #expect(row.ownerLabel == "agent-a")
         #expect(row.requiresHumanApproval == true)
         #expect(row.acceptanceCriteriaCount == 2)
@@ -399,6 +402,262 @@ struct TaskMarketSnapshotPresentationTests {
         // Total issues reflects raw snapshot count, not matched rows.
         #expect(presentation.summary.totalIssues == 1)
         #expect(presentation.summary.openIssues == 0)
+    }
+
+    @Test func activeLeaseOverridesTaskOwner() throws {
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-override",
+            missions: [],
+            tasks: [
+                TaskDTO(
+                    id: "owned-task",
+                    sessionID: "sess-override",
+                    subject: "Owned Task",
+                    description: "",
+                    status: "in_progress",
+                    activeForm: nil,
+                    owner: "task-owner",
+                    blocks: [],
+                    blockedBy: [],
+                    createdAt: "",
+                    updatedAt: ""
+                )
+            ],
+            issues: [
+                IssueDTO(
+                    sessionID: "sess-override",
+                    taskID: "owned-task",
+                    missionID: "m-1",
+                    parallelMode: "exclusive",
+                    riskLevel: "low",
+                    requiresHumanApproval: false,
+                    acceptanceCriteria: [],
+                    expectedArtifacts: [],
+                    relatedBranch: "",
+                    relatedWorktree: "",
+                    relatedPR: "",
+                    createdAt: "",
+                    updatedAt: ""
+                )
+            ],
+            leases: [
+                LeaseDTO(
+                    id: "lease-override",
+                    sessionID: "sess-override",
+                    taskID: "owned-task",
+                    agentID: "lease-agent",
+                    state: "active",
+                    expiresAt: "2099-01-01T00:00:00",
+                    worktreeName: "wt-lease",
+                    createdAt: "",
+                    updatedAt: ""
+                )
+            ],
+            failures: [],
+            events: []
+        )
+
+        let presentation = TaskMarketSnapshotPresentation(snapshot: snapshot)
+        let row = try #require(presentation.rows.first)
+
+        #expect(row.leaseState == .claimed)
+        #expect(row.ownerLabel == "lease-agent")
+        #expect(row.leaseAgentID == "lease-agent")
+        #expect(row.worktreeLabel == "wt-lease")
+    }
+
+    @Test func releasedLeaseIsIgnored() throws {
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-released",
+            missions: [],
+            tasks: [
+                TaskDTO(
+                    id: "released-task",
+                    sessionID: "sess-released",
+                    subject: "Released Task",
+                    description: "",
+                    status: "pending",
+                    activeForm: nil,
+                    owner: nil,
+                    blocks: [],
+                    blockedBy: [],
+                    createdAt: "",
+                    updatedAt: ""
+                )
+            ],
+            issues: [
+                IssueDTO(
+                    sessionID: "sess-released",
+                    taskID: "released-task",
+                    missionID: "m-1",
+                    parallelMode: "exclusive",
+                    riskLevel: "low",
+                    requiresHumanApproval: false,
+                    acceptanceCriteria: [],
+                    expectedArtifacts: [],
+                    relatedBranch: "",
+                    relatedWorktree: "",
+                    relatedPR: "",
+                    createdAt: "",
+                    updatedAt: ""
+                )
+            ],
+            leases: [
+                LeaseDTO(
+                    id: "lease-released",
+                    sessionID: "sess-released",
+                    taskID: "released-task",
+                    agentID: "former-agent",
+                    state: "released",
+                    expiresAt: "2099-01-01T00:00:00",
+                    worktreeName: "wt-released",
+                    createdAt: "",
+                    updatedAt: ""
+                )
+            ],
+            failures: [],
+            events: []
+        )
+
+        let presentation = TaskMarketSnapshotPresentation(snapshot: snapshot)
+        let row = try #require(presentation.rows.first)
+
+        #expect(row.leaseState == .open)
+        #expect(row.leaseAgentID == nil)
+        #expect(row.ownerLabel == nil)
+        #expect(row.worktreeLabel == nil)
+    }
+
+    @Test func worktreeFallbackPrefersLeaseThenIssueWorktreeThenBranch() throws {
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-wt-fallback",
+            missions: [],
+            tasks: [
+                TaskDTO(
+                    id: "lease-wt",
+                    sessionID: "sess-wt-fallback",
+                    subject: "Lease Worktree",
+                    description: "",
+                    status: "pending",
+                    activeForm: nil,
+                    owner: nil,
+                    blocks: [],
+                    blockedBy: [],
+                    createdAt: "",
+                    updatedAt: ""
+                ),
+                TaskDTO(
+                    id: "issue-wt",
+                    sessionID: "sess-wt-fallback",
+                    subject: "Issue Worktree",
+                    description: "",
+                    status: "pending",
+                    activeForm: nil,
+                    owner: nil,
+                    blocks: [],
+                    blockedBy: [],
+                    createdAt: "",
+                    updatedAt: ""
+                ),
+                TaskDTO(
+                    id: "issue-branch",
+                    sessionID: "sess-wt-fallback",
+                    subject: "Issue Branch",
+                    description: "",
+                    status: "pending",
+                    activeForm: nil,
+                    owner: nil,
+                    blocks: [],
+                    blockedBy: [],
+                    createdAt: "",
+                    updatedAt: ""
+                )
+            ],
+            issues: [
+                IssueDTO(
+                    sessionID: "sess-wt-fallback",
+                    taskID: "lease-wt",
+                    missionID: "m-1",
+                    parallelMode: "exclusive",
+                    riskLevel: "low",
+                    requiresHumanApproval: false,
+                    acceptanceCriteria: [],
+                    expectedArtifacts: [],
+                    relatedBranch: "branch-a",
+                    relatedWorktree: "worktree-a",
+                    relatedPR: "",
+                    createdAt: "",
+                    updatedAt: ""
+                ),
+                IssueDTO(
+                    sessionID: "sess-wt-fallback",
+                    taskID: "issue-wt",
+                    missionID: "m-1",
+                    parallelMode: "exclusive",
+                    riskLevel: "low",
+                    requiresHumanApproval: false,
+                    acceptanceCriteria: [],
+                    expectedArtifacts: [],
+                    relatedBranch: "branch-b",
+                    relatedWorktree: "worktree-b",
+                    relatedPR: "",
+                    createdAt: "",
+                    updatedAt: ""
+                ),
+                IssueDTO(
+                    sessionID: "sess-wt-fallback",
+                    taskID: "issue-branch",
+                    missionID: "m-1",
+                    parallelMode: "exclusive",
+                    riskLevel: "low",
+                    requiresHumanApproval: false,
+                    acceptanceCriteria: [],
+                    expectedArtifacts: [],
+                    relatedBranch: "branch-c",
+                    relatedWorktree: "",
+                    relatedPR: "",
+                    createdAt: "",
+                    updatedAt: ""
+                )
+            ],
+            leases: [
+                LeaseDTO(
+                    id: "lease-wt-1",
+                    sessionID: "sess-wt-fallback",
+                    taskID: "lease-wt",
+                    agentID: "agent-a",
+                    state: "active",
+                    expiresAt: "2099-01-01T00:00:00",
+                    worktreeName: "lease-worktree",
+                    createdAt: "",
+                    updatedAt: ""
+                ),
+                LeaseDTO(
+                    id: "lease-wt-2",
+                    sessionID: "sess-wt-fallback",
+                    taskID: "issue-wt",
+                    agentID: "agent-b",
+                    state: "active",
+                    expiresAt: "2099-01-01T00:00:00",
+                    worktreeName: "",
+                    createdAt: "",
+                    updatedAt: ""
+                )
+            ],
+            failures: [],
+            events: []
+        )
+
+        let presentation = TaskMarketSnapshotPresentation(snapshot: snapshot)
+
+        let leaseWT = try #require(presentation.rows.first { $0.taskID == "lease-wt" })
+        #expect(leaseWT.worktreeLabel == "lease-worktree")
+
+        let issueWT = try #require(presentation.rows.first { $0.taskID == "issue-wt" })
+        #expect(issueWT.worktreeLabel == "worktree-b")
+
+        let issueBranch = try #require(presentation.rows.first { $0.taskID == "issue-branch" })
+        #expect(issueBranch.worktreeLabel == "branch-c")
     }
 
     // MARK: - Helpers

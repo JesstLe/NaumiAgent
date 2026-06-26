@@ -28,6 +28,8 @@ struct AppStringsTaskMarketTests {
         #expect(AppStrings.TaskMarket.acceptanceCriteriaTitle(.zhCN) == "验收标准")
         #expect(AppStrings.TaskMarket.requiresApprovalLabel(.zhCN) == "需要人工审批")
         #expect(AppStrings.TaskMarket.bidsNotAvailable(.zhCN) == "当前快照未提供竞标数据")
+        #expect(AppStrings.TaskMarket.leaseAgentLabel(.zhCN) == "租约代理")
+        #expect(AppStrings.TaskMarket.leaseExpiresAtLabel(.zhCN) == "过期时间")
     }
 
     @Test func coreTaskMarketStringsEnUS() {
@@ -55,6 +57,8 @@ struct AppStringsTaskMarketTests {
         #expect(AppStrings.TaskMarket.acceptanceCriteriaTitle(.enUS) == "Acceptance Criteria")
         #expect(AppStrings.TaskMarket.requiresApprovalLabel(.enUS) == "Requires human approval")
         #expect(AppStrings.TaskMarket.bidsNotAvailable(.enUS) == "Bid data is not available in the current snapshot")
+        #expect(AppStrings.TaskMarket.leaseAgentLabel(.enUS) == "Lease Agent")
+        #expect(AppStrings.TaskMarket.leaseExpiresAtLabel(.enUS) == "Expires At")
     }
 
     @Test func allTaskMarketStringsAreNonEmpty() {
@@ -83,6 +87,8 @@ struct AppStringsTaskMarketTests {
             AppStrings.TaskMarket.acceptanceCriteriaTitle,
             AppStrings.TaskMarket.requiresApprovalLabel,
             AppStrings.TaskMarket.bidsNotAvailable,
+            AppStrings.TaskMarket.leaseAgentLabel,
+            AppStrings.TaskMarket.leaseExpiresAtLabel,
         ]
 
         for string in strings {

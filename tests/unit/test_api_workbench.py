@@ -62,6 +62,7 @@ class _FakeWorkbenchService:
             "missions": [],
             "tasks": [],
             "issues": [],
+            "leases": [],
             "failures": [],
             "events": [],
         }
@@ -286,6 +287,8 @@ async def test_workbench_snapshot_endpoint_returns_service_snapshot() -> None:
     assert engine.loaded == ["sess-1"]
     assert response["session_id"] == "sess-1"
     assert "missions" in response
+    assert "leases" in response
+    assert response["leases"] == []
     assert "events" in response
 
 
