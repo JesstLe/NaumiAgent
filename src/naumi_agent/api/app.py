@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI):
     app.state.engine = engine
     app.state.config = config
     app.state.engine_lock = asyncio.Lock()
+    app.state.started_at = datetime.now(UTC).replace(microsecond=0).isoformat()
     yield
     await engine.shutdown()
 

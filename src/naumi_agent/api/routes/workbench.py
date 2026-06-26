@@ -2,16 +2,38 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from naumi_agent import __version__
 from naumi_agent.api.deps import AuthDep
 from naumi_agent.workbench.market import TaskMarket
 from naumi_agent.workbench.models import ParallelMode, RiskLevel
 
 router = APIRouter(tags=["workbench"])
+
+
+class DaemonStatusResponse(BaseModel):
+    status: str
+    version: str
+    pid: int
+    host: str
+    port: int
+    started_at: str
+    workspace_count: int
+
+
+class WorkbenchCapabilitiesResponse(BaseModel):
+    supports_daemon_management: bool
+    supports_workspace_registry: bool
+    supports_validation_runner: bool
+    supports_cloud_sync: bool
+    supported_locales: list[str]
+    protocol_version: int
 
 
 class MissionCreate(BaseModel):
@@ -39,6 +61,46 @@ def _get_task_market(engine) -> TaskMarket:
     return TaskMarket(
         task_store=engine.task_store,
         workbench_store=engine.workbench_store,
+    )
+
+
+async def _count_workspaces(engine) -> int:
+    session_store = getattr(engine, "session_store", None)
+    if session_store is None:
+        return 0
+    try:
+        _, total = await session_store.list_sessions(page=1, page_size=1)
+        return int(total)
+    except (AttributeError, TypeError, ValueError):
+        return 0
+
+
+@router.get("/workbench/daemon/status", response_model=DaemonStatusResponse)
+async def get_daemon_status(request: Request, auth: str = AuthDep):
+    engine = request.app.state.engine
+    started_at = getattr(request.app.state, "started_at", None)
+    if started_at is None:
+        started_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+    return DaemonStatusResponse(
+        status="running",
+        version=__version__,
+        pid=os.getpid(),
+        host=request.url.hostname or "127.0.0.1",
+        port=request.url.port or 8765,
+        started_at=started_at,
+        workspace_count=await _count_workspaces(engine),
+    )
+
+
+@router.get("/workbench/capabilities", response_model=WorkbenchCapabilitiesResponse)
+async def get_workbench_capabilities(request: Request, auth: str = AuthDep):
+    return WorkbenchCapabilitiesResponse(
+        supports_daemon_management=False,
+        supports_workspace_registry=False,
+        supports_validation_runner=True,
+        supports_cloud_sync=False,
+        supported_locales=["zh-CN", "en-US"],
+        protocol_version=1,
     )
 
 
