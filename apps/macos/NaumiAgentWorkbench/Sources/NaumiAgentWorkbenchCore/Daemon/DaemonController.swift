@@ -23,7 +23,12 @@ public final class DaemonController: Sendable {
     ///
     /// - Sets `connectionState` to `.connecting` and clears `lastError`.
     /// - On success, writes `daemonStatus` and `capabilities`, then sets `.connected`.
-    /// - On failure, writes the `APIError` to `lastError` and sets `.disconnected`.
+    /// - If a session is already selected, refreshes its snapshot; otherwise picks
+    ///   the most recent session from `GET /sessions` and refreshes that snapshot.
+    /// - Snapshot/session failures keep the daemon `.connected` and record the
+    ///   error in `lastError` while clearing stale snapshot data.
+    /// - On status/capabilities failure, writes the `APIError` to `lastError`
+    ///   and sets `.disconnected`.
     public func refreshConnection() async {
         appState.connectionState = .connecting
         appState.lastError = nil
@@ -35,9 +40,40 @@ public final class DaemonController: Sendable {
             appState.daemonStatus = status
             appState.capabilities = capabilities
             appState.connectionState = .connected
+
+            await refreshSnapshot()
         } catch {
             appState.lastError = error
             appState.connectionState = .disconnected
+        }
+    }
+
+    private func refreshSnapshot() async {
+        let sessionID: String
+        if let existingID = appState.selectedSessionID {
+            sessionID = existingID
+        } else {
+            do {
+                let list = try await apiProvider.fetchSessions(page: 1, pageSize: 1)
+                guard let firstSession = list.sessions.first else {
+                    appState.snapshot = nil
+                    return
+                }
+                sessionID = firstSession.id
+                appState.selectedSessionID = sessionID
+            } catch {
+                appState.lastError = error
+                appState.snapshot = nil
+                return
+            }
+        }
+
+        do {
+            let snapshot = try await apiProvider.fetchSnapshot(sessionID: sessionID)
+            appState.snapshot = snapshot
+        } catch {
+            appState.lastError = error
+            appState.snapshot = nil
         }
     }
 }

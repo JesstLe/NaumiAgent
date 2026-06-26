@@ -8,4 +8,5 @@ public protocol WorkbenchAPIProviding: Sendable {
     func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO
     func fetchCapabilities() async throws(APIError) -> CapabilitiesDTO
     func fetchSnapshot(sessionID: String) async throws(APIError) -> WorkbenchSnapshotDTO
+    func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO
 }
