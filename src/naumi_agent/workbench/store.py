@@ -221,6 +221,30 @@ class WorkbenchStore:
             await db.commit()
         return issue
 
+    async def set_issue_worktree(
+        self,
+        *,
+        session_id: str,
+        task_id: str,
+        worktree_name: str,
+    ) -> IssueMetadata | None:
+        existing = await self.get_issue(session_id, task_id)
+        if existing is None:
+            return None
+        return await self.upsert_issue(
+            session_id=session_id,
+            task_id=task_id,
+            mission_id=existing.mission_id,
+            parallel_mode=existing.parallel_mode,
+            risk_level=existing.risk_level,
+            requires_human_approval=existing.requires_human_approval,
+            acceptance_criteria=existing.acceptance_criteria,
+            expected_artifacts=existing.expected_artifacts,
+            related_branch=existing.related_branch,
+            related_worktree=worktree_name,
+            related_pr=existing.related_pr,
+        )
+
     async def get_issue(self, session_id: str, task_id: str) -> IssueMetadata | None:
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
