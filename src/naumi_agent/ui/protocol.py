@@ -63,6 +63,8 @@ class ServerEventType(StrEnum):
     PERMISSION_REQUEST = "permission/request"
     PERMISSION_RESOLVED = "permission/resolved"
     DEBUG_TRACE = "debug/trace"
+    WORKBENCH_SNAPSHOT = "workbench/snapshot"
+    WORKBENCH_EVENT = "workbench/event"
     SHUTDOWN = "shutdown"
 
 
