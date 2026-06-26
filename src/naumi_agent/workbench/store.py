@@ -9,6 +9,7 @@ from typing import Any, cast
 import aiosqlite
 
 from naumi_agent.workbench.models import (
+    ContextHealth,
     Decision,
     DecisionKind,
     IntentLock,
@@ -106,6 +107,18 @@ CREATE TABLE IF NOT EXISTS workbench_leases (
 )
 """
 
+_CREATE_CONTEXT_SNAPSHOTS = """
+CREATE TABLE IF NOT EXISTS workbench_context_snapshots (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    health TEXT NOT NULL,
+    reasons TEXT NOT NULL,
+    created_at TEXT NOT NULL
+)
+"""
+
 
 class WorkbenchStore:
     """SQLite-backed state for the workbench dashboard."""
@@ -123,6 +136,7 @@ class WorkbenchStore:
         await db.execute(_CREATE_EVENTS)
         await db.execute(_CREATE_INTENT_LOCKS)
         await db.execute(_CREATE_LEASES)
+        await db.execute(_CREATE_CONTEXT_SNAPSHOTS)
         await db.commit()
         self._initialized = True
 
@@ -499,6 +513,43 @@ class WorkbenchStore:
                 (expires_at, lease_id),
             )
             await db.commit()
+
+    async def record_context_snapshot(
+        self,
+        *,
+        session_id: str,
+        agent_id: str,
+        task_id: str,
+        health: ContextHealth,
+        reasons: list[str],
+    ) -> dict[str, Any]:
+        snapshot = {
+            "id": uuid.uuid4().hex[:12],
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "task_id": task_id,
+            "health": health.value,
+            "reasons": reasons,
+            "created_at": now_iso(),
+        }
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                """INSERT INTO workbench_context_snapshots
+                   (id, session_id, agent_id, task_id, health, reasons, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    snapshot["id"],
+                    session_id,
+                    agent_id,
+                    task_id,
+                    health.value,
+                    json.dumps(reasons, ensure_ascii=False),
+                    snapshot["created_at"],
+                ),
+            )
+            await db.commit()
+        return snapshot
 
 
 def _row_to_issue(row: dict[str, Any]) -> IssueMetadata:
