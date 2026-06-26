@@ -1,5 +1,10 @@
 """Local-first collaboration workbench for NaumiAgent."""
 
+from naumi_agent.workbench.context_health import (
+    ContextHealthInput,
+    ContextHealthResult,
+    evaluate_context_health,
+)
 from naumi_agent.workbench.market import TaskMarket
 from naumi_agent.workbench.models import (
     AgentProfile,
@@ -24,6 +29,8 @@ __all__ = [
     "AgentProfile",
     "ApprovalState",
     "ContextHealth",
+    "ContextHealthInput",
+    "ContextHealthResult",
     "Decision",
     "DecisionKind",
     "FailureKind",
@@ -38,5 +45,6 @@ __all__ = [
     "TaskMarket",
     "WorkbenchEvent",
     "WorkbenchStore",
+    "evaluate_context_health",
     "evaluate_intent_locks",
 ]
