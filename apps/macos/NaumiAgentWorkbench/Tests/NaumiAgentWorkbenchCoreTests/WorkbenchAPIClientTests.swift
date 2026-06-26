@@ -443,6 +443,189 @@ final class WorkbenchAPIClientTests {
         #expect(lease.state == "released")
     }
 
+    @Test func createMission() async throws {
+        let missionJSON = Data(
+            """
+            {"id":"mission-001","session_id":"sess-001","title":"Mac 工作台","goal":"补齐 API 调用面","status":"active","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/missions" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["title"] as? String == "Mac 工作台",
+                  json?["goal"] as? String == "补齐 API 调用面" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, missionJSON)
+        }
+
+        let client = makeClient()
+        let mission = try await client.createMission(
+            sessionID: "sess-001",
+            title: "Mac 工作台",
+            goal: "补齐 API 调用面"
+        )
+
+        #expect(mission.id == "mission-001")
+        #expect(mission.sessionID == "sess-001")
+        #expect(mission.title == "Mac 工作台")
+        #expect(mission.goal == "补齐 API 调用面")
+        #expect(mission.status == "active")
+    }
+
+    @Test func createMissionEncodesPathComponents() async throws {
+        let sessionID = "sess 中文"
+        let missionJSON = Data(
+            """
+            {"id":"mission-002","session_id":"sess 中文","title":"Title","goal":"Goal","status":"active","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/missions" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, missionJSON)
+        }
+
+        let client = makeClient()
+        let mission = try await client.createMission(
+            sessionID: sessionID,
+            title: "Title",
+            goal: "Goal"
+        )
+
+        #expect(mission.sessionID == sessionID)
+    }
+
+    @Test func attachIssue() async throws {
+        let issueJSON = Data(
+            """
+            {"session_id":"sess-001","task_id":"task-001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"medium","requires_human_approval":false,"acceptance_criteria":["通过 Swift 编译"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/missions/mission-001/issues" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["task_id"] as? String == "task-001",
+                  let criteria = json?["acceptance_criteria"] as? [String],
+                  criteria == ["通过 Swift 编译"],
+                  json?["parallel_mode"] as? String == "exclusive",
+                  json?["risk_level"] as? String == "medium" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, issueJSON)
+        }
+
+        let client = makeClient()
+        let issue = try await client.attachIssue(
+            sessionID: "sess-001",
+            missionID: "mission-001",
+            taskID: "task-001",
+            acceptanceCriteria: ["通过 Swift 编译"],
+            parallelMode: "exclusive",
+            riskLevel: "medium"
+        )
+
+        #expect(issue.sessionID == "sess-001")
+        #expect(issue.taskID == "task-001")
+        #expect(issue.missionID == "mission-001")
+        #expect(issue.parallelMode == "exclusive")
+        #expect(issue.riskLevel == "medium")
+        #expect(issue.acceptanceCriteria == ["通过 Swift 编译"])
+    }
+
+    @Test func attachIssueEncodesPathComponentsAndBody() async throws {
+        let missionID = "mission 中文"
+        let taskID = "task 001/审查"
+        let issueJSON = Data(
+            """
+            {"session_id":"sess-001","task_id":"task 001/审查","mission_id":"mission 中文","parallel_mode":"cooperative","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["criteria 1"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/missions/mission%20%E4%B8%AD%E6%96%87/issues" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["task_id"] as? String == taskID,
+                  let criteria = json?["acceptance_criteria"] as? [String],
+                  criteria == ["criteria 1"] else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, issueJSON)
+        }
+
+        let client = makeClient()
+        let issue = try await client.attachIssue(
+            sessionID: "sess-001",
+            missionID: missionID,
+            taskID: taskID,
+            acceptanceCriteria: ["criteria 1"],
+            parallelMode: "cooperative",
+            riskLevel: "high"
+        )
+
+        #expect(issue.missionID == missionID)
+        #expect(issue.taskID == taskID)
+    }
+
     // MARK: - Helpers
 
     private func makeClient() -> WorkbenchAPIClient {

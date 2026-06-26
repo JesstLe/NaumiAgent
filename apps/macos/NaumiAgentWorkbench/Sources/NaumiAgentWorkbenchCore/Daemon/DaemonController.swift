@@ -215,4 +215,59 @@ public final class DaemonController: Sendable {
             appState.lastError = error
         }
     }
+
+    /// Creates a mission in the selected session and refreshes the snapshot on success.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the local snapshot is never mutated directly.
+    public func createMission(title: String, goal: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            _ = try await apiProvider.createMission(
+                sessionID: sessionID,
+                title: title,
+                goal: goal
+            )
+            await refreshSnapshot()
+        } catch {
+            appState.lastError = error
+        }
+    }
+
+    /// Attaches an issue to a mission and refreshes the snapshot on success.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the local snapshot is never mutated directly.
+    public func attachIssue(
+        missionID: String,
+        taskID: String,
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            _ = try await apiProvider.attachIssue(
+                sessionID: sessionID,
+                missionID: missionID,
+                taskID: taskID,
+                acceptanceCriteria: acceptanceCriteria,
+                parallelMode: parallelMode,
+                riskLevel: riskLevel
+            )
+            await refreshSnapshot()
+        } catch {
+            appState.lastError = error
+        }
+    }
 }

@@ -19,4 +19,22 @@ public struct MissionDTO: Decodable, Equatable, Sendable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
+
+    public init(
+        id: String,
+        sessionID: String,
+        title: String,
+        goal: String,
+        status: String,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.title = title
+        self.goal = goal
+        self.status = status
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
 }

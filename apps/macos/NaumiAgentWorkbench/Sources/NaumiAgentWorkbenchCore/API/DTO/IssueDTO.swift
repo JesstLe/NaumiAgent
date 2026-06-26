@@ -31,4 +31,34 @@ public struct IssueDTO: Decodable, Equatable, Sendable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
+
+    public init(
+        sessionID: String,
+        taskID: String,
+        missionID: String,
+        parallelMode: String,
+        riskLevel: String,
+        requiresHumanApproval: Bool,
+        acceptanceCriteria: [String],
+        expectedArtifacts: [String],
+        relatedBranch: String,
+        relatedWorktree: String,
+        relatedPR: String,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        self.sessionID = sessionID
+        self.taskID = taskID
+        self.missionID = missionID
+        self.parallelMode = parallelMode
+        self.riskLevel = riskLevel
+        self.requiresHumanApproval = requiresHumanApproval
+        self.acceptanceCriteria = acceptanceCriteria
+        self.expectedArtifacts = expectedArtifacts
+        self.relatedBranch = relatedBranch
+        self.relatedWorktree = relatedWorktree
+        self.relatedPR = relatedPR
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
 }

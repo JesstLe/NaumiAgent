@@ -39,4 +39,21 @@ public protocol WorkbenchAPIProviding: Sendable {
 
     /// Releases an existing lease, returning the updated lease record.
     func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO
+
+    /// Creates a mission inside the selected session.
+    func createMission(
+        sessionID: String,
+        title: String,
+        goal: String
+    ) async throws(APIError) -> MissionDTO
+
+    /// Attaches an issue to a mission.
+    func attachIssue(
+        sessionID: String,
+        missionID: String,
+        taskID: String,
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async throws(APIError) -> IssueDTO
 }
