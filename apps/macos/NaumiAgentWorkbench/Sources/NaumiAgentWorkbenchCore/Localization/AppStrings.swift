@@ -110,6 +110,70 @@ public enum AppStrings {
         public static func errorDetailLabel(_ locale: AppLocale) -> String {
             locale == .zhCN ? "详情" : "Details"
         }
+
+        public static func missionSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "当前目标" : "Current Mission"
+        }
+
+        public static func taskQueueSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "任务队列" : "Task Queue"
+        }
+
+        public static func failuresSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "失败验证" : "Validation Failures"
+        }
+
+        public static func eventsSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "最近事件" : "Recent Events"
+        }
+
+        public static func statusLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "状态" : "Status"
+        }
+
+        public static func ownerLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "负责人" : "Owner"
+        }
+
+        public static func riskLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "风险" : "Risk"
+        }
+
+        public static func activeFormLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "当前形态" : "Active Form"
+        }
+
+        public static func kindLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "类型" : "Kind"
+        }
+
+        public static func actorLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "执行者" : "Actor"
+        }
+
+        public static func parallelModeLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "并行模式" : "Parallel Mode"
+        }
+
+        public static func acceptanceCriteriaLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "验收标准" : "Acceptance Criteria"
+        }
+
+        public static func subjectsLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "对象" : "Subject"
+        }
+
+        public static func emptyTasks(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无任务" : "No tasks"
+        }
+
+        public static func emptyFailures(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无失败" : "No failures"
+        }
+
+        public static func emptyEvents(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无事件" : "No events"
+        }
     }
 
     // MARK: - Errors

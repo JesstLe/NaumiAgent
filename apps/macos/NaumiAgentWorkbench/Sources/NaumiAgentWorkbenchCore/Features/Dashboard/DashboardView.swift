@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Minimal usable dashboard homepage.
-/// Displays connection state, daemon/version and counts of missions/tasks/issues/failures/events.
+/// Displays connection state, daemon/version, counts and the current snapshot content.
 public struct DashboardView: View {
     @Bindable public var appState: AppState
 
@@ -17,6 +17,9 @@ public struct DashboardView: View {
                     daemonCard(status: status)
                 }
                 countsGrid
+                if let snapshot = appState.snapshot {
+                    snapshotContent(snapshot: snapshot)
+                }
                 if let lastError = appState.lastError {
                     errorCard(error: lastError)
                 }
@@ -91,7 +94,7 @@ public struct DashboardView: View {
         }
         .padding()
         .background(Color.secondary.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func detailItem(label: String, value: String) -> some View {
@@ -159,7 +162,225 @@ public struct DashboardView: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: - Snapshot Content
+
+    private func snapshotContent(snapshot: WorkbenchSnapshotDTO) -> some View {
+        let presentation = DashboardSnapshotPresentation(snapshot: snapshot)
+
+        return VStack(alignment: .leading, spacing: 20) {
+            if let mission = presentation.currentMission {
+                missionCard(mission: mission)
+            }
+            taskQueueSection(rows: presentation.taskRows)
+            failuresSection(rows: presentation.failureRows)
+            eventsSection(rows: presentation.recentEventRows)
+        }
+    }
+
+    private func missionCard(mission: DashboardMissionSummary) -> some View {
+        sectionCard(title: AppStrings.Dashboard.missionSection(appState.locale)) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(mission.title)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                HStack(spacing: 16) {
+                    detailItem(
+                        label: AppStrings.Dashboard.statusLabel(appState.locale),
+                        value: mission.status
+                    )
+                }
+            }
+        }
+    }
+
+    private func taskQueueSection(rows: [DashboardTaskRow]) -> some View {
+        sectionCard(title: AppStrings.Dashboard.taskQueueSection(appState.locale)) {
+            VStack(alignment: .leading, spacing: 12) {
+                if rows.isEmpty {
+                    emptyListLabel(AppStrings.Dashboard.emptyTasks(appState.locale))
+                } else {
+                    ForEach(rows, id: \.id) { row in
+                        taskRowView(row: row)
+                        if row.id != rows.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func taskRowView(row: DashboardTaskRow) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text(row.subject)
+                    .font(.body)
+                    .fontWeight(.medium)
+                Spacer()
+                StatusBadge(text: row.status, color: statusColor(for: row.status))
+            }
+
+            HStack(spacing: 16) {
+                if let owner = row.owner {
+                    detailItem(
+                        label: AppStrings.Dashboard.ownerLabel(appState.locale),
+                        value: owner
+                    )
+                }
+                if let activeForm = row.activeForm {
+                    detailItem(
+                        label: AppStrings.Dashboard.activeFormLabel(appState.locale),
+                        value: activeForm
+                    )
+                }
+            }
+
+            if row.riskLevel != nil || row.parallelMode != nil {
+                HStack(spacing: 16) {
+                    if let riskLevel = row.riskLevel {
+                        detailItem(
+                            label: AppStrings.Dashboard.riskLabel(appState.locale),
+                            value: riskLevel
+                        )
+                    }
+                    if let parallelMode = row.parallelMode {
+                        detailItem(
+                            label: AppStrings.Dashboard.parallelModeLabel(appState.locale),
+                            value: parallelMode
+                        )
+                    }
+                    if let count = row.acceptanceCriteriaCount {
+                        detailItem(
+                            label: AppStrings.Dashboard.acceptanceCriteriaLabel(appState.locale),
+                            value: "\(count)"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func failuresSection(rows: [DashboardFailureRow]) -> some View {
+        sectionCard(title: AppStrings.Dashboard.failuresSection(appState.locale)) {
+            VStack(alignment: .leading, spacing: 12) {
+                if rows.isEmpty {
+                    emptyListLabel(AppStrings.Dashboard.emptyFailures(appState.locale))
+                } else {
+                    ForEach(rows, id: \.id) { row in
+                        failureRowView(row: row)
+                        if row.id != rows.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func failureRowView(row: DashboardFailureRow) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text(row.title)
+                    .font(.body)
+                    .fontWeight(.medium)
+                Spacer()
+                StatusBadge(text: row.status, color: .red)
+            }
+            HStack(spacing: 16) {
+                detailItem(
+                    label: AppStrings.Dashboard.kindLabel(appState.locale),
+                    value: row.kind
+                )
+                detailItem(
+                    label: AppStrings.Dashboard.tasksLabel(appState.locale),
+                    value: row.taskID
+                )
+            }
+        }
+    }
+
+    private func eventsSection(rows: [DashboardEventRow]) -> some View {
+        sectionCard(title: AppStrings.Dashboard.eventsSection(appState.locale)) {
+            VStack(alignment: .leading, spacing: 12) {
+                if rows.isEmpty {
+                    emptyListLabel(AppStrings.Dashboard.emptyEvents(appState.locale))
+                } else {
+                    ForEach(rows, id: \.id) { row in
+                        eventRowView(row: row)
+                        if row.id != rows.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func eventRowView(row: DashboardEventRow) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text(row.type)
+                    .font(.body)
+                    .fontWeight(.medium)
+                Spacer()
+                Text(row.timestamp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 16) {
+                detailItem(
+                    label: AppStrings.Dashboard.actorLabel(appState.locale),
+                    value: row.actor
+                )
+                detailItem(
+                    label: AppStrings.Dashboard.subjectsLabel(appState.locale),
+                    value: row.subjectID
+                )
+            }
+        }
+    }
+
+    private func sectionCard<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+            content()
+        }
+        .padding()
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func emptyListLabel(_ text: String) -> some View {
+        HStack {
+            Spacer()
+            Text(text)
+                .foregroundStyle(.secondary)
+                .font(.callout)
+            Spacer()
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func statusColor(for status: String) -> Color {
+        switch status.lowercased() {
+        case "completed", "done", "closed", "resolved":
+            return .green
+        case "in_progress", "running", "active":
+            return .blue
+        case "blocked", "failed", "open":
+            return .red
+        case "planning", "pending", "waiting":
+            return .orange
+        default:
+            return .secondary
+        }
     }
 
     // MARK: - Error Card
@@ -178,7 +399,7 @@ public struct DashboardView: View {
         }
         .padding()
         .background(Color.red.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Empty State
