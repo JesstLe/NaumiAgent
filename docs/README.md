@@ -22,3 +22,14 @@
 - [第十二部分：优化路线图](./12-optimization-roadmap.md)
 - [第十三部分：CLI/TUI Claude Code 化路线图](./13-cli-tui-claude-code-roadmap.md)
 - [第十四部分：未来架构重构方案](./14-future-architecture-refactor-plan.md)
+
+## Mac Agent Workbench
+
+- [Mac Agent Workbench PRD](./product/mac-agent-workbench-prd.md)
+- [Mac Agent Workbench 用户工作流](./product/mac-agent-workbench-user-flows.md)
+- [Mac Agent Workbench 架构设计](./design/mac-agent-workbench-architecture.md)
+- [Mac Agent Workbench 领域模型](./design/mac-agent-workbench-domain-model.md)
+- [Mac Agent Workbench 事件协议](./design/mac-agent-workbench-event-protocol.md)
+- [Mac Agent Workbench 治理策略](./design/mac-agent-workbench-governance.md)
+- [Mac Agent Workbench 测试策略](./quality/mac-agent-workbench-test-strategy.md)
+- [Mac Agent Workbench 验收标准](./quality/mac-agent-workbench-acceptance.md)
