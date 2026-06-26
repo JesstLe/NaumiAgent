@@ -16,6 +16,7 @@ from naumi_agent.workbench.models import (
     RiskLevel,
     WorkbenchEvent,
 )
+from naumi_agent.workbench.store import WorkbenchStore
 
 __all__ = [
     "AgentProfile",
@@ -32,4 +33,5 @@ __all__ = [
     "ParallelMode",
     "RiskLevel",
     "WorkbenchEvent",
+    "WorkbenchStore",
 ]
