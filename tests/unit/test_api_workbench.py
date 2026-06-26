@@ -22,6 +22,7 @@ from naumi_agent.api.routes.workbench import (
     expire_workbench_leases,
     get_daemon_status,
     get_workbench_capabilities,
+    get_workbench_events,
     get_workbench_snapshot,
     release_workbench_lease,
 )
@@ -42,6 +43,7 @@ class _FakeWorkbenchService:
     def __init__(self) -> None:
         self.created_missions: list[dict] = []
         self.attached_issues: list[dict] = []
+        self.listed_events: list[dict] = []
 
     async def dashboard_snapshot(self, session_id: str):
         return {
@@ -99,6 +101,20 @@ class _FakeWorkbenchService:
             "created_at": "2024-01-01T00:00:00",
             "updated_at": "2024-01-01T00:00:00",
         }
+
+    async def list_events(self, session_id: str, limit: int = 50):
+        self.listed_events.append({"session_id": session_id, "limit": limit})
+        return [
+            {
+                "id": "evt-1",
+                "session_id": session_id,
+                "type": "mission.created",
+                "actor": "Human",
+                "subject_id": "mission-1",
+                "payload": {"title": "Mac 工作台"},
+                "timestamp": "2024-01-01T00:00:00",
+            }
+        ]
 
 
 class FakeTaskMarket:
@@ -211,6 +227,43 @@ async def test_workbench_snapshot_endpoint_returns_service_snapshot() -> None:
     assert response["session_id"] == "sess-1"
     assert "missions" in response
     assert "events" in response
+
+
+@pytest.mark.asyncio
+async def test_get_events_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_workbench_events("missing", _fake_request(engine), limit=10, auth="test")
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_get_events_endpoint_returns_events_and_limit() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_workbench_events("sess-1", _fake_request(engine), limit=25, auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_events == [
+        {"session_id": "sess-1", "limit": 25}
+    ]
+    assert response.model_dump() == {
+        "events": [
+            {
+                "id": "evt-1",
+                "session_id": "sess-1",
+                "type": "mission.created",
+                "actor": "Human",
+                "subject_id": "mission-1",
+                "payload": {"title": "Mac 工作台"},
+                "timestamp": "2024-01-01T00:00:00",
+            }
+        ],
+        "limit": 25,
+    }
 
 
 @pytest.mark.asyncio

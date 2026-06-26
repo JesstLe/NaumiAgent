@@ -5,8 +5,9 @@ from __future__ import annotations
 import os
 from dataclasses import asdict
 from datetime import UTC, datetime
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from naumi_agent import __version__
@@ -52,6 +53,11 @@ class ClaimIssue(BaseModel):
     agent_id: str
     duration_minutes: int = Field(default=45, ge=1)
     worktree_name: str = ""
+
+
+class WorkbenchEventsResponse(BaseModel):
+    events: list[dict[str, Any]]
+    limit: int
 
 
 def _get_task_market(engine) -> TaskMarket:
@@ -113,6 +119,26 @@ async def get_workbench_snapshot(session_id: str, request: Request, auth: str = 
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     return await engine.workbench_service.dashboard_snapshot(session_id)
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/events",
+    response_model=WorkbenchEventsResponse,
+)
+async def get_workbench_events(
+    session_id: str,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    events = await engine.workbench_service.list_events(session_id, limit=limit)
+    return WorkbenchEventsResponse(events=events, limit=limit)
 
 
 @router.post("/workbench/sessions/{session_id}/missions", status_code=201)
