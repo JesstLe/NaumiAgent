@@ -206,6 +206,30 @@ class WorkbenchStore:
             await db.commit()
         return mission
 
+    async def list_missions(self, session_id: str) -> list[Mission]:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_missions
+                   WHERE session_id = ?
+                   ORDER BY created_at""",
+                (session_id,),
+            )
+            rows = await cursor.fetchall()
+        return [
+            Mission(
+                id=row["id"],
+                session_id=row["session_id"],
+                title=row["title"],
+                goal=row["goal"],
+                status=row["status"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
     async def upsert_issue(
         self,
         *,
