@@ -273,6 +273,95 @@ final class WorkbenchAPIClientTests {
         #expect(response.validationRuns.isEmpty)
     }
 
+    @Test func fetchContextSnapshotsWithTaskIDAndAgentID() async throws {
+        let taskID = "task 001/审查"
+        let agentID = "agent 001/测试"
+        let json = Data(
+            """
+            {"context_snapshots":[{"id":"snap-001","session_id":"sess-001","agent_id":"agent 001/测试","task_id":"task 001/审查","health":"good","reasons":["上下文健康"],"created_at":"2026-06-27T06:00:00"}],"task_id":"task 001/审查","agent_id":"agent 001/测试","limit":25}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.path == "/api/v1/workbench/sessions/sess-001/context-snapshots",
+                  query["limit"] == "25",
+                  query["task_id"] == taskID,
+                  query["agent_id"] == agentID else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchContextSnapshots(
+            sessionID: "sess-001",
+            taskID: taskID,
+            agentID: agentID,
+            limit: 25
+        )
+
+        #expect(response.taskID == taskID)
+        #expect(response.agentID == agentID)
+        #expect(response.limit == 25)
+        #expect(response.contextSnapshots.count == 1)
+
+        let snapshot = try #require(response.contextSnapshots.first)
+        #expect(snapshot.id == "snap-001")
+        #expect(snapshot.sessionID == "sess-001")
+        #expect(snapshot.agentID == agentID)
+        #expect(snapshot.taskID == taskID)
+        #expect(snapshot.health == "good")
+        #expect(snapshot.reasons == ["上下文健康"])
+        #expect(snapshot.createdAt == "2026-06-27T06:00:00")
+    }
+
+    @Test func fetchContextSnapshotsWithoutOptionalFilters() async throws {
+        let json = Data(
+            """
+            {"context_snapshots":[],"task_id":null,"agent_id":null,"limit":50}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/context-snapshots?limit=50" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchContextSnapshots(
+            sessionID: "sess-001",
+            taskID: nil,
+            agentID: nil,
+            limit: 50
+        )
+
+        #expect(response.taskID == nil)
+        #expect(response.agentID == nil)
+        #expect(response.limit == 50)
+        #expect(response.contextSnapshots.isEmpty)
+    }
+
     @Test func claimIssue() async throws {
         let leaseJSON = Data(
             """

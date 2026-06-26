@@ -10,6 +10,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var sessionsResult: Result<SessionListDTO, APIError>?
     var eventsResult: Result<WorkbenchEventsDTO, APIError>?
     var validationRunsResult: Result<ValidationRunsDTO, APIError>?
+    var contextSnapshotsResult: Result<ContextSnapshotsDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
 
@@ -54,6 +55,18 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> ValidationRunsDTO {
         guard let result = validationRunsResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchContextSnapshots(
+        sessionID: String,
+        taskID: String?,
+        agentID: String?,
+        limit: Int
+    ) async throws(APIError) -> ContextSnapshotsDTO {
+        guard let result = contextSnapshotsResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -498,6 +511,84 @@ final class DaemonControllerTests {
         #expect(appState.validationRuns == [staleRun])
         #expect(appState.lastError == .httpStatus(500))
     }
+
+    @Test @MainActor func refreshContextSnapshotsSuccessWritesToAppState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let snapshot = ContextSnapshotDTO(
+            id: "snap-001",
+            sessionID: "sess-001",
+            agentID: "agent-001",
+            taskID: "task-001",
+            health: "good",
+            reasons: ["上下文健康"],
+            createdAt: "2026-06-27T06:00:00"
+        )
+        let snapshots = ContextSnapshotsDTO(
+            contextSnapshots: [snapshot],
+            taskID: "task-001",
+            agentID: "agent-001",
+            limit: 25
+        )
+
+        await api.setContextSnapshotsResult(.success(snapshots))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshContextSnapshots(taskID: "task-001", agentID: "agent-001", limit: 25)
+
+        #expect(appState.contextSnapshots == [snapshot])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshContextSnapshotsWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        appState.contextSnapshots = [
+            ContextSnapshotDTO(
+                id: "snap-stale",
+                sessionID: "old-session",
+                agentID: "agent-old",
+                taskID: "task-old",
+                health: "stale",
+                reasons: ["旧数据"],
+                createdAt: "2026-06-27T05:00:00"
+            )
+        ]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshContextSnapshots(limit: 50)
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.contextSnapshots.isEmpty)
+    }
+
+    @Test @MainActor func refreshContextSnapshotsFailurePreservesOldList() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleSnapshot = ContextSnapshotDTO(
+            id: "snap-stale",
+            sessionID: "sess-001",
+            agentID: "agent-001",
+            taskID: "task-001",
+            health: "stale",
+            reasons: ["旧数据"],
+            createdAt: "2026-06-27T05:00:00"
+        )
+        appState.contextSnapshots = [staleSnapshot]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setContextSnapshotsResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshContextSnapshots(limit: 50)
+
+        #expect(appState.contextSnapshots == [staleSnapshot])
+        #expect(appState.lastError == .httpStatus(500))
+    }
 }
 
 extension FakeWorkbenchAPIProvider {
@@ -523,6 +614,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setValidationRunsResult(_ result: Result<ValidationRunsDTO, APIError>) {
         validationRunsResult = result
+    }
+
+    fileprivate func setContextSnapshotsResult(_ result: Result<ContextSnapshotsDTO, APIError>) {
+        contextSnapshotsResult = result
     }
 
     fileprivate func setClaimIssueResult(_ result: Result<LeaseDTO, APIError>) {

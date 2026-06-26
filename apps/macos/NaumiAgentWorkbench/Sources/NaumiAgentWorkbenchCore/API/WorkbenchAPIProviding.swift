@@ -20,6 +20,14 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> ValidationRunsDTO
 
+    /// Fetches context health snapshots for the given session.
+    func fetchContextSnapshots(
+        sessionID: String,
+        taskID: String?,
+        agentID: String?,
+        limit: Int
+    ) async throws(APIError) -> ContextSnapshotsDTO
+
     /// Claims an open issue for the given agent, creating a new lease.
     func claimIssue(
         sessionID: String,
