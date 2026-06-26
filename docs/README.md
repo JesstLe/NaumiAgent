@@ -31,5 +31,6 @@
 - [Mac Agent Workbench 领域模型](./design/mac-agent-workbench-domain-model.md)
 - [Mac Agent Workbench 事件协议](./design/mac-agent-workbench-event-protocol.md)
 - [Mac Agent Workbench 治理策略](./design/mac-agent-workbench-governance.md)
+- [Mac Agent Workbench 界面规格](./design/mac-agent-workbench-interface-spec.md)
 - [Mac Agent Workbench 测试策略](./quality/mac-agent-workbench-test-strategy.md)
 - [Mac Agent Workbench 验收标准](./quality/mac-agent-workbench-acceptance.md)
