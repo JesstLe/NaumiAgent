@@ -40,6 +40,10 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         try await get(path: "sessions?page=\(page)&page_size=\(pageSize)")
     }
 
+    public func fetchEvents(sessionID: String, limit: Int) async throws(APIError) -> WorkbenchEventsDTO {
+        try await get(path: "workbench/sessions/\(sessionID)/events?limit=\(limit)")
+    }
+
     public func claimIssue(
         sessionID: String,
         taskID: String,

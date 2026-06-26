@@ -1,0 +1,281 @@
+import SwiftUI
+
+/// Standalone audit-event timeline for the selected session.
+///
+/// Events are loaded from `GET /workbench/sessions/{id}/events` and never
+/// fabricated locally. The view refreshes automatically on appear and exposes
+/// a manual refresh button in the toolbar.
+public struct TimelineView: View {
+    @Bindable public var appState: AppState
+    public let daemonController: DaemonController
+
+    public init(appState: AppState, daemonController: DaemonController) {
+        self.appState = appState
+        self.daemonController = daemonController
+    }
+
+    public var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                header
+                if let lastError = appState.lastError {
+                    errorCard(error: lastError)
+                }
+                eventList
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .navigationTitle(AppStrings.Timeline.title(appState.locale))
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: {
+                    Task {
+                        await daemonController.refreshEvents(limit: 50)
+                    }
+                }) {
+                    Label(
+                        AppStrings.Timeline.refreshButton(appState.locale),
+                        systemImage: "arrow.clockwise"
+                    )
+                }
+            }
+        }
+        .task {
+            await daemonController.refreshEvents(limit: 50)
+        }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(AppStrings.Timeline.title(appState.locale))
+                .font(.largeTitle)
+                .fontWeight(.bold)
+
+            HStack(spacing: 12) {
+                Text(AppStrings.Timeline.eventCount(appState.locale, count: appState.timelineEvents.count))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                if let sessionID = appState.selectedSessionID {
+                    Text(sessionID)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    // MARK: - Event List
+
+    @ViewBuilder
+    private var eventList: some View {
+        if appState.timelineEvents.isEmpty {
+            emptyState
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(presentedEvents) { event in
+                    eventRow(event: event)
+                    if event.id != presentedEvents.last?.id {
+                        Divider()
+                    }
+                }
+            }
+            .padding()
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private var presentedEvents: [TimelineEventPresentation] {
+        appState.timelineEvents.map(TimelineEventPresentation.init)
+    }
+
+    private func eventRow(event: TimelineEventPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text(event.type)
+                    .font(.body)
+                    .fontWeight(.medium)
+                Spacer()
+                Text(event.timestamp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 16) {
+                detailItem(
+                    label: AppStrings.Timeline.actorLabel(appState.locale),
+                    value: event.actor
+                )
+                detailItem(
+                    label: AppStrings.Timeline.subjectLabel(appState.locale),
+                    value: event.subjectID
+                )
+            }
+
+            if !event.payloadSummary.isEmpty {
+                Text(event.payloadSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private func detailItem(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.body)
+                .fontWeight(.medium)
+        }
+    }
+
+    private func errorCard(error: APIError) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(AppStrings.Dashboard.errorSection(appState.locale))
+                .font(.headline)
+                .foregroundStyle(.red)
+            Text(error.localizedMessage(locale: appState.locale))
+                .font(.body)
+                .foregroundStyle(.red)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.red.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 8) {
+                Image(systemName: "clock.badge.questionmark")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.secondary)
+                Text(AppStrings.Timeline.emptyEvents(appState.locale))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 32)
+    }
+}
+
+#if DEBUG
+struct TimelineView_Previews: PreviewProvider {
+    @MainActor
+    static var previews: some View {
+        let state = AppState()
+        state.locale = .zhCN
+        state.selectedSessionID = "sess-preview"
+        state.timelineEvents = [
+            EventDTO(
+                id: "evt-1",
+                sessionID: "sess-preview",
+                type: "mission.created",
+                actor: "Human",
+                subjectID: "mission-1",
+                payload: ["title": .string("Mac 工作台")],
+                timestamp: "2026-06-27T06:00:00"
+            )
+        ]
+        return TimelineView(
+            appState: state,
+            daemonController: DaemonController(
+                appState: state,
+                apiProvider: PreviewWorkbenchAPIProvider()
+            )
+        )
+        .frame(minWidth: 640, minHeight: 420)
+    }
+}
+
+/// Minimal fake provider so the preview compiles without a real daemon.
+@MainActor
+private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
+    func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
+        DaemonStatusDTO(
+            status: "running",
+            version: "0.1.0",
+            pid: 1,
+            host: "127.0.0.1",
+            port: 8765,
+            startedAt: "2026-06-27T06:00:00",
+            workspaceCount: 0
+        )
+    }
+
+    func fetchCapabilities() async throws(APIError) -> CapabilitiesDTO {
+        CapabilitiesDTO(
+            supportsDaemonManagement: false,
+            supportsWorkspaceRegistry: false,
+            supportsValidationRunner: true,
+            supportsCloudSync: false,
+            supportedLocales: ["zh-CN", "en-US"],
+            protocolVersion: 1
+        )
+    }
+
+    func fetchSnapshot(sessionID: String) async throws(APIError) -> WorkbenchSnapshotDTO {
+        WorkbenchSnapshotDTO(
+            sessionID: sessionID,
+            missions: [],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+    }
+
+    func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO {
+        SessionListDTO(sessions: [], total: 0, page: page, pageSize: pageSize)
+    }
+
+    func fetchEvents(sessionID: String, limit: Int) async throws(APIError) -> WorkbenchEventsDTO {
+        WorkbenchEventsDTO(events: [], limit: limit)
+    }
+
+    func claimIssue(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        durationMinutes: Int,
+        worktreeName: String
+    ) async throws(APIError) -> LeaseDTO {
+        LeaseDTO(
+            id: "lease-1",
+            sessionID: sessionID,
+            taskID: taskID,
+            agentID: agentID,
+            state: "active",
+            expiresAt: "2026-06-27T08:00:00",
+            worktreeName: worktreeName,
+            createdAt: "2026-06-27T06:00:00",
+            updatedAt: "2026-06-27T06:00:00"
+        )
+    }
+
+    func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
+        LeaseDTO(
+            id: leaseID,
+            sessionID: sessionID,
+            taskID: "task-1",
+            agentID: "agent-1",
+            state: "released",
+            expiresAt: "2026-06-27T08:00:00",
+            worktreeName: "",
+            createdAt: "2026-06-27T06:00:00",
+            updatedAt: "2026-06-27T06:00:00"
+        )
+    }
+}
+#endif

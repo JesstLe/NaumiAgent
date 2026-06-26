@@ -8,6 +8,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var capabilitiesResult: Result<CapabilitiesDTO, APIError>?
     var snapshotResult: Result<WorkbenchSnapshotDTO, APIError>?
     var sessionsResult: Result<SessionListDTO, APIError>?
+    var eventsResult: Result<WorkbenchEventsDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
 
@@ -34,6 +35,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
 
     func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO {
         guard let result = sessionsResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchEvents(sessionID: String, limit: Int) async throws(APIError) -> WorkbenchEventsDTO {
+        guard let result = eventsResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -344,6 +352,55 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == snapshot)
         #expect(appState.lastError == nil)
     }
+
+    @Test @MainActor func refreshEventsSuccessWritesToAppState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let event = EventDTO(
+            id: "evt-001",
+            sessionID: "sess-001",
+            type: "mission.created",
+            actor: "Human",
+            subjectID: "mission-001",
+            payload: ["title": .string("Mac Workbench")],
+            timestamp: "2026-06-27T06:00:00"
+        )
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
+
+        await api.setEventsResult(.success(events))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshEvents(limit: 50)
+
+        #expect(appState.timelineEvents == [event])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshEventsWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        appState.timelineEvents = [
+            EventDTO(
+                id: "evt-stale",
+                sessionID: "old-session",
+                type: "mission.created",
+                actor: "Human",
+                subjectID: "mission-old",
+                payload: ["title": .string("旧事件")],
+                timestamp: "2026-06-27T05:00:00"
+            )
+        ]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshEvents(limit: 50)
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.timelineEvents.isEmpty)
+    }
 }
 
 extension FakeWorkbenchAPIProvider {
@@ -361,6 +418,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setSessionsResult(_ result: Result<SessionListDTO, APIError>) {
         sessionsResult = result
+    }
+
+    fileprivate func setEventsResult(_ result: Result<WorkbenchEventsDTO, APIError>) {
+        eventsResult = result
     }
 
     fileprivate func setClaimIssueResult(_ result: Result<LeaseDTO, APIError>) {
