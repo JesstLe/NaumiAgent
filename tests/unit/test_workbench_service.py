@@ -32,3 +32,36 @@ async def test_dashboard_snapshot_contains_core_cards(tmp_path) -> None:
     assert snapshot["missions"][0]["title"] == "Mac 工作台"
     assert snapshot["issues"][0]["task_id"] == task.id
     assert snapshot["tasks"][0]["subject"] == "实现任务市场"
+
+
+@pytest.mark.asyncio
+async def test_list_events_returns_store_events_and_respects_limit(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    event_a = await workbench_store.append_event(
+        session_id="s",
+        type="mission.created",
+        actor="Human",
+        subject_id="mission-1",
+        payload={"title": "Mission A"},
+    )
+    event_b = await workbench_store.append_event(
+        session_id="s",
+        type="issue.created",
+        actor="Planner-Agent",
+        subject_id="task-1",
+        payload={"detail": "issue B"},
+    )
+
+    all_events = await service.list_events("s", limit=50)
+
+    assert {event["id"] for event in all_events} == {event_a.id, event_b.id}
+    assert all(event in [event_a.to_dict(), event_b.to_dict()] for event in all_events)
+
+    limited = await service.list_events("s", limit=1)
+
+    assert len(limited) == 1
+    assert limited[0] in [event_a.to_dict(), event_b.to_dict()]
