@@ -44,6 +44,10 @@ class EventType(StrEnum):
     BUDGET_UPDATE = "budget_update"
     TOKEN_COUNT = "token_count"
 
+    # Workbench / Mac app
+    WORKBENCH_EVENT = "workbench_event"
+    WORKBENCH_SNAPSHOT = "workbench_snapshot"
+
 
 @dataclass(frozen=True)
 class StreamEvent:
