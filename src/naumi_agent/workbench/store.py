@@ -12,6 +12,7 @@ from naumi_agent.workbench.models import (
     ContextHealth,
     Decision,
     DecisionKind,
+    FailureKind,
     IntentLock,
     IssueMetadata,
     Lease,
@@ -119,6 +120,36 @@ CREATE TABLE IF NOT EXISTS workbench_context_snapshots (
 )
 """
 
+_CREATE_VALIDATION_RUNS = """
+CREATE TABLE IF NOT EXISTS workbench_validation_runs (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    command TEXT NOT NULL,
+    cwd TEXT NOT NULL,
+    status TEXT NOT NULL,
+    exit_code INTEGER NOT NULL,
+    output TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL
+)
+"""
+
+_CREATE_FAILURES = """
+CREATE TABLE IF NOT EXISTS workbench_failures (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL
+)
+"""
+
 
 class WorkbenchStore:
     """SQLite-backed state for the workbench dashboard."""
@@ -137,6 +168,8 @@ class WorkbenchStore:
         await db.execute(_CREATE_INTENT_LOCKS)
         await db.execute(_CREATE_LEASES)
         await db.execute(_CREATE_CONTEXT_SNAPSHOTS)
+        await db.execute(_CREATE_VALIDATION_RUNS)
+        await db.execute(_CREATE_FAILURES)
         await db.commit()
         self._initialized = True
 
@@ -550,6 +583,112 @@ class WorkbenchStore:
             )
             await db.commit()
         return snapshot
+
+    async def record_validation_run(
+        self,
+        *,
+        session_id: str,
+        task_id: str,
+        actor: str,
+        command: list[str],
+        cwd: str,
+        status: str,
+        exit_code: int,
+        output: str,
+        started_at: str,
+        completed_at: str,
+    ) -> dict[str, Any]:
+        run = {
+            "id": uuid.uuid4().hex[:12],
+            "session_id": session_id,
+            "task_id": task_id,
+            "actor": actor,
+            "command": command,
+            "cwd": cwd,
+            "status": status,
+            "exit_code": exit_code,
+            "output": output,
+            "started_at": started_at,
+            "completed_at": completed_at,
+        }
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                """INSERT INTO workbench_validation_runs
+                   (id, session_id, task_id, actor, command, cwd, status, exit_code,
+                    output, started_at, completed_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    run["id"],
+                    session_id,
+                    task_id,
+                    actor,
+                    json.dumps(command, ensure_ascii=False),
+                    cwd,
+                    status,
+                    exit_code,
+                    output,
+                    started_at,
+                    completed_at,
+                ),
+            )
+            await db.commit()
+        return run
+
+    async def create_failure(
+        self,
+        *,
+        session_id: str,
+        task_id: str,
+        kind: FailureKind,
+        title: str,
+        detail: str,
+        source_id: str,
+    ) -> dict[str, Any]:
+        failure = {
+            "id": uuid.uuid4().hex[:12],
+            "session_id": session_id,
+            "task_id": task_id,
+            "kind": kind.value,
+            "title": title,
+            "detail": detail,
+            "source_id": source_id,
+            "status": "open",
+            "created_at": now_iso(),
+        }
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                """INSERT INTO workbench_failures
+                   (id, session_id, task_id, kind, title, detail, source_id, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    failure["id"],
+                    session_id,
+                    task_id,
+                    failure["kind"],
+                    title,
+                    detail,
+                    source_id,
+                    "open",
+                    failure["created_at"],
+                ),
+            )
+            await db.commit()
+        return failure
+
+    async def list_failures(self, session_id: str) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_failures
+                   WHERE session_id = ?
+                   ORDER BY created_at DESC""",
+                (session_id,),
+            )
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
 
 
 def _row_to_issue(row: dict[str, Any]) -> IssueMetadata:

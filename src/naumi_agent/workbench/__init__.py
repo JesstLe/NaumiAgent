@@ -24,6 +24,11 @@ from naumi_agent.workbench.models import (
 )
 from naumi_agent.workbench.policy import PolicyDecision, evaluate_intent_locks
 from naumi_agent.workbench.store import WorkbenchStore
+from naumi_agent.workbench.validation import (
+    ValidationCommand,
+    ValidationResult,
+    ValidationRunner,
+)
 
 __all__ = [
     "AgentProfile",
@@ -43,6 +48,9 @@ __all__ = [
     "PolicyDecision",
     "RiskLevel",
     "TaskMarket",
+    "ValidationCommand",
+    "ValidationResult",
+    "ValidationRunner",
     "WorkbenchEvent",
     "WorkbenchStore",
     "evaluate_context_health",
