@@ -98,6 +98,38 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Fetches context health snapshots for the currently selected session.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success the snapshots
+    /// are written to `appState.contextSnapshots`; on failure `appState.lastError`
+    /// is set. Missing session clears the local snapshot list to avoid showing
+    /// stale data from another session. API failures leave the local list
+    /// unchanged (no fake local snapshots).
+    public func refreshContextSnapshots(
+        taskID: String? = nil,
+        agentID: String? = nil,
+        limit: Int = 50
+    ) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.contextSnapshots = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchContextSnapshots(
+                sessionID: sessionID,
+                taskID: taskID,
+                agentID: agentID,
+                limit: limit
+            )
+            appState.contextSnapshots = response.contextSnapshots
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Refreshes the snapshot for the currently selected session.
     ///
     /// When no session is selected, the most recent session from `GET /sessions`

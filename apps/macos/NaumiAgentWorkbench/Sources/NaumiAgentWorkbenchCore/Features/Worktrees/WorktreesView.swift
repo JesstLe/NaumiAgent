@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// Standalone audit-event timeline for the selected session.
+/// Worktrees page showing context health snapshots for the selected session.
 ///
-/// Events are loaded from `GET /workbench/sessions/{id}/events` and never
-/// fabricated locally. The view refreshes automatically on appear and exposes
-/// a manual refresh button in the toolbar.
-public struct TimelineView: View {
+/// Snapshots are loaded from `GET /workbench/sessions/{id}/context-snapshots`
+/// and never fabricated locally. The view refreshes automatically on appear and
+/// exposes a manual refresh button in the toolbar.
+public struct WorktreesView: View {
     @Bindable public var appState: AppState
     public let daemonController: DaemonController
 
@@ -21,28 +21,28 @@ public struct TimelineView: View {
                 if let lastError = appState.lastError {
                     errorCard(error: lastError)
                 }
-                eventList
+                snapshotList
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .navigationTitle(AppStrings.Timeline.title(appState.locale))
+        .navigationTitle(AppStrings.Worktrees.title(appState.locale))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(action: {
                     Task {
-                        await daemonController.refreshEvents(limit: 50)
+                        await daemonController.refreshContextSnapshots(limit: 50)
                     }
                 }) {
                     Label(
-                        AppStrings.Timeline.refreshButton(appState.locale),
+                        AppStrings.Worktrees.refreshButton(appState.locale),
                         systemImage: "arrow.clockwise"
                     )
                 }
             }
         }
         .task {
-            await daemonController.refreshEvents(limit: 50)
+            await daemonController.refreshContextSnapshots(limit: 50)
         }
     }
 
@@ -50,14 +50,19 @@ public struct TimelineView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(AppStrings.Timeline.title(appState.locale))
+            Text(AppStrings.Worktrees.title(appState.locale))
                 .font(.largeTitle)
                 .fontWeight(.bold)
 
             HStack(spacing: 12) {
-                Text(AppStrings.Timeline.eventCount(appState.locale, count: appState.timelineEvents.count))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Text(
+                    AppStrings.Worktrees.snapshotCount(
+                        appState.locale,
+                        count: appState.contextSnapshots.count
+                    )
+                )
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
 
                 if let sessionID = appState.selectedSessionID {
                     Text(sessionID)
@@ -69,17 +74,17 @@ public struct TimelineView: View {
         }
     }
 
-    // MARK: - Event List
+    // MARK: - Snapshot List
 
     @ViewBuilder
-    private var eventList: some View {
-        if appState.timelineEvents.isEmpty {
+    private var snapshotList: some View {
+        if appState.contextSnapshots.isEmpty {
             emptyState
         } else {
             VStack(alignment: .leading, spacing: 12) {
-                ForEach(presentedEvents) { event in
-                    eventRow(event: event)
-                    if event.id != presentedEvents.last?.id {
+                ForEach(presentedSnapshots) { snapshot in
+                    snapshotRow(snapshot: snapshot)
+                    if snapshot.id != presentedSnapshots.last?.id {
                         Divider()
                     }
                 }
@@ -90,39 +95,38 @@ public struct TimelineView: View {
         }
     }
 
-    private var presentedEvents: [TimelineEventPresentation] {
-        appState.timelineEvents.map(TimelineEventPresentation.init)
+    private var presentedSnapshots: [ContextSnapshotPresentation] {
+        appState.contextSnapshots.map(ContextSnapshotPresentation.init)
     }
 
-    private func eventRow(event: TimelineEventPresentation) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private func snapshotRow(snapshot: ContextSnapshotPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                Text(event.type)
-                    .font(.body)
-                    .fontWeight(.medium)
+                StatusBadge(
+                    text: snapshot.healthLabel(locale: appState.locale),
+                    color: snapshot.healthColor()
+                )
                 Spacer()
-                Text(event.timestamp)
+                Text(snapshot.createdAt)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 16) {
                 detailItem(
-                    label: AppStrings.Timeline.actorLabel(appState.locale),
-                    value: event.actor
+                    label: AppStrings.Worktrees.taskIDLabel(appState.locale),
+                    value: snapshot.taskID
                 )
                 detailItem(
-                    label: AppStrings.Timeline.subjectLabel(appState.locale),
-                    value: event.subjectID
+                    label: AppStrings.Worktrees.agentIDLabel(appState.locale),
+                    value: snapshot.agentID
                 )
             }
 
-            if !event.payloadSummary.isEmpty {
-                Text(event.payloadSummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
+            detailItem(
+                label: AppStrings.Worktrees.reasonsLabel(appState.locale),
+                value: snapshot.reasonsSummary(locale: appState.locale)
+            )
         }
     }
 
@@ -134,6 +138,7 @@ public struct TimelineView: View {
             Text(value)
                 .font(.body)
                 .fontWeight(.medium)
+                .lineLimit(2)
         }
     }
 
@@ -158,11 +163,12 @@ public struct TimelineView: View {
         HStack {
             Spacer()
             VStack(spacing: 8) {
-                Image(systemName: "clock.badge.questionmark")
+                Image(systemName: "doc.text.magnifyingglass")
                     .font(.system(size: 32))
                     .foregroundStyle(.secondary)
-                Text(AppStrings.Timeline.emptyEvents(appState.locale))
+                Text(AppStrings.Worktrees.emptySnapshots(appState.locale))
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
             Spacer()
         }
@@ -171,24 +177,42 @@ public struct TimelineView: View {
 }
 
 #if DEBUG
-struct TimelineView_Previews: PreviewProvider {
+struct WorktreesView_Previews: PreviewProvider {
     @MainActor
     static var previews: some View {
         let state = AppState()
         state.locale = .zhCN
         state.selectedSessionID = "sess-preview"
-        state.timelineEvents = [
-            EventDTO(
-                id: "evt-1",
+        state.contextSnapshots = [
+            ContextSnapshotDTO(
+                id: "snap-1",
                 sessionID: "sess-preview",
-                type: "mission.created",
-                actor: "Human",
-                subjectID: "mission-1",
-                payload: ["title": .string("Mac 工作台")],
-                timestamp: "2026-06-27T06:00:00"
+                agentID: "agent-a",
+                taskID: "task-1",
+                health: "good",
+                reasons: ["上下文健康"],
+                createdAt: "2026-06-27T06:00:00"
+            ),
+            ContextSnapshotDTO(
+                id: "snap-2",
+                sessionID: "sess-preview",
+                agentID: "agent-b",
+                taskID: "task-2",
+                health: "stale",
+                reasons: ["长时间未更新", "依赖文件已变更"],
+                createdAt: "2026-06-27T06:05:00"
+            ),
+            ContextSnapshotDTO(
+                id: "snap-3",
+                sessionID: "sess-preview",
+                agentID: "agent-c",
+                taskID: "task-3",
+                health: "conflicted",
+                reasons: ["与主分支冲突"],
+                createdAt: "2026-06-27T06:10:00"
             )
         ]
-        return TimelineView(
+        return WorktreesView(
             appState: state,
             daemonController: DaemonController(
                 appState: state,

@@ -59,6 +59,25 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchContextSnapshots(
+        sessionID: String,
+        taskID: String?,
+        agentID: String?,
+        limit: Int
+    ) async throws(APIError) -> ContextSnapshotsDTO {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let taskID, !taskID.isEmpty {
+            queryItems.append(URLQueryItem(name: "task_id", value: taskID))
+        }
+        if let agentID, !agentID.isEmpty {
+            queryItems.append(URLQueryItem(name: "agent_id", value: agentID))
+        }
+        return try await get(
+            path: "workbench/sessions/\(sessionID)/context-snapshots",
+            queryItems: queryItems
+        )
+    }
+
     public func claimIssue(
         sessionID: String,
         taskID: String,

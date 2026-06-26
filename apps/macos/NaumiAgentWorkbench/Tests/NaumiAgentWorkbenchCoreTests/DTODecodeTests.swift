@@ -104,6 +104,45 @@ struct DTODecodeTests {
         #expect(response.validationRuns.isEmpty)
     }
 
+    @Test func decodeContextSnapshots() throws {
+        let data = Data(
+            """
+            {"context_snapshots":[{"id":"snap-001","session_id":"sess-001","agent_id":"agent-001","task_id":"task 001/审查","health":"good","reasons":["上下文健康"],"created_at":"2026-06-27T06:00:00"}],"task_id":"task 001/审查","agent_id":"agent-001","limit":25}
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(ContextSnapshotsDTO.self, from: data)
+
+        #expect(response.taskID == "task 001/审查")
+        #expect(response.agentID == "agent-001")
+        #expect(response.limit == 25)
+        #expect(response.contextSnapshots.count == 1)
+
+        let snapshot = try #require(response.contextSnapshots.first)
+        #expect(snapshot.id == "snap-001")
+        #expect(snapshot.sessionID == "sess-001")
+        #expect(snapshot.agentID == "agent-001")
+        #expect(snapshot.taskID == "task 001/审查")
+        #expect(snapshot.health == "good")
+        #expect(snapshot.reasons == ["上下文健康"])
+        #expect(snapshot.createdAt == "2026-06-27T06:00:00")
+    }
+
+    @Test func decodeContextSnapshotsWithoutOptionalFilters() throws {
+        let data = Data(
+            """
+            {"context_snapshots":[],"task_id":null,"agent_id":null,"limit":50}
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(ContextSnapshotsDTO.self, from: data)
+
+        #expect(response.taskID == nil)
+        #expect(response.agentID == nil)
+        #expect(response.limit == 50)
+        #expect(response.contextSnapshots.isEmpty)
+    }
+
     @Test func decodeEventPayloadWithNonStringValues() throws {
         let data = Data(
             """

@@ -312,6 +312,69 @@ public enum AppStrings {
 
     }
 
+    // MARK: - Worktrees
+    public enum Worktrees {
+        public static func title(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "上下文健康快照" : "Context Health Snapshots"
+        }
+
+        public static func snapshotCount(_ locale: AppLocale, count: Int) -> String {
+            locale == .zhCN ? "\(count) 条快照" : "\(count) snapshots"
+        }
+
+        public static func refreshButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "刷新" : "Refresh"
+        }
+
+        public static func emptySnapshots(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无上下文快照" : "No context snapshots"
+        }
+
+        public static func healthLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "健康状态" : "Health"
+        }
+
+        public static func taskIDLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "任务 ID" : "Task ID"
+        }
+
+        public static func agentIDLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "代理 ID" : "Agent ID"
+        }
+
+        public static func createdAtLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "创建时间" : "Created At"
+        }
+
+        public static func reasonsLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "原因" : "Reasons"
+        }
+
+        public static func healthGood(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "健康" : "Good"
+        }
+
+        public static func healthStale(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "过期" : "Stale"
+        }
+
+        public static func healthOverloaded(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "过载" : "Overloaded"
+        }
+
+        public static func healthMissing(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "缺失" : "Missing"
+        }
+
+        public static func healthConflicted(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "冲突" : "Conflicted"
+        }
+
+        public static func healthUnknown(_ locale: AppLocale, health: String) -> String {
+            locale == .zhCN ? "未知: \(health)" : "Unknown: \(health)"
+        }
+    }
+
     // MARK: - Reviews
     public enum Reviews {
         public static func title(_ locale: AppLocale) -> String {
