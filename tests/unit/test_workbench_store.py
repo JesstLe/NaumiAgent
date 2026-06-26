@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from naumi_agent.workbench.models import DecisionKind, ParallelMode, RiskLevel
+from naumi_agent.workbench.models import ContextHealth, DecisionKind, ParallelMode, RiskLevel
 from naumi_agent.workbench.store import WorkbenchStore
 
 
@@ -125,3 +125,50 @@ async def test_list_validation_runs_filters_and_orders(store: WorkbenchStore) ->
 
     limited = await store.list_validation_runs("s", limit=1)
     assert [run["id"] for run in limited] == [run_c["id"]]
+
+
+@pytest.mark.asyncio
+async def test_list_context_snapshots_filters_and_returns_reasons(store: WorkbenchStore) -> None:
+    snap_a = await store.record_context_snapshot(
+        session_id="s",
+        agent_id="agent-1",
+        task_id="task-a",
+        health=ContextHealth.GOOD,
+        reasons=["上下文健康"],
+    )
+    snap_b = await store.record_context_snapshot(
+        session_id="s",
+        agent_id="agent-2",
+        task_id="task-b",
+        health=ContextHealth.STALE,
+        reasons=["超过 60 分钟未同步上下文"],
+    )
+    snap_c = await store.record_context_snapshot(
+        session_id="s",
+        agent_id="agent-1",
+        task_id="task-b",
+        health=ContextHealth.MISSING,
+        reasons=["缺少 mission 目标", "缺少验收标准"],
+    )
+
+    all_snapshots = await store.list_context_snapshots("s", limit=50)
+    assert {snap["id"] for snap in all_snapshots} == {snap_a["id"], snap_b["id"], snap_c["id"]}
+    for snap in all_snapshots:
+        assert isinstance(snap["reasons"], list)
+
+    task_a_snaps = await store.list_context_snapshots("s", task_id="task-a", limit=50)
+    assert {snap["id"] for snap in task_a_snaps} == {snap_a["id"]}
+    assert task_a_snaps[0]["reasons"] == ["上下文健康"]
+
+    agent_2_snaps = await store.list_context_snapshots("s", agent_id="agent-2", limit=50)
+    assert {snap["id"] for snap in agent_2_snaps} == {snap_b["id"]}
+
+    combined_snaps = await store.list_context_snapshots(
+        "s", task_id="task-b", agent_id="agent-1", limit=50
+    )
+    assert {snap["id"] for snap in combined_snaps} == {snap_c["id"]}
+    assert combined_snaps[0]["reasons"] == ["缺少 mission 目标", "缺少验收标准"]
+
+    limited = await store.list_context_snapshots("s", limit=1)
+    assert len(limited) == 1
+    assert limited[0]["id"] in {snap_a["id"], snap_b["id"], snap_c["id"]}
