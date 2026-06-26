@@ -60,6 +60,12 @@ class WorkbenchEventsResponse(BaseModel):
     limit: int
 
 
+class ValidationRunsResponse(BaseModel):
+    validation_runs: list[dict[str, Any]]
+    task_id: str | None
+    limit: int
+
+
 def _get_task_market(engine) -> TaskMarket:
     market = getattr(engine, "workbench_market", None)
     if market is not None:
@@ -139,6 +145,29 @@ async def get_workbench_events(
         raise HTTPException(status_code=404, detail="Session not found")
     events = await engine.workbench_service.list_events(session_id, limit=limit)
     return WorkbenchEventsResponse(events=events, limit=limit)
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/validation-runs",
+    response_model=ValidationRunsResponse,
+)
+async def get_validation_runs(
+    session_id: str,
+    request: Request,
+    task_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    runs = await engine.workbench_service.list_validation_runs(
+        session_id, task_id=task_id, limit=limit
+    )
+    return ValidationRunsResponse(validation_runs=runs, task_id=task_id, limit=limit)
 
 
 @router.post("/workbench/sessions/{session_id}/missions", status_code=201)

@@ -77,6 +77,16 @@ class WorkbenchService:
         events = await self._workbench_store.list_events(session_id, limit=limit)
         return [event.to_dict() for event in events]
 
+    async def list_validation_runs(
+        self,
+        session_id: str,
+        task_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        return await self._workbench_store.list_validation_runs(
+            session_id, task_id=task_id, limit=limit
+        )
+
     async def _list_missions_for_snapshot(self, session_id: str) -> list[dict[str, Any]]:
         missions = await self._workbench_store.list_missions(session_id)
         return [asdict(mission) for mission in missions]

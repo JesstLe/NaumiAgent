@@ -659,6 +659,39 @@ class WorkbenchStore:
             await db.commit()
         return run
 
+    async def list_validation_runs(
+        self,
+        session_id: str,
+        task_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            if task_id is None:
+                cursor = await db.execute(
+                    """SELECT * FROM workbench_validation_runs
+                       WHERE session_id = ?
+                       ORDER BY completed_at DESC
+                       LIMIT ?""",
+                    (session_id, limit),
+                )
+            else:
+                cursor = await db.execute(
+                    """SELECT * FROM workbench_validation_runs
+                       WHERE session_id = ? AND task_id = ?
+                       ORDER BY completed_at DESC
+                       LIMIT ?""",
+                    (session_id, task_id, limit),
+                )
+            rows = await cursor.fetchall()
+        runs: list[dict[str, Any]] = []
+        for row in reversed(rows):
+            run = dict(row)
+            run["command"] = cast(list[str], json.loads(run["command"]))
+            runs.append(run)
+        return runs
+
     async def create_failure(
         self,
         *,

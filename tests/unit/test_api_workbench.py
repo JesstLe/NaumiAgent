@@ -21,6 +21,7 @@ from naumi_agent.api.routes.workbench import (
     create_workbench_mission,
     expire_workbench_leases,
     get_daemon_status,
+    get_validation_runs,
     get_workbench_capabilities,
     get_workbench_events,
     get_workbench_snapshot,
@@ -44,6 +45,7 @@ class _FakeWorkbenchService:
         self.created_missions: list[dict] = []
         self.attached_issues: list[dict] = []
         self.listed_events: list[dict] = []
+        self.listed_validation_runs: list[dict] = []
 
     async def dashboard_snapshot(self, session_id: str):
         return {
@@ -113,6 +115,28 @@ class _FakeWorkbenchService:
                 "subject_id": "mission-1",
                 "payload": {"title": "Mac 工作台"},
                 "timestamp": "2024-01-01T00:00:00",
+            }
+        ]
+
+    async def list_validation_runs(
+        self, session_id: str, task_id: str | None = None, limit: int = 50
+    ):
+        self.listed_validation_runs.append(
+            {"session_id": session_id, "task_id": task_id, "limit": limit}
+        )
+        return [
+            {
+                "id": "run-1",
+                "session_id": session_id,
+                "task_id": task_id or "task-1",
+                "actor": "ValidationRunner",
+                "command": ["pytest", "test.py"],
+                "cwd": "/workspace",
+                "status": "passed",
+                "exit_code": 0,
+                "output": "ok",
+                "started_at": "2024-01-01T00:00:00",
+                "completed_at": "2024-01-01T00:00:01",
             }
         ]
 
@@ -262,6 +286,52 @@ async def test_get_events_endpoint_returns_events_and_limit() -> None:
                 "timestamp": "2024-01-01T00:00:00",
             }
         ],
+        "limit": 25,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_validation_runs_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_validation_runs(
+            "missing", _fake_request(engine), task_id=None, limit=10, auth="test"
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_get_validation_runs_endpoint_returns_runs_and_params() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_validation_runs(
+        "sess-1", _fake_request(engine), task_id="task-2", limit=25, auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_validation_runs == [
+        {"session_id": "sess-1", "task_id": "task-2", "limit": 25}
+    ]
+    assert response.model_dump() == {
+        "validation_runs": [
+            {
+                "id": "run-1",
+                "session_id": "sess-1",
+                "task_id": "task-2",
+                "actor": "ValidationRunner",
+                "command": ["pytest", "test.py"],
+                "cwd": "/workspace",
+                "status": "passed",
+                "exit_code": 0,
+                "output": "ok",
+                "started_at": "2024-01-01T00:00:00",
+                "completed_at": "2024-01-01T00:00:01",
+            }
+        ],
+        "task_id": "task-2",
         "limit": 25,
     }
 
