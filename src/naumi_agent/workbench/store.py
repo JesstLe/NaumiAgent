@@ -11,6 +11,7 @@ import aiosqlite
 from naumi_agent.workbench.models import (
     Decision,
     DecisionKind,
+    IntentLock,
     IssueMetadata,
     Mission,
     ParallelMode,
@@ -75,6 +76,20 @@ CREATE TABLE IF NOT EXISTS workbench_audit_events (
 )
 """
 
+_CREATE_INTENT_LOCKS = """
+CREATE TABLE IF NOT EXISTS workbench_intent_locks (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    mission_id TEXT NOT NULL,
+    rule TEXT NOT NULL,
+    blocked_paths TEXT NOT NULL,
+    allowed_paths TEXT NOT NULL,
+    require_proposal_for_risk TEXT NOT NULL,
+    active INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+)
+"""
+
 
 class WorkbenchStore:
     """SQLite-backed state for the workbench dashboard."""
@@ -90,6 +105,7 @@ class WorkbenchStore:
         await db.execute(_CREATE_ISSUES)
         await db.execute(_CREATE_DECISIONS)
         await db.execute(_CREATE_EVENTS)
+        await db.execute(_CREATE_INTENT_LOCKS)
         await db.commit()
         self._initialized = True
 
@@ -300,6 +316,60 @@ class WorkbenchStore:
             rows = await cursor.fetchall()
         return [_row_to_event(dict(row)) for row in reversed(rows)]
 
+    async def add_intent_lock(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        rule: str,
+        blocked_paths: list[str] | None = None,
+        allowed_paths: list[str] | None = None,
+        require_proposal_for_risk: RiskLevel = RiskLevel.HIGH,
+    ) -> IntentLock:
+        lock = IntentLock(
+            id=uuid.uuid4().hex[:12],
+            session_id=session_id,
+            mission_id=mission_id,
+            rule=rule.strip(),
+            blocked_paths=list(blocked_paths or []),
+            allowed_paths=list(allowed_paths or []),
+            require_proposal_for_risk=require_proposal_for_risk,
+        )
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                """INSERT INTO workbench_intent_locks
+                   (id, session_id, mission_id, rule, blocked_paths, allowed_paths,
+                    require_proposal_for_risk, active, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    lock.id,
+                    lock.session_id,
+                    lock.mission_id,
+                    lock.rule,
+                    json.dumps(lock.blocked_paths, ensure_ascii=False),
+                    json.dumps(lock.allowed_paths, ensure_ascii=False),
+                    lock.require_proposal_for_risk.value,
+                    1 if lock.active else 0,
+                    lock.created_at,
+                ),
+            )
+            await db.commit()
+        return lock
+
+    async def list_intent_locks(self, session_id: str, mission_id: str) -> list[IntentLock]:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_intent_locks
+                   WHERE session_id = ? AND mission_id = ?
+                   ORDER BY created_at""",
+                (session_id, mission_id),
+            )
+            rows = await cursor.fetchall()
+        return [_row_to_intent_lock(dict(row)) for row in rows]
+
 
 def _row_to_issue(row: dict[str, Any]) -> IssueMetadata:
     return IssueMetadata(
@@ -341,4 +411,18 @@ def _row_to_event(row: dict[str, Any]) -> WorkbenchEvent:
         subject_id=row["subject_id"],
         payload=cast(dict[str, Any], json.loads(row["payload"])),
         timestamp=row["timestamp"],
+    )
+
+
+def _row_to_intent_lock(row: dict[str, Any]) -> IntentLock:
+    return IntentLock(
+        id=row["id"],
+        session_id=row["session_id"],
+        mission_id=row["mission_id"],
+        rule=row["rule"],
+        blocked_paths=cast(list[str], json.loads(row["blocked_paths"])),
+        allowed_paths=cast(list[str], json.loads(row["allowed_paths"])),
+        require_proposal_for_risk=RiskLevel(row["require_proposal_for_risk"]),
+        active=bool(row["active"]),
+        created_at=row["created_at"],
     )

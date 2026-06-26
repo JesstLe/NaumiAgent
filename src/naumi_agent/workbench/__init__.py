@@ -16,6 +16,7 @@ from naumi_agent.workbench.models import (
     RiskLevel,
     WorkbenchEvent,
 )
+from naumi_agent.workbench.policy import PolicyDecision, evaluate_intent_locks
 from naumi_agent.workbench.store import WorkbenchStore
 
 __all__ = [
@@ -31,7 +32,9 @@ __all__ = [
     "LeaseState",
     "Mission",
     "ParallelMode",
+    "PolicyDecision",
     "RiskLevel",
     "WorkbenchEvent",
     "WorkbenchStore",
+    "evaluate_intent_locks",
 ]
