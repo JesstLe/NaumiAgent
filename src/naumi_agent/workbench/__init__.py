@@ -1,5 +1,6 @@
 """Local-first collaboration workbench for NaumiAgent."""
 
+from naumi_agent.workbench.market import TaskMarket
 from naumi_agent.workbench.models import (
     AgentProfile,
     ApprovalState,
@@ -34,6 +35,7 @@ __all__ = [
     "ParallelMode",
     "PolicyDecision",
     "RiskLevel",
+    "TaskMarket",
     "WorkbenchEvent",
     "WorkbenchStore",
     "evaluate_intent_locks",
