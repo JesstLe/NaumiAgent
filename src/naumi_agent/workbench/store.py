@@ -608,6 +608,41 @@ class WorkbenchStore:
             await db.commit()
         return snapshot
 
+    async def list_context_snapshots(
+        self,
+        session_id: str,
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            params: list[Any] = [session_id]
+            filters = ["session_id = ?"]
+            if task_id is not None:
+                filters.append("task_id = ?")
+                params.append(task_id)
+            if agent_id is not None:
+                filters.append("agent_id = ?")
+                params.append(agent_id)
+            params.append(limit)
+            where_clause = " AND ".join(filters)
+            cursor = await db.execute(
+                f"""SELECT * FROM workbench_context_snapshots
+                   WHERE {where_clause}
+                   ORDER BY created_at DESC
+                   LIMIT ?""",
+                params,
+            )
+            rows = await cursor.fetchall()
+        snapshots: list[dict[str, Any]] = []
+        for row in reversed(rows):
+            snapshot = dict(row)
+            snapshot["reasons"] = cast(list[str], json.loads(snapshot["reasons"]))
+            snapshots.append(snapshot)
+        return snapshots
+
     async def record_validation_run(
         self,
         *,

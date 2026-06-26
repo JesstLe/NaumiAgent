@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from naumi_agent.tasks.store import TaskStore
+from naumi_agent.workbench.models import ContextHealth
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 
@@ -107,3 +108,37 @@ async def test_list_validation_runs_returns_runs_and_respects_limit(tmp_path) ->
 
     limited = await service.list_validation_runs("s", limit=1)
     assert [run["id"] for run in limited] == [run_b["id"]]
+
+
+@pytest.mark.asyncio
+async def test_list_context_snapshots_returns_store_snapshots_and_respects_limit(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    snap_a = await workbench_store.record_context_snapshot(
+        session_id="s",
+        agent_id="agent-1",
+        task_id="task-a",
+        health=ContextHealth.GOOD,
+        reasons=["上下文健康"],
+    )
+    snap_b = await workbench_store.record_context_snapshot(
+        session_id="s",
+        agent_id="agent-2",
+        task_id="task-b",
+        health=ContextHealth.STALE,
+        reasons=["超过 60 分钟未同步上下文"],
+    )
+
+    all_snaps = await service.list_context_snapshots("s", limit=50)
+    assert {snap["id"] for snap in all_snaps} == {snap_a["id"], snap_b["id"]}
+
+    filtered = await service.list_context_snapshots("s", agent_id="agent-2", limit=50)
+    assert [snap["id"] for snap in filtered] == [snap_b["id"]]
+    assert filtered[0]["reasons"] == ["超过 60 分钟未同步上下文"]
+
+    limited = await service.list_context_snapshots("s", limit=1)
+    assert len(limited) == 1
+    assert limited[0]["id"] in {snap_a["id"], snap_b["id"]}

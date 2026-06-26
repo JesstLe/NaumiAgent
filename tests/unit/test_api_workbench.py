@@ -20,6 +20,7 @@ from naumi_agent.api.routes.workbench import (
     claim_workbench_issue,
     create_workbench_mission,
     expire_workbench_leases,
+    get_context_snapshots,
     get_daemon_status,
     get_validation_runs,
     get_workbench_capabilities,
@@ -27,7 +28,14 @@ from naumi_agent.api.routes.workbench import (
     get_workbench_snapshot,
     release_workbench_lease,
 )
-from naumi_agent.workbench.models import Lease, LeaseState, Mission, ParallelMode, RiskLevel
+from naumi_agent.workbench.models import (
+    ContextHealth,
+    Lease,
+    LeaseState,
+    Mission,
+    ParallelMode,
+    RiskLevel,
+)
 
 
 class _FakeSessionStore:
@@ -46,6 +54,7 @@ class _FakeWorkbenchService:
         self.attached_issues: list[dict] = []
         self.listed_events: list[dict] = []
         self.listed_validation_runs: list[dict] = []
+        self.listed_context_snapshots: list[dict] = []
 
     async def dashboard_snapshot(self, session_id: str):
         return {
@@ -137,6 +146,33 @@ class _FakeWorkbenchService:
                 "output": "ok",
                 "started_at": "2024-01-01T00:00:00",
                 "completed_at": "2024-01-01T00:00:01",
+            }
+        ]
+
+    async def list_context_snapshots(
+        self,
+        session_id: str,
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        limit: int = 50,
+    ):
+        self.listed_context_snapshots.append(
+            {
+                "session_id": session_id,
+                "task_id": task_id,
+                "agent_id": agent_id,
+                "limit": limit,
+            }
+        )
+        return [
+            {
+                "id": "snap-1",
+                "session_id": session_id,
+                "agent_id": agent_id or "agent-1",
+                "task_id": task_id or "task-1",
+                "health": ContextHealth.GOOD,
+                "reasons": ["上下文健康"],
+                "created_at": "2024-01-01T00:00:00",
             }
         ]
 
@@ -332,6 +368,64 @@ async def test_get_validation_runs_endpoint_returns_runs_and_params() -> None:
             }
         ],
         "task_id": "task-2",
+        "limit": 25,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_context_snapshots_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_context_snapshots(
+            "missing",
+            _fake_request(engine),
+            task_id=None,
+            agent_id=None,
+            limit=10,
+            auth="test",
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_get_context_snapshots_endpoint_returns_snapshots_and_params() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_context_snapshots(
+        "sess-1",
+        _fake_request(engine),
+        task_id="task-2",
+        agent_id="agent-2",
+        limit=25,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_context_snapshots == [
+        {
+            "session_id": "sess-1",
+            "task_id": "task-2",
+            "agent_id": "agent-2",
+            "limit": 25,
+        }
+    ]
+    assert response.model_dump() == {
+        "context_snapshots": [
+            {
+                "id": "snap-1",
+                "session_id": "sess-1",
+                "agent_id": "agent-2",
+                "task_id": "task-2",
+                "health": ContextHealth.GOOD,
+                "reasons": ["上下文健康"],
+                "created_at": "2024-01-01T00:00:00",
+            }
+        ],
+        "task_id": "task-2",
+        "agent_id": "agent-2",
         "limit": 25,
     }
 
