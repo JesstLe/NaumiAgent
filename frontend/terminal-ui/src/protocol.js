@@ -162,6 +162,28 @@ function normalizeServerPayload(type, payload) {
       transcript_path: String(payload.transcript_path ?? ""),
     };
   }
+  if (type === "workbench/snapshot") {
+    return {
+      ...payload,
+      session_id: String(payload.session_id ?? ""),
+      missions: Array.isArray(payload.missions) ? payload.missions : [],
+      tasks: Array.isArray(payload.tasks) ? payload.tasks : [],
+      issues: Array.isArray(payload.issues) ? payload.issues : [],
+      failures: Array.isArray(payload.failures) ? payload.failures : [],
+      events: Array.isArray(payload.events) ? payload.events : [],
+    };
+  }
+  if (type === "workbench/event") {
+    return {
+      ...payload,
+      id: String(payload.id ?? ""),
+      type: String(payload.type ?? ""),
+      actor: String(payload.actor ?? ""),
+      subject_id: String(payload.subject_id ?? ""),
+      payload: normalizeObject(payload.payload),
+      timestamp: String(payload.timestamp ?? ""),
+    };
+  }
   return { ...payload };
 }
 

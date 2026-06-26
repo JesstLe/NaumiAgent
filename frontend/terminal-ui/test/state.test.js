@@ -1024,3 +1024,66 @@ test("slash completion filters by partial command", () => {
 test("slash completion closes after typing argument separator", () => {
   assert.equal(getSlashCommandCompletions("/help foo").length, 0);
 });
+
+test("initial state includes empty workbench bucket", () => {
+  const state = createInitialState();
+
+  assert.deepEqual(state.workbench, {
+    session_id: "",
+    missions: [],
+    tasks: [],
+    issues: [],
+    failures: [],
+    events: [],
+  });
+});
+
+test("workbench snapshot replaces dashboard state", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "workbench/snapshot",
+    payload: {
+      session_id: "s",
+      missions: [{ id: "m1", title: "Mac 工作台" }],
+      tasks: [{ id: "t1", subject: "实现协议" }],
+      issues: [{ task_id: "1", risk_level: "high" }],
+      failures: [{ id: "f1", kind: "test_failed" }],
+      events: [{ id: "e1", type: "issue.created" }],
+    },
+  });
+
+  assert.equal(state.workbench.session_id, "s");
+  assert.equal(state.workbench.missions[0].title, "Mac 工作台");
+  assert.equal(state.workbench.tasks[0].subject, "实现协议");
+  assert.equal(state.workbench.issues[0].risk_level, "high");
+  assert.equal(state.workbench.failures[0].kind, "test_failed");
+  assert.equal(state.workbench.events[0].type, "issue.created");
+});
+
+test("workbench event appends to event log and keeps last 100", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "workbench/snapshot",
+    payload: {
+      session_id: "s",
+      missions: [],
+      tasks: [],
+      issues: [],
+      failures: [],
+      events: [{ id: "e0", type: "snapshot.seed" }],
+    },
+  });
+
+  for (let index = 1; index <= 105; index += 1) {
+    reduceServerEvent(state, {
+      type: "workbench/event",
+      payload: { id: `e${index}`, type: "issue.updated", actor: "agent", subject_id: String(index), payload: {}, timestamp: "" },
+    });
+  }
+
+  assert.equal(state.workbench.events.length, 100);
+  assert.equal(state.workbench.events[0].id, "e6");
+  assert.equal(state.workbench.events.at(-1).id, "e105");
+});

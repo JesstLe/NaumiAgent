@@ -186,6 +186,14 @@ export function createInitialState() {
     folds: {},
     foldCursor: 0,
     renderCache: createRenderCache(),
+    workbench: {
+      session_id: "",
+      missions: [],
+      tasks: [],
+      issues: [],
+      failures: [],
+      events: [],
+    },
   };
 }
 
@@ -274,6 +282,12 @@ export function reduceServerEvent(state, record) {
       break;
     case "shutdown":
       return [{ type: "exit" }];
+    case "workbench/snapshot":
+      state.workbench = record.payload;
+      break;
+    case "workbench/event":
+      state.workbench.events = [...state.workbench.events, record.payload].slice(-100);
+      break;
     default:
       break;
   }

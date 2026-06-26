@@ -134,6 +134,46 @@ test("normalizeServerRecord rejects invalid bridge records", () => {
   );
 });
 
+test("normalizes workbench snapshot events", () => {
+  const record = normalizeServerRecord({
+    type: "workbench/snapshot",
+    version: 1,
+    payload: {
+      session_id: "s",
+      missions: [{ id: "m1", title: "Mac 工作台" }],
+      issues: [],
+      tasks: [],
+      failures: [],
+      events: [],
+    },
+  });
+
+  assert.equal(record.payload.session_id, "s");
+  assert.equal(record.payload.missions[0].title, "Mac 工作台");
+});
+
+test("normalizes workbench event payloads", () => {
+  const record = normalizeServerRecord({
+    type: "workbench/event",
+    version: 1,
+    payload: {
+      id: "evt-1",
+      type: "issue.claimed",
+      actor: "Backend-Agent",
+      subject_id: "1",
+      payload: { lease_id: "lease-1" },
+      timestamp: "2026-06-27T10:00:00",
+    },
+  });
+
+  assert.equal(record.payload.id, "evt-1");
+  assert.equal(record.payload.type, "issue.claimed");
+  assert.equal(record.payload.actor, "Backend-Agent");
+  assert.equal(record.payload.subject_id, "1");
+  assert.equal(record.payload.payload.lease_id, "lease-1");
+  assert.equal(record.payload.timestamp, "2026-06-27T10:00:00");
+});
+
 test("jsonl reader emits complete lines across chunk boundaries", () => {
   const stream = new EventEmitter();
   const lines = [];

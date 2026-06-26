@@ -32,6 +32,8 @@
     "permission/request",
     "permission/resolved",
     "debug/trace",
+    "workbench/snapshot",
+    "workbench/event",
     "shutdown"
   ],
   "ui_messages": {
@@ -89,5 +91,9 @@
     "system_notice": {
       "fields": ["title", "content", "level"]
     }
+  },
+  "workbench": {
+    "snapshot_fields": ["session_id", "missions", "tasks", "issues", "failures", "events"],
+    "event_fields": ["id", "type", "actor", "subject_id", "payload", "timestamp"]
   }
 }
