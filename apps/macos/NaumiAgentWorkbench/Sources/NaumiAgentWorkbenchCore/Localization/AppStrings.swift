@@ -312,6 +312,33 @@ public enum AppStrings {
 
     }
 
+    // MARK: - Timeline
+    public enum Timeline {
+        public static func title(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "审计时间线" : "Audit Timeline"
+        }
+
+        public static func eventCount(_ locale: AppLocale, count: Int) -> String {
+            locale == .zhCN ? "\(count) 条事件" : "\(count) events"
+        }
+
+        public static func actorLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "执行者" : "Actor"
+        }
+
+        public static func subjectLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "对象" : "Subject"
+        }
+
+        public static func refreshButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "刷新" : "Refresh"
+        }
+
+        public static func emptyEvents(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无事件" : "No events"
+        }
+    }
+
     // MARK: - Errors
     public enum Error {
         public static func unknown(_ locale: AppLocale) -> String {

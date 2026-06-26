@@ -48,6 +48,29 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Fetches the most recent audit events for the currently selected session.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success the events are
+    /// written to `appState.timelineEvents`; on failure `appState.lastError` is
+    /// set. Missing session clears the local event list to avoid showing stale
+    /// events from another session. API failures leave the local event list
+    /// unchanged (no fake local events).
+    public func refreshEvents(limit: Int) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.timelineEvents = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchEvents(sessionID: sessionID, limit: limit)
+            appState.timelineEvents = response.events
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Refreshes the snapshot for the currently selected session.
     ///
     /// When no session is selected, the most recent session from `GET /sessions`

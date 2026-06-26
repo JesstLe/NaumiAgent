@@ -155,6 +155,45 @@ final class WorkbenchAPIClientTests {
         #expect(session.status == "active")
     }
 
+    @Test func fetchEvents() async throws {
+        let json = Data(
+            """
+            {"events":[{"id":"evt-001","session_id":"sess-001","type":"mission.created","actor":"Human","subject_id":"mission-001","payload":{"title":"Mac Workbench"},"timestamp":"2026-06-27T06:00:00"}],"limit":50}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/events?limit=50" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchEvents(sessionID: "sess-001", limit: 50)
+
+        #expect(response.limit == 50)
+        #expect(response.events.count == 1)
+
+        let event = try #require(response.events.first)
+        #expect(event.id == "evt-001")
+        #expect(event.sessionID == "sess-001")
+        #expect(event.type == "mission.created")
+        #expect(event.actor == "Human")
+        #expect(event.subjectID == "mission-001")
+        #expect(event.timestamp == "2026-06-27T06:00:00")
+        #expect(event.payload == ["title": .string("Mac Workbench")])
+    }
+
     @Test func claimIssue() async throws {
         let leaseJSON = Data(
             """

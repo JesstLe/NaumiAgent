@@ -10,6 +10,9 @@ public protocol WorkbenchAPIProviding: Sendable {
     func fetchSnapshot(sessionID: String) async throws(APIError) -> WorkbenchSnapshotDTO
     func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO
 
+    /// Fetches the most recent audit events for the given session.
+    func fetchEvents(sessionID: String, limit: Int) async throws(APIError) -> WorkbenchEventsDTO
+
     /// Claims an open issue for the given agent, creating a new lease.
     func claimIssue(
         sessionID: String,
