@@ -36,6 +36,10 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         try await get(path: "workbench/sessions/\(sessionID)/snapshot")
     }
 
+    public func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO {
+        try await get(path: "sessions?page=\(page)&page_size=\(pageSize)")
+    }
+
     // MARK: - Private
 
     private func get<T: Decodable & Sendable>(path: String) async throws(APIError) -> T {

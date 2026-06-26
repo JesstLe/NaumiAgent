@@ -7,6 +7,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var statusResult: Result<DaemonStatusDTO, APIError>?
     var capabilitiesResult: Result<CapabilitiesDTO, APIError>?
     var snapshotResult: Result<WorkbenchSnapshotDTO, APIError>?
+    var sessionsResult: Result<SessionListDTO, APIError>?
 
     func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
         guard let result = statusResult else {
@@ -24,6 +25,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
 
     func fetchSnapshot(sessionID: String) async throws(APIError) -> WorkbenchSnapshotDTO {
         guard let result = snapshotResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO {
+        guard let result = sessionsResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -54,9 +62,16 @@ final class DaemonControllerTests {
             supportedLocales: ["zh-CN", "en-US"],
             protocolVersion: 1
         )
+        let sessions = SessionListDTO(
+            sessions: [],
+            total: 0,
+            page: 1,
+            pageSize: 1
+        )
 
         await api.setStatusResult(.success(status))
         await api.setCapabilitiesResult(.success(capabilities))
+        await api.setSessionsResult(.success(sessions))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.refreshConnection()
@@ -65,6 +80,7 @@ final class DaemonControllerTests {
         #expect(appState.daemonStatus == status)
         #expect(appState.capabilities == capabilities)
         #expect(appState.lastError == nil)
+        #expect(appState.snapshot == nil)
     }
 
     @Test @MainActor func refreshConnectionFailure() async throws {
@@ -113,12 +129,139 @@ final class DaemonControllerTests {
             supportedLocales: ["zh-CN", "en-US"],
             protocolVersion: 1
         )))
+        await api.setSessionsResult(.success(SessionListDTO(
+            sessions: [],
+            total: 0,
+            page: 1,
+            pageSize: 1
+        )))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.refreshConnection()
 
         #expect(appState.connectionState == .connected)
         #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshConnectionRefreshesSnapshotForSelectedSession() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-existing"
+
+        let api = FakeWorkbenchAPIProvider()
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-existing",
+            missions: [],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+
+        await api.setStatusResult(.success(makeStatus()))
+        await api.setCapabilitiesResult(.success(makeCapabilities()))
+        await api.setSnapshotResult(.success(snapshot))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.selectedSessionID == "sess-existing")
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshConnectionAutoSelectsMostRecentSession() async throws {
+        let appState = AppState()
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let session = SessionDTO(
+            id: "sess-latest",
+            title: "Latest Session",
+            model: "gpt-4o",
+            createdAt: "2026-06-27T06:00:00",
+            updatedAt: "2026-06-27T06:30:00",
+            messageCount: 3,
+            totalTokens: 120,
+            totalCostUSD: 0.0012,
+            status: "active"
+        )
+        let sessions = SessionListDTO(
+            sessions: [session],
+            total: 1,
+            page: 1,
+            pageSize: 1
+        )
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-latest",
+            missions: [],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+
+        await api.setStatusResult(.success(makeStatus()))
+        await api.setCapabilitiesResult(.success(makeCapabilities()))
+        await api.setSessionsResult(.success(sessions))
+        await api.setSnapshotResult(.success(snapshot))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.selectedSessionID == "sess-latest")
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshConnectionKeepsConnectedWhenSessionsEmpty() async throws {
+        let appState = AppState()
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setStatusResult(.success(makeStatus()))
+        await api.setCapabilitiesResult(.success(makeCapabilities()))
+        await api.setSessionsResult(.success(SessionListDTO(
+            sessions: [],
+            total: 0,
+            page: 1,
+            pageSize: 1
+        )))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshConnectionKeepsConnectedAndClearsSnapshotOnSnapshotFailure() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-existing"
+        appState.snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-stale",
+            missions: [],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setStatusResult(.success(makeStatus()))
+        await api.setCapabilitiesResult(.success(makeCapabilities()))
+        await api.setSnapshotResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.selectedSessionID == "sess-existing")
+        #expect(appState.snapshot == nil)
+        #expect(appState.lastError == .httpStatus(500))
     }
 }
 
@@ -134,4 +277,31 @@ extension FakeWorkbenchAPIProvider {
     fileprivate func setSnapshotResult(_ result: Result<WorkbenchSnapshotDTO, APIError>) {
         snapshotResult = result
     }
+
+    fileprivate func setSessionsResult(_ result: Result<SessionListDTO, APIError>) {
+        sessionsResult = result
+    }
+}
+
+private func makeStatus() -> DaemonStatusDTO {
+    DaemonStatusDTO(
+        status: "running",
+        version: "0.2.0",
+        pid: 42,
+        host: "127.0.0.1",
+        port: 8765,
+        startedAt: "2026-06-27T06:00:00",
+        workspaceCount: 7
+    )
+}
+
+private func makeCapabilities() -> CapabilitiesDTO {
+    CapabilitiesDTO(
+        supportsDaemonManagement: false,
+        supportsWorkspaceRegistry: true,
+        supportsValidationRunner: true,
+        supportsCloudSync: false,
+        supportedLocales: ["zh-CN", "en-US"],
+        protocolVersion: 1
+    )
 }

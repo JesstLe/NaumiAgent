@@ -115,6 +115,46 @@ final class WorkbenchAPIClientTests {
         }
     }
 
+    @Test func fetchSessions() async throws {
+        let json = Data(
+            """
+            {"sessions":[{"id":"sess-001","title":"Test Session","model":"gpt-4o","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:30:00","message_count":5,"total_tokens":200,"total_cost_usd":0.002,"status":"active"}],"total":1,"page":1,"page_size":1}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/sessions?page=1&page_size=1" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let list = try await client.fetchSessions(page: 1, pageSize: 1)
+
+        #expect(list.total == 1)
+        #expect(list.page == 1)
+        #expect(list.pageSize == 1)
+        #expect(list.sessions.count == 1)
+
+        let session = try #require(list.sessions.first)
+        #expect(session.id == "sess-001")
+        #expect(session.title == "Test Session")
+        #expect(session.model == "gpt-4o")
+        #expect(session.createdAt == "2026-06-27T06:00:00")
+        #expect(session.updatedAt == "2026-06-27T06:30:00")
+        #expect(session.messageCount == 5)
+        #expect(session.totalTokens == 200)
+        #expect(session.totalCostUSD == 0.002)
+        #expect(session.status == "active")
+    }
+
     // MARK: - Helpers
 
     private func makeClient() -> WorkbenchAPIClient {
