@@ -23,6 +23,7 @@ from naumi_agent.workbench.models import (
     WorkbenchEvent,
 )
 from naumi_agent.workbench.policy import PolicyDecision, evaluate_intent_locks
+from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.workbench.validation import (
     ValidationCommand,
@@ -52,6 +53,7 @@ __all__ = [
     "ValidationResult",
     "ValidationRunner",
     "WorkbenchEvent",
+    "WorkbenchService",
     "WorkbenchStore",
     "evaluate_context_health",
     "evaluate_intent_locks",
