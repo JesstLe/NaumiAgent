@@ -65,3 +65,45 @@ async def test_list_events_returns_store_events_and_respects_limit(tmp_path) -> 
 
     assert len(limited) == 1
     assert limited[0] in [event_a.to_dict(), event_b.to_dict()]
+
+
+@pytest.mark.asyncio
+async def test_list_validation_runs_returns_runs_and_respects_limit(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    run_a = await workbench_store.record_validation_run(
+        session_id="s",
+        task_id="task-a",
+        actor="ValidationRunner",
+        command=["pytest", "test_a.py"],
+        cwd="/workspace",
+        status="passed",
+        exit_code=0,
+        output="ok",
+        started_at="2024-01-01T00:00:00",
+        completed_at="2024-01-01T00:00:01",
+    )
+    run_b = await workbench_store.record_validation_run(
+        session_id="s",
+        task_id="task-b",
+        actor="ValidationRunner",
+        command=["pytest", "test_b.py"],
+        cwd="/workspace",
+        status="failed",
+        exit_code=1,
+        output="error",
+        started_at="2024-01-01T00:01:00",
+        completed_at="2024-01-01T00:01:01",
+    )
+
+    all_runs = await service.list_validation_runs("s", limit=50)
+    assert [run["id"] for run in all_runs] == [run_a["id"], run_b["id"]]
+
+    filtered = await service.list_validation_runs("s", task_id="task-b", limit=50)
+    assert [run["id"] for run in filtered] == [run_b["id"]]
+
+    limited = await service.list_validation_runs("s", limit=1)
+    assert [run["id"] for run in limited] == [run_b["id"]]

@@ -70,3 +70,58 @@ async def test_intent_locks_round_trip(store: WorkbenchStore) -> None:
 
     locks = await store.list_intent_locks("s", mission.id)
     assert locks == [lock]
+
+
+@pytest.mark.asyncio
+async def test_list_validation_runs_filters_and_orders(store: WorkbenchStore) -> None:
+    run_a = await store.record_validation_run(
+        session_id="s",
+        task_id="task-a",
+        actor="ValidationRunner",
+        command=["pytest", "tests/unit/test_a.py"],
+        cwd="/workspace/a",
+        status="passed",
+        exit_code=0,
+        output="ok",
+        started_at="2024-01-01T00:00:00",
+        completed_at="2024-01-01T00:00:01",
+    )
+    run_b = await store.record_validation_run(
+        session_id="s",
+        task_id="task-b",
+        actor="ValidationRunner",
+        command=["pytest", "tests/unit/test_b.py"],
+        cwd="/workspace/b",
+        status="failed",
+        exit_code=1,
+        output="error",
+        started_at="2024-01-01T00:01:00",
+        completed_at="2024-01-01T00:01:01",
+    )
+    run_c = await store.record_validation_run(
+        session_id="s",
+        task_id="task-a",
+        actor="ValidationRunner",
+        command=["pytest", "tests/unit/test_a2.py"],
+        cwd="/workspace/a",
+        status="passed",
+        exit_code=0,
+        output="ok",
+        started_at="2024-01-01T00:02:00",
+        completed_at="2024-01-01T00:02:01",
+    )
+
+    all_runs = await store.list_validation_runs("s", limit=50)
+    assert [run["id"] for run in all_runs] == [run_a["id"], run_b["id"], run_c["id"]]
+    assert all(isinstance(run["command"], list) for run in all_runs)
+    for run, stored in zip(all_runs, [run_a, run_b, run_c]):
+        assert run["command"] == stored["command"]
+
+    task_a_runs = await store.list_validation_runs("s", task_id="task-a", limit=50)
+    assert [run["id"] for run in task_a_runs] == [run_a["id"], run_c["id"]]
+
+    task_b_runs = await store.list_validation_runs("s", task_id="task-b", limit=50)
+    assert [run["id"] for run in task_b_runs] == [run_b["id"]]
+
+    limited = await store.list_validation_runs("s", limit=1)
+    assert [run["id"] for run in limited] == [run_c["id"]]
