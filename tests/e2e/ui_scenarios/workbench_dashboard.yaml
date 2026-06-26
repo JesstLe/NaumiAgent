@@ -1,0 +1,45 @@
+name: workbench_dashboard
+description: 工作台快照在 CLI/TUI 中展示任务、风险、并行模式与关联 worktree。
+events:
+  - event: task_snapshot
+    data:
+      source: workbench
+      count: 1
+      open_count: 1
+      completed_count: 0
+      summary: "Mac 工作台"
+      items:
+        - id: "1"
+          subject: 实现任务市场
+          status: in_progress
+          owner: agent:Backend-Agent
+      missions:
+        - id: m1
+          title: Mac 工作台
+      tasks:
+        - id: "1"
+          subject: 实现任务市场
+          status: in_progress
+          owner: agent:Backend-Agent
+      issues:
+        - task_id: "1"
+          risk_level: high
+          parallel_mode: exclusive
+          related_worktree: issue-1-backend
+      failures: []
+      events: []
+  - event: runtime_notification
+    data:
+      source: workbench
+      title: Mac 工作台
+      count: 1
+      preview: "Backend-Agent · issue-1-backend"
+assert_cli_contains:
+  - Mac 工作台
+  - Backend-Agent
+  - issue-1-backend
+assert_tui_contains:
+  - Mac 工作台
+  - Backend-Agent
+  - issue-1-backend
+min_history_lines: 1
