@@ -1,0 +1,39 @@
+import Foundation
+import Observation
+
+/// Shared root state for the SwiftUI workbench shell.
+@Observable
+@MainActor
+public final class AppState: Sendable {
+    public var selectedWorkspace: String? = nil
+    public var selectedSessionID: String? = nil
+    public var currentRoute: AppRoute = .dashboard
+    public var connectionState: ConnectionState = .disconnected
+    public var daemonStatus: DaemonStatusDTO? = nil
+    public var capabilities: CapabilitiesDTO? = nil
+    public var snapshot: WorkbenchSnapshotDTO? = nil
+    public var lastError: APIError? = nil
+    public var locale: AppLocale = .default
+
+    public init() {}
+
+    public enum ConnectionState: String, Equatable, Sendable, CaseIterable {
+        case disconnected
+        case connecting
+        case connected
+        case stale
+
+        public func displayName(locale: AppLocale) -> String {
+            switch self {
+            case .connected:
+                return AppStrings.Connection.connected(locale)
+            case .connecting:
+                return AppStrings.Connection.connecting(locale)
+            case .disconnected:
+                return AppStrings.Connection.disconnected(locale)
+            case .stale:
+                return AppStrings.Connection.stale(locale)
+            }
+        }
+    }
+}

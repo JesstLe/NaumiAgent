@@ -1,0 +1,92 @@
+{
+  "session_id": "sess-zh-001",
+  "missions": [
+    {
+      "id": "mzh-001",
+      "session_id": "sess-zh-001",
+      "title": "实现 SwiftUI 工作台骨架",
+      "goal": "搭建可编译、可测试的 macOS Swift Package 第一刀",
+      "status": "planning",
+      "created_at": "2026-06-27T05:00:00",
+      "updated_at": "2026-06-27T05:30:00"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "1",
+      "session_id": "sess-zh-001",
+      "subject": "创建 Package.swift",
+      "description": "定义 library、executable 和 test target",
+      "status": "completed",
+      "active_form": null,
+      "owner": "human",
+      "blocks": [],
+      "blocked_by": [],
+      "created_at": "2026-06-27T05:00:00",
+      "updated_at": "2026-06-27T05:30:00"
+    },
+    {
+      "id": "2",
+      "session_id": "sess-zh-001",
+      "subject": "实现 API Client",
+      "description": "用 URLSession async 封装 daemon/capabilities/snapshot 接口",
+      "status": "in_progress",
+      "active_form": "实现 WorkbenchAPIClient",
+      "owner": "agent-a",
+      "blocks": [],
+      "blocked_by": [],
+      "created_at": "2026-06-27T05:10:00",
+      "updated_at": "2026-06-27T05:40:00"
+    }
+  ],
+  "issues": [
+    {
+      "session_id": "sess-zh-001",
+      "task_id": "2",
+      "mission_id": "mzh-001",
+      "parallel_mode": "exclusive",
+      "risk_level": "medium",
+      "requires_human_approval": true,
+      "acceptance_criteria": ["通过 swift test", "通过 swift build"],
+      "expected_artifacts": ["Sources/", "Tests/", "Fixtures/"],
+      "related_branch": "",
+      "related_worktree": "",
+      "related_pr": "",
+      "created_at": "2026-06-27T05:15:00",
+      "updated_at": "2026-06-27T05:45:00"
+    }
+  ],
+  "failures": [
+    {
+      "id": "fzh-001",
+      "session_id": "sess-zh-001",
+      "task_id": "2",
+      "kind": "test_failed",
+      "title": "DTO 解码测试失败",
+      "detail": "EventDTO payload 字段类型不匹配",
+      "source_id": "evt-001",
+      "status": "open",
+      "created_at": "2026-06-27T05:50:00"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt-001",
+      "session_id": "sess-zh-001",
+      "type": "mission.created",
+      "actor": "Human",
+      "subject_id": "mzh-001",
+      "payload": {"title": "实现 SwiftUI 工作台骨架"},
+      "timestamp": "2026-06-27T05:00:00"
+    },
+    {
+      "id": "evt-002",
+      "session_id": "sess-zh-001",
+      "type": "task.updated",
+      "actor": "Agent",
+      "subject_id": "2",
+      "payload": {"status": "in_progress"},
+      "timestamp": "2026-06-27T05:40:00"
+    }
+  ]
+}
