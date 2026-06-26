@@ -13,6 +13,8 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var contextSnapshotsResult: Result<ContextSnapshotsDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
+    var createMissionResult: Result<MissionDTO, APIError>?
+    var attachIssueResult: Result<IssueDTO, APIError>?
 
     func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
         guard let result = statusResult else {
@@ -87,6 +89,31 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
 
     func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
         guard let result = releaseLeaseResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func createMission(
+        sessionID: String,
+        title: String,
+        goal: String
+    ) async throws(APIError) -> MissionDTO {
+        guard let result = createMissionResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func attachIssue(
+        sessionID: String,
+        missionID: String,
+        taskID: String,
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async throws(APIError) -> IssueDTO {
+        guard let result = attachIssueResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -378,6 +405,118 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    @Test @MainActor func createMissionSuccessRefreshesSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let mission = makeMission(id: "mission-001", sessionID: "sess-001")
+        let snapshot = makeSnapshot(sessionID: "sess-001", missions: [mission])
+
+        await api.setCreateMissionResult(.success(mission))
+        await api.setSnapshotResult(.success(snapshot))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createMission(title: "Mac 工作台", goal: "补齐 API 调用面")
+
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func createMissionWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createMission(title: "Title", goal: "Goal")
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.snapshot == nil)
+    }
+
+    @Test @MainActor func createMissionFailurePreservesOldSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        appState.snapshot = staleSnapshot
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateMissionResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createMission(title: "Title", goal: "Goal")
+
+        #expect(appState.snapshot == staleSnapshot)
+        #expect(appState.lastError == .httpStatus(500))
+    }
+
+    @Test @MainActor func attachIssueSuccessRefreshesSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let issue = makeIssue(taskID: "task-001", missionID: "mission-001")
+        let snapshot = makeSnapshot(sessionID: "sess-001", issues: [issue])
+
+        await api.setAttachIssueResult(.success(issue))
+        await api.setSnapshotResult(.success(snapshot))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.attachIssue(
+            missionID: "mission-001",
+            taskID: "task-001",
+            acceptanceCriteria: ["通过 Swift 编译"],
+            parallelMode: "exclusive",
+            riskLevel: "medium"
+        )
+
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func attachIssueWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.attachIssue(
+            missionID: "mission-001",
+            taskID: "task-001",
+            acceptanceCriteria: [],
+            parallelMode: "exclusive",
+            riskLevel: "low"
+        )
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.snapshot == nil)
+    }
+
+    @Test @MainActor func attachIssueFailurePreservesOldSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", issues: [])
+        appState.snapshot = staleSnapshot
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setAttachIssueResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.attachIssue(
+            missionID: "mission-001",
+            taskID: "task-001",
+            acceptanceCriteria: [],
+            parallelMode: "cooperative",
+            riskLevel: "high"
+        )
+
+        #expect(appState.snapshot == staleSnapshot)
+        #expect(appState.lastError == .httpStatus(500))
+    }
+
     @Test @MainActor func refreshEventsSuccessWritesToAppState() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -627,6 +766,14 @@ extension FakeWorkbenchAPIProvider {
     fileprivate func setReleaseLeaseResult(_ result: Result<LeaseDTO, APIError>) {
         releaseLeaseResult = result
     }
+
+    fileprivate func setCreateMissionResult(_ result: Result<MissionDTO, APIError>) {
+        createMissionResult = result
+    }
+
+    fileprivate func setAttachIssueResult(_ result: Result<IssueDTO, APIError>) {
+        attachIssueResult = result
+    }
 }
 
 private func makeStatus() -> DaemonStatusDTO {
@@ -666,6 +813,28 @@ private func makeSnapshot(sessionID: String, lease: LeaseDTO) -> WorkbenchSnapsh
     )
 }
 
+private func makeSnapshot(sessionID: String, missions: [MissionDTO]) -> WorkbenchSnapshotDTO {
+    WorkbenchSnapshotDTO(
+        sessionID: sessionID,
+        missions: missions,
+        tasks: [],
+        issues: [],
+        failures: [],
+        events: []
+    )
+}
+
+private func makeSnapshot(sessionID: String, issues: [IssueDTO]) -> WorkbenchSnapshotDTO {
+    WorkbenchSnapshotDTO(
+        sessionID: sessionID,
+        missions: [],
+        tasks: [],
+        issues: issues,
+        failures: [],
+        events: []
+    )
+}
+
 private func makeTask(id: String, subject: String, status: String) -> TaskDTO {
     TaskDTO(
         id: id,
@@ -682,12 +851,12 @@ private func makeTask(id: String, subject: String, status: String) -> TaskDTO {
     )
 }
 
-private func makeIssue(taskID: String) -> IssueDTO {
+private func makeIssue(taskID: String, missionID: String = "mission-001") -> IssueDTO {
     IssueDTO(
         sessionID: "sess-001",
         taskID: taskID,
-        missionID: "mission-001",
-        parallelMode: "sequential",
+        missionID: missionID,
+        parallelMode: "exclusive",
         riskLevel: "medium",
         requiresHumanApproval: false,
         acceptanceCriteria: [],
@@ -695,6 +864,18 @@ private func makeIssue(taskID: String) -> IssueDTO {
         relatedBranch: "",
         relatedWorktree: "",
         relatedPR: "",
+        createdAt: "2026-06-27T06:00:00",
+        updatedAt: "2026-06-27T06:00:00"
+    )
+}
+
+private func makeMission(id: String, sessionID: String) -> MissionDTO {
+    MissionDTO(
+        id: id,
+        sessionID: sessionID,
+        title: "Mac 工作台",
+        goal: "补齐 API 调用面",
+        status: "active",
         createdAt: "2026-06-27T06:00:00",
         updatedAt: "2026-06-27T06:00:00"
     )

@@ -100,10 +100,42 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         try await post(path: "workbench/sessions/\(sessionID)/leases/\(leaseID)/release")
     }
 
+    public func createMission(
+        sessionID: String,
+        title: String,
+        goal: String
+    ) async throws(APIError) -> MissionDTO {
+        let body = CreateMissionRequest(title: title, goal: goal)
+        return try await post(
+            path: "workbench/sessions/\(sessionID)/missions",
+            body: body
+        )
+    }
+
+    public func attachIssue(
+        sessionID: String,
+        missionID: String,
+        taskID: String,
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async throws(APIError) -> IssueDTO {
+        let body = AttachIssueRequest(
+            taskID: taskID,
+            acceptanceCriteria: acceptanceCriteria,
+            parallelMode: parallelMode,
+            riskLevel: riskLevel
+        )
+        return try await post(
+            path: "workbench/sessions/\(sessionID)/missions/\(missionID)/issues",
+            body: body
+        )
+    }
+
     // MARK: - Private
 
     private func get<T: Decodable & Sendable>(path: String) async throws(APIError) -> T {
-        guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL else {
+        guard let url = url(for: path) else {
             throw .invalidURL
         }
 
@@ -114,7 +146,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         path: String,
         queryItems: [URLQueryItem]
     ) async throws(APIError) -> T {
-        guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL,
+        guard let url = url(for: path),
               var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             throw .invalidURL
         }
@@ -130,7 +162,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         path: String,
         body: B
     ) async throws(APIError) -> T {
-        guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL else {
+        guard let url = url(for: path) else {
             throw .invalidURL
         }
 
@@ -150,7 +182,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     }
 
     private func post<T: Decodable & Sendable>(path: String) async throws(APIError) -> T {
-        guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL else {
+        guard let url = url(for: path) else {
             throw .invalidURL
         }
 
@@ -158,6 +190,27 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         request.httpMethod = "POST"
 
         return try await performRequest(request)
+    }
+
+    /// Builds an absolute URL from a relative path, percent-encoding any characters
+    /// in the path segment that are not valid (spaces, Chinese characters, etc.).
+    /// Query strings are preserved unchanged so existing callers such as
+    /// `fetchSessions(page:pageSize:)` continue to work.
+    private func url(for path: String) -> URL? {
+        let pathPart: String
+        let queryPart: String
+        if let queryRange = path.range(of: "?") {
+            pathPart = String(path[..<queryRange.lowerBound])
+            queryPart = String(path[queryRange.lowerBound...])
+        } else {
+            pathPart = path
+            queryPart = ""
+        }
+
+        guard let encodedPath = pathPart.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            return nil
+        }
+        return URL(string: encodedPath + queryPart, relativeTo: baseURL)?.absoluteURL
     }
 
     private func performRequest<T: Decodable & Sendable>(_ request: URLRequest) async throws(APIError) -> T {
@@ -191,5 +244,19 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         let agentID: String
         let durationMinutes: Int
         let worktreeName: String
+    }
+
+    /// Payload for `POST /workbench/sessions/{session_id}/missions`.
+    private struct CreateMissionRequest: Encodable, Sendable {
+        let title: String
+        let goal: String
+    }
+
+    /// Payload for `POST /workbench/sessions/{session_id}/missions/{mission_id}/issues`.
+    private struct AttachIssueRequest: Encodable, Sendable {
+        let taskID: String
+        let acceptanceCriteria: [String]
+        let parallelMode: String
+        let riskLevel: String
     }
 }

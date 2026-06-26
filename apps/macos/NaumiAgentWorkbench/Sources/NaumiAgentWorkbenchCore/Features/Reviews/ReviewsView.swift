@@ -346,5 +346,46 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
             updatedAt: "2026-06-27T06:00:00"
         )
     }
+
+    func createMission(
+        sessionID: String,
+        title: String,
+        goal: String
+    ) async throws(APIError) -> MissionDTO {
+        MissionDTO(
+            id: "mission-1",
+            sessionID: sessionID,
+            title: title,
+            goal: goal,
+            status: "active",
+            createdAt: "2026-06-27T06:00:00",
+            updatedAt: "2026-06-27T06:00:00"
+        )
+    }
+
+    func attachIssue(
+        sessionID: String,
+        missionID: String,
+        taskID: String,
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async throws(APIError) -> IssueDTO {
+        IssueDTO(
+            sessionID: sessionID,
+            taskID: taskID,
+            missionID: missionID,
+            parallelMode: parallelMode,
+            riskLevel: riskLevel,
+            requiresHumanApproval: false,
+            acceptanceCriteria: acceptanceCriteria,
+            expectedArtifacts: [],
+            relatedBranch: "",
+            relatedWorktree: "",
+            relatedPR: "",
+            createdAt: "2026-06-27T06:00:00",
+            updatedAt: "2026-06-27T06:00:00"
+        )
+    }
 }
 #endif
