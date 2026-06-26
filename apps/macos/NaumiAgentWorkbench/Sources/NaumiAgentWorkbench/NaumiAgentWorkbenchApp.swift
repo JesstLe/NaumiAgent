@@ -9,6 +9,9 @@ struct NaumiAgentWorkbenchApp: App {
         WindowGroup {
             ContentView()
                 .environment(environment)
+                .task {
+                    await environment.daemonController.refreshConnection()
+                }
         }
     }
 }

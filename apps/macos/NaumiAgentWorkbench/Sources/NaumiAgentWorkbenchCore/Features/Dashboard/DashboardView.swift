@@ -17,6 +17,9 @@ public struct DashboardView: View {
                     daemonCard(status: status)
                 }
                 countsGrid
+                if let lastError = appState.lastError {
+                    errorCard(error: lastError)
+                }
                 if appState.snapshot == nil {
                     emptyState
                 }
@@ -156,6 +159,25 @@ public struct DashboardView: View {
         .frame(maxWidth: .infinity)
         .padding()
         .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - Error Card
+
+    private func errorCard(error: APIError) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(AppStrings.Dashboard.errorSection(appState.locale))
+                .font(.headline)
+                .foregroundStyle(.red)
+            HStack(spacing: 16) {
+                detailItem(
+                    label: AppStrings.Dashboard.errorDetailLabel(appState.locale),
+                    value: error.localizedMessage(locale: appState.locale)
+                )
+            }
+        }
+        .padding()
+        .background(Color.red.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 

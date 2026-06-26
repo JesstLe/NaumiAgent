@@ -3,7 +3,7 @@ import Foundation
 /// REST client for the NaumiAgent Workbench Kernel.
 ///
 /// SwiftUI 不直接读写 SQLite / 跑 git / pytest；所有业务状态通过此 client 访问本地 API。
-public actor WorkbenchAPIClient: Sendable {
+public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     public let baseURL: URL
     public let session: URLSession
 
