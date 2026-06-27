@@ -48,6 +48,50 @@ async def test_dashboard_snapshot_contains_core_cards(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_register_agent_profile_records_event_and_snapshot_card(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    profile = await service.register_agent_profile(
+        session_id="s",
+        agent_id="agent-a",
+        name="Backend Agent",
+        role="coder",
+        capabilities=["code", "test"],
+        permissions=["read", "write"],
+        max_parallel_tasks=2,
+        status="busy",
+        actor="Human",
+    )
+
+    assert profile["id"] == "agent-a"
+    assert profile["capabilities"] == ["code", "test"]
+    assert profile["permissions"] == ["read", "write"]
+    assert profile["status"] == "busy"
+
+    listed = await service.list_agent_profiles("s", status="busy")
+    assert [item["id"] for item in listed["agent_profiles"]] == ["agent-a"]
+    assert listed["status"] == "busy"
+
+    snapshot = await service.dashboard_snapshot("s")
+    assert [item["id"] for item in snapshot["agent_profiles"]] == ["agent-a"]
+
+    events = await service.list_events("s", event_type="agent_profile.upserted")
+    event = events["events"][0]
+    assert event["actor"] == "Human"
+    assert event["subject_id"] == "agent-a"
+    assert event["payload"] == {
+        "name": "Backend Agent",
+        "role": "coder",
+        "status": "busy",
+        "capabilities": ["code", "test"],
+        "permissions": ["read", "write"],
+    }
+
+
+@pytest.mark.asyncio
 async def test_dashboard_snapshot_includes_only_active_leases(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")

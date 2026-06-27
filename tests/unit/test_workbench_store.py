@@ -123,6 +123,57 @@ async def test_create_mission_and_issue_metadata(store: WorkbenchStore) -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_profiles_round_trip_filter_and_update(store: WorkbenchStore) -> None:
+    profile = await store.upsert_agent_profile(
+        session_id="s",
+        agent_id=" Agent-A ",
+        name=" Backend Agent ",
+        role=" coder ",
+        capabilities=[" code ", "", "test"],
+        permissions=["read", " write "],
+        max_parallel_tasks=2,
+        status="idle",
+    )
+    await store.upsert_agent_profile(
+        session_id="s",
+        agent_id="agent-b",
+        name="Reviewer",
+        role="reviewer",
+        status="busy",
+    )
+    await store.upsert_agent_profile(
+        session_id="other",
+        agent_id="Agent-A",
+        name="Other",
+        role="coder",
+    )
+
+    loaded = await store.get_agent_profile("s", "Agent-A")
+    assert loaded == profile
+    assert loaded.name == "Backend Agent"
+    assert loaded.role == "coder"
+    assert loaded.capabilities == ["code", "test"]
+    assert loaded.permissions == ["read", "write"]
+    assert loaded.max_parallel_tasks == 2
+
+    busy = await store.list_agent_profiles("s", status="busy", limit=50)
+    assert [item.id for item in busy] == ["agent-b"]
+
+    updated = await store.upsert_agent_profile(
+        session_id="s",
+        agent_id="Agent-A",
+        name="Backend Agent",
+        role="coder",
+        status="busy",
+    )
+    assert updated.created_at == profile.created_at
+    assert updated.status == "busy"
+
+    session_profiles = await store.list_agent_profiles("s", limit=50)
+    assert {item.id for item in session_profiles} == {"Agent-A", "agent-b"}
+
+
+@pytest.mark.asyncio
 async def test_decision_and_audit_event_are_persisted(store: WorkbenchStore) -> None:
     mission = await store.create_mission("s", "M", "G")
     decision = await store.add_decision(

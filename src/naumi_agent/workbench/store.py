@@ -9,6 +9,7 @@ from typing import Any, cast
 import aiosqlite
 
 from naumi_agent.workbench.models import (
+    AgentProfile,
     Approval,
     ApprovalState,
     ContextHealth,
@@ -54,6 +55,22 @@ CREATE TABLE IF NOT EXISTS workbench_issues (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (session_id, task_id)
+)
+"""
+
+_CREATE_AGENT_PROFILES = """
+CREATE TABLE IF NOT EXISTS workbench_agent_profiles (
+    id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    capabilities TEXT NOT NULL,
+    permissions TEXT NOT NULL,
+    max_parallel_tasks INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, id)
 )
 """
 
@@ -182,6 +199,7 @@ class WorkbenchStore:
             return
         await db.execute(_CREATE_MISSIONS)
         await db.execute(_CREATE_ISSUES)
+        await db.execute(_CREATE_AGENT_PROFILES)
         await db.execute(_CREATE_DECISIONS)
         await db.execute(_CREATE_EVENTS)
         await db.execute(_CREATE_INTENT_LOCKS)
@@ -395,6 +413,110 @@ class WorkbenchStore:
             )
             rows = await cursor.fetchall()
         return [_row_to_issue(dict(row)) for row in rows]
+
+    async def upsert_agent_profile(
+        self,
+        *,
+        session_id: str,
+        agent_id: str,
+        name: str,
+        role: str,
+        capabilities: list[str] | None = None,
+        permissions: list[str] | None = None,
+        max_parallel_tasks: int = 1,
+        status: str = "idle",
+    ) -> AgentProfile:
+        cleaned_id = agent_id.strip()
+        cleaned_name = name.strip()
+        cleaned_role = role.strip()
+        cleaned_status = status.strip() or "idle"
+        if not cleaned_id:
+            raise ValueError("agent_id 不能为空")
+        if not cleaned_name:
+            raise ValueError("Agent 名称不能为空")
+        if not cleaned_role:
+            raise ValueError("Agent 角色不能为空")
+        if max_parallel_tasks < 1:
+            raise ValueError("max_parallel_tasks 必须大于 0")
+
+        now = now_iso()
+        profile = AgentProfile(
+            id=cleaned_id,
+            session_id=session_id,
+            name=cleaned_name,
+            role=cleaned_role,
+            capabilities=[item.strip() for item in (capabilities or []) if item.strip()],
+            permissions=[item.strip() for item in (permissions or []) if item.strip()],
+            max_parallel_tasks=max_parallel_tasks,
+            status=cleaned_status,
+            updated_at=now,
+        )
+        existing = await self.get_agent_profile(session_id, cleaned_id)
+        if existing is not None:
+            profile.created_at = existing.created_at
+
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                """INSERT OR REPLACE INTO workbench_agent_profiles
+                   (id, session_id, name, role, capabilities, permissions,
+                    max_parallel_tasks, status, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    profile.id,
+                    profile.session_id,
+                    profile.name,
+                    profile.role,
+                    json.dumps(profile.capabilities, ensure_ascii=False),
+                    json.dumps(profile.permissions, ensure_ascii=False),
+                    profile.max_parallel_tasks,
+                    profile.status,
+                    profile.created_at,
+                    profile.updated_at,
+                ),
+            )
+            await db.commit()
+        return profile
+
+    async def get_agent_profile(
+        self, session_id: str, agent_id: str
+    ) -> AgentProfile | None:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_agent_profiles
+                   WHERE session_id = ? AND id = ?""",
+                (session_id, agent_id),
+            )
+            row = await cursor.fetchone()
+        return _row_to_agent_profile(dict(row)) if row else None
+
+    async def list_agent_profiles(
+        self,
+        session_id: str,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[AgentProfile]:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            params: list[Any] = [session_id]
+            filters = ["session_id = ?"]
+            if status is not None:
+                filters.append("status = ?")
+                params.append(status)
+            params.append(limit)
+            where_clause = " AND ".join(filters)
+            cursor = await db.execute(
+                f"""SELECT * FROM workbench_agent_profiles
+                   WHERE {where_clause}
+                   ORDER BY updated_at DESC, created_at DESC
+                   LIMIT ?""",
+                params,
+            )
+            rows = await cursor.fetchall()
+        return [_row_to_agent_profile(dict(row)) for row in rows]
 
     async def add_decision(
         self,
@@ -1046,6 +1168,21 @@ def _row_to_issue(row: dict[str, Any]) -> IssueMetadata:
         related_branch=row["related_branch"],
         related_worktree=row["related_worktree"],
         related_pr=row["related_pr"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _row_to_agent_profile(row: dict[str, Any]) -> AgentProfile:
+    return AgentProfile(
+        id=row["id"],
+        session_id=row["session_id"],
+        name=row["name"],
+        role=row["role"],
+        capabilities=cast(list[str], json.loads(row["capabilities"])),
+        permissions=cast(list[str], json.loads(row["permissions"])),
+        max_parallel_tasks=row["max_parallel_tasks"],
+        status=row["status"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
