@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from naumi_agent import __version__
 from naumi_agent.api.routes.workbench import (
+    AgentProfileUpsert,
     ApprovalResolve,
     ClaimIssue,
     ContextHealthRecord,
@@ -30,6 +31,7 @@ from naumi_agent.api.routes.workbench import (
     create_validation_run,
     create_workbench_mission,
     expire_workbench_leases,
+    get_agent_profiles,
     get_approvals,
     get_context_snapshots,
     get_daemon_status,
@@ -43,6 +45,7 @@ from naumi_agent.api.routes.workbench import (
     get_workbench_snapshot,
     release_workbench_lease,
     resolve_approval,
+    upsert_agent_profile,
 )
 from naumi_agent.api.routes.workbench import (
     router as workbench_router,
@@ -73,6 +76,7 @@ class _FakeWorkbenchService:
     def __init__(self) -> None:
         self.created_missions: list[dict] = []
         self.attached_issues: list[dict] = []
+        self.registered_agent_profiles: list[dict] = []
         self.created_intent_locks: list[dict] = []
         self.created_decisions: list[dict] = []
         self.recorded_context_health: list[dict] = []
@@ -82,6 +86,7 @@ class _FakeWorkbenchService:
         self.listed_validation_runs: list[dict] = []
         self.listed_context_snapshots: list[dict] = []
         self.listed_approvals: list[dict] = []
+        self.listed_agent_profiles: list[dict] = []
         self.listed_failures: list[dict] = []
         self.listed_issues: list[dict] = []
         self.listed_missions: list[dict] = []
@@ -89,6 +94,7 @@ class _FakeWorkbenchService:
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
+        self._agent_profile_error: Exception | None = None
         self._context_health_error: Exception | None = None
         self._resolve_approval_error: Exception | None = None
         self._resolve_approval_result: dict | None = None
@@ -101,6 +107,9 @@ class _FakeWorkbenchService:
 
     def set_decision_error(self, error: Exception) -> None:
         self._decision_error = error
+
+    def set_agent_profile_error(self, error: Exception) -> None:
+        self._agent_profile_error = error
 
     def set_context_health_error(self, error: Exception) -> None:
         self._context_health_error = error
@@ -167,6 +176,75 @@ class _FakeWorkbenchService:
             "related_pr": "",
             "created_at": "2024-01-01T00:00:00",
             "updated_at": "2024-01-01T00:00:00",
+        }
+
+    async def register_agent_profile(
+        self,
+        *,
+        session_id: str,
+        agent_id: str,
+        name: str,
+        role: str,
+        capabilities: list[str] | None = None,
+        permissions: list[str] | None = None,
+        max_parallel_tasks: int = 1,
+        status: str = "idle",
+        actor: str = "Human",
+    ):
+        self.registered_agent_profiles.append(
+            {
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "name": name,
+                "role": role,
+                "capabilities": capabilities,
+                "permissions": permissions,
+                "max_parallel_tasks": max_parallel_tasks,
+                "status": status,
+                "actor": actor,
+            }
+        )
+        if self._agent_profile_error is not None:
+            raise self._agent_profile_error
+        return {
+            "id": agent_id,
+            "session_id": session_id,
+            "name": name.strip(),
+            "role": role.strip(),
+            "capabilities": list(capabilities or []),
+            "permissions": list(permissions or []),
+            "max_parallel_tasks": max_parallel_tasks,
+            "status": status,
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
+        }
+
+    async def list_agent_profiles(
+        self,
+        session_id: str,
+        status: str | None = None,
+        limit: int = 50,
+    ):
+        self.listed_agent_profiles.append(
+            {"session_id": session_id, "status": status, "limit": limit}
+        )
+        return {
+            "agent_profiles": [
+                {
+                    "id": "agent-1",
+                    "session_id": session_id,
+                    "name": "Backend Agent",
+                    "role": "coder",
+                    "capabilities": ["code", "test"],
+                    "permissions": ["read", "write"],
+                    "max_parallel_tasks": 2,
+                    "status": status or "busy",
+                    "created_at": "2024-01-01T00:00:00",
+                    "updated_at": "2024-01-01T00:00:00",
+                }
+            ],
+            "status": status,
+            "limit": limit,
         }
 
     async def create_intent_lock(
@@ -1865,6 +1943,139 @@ async def test_get_issues_endpoint_without_filters() -> None:
     assert response.model_dump()["risk_level"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["issues"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_agent_profiles_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_agent_profiles(
+            "missing", _fake_request(engine), status=None, limit=10, auth="test"
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_get_agent_profiles_endpoint_returns_profiles_and_params() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_agent_profiles(
+        "sess-1", _fake_request(engine), status="busy", limit=25, auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_agent_profiles == [
+        {"session_id": "sess-1", "status": "busy", "limit": 25}
+    ]
+    assert response.model_dump() == {
+        "agent_profiles": [
+            {
+                "id": "agent-1",
+                "session_id": "sess-1",
+                "name": "Backend Agent",
+                "role": "coder",
+                "capabilities": ["code", "test"],
+                "permissions": ["read", "write"],
+                "max_parallel_tasks": 2,
+                "status": "busy",
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+            }
+        ],
+        "status": "busy",
+        "limit": 25,
+    }
+
+
+@pytest.mark.asyncio
+async def test_upsert_agent_profile_endpoint_registers_profile() -> None:
+    engine = _FakeEngine(exists=True)
+    body = AgentProfileUpsert(
+        name=" Backend Agent ",
+        role=" coder ",
+        capabilities=["code", "test"],
+        permissions=["read"],
+        max_parallel_tasks=2,
+        status="busy",
+        actor="Human",
+    )
+
+    response = await upsert_agent_profile(
+        "sess-1", "agent-1", body, _fake_request(engine), auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.registered_agent_profiles == [
+        {
+            "session_id": "sess-1",
+            "agent_id": "agent-1",
+            "name": " Backend Agent ",
+            "role": " coder ",
+            "capabilities": ["code", "test"],
+            "permissions": ["read"],
+            "max_parallel_tasks": 2,
+            "status": "busy",
+            "actor": "Human",
+        }
+    ]
+    assert response["id"] == "agent-1"
+    assert response["name"] == "Backend Agent"
+    assert response["role"] == "coder"
+
+
+@pytest.mark.asyncio
+async def test_upsert_agent_profile_endpoint_maps_value_error_to_400() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_agent_profile_error(ValueError("Agent 名称不能为空"))
+    body = AgentProfileUpsert(name="", role="coder")
+
+    with pytest.raises(HTTPException) as exc:
+        await upsert_agent_profile(
+            "sess-1", "agent-1", body, _fake_request(engine), auth="test"
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Agent 名称不能为空"
+
+
+def test_upsert_agent_profile_route_accepts_json_body() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/agents/agent-1",
+        json={
+            "name": "Backend Agent",
+            "role": "coder",
+            "capabilities": ["code"],
+            "permissions": ["read"],
+            "max_parallel_tasks": 2,
+            "status": "busy",
+            "actor": "Human",
+        },
+    )
+
+    assert response.status_code == 201
+    assert engine.workbench_service.registered_agent_profiles == [
+        {
+            "session_id": "sess-1",
+            "agent_id": "agent-1",
+            "name": "Backend Agent",
+            "role": "coder",
+            "capabilities": ["code"],
+            "permissions": ["read"],
+            "max_parallel_tasks": 2,
+            "status": "busy",
+            "actor": "Human",
+        }
+    ]
+    assert response.json()["status"] == "busy"
 
 
 @pytest.mark.asyncio

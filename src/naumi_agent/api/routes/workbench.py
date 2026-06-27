@@ -49,6 +49,16 @@ class IssueAttach(BaseModel):
     risk_level: RiskLevel = RiskLevel.MEDIUM
 
 
+class AgentProfileUpsert(BaseModel):
+    name: str
+    role: str
+    capabilities: list[str] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
+    max_parallel_tasks: int = Field(default=1, ge=1)
+    status: str = "idle"
+    actor: str = "Human"
+
+
 class IntentLockCreate(BaseModel):
     actor: str = "Human"
     rule: str
@@ -149,6 +159,12 @@ class LeasesResponse(BaseModel):
 
 class MissionsResponse(BaseModel):
     missions: list[dict[str, Any]]
+    status: str | None
+    limit: int
+
+
+class AgentProfilesResponse(BaseModel):
+    agent_profiles: list[dict[str, Any]]
     status: str | None
     limit: int
 
@@ -580,6 +596,63 @@ async def get_issues(
         risk_level=risk_level,
         limit=limit,
     )
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/agents",
+    response_model=AgentProfilesResponse,
+)
+async def get_agent_profiles(
+    session_id: str,
+    request: Request,
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    result = await engine.workbench_service.list_agent_profiles(
+        session_id, status=status, limit=limit
+    )
+    return AgentProfilesResponse(
+        agent_profiles=result["agent_profiles"],
+        status=result["status"],
+        limit=result["limit"],
+    )
+
+
+@router.post("/workbench/sessions/{session_id}/agents/{agent_id}", status_code=201)
+async def upsert_agent_profile(
+    session_id: str,
+    agent_id: str,
+    body: AgentProfileUpsert,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        return await engine.workbench_service.register_agent_profile(
+            session_id=session_id,
+            agent_id=agent_id,
+            name=body.name,
+            role=body.role,
+            capabilities=body.capabilities,
+            permissions=body.permissions,
+            max_parallel_tasks=body.max_parallel_tasks,
+            status=body.status,
+            actor=body.actor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get(

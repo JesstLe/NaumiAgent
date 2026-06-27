@@ -12,6 +12,7 @@ from naumi_agent.workbench.context_health import (
     evaluate_context_health,
 )
 from naumi_agent.workbench.models import (
+    AgentProfile,
     Approval,
     ApprovalState,
     Decision,
@@ -251,8 +252,70 @@ class WorkbenchService:
         data["risk_level"] = data["risk_level"].value
         return data
 
+    async def register_agent_profile(
+        self,
+        *,
+        session_id: str,
+        agent_id: str,
+        name: str,
+        role: str,
+        capabilities: list[str] | None = None,
+        permissions: list[str] | None = None,
+        max_parallel_tasks: int = 1,
+        status: str = "idle",
+        actor: str = "Human",
+    ) -> dict[str, Any]:
+        profile = await self._workbench_store.upsert_agent_profile(
+            session_id=session_id,
+            agent_id=agent_id,
+            name=name,
+            role=role,
+            capabilities=capabilities,
+            permissions=permissions,
+            max_parallel_tasks=max_parallel_tasks,
+            status=status,
+        )
+        await self._workbench_store.append_event(
+            session_id=session_id,
+            type="agent_profile.upserted",
+            actor=actor.strip() or "Human",
+            subject_id=profile.id,
+            payload={
+                "name": profile.name,
+                "role": profile.role,
+                "status": profile.status,
+                "capabilities": profile.capabilities,
+                "permissions": profile.permissions,
+            },
+        )
+        return self._agent_profile_to_dict(profile)
+
+    async def list_agent_profiles(
+        self,
+        session_id: str,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        profiles = await self._workbench_store.list_agent_profiles(
+            session_id, status=status, limit=limit
+        )
+        return {
+            "agent_profiles": [
+                self._agent_profile_to_dict(profile) for profile in profiles
+            ],
+            "status": status,
+            "limit": limit,
+        }
+
+    @staticmethod
+    def _agent_profile_to_dict(profile: AgentProfile) -> dict[str, Any]:
+        return asdict(profile)
+
     async def dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
         tasks = await self._task_store.list_tasks()
+        agent_profiles = await self._workbench_store.list_agent_profiles(
+            session_id, limit=50
+        )
         events = await self._workbench_store.list_events(session_id, limit=50)
         failures = await self._workbench_store.list_failures(session_id)
         validation_runs = await self._workbench_store.list_validation_runs(
@@ -276,6 +339,9 @@ class WorkbenchService:
         return {
             "session_id": session_id,
             "missions": await self._list_missions_for_snapshot(session_id),
+            "agent_profiles": [
+                self._agent_profile_to_dict(profile) for profile in agent_profiles
+            ],
             "tasks": [asdict(task) for task in tasks],
             "issues": issues,
             "leases": leases,
