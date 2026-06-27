@@ -8,6 +8,10 @@ public struct TaskMarketView: View {
     @State private var selectedTaskID: String?
     @State private var searchText = ""
     @State private var autoRefresh = true
+    @State private var claimAgentID = "Backend-Agent"
+    @State private var claimDurationMinutes = 45
+    @State private var claimWorktreeName = ""
+    @State private var isClaimingIssue = false
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -55,6 +59,9 @@ public struct TaskMarketView: View {
         .onAppear {
             if selectedTaskID == nil {
                 selectedTaskID = presentation.selectedIssue?.taskID
+            }
+            if claimWorktreeName.isEmpty, let selected {
+                claimWorktreeName = selected.defaultClaimWorktreeName
             }
         }
     }
@@ -233,6 +240,7 @@ public struct TaskMarketView: View {
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 selectedTaskID = row.taskID
+                                claimWorktreeName = row.defaultClaimWorktreeName
                             }
                             .background(selectedTaskID == row.taskID ? Color.accentColor.opacity(0.10) : Color.clear)
                         Divider()
@@ -350,6 +358,10 @@ public struct TaskMarketView: View {
 
                 Divider()
 
+                claimCommandPanel(issue)
+
+                Divider()
+
                 HStack {
                     Text(appState.locale == .zhCN ? "智能体竞标 (3)" : "Agent Bids (3)")
                         .font(.headline)
@@ -379,6 +391,73 @@ public struct TaskMarketView: View {
         }
         .padding(16)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func claimCommandPanel(_ issue: TaskMarketDesignIssue) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(AppStrings.TaskMarket.commandSectionTitle(appState.locale))
+                .font(.headline)
+
+            TextField(AppStrings.TaskMarket.agentIDLabel(appState.locale), text: $claimAgentID)
+                .textFieldStyle(.roundedBorder)
+
+            Stepper(
+                "\(AppStrings.TaskMarket.durationLabel(appState.locale)): \(claimDurationMinutes)",
+                value: $claimDurationMinutes,
+                in: 1...240,
+                step: 5
+            )
+            .font(.caption)
+
+            TextField(
+                AppStrings.TaskMarket.columnWorktree(appState.locale),
+                text: $claimWorktreeName
+            )
+            .textFieldStyle(.roundedBorder)
+
+            Button {
+                claimIssue(issue)
+            } label: {
+                Label(
+                    isClaimingIssue
+                        ? AppStrings.TaskMarket.processingLabel(appState.locale)
+                        : AppStrings.TaskMarket.claimButton(appState.locale),
+                    systemImage: "hand.raised"
+                )
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!issue.canClaim || isClaimingIssue)
+
+            if let reason = issue.claimDisabledReason(locale: appState.locale) {
+                Text(reason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func claimIssue(_ issue: TaskMarketDesignIssue) {
+        guard issue.canClaim, !isClaimingIssue else { return }
+        let agentID = claimAgentID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !agentID.isEmpty else {
+            appState.lastError = .networkFailure(
+                appState.locale == .zhCN ? "代理 ID 不能为空" : "Agent ID is required"
+            )
+            return
+        }
+        let worktreeName = claimWorktreeName.trimmingCharacters(in: .whitespacesAndNewlines)
+        isClaimingIssue = true
+        Task {
+            await daemonController.claimIssue(
+                taskID: issue.taskID,
+                agentID: agentID,
+                durationMinutes: claimDurationMinutes,
+                worktreeName: worktreeName.isEmpty ? issue.defaultClaimWorktreeName : worktreeName
+            )
+            isClaimingIssue = false
+        }
     }
 
     private func inspectorGrid(_ issue: TaskMarketDesignIssue) -> some View {

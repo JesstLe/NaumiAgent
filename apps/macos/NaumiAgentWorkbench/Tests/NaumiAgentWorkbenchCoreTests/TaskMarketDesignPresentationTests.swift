@@ -17,6 +17,27 @@ struct TaskMarketDesignPresentationTests {
         #expect(presentation.rows[1].status == "Blocked")
     }
 
+    @Test func exposesClaimActionStateAndLocalizedDisabledReasons() {
+        let presentation = TaskMarketDesignPresentation(snapshot: nil)
+
+        let openIssue = presentation.rows.first { $0.taskID == "design-lease" }
+        let blockedIssue = presentation.rows.first { $0.taskID == "design-snapshot" }
+        let leasedIssue = presentation.rows.first { $0.taskID == "design-failure-cards" }
+
+        #expect(openIssue?.canClaim == true)
+        #expect(openIssue?.claimDisabledReason(locale: .zhCN) == nil)
+        #expect(openIssue?.claimDisabledReason(locale: .enUS) == nil)
+        #expect(openIssue?.defaultClaimWorktreeName == "wt-design-lease")
+
+        #expect(blockedIssue?.canClaim == false)
+        #expect(blockedIssue?.claimDisabledReason(locale: .zhCN) == "存在未完成依赖，暂不能认领")
+        #expect(blockedIssue?.claimDisabledReason(locale: .enUS) == "Unresolved dependencies block this claim")
+
+        #expect(leasedIssue?.canClaim == false)
+        #expect(leasedIssue?.claimDisabledReason(locale: .zhCN) == "已有活跃租约，需先释放或转派")
+        #expect(leasedIssue?.claimDisabledReason(locale: .enUS) == "An active lease must be released or reassigned first")
+    }
+
     private func loadZHSnapshot() throws -> WorkbenchSnapshotDTO {
         let data = try loadFixture(named: "workbench_snapshot_zh")
         return try JSONDecoder().decode(WorkbenchSnapshotDTO.self, from: data)

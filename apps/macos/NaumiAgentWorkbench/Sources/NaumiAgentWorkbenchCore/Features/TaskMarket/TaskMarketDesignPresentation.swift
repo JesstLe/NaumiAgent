@@ -271,6 +271,43 @@ public struct TaskMarketDesignIssue: Equatable, Sendable, Identifiable {
     public let status: String
     public let tag: String
 
+    public var canClaim: Bool {
+        !isBlocked && !hasActiveLease
+    }
+
+    public var defaultClaimWorktreeName: String {
+        let sanitized = taskID
+            .lowercased()
+            .map { character in
+                character.isLetter || character.isNumber ? character : "-"
+            }
+        let collapsed = String(sanitized).split(separator: "-").joined(separator: "-")
+        return "wt-\(collapsed)"
+    }
+
+    private var isBlocked: Bool {
+        dependency != "-"
+    }
+
+    private var hasActiveLease: Bool {
+        status.lowercased() == "leased" || lease.lowercased().contains("remaining")
+    }
+
+    public func claimDisabledReason(locale: AppLocale) -> String? {
+        guard !canClaim else { return nil }
+        if isBlocked {
+            return locale == .zhCN
+                ? "存在未完成依赖，暂不能认领"
+                : "Unresolved dependencies block this claim"
+        }
+        if hasActiveLease {
+            return locale == .zhCN
+                ? "已有活跃租约，需先释放或转派"
+                : "An active lease must be released or reassigned first"
+        }
+        return locale == .zhCN ? "当前状态不可认领" : "Current state cannot be claimed"
+    }
+
     fileprivate func withNumber(_ number: Int) -> TaskMarketDesignIssue {
         TaskMarketDesignIssue(
             number: number,
