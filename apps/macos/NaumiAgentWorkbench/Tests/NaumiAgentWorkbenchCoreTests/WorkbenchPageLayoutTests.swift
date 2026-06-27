@@ -22,17 +22,19 @@ struct WorkbenchPageLayoutTests {
         #expect(size.height < layout.baseHeight)
     }
 
-    @Test func scaledLayoutKeepsThreeColumnsStableWhenHeightChanges() {
+    @Test func scaledLayoutFitsBothWidthAndHeightSoColumnsRemainVisible() {
         let layout = WorkbenchScaledPageLayout.dashboard
 
-        let normalHeight = layout.scaledSize(for: CGSize(width: 1360, height: 900))
-        let shortHeight = layout.scaledSize(for: CGSize(width: 1360, height: 620))
+        let native = layout.scaledSize(for: CGSize(width: 1360, height: 720))
+        let wideButShort = layout.scaledSize(for: CGSize(width: 2048, height: 1048))
         let narrow = layout.scaledSize(for: CGSize(width: 900, height: 620))
 
-        #expect(abs(normalHeight.width - layout.baseWidth) < 0.001)
-        #expect(abs(shortHeight.width - layout.baseWidth) < 0.001)
-        #expect(abs(shortHeight.height - normalHeight.height) < 0.001)
+        #expect(abs(native.width - layout.baseWidth) < 0.001)
+        #expect(abs(native.height - layout.baseHeight) < 0.001)
+        #expect(wideButShort.width <= 2048)
+        #expect(wideButShort.height <= 1048)
+        #expect(wideButShort.width < 2048)
         #expect(narrow.width <= 900)
-        #expect(abs(narrow.height - layout.baseHeight * layout.scale(for: 900)) < 0.001)
+        #expect(narrow.height <= 620)
     }
 }
