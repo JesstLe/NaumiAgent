@@ -476,6 +476,25 @@ async def get_validation_runs(
     return ValidationRunsResponse(validation_runs=runs, task_id=task_id, limit=limit)
 
 
+@router.get("/workbench/sessions/{session_id}/validation-runs/{run_id}")
+async def get_validation_run(
+    session_id: str,
+    run_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    run = await engine.workbench_service.get_validation_run(session_id, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="验证运行不存在")
+    return run
+
+
 @router.get(
     "/workbench/sessions/{session_id}/context-snapshots",
     response_model=ContextSnapshotsResponse,

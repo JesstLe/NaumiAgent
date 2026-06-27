@@ -90,6 +90,7 @@ class _FakeWorkbenchService:
         self.run_validations: list[dict] = []
         self.listed_events: list[dict] = []
         self.listed_validation_runs: list[dict] = []
+        self.requested_validation_runs: list[dict] = []
         self.listed_context_snapshots: list[dict] = []
         self.listed_approvals: list[dict] = []
         self.listed_agent_profiles: list[dict] = []
@@ -473,6 +474,26 @@ class _FakeWorkbenchService:
                 "completed_at": "2024-01-01T00:00:01",
             }
         ]
+
+    async def get_validation_run(self, session_id: str, run_id: str):
+        self.requested_validation_runs.append(
+            {"session_id": session_id, "run_id": run_id}
+        )
+        if run_id == "missing-run":
+            return None
+        return {
+            "id": run_id,
+            "session_id": session_id,
+            "task_id": "task-1",
+            "actor": "ValidationRunner",
+            "command": ["pytest", "test.py"],
+            "cwd": "/workspace",
+            "status": "passed",
+            "exit_code": 0,
+            "output": "ok",
+            "started_at": "2024-01-01T00:00:00",
+            "completed_at": "2024-01-01T00:00:01",
+        }
 
     async def list_context_snapshots(
         self,
@@ -1242,6 +1263,58 @@ async def test_get_validation_runs_endpoint_returns_runs_and_params() -> None:
         "task_id": "task-2",
         "limit": 25,
     }
+
+
+@pytest.mark.asyncio
+async def test_get_validation_run_endpoint_returns_single_run() -> None:
+    engine = _FakeEngine(exists=True)
+
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get(
+        "/workbench/sessions/sess-1/validation-runs/run-2",
+        headers={"Authorization": "Bearer local-token"},
+    )
+
+    assert response.status_code == 200
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_validation_runs == [
+        {"session_id": "sess-1", "run_id": "run-2"}
+    ]
+    assert response.json() == {
+        "id": "run-2",
+        "session_id": "sess-1",
+        "task_id": "task-1",
+        "actor": "ValidationRunner",
+        "command": ["pytest", "test.py"],
+        "cwd": "/workspace",
+        "status": "passed",
+        "exit_code": 0,
+        "output": "ok",
+        "started_at": "2024-01-01T00:00:00",
+        "completed_at": "2024-01-01T00:00:01",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_validation_run_endpoint_returns_404_for_missing_run() -> None:
+    engine = _FakeEngine(exists=True)
+
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get(
+        "/workbench/sessions/sess-1/validation-runs/missing-run",
+        headers={"Authorization": "Bearer local-token"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "验证运行不存在"
 
 
 @pytest.mark.asyncio

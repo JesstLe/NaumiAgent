@@ -466,6 +466,13 @@ class WorkbenchService:
             session_id, task_id=task_id, limit=limit
         )
 
+    async def get_validation_run(
+        self,
+        session_id: str,
+        run_id: str,
+    ) -> dict[str, Any] | None:
+        return await self._workbench_store.get_validation_run(session_id, run_id)
+
     async def list_context_snapshots(
         self,
         session_id: str,
