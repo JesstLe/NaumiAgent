@@ -31,6 +31,7 @@ from naumi_agent.api.routes.workbench import (
     get_context_snapshots,
     get_daemon_status,
     get_failures,
+    get_issues,
     get_validation_runs,
     get_workbench_capabilities,
     get_workbench_events,
@@ -73,6 +74,7 @@ class _FakeWorkbenchService:
         self.listed_context_snapshots: list[dict] = []
         self.listed_approvals: list[dict] = []
         self.listed_failures: list[dict] = []
+        self.listed_issues: list[dict] = []
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
@@ -389,6 +391,44 @@ class _FakeWorkbenchService:
                 "created_at": "2024-01-01T00:00:00",
             }
         ]
+
+    async def list_issues(
+        self,
+        session_id: str,
+        mission_id: str | None = None,
+        risk_level: str | None = None,
+        limit: int = 50,
+    ):
+        self.listed_issues.append(
+            {
+                "session_id": session_id,
+                "mission_id": mission_id,
+                "risk_level": risk_level,
+                "limit": limit,
+            }
+        )
+        return {
+            "issues": [
+                {
+                    "session_id": session_id,
+                    "task_id": "task-1",
+                    "mission_id": mission_id or "mission-1",
+                    "parallel_mode": "exclusive",
+                    "risk_level": risk_level or "medium",
+                    "requires_human_approval": True,
+                    "acceptance_criteria": [],
+                    "expected_artifacts": [],
+                    "related_branch": "",
+                    "related_worktree": "",
+                    "related_pr": "",
+                    "created_at": "2024-01-01T00:00:00",
+                    "updated_at": "2024-01-01T00:00:00",
+                }
+            ],
+            "mission_id": mission_id,
+            "risk_level": risk_level,
+            "limit": limit,
+        }
 
 
 class FakeTaskMarket:
@@ -1356,3 +1396,85 @@ async def test_create_decision_endpoint_maps_value_error_to_400() -> None:
 
     assert exc.value.status_code == 400
     assert exc.value.detail == "决策标题不能为空"
+
+
+@pytest.mark.asyncio
+async def test_get_issues_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_issues(
+            "missing",
+            _fake_request(engine),
+            mission_id=None,
+            risk_level=None,
+            limit=10,
+            auth="test",
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_get_issues_endpoint_returns_issues_and_params() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_issues(
+        "sess-1",
+        _fake_request(engine),
+        mission_id="mission-2",
+        risk_level="high",
+        limit=25,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_issues == [
+        {"session_id": "sess-1", "mission_id": "mission-2", "risk_level": "high", "limit": 25}
+    ]
+    assert response.model_dump() == {
+        "issues": [
+            {
+                "session_id": "sess-1",
+                "task_id": "task-1",
+                "mission_id": "mission-2",
+                "parallel_mode": "exclusive",
+                "risk_level": "high",
+                "requires_human_approval": True,
+                "acceptance_criteria": [],
+                "expected_artifacts": [],
+                "related_branch": "",
+                "related_worktree": "",
+                "related_pr": "",
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+            }
+        ],
+        "mission_id": "mission-2",
+        "risk_level": "high",
+        "limit": 25,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_issues_endpoint_without_filters() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_issues(
+        "sess-1",
+        _fake_request(engine),
+        mission_id=None,
+        risk_level=None,
+        limit=50,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_issues == [
+        {"session_id": "sess-1", "mission_id": None, "risk_level": None, "limit": 50}
+    ]
+    assert response.model_dump()["mission_id"] is None
+    assert response.model_dump()["risk_level"] is None
+    assert response.model_dump()["limit"] == 50
+    assert len(response.model_dump()["issues"]) == 1

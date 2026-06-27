@@ -13,6 +13,7 @@ from naumi_agent.workbench.models import (
     Decision,
     DecisionKind,
     IntentLock,
+    IssueMetadata,
     Lease,
     Mission,
     ParallelMode,
@@ -216,6 +217,34 @@ class WorkbenchService:
             payload={"mission_id": mission_id, "risk_level": risk_level.value},
         )
         return asdict(issue)
+
+    async def list_issues(
+        self,
+        session_id: str,
+        mission_id: str | None = None,
+        risk_level: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        issues = await self._workbench_store.list_issues(
+            session_id=session_id,
+            mission_id=mission_id,
+            risk_level=risk_level,
+            limit=limit,
+        )
+        return {
+            "issues": [self._issue_to_dict(issue) for issue in issues],
+            "mission_id": mission_id,
+            "risk_level": risk_level,
+            "limit": limit,
+        }
+
+    @staticmethod
+    def _issue_to_dict(issue: IssueMetadata) -> dict[str, Any]:
+        data = asdict(issue)
+        # Ensure enum values are JSON-friendly strings.
+        data["parallel_mode"] = data["parallel_mode"].value
+        data["risk_level"] = data["risk_level"].value
+        return data
 
     async def dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
         tasks = await self._task_store.list_tasks()

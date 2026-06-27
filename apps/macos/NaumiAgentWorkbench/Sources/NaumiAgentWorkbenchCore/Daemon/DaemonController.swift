@@ -186,6 +186,34 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Fetches issues for the currently selected session.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success the issues
+    /// are written to `appState.issues`; on failure `appState.lastError` is
+    /// set. Missing session clears the local issues list to avoid showing
+    /// stale data from another session. API failures leave the local list
+    /// unchanged.
+    public func refreshIssues(missionID: String? = nil, riskLevel: String? = nil, limit: Int = 50) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.issues = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchIssues(
+                sessionID: sessionID,
+                missionID: missionID,
+                riskLevel: riskLevel,
+                limit: limit
+            )
+            appState.issues = response.issues
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Refreshes the snapshot for the currently selected session.
     ///
     /// When no session is selected, the most recent session from `GET /sessions`
@@ -220,10 +248,12 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Claims an issue on behalf of an agent and refreshes the snapshot on success.
+    /// Claims an issue on behalf of an agent and refreshes the snapshot and
+    /// issues list on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot is never mutated directly.
+    /// `appState.lastError`; the local snapshot and issues are never mutated
+    /// directly.
     public func claimIssue(
         taskID: String,
         agentID: String,
@@ -244,6 +274,7 @@ public final class DaemonController: Sendable {
                 durationMinutes: durationMinutes,
                 worktreeName: worktreeName
             )
+            await refreshIssues()
             await refreshSnapshot()
         } catch {
             appState.lastError = error
@@ -291,10 +322,12 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Creates a mission in the selected session and refreshes the snapshot on success.
+    /// Creates a mission in the selected session and refreshes the snapshot
+    /// and issues list on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot is never mutated directly.
+    /// `appState.lastError`; the local snapshot and issues are never mutated
+    /// directly.
     public func createMission(title: String, goal: String) async {
         guard let sessionID = appState.selectedSessionID else {
             appState.lastError = .missingSelectedSession
@@ -308,16 +341,19 @@ public final class DaemonController: Sendable {
                 title: title,
                 goal: goal
             )
+            await refreshIssues()
             await refreshSnapshot()
         } catch {
             appState.lastError = error
         }
     }
 
-    /// Attaches an issue to a mission and refreshes the snapshot on success.
+    /// Attaches an issue to a mission and refreshes the snapshot and the
+    /// filtered issues list for that mission on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot is never mutated directly.
+    /// `appState.lastError`; the local snapshot and issues are never mutated
+    /// directly.
     public func attachIssue(
         missionID: String,
         taskID: String,
@@ -340,6 +376,7 @@ public final class DaemonController: Sendable {
                 parallelMode: parallelMode,
                 riskLevel: riskLevel
             )
+            await refreshIssues(missionID: missionID)
             await refreshSnapshot()
         } catch {
             appState.lastError = error

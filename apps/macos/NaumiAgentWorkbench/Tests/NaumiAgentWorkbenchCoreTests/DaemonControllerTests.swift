@@ -13,6 +13,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var contextSnapshotsResult: Result<ContextSnapshotsDTO, APIError>?
     var approvalsResult: Result<ApprovalsDTO, APIError>?
     var failuresResult: Result<FailuresDTO, APIError>?
+    var issuesResult: Result<IssuesDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
@@ -99,6 +100,18 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> FailuresDTO {
         guard let result = failuresResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchIssues(
+        sessionID: String,
+        missionID: String?,
+        riskLevel: String?,
+        limit: Int
+    ) async throws(APIError) -> IssuesDTO {
+        guard let result = issuesResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -438,16 +451,19 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func claimIssueSuccessRefreshesSnapshot() async throws {
+    @Test @MainActor func claimIssueSuccessRefreshesSnapshotAndIssues() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
         let api = FakeWorkbenchAPIProvider()
         let lease = makeLease(id: "lease-001", taskID: "task-001", state: "active")
         let snapshot = makeSnapshot(sessionID: "sess-001", lease: lease)
+        let issue = makeIssue(taskID: "task-001")
+        let issues = IssuesDTO(issues: [issue], missionID: nil, riskLevel: nil, limit: 50)
 
         await api.setClaimIssueResult(.success(lease))
         await api.setSnapshotResult(.success(snapshot))
+        await api.setIssuesResult(.success(issues))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.claimIssue(
@@ -458,7 +474,34 @@ final class DaemonControllerTests {
         )
 
         #expect(appState.snapshot == snapshot)
+        #expect(appState.issues == [issue])
         #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func claimIssueSnapshotFailureIsNotClearedByIssuesRefresh() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let lease = makeLease(id: "lease-001", taskID: "task-001", state: "active")
+        let issue = makeIssue(taskID: "task-001")
+        let issues = IssuesDTO(issues: [issue], missionID: nil, riskLevel: nil, limit: 50)
+
+        await api.setClaimIssueResult(.success(lease))
+        await api.setSnapshotResult(.failure(.httpStatus(503)))
+        await api.setIssuesResult(.success(issues))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.claimIssue(
+            taskID: "task-001",
+            agentID: "local-agent",
+            durationMinutes: 30,
+            worktreeName: "wt-001"
+        )
+
+        #expect(appState.issues == [issue])
+        #expect(appState.snapshot == nil)
+        #expect(appState.lastError == .httpStatus(503))
     }
 
     @Test @MainActor func claimIssueWithoutSelectedSessionRecordsError() async throws {
@@ -545,21 +588,24 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func createMissionSuccessRefreshesSnapshot() async throws {
+    @Test @MainActor func createMissionSuccessRefreshesSnapshotAndIssues() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
         let api = FakeWorkbenchAPIProvider()
         let mission = makeMission(id: "mission-001", sessionID: "sess-001")
         let snapshot = makeSnapshot(sessionID: "sess-001", missions: [mission])
+        let issues = IssuesDTO(issues: [], missionID: nil, riskLevel: nil, limit: 50)
 
         await api.setCreateMissionResult(.success(mission))
         await api.setSnapshotResult(.success(snapshot))
+        await api.setIssuesResult(.success(issues))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createMission(title: "Mac 工作台", goal: "补齐 API 调用面")
 
         #expect(appState.snapshot == snapshot)
+        #expect(appState.issues.isEmpty)
         #expect(appState.lastError == nil)
     }
 
@@ -592,16 +638,38 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func attachIssueSuccessRefreshesSnapshot() async throws {
+    @Test @MainActor func createMissionSnapshotFailureIsNotClearedByIssuesRefresh() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let mission = makeMission(id: "mission-001", sessionID: "sess-001")
+        let issues = IssuesDTO(issues: [], missionID: nil, riskLevel: nil, limit: 50)
+
+        await api.setCreateMissionResult(.success(mission))
+        await api.setSnapshotResult(.failure(.httpStatus(503)))
+        await api.setIssuesResult(.success(issues))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createMission(title: "Mac 工作台", goal: "补齐 API 调用面")
+
+        #expect(appState.issues.isEmpty)
+        #expect(appState.snapshot == nil)
+        #expect(appState.lastError == .httpStatus(503))
+    }
+
+    @Test @MainActor func attachIssueSuccessRefreshesSnapshotAndMissionIssues() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
         let api = FakeWorkbenchAPIProvider()
         let issue = makeIssue(taskID: "task-001", missionID: "mission-001")
         let snapshot = makeSnapshot(sessionID: "sess-001", issues: [issue])
+        let issues = IssuesDTO(issues: [issue], missionID: "mission-001", riskLevel: nil, limit: 50)
 
         await api.setAttachIssueResult(.success(issue))
         await api.setSnapshotResult(.success(snapshot))
+        await api.setIssuesResult(.success(issues))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.attachIssue(
@@ -613,6 +681,7 @@ final class DaemonControllerTests {
         )
 
         #expect(appState.snapshot == snapshot)
+        #expect(appState.issues == [issue])
         #expect(appState.lastError == nil)
     }
 
@@ -655,6 +724,32 @@ final class DaemonControllerTests {
 
         #expect(appState.snapshot == staleSnapshot)
         #expect(appState.lastError == .httpStatus(500))
+    }
+
+    @Test @MainActor func attachIssueSnapshotFailureIsNotClearedByIssuesRefresh() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let issue = makeIssue(taskID: "task-001", missionID: "mission-001")
+        let issues = IssuesDTO(issues: [issue], missionID: "mission-001", riskLevel: nil, limit: 50)
+
+        await api.setAttachIssueResult(.success(issue))
+        await api.setSnapshotResult(.failure(.httpStatus(503)))
+        await api.setIssuesResult(.success(issues))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.attachIssue(
+            missionID: "mission-001",
+            taskID: "task-001",
+            acceptanceCriteria: ["通过 Swift 编译"],
+            parallelMode: "exclusive",
+            riskLevel: "medium"
+        )
+
+        #expect(appState.issues == [issue])
+        #expect(appState.snapshot == nil)
+        #expect(appState.lastError == .httpStatus(503))
     }
 
     @Test @MainActor func refreshEventsSuccessWritesToAppState() async throws {
@@ -964,6 +1059,53 @@ final class DaemonControllerTests {
         await controller.refreshFailures(limit: 50)
 
         #expect(appState.failures == [staleFailure])
+        #expect(appState.lastError == .httpStatus(500))
+    }
+
+    @Test @MainActor func refreshIssuesSuccessWritesToAppState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let issue = makeIssue(taskID: "task-001", missionID: "mission-001")
+        let issues = IssuesDTO(issues: [issue], missionID: "mission-001", riskLevel: "medium", limit: 25)
+
+        await api.setIssuesResult(.success(issues))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshIssues(missionID: "mission-001", riskLevel: "medium", limit: 25)
+
+        #expect(appState.issues == [issue])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshIssuesWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        appState.issues = [makeIssue(taskID: "task-stale", missionID: "mission-old")]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshIssues(limit: 50)
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.issues.isEmpty)
+    }
+
+    @Test @MainActor func refreshIssuesFailurePreservesOldList() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleIssue = makeIssue(taskID: "task-stale", missionID: "mission-001")
+        appState.issues = [staleIssue]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setIssuesResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshIssues(limit: 50)
+
+        #expect(appState.issues == [staleIssue])
         #expect(appState.lastError == .httpStatus(500))
     }
 
@@ -1325,6 +1467,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setFailuresResult(_ result: Result<FailuresDTO, APIError>) {
         failuresResult = result
+    }
+
+    fileprivate func setIssuesResult(_ result: Result<IssuesDTO, APIError>) {
+        issuesResult = result
     }
 
     fileprivate func setClaimIssueResult(_ result: Result<LeaseDTO, APIError>) {

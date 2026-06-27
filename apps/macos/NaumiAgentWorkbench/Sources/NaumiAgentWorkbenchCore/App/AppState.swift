@@ -17,6 +17,7 @@ public final class AppState: Sendable {
     public var contextSnapshots: [ContextSnapshotDTO] = []
     public var approvals: [ApprovalDTO] = []
     public var failures: [FailureDTO] = []
+    public var issues: [IssueDTO] = []
     public var lastError: APIError? = nil
     public var locale: AppLocale = .default
 

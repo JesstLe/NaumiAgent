@@ -64,6 +64,23 @@ async def _set_failure_status(
         await db.commit()
 
 
+async def _set_issue_timestamps(
+    store: WorkbenchStore,
+    session_id: str,
+    task_id: str,
+    *,
+    created_at: str,
+) -> None:
+    async with aiosqlite.connect(store._db_path) as db:
+        await db.execute(
+            """UPDATE workbench_issues
+               SET created_at = ?, updated_at = ?
+               WHERE session_id = ? AND task_id = ?""",
+            (created_at, created_at, session_id, task_id),
+        )
+        await db.commit()
+
+
 @pytest.mark.asyncio
 async def test_create_mission_and_issue_metadata(store: WorkbenchStore) -> None:
     mission = await store.create_mission(
@@ -457,3 +474,98 @@ async def test_list_context_snapshots_filters_and_returns_reasons(store: Workben
     limited = await store.list_context_snapshots("s", limit=1)
     assert len(limited) == 1
     assert limited[0]["id"] in {snap_a["id"], snap_b["id"], snap_c["id"]}
+
+
+@pytest.mark.asyncio
+async def test_list_issues_filters_by_session_mission_risk_and_orders_newest_first(
+    store: WorkbenchStore,
+) -> None:
+    mission_s1 = await store.create_mission("s", "Mission S1", "Goal")
+    mission_s2 = await store.create_mission("s", "Mission S2", "Goal")
+    await store.create_mission("s2", "Mission Other", "Goal")
+
+    issue_high_m1 = await store.upsert_issue(
+        session_id="s",
+        task_id="task-high-m1",
+        mission_id=mission_s1.id,
+        risk_level=RiskLevel.HIGH,
+    )
+    issue_medium_m1 = await store.upsert_issue(
+        session_id="s",
+        task_id="task-medium-m1",
+        mission_id=mission_s1.id,
+        risk_level=RiskLevel.MEDIUM,
+    )
+    issue_high_m2 = await store.upsert_issue(
+        session_id="s",
+        task_id="task-high-m2",
+        mission_id=mission_s2.id,
+        risk_level=RiskLevel.HIGH,
+    )
+    issue_low_m2 = await store.upsert_issue(
+        session_id="s",
+        task_id="task-low-m2",
+        mission_id=mission_s2.id,
+        risk_level=RiskLevel.LOW,
+    )
+    issue_other_session = await store.upsert_issue(
+        session_id="s2",
+        task_id="task-other",
+        mission_id="mission-other",
+        risk_level=RiskLevel.HIGH,
+    )
+
+    # Pin timestamps so ordering/limit assertions are deterministic.
+    await _set_issue_timestamps(
+        store, "s", issue_high_m1.task_id, created_at="2026-06-27T08:02:00"
+    )
+    await _set_issue_timestamps(
+        store, "s", issue_medium_m1.task_id, created_at="2026-06-27T08:01:00"
+    )
+    await _set_issue_timestamps(
+        store, "s", issue_high_m2.task_id, created_at="2026-06-27T08:00:00"
+    )
+    await _set_issue_timestamps(
+        store, "s", issue_low_m2.task_id, created_at="2026-06-27T07:59:00"
+    )
+    await _set_issue_timestamps(
+        store, "s2", issue_other_session.task_id, created_at="2026-06-27T08:03:00"
+    )
+
+    all_issues = await store.list_issues("s", limit=50)
+    assert [i.task_id for i in all_issues] == [
+        issue_high_m1.task_id,
+        issue_medium_m1.task_id,
+        issue_high_m2.task_id,
+        issue_low_m2.task_id,
+    ]
+    assert all(i.session_id == "s" for i in all_issues)
+
+    mission_s1_issues = await store.list_issues(
+        "s", mission_id=mission_s1.id, limit=50
+    )
+    assert [i.task_id for i in mission_s1_issues] == [
+        issue_high_m1.task_id,
+        issue_medium_m1.task_id,
+    ]
+
+    high_risk_issues = await store.list_issues("s", risk_level="high", limit=50)
+    assert [i.task_id for i in high_risk_issues] == [
+        issue_high_m1.task_id,
+        issue_high_m2.task_id,
+    ]
+    assert all(i.risk_level == RiskLevel.HIGH for i in high_risk_issues)
+
+    filtered = await store.list_issues(
+        "s", mission_id=mission_s1.id, risk_level="high", limit=50
+    )
+    assert [i.task_id for i in filtered] == [issue_high_m1.task_id]
+
+    limited = await store.list_issues("s", limit=2)
+    assert [i.task_id for i in limited] == [
+        issue_high_m1.task_id,
+        issue_medium_m1.task_id,
+    ]
+
+    other_session_issues = await store.list_issues("s2", limit=50)
+    assert [i.task_id for i in other_session_issues] == [issue_other_session.task_id]
