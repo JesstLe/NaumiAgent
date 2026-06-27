@@ -692,5 +692,60 @@ public enum AppStrings {
                 ? "写操作必须经 Workbench API 转发"
                 : "Write operations must go through the Workbench API"
         }
+
+        public static func createIntentLockSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "创建意图锁" : "Create Intent Lock"
+        }
+
+        public static func missionIDFieldLabel(_ locale: AppLocale) -> String {
+            "Mission ID"
+        }
+
+        public static func actorFieldLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "执行者" : "Actor"
+        }
+
+        public static func ruleFieldLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "规则" : "Rule"
+        }
+
+        public static func blockedPathsFieldLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "阻塞路径" : "Blocked Paths"
+        }
+
+        public static func allowedPathsFieldLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "允许路径" : "Allowed Paths"
+        }
+
+        public static func requireProposalForRiskLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "需提案的风险等级" : "Require Proposal For Risk"
+        }
+
+        public static func createIntentLockButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "创建意图锁" : "Create Intent Lock"
+        }
+
+        public static func processingLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "处理中…" : "Processing…"
+        }
+    }
+
+    // MARK: - Governance Risk Level
+    public enum GovernanceRiskLevel {
+        public static func low(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "低" : "Low"
+        }
+
+        public static func medium(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "中" : "Medium"
+        }
+
+        public static func high(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "高" : "High"
+        }
+
+        public static func critical(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "严重" : "Critical"
+        }
     }
 }
