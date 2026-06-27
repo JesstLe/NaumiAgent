@@ -479,6 +479,45 @@ async def test_list_events_forwards_filters_and_reflected_in_response(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_get_event_returns_single_event_payload(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    event = await workbench_store.append_event(
+        session_id="s",
+        type="issue.claimed",
+        actor="Backend-Agent",
+        subject_id="task-1",
+        payload={"lease_id": "lease-1"},
+    )
+
+    result = await service.get_event("s", event.id)
+
+    assert result == event.to_dict()
+
+
+@pytest.mark.asyncio
+async def test_get_event_returns_none_for_missing_or_other_session(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    event = await workbench_store.append_event(
+        session_id="s",
+        type="issue.claimed",
+        actor="Backend-Agent",
+        subject_id="task-1",
+        payload={"lease_id": "lease-1"},
+    )
+
+    assert await service.get_event("s", "missing-event") is None
+    assert await service.get_event("other", event.id) is None
+
+
+@pytest.mark.asyncio
 async def test_list_validation_runs_returns_runs_and_respects_limit(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")

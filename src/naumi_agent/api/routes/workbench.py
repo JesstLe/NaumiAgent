@@ -360,6 +360,25 @@ async def get_workbench_events(
     )
 
 
+@router.get("/workbench/sessions/{session_id}/events/{event_id}")
+async def get_workbench_event(
+    session_id: str,
+    event_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    event = await engine.workbench_service.get_event(session_id, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="审计事件不存在")
+    return event
+
+
 @router.websocket("/workbench/sessions/{session_id}/events/stream")
 async def websocket_workbench_events(websocket: WebSocket, session_id: str):
     await websocket.accept()

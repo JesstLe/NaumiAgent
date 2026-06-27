@@ -456,6 +456,12 @@ class WorkbenchService:
             "limit": limit,
         }
 
+    async def get_event(self, session_id: str, event_id: str) -> dict[str, Any] | None:
+        event = await self._workbench_store.get_event(session_id, event_id)
+        if event is None:
+            return None
+        return event.to_dict()
+
     async def list_validation_runs(
         self,
         session_id: str,

@@ -89,6 +89,7 @@ class _FakeWorkbenchService:
         self.resolved_approvals: list[dict] = []
         self.run_validations: list[dict] = []
         self.listed_events: list[dict] = []
+        self.requested_events: list[dict] = []
         self.listed_validation_runs: list[dict] = []
         self.requested_validation_runs: list[dict] = []
         self.listed_context_snapshots: list[dict] = []
@@ -426,6 +427,25 @@ class _FakeWorkbenchService:
             "subject_id": subject_id,
             "actor": actor,
             "limit": limit,
+        }
+
+    async def get_event(self, session_id: str, event_id: str):
+        self.requested_events.append(
+            {
+                "session_id": session_id,
+                "event_id": event_id,
+            }
+        )
+        if event_id == "missing-event":
+            return None
+        return {
+            "id": event_id,
+            "session_id": session_id,
+            "type": "issue.claimed",
+            "actor": "Backend-Agent",
+            "subject_id": "task-1",
+            "payload": {"lease_id": "lease-1"},
+            "timestamp": "2024-01-01T00:00:00",
         }
 
     async def run_validation(
@@ -1105,6 +1125,44 @@ def test_get_events_route_accepts_type_query_alias() -> None:
         }
     ]
     assert response.json()["event_type"] == "issue.created"
+
+
+def test_get_event_route_returns_single_event() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/events/event-2")
+
+    assert response.status_code == 200
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_events == [
+        {"session_id": "sess-1", "event_id": "event-2"}
+    ]
+    assert response.json() == {
+        "id": "event-2",
+        "session_id": "sess-1",
+        "type": "issue.claimed",
+        "actor": "Backend-Agent",
+        "subject_id": "task-1",
+        "payload": {"lease_id": "lease-1"},
+        "timestamp": "2024-01-01T00:00:00",
+    }
+
+
+def test_get_event_route_returns_chinese_404_for_missing_event() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/events/missing-event")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "审计事件不存在"}
 
 
 def test_workbench_event_stream_rejects_missing_session() -> None:
