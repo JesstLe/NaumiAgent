@@ -578,6 +578,25 @@ async def get_failures(
     )
 
 
+@router.get("/workbench/sessions/{session_id}/failures/{failure_id}")
+async def get_failure(
+    session_id: str,
+    failure_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    failure = await engine.workbench_service.get_failure(session_id, failure_id)
+    if failure is None:
+        raise HTTPException(status_code=404, detail="失败卡片不存在")
+    return failure
+
+
 @router.get(
     "/workbench/sessions/{session_id}/missions",
     response_model=MissionsResponse,

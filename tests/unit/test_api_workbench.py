@@ -95,6 +95,7 @@ class _FakeWorkbenchService:
         self.listed_approvals: list[dict] = []
         self.listed_agent_profiles: list[dict] = []
         self.listed_failures: list[dict] = []
+        self.requested_failures: list[dict] = []
         self.listed_issues: list[dict] = []
         self.requested_issues: list[dict] = []
         self.requested_missions: list[dict] = []
@@ -610,6 +611,24 @@ class _FakeWorkbenchService:
                 "created_at": "2024-01-01T00:00:00",
             }
         ]
+
+    async def get_failure(self, session_id: str, failure_id: str):
+        self.requested_failures.append(
+            {"session_id": session_id, "failure_id": failure_id}
+        )
+        if failure_id == "missing-failure":
+            return None
+        return {
+            "id": failure_id,
+            "session_id": session_id,
+            "task_id": "task-1",
+            "kind": "test_failed",
+            "title": "测试失败",
+            "detail": "详情",
+            "source_id": "run-1",
+            "status": "open",
+            "created_at": "2024-01-01T00:00:00",
+        }
 
     async def list_issues(
         self,
@@ -1865,6 +1884,56 @@ async def test_get_failures_endpoint_without_filters() -> None:
     assert response.model_dump()["status"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["failures"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_failure_endpoint_returns_single_failure() -> None:
+    engine = _FakeEngine(exists=True)
+
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get(
+        "/workbench/sessions/sess-1/failures/failure-2",
+        headers={"Authorization": "Bearer local-token"},
+    )
+
+    assert response.status_code == 200
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_failures == [
+        {"session_id": "sess-1", "failure_id": "failure-2"}
+    ]
+    assert response.json() == {
+        "id": "failure-2",
+        "session_id": "sess-1",
+        "task_id": "task-1",
+        "kind": "test_failed",
+        "title": "测试失败",
+        "detail": "详情",
+        "source_id": "run-1",
+        "status": "open",
+        "created_at": "2024-01-01T00:00:00",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_failure_endpoint_returns_404_for_missing_failure() -> None:
+    engine = _FakeEngine(exists=True)
+
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get(
+        "/workbench/sessions/sess-1/failures/missing-failure",
+        headers={"Authorization": "Bearer local-token"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "失败卡片不存在"
 
 
 @pytest.mark.asyncio
