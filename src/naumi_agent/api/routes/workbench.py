@@ -114,6 +114,13 @@ class ApprovalsResponse(BaseModel):
     limit: int
 
 
+class FailuresResponse(BaseModel):
+    failures: list[dict[str, Any]]
+    task_id: str | None
+    status: str | None
+    limit: int
+
+
 def _get_task_market(engine) -> TaskMarket:
     market = getattr(engine, "workbench_market", None)
     if market is not None:
@@ -241,6 +248,32 @@ async def get_context_snapshots(
     )
     return ContextSnapshotsResponse(
         context_snapshots=snapshots, task_id=task_id, agent_id=agent_id, limit=limit
+    )
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/failures",
+    response_model=FailuresResponse,
+)
+async def get_failures(
+    session_id: str,
+    request: Request,
+    task_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    failures = await engine.workbench_service.list_failures(
+        session_id, task_id=task_id, status=status, limit=limit
+    )
+    return FailuresResponse(
+        failures=failures, task_id=task_id, status=status, limit=limit
     )
 
 

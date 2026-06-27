@@ -7,6 +7,7 @@ from naumi_agent.workbench.models import (
     ApprovalState,
     ContextHealth,
     DecisionKind,
+    FailureKind,
     ParallelMode,
     RiskLevel,
 )
@@ -31,6 +32,34 @@ async def _set_approval_timestamps(
                SET created_at = ?, updated_at = ?
                WHERE id = ?""",
             (created_at, updated_at, approval_id),
+        )
+        await db.commit()
+
+
+async def _set_failure_timestamps(
+    store: WorkbenchStore,
+    failure_id: str,
+    *,
+    created_at: str,
+) -> None:
+    async with aiosqlite.connect(store._db_path) as db:
+        await db.execute(
+            "UPDATE workbench_failures SET created_at = ? WHERE id = ?",
+            (created_at, failure_id),
+        )
+        await db.commit()
+
+
+async def _set_failure_status(
+    store: WorkbenchStore,
+    failure_id: str,
+    *,
+    status: str,
+) -> None:
+    async with aiosqlite.connect(store._db_path) as db:
+        await db.execute(
+            "UPDATE workbench_failures SET status = ? WHERE id = ?",
+            (status, failure_id),
         )
         await db.commit()
 
@@ -149,6 +178,91 @@ async def test_list_validation_runs_filters_and_orders(store: WorkbenchStore) ->
 
     limited = await store.list_validation_runs("s", limit=1)
     assert [run["id"] for run in limited] == [run_c["id"]]
+
+
+@pytest.mark.asyncio
+async def test_list_failures_filters_by_session_task_status_and_orders_newest_first(
+    store: WorkbenchStore,
+) -> None:
+    # Session s, task-a: open failure (oldest).
+    f_open_a = await store.create_failure(
+        session_id="s",
+        task_id="task-a",
+        kind=FailureKind.TEST_FAILED,
+        title="测试失败 A",
+        detail="detail-a",
+        source_id="run-a",
+    )
+    # Session s, task-b: open failure (middle).
+    f_open_b = await store.create_failure(
+        session_id="s",
+        task_id="task-b",
+        kind=FailureKind.AGENT_TIMEOUT,
+        title="Agent 超时 B",
+        detail="detail-b",
+        source_id="run-b",
+    )
+    # Session s, task-a: resolved failure (newest).
+    f_resolved_a = await store.create_failure(
+        session_id="s",
+        task_id="task-a",
+        kind=FailureKind.LEASE_EXPIRED,
+        title="租约过期 A",
+        detail="detail-resolved",
+        source_id="run-c",
+    )
+    # Different session.
+    await store.create_failure(
+        session_id="s2",
+        task_id="task-a",
+        kind=FailureKind.TEST_FAILED,
+        title="其他会话失败",
+        detail="detail-other",
+        source_id="run-other",
+    )
+
+    # Pin timestamps deterministically; store orders by created_at DESC.
+    await _set_failure_timestamps(
+        store, f_open_a["id"], created_at="2026-06-27T06:00:00"
+    )
+    await _set_failure_timestamps(
+        store, f_open_b["id"], created_at="2026-06-27T06:01:00"
+    )
+    await _set_failure_timestamps(
+        store, f_resolved_a["id"], created_at="2026-06-27T06:02:00"
+    )
+    await _set_failure_status(
+        store, f_resolved_a["id"], status="resolved"
+    )
+
+    all_failures = await store.list_failures("s", limit=50)
+    assert [f["id"] for f in all_failures] == [
+        f_resolved_a["id"],
+        f_open_b["id"],
+        f_open_a["id"],
+    ]
+    assert all(f["session_id"] == "s" for f in all_failures)
+
+    task_a_failures = await store.list_failures("s", task_id="task-a", limit=50)
+    assert [f["id"] for f in task_a_failures] == [
+        f_resolved_a["id"],
+        f_open_a["id"],
+    ]
+
+    open_failures = await store.list_failures("s", status="open", limit=50)
+    assert [f["id"] for f in open_failures] == [f_open_b["id"], f_open_a["id"]]
+
+    task_a_open_failures = await store.list_failures(
+        "s", task_id="task-a", status="open", limit=50
+    )
+    assert [f["id"] for f in task_a_open_failures] == [f_open_a["id"]]
+
+    limited = await store.list_failures("s", limit=1)
+    assert [f["id"] for f in limited] == [f_resolved_a["id"]]
+
+    other_session = await store.list_failures("s2", limit=50)
+    assert len(other_session) == 1
+    assert other_session[0]["session_id"] == "s2"
 
 
 @pytest.mark.asyncio

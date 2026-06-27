@@ -158,6 +158,34 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Fetches failure cards for the currently selected session.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success the failures
+    /// are written to `appState.failures`; on failure `appState.lastError` is
+    /// set. Missing session clears the local failures list to avoid showing
+    /// stale data from another session. API failures leave the local list
+    /// unchanged.
+    public func refreshFailures(taskID: String? = nil, status: String? = nil, limit: Int = 50) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.failures = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchFailures(
+                sessionID: sessionID,
+                taskID: taskID,
+                status: status,
+                limit: limit
+            )
+            appState.failures = response.failures
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Refreshes the snapshot for the currently selected session.
     ///
     /// When no session is selected, the most recent session from `GET /sessions`
@@ -417,11 +445,12 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Runs a validation command and refreshes validation runs plus snapshot on success.
+    /// Runs a validation command and refreshes validation runs, failures, and
+    /// snapshot on success.
     ///
-    /// Requires `appState.selectedSessionID` to be set. On success, `validationRuns`
-    /// and `snapshot` are refreshed from the backend; on failure `lastError` is set
-    /// and the existing local state is preserved.
+    /// Requires `appState.selectedSessionID` to be set. On success, `validationRuns`,
+    /// `failures`, and `snapshot` are refreshed from the backend; on failure
+    /// `lastError` is set and the existing local state is preserved.
     public func runValidation(
         taskID: String,
         actor: String,
@@ -443,6 +472,7 @@ public final class DaemonController: Sendable {
                 cwd: cwd
             )
             await refreshValidationRuns(taskID: taskID)
+            await refreshFailures(taskID: taskID)
             await refreshSnapshot()
         } catch {
             appState.lastError = error

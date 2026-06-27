@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 
+import aiosqlite
 import pytest
 
 from naumi_agent.tasks.store import TaskStore
@@ -9,6 +10,7 @@ from naumi_agent.workbench.models import (
     ApprovalState,
     ContextHealth,
     DecisionKind,
+    FailureKind,
     LeaseState,
     RiskLevel,
 )
@@ -247,6 +249,58 @@ async def test_list_approvals_returns_json_friendly_state_strings(tmp_path) -> N
     waiting_only = await service.list_approvals("s", state=ApprovalState.WAITING, limit=50)
     assert [a["id"] for a in waiting_only] == [waiting.id]
     assert waiting_only[0]["state"] == "waiting"
+
+
+@pytest.mark.asyncio
+async def test_list_failures_returns_store_rows_and_respects_filters(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    failure_open = await workbench_store.create_failure(
+        session_id="s",
+        task_id="task-a",
+        kind=FailureKind.TEST_FAILED,
+        title="测试失败",
+        detail="detail",
+        source_id="run-a",
+    )
+    failure_resolved = await workbench_store.create_failure(
+        session_id="s",
+        task_id="task-b",
+        kind=FailureKind.AGENT_TIMEOUT,
+        title="Agent 超时",
+        detail="detail",
+        source_id="run-b",
+    )
+    async with aiosqlite.connect(workbench_store._db_path) as db:
+        await db.execute(
+            "UPDATE workbench_failures SET status = ? WHERE id = ?",
+            ("resolved", failure_resolved["id"]),
+        )
+        await db.commit()
+    await workbench_store.create_failure(
+        session_id="s2",
+        task_id="task-a",
+        kind=FailureKind.LEASE_EXPIRED,
+        title="其他会话失败",
+        detail="detail",
+        source_id="run-c",
+    )
+
+    all_failures = await service.list_failures("s", limit=50)
+    assert {f["id"] for f in all_failures} == {failure_open["id"], failure_resolved["id"]}
+    assert all(isinstance(f["status"], str) for f in all_failures)
+
+    filtered_task = await service.list_failures("s", task_id="task-a", limit=50)
+    assert [f["id"] for f in filtered_task] == [failure_open["id"]]
+
+    filtered_status = await service.list_failures("s", status="open", limit=50)
+    assert [f["id"] for f in filtered_status] == [failure_open["id"]]
+
+    limited = await service.list_failures("s", limit=1)
+    assert len(limited) == 1
 
 
 @pytest.mark.asyncio

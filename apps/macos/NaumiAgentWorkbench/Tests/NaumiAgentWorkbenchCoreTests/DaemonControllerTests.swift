@@ -12,6 +12,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var validationRunsResult: Result<ValidationRunsDTO, APIError>?
     var contextSnapshotsResult: Result<ContextSnapshotsDTO, APIError>?
     var approvalsResult: Result<ApprovalsDTO, APIError>?
+    var failuresResult: Result<FailuresDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
@@ -86,6 +87,18 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> ApprovalsDTO {
         guard let result = approvalsResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchFailures(
+        sessionID: String,
+        taskID: String?,
+        status: String?,
+        limit: Int
+    ) async throws(APIError) -> FailuresDTO {
+        guard let result = failuresResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -905,7 +918,56 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func runValidationSuccessRefreshesValidationRunsAndSnapshot() async throws {
+    @Test @MainActor func refreshFailuresSuccessWritesToAppState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let failure = makeFailure(id: "failure-001", taskID: "task-001", status: "open")
+        let failures = FailuresDTO(failures: [failure], taskID: "task-001", status: "open", limit: 25)
+
+        await api.setFailuresResult(.success(failures))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshFailures(taskID: "task-001", status: "open", limit: 25)
+
+        #expect(appState.failures == [failure])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshFailuresWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        appState.failures = [
+            makeFailure(id: "failure-stale", taskID: "task-old", status: "open")
+        ]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshFailures(limit: 50)
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.failures.isEmpty)
+    }
+
+    @Test @MainActor func refreshFailuresFailurePreservesOldList() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleFailure = makeFailure(id: "failure-stale", taskID: "task-001", status: "open")
+        appState.failures = [staleFailure]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setFailuresResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshFailures(limit: 50)
+
+        #expect(appState.failures == [staleFailure])
+        #expect(appState.lastError == .httpStatus(500))
+    }
+
+    @Test @MainActor func runValidationSuccessRefreshesValidationRunsSnapshotAndFailures() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -930,10 +992,13 @@ final class DaemonControllerTests {
             completedAt: "2026-06-27T06:00:01"
         )
         let runs = ValidationRunsDTO(validationRuns: [run], taskID: "task-001", limit: 50)
+        let failure = makeFailure(id: "failure-001", taskID: "task-001", status: "open")
+        let failures = FailuresDTO(failures: [failure], taskID: "task-001", status: nil, limit: 50)
         let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
 
         await api.setRunValidationResult(.success(result))
         await api.setValidationRunsResult(.success(runs))
+        await api.setFailuresResult(.success(failures))
         await api.setSnapshotResult(.success(snapshot))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
@@ -945,6 +1010,7 @@ final class DaemonControllerTests {
         )
 
         #expect(appState.validationRuns == [run])
+        #expect(appState.failures == [failure])
         #expect(appState.snapshot == snapshot)
         #expect(appState.lastError == nil)
     }
@@ -999,6 +1065,8 @@ final class DaemonControllerTests {
             completedAt: "2026-06-27T05:00:01"
         )
         appState.validationRuns = [staleRun]
+        let staleFailure = makeFailure(id: "failure-stale", taskID: "task-001", status: "open")
+        appState.failures = [staleFailure]
         let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
         appState.snapshot = staleSnapshot
 
@@ -1014,6 +1082,7 @@ final class DaemonControllerTests {
         )
 
         #expect(appState.validationRuns == [staleRun])
+        #expect(appState.failures == [staleFailure])
         #expect(appState.snapshot == staleSnapshot)
         #expect(appState.lastError == .httpStatus(500))
     }
@@ -1254,6 +1323,10 @@ extension FakeWorkbenchAPIProvider {
         approvalsResult = result
     }
 
+    fileprivate func setFailuresResult(_ result: Result<FailuresDTO, APIError>) {
+        failuresResult = result
+    }
+
     fileprivate func setClaimIssueResult(_ result: Result<LeaseDTO, APIError>) {
         claimIssueResult = result
     }
@@ -1451,5 +1524,19 @@ private func makeApproval(id: String, missionID: String, state: String) -> Appro
         decisionNote: "同意",
         createdAt: "2026-06-27T06:00:00",
         updatedAt: "2026-06-27T06:00:01"
+    )
+}
+
+private func makeFailure(id: String, taskID: String, status: String) -> FailureDTO {
+    FailureDTO(
+        id: id,
+        sessionID: "sess-001",
+        taskID: taskID,
+        kind: "test_failed",
+        title: "测试失败",
+        detail: "保持测试通过",
+        sourceID: "run-001",
+        status: status,
+        createdAt: "2026-06-27T06:00:00"
     )
 }
