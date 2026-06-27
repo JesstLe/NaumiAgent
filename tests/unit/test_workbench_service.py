@@ -1661,6 +1661,49 @@ async def test_list_decisions_returns_json_friendly_strings(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_decision_returns_json_friendly_decision_detail(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    decision = await service.create_decision(
+        session_id="s",
+        mission_id="mission-1",
+        actor="Planner-Agent",
+        kind=DecisionKind.POLICY,
+        title="采用策略 A",
+        content="内容 A",
+    )
+
+    result = await service.get_decision("s", "mission-1", decision["id"])
+
+    assert result == decision
+    assert result["kind"] == "policy"
+
+
+@pytest.mark.asyncio
+async def test_get_decision_returns_none_for_missing_or_other_scope(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    decision = await service.create_decision(
+        session_id="s",
+        mission_id="mission-1",
+        actor="Planner-Agent",
+        kind=DecisionKind.POLICY,
+        title="采用策略 A",
+        content="内容 A",
+    )
+
+    assert await service.get_decision("s", "mission-1", "missing-decision") is None
+    assert await service.get_decision("s", "mission-2", decision["id"]) is None
+    assert await service.get_decision("other", "mission-1", decision["id"]) is None
+
+
+@pytest.mark.asyncio
 async def test_list_decisions_is_scoped_to_session_and_mission(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")
