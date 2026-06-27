@@ -35,6 +35,20 @@ struct DashboardSnapshotPresentationTests {
         #expect(taskWithoutIssue.acceptanceCriteriaCount == nil)
     }
 
+    @Test func agentRowsMapProfiles() throws {
+        let snapshot = try loadZHSnapshot()
+        let presentation = DashboardSnapshotPresentation(snapshot: snapshot)
+
+        #expect(presentation.agentRows.count == 2)
+
+        let agent = try #require(presentation.agentRows.first { $0.id == "agent-a" })
+        #expect(agent.name == "后端智能体")
+        #expect(agent.role == "coder")
+        #expect(agent.status == "busy")
+        #expect(agent.capabilityCount == 2)
+        #expect(agent.maxParallelTasks == 2)
+    }
+
     @Test func issueRowsListAllIssues() throws {
         let snapshot = try loadZHSnapshot()
         let presentation = DashboardSnapshotPresentation(snapshot: snapshot)
@@ -138,6 +152,36 @@ struct DashboardSnapshotPresentationTests {
 
         #expect(presentation.taskRows.count == 5)
         #expect(presentation.taskRows.map(\.id) == ["1", "2", "3", "4", "5"])
+    }
+
+    @Test func agentRowsLimitToFive() throws {
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-limit",
+            missions: [],
+            agentProfiles: (1...8).map { index in
+                AgentProfileDTO(
+                    id: "agent-\(index)",
+                    sessionID: "sess-limit",
+                    name: "Agent \(index)",
+                    role: "coder",
+                    capabilities: ["code"],
+                    permissions: ["read"],
+                    maxParallelTasks: 1,
+                    status: "idle",
+                    createdAt: "",
+                    updatedAt: ""
+                )
+            },
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+
+        let presentation = DashboardSnapshotPresentation(snapshot: snapshot)
+
+        #expect(presentation.agentRows.count == 5)
+        #expect(presentation.agentRows.map(\.id) == ["agent-1", "agent-2", "agent-3", "agent-4", "agent-5"])
     }
 
     // MARK: - Helpers

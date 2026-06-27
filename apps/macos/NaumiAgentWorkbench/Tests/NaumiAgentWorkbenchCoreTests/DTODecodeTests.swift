@@ -10,6 +10,7 @@ struct DTODecodeTests {
 
         #expect(snapshot.sessionID == "sess-zh-001")
         #expect(snapshot.missions.count == 1)
+        #expect(snapshot.agentProfiles.count == 2)
         #expect(snapshot.tasks.count == 2)
         #expect(snapshot.issues.count == 1)
         #expect(snapshot.leases.count == 1)
@@ -26,6 +27,15 @@ struct DTODecodeTests {
         let mission = try #require(snapshot.missions.first)
         #expect(mission.title == "实现 SwiftUI 工作台骨架")
         #expect(mission.status == "planning")
+
+        let agent = try #require(snapshot.agentProfiles.first { $0.id == "agent-a" })
+        #expect(agent.sessionID == "sess-zh-001")
+        #expect(agent.name == "后端智能体")
+        #expect(agent.role == "coder")
+        #expect(agent.capabilities == ["api", "swift-client"])
+        #expect(agent.permissions == ["read", "write"])
+        #expect(agent.maxParallelTasks == 2)
+        #expect(agent.status == "busy")
 
         let task = try #require(snapshot.tasks.first { $0.id == "2" })
         #expect(task.status == "in_progress")
@@ -49,6 +59,7 @@ struct DTODecodeTests {
 
         #expect(snapshot.sessionID == "sess-en-001")
         #expect(snapshot.missions.count == 1)
+        #expect(snapshot.agentProfiles.count == 2)
         #expect(snapshot.tasks.count == 2)
         #expect(snapshot.issues.count == 1)
         #expect(snapshot.leases.count == 1)
@@ -61,6 +72,10 @@ struct DTODecodeTests {
 
         let mission = try #require(snapshot.missions.first)
         #expect(mission.title == "Build SwiftUI Workbench Shell")
+
+        let agent = try #require(snapshot.agentProfiles.first { $0.id == "agent-a" })
+        #expect(agent.name == "Backend Agent")
+        #expect(agent.status == "busy")
     }
 
     @Test func decodeValidationRuns() throws {
