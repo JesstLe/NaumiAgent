@@ -10,7 +10,7 @@ struct NaumiAgentWorkbenchApp: App {
             ContentView()
                 .environment(environment)
                 .task {
-                    await environment.daemonController.refreshConnection()
+                    await environment.refreshCoordinator.startPeriodicRefresh()
                 }
         }
     }

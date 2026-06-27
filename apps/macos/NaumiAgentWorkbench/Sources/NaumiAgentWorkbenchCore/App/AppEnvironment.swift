@@ -8,6 +8,7 @@ public final class AppEnvironment: Sendable {
     public let apiClient: WorkbenchAPIClient
     public let appState: AppState
     public let daemonController: DaemonController
+    public let refreshCoordinator: WorkbenchRefreshCoordinator
 
     public init(
         appState: AppState = AppState(),
@@ -18,6 +19,9 @@ public final class AppEnvironment: Sendable {
         self.daemonController = DaemonController(
             appState: appState,
             apiProvider: apiClient
+        )
+        self.refreshCoordinator = WorkbenchRefreshCoordinator(
+            daemonController: daemonController
         )
     }
 }
