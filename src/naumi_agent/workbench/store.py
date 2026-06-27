@@ -961,6 +961,12 @@ class WorkbenchStore:
             await db.commit()
         return run
 
+    @staticmethod
+    def _validation_run_from_row(row: aiosqlite.Row) -> dict[str, Any]:
+        run = dict(row)
+        run["command"] = cast(list[str], json.loads(run["command"]))
+        return run
+
     async def list_validation_runs(
         self,
         session_id: str,
@@ -989,10 +995,26 @@ class WorkbenchStore:
             rows = await cursor.fetchall()
         runs: list[dict[str, Any]] = []
         for row in reversed(rows):
-            run = dict(row)
-            run["command"] = cast(list[str], json.loads(run["command"]))
-            runs.append(run)
+            runs.append(self._validation_run_from_row(row))
         return runs
+
+    async def get_validation_run(
+        self,
+        session_id: str,
+        run_id: str,
+    ) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_validation_runs
+                   WHERE session_id = ? AND id = ?""",
+                (session_id, run_id),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._validation_run_from_row(row)
 
     async def create_failure(
         self,

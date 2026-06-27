@@ -521,6 +521,57 @@ async def test_list_validation_runs_returns_runs_and_respects_limit(tmp_path) ->
 
 
 @pytest.mark.asyncio
+async def test_get_validation_run_returns_single_run(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    run = await workbench_store.record_validation_run(
+        session_id="s",
+        task_id="task-a",
+        actor="ValidationRunner",
+        command=["pytest", "test_a.py"],
+        cwd="/workspace",
+        status="passed",
+        exit_code=0,
+        output="ok",
+        started_at="2024-01-01T00:00:00",
+        completed_at="2024-01-01T00:00:01",
+    )
+
+    result = await service.get_validation_run("s", run["id"])
+
+    assert result == run
+
+
+@pytest.mark.asyncio
+async def test_get_validation_run_returns_none_for_missing_or_other_session(
+    tmp_path,
+) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    run = await workbench_store.record_validation_run(
+        session_id="s",
+        task_id="task-a",
+        actor="ValidationRunner",
+        command=["pytest", "test_a.py"],
+        cwd="/workspace",
+        status="passed",
+        exit_code=0,
+        output="ok",
+        started_at="2024-01-01T00:00:00",
+        completed_at="2024-01-01T00:00:01",
+    )
+
+    assert await service.get_validation_run("s", "missing-run") is None
+    assert await service.get_validation_run("other-session", run["id"]) is None
+
+
+@pytest.mark.asyncio
 async def test_list_context_snapshots_returns_store_snapshots_and_respects_limit(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")

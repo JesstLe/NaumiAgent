@@ -169,7 +169,22 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
                 },
             )
             assert validation_response.status_code == 201
-            assert validation_response.json()["status"] == "passed"
+            validation_run = validation_response.json()
+            assert validation_run["status"] == "passed"
+
+            validation_detail_response = client.get(
+                f"/api/v1/workbench/sessions/{session_id}/validation-runs/{validation_run['id']}"
+            )
+            assert validation_detail_response.status_code == 200
+            validation_detail = validation_detail_response.json()
+            assert validation_detail["id"] == validation_run["id"]
+            assert validation_detail["task_id"] == task_id
+            assert validation_detail["command"] == [
+                sys.executable,
+                "-c",
+                "print('validation ok')",
+            ]
+            assert validation_detail["status"] == "passed"
 
             snapshot_response = client.get(
                 f"/api/v1/workbench/sessions/{session_id}/snapshot"
