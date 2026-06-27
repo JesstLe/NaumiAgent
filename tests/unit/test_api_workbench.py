@@ -42,6 +42,7 @@ from naumi_agent.api.routes.workbench import (
     get_leases,
     get_missions,
     get_validation_runs,
+    get_workbench_bootstrap,
     get_workbench_capabilities,
     get_workbench_events,
     get_workbench_snapshot,
@@ -757,6 +758,24 @@ class _FakeSessionStoreWithCount:
         self, page: int = 1, page_size: int = 20, query: str = ""
     ) -> tuple[list, int]:
         return ([], self.total)
+
+
+class _FakeSessionStoreWithLatest:
+    def __init__(self, sessions: list[SimpleNamespace]) -> None:
+        self.sessions = sessions
+        self.loaded: list[str] = []
+
+    async def load(self, session_id: str):
+        self.loaded.append(session_id)
+        for session in self.sessions:
+            if session.id == session_id:
+                return session
+        return None
+
+    async def list_sessions(
+        self, page: int = 1, page_size: int = 20, query: str = ""
+    ) -> tuple[list[SimpleNamespace], int]:
+        return (self.sessions[:page_size], len(self.sessions))
 
 
 def _fake_status_request(
@@ -1708,6 +1727,52 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
     assert response.supports_cloud_sync is False
     assert response.supported_locales == ["zh-CN", "en-US"]
     assert response.protocol_version == 1
+
+
+@pytest.mark.asyncio
+async def test_workbench_bootstrap_returns_latest_session_and_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    latest_session = SimpleNamespace(
+        id="sess-latest",
+        title="Mac 工作台",
+        model="gpt-5",
+        created_at=datetime(2026, 6, 27, 8, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 27, 9, 0, tzinfo=UTC),
+        messages=[{"role": "user"}, {"role": "assistant"}],
+        total_tokens=128,
+        total_cost_usd=0.012,
+        status="active",
+    )
+    engine.session_store = _FakeSessionStoreWithLatest([latest_session])
+    request = _fake_status_request(engine)
+
+    response = await get_workbench_bootstrap(request, auth="test")
+
+    assert response.selected_session_id == "sess-latest"
+    assert response.total_sessions == 1
+    assert response.sessions[0]["id"] == "sess-latest"
+    assert response.sessions[0]["message_count"] == 2
+    assert response.snapshot is not None
+    assert response.snapshot["session_id"] == "sess-latest"
+    assert response.daemon_status.host == "127.0.0.1"
+    assert response.capabilities.protocol_version == 1
+    assert engine.session_store.loaded == ["sess-latest"]
+
+
+@pytest.mark.asyncio
+async def test_workbench_bootstrap_keeps_daemon_ready_when_no_sessions_exist() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store = _FakeSessionStoreWithLatest([])
+    request = _fake_status_request(engine)
+
+    response = await get_workbench_bootstrap(request, auth="test")
+
+    assert response.selected_session_id is None
+    assert response.sessions == []
+    assert response.total_sessions == 0
+    assert response.snapshot is None
+    assert response.daemon_status.status == "running"
+    assert response.capabilities.supported_locales == ["zh-CN", "en-US"]
 
 
 @pytest.mark.asyncio

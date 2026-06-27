@@ -98,6 +98,40 @@ final class WorkbenchAPIClientTests {
         #expect(status.workspaceCount == 3)
     }
 
+    @Test func fetchBootstrap() async throws {
+        let json = Data(
+            """
+            {"daemon_status":{"status":"running","version":"0.1.0","pid":12345,"host":"127.0.0.1","port":8765,"started_at":"2026-06-27T06:00:00","workspace_count":3},"capabilities":{"supports_daemon_management":false,"supports_workspace_registry":false,"supports_validation_runner":true,"supports_cloud_sync":false,"supported_locales":["zh-CN","en-US"],"protocol_version":1},"sessions":[{"id":"sess-latest","title":"Mac 工作台","model":"gpt-5","created_at":"2026-06-27T08:00:00+00:00","updated_at":"2026-06-27T09:00:00+00:00","message_count":2,"total_tokens":128,"total_cost_usd":0.012,"status":"active"}],"total_sessions":1,"selected_session_id":"sess-latest","snapshot":{"session_id":"sess-latest","missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/bootstrap?page_size=1" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let bootstrap = try await client.fetchBootstrap(pageSize: 1)
+
+        #expect(bootstrap.daemonStatus.host == "127.0.0.1")
+        #expect(bootstrap.capabilities.protocolVersion == 1)
+        #expect(bootstrap.selectedSessionID == "sess-latest")
+        #expect(bootstrap.totalSessions == 1)
+        #expect(bootstrap.sessions.first?.id == "sess-latest")
+        #expect(bootstrap.snapshot?.sessionID == "sess-latest")
+    }
+
     @Test func httpErrorThrowsAPIError() async {
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(

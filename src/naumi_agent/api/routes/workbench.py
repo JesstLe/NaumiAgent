@@ -38,6 +38,15 @@ class WorkbenchCapabilitiesResponse(BaseModel):
     protocol_version: int
 
 
+class WorkbenchBootstrapResponse(BaseModel):
+    daemon_status: DaemonStatusResponse
+    capabilities: WorkbenchCapabilitiesResponse
+    sessions: list[dict[str, Any]]
+    total_sessions: int
+    selected_session_id: str | None
+    snapshot: dict[str, Any] | None
+
+
 class MissionCreate(BaseModel):
     title: str
     goal: str
@@ -201,8 +210,29 @@ async def _count_workspaces(engine) -> int:
         return 0
 
 
-@router.get("/workbench/daemon/status", response_model=DaemonStatusResponse)
-async def get_daemon_status(request: Request, auth: str = AuthDep):
+def _session_to_bootstrap_dict(session) -> dict[str, Any]:
+    created_at = getattr(session, "created_at", "")
+    updated_at = getattr(session, "updated_at", "")
+    if hasattr(created_at, "isoformat"):
+        created_at = created_at.isoformat()
+    if hasattr(updated_at, "isoformat"):
+        updated_at = updated_at.isoformat()
+
+    messages = getattr(session, "messages", [])
+    return {
+        "id": getattr(session, "id", ""),
+        "title": getattr(session, "title", None),
+        "model": getattr(session, "model", ""),
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "message_count": len(messages),
+        "total_tokens": getattr(session, "total_tokens", 0),
+        "total_cost_usd": getattr(session, "total_cost_usd", 0.0),
+        "status": getattr(session, "status", "active"),
+    }
+
+
+async def _build_daemon_status(request: Request) -> DaemonStatusResponse:
     engine = request.app.state.engine
     started_at = getattr(request.app.state, "started_at", None)
     if started_at is None:
@@ -218,8 +248,7 @@ async def get_daemon_status(request: Request, auth: str = AuthDep):
     )
 
 
-@router.get("/workbench/capabilities", response_model=WorkbenchCapabilitiesResponse)
-async def get_workbench_capabilities(request: Request, auth: str = AuthDep):
+def _build_capabilities() -> WorkbenchCapabilitiesResponse:
     return WorkbenchCapabilitiesResponse(
         supports_daemon_management=False,
         supports_workspace_registry=False,
@@ -227,6 +256,48 @@ async def get_workbench_capabilities(request: Request, auth: str = AuthDep):
         supports_cloud_sync=False,
         supported_locales=["zh-CN", "en-US"],
         protocol_version=1,
+    )
+
+
+@router.get("/workbench/daemon/status", response_model=DaemonStatusResponse)
+async def get_daemon_status(request: Request, auth: str = AuthDep):
+    return await _build_daemon_status(request)
+
+
+@router.get("/workbench/capabilities", response_model=WorkbenchCapabilitiesResponse)
+async def get_workbench_capabilities(request: Request, auth: str = AuthDep):
+    return _build_capabilities()
+
+
+@router.get("/workbench/bootstrap", response_model=WorkbenchBootstrapResponse)
+async def get_workbench_bootstrap(
+    request: Request,
+    page_size: Annotated[int, Query(ge=1, le=20)] = 1,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    sessions, total = await engine.session_store.list_sessions(
+        page=1,
+        page_size=page_size,
+    )
+    session_dicts = [_session_to_bootstrap_dict(session) for session in sessions]
+    selected_session_id = session_dicts[0]["id"] if session_dicts else None
+    snapshot = None
+
+    if selected_session_id is not None:
+        session = await engine.session_store.load(selected_session_id)
+        if session is not None:
+            snapshot = await engine.workbench_service.dashboard_snapshot(
+                selected_session_id
+            )
+
+    return WorkbenchBootstrapResponse(
+        daemon_status=await _build_daemon_status(request),
+        capabilities=_build_capabilities(),
+        sessions=session_dicts,
+        total_sessions=total,
+        selected_session_id=selected_session_id,
+        snapshot=snapshot,
     )
 
 
