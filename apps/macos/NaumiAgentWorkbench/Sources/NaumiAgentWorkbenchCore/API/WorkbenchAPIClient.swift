@@ -44,8 +44,27 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         try await get(path: "sessions?page=\(page)&page_size=\(pageSize)")
     }
 
-    public func fetchEvents(sessionID: String, limit: Int) async throws(APIError) -> WorkbenchEventsDTO {
-        try await get(path: encodePath("workbench", "sessions", sessionID, "events") + "?limit=\(limit)")
+    public func fetchEvents(
+        sessionID: String,
+        eventType: String? = nil,
+        subjectID: String? = nil,
+        actor: String? = nil,
+        limit: Int
+    ) async throws(APIError) -> WorkbenchEventsDTO {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let eventType, !eventType.isEmpty {
+            queryItems.append(URLQueryItem(name: "type", value: eventType))
+        }
+        if let subjectID, !subjectID.isEmpty {
+            queryItems.append(URLQueryItem(name: "subject_id", value: subjectID))
+        }
+        if let actor, !actor.isEmpty {
+            queryItems.append(URLQueryItem(name: "actor", value: actor))
+        }
+        return try await get(
+            path: encodePath("workbench", "sessions", sessionID, "events"),
+            queryItems: queryItems
+        )
     }
 
     public func fetchValidationRuns(

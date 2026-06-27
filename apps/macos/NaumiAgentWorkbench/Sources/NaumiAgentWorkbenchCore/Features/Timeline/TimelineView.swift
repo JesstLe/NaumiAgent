@@ -240,8 +240,14 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         SessionListDTO(sessions: [], total: 0, page: page, pageSize: pageSize)
     }
 
-    func fetchEvents(sessionID: String, limit: Int) async throws(APIError) -> WorkbenchEventsDTO {
-        WorkbenchEventsDTO(events: [], limit: limit)
+    func fetchEvents(
+        sessionID: String,
+        eventType: String?,
+        subjectID: String?,
+        actor: String?,
+        limit: Int
+    ) async throws(APIError) -> WorkbenchEventsDTO {
+        WorkbenchEventsDTO(events: [], eventType: eventType, subjectID: subjectID, actor: actor, limit: limit)
     }
 
     func fetchValidationRuns(

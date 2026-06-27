@@ -57,7 +57,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         return try result.get()
     }
 
-    func fetchEvents(sessionID: String, limit: Int) async throws(APIError) -> WorkbenchEventsDTO {
+    func fetchEvents(
+        sessionID: String,
+        eventType: String?,
+        subjectID: String?,
+        actor: String?,
+        limit: Int
+    ) async throws(APIError) -> WorkbenchEventsDTO {
         guard let result = eventsResult else {
             throw .invalidResponse
         }
