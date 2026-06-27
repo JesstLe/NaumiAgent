@@ -146,6 +146,18 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
                 },
             )
             assert claim_response.status_code == 201
+            claimed_lease = claim_response.json()
+
+            lease_detail_response = client.get(
+                f"/api/v1/workbench/sessions/{session_id}/leases/{claimed_lease['id']}"
+            )
+            assert lease_detail_response.status_code == 200
+            lease_detail = lease_detail_response.json()
+            assert lease_detail["id"] == claimed_lease["id"]
+            assert lease_detail["task_id"] == task_id
+            assert lease_detail["agent_id"] == "Backend-Agent"
+            assert lease_detail["state"] == "active"
+            assert lease_detail["worktree_name"] == "wt-api-smoke"
 
             context_response = client.post(
                 f"/api/v1/workbench/sessions/{session_id}/issues/{task_id}/context-health",
@@ -238,6 +250,6 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
             assert event_detail["type"] == "issue.claimed"
             assert event_detail["actor"] == "Backend-Agent"
             assert event_detail["subject_id"] == task_id
-            assert event_detail["payload"]["lease_id"] == claim_response.json()["id"]
+            assert event_detail["payload"]["lease_id"] == claimed_lease["id"]
     finally:
         asyncio.run(engine.close())

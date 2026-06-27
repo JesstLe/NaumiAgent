@@ -877,6 +877,30 @@ async def test_list_leases_filters_by_session_state_task_agent_and_orders_newest
 
 
 @pytest.mark.asyncio
+async def test_get_lease_returns_matching_session_lease(store: WorkbenchStore) -> None:
+    lease = await store.create_lease(
+        session_id="s",
+        task_id="task-a",
+        agent_id="agent-1",
+        expires_at="2099-01-01T00:00:00",
+        worktree_name="wt-a",
+    )
+    _other_session_lease = await store.create_lease(
+        session_id="other",
+        task_id="task-a",
+        agent_id="agent-1",
+        expires_at="2099-01-01T00:00:00",
+        worktree_name="wt-other",
+    )
+
+    found = await store.get_lease("s", lease.id)
+
+    assert found == lease
+    assert await store.get_lease("s", "missing-lease") is None
+    assert await store.get_lease("other", lease.id) is None
+
+
+@pytest.mark.asyncio
 async def test_list_events_filters_by_type_subject_id_actor_and_returns_newest_first(
     store: WorkbenchStore,
 ) -> None:

@@ -841,6 +841,18 @@ class WorkbenchStore:
             rows = await cursor.fetchall()
         return [_row_to_lease(dict(row)) for row in rows]
 
+    async def get_lease(self, session_id: str, lease_id: str) -> Lease | None:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_leases
+                   WHERE session_id = ? AND id = ?""",
+                (session_id, lease_id),
+            )
+            row = await cursor.fetchone()
+        return _row_to_lease(dict(row)) if row else None
+
     async def force_lease_expiry_for_test(self, lease_id: str, expires_at: str) -> None:
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
