@@ -23,8 +23,8 @@ public struct ReviewsView: View {
         let layout = WorkbenchScaledPageLayout.reviews
 
         GeometryReader { proxy in
-            let scale = CGFloat(layout.scale(for: Double(proxy.size.width)))
-            let scaledSize = layout.scaledSize(for: Double(proxy.size.width))
+            let scale = CGFloat(layout.scale(for: proxy.size))
+            let scaledSize = layout.scaledSize(for: proxy.size)
 
             ZStack(alignment: .topLeading) {
                 reviewLayoutContent(presentation: presentation, selected: selected)
