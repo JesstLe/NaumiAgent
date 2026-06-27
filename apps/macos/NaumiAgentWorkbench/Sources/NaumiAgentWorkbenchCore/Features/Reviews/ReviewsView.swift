@@ -36,8 +36,6 @@ public struct ReviewsView: View {
                     .frame(width: 296)
             }
 
-            Divider()
-            footer
         }
         .frame(minWidth: 1180, minHeight: 720)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -54,31 +52,27 @@ public struct ReviewsView: View {
     }
 
     private func pageHeader(selected: ReviewDesignItem) -> some View {
-        ZStack {
-            Color(nsColor: .windowBackgroundColor)
-
-            HStack(spacing: 12) {
-                Text(appState.locale == .zhCN
-                    ? "审查：\(selected.title) (#\(selected.number))"
-                    : "Review: \(selected.title) (#\(selected.number))"
-                )
-                    .font(.system(size: 17, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(appState.locale == .zhCN ? "高风险：需要人工审批" : "High Risk: Human Approval Required")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.red.opacity(0.10))
-                    .foregroundStyle(.red)
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
-                Spacer()
-            }
-            .padding(.horizontal, 18)
-            .offset(y: 28)
+        HStack(spacing: 12) {
+            Text(appState.locale == .zhCN
+                ? "审查：\(selected.title) (#\(selected.number))"
+                : "Review: \(selected.title) (#\(selected.number))"
+            )
+                .font(.system(size: 17, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Text(appState.locale == .zhCN ? "高风险：需要人工审批" : "High Risk: Human Approval Required")
+                .font(.caption)
+                .fontWeight(.medium)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.red.opacity(0.10))
+                .foregroundStyle(.red)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+            Spacer()
         }
+        .padding(.horizontal, 18)
         .frame(height: 48)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private func reviewQueueRail(_ presentation: ReviewsDesignPresentation) -> some View {
@@ -583,24 +577,6 @@ public struct ReviewsView: View {
         }
         .font(.caption)
         .foregroundStyle(.secondary)
-    }
-
-    private var footer: some View {
-        HStack {
-            Circle()
-                .fill(.green)
-                .frame(width: 8, height: 8)
-            Text(appState.locale == .zhCN ? "已连接本地 NaumiAgent Runtime" : "Connected to local NaumiAgent Runtime")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text("v0.3.0")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private func statusTone(_ status: String) -> Color {

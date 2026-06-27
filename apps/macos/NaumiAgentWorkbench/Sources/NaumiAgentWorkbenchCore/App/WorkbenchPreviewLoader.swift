@@ -103,7 +103,7 @@ public enum WorkbenchPreviewLoader {
         appState.validationRuns = previewValidationRuns(from: snapshot, locale: locale)
         appState.contextSnapshots = previewContextSnapshots(from: snapshot, locale: locale)
         appState.approvals = previewApprovals(from: snapshot, locale: locale)
-        appState.timelineEvents = snapshot.events
+        appState.timelineEvents = previewTimelineEvents(from: snapshot, locale: locale)
         appState.issues = snapshot.issues
         appState.failures = snapshot.failures
         appState.leases = snapshot.leases
@@ -273,6 +273,128 @@ public enum WorkbenchPreviewLoader {
                     ? ["目标锁策略存在冲突"]
                     : ["Intent lock policy conflict"],
                 createdAt: "2026-06-27T09:09:00"
+            ),
+            ContextSnapshotDTO(
+                id: "preview-context-4",
+                sessionID: snapshot.sessionID,
+                agentID: "Test-Agent",
+                taskID: firstTaskID,
+                health: "good",
+                reasons: locale == .zhCN
+                    ? ["验证日志已归档", "失败复现路径可用"]
+                    : ["Validation logs archived", "Failure reproduction path is available"],
+                createdAt: "2026-06-27T09:38:00"
+            ),
+            ContextSnapshotDTO(
+                id: "preview-context-5",
+                sessionID: snapshot.sessionID,
+                agentID: "Backend-Agent",
+                taskID: secondTaskID,
+                health: "stale",
+                reasons: locale == .zhCN
+                    ? ["依赖任务刚刚更新", "需要重新读取租约状态"]
+                    : ["Dependency task was just updated", "Lease state should be reread"],
+                createdAt: "2026-06-27T09:22:00"
+            ),
+            ContextSnapshotDTO(
+                id: "preview-context-6",
+                sessionID: snapshot.sessionID,
+                agentID: "Reviewer-Agent",
+                taskID: firstTaskID,
+                health: "overloaded",
+                reasons: locale == .zhCN
+                    ? ["审查队列超过并行上限", "建议先处理高风险审批"]
+                    : ["Review queue exceeds parallel limit", "Handle high-risk approval first"],
+                createdAt: "2026-06-27T09:14:00"
+            )
+        ]
+    }
+
+    private static func previewTimelineEvents(
+        from snapshot: WorkbenchSnapshotDTO,
+        locale: AppLocale
+    ) -> [EventDTO] {
+        let missionID = snapshot.missions.first?.id ?? "mission-preview"
+        let firstTaskID = snapshot.tasks.first?.id ?? "task-preview"
+        let secondTaskID = snapshot.tasks.dropFirst().first?.id ?? firstTaskID
+        let thirdTaskID = snapshot.tasks.dropFirst(2).first?.id ?? firstTaskID
+
+        let localizedMissionTitle = locale == .zhCN
+            ? "实现 SwiftUI 工作台骨架"
+            : "Implement SwiftUI workbench shell"
+
+        return [
+            EventDTO(
+                id: "preview-event-1",
+                sessionID: snapshot.sessionID,
+                type: "mission.created",
+                actor: "Human",
+                subjectID: missionID,
+                payload: ["title": .string(localizedMissionTitle)],
+                timestamp: "2026-06-27T09:05:00"
+            ),
+            EventDTO(
+                id: "preview-event-2",
+                sessionID: snapshot.sessionID,
+                type: "task.claimed",
+                actor: "Backend-Agent",
+                subjectID: firstTaskID,
+                payload: ["lease": .string("exclusive"), "worktree": .string("wt-api-client")],
+                timestamp: "2026-06-27T09:14:00"
+            ),
+            EventDTO(
+                id: "preview-event-3",
+                sessionID: snapshot.sessionID,
+                type: "worktree.created",
+                actor: "Backend-Agent",
+                subjectID: "wt-api-client",
+                payload: ["branch": .string("issue-1-api-client")],
+                timestamp: "2026-06-27T09:18:11"
+            ),
+            EventDTO(
+                id: "preview-event-4",
+                sessionID: snapshot.sessionID,
+                type: "validation.passed",
+                actor: "Test-Agent",
+                subjectID: firstTaskID,
+                payload: ["command": .string("ruff check src/")],
+                timestamp: "2026-06-27T09:28:02"
+            ),
+            EventDTO(
+                id: "preview-event-5",
+                sessionID: snapshot.sessionID,
+                type: "validation.failed",
+                actor: "Test-Agent",
+                subjectID: secondTaskID,
+                payload: ["failed": .number(12), "passed": .number(3)],
+                timestamp: "2026-06-27T09:31:12"
+            ),
+            EventDTO(
+                id: "preview-event-6",
+                sessionID: snapshot.sessionID,
+                type: "context.stale",
+                actor: "Reviewer-Agent",
+                subjectID: secondTaskID,
+                payload: ["reason": .string(locale == .zhCN ? "分支已更新" : "Branch updated")],
+                timestamp: "2026-06-27T09:34:20"
+            ),
+            EventDTO(
+                id: "preview-event-7",
+                sessionID: snapshot.sessionID,
+                type: "approval.requested",
+                actor: "Backend-Agent",
+                subjectID: thirdTaskID,
+                payload: ["risk": .string("high"), "reviewer": .string("Human")],
+                timestamp: "2026-06-27T09:36:02"
+            ),
+            EventDTO(
+                id: "preview-event-8",
+                sessionID: snapshot.sessionID,
+                type: "task.updated",
+                actor: "Planner-Agent",
+                subjectID: thirdTaskID,
+                payload: ["status": .string("requires_proposal")],
+                timestamp: "2026-06-27T09:40:00"
             )
         ]
     }
