@@ -28,7 +28,7 @@ def _patch_uvicorn_run(monkeypatch) -> list[dict]:
 
 def test_serve_default_host_is_localhost(monkeypatch, runner: CliRunner) -> None:
     calls = _patch_uvicorn_run(monkeypatch)
-    example_config = str(Path(__file__).resolve().parents[3] / "config.yaml.example")
+    example_config = str(Path(__file__).resolve().parents[2] / "config.yaml.example")
 
     result = runner.invoke(app, ["serve", "--config", example_config])
 
@@ -39,7 +39,7 @@ def test_serve_default_host_is_localhost(monkeypatch, runner: CliRunner) -> None
 
 def test_serve_explicit_host_override_still_works(monkeypatch, runner: CliRunner) -> None:
     calls = _patch_uvicorn_run(monkeypatch)
-    example_config = str(Path(__file__).resolve().parents[3] / "config.yaml.example")
+    example_config = str(Path(__file__).resolve().parents[2] / "config.yaml.example")
 
     result = runner.invoke(
         app,
@@ -49,3 +49,28 @@ def test_serve_explicit_host_override_still_works(monkeypatch, runner: CliRunner
     assert result.exit_code == 0, result.output
     assert len(calls) == 1
     assert calls[0]["kwargs"]["host"] == "0.0.0.0"
+
+
+def test_serve_default_port_is_mac_workbench_daemon_port(monkeypatch, runner: CliRunner) -> None:
+    calls = _patch_uvicorn_run(monkeypatch)
+    example_config = str(Path(__file__).resolve().parents[2] / "config.yaml.example")
+
+    result = runner.invoke(app, ["serve", "--config", example_config])
+
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    assert calls[0]["kwargs"]["port"] == 8765
+
+
+def test_serve_explicit_port_override_still_works(monkeypatch, runner: CliRunner) -> None:
+    calls = _patch_uvicorn_run(monkeypatch)
+    example_config = str(Path(__file__).resolve().parents[2] / "config.yaml.example")
+
+    result = runner.invoke(
+        app,
+        ["serve", "--config", example_config, "--port", "8080"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    assert calls[0]["kwargs"]["port"] == 8080
