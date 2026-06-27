@@ -606,6 +606,47 @@ async def test_list_context_snapshots_returns_store_snapshots_and_respects_limit
 
 
 @pytest.mark.asyncio
+async def test_get_context_snapshot_returns_single_snapshot(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    snapshot = await workbench_store.record_context_snapshot(
+        session_id="s",
+        agent_id="agent-1",
+        task_id="task-a",
+        health=ContextHealth.STALE,
+        reasons=["超过 60 分钟未同步上下文"],
+    )
+
+    result = await service.get_context_snapshot("s", snapshot["id"])
+
+    assert result == snapshot
+
+
+@pytest.mark.asyncio
+async def test_get_context_snapshot_returns_none_for_missing_or_other_session(
+    tmp_path,
+) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    snapshot = await workbench_store.record_context_snapshot(
+        session_id="s",
+        agent_id="agent-1",
+        task_id="task-a",
+        health=ContextHealth.GOOD,
+        reasons=["上下文健康"],
+    )
+
+    assert await service.get_context_snapshot("s", "missing-snapshot") is None
+    assert await service.get_context_snapshot("other-session", snapshot["id"]) is None
+
+
+@pytest.mark.asyncio
 async def test_record_context_health_evaluates_persists_and_records_event(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")

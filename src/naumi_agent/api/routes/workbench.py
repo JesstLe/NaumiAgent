@@ -521,6 +521,28 @@ async def get_context_snapshots(
     )
 
 
+@router.get("/workbench/sessions/{session_id}/context-snapshots/{snapshot_id}")
+async def get_context_snapshot(
+    session_id: str,
+    snapshot_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    snapshot = await engine.workbench_service.get_context_snapshot(
+        session_id,
+        snapshot_id,
+    )
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="上下文快照不存在")
+    return snapshot
+
+
 @router.post(
     "/workbench/sessions/{session_id}/issues/{task_id}/context-health",
     status_code=201,

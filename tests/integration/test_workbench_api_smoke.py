@@ -158,6 +158,18 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
                 },
             )
             assert context_response.status_code == 201
+            context_snapshot = context_response.json()
+
+            context_detail_response = client.get(
+                f"/api/v1/workbench/sessions/{session_id}/context-snapshots/{context_snapshot['id']}"
+            )
+            assert context_detail_response.status_code == 200
+            context_detail = context_detail_response.json()
+            assert context_detail["id"] == context_snapshot["id"]
+            assert context_detail["task_id"] == task_id
+            assert context_detail["agent_id"] == "Backend-Agent"
+            assert context_detail["health"] == "good"
+            assert context_detail["reasons"] == ["上下文健康"]
 
             validation_response = client.post(
                 f"/api/v1/workbench/sessions/{session_id}/validation-runs",
