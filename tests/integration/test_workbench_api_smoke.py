@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from naumi_agent.tasks.store import TaskStore
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.workbench.validation import ValidationRunner
+from naumi_agent.worktree.manager import WorktreeManager
 
 
 class _SmokeEngine:
@@ -29,6 +31,11 @@ class _SmokeEngine:
         )
         self.task_store = TaskStore(str(db_path))
         self.workbench_store = WorkbenchStore(str(db_path))
+        self.worktree_manager = WorktreeManager(
+            repo_root=workspace_root,
+            storage_dir=workspace_root / "worktrees",
+            task_store=self.task_store,
+        )
         self.validation_runner = ValidationRunner(
             store=self.workbench_store,
             allowed_commands=[[sys.executable, "-c"]],
@@ -247,6 +254,48 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
             assert lease_detail["agent_id"] == "Backend-Agent"
             assert lease_detail["state"] == "active"
             assert lease_detail["worktree_name"] == "wt-api-smoke"
+
+            engine.worktree_manager.storage_dir.mkdir(parents=True, exist_ok=True)
+            worktree_state_path = engine.worktree_manager.storage_dir / "worktrees.json"
+            worktree_state_path.write_text(
+                json.dumps(
+                    {
+                        "wt-api-smoke": {
+                            "name": "wt-api-smoke",
+                            "path": str(tmp_path / "missing-wt-api-smoke"),
+                            "branch": "naumi/worktree-wt-api-smoke",
+                            "base_ref": "abc123",
+                            "status": "clean",
+                            "task_id": task_id,
+                            "dirty_files": 0,
+                            "commits_ahead": 0,
+                            "created_at": "2024-01-01T00:00:00",
+                            "updated_at": "2024-01-01T00:00:00",
+                            "kept_reason": "",
+                            "metadata": {"agent_id": "Backend-Agent"},
+                        }
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            worktrees_response = client.get(
+                f"/api/v1/workbench/sessions/{session_id}/worktrees?task_id={task_id}&status=missing"
+            )
+            assert worktrees_response.status_code == 200
+            worktrees = worktrees_response.json()
+            assert worktrees["task_id"] == task_id
+            assert worktrees["status"] == "missing"
+            assert worktrees["limit"] == 50
+            assert len(worktrees["worktrees"]) == 1
+            worktree = worktrees["worktrees"][0]
+            assert worktree["name"] == "wt-api-smoke"
+            assert worktree["task_id"] == task_id
+            assert worktree["status"] == "missing"
+            assert worktree["metadata"] == {"agent_id": "Backend-Agent"}
+            assert worktree["removable"] is False
 
             context_response = client.post(
                 f"/api/v1/workbench/sessions/{session_id}/issues/{task_id}/context-health",

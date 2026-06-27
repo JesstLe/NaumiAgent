@@ -170,6 +170,13 @@ class LeasesResponse(BaseModel):
     limit: int
 
 
+class WorktreesResponse(BaseModel):
+    worktrees: list[dict[str, Any]]
+    task_id: str | None
+    status: str | None
+    limit: int
+
+
 class MissionsResponse(BaseModel):
     missions: list[dict[str, Any]]
     status: str | None
@@ -200,6 +207,15 @@ def _get_task_market(engine) -> TaskMarket:
         task_store=engine.task_store,
         workbench_store=engine.workbench_store,
     )
+
+
+def _worktree_to_dict(record) -> dict[str, Any]:
+    data = asdict(record)
+    status = data.get("status")
+    if hasattr(status, "value"):
+        data["status"] = status.value
+    data["removable"] = record.removable
+    return data
 
 
 async def _count_workspaces(engine) -> int:
@@ -1077,6 +1093,46 @@ async def upsert_agent_profile(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/worktrees",
+    response_model=WorktreesResponse,
+)
+async def get_worktrees(
+    session_id: str,
+    request: Request,
+    task_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    manager = getattr(engine, "worktree_manager", None)
+    if manager is None:
+        raise HTTPException(status_code=503, detail="worktree 管理器未初始化")
+
+    records = await manager.status()
+    if not isinstance(records, list):
+        records = [records]
+    worktrees = [_worktree_to_dict(record) for record in records]
+    if task_id is not None:
+        worktrees = [record for record in worktrees if record["task_id"] == task_id]
+    if status is not None:
+        worktrees = [record for record in worktrees if record["status"] == status]
+
+    return WorktreesResponse(
+        worktrees=worktrees[:limit],
+        task_id=task_id,
+        status=status,
+        limit=limit,
+    )
 
 
 @router.get(
