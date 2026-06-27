@@ -63,7 +63,7 @@ class MCPConfig(BaseSettings):
 class APIConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NAUMI_API__")
 
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8080
     workers: int = 1
     api_keys: list[str] = Field(default_factory=list)

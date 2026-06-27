@@ -1277,7 +1277,12 @@ async def _run_task(task: str, config_path: str) -> None:
 
 @app.command()
 def serve(
-    host: str = typer.Option("0.0.0.0", "--host", "-h", help="监听地址"),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        "-h",
+        help="监听地址（默认 127.0.0.1，仅本地访问；如需暴露网络请显式指定 0.0.0.0）",
+    ),
     port: int = typer.Option(8080, "--port", "-p", help="监听端口"),
     config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
     reload: bool = typer.Option(False, "--reload", help="开发模式热重载"),
