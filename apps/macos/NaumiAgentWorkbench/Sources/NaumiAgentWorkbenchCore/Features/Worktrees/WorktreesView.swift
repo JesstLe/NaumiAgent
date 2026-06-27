@@ -21,6 +21,7 @@ public struct WorktreesView: View {
                 }
                 summaryStrip(presentation: presentation)
                 dashboardGrid(presentation: presentation)
+                operationsGrid(presentation: presentation)
             }
             .padding(.horizontal, 22)
             .padding(.vertical, 18)
@@ -105,6 +106,101 @@ public struct WorktreesView: View {
                 healthDistributionPanel(presentation: presentation)
             }
             .frame(width: 340, alignment: .top)
+        }
+    }
+
+    private func operationsGrid(presentation: WorktreesDashboardPresentation) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            agentWorkloadPanel(presentation: presentation)
+                .frame(minWidth: 420, maxWidth: .infinity, alignment: .top)
+            remediationPanel(presentation: presentation)
+                .frame(width: 420, alignment: .top)
+        }
+    }
+
+    private func agentWorkloadPanel(presentation: WorktreesDashboardPresentation) -> some View {
+        panel(title: appState.locale == .zhCN ? "Agent / Worktree 负载" : "Agent / Worktree Load") {
+            if presentation.agentBuckets.isEmpty {
+                emptyState
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(presentation.agentBuckets) { bucket in
+                        HStack(spacing: 12) {
+                            Image(systemName: "person.crop.circle.badge.gearshape")
+                                .foregroundStyle(color(for: bucket.worstHealth))
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Text(bucket.agentID)
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Spacer()
+                                    StatusBadge(
+                                        text: healthLabel(bucket.worstHealth),
+                                        color: color(for: bucket.worstHealth)
+                                    )
+                                }
+                                HStack(spacing: 18) {
+                                    compactDetail(
+                                        label: appState.locale == .zhCN ? "快照" : "Snapshots",
+                                        value: "\(bucket.snapshotCount)"
+                                    )
+                                    compactDetail(
+                                        label: appState.locale == .zhCN ? "需关注" : "Attention",
+                                        value: "\(bucket.attentionCount)"
+                                    )
+                                }
+                            }
+                        }
+                        .padding(12)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+        }
+    }
+
+    private func remediationPanel(presentation: WorktreesDashboardPresentation) -> some View {
+        panel(title: appState.locale == .zhCN ? "建议处置" : "Recommended Actions") {
+            if presentation.recommendedActions.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(
+                        appState.locale == .zhCN ? "当前无需人工介入" : "No manual action needed",
+                        systemImage: "checkmark.seal"
+                    )
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.green)
+                    Text(appState.locale == .zhCN ? "所有工作区上下文处于可继续执行状态。" : "All worktree contexts are safe to continue.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.green.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(presentation.recommendedActions) { action in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: action.systemImage)
+                                .foregroundStyle(.orange)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(action.title(locale: appState.locale))
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text(action.detail(locale: appState.locale))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                        }
+                        .padding(12)
+                        .background(Color.orange.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
         }
     }
 
