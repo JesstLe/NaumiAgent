@@ -53,7 +53,7 @@ public struct ReviewsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
             reviewInspector(presentation: presentation, selected: selected)
-                .frame(width: 296)
+                .frame(width: 340)
         }
         .frame(
             width: WorkbenchScaledPageLayout.reviews.baseWidth,

@@ -16,25 +16,23 @@ struct WorkbenchPageLayoutTests {
         let layout = WorkbenchScaledPageLayout.dashboard
         let size = layout.scaledSize(for: 900)
 
-        #expect(layout.scale(for: 1440) == 1)
+        #expect(layout.scale(for: 1440) > 1)
         #expect(layout.scale(for: 900) < 1)
         #expect(size.width <= 900)
         #expect(size.height < layout.baseHeight)
     }
 
-    @Test func scaledLayoutUsesBothWindowDimensionsAndScalesUpWhenSpaceAllows() {
+    @Test func scaledLayoutKeepsThreeColumnsStableWhenHeightChanges() {
         let layout = WorkbenchScaledPageLayout.dashboard
 
-        let large = layout.scaledSize(for: CGSize(width: 2048, height: 1000))
-        let heightLimited = layout.scaledSize(for: CGSize(width: 2048, height: 640))
+        let normalHeight = layout.scaledSize(for: CGSize(width: 1360, height: 900))
+        let shortHeight = layout.scaledSize(for: CGSize(width: 1360, height: 620))
         let narrow = layout.scaledSize(for: CGSize(width: 900, height: 620))
 
-        #expect(large.width > layout.baseWidth)
-        #expect(large.width <= 2048)
-        #expect(large.height <= 1000)
-        #expect(heightLimited.height <= 640)
-        #expect(heightLimited.width < large.width)
+        #expect(abs(normalHeight.width - layout.baseWidth) < 0.001)
+        #expect(abs(shortHeight.width - layout.baseWidth) < 0.001)
+        #expect(abs(shortHeight.height - normalHeight.height) < 0.001)
         #expect(narrow.width <= 900)
-        #expect(narrow.height <= 620)
+        #expect(abs(narrow.height - layout.baseHeight * layout.scale(for: 900)) < 0.001)
     }
 }

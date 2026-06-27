@@ -94,7 +94,7 @@ public struct DashboardView: View {
                 Divider()
 
                 inspectorPanel(presentation: presentation)
-                    .frame(width: 296, alignment: .top)
+                    .frame(width: 340, alignment: .top)
             }
             .frame(height: mainHeight, alignment: .top)
             .clipped()
@@ -355,6 +355,11 @@ public struct DashboardView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
+                Text(AppStrings.Dashboard.sharedCanvasSection(appState.locale))
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+                    .layoutPriority(2)
+                Spacer(minLength: 12)
                 Text(appState.locale == .zhCN ? "显示：" : "Show:")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -363,9 +368,6 @@ public struct DashboardView: View {
                         .toggleStyle(.checkbox)
                         .font(.caption)
                 }
-                Spacer()
-                Text(AppStrings.Dashboard.sharedCanvasSection(appState.locale))
-                    .font(.system(size: 14, weight: .semibold))
             }
             .padding(.horizontal, 16)
             .frame(height: 44, alignment: .center)
@@ -394,7 +396,7 @@ public struct DashboardView: View {
                                 canvasIssueCard(row)
                             }
                         }
-                        .frame(width: 230)
+                        .frame(width: 220)
 
                         VStack(spacing: 14) {
                             ForEach(presentation.workbench.canvasNodes.filter { $0.kind == .agents }, id: \.id) { node in
@@ -404,14 +406,14 @@ public struct DashboardView: View {
                                 compactCanvasPill(agent, color: .purple)
                             }
                         }
-                        .frame(width: 172)
+                        .frame(width: 160)
 
                         VStack(spacing: 14) {
                             ForEach(presentation.workbench.canvasNodes.filter { $0.kind == .worktrees || $0.kind == .validation || $0.kind == .failure || $0.kind == .approval }, id: \.id) { node in
                                 canvasNodeView(node: node)
                             }
                         }
-                        .frame(width: 260)
+                        .frame(width: 240)
                     }
                 }
                 .padding(24)

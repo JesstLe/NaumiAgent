@@ -43,14 +43,11 @@ public struct WorkbenchScaledPageLayout: Equatable, Sendable {
 
     public func scale(for availableWidth: Double) -> Double {
         guard baseWidth > 0 else { return 1 }
-        return min(1, max(0.1, availableWidth / baseWidth))
+        return max(0.1, availableWidth / baseWidth)
     }
 
     public func scale(for availableSize: CGSize) -> Double {
-        guard baseWidth > 0, baseHeight > 0 else { return 1 }
-        let widthScale = availableSize.width / baseWidth
-        let heightScale = availableSize.height / baseHeight
-        return max(0.1, min(widthScale, heightScale))
+        scale(for: availableSize.width)
     }
 
     public func scaledSize(for availableWidth: Double) -> CGSize {

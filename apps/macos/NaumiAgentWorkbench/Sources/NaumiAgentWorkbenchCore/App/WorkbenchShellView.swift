@@ -22,11 +22,6 @@ public struct WorkbenchShellView: View {
 
             Divider()
 
-            GlobalStatusStrip(appState: environment.appState)
-                .frame(height: WorkbenchShellPresentation().globalStatusHeight)
-
-            Divider()
-
             routeView(for: appState.currentRoute)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .clipped()
