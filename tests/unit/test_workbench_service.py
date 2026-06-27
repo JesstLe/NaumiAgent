@@ -686,11 +686,23 @@ async def test_run_validation_records_run_and_event(tmp_path) -> None:
         validation_runner=runner,
         workspace_root=str(tmp_path),
     )
+    mission = await service.create_mission(
+        session_id="s",
+        title="Mac 工作台",
+        goal="验证运行必须绑定 issue",
+    )
+    task = await task_store.create_task("运行验证")
+    await service.attach_issue(
+        session_id="s",
+        mission_id=mission.id,
+        task_id=task.id,
+        acceptance_criteria=["验证记录必须可追溯"],
+    )
 
     argv = [sys.executable, "-c", "print('hello from validation')"]
     result = await service.run_validation(
         session_id="s",
-        task_id="task-1",
+        task_id=task.id,
         actor="Human",
         argv=argv,
     )
@@ -699,7 +711,7 @@ async def test_run_validation_records_run_and_event(tmp_path) -> None:
     assert result["exit_code"] == 0
     assert "hello from validation" in result["output"]
 
-    runs = await service.list_validation_runs("s", task_id="task-1")
+    runs = await service.list_validation_runs("s", task_id=task.id)
     assert any(run["id"] == result["id"] for run in runs)
     assert next(run for run in runs if run["id"] == result["id"])["cwd"] == str(
         tmp_path.resolve()
@@ -709,11 +721,38 @@ async def test_run_validation_records_run_and_event(tmp_path) -> None:
     event = next((e for e in events["events"] if e["type"] == "validation.completed"), None)
     assert event is not None
     assert event["actor"] == "Human"
-    assert event["subject_id"] == "task-1"
+    assert event["subject_id"] == task.id
     assert event["payload"]["run_id"] == result["id"]
     assert event["payload"]["status"] == "passed"
     assert event["payload"]["exit_code"] == 0
     assert event["payload"]["command"] == argv
+
+
+@pytest.mark.asyncio
+async def test_run_validation_rejects_missing_issue_without_recording_run(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    runner = ValidationRunner(
+        store=workbench_store,
+        allowed_commands=[[sys.executable, "-c"]],
+    )
+    service = WorkbenchService(
+        task_store=task_store,
+        workbench_store=workbench_store,
+        validation_runner=runner,
+        workspace_root=str(tmp_path),
+    )
+
+    with pytest.raises(ValueError, match="issue 不存在"):
+        await service.run_validation(
+            session_id="s",
+            task_id="missing-task",
+            actor="Human",
+            argv=[sys.executable, "-c", "print('should not run')"],
+        )
+
+    assert await service.list_validation_runs("s", task_id="missing-task") == []
 
 
 @pytest.mark.asyncio
@@ -731,11 +770,23 @@ async def test_run_validation_rejects_cwd_outside_workspace(tmp_path) -> None:
         validation_runner=runner,
         workspace_root=str(tmp_path),
     )
+    mission = await service.create_mission(
+        session_id="s",
+        title="Mac 工作台",
+        goal="验证 cwd 必须被限制",
+    )
+    task = await task_store.create_task("验证 cwd")
+    await service.attach_issue(
+        session_id="s",
+        mission_id=mission.id,
+        task_id=task.id,
+        acceptance_criteria=["cwd 不能越界"],
+    )
 
     with pytest.raises(ValueError, match="工作目录必须在 workspace_root 内"):
         await service.run_validation(
             session_id="s",
-            task_id="task-1",
+            task_id=task.id,
             actor="Human",
             argv=[sys.executable, "-c", "print('ok')"],
             cwd=str(tmp_path.parent),

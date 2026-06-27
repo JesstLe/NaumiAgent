@@ -599,6 +599,9 @@ class WorkbenchService:
         if not argv:
             raise ValueError("验证命令不能为空")
 
+        if await self._workbench_store.get_issue(session_id, task_id) is None:
+            raise ValueError("issue 不存在，无法运行验证")
+
         if self._validation_runner is None:
             raise RuntimeError("ValidationRunner 未配置")
 
