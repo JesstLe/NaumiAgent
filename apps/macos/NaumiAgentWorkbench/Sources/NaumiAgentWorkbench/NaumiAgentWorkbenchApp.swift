@@ -95,7 +95,10 @@ struct ContentView: View {
                 daemonController: environment.daemonController
             )
         case .settings:
-            SettingsView(appState: environment.appState)
+            SettingsView(
+                appState: environment.appState,
+                daemonController: environment.daemonController
+            )
         }
     }
 }
