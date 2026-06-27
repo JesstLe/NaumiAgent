@@ -81,6 +81,15 @@ public protocol WorkbenchAPIProviding: Sendable {
         actor: String
     ) async throws(APIError) -> DecisionDTO
 
+    /// Resolves an approval request as approved or rejected.
+    func resolveApproval(
+        sessionID: String,
+        approvalID: String,
+        actor: String,
+        state: String,
+        decisionNote: String
+    ) async throws(APIError) -> ApprovalDTO
+
     /// Runs a validation command in the given session and returns its result.
     func runValidation(
         sessionID: String,

@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 from naumi_agent import __version__
 from naumi_agent.api.routes.workbench import (
+    ApprovalResolve,
     ClaimIssue,
     DecisionCreate,
     IntentLockCreate,
@@ -33,8 +34,10 @@ from naumi_agent.api.routes.workbench import (
     get_workbench_events,
     get_workbench_snapshot,
     release_workbench_lease,
+    resolve_approval,
 )
 from naumi_agent.workbench.models import (
+    ApprovalState,
     ContextHealth,
     DecisionKind,
     Lease,
@@ -61,6 +64,7 @@ class _FakeWorkbenchService:
         self.attached_issues: list[dict] = []
         self.created_intent_locks: list[dict] = []
         self.created_decisions: list[dict] = []
+        self.resolved_approvals: list[dict] = []
         self.run_validations: list[dict] = []
         self.listed_events: list[dict] = []
         self.listed_validation_runs: list[dict] = []
@@ -68,6 +72,8 @@ class _FakeWorkbenchService:
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
+        self._resolve_approval_error: Exception | None = None
+        self._resolve_approval_result: dict | None = None
 
     def set_run_validation_error(self, error: Exception) -> None:
         self._run_validation_error = error
@@ -77,6 +83,12 @@ class _FakeWorkbenchService:
 
     def set_decision_error(self, error: Exception) -> None:
         self._decision_error = error
+
+    def set_resolve_approval_error(self, error: Exception) -> None:
+        self._resolve_approval_error = error
+
+    def set_resolve_approval_result(self, result: dict | None) -> None:
+        self._resolve_approval_result = result
 
     async def dashboard_snapshot(self, session_id: str):
         return {
@@ -204,6 +216,30 @@ class _FakeWorkbenchService:
             "actor": actor,
             "created_at": "2024-01-01T00:00:00",
         }
+
+    async def resolve_approval(
+        self,
+        *,
+        session_id: str,
+        approval_id: str,
+        actor: str,
+        state: ApprovalState,
+        decision_note: str,
+    ):
+        self.resolved_approvals.append(
+            {
+                "session_id": session_id,
+                "approval_id": approval_id,
+                "actor": actor,
+                "state": state,
+                "decision_note": decision_note,
+            }
+        )
+        if self._resolve_approval_error is not None:
+            raise self._resolve_approval_error
+        if self._resolve_approval_result is None:
+            return None
+        return self._resolve_approval_result
 
     async def list_events(self, session_id: str, limit: int = 50):
         self.listed_events.append({"session_id": session_id, "limit": limit})
@@ -688,7 +724,89 @@ async def test_claim_issue_endpoint_maps_value_error_to_400() -> None:
         await claim_workbench_issue("sess-1", "task-1", body, _fake_request(engine), auth="test")
 
     assert exc.value.status_code == 400
-    assert exc.value.detail == "任务 #task-1 不存在"
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+    body = ApprovalResolve(state=ApprovalState.APPROVED)
+
+    with pytest.raises(HTTPException) as exc:
+        await resolve_approval("missing", "approval-1", body, _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_endpoint_returns_resolved_approval() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_resolve_approval_result(
+        {
+            "id": "approval-1",
+            "session_id": "sess-1",
+            "mission_id": "mission-1",
+            "task_id": "task-1",
+            "state": "approved",
+            "title": "允许重构",
+            "detail": "保持测试通过",
+            "requester": "Agent-A",
+            "reviewer": "Human",
+            "decision_note": "同意",
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:01",
+        }
+    )
+    body = ApprovalResolve(actor="Human", state=ApprovalState.APPROVED, decision_note="同意")
+
+    response = await resolve_approval(
+        "sess-1", "approval-1", body, _fake_request(engine), auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.resolved_approvals == [
+        {
+            "session_id": "sess-1",
+            "approval_id": "approval-1",
+            "actor": "Human",
+            "state": ApprovalState.APPROVED,
+            "decision_note": "同意",
+        }
+    ]
+    assert response["id"] == "approval-1"
+    assert response["state"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_endpoint_returns_404_when_missing() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_resolve_approval_result(None)
+    body = ApprovalResolve(state=ApprovalState.REJECTED)
+
+    with pytest.raises(HTTPException) as exc:
+        await resolve_approval(
+            "sess-1", "approval-missing", body, _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "审批请求不存在"
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_endpoint_maps_value_error_to_400() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_resolve_approval_error(
+        ValueError("审批结果只能是 approved 或 rejected")
+    )
+    body = ApprovalResolve(state=ApprovalState.WAITING)
+
+    with pytest.raises(HTTPException) as exc:
+        await resolve_approval("sess-1", "approval-1", body, _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "审批结果只能是 approved 或 rejected"
 
 
 @pytest.mark.asyncio

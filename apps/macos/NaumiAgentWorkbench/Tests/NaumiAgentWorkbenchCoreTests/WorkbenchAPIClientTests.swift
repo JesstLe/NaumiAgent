@@ -829,6 +829,64 @@ final class WorkbenchAPIClientTests {
         #expect(decision.createdAt == "2026-06-27T06:00:00")
     }
 
+    @Test func resolveApprovalUsesPOSTAndEncodesPathAndBody() async throws {
+        let sessionID = "sess 中文"
+        let approvalID = "approval 001 审批"
+        let approvalJSON = Data(
+            """
+            {"id":"approval 001 审批","session_id":"sess 中文","mission_id":"mission-001","task_id":"task-001","state":"approved","title":"允许重构","detail":"保持测试通过","requester":"Agent-A","reviewer":"Human","decision_note":"同意","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:01"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/approvals/approval%20001%20%E5%AE%A1%E6%89%B9/resolve" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["actor"] as? String == "Human",
+                  json?["state"] as? String == "approved",
+                  json?["decision_note"] as? String == "同意" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, approvalJSON)
+        }
+
+        let client = makeClient()
+        let approval = try await client.resolveApproval(
+            sessionID: sessionID,
+            approvalID: approvalID,
+            actor: "Human",
+            state: "approved",
+            decisionNote: "同意"
+        )
+
+        #expect(approval.id == approvalID)
+        #expect(approval.sessionID == sessionID)
+        #expect(approval.missionID == "mission-001")
+        #expect(approval.taskID == "task-001")
+        #expect(approval.state == "approved")
+        #expect(approval.title == "允许重构")
+        #expect(approval.detail == "保持测试通过")
+        #expect(approval.requester == "Agent-A")
+        #expect(approval.reviewer == "Human")
+        #expect(approval.decisionNote == "同意")
+        #expect(approval.createdAt == "2026-06-27T06:00:00")
+        #expect(approval.updatedAt == "2026-06-27T06:00:01")
+    }
+
     // MARK: - Helpers
 
     private func makeClient() -> WorkbenchAPIClient {

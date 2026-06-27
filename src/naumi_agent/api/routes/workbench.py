@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from naumi_agent import __version__
 from naumi_agent.api.deps import AuthDep
 from naumi_agent.workbench.market import TaskMarket
-from naumi_agent.workbench.models import DecisionKind, ParallelMode, RiskLevel
+from naumi_agent.workbench.models import ApprovalState, DecisionKind, ParallelMode, RiskLevel
 
 router = APIRouter(tags=["workbench"])
 
@@ -62,6 +62,12 @@ class DecisionCreate(BaseModel):
     kind: DecisionKind = DecisionKind.ARCHITECTURE
     title: str
     content: str
+
+
+class ApprovalResolve(BaseModel):
+    actor: str = "Human"
+    state: ApprovalState
+    decision_note: str = ""
 
 
 class ClaimIssue(BaseModel):
@@ -403,6 +409,35 @@ async def expire_workbench_leases(
     market = _get_task_market(engine)
     expired = await market.expire_overdue_leases()
     return {"expired": [asdict(lease) for lease in expired]}
+
+
+@router.post("/workbench/sessions/{session_id}/approvals/{approval_id}/resolve")
+async def resolve_approval(
+    session_id: str,
+    approval_id: str,
+    body: ApprovalResolve,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        approval = await engine.workbench_service.resolve_approval(
+            session_id=session_id,
+            approval_id=approval_id,
+            actor=body.actor,
+            state=body.state,
+            decision_note=body.decision_note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if approval is None:
+        raise HTTPException(status_code=404, detail="审批请求不存在")
+    return approval
 
 
 @router.post(

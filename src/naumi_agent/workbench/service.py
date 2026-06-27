@@ -8,6 +8,8 @@ from typing import Any
 
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.workbench.models import (
+    Approval,
+    ApprovalState,
     Decision,
     DecisionKind,
     IntentLock,
@@ -131,6 +133,48 @@ class WorkbenchService:
     def _decision_to_dict(decision: Decision) -> dict[str, Any]:
         data = asdict(decision)
         data["kind"] = data["kind"].value
+        return data
+
+    async def resolve_approval(
+        self,
+        *,
+        session_id: str,
+        approval_id: str,
+        actor: str,
+        state: ApprovalState,
+        decision_note: str,
+    ) -> dict[str, Any] | None:
+        if state not in {ApprovalState.APPROVED, ApprovalState.REJECTED}:
+            raise ValueError("审批结果只能是 approved 或 rejected")
+
+        approval = await self._workbench_store.resolve_approval(
+            session_id=session_id,
+            approval_id=approval_id,
+            state=state,
+            reviewer=actor.strip(),
+            decision_note=decision_note.strip(),
+        )
+        if approval is None:
+            return None
+
+        await self._workbench_store.append_event(
+            session_id=session_id,
+            type="approval.resolved",
+            actor=approval.reviewer,
+            subject_id=approval.id,
+            payload={
+                "state": approval.state.value,
+                "mission_id": approval.mission_id,
+                "task_id": approval.task_id,
+                "title": approval.title,
+            },
+        )
+        return self._approval_to_dict(approval)
+
+    @staticmethod
+    def _approval_to_dict(approval: Approval) -> dict[str, Any]:
+        data = asdict(approval)
+        data["state"] = data["state"].value
         return data
 
     async def attach_issue(

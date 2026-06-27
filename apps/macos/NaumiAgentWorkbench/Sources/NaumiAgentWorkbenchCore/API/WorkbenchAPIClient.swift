@@ -178,6 +178,24 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func resolveApproval(
+        sessionID: String,
+        approvalID: String,
+        actor: String,
+        state: String,
+        decisionNote: String
+    ) async throws(APIError) -> ApprovalDTO {
+        let body = ResolveApprovalRequest(
+            actor: actor,
+            state: state,
+            decisionNote: decisionNote
+        )
+        return try await post(
+            path: "workbench/sessions/\(sessionID)/approvals/\(approvalID)/resolve",
+            body: body
+        )
+    }
+
     public func runValidation(
         sessionID: String,
         taskID: String,
@@ -348,5 +366,12 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         let kind: String
         let title: String
         let content: String
+    }
+
+    /// Payload for `POST /workbench/sessions/{session_id}/approvals/{approval_id}/resolve`.
+    private struct ResolveApprovalRequest: Encodable, Sendable {
+        let actor: String
+        let state: String
+        let decisionNote: String
     }
 }

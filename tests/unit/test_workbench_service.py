@@ -5,7 +5,13 @@ import sys
 import pytest
 
 from naumi_agent.tasks.store import TaskStore
-from naumi_agent.workbench.models import ContextHealth, DecisionKind, LeaseState, RiskLevel
+from naumi_agent.workbench.models import (
+    ApprovalState,
+    ContextHealth,
+    DecisionKind,
+    LeaseState,
+    RiskLevel,
+)
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.workbench.validation import ValidationRunner
@@ -397,3 +403,91 @@ async def test_create_decision_rejects_empty_title_or_content(tmp_path) -> None:
         )
 
     assert await workbench_store.list_decisions("s", "mission-1") == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_persists_record_and_emits_event(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    approval = await workbench_store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="允许重构 core 模块",
+        detail="保持测试通过",
+        requester="Agent-A",
+    )
+
+    result = await service.resolve_approval(
+        session_id="s",
+        approval_id=approval.id,
+        actor="  Human  ",
+        state=ApprovalState.APPROVED,
+        decision_note="  同意  ",
+    )
+
+    assert result is not None
+    assert result["id"] == approval.id
+    assert result["session_id"] == "s"
+    assert result["mission_id"] == "mission-1"
+    assert result["task_id"] == "task-1"
+    assert result["state"] == "approved"
+    assert result["title"] == "允许重构 core 模块"
+    assert result["reviewer"] == "Human"
+    assert result["decision_note"] == "同意"
+
+    events = await service.list_events("s")
+    event = next((e for e in events if e["type"] == "approval.resolved"), None)
+    assert event is not None
+    assert event["actor"] == "Human"
+    assert event["subject_id"] == approval.id
+    assert event["payload"]["state"] == "approved"
+    assert event["payload"]["mission_id"] == "mission-1"
+    assert event["payload"]["task_id"] == "task-1"
+    assert event["payload"]["title"] == "允许重构 core 模块"
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_rejects_invalid_state(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    approval = await workbench_store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="请求审批",
+        detail="详情",
+        requester="Agent-A",
+    )
+
+    with pytest.raises(ValueError, match="审批结果只能是 approved 或 rejected"):
+        await service.resolve_approval(
+            session_id="s",
+            approval_id=approval.id,
+            actor="Human",
+            state=ApprovalState.WAITING,
+            decision_note="",
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_returns_none_when_missing(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    result = await service.resolve_approval(
+        session_id="s",
+        approval_id="no-such-id",
+        actor="Human",
+        state=ApprovalState.REJECTED,
+        decision_note="",
+    )
+    assert result is None

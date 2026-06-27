@@ -406,6 +406,29 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func resolveApproval(
+        sessionID: String,
+        approvalID: String,
+        actor: String,
+        state: String,
+        decisionNote: String
+    ) async throws(APIError) -> ApprovalDTO {
+        ApprovalDTO(
+            id: approvalID,
+            sessionID: sessionID,
+            missionID: "mission-1",
+            taskID: "task-1",
+            state: state,
+            title: "预览审批",
+            detail: "预览详情",
+            requester: "Agent-A",
+            reviewer: actor,
+            decisionNote: decisionNote,
+            createdAt: "2026-06-27T06:00:00",
+            updatedAt: "2026-06-27T06:00:00"
+        )
+    }
+
     func runValidation(
         sessionID: String,
         taskID: String,
