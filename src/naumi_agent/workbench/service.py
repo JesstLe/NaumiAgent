@@ -219,6 +219,7 @@ class WorkbenchService:
         parallel_mode: ParallelMode = ParallelMode.EXCLUSIVE,
         risk_level: RiskLevel = RiskLevel.MEDIUM,
     ) -> dict[str, Any]:
+        mission_id = await self._require_mission(session_id, mission_id)
         issue = await self._workbench_store.upsert_issue(
             session_id=session_id,
             task_id=task_id,
@@ -251,6 +252,7 @@ class WorkbenchService:
         cleaned_title = title.strip()
         if not cleaned_title:
             raise ValueError("issue 标题不能为空")
+        mission_id = await self._require_mission(session_id, mission_id)
 
         cleaned_description = description.strip()
         cleaned_blockers = [
@@ -279,6 +281,16 @@ class WorkbenchService:
         if issue is None:
             raise RuntimeError("issue 创建后无法读取")
         return self._issue_to_dict(issue)
+
+    async def _require_mission(self, session_id: str, mission_id: str) -> str:
+        cleaned_mission_id = mission_id.strip()
+        if not cleaned_mission_id:
+            raise ValueError("mission 不存在或不属于当前会话")
+
+        missions = await self._workbench_store.list_missions(session_id)
+        if not any(mission.id == cleaned_mission_id for mission in missions):
+            raise ValueError("mission 不存在或不属于当前会话")
+        return cleaned_mission_id
 
     async def list_issues(
         self,
