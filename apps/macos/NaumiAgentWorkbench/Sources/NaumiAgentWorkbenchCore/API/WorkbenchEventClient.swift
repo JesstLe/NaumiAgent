@@ -8,6 +8,17 @@ public enum WorkbenchEventStreamMessage: Equatable, Sendable {
     case ignored(type: String)
 }
 
+/// Event stream returned by `WorkbenchEventProviding`.
+public protocol WorkbenchEventStreaming: Sendable {
+    func next() async throws(APIError) -> WorkbenchEventStreamMessage
+    func cancel() async
+}
+
+/// Event client abstraction used by `DaemonController`.
+public protocol WorkbenchEventProviding: Sendable {
+    func connect(sessionID: String) async throws(APIError) -> any WorkbenchEventStreaming
+}
+
 /// Minimal task surface used by `WorkbenchEventClient`.
 public protocol WorkbenchWebSocketTasking: Sendable {
     func start() async
@@ -44,7 +55,7 @@ extension URLSession: WorkbenchWebSocketTransporting {
 ///
 /// Snapshot remains the source of truth. This client only gives SwiftUI a typed
 /// event channel so higher layers can treat incoming events as refresh hints.
-public actor WorkbenchEventClient: Sendable {
+public actor WorkbenchEventClient: Sendable, WorkbenchEventProviding {
     public let baseURL: URL
     private let transport: WorkbenchWebSocketTransporting
     private let bearerToken: String?
@@ -88,7 +99,7 @@ public actor WorkbenchEventClient: Sendable {
         return url
     }
 
-    public func connect(sessionID: String) async throws(APIError) -> WorkbenchEventStream {
+    public func connect(sessionID: String) async throws(APIError) -> any WorkbenchEventStreaming {
         let url = try Self.eventStreamURL(baseURL: baseURL, sessionID: sessionID)
         var request = URLRequest(url: url)
         if let bearerToken, !bearerToken.isEmpty {
@@ -114,7 +125,7 @@ public actor WorkbenchEventClient: Sendable {
     }
 }
 
-public struct WorkbenchEventStream: Sendable {
+public struct WorkbenchEventStream: Sendable, WorkbenchEventStreaming {
     private let task: WorkbenchWebSocketTasking
     private let decoder: JSONDecoder
 

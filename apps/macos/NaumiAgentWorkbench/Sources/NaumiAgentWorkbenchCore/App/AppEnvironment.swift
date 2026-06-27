@@ -6,19 +6,23 @@ import Observation
 @MainActor
 public final class AppEnvironment: Sendable {
     public let apiClient: WorkbenchAPIClient
+    public let eventClient: WorkbenchEventClient
     public let appState: AppState
     public let daemonController: DaemonController
     public let refreshCoordinator: WorkbenchRefreshCoordinator
 
     public init(
         appState: AppState = AppState(),
-        apiClient: WorkbenchAPIClient = WorkbenchAPIClient()
+        apiClient: WorkbenchAPIClient = WorkbenchAPIClient(),
+        eventClient: WorkbenchEventClient? = nil
     ) {
         self.appState = appState
         self.apiClient = apiClient
+        self.eventClient = eventClient ?? WorkbenchEventClient(baseURL: apiClient.baseURL)
         self.daemonController = DaemonController(
             appState: appState,
-            apiProvider: apiClient
+            apiProvider: apiClient,
+            eventProvider: self.eventClient
         )
         self.refreshCoordinator = WorkbenchRefreshCoordinator(
             daemonController: daemonController

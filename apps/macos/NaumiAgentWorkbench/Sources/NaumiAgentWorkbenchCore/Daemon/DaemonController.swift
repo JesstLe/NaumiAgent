@@ -3,22 +3,27 @@ import Observation
 
 /// Orchestrates the connection to the local NaumiAgent daemon.
 ///
-/// This first slice only refreshes the connection against an already-running
-/// localhost API. It does not start/stop the daemon process and does not use
-/// WebSockets.
+/// This controller refreshes connection state against an already-running
+/// localhost API and can subscribe to Workbench WebSocket events. It does not
+/// start/stop the daemon process.
 @MainActor
 public final class DaemonController: Sendable {
     public static let supportedProtocolVersion = 1
 
     public let appState: AppState
     public let apiProvider: WorkbenchAPIProviding
+    public let eventProvider: (any WorkbenchEventProviding)?
+    private var eventStreamTask: Task<Void, Never>?
+    private var activeEventStream: (any WorkbenchEventStreaming)?
 
     public init(
         appState: AppState,
-        apiProvider: WorkbenchAPIProviding
+        apiProvider: WorkbenchAPIProviding,
+        eventProvider: (any WorkbenchEventProviding)? = nil
     ) {
         self.appState = appState
         self.apiProvider = apiProvider
+        self.eventProvider = eventProvider
     }
 
     /// Refreshes the daemon connection by fetching the bootstrap payload.
@@ -67,9 +72,89 @@ public final class DaemonController: Sendable {
                 await refreshSnapshot()
             }
             await refreshWorkbenchListsAfterConnection()
+            await startEventStreamIfAvailable()
         } catch {
             appState.lastError = error
             appState.connectionState = .disconnected
+        }
+    }
+
+    /// Starts listening to Workbench event hints for the selected session.
+    ///
+    /// Incoming `workbench.event` messages never mutate business state directly:
+    /// they trigger a fresh snapshot/list refresh because the backend remains
+    /// the source of truth. Stream failures mark the connection stale so the UI
+    /// can prompt the user to refresh instead of trusting old incremental data.
+    public func startEventStream() async {
+        guard let eventProvider else {
+            return
+        }
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        await stopEventStream()
+        appState.lastError = nil
+        eventStreamTask = Task { [weak self, eventProvider] in
+            await self?.consumeEventStream(
+                sessionID: sessionID,
+                eventProvider: eventProvider
+            )
+        }
+    }
+
+    /// Stops any active Workbench event stream subscription.
+    public func stopEventStream() async {
+        eventStreamTask?.cancel()
+        eventStreamTask = nil
+        await activeEventStream?.cancel()
+        activeEventStream = nil
+    }
+
+    private func startEventStreamIfAvailable() async {
+        guard eventProvider != nil, appState.selectedSessionID != nil else {
+            return
+        }
+        await startEventStream()
+    }
+
+    private func consumeEventStream(
+        sessionID: String,
+        eventProvider: any WorkbenchEventProviding
+    ) async {
+        do {
+            let stream = try await eventProvider.connect(sessionID: sessionID)
+            activeEventStream = stream
+            while !Task.isCancelled {
+                let message = try await stream.next()
+                await handleEventStreamMessage(message)
+            }
+        } catch {
+            guard !Task.isCancelled else {
+                return
+            }
+            appState.connectionState = .stale
+            appState.lastError = error
+        }
+    }
+
+    private func handleEventStreamMessage(_ message: WorkbenchEventStreamMessage) async {
+        switch message {
+        case .connected:
+            if appState.connectionState == .stale {
+                appState.connectionState = .connected
+            }
+        case .event:
+            await refreshSnapshot()
+            if appState.snapshot != nil {
+                await refreshWorkbenchListsAfterConnection()
+            }
+        case .error(let message):
+            appState.connectionState = .stale
+            appState.lastError = .networkFailure(message)
+        case .ignored:
+            break
         }
     }
 
@@ -477,6 +562,7 @@ public final class DaemonController: Sendable {
     /// the requested ID, the local session-scoped lists stay cleared, and the
     /// error is recorded in `lastError`.
     public func selectSession(_ sessionID: String) async {
+        await stopEventStream()
         appState.selectedSessionID = sessionID
         clearSessionScopedState()
         appState.lastError = nil
@@ -488,6 +574,7 @@ public final class DaemonController: Sendable {
         }
 
         await refreshWorkbenchListsAfterConnection()
+        await startEventStreamIfAvailable()
     }
 
     /// Clears local state that is scoped to the currently selected session.
