@@ -111,6 +111,14 @@ class ContextSnapshotsResponse(BaseModel):
     limit: int
 
 
+class ContextHealthRecord(BaseModel):
+    agent_id: str
+    minutes_since_sync: int = Field(ge=0)
+    token_load_ratio: float = Field(ge=0)
+    policy_conflict: bool = False
+    actor: str = "Human"
+
+
 class ApprovalsResponse(BaseModel):
     approvals: list[dict[str, Any]]
     state: str | None
@@ -288,6 +296,37 @@ async def get_context_snapshots(
     return ContextSnapshotsResponse(
         context_snapshots=snapshots, task_id=task_id, agent_id=agent_id, limit=limit
     )
+
+
+@router.post(
+    "/workbench/sessions/{session_id}/issues/{task_id}/context-health",
+    status_code=201,
+)
+async def create_context_health_snapshot(
+    session_id: str,
+    task_id: str,
+    body: ContextHealthRecord,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        return await engine.workbench_service.record_context_health(
+            session_id=session_id,
+            task_id=task_id,
+            agent_id=body.agent_id,
+            minutes_since_sync=body.minutes_since_sync,
+            token_load_ratio=body.token_load_ratio,
+            policy_conflict=body.policy_conflict,
+            actor=body.actor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get(

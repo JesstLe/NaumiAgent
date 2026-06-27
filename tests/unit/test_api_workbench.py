@@ -16,6 +16,7 @@ from naumi_agent import __version__
 from naumi_agent.api.routes.workbench import (
     ApprovalResolve,
     ClaimIssue,
+    ContextHealthRecord,
     DecisionCreate,
     IntentLockCreate,
     IssueAttach,
@@ -23,6 +24,7 @@ from naumi_agent.api.routes.workbench import (
     ValidationRunCreate,
     attach_workbench_issue,
     claim_workbench_issue,
+    create_context_health_snapshot,
     create_decision,
     create_intent_lock,
     create_validation_run,
@@ -73,6 +75,7 @@ class _FakeWorkbenchService:
         self.attached_issues: list[dict] = []
         self.created_intent_locks: list[dict] = []
         self.created_decisions: list[dict] = []
+        self.recorded_context_health: list[dict] = []
         self.resolved_approvals: list[dict] = []
         self.run_validations: list[dict] = []
         self.listed_events: list[dict] = []
@@ -86,6 +89,7 @@ class _FakeWorkbenchService:
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
+        self._context_health_error: Exception | None = None
         self._resolve_approval_error: Exception | None = None
         self._resolve_approval_result: dict | None = None
 
@@ -97,6 +101,9 @@ class _FakeWorkbenchService:
 
     def set_decision_error(self, error: Exception) -> None:
         self._decision_error = error
+
+    def set_context_health_error(self, error: Exception) -> None:
+        self._context_health_error = error
 
     def set_resolve_approval_error(self, error: Exception) -> None:
         self._resolve_approval_error = error
@@ -365,6 +372,40 @@ class _FakeWorkbenchService:
                 "created_at": "2024-01-01T00:00:00",
             }
         ]
+
+    async def record_context_health(
+        self,
+        *,
+        session_id: str,
+        task_id: str,
+        agent_id: str,
+        minutes_since_sync: int,
+        token_load_ratio: float,
+        policy_conflict: bool = False,
+        actor: str = "Human",
+    ):
+        self.recorded_context_health.append(
+            {
+                "session_id": session_id,
+                "task_id": task_id,
+                "agent_id": agent_id,
+                "minutes_since_sync": minutes_since_sync,
+                "token_load_ratio": token_load_ratio,
+                "policy_conflict": policy_conflict,
+                "actor": actor,
+            }
+        )
+        if self._context_health_error is not None:
+            raise self._context_health_error
+        return {
+            "id": "snap-1",
+            "session_id": session_id,
+            "agent_id": agent_id.strip(),
+            "task_id": task_id,
+            "health": "stale",
+            "reasons": ["超过 60 分钟未同步上下文"],
+            "created_at": "2024-01-01T00:00:00",
+        }
 
     async def list_approvals(
         self,
@@ -863,6 +904,116 @@ async def test_get_context_snapshots_endpoint_returns_snapshots_and_params() -> 
         "agent_id": "agent-2",
         "limit": 25,
     }
+
+
+@pytest.mark.asyncio
+async def test_create_context_health_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+    body = ContextHealthRecord(
+        agent_id="Agent-A",
+        minutes_since_sync=75,
+        token_load_ratio=0.2,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_context_health_snapshot(
+            "missing", "task-1", body, _fake_request(engine), auth="test"
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_create_context_health_endpoint_records_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    body = ContextHealthRecord(
+        agent_id=" Agent-A ",
+        minutes_since_sync=75,
+        token_load_ratio=0.2,
+        policy_conflict=False,
+        actor="Human",
+    )
+
+    response = await create_context_health_snapshot(
+        "sess-1", "task-2", body, _fake_request(engine), auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.recorded_context_health == [
+        {
+            "session_id": "sess-1",
+            "task_id": "task-2",
+            "agent_id": " Agent-A ",
+            "minutes_since_sync": 75,
+            "token_load_ratio": 0.2,
+            "policy_conflict": False,
+            "actor": "Human",
+        }
+    ]
+    assert response == {
+        "id": "snap-1",
+        "session_id": "sess-1",
+        "agent_id": "Agent-A",
+        "task_id": "task-2",
+        "health": "stale",
+        "reasons": ["超过 60 分钟未同步上下文"],
+        "created_at": "2024-01-01T00:00:00",
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_context_health_endpoint_maps_value_error_to_400() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_context_health_error(
+        ValueError("issue 不存在，无法同步上下文健康度")
+    )
+    body = ContextHealthRecord(
+        agent_id="Agent-A",
+        minutes_since_sync=75,
+        token_load_ratio=0.2,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_context_health_snapshot(
+            "sess-1", "task-2", body, _fake_request(engine), auth="test"
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "issue 不存在，无法同步上下文健康度"
+
+
+def test_create_context_health_route_accepts_json_body() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/issues/task-2/context-health",
+        json={
+            "agent_id": "Agent-A",
+            "minutes_since_sync": 75,
+            "token_load_ratio": 0.2,
+            "policy_conflict": False,
+            "actor": "Human",
+        },
+    )
+
+    assert response.status_code == 201
+    assert engine.workbench_service.recorded_context_health == [
+        {
+            "session_id": "sess-1",
+            "task_id": "task-2",
+            "agent_id": "Agent-A",
+            "minutes_since_sync": 75,
+            "token_load_ratio": 0.2,
+            "policy_conflict": False,
+            "actor": "Human",
+        }
+    ]
+    assert response.json()["health"] == "stale"
 
 
 @pytest.mark.asyncio

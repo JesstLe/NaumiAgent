@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from naumi_agent.tasks.store import TaskStore
+from naumi_agent.workbench.context_health import (
+    ContextHealthInput,
+    evaluate_context_health,
+)
 from naumi_agent.workbench.models import (
     Approval,
     ApprovalState,
@@ -332,6 +336,70 @@ class WorkbenchService:
         return await self._workbench_store.list_context_snapshots(
             session_id, task_id=task_id, agent_id=agent_id, limit=limit
         )
+
+    async def record_context_health(
+        self,
+        *,
+        session_id: str,
+        task_id: str,
+        agent_id: str,
+        minutes_since_sync: int,
+        token_load_ratio: float,
+        policy_conflict: bool = False,
+        actor: str = "Human",
+    ) -> dict[str, Any]:
+        cleaned_agent_id = agent_id.strip()
+        if not cleaned_agent_id:
+            raise ValueError("agent_id 不能为空")
+        if minutes_since_sync < 0:
+            raise ValueError("minutes_since_sync 不能为负数")
+        if token_load_ratio < 0:
+            raise ValueError("token_load_ratio 不能为负数")
+
+        issue = await self._workbench_store.get_issue(session_id, task_id)
+        if issue is None:
+            raise ValueError("issue 不存在，无法同步上下文健康度")
+
+        has_acceptance_criteria = bool(issue.acceptance_criteria)
+        missions = await self._workbench_store.list_missions(session_id)
+        mission = next(
+            (m for m in missions if m.id == issue.mission_id),
+            None,
+        )
+        has_goal = mission is not None and mission.goal.strip() != ""
+
+        result = evaluate_context_health(
+            ContextHealthInput(
+                has_goal=has_goal,
+                has_acceptance_criteria=has_acceptance_criteria,
+                minutes_since_sync=minutes_since_sync,
+                token_load_ratio=token_load_ratio,
+                policy_conflict=policy_conflict,
+            )
+        )
+
+        snapshot = await self._workbench_store.record_context_snapshot(
+            session_id=session_id,
+            agent_id=cleaned_agent_id,
+            task_id=task_id,
+            health=result.health,
+            reasons=result.reasons,
+        )
+
+        await self._workbench_store.append_event(
+            session_id=session_id,
+            type="context_health.recorded",
+            actor=actor.strip() or "Human",
+            subject_id=task_id,
+            payload={
+                "agent_id": cleaned_agent_id,
+                "health": snapshot["health"],
+                "reasons": result.reasons,
+                "mission_id": issue.mission_id,
+            },
+        )
+
+        return snapshot
 
     async def list_failures(
         self,
