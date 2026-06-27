@@ -169,6 +169,16 @@ class AgentProfilesResponse(BaseModel):
     limit: int
 
 
+class IntentLocksResponse(BaseModel):
+    intent_locks: list[dict[str, Any]]
+    mission_id: str
+
+
+class DecisionsResponse(BaseModel):
+    decisions: list[dict[str, Any]]
+    mission_id: str
+
+
 def _get_task_market(engine) -> TaskMarket:
     market = getattr(engine, "workbench_market", None)
     if market is not None:
@@ -503,6 +513,46 @@ async def create_decision(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return decision
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks",
+    response_model=IntentLocksResponse,
+)
+async def get_intent_locks(
+    session_id: str,
+    mission_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    locks = await engine.workbench_service.list_intent_locks(session_id, mission_id)
+    return IntentLocksResponse(intent_locks=locks, mission_id=mission_id)
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/missions/{mission_id}/decisions",
+    response_model=DecisionsResponse,
+)
+async def get_decisions(
+    session_id: str,
+    mission_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    decisions = await engine.workbench_service.list_decisions(session_id, mission_id)
+    return DecisionsResponse(decisions=decisions, mission_id=mission_id)
 
 
 @router.post("/workbench/sessions/{session_id}/issues/{task_id}/claim", status_code=201)

@@ -136,6 +136,12 @@ public protocol WorkbenchAPIProviding: Sendable {
         riskLevel: String
     ) async throws(APIError) -> IssueDTO
 
+    /// Fetches intent locks for the given session and mission.
+    func fetchIntentLocks(
+        sessionID: String,
+        missionID: String
+    ) async throws(APIError) -> IntentLocksDTO
+
     /// Creates an intent lock for the given mission.
     func createIntentLock(
         sessionID: String,
@@ -146,6 +152,12 @@ public protocol WorkbenchAPIProviding: Sendable {
         allowedPaths: [String],
         requireProposalForRisk: String
     ) async throws(APIError) -> IntentLockDTO
+
+    /// Fetches decisions for the given session and mission.
+    func fetchDecisions(
+        sessionID: String,
+        missionID: String
+    ) async throws(APIError) -> DecisionsDTO
 
     /// Creates a decision for the given mission.
     func createDecision(

@@ -1044,3 +1044,121 @@ async def test_list_leases_returns_wrapper_and_json_friendly_state_strings(tmp_p
     assert filtered["agent_id"] == "agent-2"
     assert filtered["limit"] == 10
     assert filtered["leases"][0]["state"] == "released"
+
+
+@pytest.mark.asyncio
+async def test_list_intent_locks_returns_json_friendly_strings(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    lock = await service.create_intent_lock(
+        session_id="s",
+        mission_id="mission-1",
+        actor="Planner-Agent",
+        rule="禁止修改 src/secret 下文件",
+        blocked_paths=["src/secret"],
+        allowed_paths=["src/secret/README.md"],
+        require_proposal_for_risk=RiskLevel.HIGH,
+    )
+
+    locks = await service.list_intent_locks("s", "mission-1")
+    assert [item["id"] for item in locks] == [lock["id"]]
+    assert all(isinstance(item["require_proposal_for_risk"], str) for item in locks)
+    assert locks[0]["require_proposal_for_risk"] == "high"
+    assert locks[0]["rule"] == "禁止修改 src/secret 下文件"
+    assert locks[0]["blocked_paths"] == ["src/secret"]
+    assert locks[0]["allowed_paths"] == ["src/secret/README.md"]
+    assert locks[0]["active"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_intent_locks_is_scoped_to_session_and_mission(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    await service.create_intent_lock(
+        session_id="s",
+        mission_id="mission-1",
+        actor="Planner-Agent",
+        rule="规则 A",
+    )
+    await service.create_intent_lock(
+        session_id="s",
+        mission_id="mission-2",
+        actor="Planner-Agent",
+        rule="规则 B",
+    )
+    await service.create_intent_lock(
+        session_id="other",
+        mission_id="mission-1",
+        actor="Planner-Agent",
+        rule="规则 C",
+    )
+
+    locks = await service.list_intent_locks("s", "mission-1")
+    assert [item["rule"] for item in locks] == ["规则 A"]
+
+
+@pytest.mark.asyncio
+async def test_list_decisions_returns_json_friendly_strings(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    decision = await service.create_decision(
+        session_id="s",
+        mission_id="mission-1",
+        actor="Planner-Agent",
+        kind=DecisionKind.POLICY,
+        title="采用策略 A",
+        content="内容 A",
+    )
+
+    decisions = await service.list_decisions("s", "mission-1")
+    assert [item["id"] for item in decisions] == [decision["id"]]
+    assert all(isinstance(item["kind"], str) for item in decisions)
+    assert decisions[0]["kind"] == "policy"
+    assert decisions[0]["title"] == "采用策略 A"
+    assert decisions[0]["content"] == "内容 A"
+    assert decisions[0]["actor"] == "Planner-Agent"
+
+
+@pytest.mark.asyncio
+async def test_list_decisions_is_scoped_to_session_and_mission(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    await service.create_decision(
+        session_id="s",
+        mission_id="mission-1",
+        actor="Planner-Agent",
+        kind=DecisionKind.ARCHITECTURE,
+        title="决策 A",
+        content="内容 A",
+    )
+    await service.create_decision(
+        session_id="s",
+        mission_id="mission-2",
+        actor="Planner-Agent",
+        kind=DecisionKind.POLICY,
+        title="决策 B",
+        content="内容 B",
+    )
+    await service.create_decision(
+        session_id="other",
+        mission_id="mission-1",
+        actor="Planner-Agent",
+        kind=DecisionKind.EXPERIMENT,
+        title="决策 C",
+        content="内容 C",
+    )
+
+    decisions = await service.list_decisions("s", "mission-1")
+    assert [item["title"] for item in decisions] == ["决策 A"]

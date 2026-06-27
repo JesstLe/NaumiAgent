@@ -313,6 +313,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchIntentLocks(
+        sessionID: String,
+        missionID: String
+    ) async throws(APIError) -> IntentLocksDTO {
+        try await get(
+            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "intent-locks")
+        )
+    }
+
     public func createIntentLock(
         sessionID: String,
         missionID: String,
@@ -332,6 +341,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         return try await post(
             path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "intent-locks"),
             body: body
+        )
+    }
+
+    public func fetchDecisions(
+        sessionID: String,
+        missionID: String
+    ) async throws(APIError) -> DecisionsDTO {
+        try await get(
+            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "decisions")
         )
     }
 

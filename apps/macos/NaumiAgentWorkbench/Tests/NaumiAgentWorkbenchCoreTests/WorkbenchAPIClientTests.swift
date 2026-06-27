@@ -1849,6 +1849,155 @@ final class WorkbenchAPIClientTests {
         let session = URLSession(configuration: configuration)
         return WorkbenchAPIClient(session: session, bearerToken: bearerToken)
     }
+
+    @Test func fetchIntentLocksEncodesPathAndDecodesResponse() async throws {
+        let sessionID = "sess 中文"
+        let missionID = "mission 中文"
+        let json = Data(
+            """
+            {"intent_locks":[{"id":"lock-001","session_id":"sess 中文","mission_id":"mission 中文","rule":"禁止修改 core 模块","blocked_paths":["src/secret"],"allowed_paths":["src/secret/README.md"],"require_proposal_for_risk":"high","active":true,"created_at":"2026-06-27T06:00:00"}],"mission_id":"mission 中文"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/missions/mission%20%E4%B8%AD%E6%96%87/intent-locks" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchIntentLocks(sessionID: sessionID, missionID: missionID)
+
+        #expect(response.missionID == missionID)
+        #expect(response.intentLocks.count == 1)
+
+        let lock = try #require(response.intentLocks.first)
+        #expect(lock.id == "lock-001")
+        #expect(lock.sessionID == sessionID)
+        #expect(lock.missionID == missionID)
+        #expect(lock.rule == "禁止修改 core 模块")
+        #expect(lock.blockedPaths == ["src/secret"])
+        #expect(lock.allowedPaths == ["src/secret/README.md"])
+        #expect(lock.requireProposalForRisk == "high")
+        #expect(lock.active == true)
+        #expect(lock.createdAt == "2026-06-27T06:00:00")
+    }
+
+    @Test func fetchDecisionsEncodesPathAndDecodesResponse() async throws {
+        let sessionID = "sess 中文"
+        let missionID = "mission 中文"
+        let json = Data(
+            """
+            {"decisions":[{"id":"decision-001","session_id":"sess 中文","mission_id":"mission 中文","kind":"architecture","title":"采用 FastAPI","content":"使用 FastAPI 承载 Workbench API","actor":"Planner-Agent","created_at":"2026-06-27T06:00:00"}],"mission_id":"mission 中文"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/missions/mission%20%E4%B8%AD%E6%96%87/decisions" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchDecisions(sessionID: sessionID, missionID: missionID)
+
+        #expect(response.missionID == missionID)
+        #expect(response.decisions.count == 1)
+
+        let decision = try #require(response.decisions.first)
+        #expect(decision.id == "decision-001")
+        #expect(decision.sessionID == sessionID)
+        #expect(decision.missionID == missionID)
+        #expect(decision.kind == "architecture")
+        #expect(decision.title == "采用 FastAPI")
+        #expect(decision.content == "使用 FastAPI 承载 Workbench API")
+        #expect(decision.actor == "Planner-Agent")
+        #expect(decision.createdAt == "2026-06-27T06:00:00")
+    }
+
+    @Test func fetchIntentLocksEncodesSlashInPathComponents() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/审查"
+        let json = Data(
+            """
+            {"intent_locks":[],"mission_id":"mission/审查"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%2F%E4%B8%AD%E6%96%87/missions/mission%2F%E5%AE%A1%E6%9F%A5/intent-locks" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchIntentLocks(sessionID: sessionID, missionID: missionID)
+
+        #expect(response.missionID == missionID)
+        #expect(response.intentLocks.isEmpty)
+    }
+
+    @Test func fetchDecisionsEncodesSlashInPathComponents() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/审查"
+        let json = Data(
+            """
+            {"decisions":[],"mission_id":"mission/审查"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%2F%E4%B8%AD%E6%96%87/missions/mission%2F%E5%AE%A1%E6%9F%A5/decisions" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchDecisions(sessionID: sessionID, missionID: missionID)
+
+        #expect(response.missionID == missionID)
+        #expect(response.decisions.isEmpty)
+    }
 }
 
 private extension InputStream {

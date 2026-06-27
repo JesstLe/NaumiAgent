@@ -35,7 +35,9 @@ from naumi_agent.api.routes.workbench import (
     get_approvals,
     get_context_snapshots,
     get_daemon_status,
+    get_decisions,
     get_failures,
+    get_intent_locks,
     get_issues,
     get_leases,
     get_missions,
@@ -91,6 +93,8 @@ class _FakeWorkbenchService:
         self.listed_issues: list[dict] = []
         self.listed_missions: list[dict] = []
         self.listed_leases: list[dict] = []
+        self.listed_intent_locks: list[dict] = []
+        self.listed_decisions: list[dict] = []
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
@@ -643,6 +647,41 @@ class _FakeWorkbenchService:
             "status": status,
             "limit": limit,
         }
+
+    async def list_intent_locks(self, session_id: str, mission_id: str):
+        self.listed_intent_locks.append(
+            {"session_id": session_id, "mission_id": mission_id}
+        )
+        return [
+            {
+                "id": "lock-1",
+                "session_id": session_id,
+                "mission_id": mission_id,
+                "rule": "禁止修改 core 模块",
+                "blocked_paths": ["src/secret"],
+                "allowed_paths": ["src/secret/README.md"],
+                "require_proposal_for_risk": "high",
+                "active": True,
+                "created_at": "2024-01-01T00:00:00",
+            }
+        ]
+
+    async def list_decisions(self, session_id: str, mission_id: str):
+        self.listed_decisions.append(
+            {"session_id": session_id, "mission_id": mission_id}
+        )
+        return [
+            {
+                "id": "decision-1",
+                "session_id": session_id,
+                "mission_id": mission_id,
+                "kind": "architecture",
+                "title": "采用 FastAPI",
+                "content": "使用 FastAPI 承载 Workbench API",
+                "actor": "Planner-Agent",
+                "created_at": "2024-01-01T00:00:00",
+            }
+        ]
 
 
 class FakeTaskMarket:
@@ -2171,3 +2210,135 @@ async def test_get_leases_endpoint_without_filters() -> None:
     assert response.model_dump()["agent_id"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["leases"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_intent_locks_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_intent_locks("missing", "mission-1", _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_get_intent_locks_endpoint_returns_locks_and_mission_id() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_intent_locks("sess-1", "mission-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_intent_locks == [
+        {"session_id": "sess-1", "mission_id": "mission-2"}
+    ]
+    assert response.model_dump() == {
+        "intent_locks": [
+            {
+                "id": "lock-1",
+                "session_id": "sess-1",
+                "mission_id": "mission-2",
+                "rule": "禁止修改 core 模块",
+                "blocked_paths": ["src/secret"],
+                "allowed_paths": ["src/secret/README.md"],
+                "require_proposal_for_risk": "high",
+                "active": True,
+                "created_at": "2024-01-01T00:00:00",
+            }
+        ],
+        "mission_id": "mission-2",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_decisions_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_decisions("missing", "mission-1", _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_get_decisions_endpoint_returns_decisions_and_mission_id() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_decisions("sess-1", "mission-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_decisions == [
+        {"session_id": "sess-1", "mission_id": "mission-2"}
+    ]
+    assert response.model_dump() == {
+        "decisions": [
+            {
+                "id": "decision-1",
+                "session_id": "sess-1",
+                "mission_id": "mission-2",
+                "kind": "architecture",
+                "title": "采用 FastAPI",
+                "content": "使用 FastAPI 承载 Workbench API",
+                "actor": "Planner-Agent",
+                "created_at": "2024-01-01T00:00:00",
+            }
+        ],
+        "mission_id": "mission-2",
+    }
+
+
+def test_get_intent_locks_route_accepts_path_and_returns_array() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/missions/mission-1/intent-locks")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "intent_locks": [
+            {
+                "id": "lock-1",
+                "session_id": "sess-1",
+                "mission_id": "mission-1",
+                "rule": "禁止修改 core 模块",
+                "blocked_paths": ["src/secret"],
+                "allowed_paths": ["src/secret/README.md"],
+                "require_proposal_for_risk": "high",
+                "active": True,
+                "created_at": "2024-01-01T00:00:00",
+            }
+        ],
+        "mission_id": "mission-1",
+    }
+
+
+def test_get_decisions_route_accepts_path_and_returns_array() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/missions/mission-1/decisions")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "decisions": [
+            {
+                "id": "decision-1",
+                "session_id": "sess-1",
+                "mission_id": "mission-1",
+                "kind": "architecture",
+                "title": "采用 FastAPI",
+                "content": "使用 FastAPI 承载 Workbench API",
+                "actor": "Planner-Agent",
+                "created_at": "2024-01-01T00:00:00",
+            }
+        ],
+        "mission_id": "mission-1",
+    }
