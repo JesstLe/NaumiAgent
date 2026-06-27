@@ -35,6 +35,14 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> ApprovalsDTO
 
+    /// Fetches failure cards for the given session, optionally filtered by task or status.
+    func fetchFailures(
+        sessionID: String,
+        taskID: String?,
+        status: String?,
+        limit: Int
+    ) async throws(APIError) -> FailuresDTO
+
     /// Claims an open issue for the given agent, creating a new lease.
     func claimIssue(
         sessionID: String,

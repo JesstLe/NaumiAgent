@@ -321,6 +321,15 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         ApprovalsDTO(approvals: [], state: state, limit: limit)
     }
 
+    func fetchFailures(
+        sessionID: String,
+        taskID: String?,
+        status: String?,
+        limit: Int
+    ) async throws(APIError) -> FailuresDTO {
+        FailuresDTO(failures: [], taskID: taskID, status: status, limit: limit)
+    }
+
     func claimIssue(
         sessionID: String,
         taskID: String,

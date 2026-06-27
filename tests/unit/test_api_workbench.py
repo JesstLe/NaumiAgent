@@ -30,6 +30,7 @@ from naumi_agent.api.routes.workbench import (
     get_approvals,
     get_context_snapshots,
     get_daemon_status,
+    get_failures,
     get_validation_runs,
     get_workbench_capabilities,
     get_workbench_events,
@@ -71,6 +72,7 @@ class _FakeWorkbenchService:
         self.listed_validation_runs: list[dict] = []
         self.listed_context_snapshots: list[dict] = []
         self.listed_approvals: list[dict] = []
+        self.listed_failures: list[dict] = []
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
@@ -356,6 +358,35 @@ class _FakeWorkbenchService:
                 "decision_note": "",
                 "created_at": "2024-01-01T00:00:00",
                 "updated_at": "2024-01-01T00:00:00",
+            }
+        ]
+
+    async def list_failures(
+        self,
+        session_id: str,
+        task_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ):
+        self.listed_failures.append(
+            {
+                "session_id": session_id,
+                "task_id": task_id,
+                "status": status,
+                "limit": limit,
+            }
+        )
+        return [
+            {
+                "id": "failure-1",
+                "session_id": session_id,
+                "task_id": task_id or "task-1",
+                "kind": "test_failed",
+                "title": "测试失败",
+                "detail": "详情",
+                "source_id": "run-1",
+                "status": status or "open",
+                "created_at": "2024-01-01T00:00:00",
             }
         ]
 
@@ -820,6 +851,84 @@ async def test_get_approvals_endpoint_without_state_filter() -> None:
     assert response.model_dump()["state"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["approvals"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_failures_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_failures(
+            "missing",
+            _fake_request(engine),
+            task_id=None,
+            status=None,
+            limit=10,
+            auth="test",
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_get_failures_endpoint_returns_failures_and_params() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_failures(
+        "sess-1",
+        _fake_request(engine),
+        task_id="task-2",
+        status="resolved",
+        limit=25,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_failures == [
+        {"session_id": "sess-1", "task_id": "task-2", "status": "resolved", "limit": 25}
+    ]
+    assert response.model_dump() == {
+        "failures": [
+            {
+                "id": "failure-1",
+                "session_id": "sess-1",
+                "task_id": "task-2",
+                "kind": "test_failed",
+                "title": "测试失败",
+                "detail": "详情",
+                "source_id": "run-1",
+                "status": "resolved",
+                "created_at": "2024-01-01T00:00:00",
+            }
+        ],
+        "task_id": "task-2",
+        "status": "resolved",
+        "limit": 25,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_failures_endpoint_without_filters() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_failures(
+        "sess-1",
+        _fake_request(engine),
+        task_id=None,
+        status=None,
+        limit=50,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_failures == [
+        {"session_id": "sess-1", "task_id": None, "status": None, "limit": 50}
+    ]
+    assert response.model_dump()["task_id"] is None
+    assert response.model_dump()["status"] is None
+    assert response.model_dump()["limit"] == 50
+    assert len(response.model_dump()["failures"]) == 1
 
 
 @pytest.mark.asyncio

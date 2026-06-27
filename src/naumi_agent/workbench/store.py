@@ -789,15 +789,32 @@ class WorkbenchStore:
             await db.commit()
         return failure
 
-    async def list_failures(self, session_id: str) -> list[dict[str, Any]]:
+    async def list_failures(
+        self,
+        session_id: str,
+        task_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
             db.row_factory = aiosqlite.Row
+            params: list[Any] = [session_id]
+            filters = ["session_id = ?"]
+            if task_id is not None:
+                filters.append("task_id = ?")
+                params.append(task_id)
+            if status is not None:
+                filters.append("status = ?")
+                params.append(status)
+            params.append(limit)
+            where_clause = " AND ".join(filters)
             cursor = await db.execute(
-                """SELECT * FROM workbench_failures
-                   WHERE session_id = ?
-                   ORDER BY created_at DESC""",
-                (session_id,),
+                f"""SELECT * FROM workbench_failures
+                   WHERE {where_clause}
+                   ORDER BY created_at DESC
+                   LIMIT ?""",
+                params,
             )
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]

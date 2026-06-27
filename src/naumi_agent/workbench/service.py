@@ -272,6 +272,17 @@ class WorkbenchService:
             session_id, task_id=task_id, agent_id=agent_id, limit=limit
         )
 
+    async def list_failures(
+        self,
+        session_id: str,
+        task_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        return await self._workbench_store.list_failures(
+            session_id, task_id=task_id, status=status, limit=limit
+        )
+
     async def _list_missions_for_snapshot(self, session_id: str) -> list[dict[str, Any]]:
         missions = await self._workbench_store.list_missions(session_id)
         return [asdict(mission) for mission in missions]

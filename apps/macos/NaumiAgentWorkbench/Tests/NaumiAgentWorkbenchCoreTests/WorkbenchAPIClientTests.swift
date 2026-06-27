@@ -443,6 +443,98 @@ final class WorkbenchAPIClientTests {
         #expect(response.approvals.isEmpty)
     }
 
+    @Test func fetchFailuresWithFilters() async throws {
+        let sessionID = "sess 中文"
+        let taskID = "task 001/审查"
+        let status = "open"
+        let json = Data(
+            """
+            {"failures":[{"id":"failure-001","session_id":"sess 中文","task_id":"task 001/审查","kind":"test_failed","title":"测试失败","detail":"保持测试通过","source_id":"run-001","status":"open","created_at":"2026-06-27T06:00:00"}],"task_id":"task 001/审查","status":"open","limit":25}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/failures",
+                  query["limit"] == "25",
+                  query["task_id"] == taskID,
+                  query["status"] == status else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchFailures(
+            sessionID: sessionID,
+            taskID: taskID,
+            status: status,
+            limit: 25
+        )
+
+        #expect(response.taskID == taskID)
+        #expect(response.status == status)
+        #expect(response.limit == 25)
+        #expect(response.failures.count == 1)
+
+        let failure = try #require(response.failures.first)
+        #expect(failure.id == "failure-001")
+        #expect(failure.sessionID == sessionID)
+        #expect(failure.taskID == taskID)
+        #expect(failure.kind == "test_failed")
+        #expect(failure.title == "测试失败")
+        #expect(failure.detail == "保持测试通过")
+        #expect(failure.sourceID == "run-001")
+        #expect(failure.status == "open")
+        #expect(failure.createdAt == "2026-06-27T06:00:00")
+    }
+
+    @Test func fetchFailuresWithoutFilters() async throws {
+        let json = Data(
+            """
+            {"failures":[],"task_id":null,"status":null,"limit":50}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/failures?limit=50" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchFailures(
+            sessionID: "sess-001",
+            taskID: nil,
+            status: nil,
+            limit: 50
+        )
+
+        #expect(response.taskID == nil)
+        #expect(response.status == nil)
+        #expect(response.limit == 50)
+        #expect(response.failures.isEmpty)
+    }
+
     @Test func claimIssue() async throws {
         let leaseJSON = Data(
             """
