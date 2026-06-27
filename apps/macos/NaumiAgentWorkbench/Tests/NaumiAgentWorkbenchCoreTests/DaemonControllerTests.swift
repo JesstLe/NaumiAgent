@@ -477,7 +477,7 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func claimIssueSuccessRefreshesSnapshotIssuesAndLeases() async throws {
+    @Test @MainActor func claimIssueSuccessRefreshesSnapshotIssuesLeasesAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -487,11 +487,14 @@ final class DaemonControllerTests {
         let issue = makeIssue(taskID: "task-001")
         let issues = IssuesDTO(issues: [issue], missionID: nil, riskLevel: nil, limit: 50)
         let leases = LeasesDTO(leases: [lease], state: nil, taskID: nil, agentID: nil, limit: 50)
+        let event = makeEvent(id: "evt-001", type: "issue.claimed", subjectID: "task-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
         await api.setClaimIssueResult(.success(lease))
         await api.setSnapshotResult(.success(snapshot))
         await api.setIssuesResult(.success(issues))
         await api.setLeasesResult(.success(leases))
+        await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.claimIssue(
@@ -504,10 +507,11 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == snapshot)
         #expect(appState.issues == [issue])
         #expect(appState.leases == [lease])
+        #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
     }
 
-    @Test @MainActor func claimIssueSnapshotFailureIsNotClearedByIssuesOrLeasesRefresh() async throws {
+    @Test @MainActor func claimIssueSnapshotFailureIsNotClearedByEventsIssuesOrLeasesRefresh() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -516,11 +520,14 @@ final class DaemonControllerTests {
         let issue = makeIssue(taskID: "task-001")
         let issues = IssuesDTO(issues: [issue], missionID: nil, riskLevel: nil, limit: 50)
         let leases = LeasesDTO(leases: [lease], state: nil, taskID: nil, agentID: nil, limit: 50)
+        let event = makeEvent(id: "evt-001", type: "issue.claimed", subjectID: "task-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
         await api.setClaimIssueResult(.success(lease))
         await api.setSnapshotResult(.failure(.httpStatus(503)))
         await api.setIssuesResult(.success(issues))
         await api.setLeasesResult(.success(leases))
+        await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.claimIssue(
@@ -532,6 +539,7 @@ final class DaemonControllerTests {
 
         #expect(appState.issues == [issue])
         #expect(appState.leases == [lease])
+        #expect(appState.timelineEvents == [event])
         #expect(appState.snapshot == nil)
         #expect(appState.lastError == .httpStatus(503))
     }
@@ -554,7 +562,7 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == nil)
     }
 
-    @Test @MainActor func releaseLeaseSuccessRefreshesSnapshotAndLeases() async throws {
+    @Test @MainActor func releaseLeaseSuccessRefreshesSnapshotLeasesAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -562,20 +570,24 @@ final class DaemonControllerTests {
         let lease = makeLease(id: "lease-001", taskID: "task-001", state: "released")
         let snapshot = makeSnapshot(sessionID: "sess-001", lease: lease)
         let leases = LeasesDTO(leases: [lease], state: nil, taskID: nil, agentID: nil, limit: 50)
+        let event = makeEvent(id: "evt-001", type: "lease.released", subjectID: "lease-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
         await api.setReleaseLeaseResult(.success(lease))
         await api.setSnapshotResult(.success(snapshot))
         await api.setLeasesResult(.success(leases))
+        await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.releaseLease(leaseID: "lease-001")
 
         #expect(appState.snapshot == snapshot)
         #expect(appState.leases == [lease])
+        #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
     }
 
-    @Test @MainActor func expireLeasesSuccessRefreshesSnapshotAndLeases() async throws {
+    @Test @MainActor func expireLeasesSuccessRefreshesSnapshotLeasesAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -584,16 +596,20 @@ final class DaemonControllerTests {
         let expired = ExpiredLeasesDTO(expired: [expiredLease])
         let snapshot = makeSnapshot(sessionID: "sess-001", lease: expiredLease)
         let leases = LeasesDTO(leases: [expiredLease], state: nil, taskID: nil, agentID: nil, limit: 50)
+        let event = makeEvent(id: "evt-001", type: "leases.expired", subjectID: "lease-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
         await api.setExpireLeasesResult(.success(expired))
         await api.setSnapshotResult(.success(snapshot))
         await api.setLeasesResult(.success(leases))
+        await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.expireLeases()
 
         #expect(appState.snapshot == snapshot)
         #expect(appState.leases == [expiredLease])
+        #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
     }
 
@@ -626,7 +642,7 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func createMissionSuccessRefreshesMissionsIssuesAndSnapshot() async throws {
+    @Test @MainActor func createMissionSuccessRefreshesMissionsIssuesSnapshotAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -635,11 +651,14 @@ final class DaemonControllerTests {
         let snapshot = makeSnapshot(sessionID: "sess-001", missions: [mission])
         let issues = IssuesDTO(issues: [], missionID: nil, riskLevel: nil, limit: 50)
         let missions = MissionsDTO(missions: [mission], status: nil, limit: 50)
+        let event = makeEvent(id: "evt-001", type: "mission.created", subjectID: "mission-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
         await api.setCreateMissionResult(.success(mission))
         await api.setSnapshotResult(.success(snapshot))
         await api.setIssuesResult(.success(issues))
         await api.setMissionsResult(.success(missions))
+        await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createMission(title: "Mac 工作台", goal: "补齐 API 调用面")
@@ -647,6 +666,7 @@ final class DaemonControllerTests {
         #expect(appState.missions == [mission])
         #expect(appState.issues.isEmpty)
         #expect(appState.snapshot == snapshot)
+        #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
     }
 
@@ -679,7 +699,7 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func createMissionSnapshotFailureIsNotClearedByIssuesRefresh() async throws {
+    @Test @MainActor func createMissionSnapshotFailureIsNotClearedByEventsIssuesOrMissionsRefresh() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -687,17 +707,21 @@ final class DaemonControllerTests {
         let mission = makeMission(id: "mission-001", sessionID: "sess-001")
         let issues = IssuesDTO(issues: [], missionID: nil, riskLevel: nil, limit: 50)
         let missions = MissionsDTO(missions: [mission], status: nil, limit: 50)
+        let event = makeEvent(id: "evt-001", type: "mission.created", subjectID: "mission-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
         await api.setCreateMissionResult(.success(mission))
         await api.setSnapshotResult(.failure(.httpStatus(503)))
         await api.setIssuesResult(.success(issues))
         await api.setMissionsResult(.success(missions))
+        await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createMission(title: "Mac 工作台", goal: "补齐 API 调用面")
 
         #expect(appState.missions == [mission])
         #expect(appState.issues.isEmpty)
+        #expect(appState.timelineEvents == [event])
         #expect(appState.snapshot == nil)
         #expect(appState.lastError == .httpStatus(503))
     }
@@ -748,7 +772,7 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func attachIssueSuccessRefreshesSnapshotAndMissionIssues() async throws {
+    @Test @MainActor func attachIssueSuccessRefreshesSnapshotMissionIssuesAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -756,10 +780,13 @@ final class DaemonControllerTests {
         let issue = makeIssue(taskID: "task-001", missionID: "mission-001")
         let snapshot = makeSnapshot(sessionID: "sess-001", issues: [issue])
         let issues = IssuesDTO(issues: [issue], missionID: "mission-001", riskLevel: nil, limit: 50)
+        let event = makeEvent(id: "evt-001", type: "issue.attached", subjectID: "task-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
         await api.setAttachIssueResult(.success(issue))
         await api.setSnapshotResult(.success(snapshot))
         await api.setIssuesResult(.success(issues))
+        await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.attachIssue(
@@ -772,6 +799,7 @@ final class DaemonControllerTests {
 
         #expect(appState.snapshot == snapshot)
         #expect(appState.issues == [issue])
+        #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
     }
 
@@ -816,17 +844,20 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func attachIssueSnapshotFailureIsNotClearedByIssuesRefresh() async throws {
+    @Test @MainActor func attachIssueSnapshotFailureIsNotClearedByEventsOrIssuesRefresh() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
         let api = FakeWorkbenchAPIProvider()
         let issue = makeIssue(taskID: "task-001", missionID: "mission-001")
         let issues = IssuesDTO(issues: [issue], missionID: "mission-001", riskLevel: nil, limit: 50)
+        let event = makeEvent(id: "evt-001", type: "issue.attached", subjectID: "task-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
         await api.setAttachIssueResult(.success(issue))
         await api.setSnapshotResult(.failure(.httpStatus(503)))
         await api.setIssuesResult(.success(issues))
+        await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.attachIssue(
@@ -838,6 +869,7 @@ final class DaemonControllerTests {
         )
 
         #expect(appState.issues == [issue])
+        #expect(appState.timelineEvents == [event])
         #expect(appState.snapshot == nil)
         #expect(appState.lastError == .httpStatus(503))
     }
@@ -1252,7 +1284,7 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func runValidationSuccessRefreshesValidationRunsSnapshotAndFailures() async throws {
+    @Test @MainActor func runValidationSuccessRefreshesValidationRunsFailuresSnapshotAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -1280,11 +1312,14 @@ final class DaemonControllerTests {
         let failure = makeFailure(id: "failure-001", taskID: "task-001", status: "open")
         let failures = FailuresDTO(failures: [failure], taskID: "task-001", status: nil, limit: 50)
         let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        let event = makeEvent(id: "evt-001", type: "validation.ran", subjectID: "run-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
         await api.setRunValidationResult(.success(result))
         await api.setValidationRunsResult(.success(runs))
         await api.setFailuresResult(.success(failures))
         await api.setSnapshotResult(.success(snapshot))
+        await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.runValidation(
@@ -1297,6 +1332,7 @@ final class DaemonControllerTests {
         #expect(appState.validationRuns == [run])
         #expect(appState.failures == [failure])
         #expect(appState.snapshot == snapshot)
+        #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
     }
 
@@ -1372,16 +1408,19 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func createIntentLockSuccessRefreshesSnapshot() async throws {
+    @Test @MainActor func createIntentLockSuccessRefreshesSnapshotAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
         let api = FakeWorkbenchAPIProvider()
         let lock = makeIntentLock(id: "lock-001", missionID: "mission-001")
         let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        let event = makeEvent(id: "evt-001", type: "intent_lock.created", subjectID: "lock-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
         await api.setCreateIntentLockResult(.success(lock))
         await api.setSnapshotResult(.success(snapshot))
+        await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createIntentLock(
@@ -1394,6 +1433,7 @@ final class DaemonControllerTests {
         )
 
         #expect(appState.snapshot == snapshot)
+        #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
     }
 
@@ -1440,16 +1480,19 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func createDecisionSuccessRefreshesSnapshot() async throws {
+    @Test @MainActor func createDecisionSuccessRefreshesSnapshotAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
         let api = FakeWorkbenchAPIProvider()
         let decision = makeDecision(id: "decision-001", missionID: "mission-001")
         let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        let event = makeEvent(id: "evt-001", type: "decision.created", subjectID: "decision-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
         await api.setCreateDecisionResult(.success(decision))
         await api.setSnapshotResult(.success(snapshot))
+        await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createDecision(
@@ -1461,6 +1504,7 @@ final class DaemonControllerTests {
         )
 
         #expect(appState.snapshot == snapshot)
+        #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
     }
 
@@ -1505,7 +1549,7 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotAndWaitingApprovals() async throws {
+    @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotApprovalsAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -1514,10 +1558,13 @@ final class DaemonControllerTests {
         let waitingApproval = makeApproval(id: "approval-002", missionID: "mission-001", state: "waiting")
         let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
         let approvals = ApprovalsDTO(approvals: [waitingApproval], state: "waiting", limit: 50)
+        let event = makeEvent(id: "evt-001", type: "approval.resolved", subjectID: "approval-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
         await api.setResolveApprovalResult(.success(resolvedApproval))
         await api.setSnapshotResult(.success(snapshot))
         await api.setApprovalsResult(.success(approvals))
+        await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.resolveApproval(
@@ -1529,6 +1576,7 @@ final class DaemonControllerTests {
 
         #expect(appState.snapshot == snapshot)
         #expect(appState.approvals == [waitingApproval])
+        #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
     }
 
@@ -1821,6 +1869,18 @@ private func makeApproval(id: String, missionID: String, state: String) -> Appro
         decisionNote: "同意",
         createdAt: "2026-06-27T06:00:00",
         updatedAt: "2026-06-27T06:00:01"
+    )
+}
+
+private func makeEvent(id: String, type: String, subjectID: String) -> EventDTO {
+    EventDTO(
+        id: id,
+        sessionID: "sess-001",
+        type: type,
+        actor: "Human",
+        subjectID: subjectID,
+        payload: ["title": .string("Event \(id)")],
+        timestamp: "2026-06-27T06:00:00"
     )
 }
 
