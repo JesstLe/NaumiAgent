@@ -67,6 +67,26 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> MissionsDTO
 
+    /// Fetches agent capability profiles for the given session, optionally filtered by status.
+    func fetchAgentProfiles(
+        sessionID: String,
+        status: String?,
+        limit: Int
+    ) async throws(APIError) -> AgentProfilesDTO
+
+    /// Registers or updates an agent capability profile.
+    func registerAgentProfile(
+        sessionID: String,
+        agentID: String,
+        name: String,
+        role: String,
+        capabilities: [String],
+        permissions: [String],
+        maxParallelTasks: Int,
+        status: String,
+        actor: String
+    ) async throws(APIError) -> AgentProfileDTO
+
     /// Claims an open issue for the given agent, creating a new lease.
     func claimIssue(
         sessionID: String,

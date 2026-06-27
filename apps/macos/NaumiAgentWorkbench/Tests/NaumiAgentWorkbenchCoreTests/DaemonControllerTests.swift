@@ -16,6 +16,8 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var issuesResult: Result<IssuesDTO, APIError>?
     var leasesResult: Result<LeasesDTO, APIError>?
     var missionsResult: Result<MissionsDTO, APIError>?
+    var agentProfilesResult: Result<AgentProfilesDTO, APIError>?
+    var registerAgentProfileResult: Result<AgentProfileDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
@@ -139,6 +141,34 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> MissionsDTO {
         guard let result = missionsResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchAgentProfiles(
+        sessionID: String,
+        status: String?,
+        limit: Int
+    ) async throws(APIError) -> AgentProfilesDTO {
+        guard let result = agentProfilesResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func registerAgentProfile(
+        sessionID: String,
+        agentID: String,
+        name: String,
+        role: String,
+        capabilities: [String],
+        permissions: [String],
+        maxParallelTasks: Int,
+        status: String,
+        actor: String
+    ) async throws(APIError) -> AgentProfileDTO {
+        guard let result = registerAgentProfileResult else {
             throw .invalidResponse
         }
         return try result.get()

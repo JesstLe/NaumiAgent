@@ -357,6 +357,39 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         MissionsDTO(missions: [], status: status, limit: limit)
     }
 
+    func fetchAgentProfiles(
+        sessionID: String,
+        status: String?,
+        limit: Int
+    ) async throws(APIError) -> AgentProfilesDTO {
+        AgentProfilesDTO(agentProfiles: [], status: status, limit: limit)
+    }
+
+    func registerAgentProfile(
+        sessionID: String,
+        agentID: String,
+        name: String,
+        role: String,
+        capabilities: [String],
+        permissions: [String],
+        maxParallelTasks: Int,
+        status: String,
+        actor: String
+    ) async throws(APIError) -> AgentProfileDTO {
+        AgentProfileDTO(
+            id: agentID,
+            sessionID: sessionID,
+            name: name,
+            role: role,
+            capabilities: capabilities,
+            permissions: permissions,
+            maxParallelTasks: maxParallelTasks,
+            status: status,
+            createdAt: "2026-06-27T06:00:00",
+            updatedAt: "2026-06-27T06:00:00"
+        )
+    }
+
     func claimIssue(
         sessionID: String,
         taskID: String,
