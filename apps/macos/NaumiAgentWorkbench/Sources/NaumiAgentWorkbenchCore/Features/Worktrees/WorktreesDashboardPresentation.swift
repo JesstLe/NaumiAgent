@@ -3,6 +3,12 @@ import Foundation
 /// Dashboard-level summary for the worktree/context health page.
 public struct WorktreesDashboardPresentation: Equatable, Sendable {
     public let snapshots: [ContextSnapshotPresentation]
+    public let worktreeRows: [WorktreeManagementRow]
+    public let worktreeCount: Int
+    public let cleanWorktreeCount: Int
+    public let dirtyWorktreeCount: Int
+    public let keptWorktreeCount: Int
+    public let removableWorktreeCount: Int
     public let totalCount: Int
     public let goodCount: Int
     public let attentionCount: Int
@@ -12,8 +18,15 @@ public struct WorktreesDashboardPresentation: Equatable, Sendable {
     public let agentBuckets: [WorktreeAgentBucket]
     public let recommendedActions: [WorktreeRecommendedAction]
 
-    public init(snapshots: [ContextSnapshotDTO]) {
+    public init(snapshots: [ContextSnapshotDTO], worktrees: [WorktreeDTO] = []) {
         let presented = snapshots.map(ContextSnapshotPresentation.init)
+        let worktreeRows = worktrees.map(WorktreeManagementRow.init)
+        self.worktreeRows = worktreeRows
+        self.worktreeCount = worktreeRows.count
+        self.cleanWorktreeCount = worktreeRows.filter { $0.status.lowercased() == "clean" }.count
+        self.dirtyWorktreeCount = worktreeRows.filter { $0.dirtyFiles > 0 || $0.status.lowercased() == "dirty" }.count
+        self.keptWorktreeCount = worktreeRows.filter { !$0.keptReason.isEmpty || $0.status.lowercased() == "kept" }.count
+        self.removableWorktreeCount = worktreeRows.filter(\.removable).count
         self.snapshots = presented
         self.totalCount = presented.count
         self.goodCount = presented.filter { $0.health.lowercased() == "good" }.count
@@ -54,6 +67,54 @@ public struct WorktreesDashboardPresentation: Equatable, Sendable {
                 return left.attentionCount > right.attentionCount
             }
         self.recommendedActions = WorktreeRecommendedAction.actions(for: selectedSnapshot?.health)
+    }
+}
+
+public enum WorktreeStatusTone: Equatable, Sendable {
+    case normal
+    case warning
+    case kept
+    case blocked
+}
+
+public struct WorktreeManagementRow: Equatable, Sendable, Identifiable {
+    public var id: String { name }
+    public let name: String
+    public let taskID: String
+    public let agentID: String
+    public let branch: String
+    public let status: String
+    public let dirtyFiles: Int
+    public let commitsAhead: Int
+    public let removable: Bool
+    public let updatedAt: String
+    public let keptReason: String
+
+    public var statusTone: WorktreeStatusTone {
+        let normalizedStatus = status.lowercased()
+        if !keptReason.isEmpty || normalizedStatus == "kept" {
+            return .kept
+        }
+        if dirtyFiles > 0 || normalizedStatus == "dirty" || normalizedStatus == "conflicted" {
+            return .warning
+        }
+        if normalizedStatus == "blocked" || normalizedStatus == "missing" {
+            return .blocked
+        }
+        return .normal
+    }
+
+    public init(worktree: WorktreeDTO) {
+        self.name = worktree.name
+        self.taskID = worktree.taskID
+        self.agentID = worktree.metadata["agent_id"] ?? worktree.metadata["owner"] ?? "-"
+        self.branch = worktree.branch
+        self.status = worktree.status
+        self.dirtyFiles = worktree.dirtyFiles
+        self.commitsAhead = worktree.commitsAhead
+        self.removable = worktree.removable
+        self.updatedAt = worktree.updatedAt
+        self.keptReason = worktree.keptReason
     }
 }
 

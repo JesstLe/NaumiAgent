@@ -13,7 +13,10 @@ public struct WorktreesView: View {
     }
 
     public var body: some View {
-        let presentation = WorktreesDashboardPresentation(snapshots: appState.contextSnapshots)
+        let presentation = WorktreesDashboardPresentation(
+            snapshots: appState.contextSnapshots,
+            worktrees: appState.worktrees
+        )
         let selectedSnapshot = presentation.snapshots.first { $0.id == selectedSnapshotID }
             ?? presentation.selectedSnapshot
 
@@ -32,6 +35,7 @@ public struct WorktreesView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         summaryStrip(presentation: presentation)
+                        worktreeTable(presentation: presentation)
                         operationsGrid(presentation: presentation)
                         healthDistributionPanel(presentation: presentation)
                     }
@@ -65,8 +69,13 @@ public struct WorktreesView: View {
         }
         .task {
             guard !appState.isPreviewFixture else { return }
-            await daemonController.refreshContextSnapshots(limit: 50)
+            await refreshWorktreesPage()
         }
+    }
+
+    private func refreshWorktreesPage() async {
+        await daemonController.refreshWorktrees(limit: 50)
+        await daemonController.refreshContextSnapshots(limit: 50)
     }
 
     private func header(presentation: WorktreesDashboardPresentation) -> some View {
@@ -82,7 +91,7 @@ public struct WorktreesView: View {
             Button {
                 if !appState.isPreviewFixture {
                     Task {
-                        await daemonController.refreshContextSnapshots(limit: 50)
+                        await refreshWorktreesPage()
                     }
                 }
             } label: {
@@ -144,27 +153,49 @@ public struct WorktreesView: View {
     private func summaryStrip(presentation: WorktreesDashboardPresentation) -> some View {
         HStack(spacing: 12) {
             metricCard(
-                title: appState.locale == .zhCN ? "快照总数" : "Snapshots",
-                value: "\(presentation.totalCount)",
-                systemImage: "square.stack.3d.up"
+                title: appState.locale == .zhCN ? "工作区总数" : "Worktrees",
+                value: "\(presentation.worktreeCount)",
+                systemImage: "folder.badge.gearshape"
             )
             metricCard(
-                title: appState.locale == .zhCN ? "需要关注" : "Needs Attention",
-                value: "\(presentation.attentionCount)",
+                title: appState.locale == .zhCN ? "脏工作区" : "Dirty",
+                value: "\(presentation.dirtyWorktreeCount)",
                 systemImage: "exclamationmark.triangle",
                 tint: .orange
             )
             metricCard(
-                title: appState.locale == .zhCN ? "健康工作区" : "Healthy",
-                value: "\(presentation.goodCount)",
+                title: appState.locale == .zhCN ? "可移除" : "Removable",
+                value: "\(presentation.removableWorktreeCount)",
                 systemImage: "checkmark.seal",
                 tint: .green
             )
             metricCard(
-                title: appState.locale == .zhCN ? "活跃智能体" : "Active Agents",
-                value: "\(presentation.activeAgentCount)",
-                systemImage: "person.2"
+                title: appState.locale == .zhCN ? "已保留" : "Kept",
+                value: "\(presentation.keptWorktreeCount)",
+                systemImage: "pin"
             )
+        }
+    }
+
+    private func worktreeTable(presentation: WorktreesDashboardPresentation) -> some View {
+        panel(title: appState.locale == .zhCN ? "Git 工作区表格" : "Git Worktree Table") {
+            if presentation.worktreeRows.isEmpty {
+                emptyWorktreesState
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        worktreeHeaderRow
+                        Divider()
+                        ForEach(presentation.worktreeRows) { row in
+                            worktreeDataRow(row)
+                            if row.id != presentation.worktreeRows.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
+                    .frame(minWidth: 746, alignment: .leading)
+                }
+            }
         }
     }
 
@@ -175,6 +206,73 @@ public struct WorktreesView: View {
             remediationPanel(presentation: presentation)
                 .frame(width: layout.secondaryColumnWidth, alignment: .top)
         }
+    }
+
+    private var worktreeHeaderRow: some View {
+        HStack(spacing: 8) {
+            worktreeColumnTitle(appState.locale == .zhCN ? "名称" : "Name", width: 106)
+            worktreeColumnTitle(appState.locale == .zhCN ? "任务" : "Task", width: 82)
+            worktreeColumnTitle("Agent", width: 108)
+            worktreeColumnTitle(appState.locale == .zhCN ? "分支" : "Branch", width: 144)
+            worktreeColumnTitle(appState.locale == .zhCN ? "状态" : "Status", width: 74)
+            worktreeColumnTitle(appState.locale == .zhCN ? "脏文件" : "Dirty", width: 50)
+            worktreeColumnTitle("Ahead", width: 48)
+            worktreeColumnTitle(appState.locale == .zhCN ? "可移除" : "Removable", width: 58)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    private func worktreeDataRow(_ row: WorktreeManagementRow) -> some View {
+        HStack(spacing: 8) {
+            Text(row.name)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(width: 106, alignment: .leading)
+            Text(row.taskID)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(width: 82, alignment: .leading)
+            Text(row.agentID)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(width: 108, alignment: .leading)
+            Text(row.branch)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(width: 144, alignment: .leading)
+            StatusBadge(text: worktreeStatusLabel(row.status), color: color(for: row.statusTone))
+                .frame(width: 74, alignment: .leading)
+            Text("\(row.dirtyFiles)")
+                .font(.caption)
+                .fontWeight(row.dirtyFiles > 0 ? .semibold : .regular)
+                .foregroundStyle(row.dirtyFiles > 0 ? .orange : .secondary)
+                .frame(width: 50, alignment: .leading)
+            Text("\(row.commitsAhead)")
+                .font(.caption)
+                .foregroundStyle(row.commitsAhead > 0 ? Color.accentColor : Color.secondary)
+                .frame(width: 48, alignment: .leading)
+            Image(systemName: row.removable ? "checkmark.circle.fill" : "lock.fill")
+                .foregroundStyle(row.removable ? .green : .secondary)
+                .frame(width: 58, alignment: .leading)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .background(color(for: row.statusTone).opacity(row.statusTone == .normal ? 0.0 : 0.06))
+    }
+
+    private func worktreeColumnTitle(_ title: String, width: Double) -> some View {
+        Text(title)
+            .font(.caption)
+            .fontWeight(.semibold)
+            .foregroundStyle(.secondary)
+            .frame(width: width, alignment: .leading)
     }
 
     private func agentWorkloadPanel(presentation: WorktreesDashboardPresentation) -> some View {
@@ -458,10 +556,25 @@ public struct WorktreesView: View {
         .padding(.vertical, 26)
     }
 
+    private var emptyWorktreesState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "folder.badge.questionmark")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+            Text(appState.locale == .zhCN ? "暂无 Git 工作区" : "No Git worktrees")
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 26)
+    }
+
     private func subtitleText(presentation: WorktreesDashboardPresentation) -> String {
-        let count = AppStrings.Worktrees.snapshotCount(appState.locale, count: presentation.totalCount)
-        guard let sessionID = appState.selectedSessionID else { return count }
-        return "\(count) · \(sessionID)"
+        let worktreeCount = appState.locale == .zhCN
+            ? "\(presentation.worktreeCount) 个工作区"
+            : "\(presentation.worktreeCount) worktrees"
+        let snapshotCount = AppStrings.Worktrees.snapshotCount(appState.locale, count: presentation.totalCount)
+        guard let sessionID = appState.selectedSessionID else { return "\(worktreeCount) · \(snapshotCount)" }
+        return "\(worktreeCount) · \(snapshotCount) · \(sessionID)"
     }
 
     private func healthLabel(_ health: String) -> String {
@@ -492,6 +605,34 @@ public struct WorktreesView: View {
             )
         )
         .healthColor()
+    }
+
+    private func color(for tone: WorktreeStatusTone) -> Color {
+        switch tone {
+        case .normal:
+            return .green
+        case .warning:
+            return .orange
+        case .kept:
+            return .accentColor
+        case .blocked:
+            return .red
+        }
+    }
+
+    private func worktreeStatusLabel(_ status: String) -> String {
+        switch status.lowercased() {
+        case "clean":
+            return appState.locale == .zhCN ? "干净" : "Clean"
+        case "dirty":
+            return appState.locale == .zhCN ? "有变更" : "Dirty"
+        case "kept":
+            return appState.locale == .zhCN ? "保留" : "Kept"
+        case "missing":
+            return appState.locale == .zhCN ? "缺失" : "Missing"
+        default:
+            return status
+        }
     }
 
     private func iconName(for health: String) -> String {
@@ -547,6 +688,53 @@ struct WorktreesView_Previews: PreviewProvider {
                 reasons: ["与主分支冲突"],
                 createdAt: "2026-06-27T06:10:00"
             )
+        ]
+        state.worktrees = [
+            WorktreeDTO(
+                name: "wt-api-client",
+                path: "/repo/.naumi/worktrees/wt-api-client",
+                branch: "naumi/wt-api-client",
+                baseRef: "main",
+                status: "clean",
+                taskID: "task-1",
+                dirtyFiles: 0,
+                commitsAhead: 1,
+                createdAt: "2026-06-27T06:00:00",
+                updatedAt: "2026-06-27T06:12:00",
+                keptReason: "",
+                metadata: ["agent_id": "Backend-Agent"],
+                removable: true
+            ),
+            WorktreeDTO(
+                name: "wt-review-risk",
+                path: "/repo/.naumi/worktrees/wt-review-risk",
+                branch: "naumi/wt-review-risk",
+                baseRef: "main",
+                status: "dirty",
+                taskID: "task-2",
+                dirtyFiles: 4,
+                commitsAhead: 2,
+                createdAt: "2026-06-27T06:03:00",
+                updatedAt: "2026-06-27T06:18:00",
+                keptReason: "",
+                metadata: ["agent_id": "Reviewer-Agent"],
+                removable: false
+            ),
+            WorktreeDTO(
+                name: "wt-validation-card",
+                path: "/repo/.naumi/worktrees/wt-validation-card",
+                branch: "naumi/wt-validation-card",
+                baseRef: "main",
+                status: "kept",
+                taskID: "task-3",
+                dirtyFiles: 0,
+                commitsAhead: 0,
+                createdAt: "2026-06-27T06:08:00",
+                updatedAt: "2026-06-27T06:20:00",
+                keptReason: "等待人工审查",
+                metadata: ["agent_id": "Test-Agent"],
+                removable: false
+            ),
         ]
         return WorktreesView(
             appState: state,

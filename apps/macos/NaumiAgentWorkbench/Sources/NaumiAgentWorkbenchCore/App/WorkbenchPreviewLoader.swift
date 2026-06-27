@@ -102,6 +102,7 @@ public enum WorkbenchPreviewLoader {
         appState.agentProfiles = snapshot.agentProfiles
         appState.validationRuns = previewValidationRuns(from: snapshot, locale: locale)
         appState.contextSnapshots = previewContextSnapshots(from: snapshot, locale: locale)
+        appState.worktrees = previewWorktrees(from: snapshot, locale: locale)
         appState.approvals = previewApprovals(from: snapshot, locale: locale)
         appState.timelineEvents = previewTimelineEvents(from: snapshot, locale: locale)
         appState.issues = snapshot.issues
@@ -397,6 +398,78 @@ public enum WorkbenchPreviewLoader {
                 timestamp: "2026-06-27T09:40:00"
             )
         ]
+    }
+
+    private static func previewWorktrees(
+        from snapshot: WorkbenchSnapshotDTO,
+        locale: AppLocale
+    ) -> [WorktreeDTO] {
+        let firstTaskID = snapshot.tasks.first?.id ?? "task-preview"
+        let secondTaskID = snapshot.tasks.dropFirst().first?.id ?? firstTaskID
+        let thirdTaskID = snapshot.tasks.dropFirst(2).first?.id ?? firstTaskID
+        return [
+            previewWorktree(
+                sessionID: snapshot.sessionID,
+                name: "wt-api-client",
+                taskID: firstTaskID,
+                agentID: "Backend-Agent",
+                status: "clean",
+                dirtyFiles: 0,
+                commitsAhead: 1,
+                keptReason: "",
+                removable: true
+            ),
+            previewWorktree(
+                sessionID: snapshot.sessionID,
+                name: "wt-review-risk",
+                taskID: secondTaskID,
+                agentID: "Reviewer-Agent",
+                status: "dirty",
+                dirtyFiles: 4,
+                commitsAhead: 2,
+                keptReason: "",
+                removable: false
+            ),
+            previewWorktree(
+                sessionID: snapshot.sessionID,
+                name: "wt-validation-card",
+                taskID: thirdTaskID,
+                agentID: "Test-Agent",
+                status: "kept",
+                dirtyFiles: 0,
+                commitsAhead: 0,
+                keptReason: locale == .zhCN ? "等待人工审查" : "Waiting for human review",
+                removable: false
+            ),
+        ]
+    }
+
+    private static func previewWorktree(
+        sessionID: String,
+        name: String,
+        taskID: String,
+        agentID: String,
+        status: String,
+        dirtyFiles: Int,
+        commitsAhead: Int,
+        keptReason: String,
+        removable: Bool
+    ) -> WorktreeDTO {
+        WorktreeDTO(
+            name: name,
+            path: "/repo/.naumi/worktrees/\(name)",
+            branch: "naumi/\(name)",
+            baseRef: "main",
+            status: status,
+            taskID: taskID,
+            dirtyFiles: dirtyFiles,
+            commitsAhead: commitsAhead,
+            createdAt: "2026-06-27T09:10:00",
+            updatedAt: "2026-06-27T09:40:00",
+            keptReason: keptReason,
+            metadata: ["session_id": sessionID, "agent_id": agentID],
+            removable: removable
+        )
     }
 
     private static func previewApprovals(
