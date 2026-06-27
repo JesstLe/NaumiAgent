@@ -747,6 +747,18 @@ public enum AppStrings {
             locale == .zhCN ? "对象" : "Subject"
         }
 
+        public static func eventTypeLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "事件类型" : "Event Type"
+        }
+
+        public static func applyFilterButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "应用筛选" : "Apply Filter"
+        }
+
+        public static func clearFilterButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "清除" : "Clear"
+        }
+
         public static func refreshButton(_ locale: AppLocale) -> String {
             locale == .zhCN ? "刷新" : "Refresh"
         }
