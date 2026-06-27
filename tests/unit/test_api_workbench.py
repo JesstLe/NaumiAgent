@@ -794,8 +794,17 @@ def _fake_request(engine: _FakeEngine):
 
 
 class _RecordingWorkbenchWebSocket:
-    def __init__(self, engine: _FakeEngine) -> None:
-        self.app = SimpleNamespace(state=SimpleNamespace(engine=engine))
+    def __init__(
+        self,
+        engine: _FakeEngine,
+        *,
+        config=None,
+        headers: dict[str, str] | None = None,
+        query_params: dict[str, str] | None = None,
+    ) -> None:
+        self.app = SimpleNamespace(state=SimpleNamespace(engine=engine, config=config))
+        self.headers = headers or {}
+        self.query_params = query_params or {}
         self.accepted = False
         self.closed = False
         self.sent_json: list[dict] = []
@@ -1107,6 +1116,46 @@ async def test_workbench_event_stream_sends_initial_audit_events_on_connect() ->
         },
         {"type": "refresh_complete", "count": 1},
     ]
+
+
+@pytest.mark.asyncio
+async def test_workbench_event_stream_rejects_invalid_api_key_when_configured() -> None:
+    engine = _FakeEngine(exists=True)
+    config = SimpleNamespace(api=SimpleNamespace(api_keys=["local-token"]))
+    websocket = _RecordingWorkbenchWebSocket(
+        engine,
+        config=config,
+        headers={"Authorization": "Bearer wrong-token"},
+    )
+
+    await websocket_workbench_events(websocket, "sess-1")
+
+    assert websocket.accepted is True
+    assert websocket.closed is True
+    assert engine.loaded == []
+    assert engine.workbench_service.listed_events == []
+    assert websocket.sent_json == [
+        {"type": "error", "message": "Invalid API key"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_workbench_event_stream_accepts_valid_api_key_when_configured() -> None:
+    engine = _FakeEngine(exists=True)
+    config = SimpleNamespace(api=SimpleNamespace(api_keys=["local-token"]))
+    websocket = _RecordingWorkbenchWebSocket(
+        engine,
+        config=config,
+        headers={"Authorization": "Bearer local-token"},
+    )
+
+    await websocket_workbench_events(websocket, "sess-1")
+
+    assert websocket.accepted is True
+    assert websocket.closed is False
+    assert engine.loaded == ["sess-1"]
+    assert websocket.sent_json[0] == {"type": "connected", "session_id": "sess-1"}
+    assert websocket.sent_json[-1] == {"type": "refresh_complete", "count": 1}
 
 
 @pytest.mark.asyncio
