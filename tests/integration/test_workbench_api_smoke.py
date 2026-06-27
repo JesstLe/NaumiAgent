@@ -225,5 +225,19 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
                 "issue.created",
                 "mission.created",
             ]
+
+            claimed_event = next(
+                event for event in snapshot["events"] if event["type"] == "issue.claimed"
+            )
+            event_detail_response = client.get(
+                f"/api/v1/workbench/sessions/{session_id}/events/{claimed_event['id']}"
+            )
+            assert event_detail_response.status_code == 200
+            event_detail = event_detail_response.json()
+            assert event_detail["id"] == claimed_event["id"]
+            assert event_detail["type"] == "issue.claimed"
+            assert event_detail["actor"] == "Backend-Agent"
+            assert event_detail["subject_id"] == task_id
+            assert event_detail["payload"]["lease_id"] == claim_response.json()["id"]
     finally:
         asyncio.run(engine.close())

@@ -639,6 +639,18 @@ class WorkbenchStore:
             rows = await cursor.fetchall()
         return [_row_to_event(dict(row)) for row in rows]
 
+    async def get_event(self, session_id: str, event_id: str) -> WorkbenchEvent | None:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_audit_events
+                   WHERE session_id = ? AND id = ?""",
+                (session_id, event_id),
+            )
+            row = await cursor.fetchone()
+        return _row_to_event(dict(row)) if row else None
+
     async def add_intent_lock(
         self,
         *,

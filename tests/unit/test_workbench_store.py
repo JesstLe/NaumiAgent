@@ -197,6 +197,30 @@ async def test_decision_and_audit_event_are_persisted(store: WorkbenchStore) -> 
 
 
 @pytest.mark.asyncio
+async def test_get_event_returns_matching_session_event(store: WorkbenchStore) -> None:
+    event = await store.append_event(
+        session_id="s",
+        type="issue.claimed",
+        actor="Backend-Agent",
+        subject_id="task-1",
+        payload={"lease_id": "lease-1"},
+    )
+    _other_session_event = await store.append_event(
+        session_id="other",
+        type="issue.claimed",
+        actor="Backend-Agent",
+        subject_id="task-1",
+        payload={"lease_id": "lease-other"},
+    )
+
+    found = await store.get_event("s", event.id)
+
+    assert found == event
+    assert await store.get_event("s", "missing-event") is None
+    assert await store.get_event("other", event.id) is None
+
+
+@pytest.mark.asyncio
 async def test_intent_locks_round_trip(store: WorkbenchStore) -> None:
     mission = await store.create_mission("s", "M", "G")
     lock = await store.add_intent_lock(
