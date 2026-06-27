@@ -22,6 +22,33 @@ public enum AppStrings {
         }
     }
 
+    // MARK: - Mission Composer
+    public enum MissionComposer {
+        public static func newMissionButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "新建 Mission" : "New Mission"
+        }
+
+        public static func sheetTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "新建 Mission" : "New Mission"
+        }
+
+        public static func titleFieldLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "标题" : "Title"
+        }
+
+        public static func goalFieldLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "目标" : "Goal"
+        }
+
+        public static func cancelButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "取消" : "Cancel"
+        }
+
+        public static func createButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "创建" : "Create"
+        }
+    }
+
     // MARK: - Navigation
     public enum Navigation {
         public static func dashboard(_ locale: AppLocale) -> String {

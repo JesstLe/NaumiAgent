@@ -18,6 +18,7 @@ struct NaumiAgentWorkbenchApp: App {
 
 struct ContentView: View {
     @Environment(AppEnvironment.self) private var environment
+    @State private var isPresentingMissionComposer = false
 
     var body: some View {
         @Bindable var appState = environment.appState
@@ -29,6 +30,26 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 180, ideal: 220)
         } detail: {
             routeView(for: appState.currentRoute)
+        }
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    isPresentingMissionComposer = true
+                } label: {
+                    Label(
+                        AppStrings.MissionComposer.newMissionButton(appState.locale),
+                        systemImage: "plus"
+                    )
+                }
+                .labelStyle(.titleAndIcon)
+                .help(AppStrings.MissionComposer.newMissionButton(appState.locale))
+            }
+        }
+        .sheet(isPresented: $isPresentingMissionComposer) {
+            MissionComposerSheet(
+                appState: environment.appState,
+                daemonController: environment.daemonController
+            )
         }
     }
 
@@ -194,5 +215,77 @@ struct SessionRow: View {
         .padding(.vertical, 4)
         .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+}
+
+private struct MissionComposerSheet: View {
+    let appState: AppState
+    let daemonController: DaemonController
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var draftTitle: String = ""
+    @State private var draftGoal: String = ""
+
+    private var trimmedTitle: String {
+        draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedGoal: String {
+        draftGoal.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canCreate: Bool {
+        !trimmedTitle.isEmpty && !trimmedGoal.isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(AppStrings.MissionComposer.sheetTitle(appState.locale))
+                .font(.headline)
+
+            Form {
+                TextField(
+                    AppStrings.MissionComposer.titleFieldLabel(appState.locale),
+                    text: $draftTitle
+                )
+
+                TextField(
+                    AppStrings.MissionComposer.goalFieldLabel(appState.locale),
+                    text: $draftGoal
+                )
+            }
+            .frame(minWidth: 320)
+
+            HStack {
+                Spacer()
+
+                Button(
+                    AppStrings.MissionComposer.cancelButton(appState.locale)
+                ) {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button(
+                    AppStrings.MissionComposer.createButton(appState.locale)
+                ) {
+                    Task {
+                        await daemonController.createMission(
+                            title: trimmedTitle,
+                            goal: trimmedGoal
+                        )
+                        if appState.lastError == nil {
+                            draftTitle = ""
+                            draftGoal = ""
+                            dismiss()
+                        }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canCreate)
+            }
+        }
+        .padding()
+        .frame(minWidth: 360, minHeight: 180)
     }
 }
