@@ -498,6 +498,31 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Removes a tracked worktree and refreshes worktrees plus audit events.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Safe removal leaves
+    /// dirty worktrees untouched on the backend unless `discardChanges` is true.
+    /// Failures preserve the local worktree list and record `lastError`.
+    public func removeWorktree(name: String, discardChanges: Bool) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            _ = try await apiProvider.removeWorktree(
+                sessionID: sessionID,
+                name: name,
+                discardChanges: discardChanges
+            )
+            await refreshWorktrees()
+            await refreshEvents(limit: 50)
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Fetches missions for the currently selected session.
     ///
     /// Requires `appState.selectedSessionID` to be set. On success the missions

@@ -192,6 +192,18 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func removeWorktree(
+        sessionID: String,
+        name: String,
+        discardChanges: Bool
+    ) async throws(APIError) -> WorktreeRemovalDTO {
+        WorktreeRemovalDTO(
+            name: name,
+            discardChanges: discardChanges,
+            message: "preview removed \(name)"
+        )
+    }
+
     func fetchMissions(
         sessionID: String,
         status: String?,

@@ -47,3 +47,16 @@ public struct WorktreesDTO: Decodable, Equatable, Sendable {
         case limit
     }
 }
+
+/// Result returned by `DELETE /workbench/sessions/{id}/worktrees/{name}`.
+public struct WorktreeRemovalDTO: Decodable, Equatable, Sendable {
+    public let name: String
+    public let discardChanges: Bool
+    public let message: String
+
+    public enum CodingKeys: String, CodingKey {
+        case name
+        case discardChanges = "discard_changes"
+        case message
+    }
+}

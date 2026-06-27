@@ -182,6 +182,12 @@ class WorktreesResponse(BaseModel):
     limit: int
 
 
+class WorktreeRemovalResponse(BaseModel):
+    name: str
+    discard_changes: bool
+    message: str
+
+
 class MissionsResponse(BaseModel):
     missions: list[dict[str, Any]]
     status: str | None
@@ -1209,6 +1215,54 @@ async def get_worktree(
     if isinstance(record, list):
         raise HTTPException(status_code=404, detail="worktree 不存在")
     return _worktree_to_dict(record)
+
+
+@router.delete(
+    "/workbench/sessions/{session_id}/worktrees/{name:path}",
+    response_model=WorktreeRemovalResponse,
+)
+async def delete_worktree(
+    session_id: str,
+    name: str,
+    request: Request,
+    discard_changes: bool = Query(default=False),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    manager = getattr(engine, "worktree_manager", None)
+    if manager is None:
+        raise HTTPException(status_code=503, detail="worktree 管理器未初始化")
+
+    try:
+        message = await manager.remove(name, discard_changes=discard_changes)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="worktree 不存在") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if message.startswith("拒绝删除："):
+        raise HTTPException(status_code=409, detail=message)
+
+    store = getattr(engine, "workbench_store", None)
+    if store is not None:
+        await store.append_event(
+            session_id=session_id,
+            type="worktree.removed",
+            actor="Human",
+            subject_id=name,
+            payload={"discard_changes": discard_changes},
+        )
+    return WorktreeRemovalResponse(
+        name=name,
+        discard_changes=discard_changes,
+        message=message,
+    )
 
 
 @router.get(
