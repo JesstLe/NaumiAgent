@@ -27,6 +27,7 @@ from naumi_agent.api.routes.workbench import (
     create_validation_run,
     create_workbench_mission,
     expire_workbench_leases,
+    get_approvals,
     get_context_snapshots,
     get_daemon_status,
     get_validation_runs,
@@ -69,6 +70,7 @@ class _FakeWorkbenchService:
         self.listed_events: list[dict] = []
         self.listed_validation_runs: list[dict] = []
         self.listed_context_snapshots: list[dict] = []
+        self.listed_approvals: list[dict] = []
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
@@ -328,6 +330,32 @@ class _FakeWorkbenchService:
                 "health": ContextHealth.GOOD,
                 "reasons": ["上下文健康"],
                 "created_at": "2024-01-01T00:00:00",
+            }
+        ]
+
+    async def list_approvals(
+        self,
+        session_id: str,
+        state: ApprovalState | None = None,
+        limit: int = 50,
+    ):
+        self.listed_approvals.append(
+            {"session_id": session_id, "state": state, "limit": limit}
+        )
+        return [
+            {
+                "id": "approval-1",
+                "session_id": session_id,
+                "mission_id": "mission-1",
+                "task_id": "task-1",
+                "state": (state.value if state else "waiting"),
+                "title": "请求审批",
+                "detail": "详情",
+                "requester": "Agent-A",
+                "reviewer": "",
+                "decision_note": "",
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
             }
         ]
 
@@ -724,6 +752,74 @@ async def test_claim_issue_endpoint_maps_value_error_to_400() -> None:
         await claim_workbench_issue("sess-1", "task-1", body, _fake_request(engine), auth="test")
 
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_get_approvals_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_approvals(
+            "missing", _fake_request(engine), state=None, limit=10, auth="test"
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_get_approvals_endpoint_returns_approvals_and_params() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_approvals(
+        "sess-1",
+        _fake_request(engine),
+        state=ApprovalState.WAITING,
+        limit=25,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_approvals == [
+        {"session_id": "sess-1", "state": ApprovalState.WAITING, "limit": 25}
+    ]
+    assert response.model_dump() == {
+        "approvals": [
+            {
+                "id": "approval-1",
+                "session_id": "sess-1",
+                "mission_id": "mission-1",
+                "task_id": "task-1",
+                "state": "waiting",
+                "title": "请求审批",
+                "detail": "详情",
+                "requester": "Agent-A",
+                "reviewer": "",
+                "decision_note": "",
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+            }
+        ],
+        "state": "waiting",
+        "limit": 25,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_approvals_endpoint_without_state_filter() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_approvals(
+        "sess-1", _fake_request(engine), state=None, limit=50, auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_approvals == [
+        {"session_id": "sess-1", "state": None, "limit": 50}
+    ]
+    assert response.model_dump()["state"] is None
+    assert response.model_dump()["limit"] == 50
+    assert len(response.model_dump()["approvals"]) == 1
 
 
 @pytest.mark.asyncio

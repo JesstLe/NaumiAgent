@@ -108,6 +108,12 @@ class ContextSnapshotsResponse(BaseModel):
     limit: int
 
 
+class ApprovalsResponse(BaseModel):
+    approvals: list[dict[str, Any]]
+    state: str | None
+    limit: int
+
+
 def _get_task_market(engine) -> TaskMarket:
     market = getattr(engine, "workbench_market", None)
     if market is not None:
@@ -409,6 +415,33 @@ async def expire_workbench_leases(
     market = _get_task_market(engine)
     expired = await market.expire_overdue_leases()
     return {"expired": [asdict(lease) for lease in expired]}
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/approvals",
+    response_model=ApprovalsResponse,
+)
+async def get_approvals(
+    session_id: str,
+    request: Request,
+    state: ApprovalState | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    approvals = await engine.workbench_service.list_approvals(
+        session_id, state=state, limit=limit
+    )
+    return ApprovalsResponse(
+        approvals=approvals,
+        state=state.value if state is not None else None,
+        limit=limit,
+    )
 
 
 @router.post("/workbench/sessions/{session_id}/approvals/{approval_id}/resolve")

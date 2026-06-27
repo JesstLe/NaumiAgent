@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import aiosqlite
 import pytest
 
 from naumi_agent.workbench.models import (
@@ -15,6 +16,23 @@ from naumi_agent.workbench.store import WorkbenchStore
 @pytest.fixture
 def store(tmp_path) -> WorkbenchStore:
     return WorkbenchStore(str(tmp_path / "workbench.db"))
+
+
+async def _set_approval_timestamps(
+    store: WorkbenchStore,
+    approval_id: str,
+    *,
+    created_at: str,
+    updated_at: str,
+) -> None:
+    async with aiosqlite.connect(store._db_path) as db:
+        await db.execute(
+            """UPDATE workbench_approvals
+               SET created_at = ?, updated_at = ?
+               WHERE id = ?""",
+            (created_at, updated_at, approval_id),
+        )
+        await db.commit()
 
 
 @pytest.mark.asyncio
@@ -198,6 +216,86 @@ async def test_resolve_approval_only_matches_same_session(store: WorkbenchStore)
     )
     assert unchanged is not None
     assert unchanged.state == ApprovalState.APPROVED
+
+
+@pytest.mark.asyncio
+async def test_list_approvals_filters_by_session_state_and_orders_newest_first(
+    store: WorkbenchStore,
+) -> None:
+    waiting_s = await store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="等待审批 A",
+        detail="详情 A",
+        requester="Agent-A",
+    )
+    other_s = await store.add_approval(
+        session_id="s2",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="其他会话",
+        detail="详情",
+        requester="Agent-A",
+    )
+    approved_s = await store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-2",
+        title="已批准",
+        detail="详情",
+        requester="Agent-B",
+        state=ApprovalState.APPROVED,
+    )
+    waiting_s2 = await store.add_approval(
+        session_id="s",
+        mission_id="mission-2",
+        task_id="task-3",
+        title="等待审批 B",
+        detail="详情 B",
+        requester="Agent-C",
+    )
+    await _set_approval_timestamps(
+        store,
+        waiting_s.id,
+        created_at="2026-06-27T08:00:00",
+        updated_at="2026-06-27T08:00:00",
+    )
+    await _set_approval_timestamps(
+        store,
+        other_s.id,
+        created_at="2026-06-27T08:01:00",
+        updated_at="2026-06-27T08:01:00",
+    )
+    await _set_approval_timestamps(
+        store,
+        approved_s.id,
+        created_at="2026-06-27T08:02:00",
+        updated_at="2026-06-27T08:02:00",
+    )
+    await _set_approval_timestamps(
+        store,
+        waiting_s2.id,
+        created_at="2026-06-27T08:03:00",
+        updated_at="2026-06-27T08:03:00",
+    )
+
+    all_s = await store.list_approvals("s", limit=50)
+    assert [a.id for a in all_s] == [waiting_s2.id, approved_s.id, waiting_s.id]
+
+    waiting_only = await store.list_approvals("s", state=ApprovalState.WAITING, limit=50)
+    assert [a.id for a in waiting_only] == [waiting_s2.id, waiting_s.id]
+    assert all(a.state == ApprovalState.WAITING for a in waiting_only)
+
+    approved_only = await store.list_approvals("s", state=ApprovalState.APPROVED, limit=50)
+    assert [a.id for a in approved_only] == [approved_s.id]
+
+    other_session = await store.list_approvals("s2", state=ApprovalState.WAITING, limit=50)
+    assert len(other_session) == 1
+    assert other_session[0].session_id == "s2"
+
+    limited = await store.list_approvals("s", state=ApprovalState.WAITING, limit=1)
+    assert [a.id for a in limited] == [waiting_s2.id]
 
 
 @pytest.mark.asyncio

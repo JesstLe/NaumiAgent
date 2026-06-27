@@ -886,6 +886,32 @@ class WorkbenchStore:
             row = await cursor.fetchone()
         return _row_to_approval(dict(row)) if row else None
 
+    async def list_approvals(
+        self,
+        session_id: str,
+        state: ApprovalState | None = None,
+        limit: int = 50,
+    ) -> list[Approval]:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            params: list[Any] = [session_id]
+            filters = ["session_id = ?"]
+            if state is not None:
+                filters.append("state = ?")
+                params.append(state.value)
+            params.append(limit)
+            where_clause = " AND ".join(filters)
+            cursor = await db.execute(
+                f"""SELECT * FROM workbench_approvals
+                   WHERE {where_clause}
+                   ORDER BY updated_at DESC, created_at DESC
+                   LIMIT ?""",
+                params,
+            )
+            rows = await cursor.fetchall()
+        return [_row_to_approval(dict(row)) for row in rows]
+
 
 def _row_to_issue(row: dict[str, Any]) -> IssueMetadata:
     return IssueMetadata(

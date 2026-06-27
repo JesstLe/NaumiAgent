@@ -177,6 +177,19 @@ class WorkbenchService:
         data["state"] = data["state"].value
         return data
 
+    async def list_approvals(
+        self,
+        session_id: str,
+        state: ApprovalState | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        approvals = await self._workbench_store.list_approvals(
+            session_id=session_id,
+            state=state,
+            limit=limit,
+        )
+        return [self._approval_to_dict(approval) for approval in approvals]
+
     async def attach_issue(
         self,
         *,

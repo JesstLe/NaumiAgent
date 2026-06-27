@@ -313,6 +313,14 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         ContextSnapshotsDTO(contextSnapshots: [], taskID: taskID, agentID: agentID, limit: limit)
     }
 
+    func fetchApprovals(
+        sessionID: String,
+        state: String?,
+        limit: Int
+    ) async throws(APIError) -> ApprovalsDTO {
+        ApprovalsDTO(approvals: [], state: state, limit: limit)
+    }
+
     func claimIssue(
         sessionID: String,
         taskID: String,

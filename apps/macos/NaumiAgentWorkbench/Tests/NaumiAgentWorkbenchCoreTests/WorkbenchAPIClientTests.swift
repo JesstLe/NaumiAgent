@@ -362,6 +362,87 @@ final class WorkbenchAPIClientTests {
         #expect(response.contextSnapshots.isEmpty)
     }
 
+    @Test func fetchApprovalsWithState() async throws {
+        let sessionID = "sess 中文"
+        let state = "waiting"
+        let json = Data(
+            """
+            {"approvals":[{"id":"approval-001","session_id":"sess 中文","mission_id":"mission-001","task_id":"task-001","state":"waiting","title":"允许重构","detail":"保持测试通过","requester":"Agent-A","reviewer":"","decision_note":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"state":"waiting","limit":25}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/approvals",
+                  query["limit"] == "25",
+                  query["state"] == state else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchApprovals(
+            sessionID: sessionID,
+            state: state,
+            limit: 25
+        )
+
+        #expect(response.state == state)
+        #expect(response.limit == 25)
+        #expect(response.approvals.count == 1)
+
+        let approval = try #require(response.approvals.first)
+        #expect(approval.id == "approval-001")
+        #expect(approval.sessionID == sessionID)
+        #expect(approval.state == "waiting")
+        #expect(approval.title == "允许重构")
+    }
+
+    @Test func fetchApprovalsWithoutState() async throws {
+        let json = Data(
+            """
+            {"approvals":[],"state":null,"limit":50}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/approvals?limit=50" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchApprovals(
+            sessionID: "sess-001",
+            state: nil,
+            limit: 50
+        )
+
+        #expect(response.state == nil)
+        #expect(response.limit == 50)
+        #expect(response.approvals.isEmpty)
+    }
+
     @Test func claimIssue() async throws {
         let leaseJSON = Data(
             """
