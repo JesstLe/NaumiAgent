@@ -15,6 +15,9 @@ public struct TaskMarketView: View {
     @State private var isPresentingIssueComposer = false
     @State private var issueDraft = IssueCreationDraft()
     @State private var isCreatingIssue = false
+    @State private var isPresentingIssueAttachment = false
+    @State private var attachmentDraft = IssueAttachmentDraft()
+    @State private var isAttachingIssue = false
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -27,7 +30,7 @@ public struct TaskMarketView: View {
             ?? presentation.selectedIssue
 
         VStack(spacing: 0) {
-            pageHeader
+            pageHeader(selected: selected)
             Divider()
 
             HStack(spacing: 0) {
@@ -69,10 +72,16 @@ public struct TaskMarketView: View {
             if issueDraft.trimmedMissionID.isEmpty {
                 issueDraft.missionID = currentMissionID
             }
+            if attachmentDraft.trimmedMissionID.isEmpty {
+                attachmentDraft.missionID = currentMissionID
+            }
         }
         .onChange(of: currentMissionID) { _, missionID in
             if issueDraft.trimmedMissionID.isEmpty {
                 issueDraft.missionID = missionID
+            }
+            if attachmentDraft.trimmedMissionID.isEmpty {
+                attachmentDraft.missionID = missionID
             }
         }
         .sheet(isPresented: $isPresentingIssueComposer) {
@@ -86,9 +95,20 @@ public struct TaskMarketView: View {
                 }
             )
         }
+        .sheet(isPresented: $isPresentingIssueAttachment) {
+            IssueAttachmentSheet(
+                appState: appState,
+                daemonController: daemonController,
+                draft: $attachmentDraft,
+                isAttachingIssue: $isAttachingIssue,
+                onAttached: {
+                    attachmentDraft = attachmentDraftForCurrentMission(selected: selected)
+                }
+            )
+        }
     }
 
-    private var pageHeader: some View {
+    private func pageHeader(selected: TaskMarketDesignIssue?) -> some View {
         HStack(spacing: 12) {
             Text(AppStrings.TaskMarket.title(appState.locale))
                 .font(.system(size: 17, weight: .semibold))
@@ -108,6 +128,18 @@ public struct TaskMarketView: View {
                 )
             }
             .buttonStyle(.borderedProminent)
+            .disabled(currentMissionID.isEmpty)
+
+            Button {
+                attachmentDraft = attachmentDraftForCurrentMission(selected: selected)
+                isPresentingIssueAttachment = true
+            } label: {
+                Label(
+                    AppStrings.TaskMarket.attachIssueButton(appState.locale),
+                    systemImage: "link.badge.plus"
+                )
+            }
+            .buttonStyle(.bordered)
             .disabled(currentMissionID.isEmpty)
 
             Button {
@@ -682,6 +714,15 @@ public struct TaskMarketView: View {
         IssueCreationDraft(missionID: currentMissionID)
     }
 
+    private func attachmentDraftForCurrentMission(selected: TaskMarketDesignIssue?) -> IssueAttachmentDraft {
+        IssueAttachmentDraft(
+            missionID: currentMissionID,
+            taskID: selected?.taskID ?? "",
+            parallelMode: selected?.parallelMode.lowercased() ?? "exclusive",
+            riskLevel: selected?.risk.lowercased() ?? "medium"
+        )
+    }
+
     private func modeBadge(_ mode: String) -> some View {
         HStack(spacing: 4) {
             Text(String(mode.prefix(1)).uppercased())
@@ -785,7 +826,7 @@ private struct IssueCreationSheet: View {
                 .font(.headline)
 
             Form {
-                TextField("Mission ID", text: $draft.missionID)
+                TextField(AppStrings.TaskMarket.missionIDLabel(appState.locale), text: $draft.missionID)
 
                 TextField(
                     AppStrings.TaskMarket.issueTitleLabel(appState.locale),
@@ -894,6 +935,103 @@ private struct IssueCreationSheet: View {
             isCreatingIssue = false
             if appState.lastError == nil {
                 onCreated()
+                dismiss()
+            }
+        }
+    }
+}
+
+private struct IssueAttachmentSheet: View {
+    let appState: AppState
+    let daemonController: DaemonController
+    @Binding var draft: IssueAttachmentDraft
+    @Binding var isAttachingIssue: Bool
+    let onAttached: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(AppStrings.TaskMarket.attachIssueSectionTitle(appState.locale))
+                .font(.headline)
+
+            Form {
+                TextField(AppStrings.TaskMarket.missionIDLabel(appState.locale), text: $draft.missionID)
+                TextField(AppStrings.Reviews.taskIDLabel(appState.locale), text: $draft.taskID)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(AppStrings.TaskMarket.acceptanceCriteriaTitle(appState.locale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: $draft.acceptanceCriteriaText)
+                        .frame(minHeight: 72)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5)
+                                .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                        )
+                    Text(AppStrings.TaskMarket.acceptanceCriteriaHelp(appState.locale))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Picker(AppStrings.TaskMarket.columnParallelMode(appState.locale), selection: $draft.parallelMode) {
+                    Text("exclusive").tag("exclusive")
+                    Text("cooperative").tag("cooperative")
+                    Text("competitive").tag("competitive")
+                    Text("exploratory").tag("exploratory")
+                }
+
+                Picker(AppStrings.TaskMarket.columnRisk(appState.locale), selection: $draft.riskLevel) {
+                    Text("low").tag("low")
+                    Text("medium").tag("medium")
+                    Text("high").tag("high")
+                    Text("critical").tag("critical")
+                }
+            }
+            .frame(minWidth: 420)
+
+            HStack {
+                Spacer()
+
+                Button(AppStrings.MissionComposer.cancelButton(appState.locale)) {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button {
+                    attachIssue()
+                } label: {
+                    Label(
+                        isAttachingIssue
+                            ? AppStrings.TaskMarket.processingLabel(appState.locale)
+                            : AppStrings.TaskMarket.attachIssueSubmitButton(appState.locale),
+                        systemImage: "link.badge.plus"
+                    )
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(!draft.canSubmit || isAttachingIssue)
+            }
+        }
+        .padding()
+        .frame(minWidth: 460, minHeight: 360)
+    }
+
+    private func attachIssue() {
+        guard draft.canSubmit, !isAttachingIssue else { return }
+        let submission = draft
+        isAttachingIssue = true
+        Task {
+            await daemonController.attachIssue(
+                missionID: submission.trimmedMissionID,
+                taskID: submission.trimmedTaskID,
+                acceptanceCriteria: submission.acceptanceCriteria,
+                parallelMode: submission.parallelMode,
+                riskLevel: submission.riskLevel
+            )
+            isAttachingIssue = false
+            if appState.lastError == nil {
+                onAttached()
                 dismiss()
             }
         }
