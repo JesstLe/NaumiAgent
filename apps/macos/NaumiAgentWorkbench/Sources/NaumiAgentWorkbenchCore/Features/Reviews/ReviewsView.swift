@@ -11,6 +11,8 @@ public struct ReviewsView: View {
         commandLine: "pytest tests/unit/test_workbench_market.py -q"
     )
     @State private var isRunningValidation = false
+    @State private var approvalDraft = ApprovalResolveDraft()
+    @State private var isResolvingApproval = false
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -534,21 +536,39 @@ public struct ReviewsView: View {
                 Text(appState.locale == .zhCN ? "Required: 人工审批" : "Required: Human approval")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                TextField(AppStrings.Reviews.actorLabel(appState.locale), text: $approvalDraft.actor)
+                    .textFieldStyle(.roundedBorder)
+                TextField(AppStrings.Reviews.decisionNoteLabel(appState.locale), text: $approvalDraft.decisionNote)
+                    .textFieldStyle(.roundedBorder)
                 Button {
+                    resolveApproval(selected, state: .approved)
                 } label: {
-                    Label(AppStrings.Reviews.approveButton(appState.locale), systemImage: "checkmark")
+                    Label(
+                        isResolvingApproval
+                            ? AppStrings.Reviews.processingLabel(appState.locale)
+                            : AppStrings.Reviews.approveButton(appState.locale),
+                        systemImage: "checkmark"
+                    )
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
+                .disabled(!approvalDraft.canResolve || isResolvingApproval)
 
                 Button {
+                    resolveApproval(selected, state: .rejected)
                 } label: {
-                    Label(appState.locale == .zhCN ? "请求修改" : "Request Changes", systemImage: "arrow.clockwise")
+                    Label(
+                        isResolvingApproval
+                            ? AppStrings.Reviews.processingLabel(appState.locale)
+                            : (appState.locale == .zhCN ? "请求修改" : "Request Changes"),
+                        systemImage: "arrow.clockwise"
+                    )
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
+                .disabled(!approvalDraft.canResolve || isResolvingApproval)
 
                 Button(appState.locale == .zhCN ? "转为提案" : "Convert to Proposal") {}
                     .buttonStyle(.bordered)
@@ -608,6 +628,30 @@ public struct ReviewsView: View {
                 cwd: draft.normalizedCWD
             )
             isRunningValidation = false
+        }
+    }
+
+    private func resolveApproval(_ selected: ReviewDesignItem, state: ReviewApprovalResolutionState) {
+        guard let command = ReviewApprovalResolutionCommand(
+            review: selected,
+            draft: approvalDraft,
+            state: state
+        ), !isResolvingApproval else {
+            return
+        }
+
+        isResolvingApproval = true
+        Task {
+            await daemonController.resolveApproval(
+                approvalID: command.approvalID,
+                actor: command.actor,
+                state: command.state,
+                decisionNote: command.decisionNote
+            )
+            isResolvingApproval = false
+            if appState.lastError == nil {
+                approvalDraft.decisionNote = ""
+            }
         }
     }
 
