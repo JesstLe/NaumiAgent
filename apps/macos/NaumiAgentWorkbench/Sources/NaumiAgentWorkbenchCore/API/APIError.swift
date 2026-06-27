@@ -5,6 +5,7 @@ public enum APIError: Error, Equatable, Sendable {
     case invalidURL
     case invalidResponse
     case missingSelectedSession
+    case capabilityUnavailable(String)
     case httpStatus(Int)
     case decodingFailed(String)
     case networkFailure(String)
@@ -17,6 +18,8 @@ public enum APIError: Error, Equatable, Sendable {
             return AppStrings.Error.invalidResponse(locale)
         case .missingSelectedSession:
             return AppStrings.Error.missingSelectedSession(locale)
+        case .capabilityUnavailable(let capability):
+            return AppStrings.Error.capabilityUnavailable(locale, capability: capability)
         case .httpStatus(let code):
             return AppStrings.Error.httpStatus(locale, code: code)
         case .decodingFailed:
@@ -34,6 +37,8 @@ public enum APIError: Error, Equatable, Sendable {
             return "invalidResponse"
         case .missingSelectedSession:
             return "missingSelectedSession"
+        case .capabilityUnavailable(let capability):
+            return "capabilityUnavailable(\(capability))"
         case .httpStatus(let code):
             return "httpStatus(\(code))"
         case .decodingFailed(let detail):
