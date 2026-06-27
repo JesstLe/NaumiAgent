@@ -25,7 +25,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var createMissionResult: Result<MissionDTO, APIError>?
     var attachIssueResult: Result<IssueDTO, APIError>?
     var createIntentLockResult: Result<IntentLockDTO, APIError>?
+    var fetchIntentLocksResult: Result<IntentLocksDTO, APIError>?
     var createDecisionResult: Result<DecisionDTO, APIError>?
+    var fetchDecisionsResult: Result<DecisionsDTO, APIError>?
     var resolveApprovalResult: Result<ApprovalDTO, APIError>?
     var runValidationResult: Result<ValidationResultDTO, APIError>?
     var runValidationCallCount: Int = 0
@@ -248,6 +250,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         return try result.get()
     }
 
+    func fetchIntentLocks(sessionID: String, missionID: String) async throws(APIError) -> IntentLocksDTO {
+        guard let result = fetchIntentLocksResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
     func createIntentLock(
         sessionID: String,
         missionID: String,
@@ -258,6 +267,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         requireProposalForRisk: String
     ) async throws(APIError) -> IntentLockDTO {
         guard let result = createIntentLockResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchDecisions(sessionID: String, missionID: String) async throws(APIError) -> DecisionsDTO {
+        guard let result = fetchDecisionsResult else {
             throw .invalidResponse
         }
         return try result.get()

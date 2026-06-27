@@ -815,6 +815,14 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func fetchIntentLocks(sessionID: String, missionID: String) async throws(APIError) -> IntentLocksDTO {
+        IntentLocksDTO(intentLocks: [], missionID: missionID)
+    }
+
+    func fetchDecisions(sessionID: String, missionID: String) async throws(APIError) -> DecisionsDTO {
+        DecisionsDTO(decisions: [], missionID: missionID)
+    }
+
     func createIntentLock(
         sessionID: String,
         missionID: String,

@@ -100,6 +100,12 @@ class WorkbenchService:
         data["require_proposal_for_risk"] = data["require_proposal_for_risk"].value
         return data
 
+    async def list_intent_locks(
+        self, session_id: str, mission_id: str
+    ) -> list[dict[str, Any]]:
+        locks = await self._workbench_store.list_intent_locks(session_id, mission_id)
+        return [self._intent_lock_to_dict(lock) for lock in locks]
+
     async def create_decision(
         self,
         *,
@@ -141,6 +147,12 @@ class WorkbenchService:
         data = asdict(decision)
         data["kind"] = data["kind"].value
         return data
+
+    async def list_decisions(
+        self, session_id: str, mission_id: str
+    ) -> list[dict[str, Any]]:
+        decisions = await self._workbench_store.list_decisions(session_id, mission_id)
+        return [self._decision_to_dict(decision) for decision in decisions]
 
     async def resolve_approval(
         self,
