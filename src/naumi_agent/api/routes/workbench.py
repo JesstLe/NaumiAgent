@@ -844,6 +844,25 @@ async def get_issues(
     )
 
 
+@router.get("/workbench/sessions/{session_id}/issues/{task_id}")
+async def get_issue(
+    session_id: str,
+    task_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    issue = await engine.workbench_service.get_issue(session_id, task_id)
+    if issue is None:
+        raise HTTPException(status_code=404, detail="issue 不存在")
+    return issue
+
+
 @router.get(
     "/workbench/sessions/{session_id}/agents",
     response_model=AgentProfilesResponse,

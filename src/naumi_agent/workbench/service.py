@@ -312,6 +312,12 @@ class WorkbenchService:
             "limit": limit,
         }
 
+    async def get_issue(self, session_id: str, task_id: str) -> dict[str, Any] | None:
+        issue = await self._workbench_store.get_issue(session_id, task_id)
+        if issue is None:
+            return None
+        return self._issue_to_dict(issue)
+
     @staticmethod
     def _issue_to_dict(issue: IssueMetadata) -> dict[str, Any]:
         data = asdict(issue)

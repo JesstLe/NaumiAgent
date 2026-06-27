@@ -97,6 +97,49 @@ async def test_create_issue_creates_backing_task_and_issue_metadata(tmp_path) ->
 
 
 @pytest.mark.asyncio
+async def test_get_issue_returns_json_friendly_issue_metadata(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    mission = await service.create_mission(
+        session_id="s",
+        title="Mac 工作台",
+        goal="让检查器可以直接读取 Issue 详情",
+    )
+    task = await task_store.create_task("实现 Issue 详情 API")
+    await service.attach_issue(
+        session_id="s",
+        mission_id=mission.id,
+        task_id=task.id,
+        acceptance_criteria=["详情页不依赖全量 snapshot"],
+        parallel_mode=ParallelMode.COOPERATIVE,
+        risk_level=RiskLevel.HIGH,
+    )
+
+    issue = await service.get_issue("s", task.id)
+
+    assert issue is not None
+    assert issue["session_id"] == "s"
+    assert issue["task_id"] == task.id
+    assert issue["mission_id"] == mission.id
+    assert issue["parallel_mode"] == "cooperative"
+    assert issue["risk_level"] == "high"
+    assert issue["acceptance_criteria"] == ["详情页不依赖全量 snapshot"]
+
+
+@pytest.mark.asyncio
+async def test_get_issue_returns_none_for_missing_issue(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    assert await service.get_issue("s", "missing-task") is None
+
+
+@pytest.mark.asyncio
 async def test_attach_issue_rejects_missing_mission(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")

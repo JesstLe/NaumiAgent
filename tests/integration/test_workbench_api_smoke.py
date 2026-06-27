@@ -102,6 +102,15 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
             assert issue_response.status_code == 201
             task_id = issue_response.json()["task_id"]
 
+            issue_detail_response = client.get(
+                f"/api/v1/workbench/sessions/{session_id}/issues/{task_id}"
+            )
+            assert issue_detail_response.status_code == 200
+            issue_detail = issue_detail_response.json()
+            assert issue_detail["task_id"] == task_id
+            assert issue_detail["mission_id"] == mission_id
+            assert issue_detail["acceptance_criteria"] == ["dashboard snapshot 必须刷新"]
+
             agent_response = client.post(
                 f"/api/v1/workbench/sessions/{session_id}/agents/Backend-Agent",
                 json={
