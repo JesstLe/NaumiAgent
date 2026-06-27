@@ -20,6 +20,7 @@ public final class AppState: Sendable {
     public var failures: [FailureDTO] = []
     public var issues: [IssueDTO] = []
     public var leases: [LeaseDTO] = []
+    public var worktrees: [WorktreeDTO] = []
     public var missions: [MissionDTO] = []
     public var agentProfiles: [AgentProfileDTO] = []
     public var lastError: APIError? = nil

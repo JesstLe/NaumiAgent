@@ -34,7 +34,7 @@ public final class DaemonController: Sendable {
     /// - If a session is already selected, preserves that selection and refreshes
     ///   its snapshot instead of switching to the bootstrap latest session.
     /// - After a successful snapshot, pre-warms the lightweight first-screen list
-    ///   states (missions, agent profiles, issues, leases, failures, events,
+    ///   states (missions, agent profiles, issues, leases, worktrees, failures, events,
     ///   waiting approvals, validation runs, and context snapshots). Failures are isolated to
     ///   `lastError` and do not affect the connection state.
     /// - Snapshot/session failures keep the daemon `.connected` and record the
@@ -178,6 +178,8 @@ public final class DaemonController: Sendable {
         await refreshIssues()
         preWarmError = preWarmError ?? appState.lastError
         await refreshLeases()
+        preWarmError = preWarmError ?? appState.lastError
+        await refreshWorktrees()
         preWarmError = preWarmError ?? appState.lastError
         await refreshFailures()
         preWarmError = preWarmError ?? appState.lastError
@@ -441,6 +443,34 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Fetches worktrees for the currently selected session.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success the worktrees
+    /// are written to `appState.worktrees`; on failure `appState.lastError` is
+    /// set. Missing session clears the local worktree list to avoid showing
+    /// stale data from another session. API failures leave the local list
+    /// unchanged.
+    public func refreshWorktrees(taskID: String? = nil, status: String? = nil, limit: Int = 50) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.worktrees = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchWorktrees(
+                sessionID: sessionID,
+                taskID: taskID,
+                status: status,
+                limit: limit
+            )
+            appState.worktrees = response.worktrees
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Fetches missions for the currently selected session.
     ///
     /// Requires `appState.selectedSessionID` to be set. On success the missions
@@ -592,6 +622,7 @@ public final class DaemonController: Sendable {
         appState.failures = []
         appState.issues = []
         appState.leases = []
+        appState.worktrees = []
         appState.missions = []
         appState.agentProfiles = []
     }

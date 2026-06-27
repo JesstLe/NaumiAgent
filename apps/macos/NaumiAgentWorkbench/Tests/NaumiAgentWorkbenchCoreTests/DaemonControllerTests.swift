@@ -2011,6 +2011,53 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
+    @Test @MainActor func refreshWorktreesSuccessWritesToAppState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let worktree = makeWorktree(name: "wt-api-client", taskID: "task-001", status: "active")
+        let worktrees = WorktreesDTO(worktrees: [worktree], taskID: "task-001", status: "active", limit: 25)
+
+        await api.setWorktreesResult(.success(worktrees))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshWorktrees(taskID: "task-001", status: "active", limit: 25)
+
+        #expect(appState.worktrees == [worktree])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshWorktreesWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        appState.worktrees = [makeWorktree(name: "wt-stale", taskID: "task-old", status: "active")]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshWorktrees(limit: 50)
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.worktrees.isEmpty)
+    }
+
+    @Test @MainActor func refreshWorktreesFailurePreservesOldList() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleWorktree = makeWorktree(name: "wt-stale", taskID: "task-001", status: "active")
+        appState.worktrees = [staleWorktree]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setWorktreesResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshWorktrees(limit: 50)
+
+        #expect(appState.worktrees == [staleWorktree])
+        #expect(appState.lastError == .httpStatus(500))
+    }
+
     @Test @MainActor func runValidationSuccessRefreshesValidationRunsFailuresSnapshotAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -2645,6 +2692,10 @@ extension FakeWorkbenchAPIProvider {
         leasesResult = result
     }
 
+    fileprivate func setWorktreesResult(_ result: Result<WorktreesDTO, APIError>) {
+        worktreesResult = result
+    }
+
     fileprivate func setMissionsResult(_ result: Result<MissionsDTO, APIError>) {
         missionsResult = result
     }
@@ -2702,6 +2753,7 @@ private func configureWorkbenchListResults(for api: FakeWorkbenchAPIProvider, se
     let mission = makeMission(id: "mission-\(sessionID)", sessionID: sessionID)
     let issue = makeIssue(taskID: "task-\(sessionID)")
     let lease = makeLease(id: "lease-\(sessionID)", taskID: "task-\(sessionID)", state: "active")
+    let worktree = makeWorktree(name: "wt-\(sessionID)", taskID: "task-\(sessionID)", status: "active")
     let failure = makeFailure(id: "failure-\(sessionID)", taskID: "task-\(sessionID)", status: "open")
     let event = makeEvent(id: "evt-\(sessionID)", type: "test.event", subjectID: "subject-\(sessionID)")
     let approval = makeApproval(id: "approval-\(sessionID)", missionID: "mission-\(sessionID)", state: "waiting")
@@ -2732,6 +2784,7 @@ private func configureWorkbenchListResults(for api: FakeWorkbenchAPIProvider, se
     await api.setMissionsResult(.success(MissionsDTO(missions: [mission], status: nil, limit: 50)))
     await api.setIssuesResult(.success(IssuesDTO(issues: [issue], missionID: nil, riskLevel: nil, limit: 50)))
     await api.setLeasesResult(.success(LeasesDTO(leases: [lease], state: nil, taskID: nil, agentID: nil, limit: 50)))
+    await api.setWorktreesResult(.success(WorktreesDTO(worktrees: [worktree], taskID: nil, status: nil, limit: 50)))
     await api.setFailuresResult(.success(FailuresDTO(failures: [failure], taskID: nil, status: nil, limit: 50)))
     await api.setEventsResult(.success(WorkbenchEventsDTO(events: [event], limit: 50)))
     await api.setApprovalsResult(.success(ApprovalsDTO(approvals: [approval], state: "waiting", limit: 50)))
@@ -2764,6 +2817,7 @@ private func expectWorkbenchListsPopulated(
     #expect(appState.missions.count == 1, sourceLocation: sourceLocation)
     #expect(appState.issues.count == 1, sourceLocation: sourceLocation)
     #expect(appState.leases.count == 1, sourceLocation: sourceLocation)
+    #expect(appState.worktrees.count == 1, sourceLocation: sourceLocation)
     #expect(appState.failures.count == 1, sourceLocation: sourceLocation)
     #expect(appState.timelineEvents.count == 1, sourceLocation: sourceLocation)
     #expect(appState.approvals.count == 1, sourceLocation: sourceLocation)
@@ -2780,6 +2834,7 @@ private func expectWorkbenchListsEmpty(
     #expect(appState.missions.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.issues.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.leases.isEmpty, sourceLocation: sourceLocation)
+    #expect(appState.worktrees.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.failures.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.timelineEvents.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.approvals.isEmpty, sourceLocation: sourceLocation)
@@ -2919,6 +2974,24 @@ private func makeLease(id: String, taskID: String, state: String) -> LeaseDTO {
         worktreeName: "wt-001",
         createdAt: "2026-06-27T06:00:00",
         updatedAt: "2026-06-27T06:00:00"
+    )
+}
+
+private func makeWorktree(name: String, taskID: String, status: String) -> WorktreeDTO {
+    WorktreeDTO(
+        name: name,
+        path: "/repo/.naumi/worktrees/\(name)",
+        branch: "naumi/\(name)",
+        baseRef: "main",
+        status: status,
+        taskID: taskID,
+        dirtyFiles: 0,
+        commitsAhead: 1,
+        createdAt: "2026-06-27T06:00:00",
+        updatedAt: "2026-06-27T06:00:00",
+        keptReason: "",
+        metadata: ["agent_id": "local-agent"],
+        removable: true
     )
 }
 
