@@ -88,17 +88,26 @@ class TaskMarket:
         )
         return lease
 
-    async def expire_overdue_leases(self, *, now: datetime | None = None) -> list[Lease]:
-        if not self._task_store.session_id:
+    async def expire_overdue_leases(
+        self,
+        *,
+        session_id: str,
+        now: datetime | None = None,
+    ) -> list[Lease]:
+        if not self._task_store.session_id or session_id != self._task_store.session_id:
             return []
         now_text = (now or datetime.now()).isoformat(timespec="seconds")
         overdue = await self._workbench_store.list_overdue_leases(
-            self._task_store.session_id,
+            session_id,
             now_text,
         )
         expired: list[Lease] = []
         for lease in overdue:
-            updated = await self._workbench_store.update_lease_state(lease.id, LeaseState.EXPIRED)
+            updated = await self._workbench_store.update_lease_state(
+                lease.id,
+                LeaseState.EXPIRED,
+                session_id=session_id,
+            )
             if updated is None:
                 continue
             await self._reset_task_to_pending(lease.task_id)

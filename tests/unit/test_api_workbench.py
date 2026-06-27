@@ -733,6 +733,7 @@ class FakeTaskMarket:
         self.claimed: list[dict] = []
         self.released: list[str] = []
         self.expired_calls = 0
+        self.expired_sessions: list[str] = []
         self._lease: Lease | None = None
         self._expired: list[Lease] = []
         self._claim_error: ValueError | None = None
@@ -772,8 +773,9 @@ class FakeTaskMarket:
         self.released.append({"session_id": session_id, "lease_id": lease_id})
         return self._lease
 
-    async def expire_overdue_leases(self, *, now=None) -> list[Lease]:
+    async def expire_overdue_leases(self, *, session_id: str, now=None) -> list[Lease]:
         self.expired_calls += 1
+        self.expired_sessions.append(session_id)
         return list(self._expired)
 
 
@@ -1856,6 +1858,7 @@ async def test_expire_leases_endpoint_returns_expired_list() -> None:
 
     assert engine.loaded == ["sess-1"]
     assert market.expired_calls == 1
+    assert market.expired_sessions == ["sess-1"]
     assert response == {"expired": [asdict(lease)]}
 
 
