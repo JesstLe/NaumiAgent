@@ -5,6 +5,8 @@ public struct TimelineView: View {
     @Bindable public var appState: AppState
     public let daemonController: DaemonController
     @State private var selectedEventID: String?
+    @State private var filterDraft = TimelineEventFilterDraft()
+    @State private var isRefreshingEvents = false
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -81,13 +83,14 @@ public struct TimelineView: View {
             Button {
                 if !appState.isPreviewFixture {
                     Task {
-                        await daemonController.refreshEvents(limit: 50)
+                        await refreshEventsUsingCurrentFilter()
                     }
                 }
             } label: {
                 Label(AppStrings.Timeline.refreshButton(appState.locale), systemImage: "arrow.clockwise")
             }
             .buttonStyle(.bordered)
+            .disabled(isRefreshingEvents)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 11)
@@ -123,6 +126,8 @@ public struct TimelineView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
+            filterPanel
+
             ScrollView {
                 VStack(spacing: 10) {
                     if presentation.events.isEmpty {
@@ -145,6 +150,70 @@ public struct TimelineView: View {
         }
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var filterPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(appState.locale == .zhCN ? "事件筛选" : "Event Filter")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+
+            TextField(AppStrings.Timeline.eventTypeLabel(appState.locale), text: $filterDraft.eventType)
+                .textFieldStyle(.roundedBorder)
+
+            TextField(AppStrings.Timeline.actorLabel(appState.locale), text: $filterDraft.actor)
+                .textFieldStyle(.roundedBorder)
+
+            TextField(AppStrings.Timeline.subjectLabel(appState.locale), text: $filterDraft.subjectID)
+                .textFieldStyle(.roundedBorder)
+
+            HStack(spacing: 8) {
+                Button {
+                    Task {
+                        await refreshEventsUsingCurrentFilter()
+                    }
+                } label: {
+                    Label(
+                        AppStrings.Timeline.applyFilterButton(appState.locale),
+                        systemImage: "line.3.horizontal.decrease.circle"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(appState.isPreviewFixture || isRefreshingEvents)
+
+                Button {
+                    filterDraft = TimelineEventFilterDraft()
+                    Task {
+                        await refreshEventsUsingCurrentFilter()
+                    }
+                } label: {
+                    Label(AppStrings.Timeline.clearFilterButton(appState.locale), systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .disabled(appState.isPreviewFixture || isRefreshingEvents || !filterDraft.hasFilters)
+            }
+            .controlSize(.small)
+        }
+        .padding(10)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func refreshEventsUsingCurrentFilter() async {
+        guard !appState.isPreviewFixture, !isRefreshingEvents else {
+            return
+        }
+        let draft = filterDraft
+        isRefreshingEvents = true
+        await daemonController.refreshEvents(
+            eventType: draft.eventTypeQueryValue,
+            subjectID: draft.subjectIDQueryValue,
+            actor: draft.actorQueryValue,
+            limit: 50
+        )
+        isRefreshingEvents = false
     }
 
     private func summaryStrip(presentation: TimelineDashboardPresentation) -> some View {
