@@ -468,6 +468,10 @@ public enum AppStrings {
             locale == .zhCN ? "\(count) 条验证" : "\(count) validation runs"
         }
 
+        public static func approvalCount(_ locale: AppLocale, count: Int) -> String {
+            locale == .zhCN ? "\(count) 条待审批" : "\(count) pending approvals"
+        }
+
         public static func refreshButton(_ locale: AppLocale) -> String {
             locale == .zhCN ? "刷新" : "Refresh"
         }
@@ -475,6 +479,10 @@ public enum AppStrings {
         public static func emptyRuns(_ locale: AppLocale) -> String {
             locale == .zhCN ? "暂无验证记录"
                 : "No validation runs yet"
+        }
+
+        public static func emptyApprovals(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无待审批请求" : "No pending approvals"
         }
 
         public static func statusLabel(_ locale: AppLocale) -> String {
@@ -523,6 +531,42 @@ public enum AppStrings {
 
         public static func runValidationSectionTitle(_ locale: AppLocale) -> String {
             locale == .zhCN ? "运行验证" : "Run Validation"
+        }
+
+        public static func pendingApprovalsSectionTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "待审批" : "Pending Approvals"
+        }
+
+        public static func approveButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "同意" : "Approve"
+        }
+
+        public static func rejectButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "拒绝" : "Reject"
+        }
+
+        public static func decisionNoteLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "审批备注" : "Decision Note"
+        }
+
+        public static func requesterLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "请求人" : "Requester"
+        }
+
+        public static func titleLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "标题" : "Title"
+        }
+
+        public static func detailLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "详情" : "Detail"
+        }
+
+        public static func createdAtLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "创建时间" : "Created At"
+        }
+
+        public static func updatedAtLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "更新时间" : "Updated At"
         }
 
         public static func runButton(_ locale: AppLocale) -> String {

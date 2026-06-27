@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Reviews page showing validation runs for the selected session.
+/// Reviews page showing validation runs and pending approvals for the selected session.
 ///
-/// Runs are loaded from `GET /workbench/sessions/{id}/validation-runs` and never
+/// Runs are loaded from `GET /workbench/sessions/{id}/validation-runs` and approvals
+/// from `GET /workbench/sessions/{id}/approvals?state=waiting`. Neither list is ever
 /// fabricated locally. The view refreshes automatically on appear and exposes a
 /// manual refresh button in the toolbar.
 public struct ReviewsView: View {
@@ -10,6 +11,8 @@ public struct ReviewsView: View {
     public let daemonController: DaemonController
 
     @State private var validationDraft = ValidationRunDraft()
+    @State private var approvalDrafts: [String: ApprovalResolveDraft] = [:]
+    @State private var resolvingApprovalIDs: Set<String> = []
     @State private var isProcessing: Bool = false
 
     public init(appState: AppState, daemonController: DaemonController) {
@@ -24,6 +27,7 @@ public struct ReviewsView: View {
                 if let lastError = appState.lastError {
                     errorCard(error: lastError)
                 }
+                approvalsSection
                 runValidationForm
                 runList
             }
@@ -33,11 +37,7 @@ public struct ReviewsView: View {
         .navigationTitle(AppStrings.Reviews.title(appState.locale))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button(action: {
-                    Task {
-                        await daemonController.refreshValidationRuns(limit: 50)
-                    }
-                }) {
+                Button(action: refreshAll) {
                     Label(
                         AppStrings.Reviews.refreshButton(appState.locale),
                         systemImage: "arrow.clockwise"
@@ -46,7 +46,11 @@ public struct ReviewsView: View {
             }
         }
         .task {
-            await daemonController.refreshValidationRuns(limit: 50)
+            syncApprovalDrafts(with: appState.approvals)
+            await refreshBoth()
+        }
+        .onChange(of: appState.approvals) { _, newApprovals in
+            syncApprovalDrafts(with: newApprovals)
         }
     }
 
@@ -71,6 +75,188 @@ public struct ReviewsView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Pending Approvals
+
+    private var approvalsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(AppStrings.Reviews.pendingApprovalsSectionTitle(appState.locale))
+                    .font(.headline)
+                Spacer()
+                Text(AppStrings.Reviews.approvalCount(appState.locale, count: appState.approvals.count))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if appState.approvals.isEmpty {
+                emptyApprovalsState
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(appState.approvals, id: \.id) { approval in
+                        approvalRow(approval: approval)
+                        if approval.id != appState.approvals.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+                .padding()
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    private func approvalRow(approval: ApprovalDTO) -> some View {
+        let draftBinding = binding(for: approval.id)
+        let draft = draftBinding.wrappedValue
+        let isResolving = resolvingApprovalIDs.contains(approval.id)
+        let canResolve = draft.canResolve && !isResolving
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Text(approval.title)
+                    .font(.body)
+                    .fontWeight(.medium)
+                Spacer()
+                StatusBadge(
+                    text: approval.state,
+                    color: approvalStatusColor(for: approval.state)
+                )
+            }
+
+            if !approval.detail.isEmpty {
+                detailItem(
+                    label: AppStrings.Reviews.detailLabel(appState.locale),
+                    value: approval.detail
+                )
+            }
+
+            HStack(spacing: 16) {
+                detailItem(
+                    label: AppStrings.Reviews.taskIDLabel(appState.locale),
+                    value: approval.taskID
+                )
+                detailItem(
+                    label: AppStrings.Reviews.requesterLabel(appState.locale),
+                    value: approval.requester
+                )
+            }
+
+            HStack(spacing: 16) {
+                detailItem(
+                    label: AppStrings.Reviews.createdAtLabel(appState.locale),
+                    value: approval.createdAt
+                )
+                detailItem(
+                    label: AppStrings.Reviews.updatedAtLabel(appState.locale),
+                    value: approval.updatedAt
+                )
+            }
+
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(AppStrings.Reviews.actorLabel(appState.locale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("", text: draftBinding.actor)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel(AppStrings.Reviews.actorLabel(appState.locale))
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(AppStrings.Reviews.decisionNoteLabel(appState.locale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("", text: draftBinding.decisionNote)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel(AppStrings.Reviews.decisionNoteLabel(appState.locale))
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button(action: { resolveApproval(approval: approval, state: "rejected") }) {
+                    if isResolving {
+                        Label(
+                            AppStrings.Reviews.processingLabel(appState.locale),
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                    } else {
+                        Label(
+                            AppStrings.Reviews.rejectButton(appState.locale),
+                            systemImage: "xmark.circle"
+                        )
+                    }
+                }
+                .disabled(!canResolve)
+
+                Button(action: { resolveApproval(approval: approval, state: "approved") }) {
+                    if isResolving {
+                        Label(
+                            AppStrings.Reviews.processingLabel(appState.locale),
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                    } else {
+                        Label(
+                            AppStrings.Reviews.approveButton(appState.locale),
+                            systemImage: "checkmark.circle"
+                        )
+                    }
+                }
+                .disabled(!canResolve)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private func binding(for approvalID: String) -> Binding<ApprovalResolveDraft> {
+        Binding(
+            get: { approvalDrafts[approvalID] ?? ApprovalResolveDraft() },
+            set: { approvalDrafts[approvalID] = $0 }
+        )
+    }
+
+    private func syncApprovalDrafts(with approvals: [ApprovalDTO]) {
+        let ids = Set(approvals.map(\.id))
+        var updated = approvalDrafts.filter { ids.contains($0.key) }
+        for approval in approvals where updated[approval.id] == nil {
+            updated[approval.id] = ApprovalResolveDraft()
+        }
+        approvalDrafts = updated
+    }
+
+    private func resolveApproval(approval: ApprovalDTO, state: String) {
+        let draft = approvalDrafts[approval.id] ?? ApprovalResolveDraft()
+        guard draft.canResolve else { return }
+
+        resolvingApprovalIDs.insert(approval.id)
+        Task { @MainActor in
+            await daemonController.resolveApproval(
+                approvalID: approval.id,
+                actor: draft.trimmedActor,
+                state: state,
+                decisionNote: draft.trimmedDecisionNote
+            )
+            resolvingApprovalIDs.remove(approval.id)
+        }
+    }
+
+    private var emptyApprovalsState: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 8) {
+                Image(systemName: "checkmark.shield")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.secondary)
+                Text(AppStrings.Reviews.emptyApprovals(appState.locale))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 32)
     }
 
     // MARK: - Run Validation Form
@@ -287,12 +473,36 @@ public struct ReviewsView: View {
 
     // MARK: - Helpers
 
+    private func refreshAll() {
+        Task {
+            await refreshBoth()
+        }
+    }
+
+    private func refreshBoth() async {
+        await daemonController.refreshValidationRuns(limit: 50)
+        await daemonController.refreshApprovals(state: "waiting")
+    }
+
     private func statusColor(for status: String) -> Color {
         switch status.lowercased() {
         case "passed":
             return .green
         case "failed":
             return .red
+        default:
+            return .secondary
+        }
+    }
+
+    private func approvalStatusColor(for state: String) -> Color {
+        switch state.lowercased() {
+        case "approved":
+            return .green
+        case "rejected":
+            return .red
+        case "waiting":
+            return .orange
         default:
             return .secondary
         }
@@ -332,6 +542,22 @@ struct ReviewsView_Previews: PreviewProvider {
                 output: "E501 line too long\n\nE502 another error",
                 startedAt: "2026-06-27T06:01:00",
                 completedAt: "2026-06-27T06:01:02"
+            )
+        ]
+        state.approvals = [
+            ApprovalDTO(
+                id: "approval-1",
+                sessionID: "sess-preview",
+                missionID: "mission-1",
+                taskID: "task-1",
+                state: "waiting",
+                title: "请求执行高风险操作",
+                detail: "需要人工确认后继续执行",
+                requester: "Agent-A",
+                reviewer: "",
+                decisionNote: "",
+                createdAt: "2026-06-27T06:00:00",
+                updatedAt: "2026-06-27T06:00:01"
             )
         ]
         return ReviewsView(
