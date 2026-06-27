@@ -116,8 +116,16 @@ public struct WorktreeManagementRow: Equatable, Sendable, Identifiable {
         !isKept
     }
 
+    public var canRemoveSafely: Bool {
+        removable
+    }
+
     private var isKept: Bool {
         !keptReason.isEmpty || status.lowercased() == "kept"
+    }
+
+    private var hasUnreviewedWork: Bool {
+        dirtyFiles > 0 || commitsAhead > 0 || status.lowercased() == "dirty"
     }
 
     public func defaultKeepReason(locale: AppLocale) -> String {
@@ -129,6 +137,21 @@ public struct WorktreeManagementRow: Equatable, Sendable, Identifiable {
     public func keepDisabledReason(locale: AppLocale) -> String? {
         guard !canKeep else { return nil }
         return locale == .zhCN ? "已保留" : "Already kept"
+    }
+
+    public func removeDisabledReason(locale: AppLocale) -> String? {
+        guard !canRemoveSafely else { return nil }
+        if isKept {
+            return locale == .zhCN
+                ? "已人工保留，需先确认治理结果"
+                : "Kept worktrees require governance confirmation first"
+        }
+        if hasUnreviewedWork {
+            return locale == .zhCN
+                ? "存在未提交或未审查的工作，只能通过强制删除流程处理"
+                : "Uncommitted or unreviewed work requires the force-remove flow"
+        }
+        return locale == .zhCN ? "当前状态不可安全删除" : "Current state cannot be safely removed"
     }
 
     public init(worktree: WorktreeDTO) {
