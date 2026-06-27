@@ -9,7 +9,8 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 from naumi_agent import __version__
 from naumi_agent.api.routes.workbench import (
@@ -40,6 +41,9 @@ from naumi_agent.api.routes.workbench import (
     get_workbench_snapshot,
     release_workbench_lease,
     resolve_approval,
+)
+from naumi_agent.api.routes.workbench import (
+    router as workbench_router,
 )
 from naumi_agent.workbench.models import (
     ApprovalState,
@@ -251,19 +255,40 @@ class _FakeWorkbenchService:
             return None
         return self._resolve_approval_result
 
-    async def list_events(self, session_id: str, limit: int = 50):
-        self.listed_events.append({"session_id": session_id, "limit": limit})
-        return [
+    async def list_events(
+        self,
+        session_id: str,
+        event_type: str | None = None,
+        subject_id: str | None = None,
+        actor: str | None = None,
+        limit: int = 50,
+    ):
+        self.listed_events.append(
             {
-                "id": "evt-1",
                 "session_id": session_id,
-                "type": "mission.created",
-                "actor": "Human",
-                "subject_id": "mission-1",
-                "payload": {"title": "Mac 工作台"},
-                "timestamp": "2024-01-01T00:00:00",
+                "event_type": event_type,
+                "subject_id": subject_id,
+                "actor": actor,
+                "limit": limit,
             }
-        ]
+        )
+        return {
+            "events": [
+                {
+                    "id": "evt-1",
+                    "session_id": session_id,
+                    "type": event_type or "mission.created",
+                    "actor": actor or "Human",
+                    "subject_id": subject_id or "mission-1",
+                    "payload": {"title": "Mac 工作台"},
+                    "timestamp": "2024-01-01T00:00:00",
+                }
+            ],
+            "event_type": event_type,
+            "subject_id": subject_id,
+            "actor": actor,
+            "limit": limit,
+        }
 
     async def run_validation(
         self,
@@ -630,11 +655,19 @@ async def test_get_events_endpoint_requires_existing_session() -> None:
 async def test_get_events_endpoint_returns_events_and_limit() -> None:
     engine = _FakeEngine(exists=True)
 
-    response = await get_workbench_events("sess-1", _fake_request(engine), limit=25, auth="test")
+    response = await get_workbench_events(
+        "sess-1", _fake_request(engine), limit=25, auth="test"
+    )
 
     assert engine.loaded == ["sess-1"]
     assert engine.workbench_service.listed_events == [
-        {"session_id": "sess-1", "limit": 25}
+        {
+            "session_id": "sess-1",
+            "event_type": None,
+            "subject_id": None,
+            "actor": None,
+            "limit": 25,
+        }
     ]
     assert response.model_dump() == {
         "events": [
@@ -648,8 +681,84 @@ async def test_get_events_endpoint_returns_events_and_limit() -> None:
                 "timestamp": "2024-01-01T00:00:00",
             }
         ],
+        "event_type": None,
+        "subject_id": None,
+        "actor": None,
         "limit": 25,
     }
+
+
+@pytest.mark.asyncio
+async def test_get_events_endpoint_forwards_filters_and_returns_them() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_workbench_events(
+        "sess-1",
+        _fake_request(engine),
+        limit=25,
+        event_type="issue.created",
+        subject_id="task-2",
+        actor="Planner-Agent",
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_events == [
+        {
+            "session_id": "sess-1",
+            "event_type": "issue.created",
+            "subject_id": "task-2",
+            "actor": "Planner-Agent",
+            "limit": 25,
+        }
+    ]
+    assert response.model_dump() == {
+        "events": [
+            {
+                "id": "evt-1",
+                "session_id": "sess-1",
+                "type": "issue.created",
+                "actor": "Planner-Agent",
+                "subject_id": "task-2",
+                "payload": {"title": "Mac 工作台"},
+                "timestamp": "2024-01-01T00:00:00",
+            }
+        ],
+        "event_type": "issue.created",
+        "subject_id": "task-2",
+        "actor": "Planner-Agent",
+        "limit": 25,
+    }
+
+
+def test_get_events_route_accepts_type_query_alias() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get(
+        "/workbench/sessions/sess-1/events",
+        params={
+            "type": "issue.created",
+            "subject_id": "task-2",
+            "actor": "Planner-Agent",
+            "limit": "7",
+        },
+    )
+
+    assert response.status_code == 200
+    assert engine.workbench_service.listed_events == [
+        {
+            "session_id": "sess-1",
+            "event_type": "issue.created",
+            "subject_id": "task-2",
+            "actor": "Planner-Agent",
+            "limit": 7,
+        }
+    ]
+    assert response.json()["event_type"] == "issue.created"
 
 
 @pytest.mark.asyncio

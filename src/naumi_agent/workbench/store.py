@@ -483,16 +483,36 @@ class WorkbenchStore:
             await db.commit()
         return event
 
-    async def list_events(self, session_id: str, limit: int = 100) -> list[WorkbenchEvent]:
+    async def list_events(
+        self,
+        session_id: str,
+        limit: int = 100,
+        event_type: str | None = None,
+        subject_id: str | None = None,
+        actor: str | None = None,
+    ) -> list[WorkbenchEvent]:
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
             db.row_factory = aiosqlite.Row
+            params: list[Any] = [session_id]
+            filters = ["session_id = ?"]
+            if event_type is not None:
+                filters.append("type = ?")
+                params.append(event_type)
+            if subject_id is not None:
+                filters.append("subject_id = ?")
+                params.append(subject_id)
+            if actor is not None:
+                filters.append("actor = ?")
+                params.append(actor)
+            params.append(limit)
+            where_clause = " AND ".join(filters)
             cursor = await db.execute(
-                """SELECT * FROM workbench_audit_events
-                   WHERE session_id = ?
-                   ORDER BY timestamp DESC
+                f"""SELECT * FROM workbench_audit_events
+                   WHERE {where_clause}
+                   ORDER BY timestamp DESC, rowid DESC
                    LIMIT ?""",
-                (session_id, limit),
+                params,
             )
             rows = await cursor.fetchall()
         return [_row_to_event(dict(row)) for row in reversed(rows)]

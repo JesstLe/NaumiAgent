@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import asdict
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -92,6 +92,9 @@ class ValidationRunResultResponse(BaseModel):
 
 class WorkbenchEventsResponse(BaseModel):
     events: list[dict[str, Any]]
+    event_type: str | None
+    subject_id: str | None
+    actor: str | None
     limit: int
 
 
@@ -211,6 +214,9 @@ async def get_workbench_events(
     session_id: str,
     request: Request,
     limit: int = Query(default=50, ge=1, le=200),
+    event_type: Annotated[str | None, Query(alias="type")] = None,
+    subject_id: Annotated[str | None, Query()] = None,
+    actor: Annotated[str | None, Query()] = None,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -219,8 +225,20 @@ async def get_workbench_events(
         raise HTTPException(status_code=404, detail="Session not found")
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    events = await engine.workbench_service.list_events(session_id, limit=limit)
-    return WorkbenchEventsResponse(events=events, limit=limit)
+    result = await engine.workbench_service.list_events(
+        session_id,
+        event_type=event_type,
+        subject_id=subject_id,
+        actor=actor,
+        limit=limit,
+    )
+    return WorkbenchEventsResponse(
+        events=result["events"],
+        event_type=result["event_type"],
+        subject_id=result["subject_id"],
+        actor=result["actor"],
+        limit=result["limit"],
+    )
 
 
 @router.get(

@@ -277,9 +277,28 @@ class WorkbenchService:
         data["state"] = data["state"].value
         return data
 
-    async def list_events(self, session_id: str, limit: int = 50) -> list[dict[str, Any]]:
-        events = await self._workbench_store.list_events(session_id, limit=limit)
-        return [event.to_dict() for event in events]
+    async def list_events(
+        self,
+        session_id: str,
+        event_type: str | None = None,
+        subject_id: str | None = None,
+        actor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        events = await self._workbench_store.list_events(
+            session_id,
+            event_type=event_type,
+            subject_id=subject_id,
+            actor=actor,
+            limit=limit,
+        )
+        return {
+            "events": [event.to_dict() for event in events],
+            "event_type": event_type,
+            "subject_id": subject_id,
+            "actor": actor,
+            "limit": limit,
+        }
 
     async def list_validation_runs(
         self,
