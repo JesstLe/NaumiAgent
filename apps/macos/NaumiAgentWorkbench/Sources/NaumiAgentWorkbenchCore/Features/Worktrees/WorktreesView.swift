@@ -4,14 +4,21 @@ import SwiftUI
 public struct WorktreesView: View {
     @Bindable public var appState: AppState
     public let daemonController: DaemonController
+    private let localActionExecutor: WorktreeLocalActionExecutor
     @State private var selectedSnapshotID: String?
     @State private var selectedWorktreeID: String?
     @State private var isKeepingWorktree = false
+    @State private var localActionErrorMessage: String?
     private let layout = WorkbenchPageLayout.worktrees
 
-    public init(appState: AppState, daemonController: DaemonController) {
+    public init(
+        appState: AppState,
+        daemonController: DaemonController,
+        localActionExecutor: WorktreeLocalActionExecutor = WorktreeLocalActionExecutor()
+    ) {
         self.appState = appState
         self.daemonController = daemonController
+        self.localActionExecutor = localActionExecutor
     }
 
     public var body: some View {
@@ -52,6 +59,9 @@ public struct WorktreesView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         selectedWorktreePanel(worktree: selectedWorktree)
+                        if let localActionErrorMessage {
+                            localActionErrorCard(message: localActionErrorMessage)
+                        }
                         selectedSnapshotPanel(snapshot: selectedSnapshot)
                         remediationPanel(presentation: presentation)
                         if let lastError = appState.lastError {
@@ -96,6 +106,17 @@ public struct WorktreesView: View {
             )
             await daemonController.refreshContextSnapshots(limit: 50)
             isKeepingWorktree = false
+        }
+    }
+
+    private func performLocalAction(_ action: WorktreeLocalAction, worktree: WorktreeManagementRow) {
+        do {
+            try localActionExecutor.perform(action, path: worktree.path)
+            localActionErrorMessage = nil
+        } catch let error as WorktreeLocalActionError {
+            localActionErrorMessage = error.localizedMessage(locale: appState.locale)
+        } catch {
+            localActionErrorMessage = error.localizedDescription
         }
     }
 
@@ -463,6 +484,24 @@ public struct WorktreesView: View {
                         Text(appState.locale == .zhCN ? "动作" : "Actions")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            Button {
+                                performLocalAction(.revealInFinder, worktree: worktree)
+                            } label: {
+                                Label(appState.locale == .zhCN ? "Finder" : "Finder", systemImage: "folder")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button {
+                                performLocalAction(.openTerminal, worktree: worktree)
+                            } label: {
+                                Label(appState.locale == .zhCN ? "终端" : "Terminal", systemImage: "terminal")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
                         Button {
                             keepWorktree(worktree)
                         } label: {
@@ -635,6 +674,22 @@ public struct WorktreesView: View {
             Text(error.localizedMessage(locale: appState.locale))
                 .font(.body)
                 .foregroundStyle(.red)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.red.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func localActionErrorCard(message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(appState.locale == .zhCN ? "本地操作失败" : "Local Action Failed")
+                .font(.headline)
+                .foregroundStyle(.red)
+            Text(message)
+                .font(.body)
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
