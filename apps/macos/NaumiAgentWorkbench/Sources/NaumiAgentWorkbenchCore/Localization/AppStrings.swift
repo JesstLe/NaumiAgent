@@ -500,6 +500,22 @@ public enum AppStrings {
             }
             return "Cannot reach the local NaumiAgent service. Start it with:\nnaumi-agent api --host 127.0.0.1 --port 8765"
         }
+
+        public static func capabilityUnavailable(_ locale: AppLocale, capability: String) -> String {
+            let name = localizedCapabilityName(locale, capability: capability)
+            return locale == .zhCN
+                ? "当前 daemon 不支持「\(name)」"
+                : "The daemon does not support '\(name)'"
+        }
+
+        private static func localizedCapabilityName(_ locale: AppLocale, capability: String) -> String {
+            switch capability {
+            case "validation_runner":
+                return locale == .zhCN ? "验证运行器" : "validation runner"
+            default:
+                return capability
+            }
+        }
     }
 
     // MARK: - Settings

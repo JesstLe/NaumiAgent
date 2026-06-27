@@ -616,6 +616,11 @@ public final class DaemonController: Sendable {
             return
         }
 
+        if let capabilities = appState.capabilities, !capabilities.supportsValidationRunner {
+            appState.lastError = .capabilityUnavailable("validation_runner")
+            return
+        }
+
         appState.lastError = nil
         do {
             _ = try await apiProvider.runValidation(

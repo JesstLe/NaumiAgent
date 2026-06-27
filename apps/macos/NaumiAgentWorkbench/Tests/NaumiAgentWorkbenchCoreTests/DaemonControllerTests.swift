@@ -25,6 +25,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var createDecisionResult: Result<DecisionDTO, APIError>?
     var resolveApprovalResult: Result<ApprovalDTO, APIError>?
     var runValidationResult: Result<ValidationResultDTO, APIError>?
+    var runValidationCallCount: Int = 0
 
     func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
         guard let result = statusResult else {
@@ -244,6 +245,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         argv: [String],
         cwd: String?
     ) async throws(APIError) -> ValidationResultDTO {
+        runValidationCallCount += 1
         guard let result = runValidationResult else {
             throw .invalidResponse
         }
@@ -1449,6 +1451,112 @@ final class DaemonControllerTests {
         #expect(appState.failures == [staleFailure])
         #expect(appState.snapshot == staleSnapshot)
         #expect(appState.lastError == .httpStatus(500))
+    }
+
+    @Test @MainActor func runValidationBlockedWhenCapabilitiesLackValidationRunner() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        appState.capabilities = CapabilitiesDTO(
+            supportsDaemonManagement: false,
+            supportsWorkspaceRegistry: true,
+            supportsValidationRunner: false,
+            supportsCloudSync: false,
+            supportedLocales: ["zh-CN", "en-US"],
+            protocolVersion: 1
+        )
+
+        let staleRun = ValidationRunDTO(
+            id: "run-stale",
+            sessionID: "sess-001",
+            taskID: "task-001",
+            actor: "ValidationRunner",
+            command: [],
+            cwd: "",
+            status: "passed",
+            exitCode: 0,
+            output: "",
+            startedAt: "2026-06-27T05:00:00",
+            completedAt: "2026-06-27T05:00:01"
+        )
+        let staleFailure = makeFailure(id: "failure-stale", taskID: "task-001", status: "open")
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        let staleEvent = makeEvent(id: "evt-stale", type: "validation.ran", subjectID: "run-stale")
+        appState.validationRuns = [staleRun]
+        appState.failures = [staleFailure]
+        appState.snapshot = staleSnapshot
+        appState.timelineEvents = [staleEvent]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setRunValidationResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.runValidation(
+            taskID: "task-001",
+            actor: "Human",
+            argv: ["pytest"],
+            cwd: "/workspace"
+        )
+
+        #expect(appState.lastError == .capabilityUnavailable("validation_runner"))
+        #expect(appState.validationRuns == [staleRun])
+        #expect(appState.failures == [staleFailure])
+        #expect(appState.snapshot == staleSnapshot)
+        #expect(appState.timelineEvents == [staleEvent])
+        #expect(await api.runValidationCallCount == 0)
+    }
+
+    @Test @MainActor func runValidationWithNilCapabilitiesAllowsSuccess() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        #expect(appState.capabilities == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let result = ValidationResultDTO(
+            id: "run-001",
+            status: "passed",
+            exitCode: 0,
+            output: "ok"
+        )
+        let run = ValidationRunDTO(
+            id: "run-001",
+            sessionID: "sess-001",
+            taskID: "task-001",
+            actor: "Human",
+            command: ["pytest"],
+            cwd: "/workspace",
+            status: "passed",
+            exitCode: 0,
+            output: "ok",
+            startedAt: "2026-06-27T06:00:00",
+            completedAt: "2026-06-27T06:00:01"
+        )
+        let runs = ValidationRunsDTO(validationRuns: [run], taskID: "task-001", limit: 50)
+        let failure = makeFailure(id: "failure-001", taskID: "task-001", status: "open")
+        let failures = FailuresDTO(failures: [failure], taskID: "task-001", status: nil, limit: 50)
+        let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        let event = makeEvent(id: "evt-001", type: "validation.ran", subjectID: "run-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
+
+        await api.setRunValidationResult(.success(result))
+        await api.setValidationRunsResult(.success(runs))
+        await api.setFailuresResult(.success(failures))
+        await api.setSnapshotResult(.success(snapshot))
+        await api.setEventsResult(.success(events))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.runValidation(
+            taskID: "task-001",
+            actor: "Human",
+            argv: ["pytest"],
+            cwd: "/workspace"
+        )
+
+        #expect(appState.validationRuns == [run])
+        #expect(appState.failures == [failure])
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.timelineEvents == [event])
+        #expect(appState.lastError == nil)
+        #expect(await api.runValidationCallCount == 1)
     }
 
     @Test @MainActor func createIntentLockSuccessRefreshesSnapshotAndEvents() async throws {
