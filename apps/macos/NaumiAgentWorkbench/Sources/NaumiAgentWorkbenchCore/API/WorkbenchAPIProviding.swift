@@ -10,8 +10,14 @@ public protocol WorkbenchAPIProviding: Sendable {
     func fetchSnapshot(sessionID: String) async throws(APIError) -> WorkbenchSnapshotDTO
     func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO
 
-    /// Fetches the most recent audit events for the given session.
-    func fetchEvents(sessionID: String, limit: Int) async throws(APIError) -> WorkbenchEventsDTO
+    /// Fetches audit events for the given session, optionally filtered by event fields.
+    func fetchEvents(
+        sessionID: String,
+        eventType: String?,
+        subjectID: String?,
+        actor: String?,
+        limit: Int
+    ) async throws(APIError) -> WorkbenchEventsDTO
 
     /// Fetches validation runs for the given session, optionally filtered by task.
     func fetchValidationRuns(

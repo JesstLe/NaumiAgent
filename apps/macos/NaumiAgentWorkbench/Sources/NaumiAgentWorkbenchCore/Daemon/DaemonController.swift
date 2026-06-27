@@ -96,7 +96,12 @@ public final class DaemonController: Sendable {
     /// set. Missing session clears the local event list to avoid showing stale
     /// events from another session. API failures leave the local event list
     /// unchanged (no fake local events).
-    public func refreshEvents(limit: Int) async {
+    public func refreshEvents(
+        eventType: String? = nil,
+        subjectID: String? = nil,
+        actor: String? = nil,
+        limit: Int
+    ) async {
         guard let sessionID = appState.selectedSessionID else {
             appState.timelineEvents = []
             appState.lastError = .missingSelectedSession
@@ -105,7 +110,13 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            let response = try await apiProvider.fetchEvents(sessionID: sessionID, limit: limit)
+            let response = try await apiProvider.fetchEvents(
+                sessionID: sessionID,
+                eventType: eventType,
+                subjectID: subjectID,
+                actor: actor,
+                limit: limit
+            )
             appState.timelineEvents = response.events
         } catch {
             appState.lastError = error

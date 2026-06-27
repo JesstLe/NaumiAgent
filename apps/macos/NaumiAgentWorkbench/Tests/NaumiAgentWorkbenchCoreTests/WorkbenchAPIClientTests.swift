@@ -212,6 +212,63 @@ final class WorkbenchAPIClientTests {
         #expect(event.payload == ["title": .string("Mac Workbench")])
     }
 
+    @Test func fetchEventsWithFilters() async throws {
+        let sessionID = "sess/中文"
+        let eventType = "issue.claimed"
+        let subjectID = "task/审查"
+        let actor = "后端智能体"
+        let json = Data(
+            """
+            {"events":[{"id":"evt-002","session_id":"sess/中文","type":"issue.claimed","actor":"后端智能体","subject_id":"task/审查","payload":{"lease_id":"lease-001"},"timestamp":"2026-06-27T06:10:00"}],"event_type":"issue.claimed","subject_id":"task/审查","actor":"后端智能体","limit":25}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%2F%E4%B8%AD%E6%96%87/events",
+                  query["limit"] == "25",
+                  query["type"] == eventType,
+                  query["subject_id"] == subjectID,
+                  query["actor"] == actor else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchEvents(
+            sessionID: sessionID,
+            eventType: eventType,
+            subjectID: subjectID,
+            actor: actor,
+            limit: 25
+        )
+
+        #expect(response.eventType == eventType)
+        #expect(response.subjectID == subjectID)
+        #expect(response.actor == actor)
+        #expect(response.limit == 25)
+
+        let event = try #require(response.events.first)
+        #expect(event.sessionID == sessionID)
+        #expect(event.type == eventType)
+        #expect(event.actor == actor)
+        #expect(event.subjectID == subjectID)
+        #expect(event.payload == ["lease_id": .string("lease-001")])
+    }
+
     @Test func fetchValidationRunsWithTaskID() async throws {
         let taskID = "task 001/审查"
         let json = Data(
