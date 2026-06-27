@@ -240,6 +240,24 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         SessionListDTO(sessions: [], total: 0, page: page, pageSize: pageSize)
     }
 
+    func createSession(
+        title: String?,
+        model: String?,
+        systemPrompt: String?
+    ) async throws(APIError) -> SessionDTO {
+        SessionDTO(
+            id: "preview-session",
+            title: title,
+            model: model ?? "preview",
+            createdAt: "2026-06-27T06:00:00",
+            updatedAt: "2026-06-27T06:00:00",
+            messageCount: 0,
+            totalTokens: 0,
+            totalCostUSD: 0,
+            status: "active"
+        )
+    }
+
     func fetchEvents(
         sessionID: String,
         eventType: String?,

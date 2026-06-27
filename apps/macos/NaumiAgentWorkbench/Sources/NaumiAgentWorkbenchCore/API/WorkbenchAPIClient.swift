@@ -44,6 +44,19 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         try await get(path: "sessions?page=\(page)&page_size=\(pageSize)")
     }
 
+    public func createSession(
+        title: String?,
+        model: String?,
+        systemPrompt: String?
+    ) async throws(APIError) -> SessionDTO {
+        let body = CreateSessionRequest(
+            title: title,
+            systemPrompt: systemPrompt,
+            model: model
+        )
+        return try await post(path: "sessions", body: body)
+    }
+
     public func fetchEvents(
         sessionID: String,
         eventType: String? = nil,
@@ -525,6 +538,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         } catch {
             throw .decodingFailed(String(describing: error))
         }
+    }
+
+    /// Payload for `POST /sessions`.
+    private struct CreateSessionRequest: Encodable, Sendable {
+        let title: String?
+        let systemPrompt: String?
+        let model: String?
     }
 
     /// Payload for `POST /workbench/sessions/{session_id}/issues/{task_id}/claim`.

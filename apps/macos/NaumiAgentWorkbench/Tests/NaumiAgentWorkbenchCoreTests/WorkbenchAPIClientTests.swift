@@ -173,6 +173,55 @@ final class WorkbenchAPIClientTests {
         #expect(session.status == "active")
     }
 
+    @Test func createSessionUsesPOSTAndEncodesBody() async throws {
+        let json = Data(
+            """
+            {"id":"sess-new","title":"Mac 工作台","model":"gpt-5","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","message_count":0,"total_tokens":0,"total_cost_usd":0.0,"status":"active"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/sessions" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard request.value(forHTTPHeaderField: "Content-Type") == "application/json" else {
+                fatalError("Missing JSON content type")
+            }
+            guard let bodyData = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Missing body")
+            }
+            let body = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
+            guard body?["title"] as? String == "Mac 工作台",
+                  body?["model"] as? String == "gpt-5",
+                  body?["system_prompt"] as? String == "你是本地工作台协调者" else {
+                fatalError("Unexpected body: \(String(describing: body))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let session = try await client.createSession(
+            title: "Mac 工作台",
+            model: "gpt-5",
+            systemPrompt: "你是本地工作台协调者"
+        )
+
+        #expect(session.id == "sess-new")
+        #expect(session.title == "Mac 工作台")
+        #expect(session.model == "gpt-5")
+        #expect(session.messageCount == 0)
+        #expect(session.totalTokens == 0)
+    }
+
     @Test func fetchEvents() async throws {
         let json = Data(
             """

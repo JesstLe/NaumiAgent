@@ -9,6 +9,11 @@ public protocol WorkbenchAPIProviding: Sendable {
     func fetchCapabilities() async throws(APIError) -> CapabilitiesDTO
     func fetchSnapshot(sessionID: String) async throws(APIError) -> WorkbenchSnapshotDTO
     func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO
+    func createSession(
+        title: String?,
+        model: String?,
+        systemPrompt: String?
+    ) async throws(APIError) -> SessionDTO
 
     /// Fetches audit events for the given session, optionally filtered by event fields.
     func fetchEvents(

@@ -8,6 +8,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var capabilitiesResult: Result<CapabilitiesDTO, APIError>?
     var snapshotResult: Result<WorkbenchSnapshotDTO, APIError>?
     var sessionsResult: Result<SessionListDTO, APIError>?
+    var createSessionResult: Result<SessionDTO, APIError>?
     var eventsResult: Result<WorkbenchEventsDTO, APIError>?
     var validationRunsResult: Result<ValidationRunsDTO, APIError>?
     var contextSnapshotsResult: Result<ContextSnapshotsDTO, APIError>?
@@ -55,6 +56,17 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
 
     func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO {
         guard let result = sessionsResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func createSession(
+        title: String?,
+        model: String?,
+        systemPrompt: String?
+    ) async throws(APIError) -> SessionDTO {
+        guard let result = createSessionResult else {
             throw .invalidResponse
         }
         return try result.get()
