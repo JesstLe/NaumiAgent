@@ -10,7 +10,21 @@ struct NaumiAgentWorkbenchApp: App {
             ContentView()
                 .environment(environment)
                 .task {
-                    await environment.refreshCoordinator.startPeriodicRefresh()
+                    switch WorkbenchPreviewLoader.requestedMode(from: CommandLine.arguments) {
+                    case .disabled:
+                        await environment.refreshCoordinator.startPeriodicRefresh()
+                    case .enabled(let locale):
+                        do {
+                            try WorkbenchPreviewLoader.applyPreviewState(
+                                locale: locale,
+                                to: environment.appState
+                            )
+                        } catch {
+                            environment.appState.connectionState = .disconnected
+                        }
+                    case .malformed:
+                        environment.appState.connectionState = .disconnected
+                    }
                 }
         }
     }
