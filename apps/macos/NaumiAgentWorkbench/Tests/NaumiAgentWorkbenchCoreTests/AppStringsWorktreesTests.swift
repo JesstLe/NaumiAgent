@@ -4,7 +4,8 @@ import Testing
 struct AppStringsWorktreesTests {
 
     @Test func worktreesStringsZhCN() {
-        #expect(AppStrings.Worktrees.title(.zhCN) == "上下文健康快照")
+        #expect(AppStrings.Worktrees.title(.zhCN) == "工作区")
+        #expect(AppStrings.Worktrees.subtitle(.zhCN) == "Git 工作区 / 上下文健康 / Agent 负载")
         #expect(AppStrings.Worktrees.snapshotCount(.zhCN, count: 3) == "3 条快照")
         #expect(AppStrings.Worktrees.refreshButton(.zhCN) == "刷新")
         #expect(AppStrings.Worktrees.emptySnapshots(.zhCN) == "暂无上下文快照")
@@ -22,7 +23,8 @@ struct AppStringsWorktreesTests {
     }
 
     @Test func worktreesStringsEnUS() {
-        #expect(AppStrings.Worktrees.title(.enUS) == "Context Health Snapshots")
+        #expect(AppStrings.Worktrees.title(.enUS) == "Worktrees")
+        #expect(AppStrings.Worktrees.subtitle(.enUS) == "Git worktrees, context health, and agent load")
         #expect(AppStrings.Worktrees.snapshotCount(.enUS, count: 3) == "3 snapshots")
         #expect(AppStrings.Worktrees.refreshButton(.enUS) == "Refresh")
         #expect(AppStrings.Worktrees.emptySnapshots(.enUS) == "No context snapshots")
@@ -42,6 +44,7 @@ struct AppStringsWorktreesTests {
     @Test func allWorktreesStringsAreNonEmpty() {
         let strings: [(AppLocale) -> String] = [
             AppStrings.Worktrees.title,
+            AppStrings.Worktrees.subtitle,
             { AppStrings.Worktrees.snapshotCount($0, count: 1) },
             AppStrings.Worktrees.refreshButton,
             AppStrings.Worktrees.emptySnapshots,

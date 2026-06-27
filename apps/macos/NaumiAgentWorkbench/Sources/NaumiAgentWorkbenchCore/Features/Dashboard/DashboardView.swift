@@ -10,6 +10,13 @@ public struct DashboardView: View {
         self.appState = appState
     }
 
+    private var canvasFilterLabels: [String] {
+        if appState.locale == .zhCN {
+            return ["问题", "智能体", "工作区", "验证", "审批", "依赖"]
+        }
+        return ["Issues", "Agents", "Worktrees", "Validations", "Approvals", "Dependencies"]
+    }
+
     public var body: some View {
         Group {
             if let snapshot = appState.snapshot {
@@ -136,17 +143,37 @@ public struct DashboardView: View {
                         color: .indigo
                     )
                 }
-                railRow(icon: "square.grid.2x2", title: "Overview", subtitle: "", color: .secondary)
-                railRow(icon: "person.2", title: AppStrings.Dashboard.agentsSection(appState.locale), subtitle: "4", color: .purple)
-                railRow(icon: "point.3.connected.trianglepath.dotted", title: AppStrings.Dashboard.sharedCanvasSection(appState.locale), subtitle: "selected", color: .blue)
-                railRow(icon: "checkmark.circle", title: AppStrings.Dashboard.validationRunsLabel(appState.locale), subtitle: "12", color: .green)
+                railRow(
+                    icon: "square.grid.2x2",
+                    title: appState.locale == .zhCN ? "总览" : "Overview",
+                    subtitle: "",
+                    color: .secondary
+                )
+                railRow(
+                    icon: "person.2",
+                    title: AppStrings.Dashboard.agentsSection(appState.locale),
+                    subtitle: "\(presentation.agentRows.count)",
+                    color: .purple
+                )
+                railRow(
+                    icon: "point.3.connected.trianglepath.dotted",
+                    title: AppStrings.Dashboard.sharedCanvasSection(appState.locale),
+                    subtitle: appState.locale == .zhCN ? "已选中" : "selected",
+                    color: .blue
+                )
+                railRow(
+                    icon: "checkmark.circle",
+                    title: AppStrings.Dashboard.validationRunsLabel(appState.locale),
+                    subtitle: "\(presentation.taskRows.count)",
+                    color: .green
+                )
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     railSectionTitle(AppStrings.Dashboard.issueBacklogSection(appState.locale))
                     Spacer()
-                    Text("Priority")
+                    Text(appState.locale == .zhCN ? "优先级" : "Priority")
                         .font(.caption2)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
@@ -154,10 +181,22 @@ public struct DashboardView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 5))
                 }
                 HStack(spacing: 4) {
-                    miniFilter("All", "12", .blue)
-                    miniFilter("Active", "6", .secondary)
-                    miniFilter("Blocked", "2", .secondary)
-                    miniFilter("Done", "4", .secondary)
+                    miniFilter(appState.locale == .zhCN ? "全部" : "All", "\(market.rows.count)", .blue)
+                    miniFilter(
+                        appState.locale == .zhCN ? "活跃" : "Active",
+                        "\(market.rows.filter { $0.status != "Completed" && $0.status != "Done" }.count)",
+                        .secondary
+                    )
+                    miniFilter(
+                        appState.locale == .zhCN ? "阻塞" : "Blocked",
+                        "\(market.rows.filter { $0.status == "Blocked" }.count)",
+                        .secondary
+                    )
+                    miniFilter(
+                        appState.locale == .zhCN ? "完成" : "Done",
+                        "\(market.rows.filter { $0.status == "Completed" || $0.status == "Done" }.count)",
+                        .secondary
+                    )
                 }
 
                 ScrollView {
@@ -213,7 +252,10 @@ public struct DashboardView: View {
                             .foregroundStyle(riskColor(row.risk))
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
-                    Text("Agent: \(row.number % 3 == 0 ? "Test-Agent" : "Backend-Agent")")
+                    Text(appState.locale == .zhCN
+                        ? "智能体：\(row.number % 3 == 0 ? "Test-Agent" : "Backend-Agent")"
+                        : "Agent: \(row.number % 3 == 0 ? "Test-Agent" : "Backend-Agent")"
+                    )
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     HStack {
@@ -279,10 +321,10 @@ public struct DashboardView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Show:")
+                Text(appState.locale == .zhCN ? "显示：" : "Show:")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                ForEach(["Issues", "Agents", "Worktrees", "Validations", "Approvals", "Dependencies"], id: \.self) { item in
+                ForEach(canvasFilterLabels, id: \.self) { item in
                     Toggle(item, isOn: .constant(true))
                         .toggleStyle(.checkbox)
                         .font(.caption)
@@ -367,10 +409,13 @@ public struct DashboardView: View {
                     .font(.caption2)
                     .foregroundStyle(riskColor(row.risk))
             }
-            Text("Status: \(row.status)")
+            Text(appState.locale == .zhCN ? "状态：\(row.status)" : "Status: \(row.status)")
                 .font(.caption2)
                 .foregroundStyle(statusDotColor(row.status))
-            Text("Agent: \(row.number % 3 == 0 ? "Test-Agent" : "Backend-Agent")")
+            Text(appState.locale == .zhCN
+                ? "智能体：\(row.number % 3 == 0 ? "Test-Agent" : "Backend-Agent")"
+                : "Agent: \(row.number % 3 == 0 ? "Test-Agent" : "Backend-Agent")"
+            )
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -488,11 +533,11 @@ public struct DashboardView: View {
             Text(AppStrings.Dashboard.inspectorSection(appState.locale))
                 .font(.system(size: 14, weight: .semibold))
             Picker("", selection: .constant("Context")) {
-                Text("Context").tag("Context")
-                Text("Diff").tag("Diff")
-                Text("Tests").tag("Tests")
-                Text("Risk").tag("Risk")
-                Text("Approval").tag("Approval")
+                Text(appState.locale == .zhCN ? "上下文" : "Context").tag("Context")
+                Text(appState.locale == .zhCN ? "差异" : "Diff").tag("Diff")
+                Text(appState.locale == .zhCN ? "测试" : "Tests").tag("Tests")
+                Text(appState.locale == .zhCN ? "风险" : "Risk").tag("Risk")
+                Text(appState.locale == .zhCN ? "审批" : "Approval").tag("Approval")
             }
             .pickerStyle(.segmented)
 
@@ -533,9 +578,9 @@ public struct DashboardView: View {
                 title: appState.locale == .zhCN ? "验证状态" : "Validation State",
                 tone: .red,
                 lines: [
-                    "Latest Run: #23 (09:36)",
-                    "Result: pytest failed",
-                    "Tests: 12 failed, 3 passed"
+                    appState.locale == .zhCN ? "最近运行：#23 (09:36)" : "Latest Run: #23 (09:36)",
+                    appState.locale == .zhCN ? "结果：pytest failed" : "Result: pytest failed",
+                    appState.locale == .zhCN ? "测试：12 失败，3 通过" : "Tests: 12 failed, 3 passed"
                 ]
             )
 
@@ -543,9 +588,9 @@ public struct DashboardView: View {
                 title: appState.locale == .zhCN ? "上下文健康" : "Context Health",
                 tone: .orange,
                 lines: [
-                    "Overall: Stale",
-                    "Files Analyzed: 18",
-                    "Last Updated: 18m ago"
+                    appState.locale == .zhCN ? "整体：过期" : "Overall: Stale",
+                    appState.locale == .zhCN ? "已分析文件：18" : "Files Analyzed: 18",
+                    appState.locale == .zhCN ? "更新：18 分钟前" : "Last Updated: 18m ago"
                 ]
             )
 

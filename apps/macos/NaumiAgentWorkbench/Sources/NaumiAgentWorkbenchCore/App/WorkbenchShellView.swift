@@ -21,6 +21,10 @@ public struct WorkbenchShellView: View {
 
             Divider()
 
+            GlobalStatusStrip(appState: environment.appState)
+
+            Divider()
+
             routeView(for: appState.currentRoute)
         }
         .frame(minWidth: 1180, minHeight: 720)
@@ -62,6 +66,83 @@ public struct WorkbenchShellView: View {
                 appState: environment.appState,
                 daemonController: environment.daemonController
             )
+        }
+    }
+}
+
+private struct GlobalStatusStrip: View {
+    let appState: AppState
+
+    var body: some View {
+        let presentation = WorkbenchGlobalStatusPresentation(
+            snapshot: appState.snapshot,
+            approvals: appState.approvals,
+            validationRuns: appState.validationRuns,
+            failures: appState.failures,
+            locale: appState.locale
+        )
+
+        HStack(spacing: 10) {
+            ForEach(presentation.items) { item in
+                statusItem(item)
+                    .frame(
+                        minWidth: item.label == "Mission" ? 220 : 96,
+                        maxWidth: item.label == "Mission" ? 320 : 150,
+                        alignment: .leading
+                    )
+            }
+
+            Spacer(minLength: 8)
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 14)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 36)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .layoutPriority(3)
+    }
+
+    private func statusItem(_ item: WorkbenchGlobalStatusItem) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: item.systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(color(for: item.tone))
+                .frame(width: 14)
+
+            Text(item.label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Text(item.value)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(color(for: item.tone).opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func color(for tone: WorkbenchGlobalStatusTone) -> Color {
+        switch tone {
+        case .accent:
+            return .accentColor
+        case .blue:
+            return .blue
+        case .orange:
+            return .orange
+        case .pink:
+            return .pink
+        case .purple:
+            return .purple
+        case .red:
+            return .red
+        case .secondary:
+            return .secondary
         }
     }
 }
@@ -115,9 +196,9 @@ private struct TopNavigationBar: View {
             .controlSize(.small)
 
             Menu {
-                Button("Mac Agent Workbench MVP") {}
+                Button(currentMissionTitle) {}
             } label: {
-                Text("Mission")
+                Text(appState.locale == .zhCN ? "目标" : "Mission")
             }
             .menuStyle(.borderlessButton)
             .controlSize(.small)
@@ -145,6 +226,11 @@ private struct TopNavigationBar: View {
     private var workspaceLabel: String {
         let workspace = appState.selectedWorkspace ?? "~/naumi"
         return appState.locale == .zhCN ? "工作区: \(workspace)" : "Workspace: \(workspace)"
+    }
+
+    private var currentMissionTitle: String {
+        appState.snapshot?.missions.first?.title
+            ?? (appState.locale == .zhCN ? "Mac Agent Workbench MVP" : "Mac Agent Workbench MVP")
     }
 
     private var connectionColor: Color {

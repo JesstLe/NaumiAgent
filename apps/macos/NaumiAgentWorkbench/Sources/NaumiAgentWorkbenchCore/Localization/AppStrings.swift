@@ -80,6 +80,33 @@ public enum AppStrings {
         }
     }
 
+    // MARK: - Global Status
+    public enum GlobalStatus {
+        public static func noMission(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无 Mission" : "No Mission"
+        }
+
+        public static func activeAgents(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "智能体" : "Agents"
+        }
+
+        public static func openIssues(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "开放问题" : "Open Issues"
+        }
+
+        public static func blocked(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "阻塞" : "Blocked"
+        }
+
+        public static func pendingApproval(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "待审批" : "Pending Approval"
+        }
+
+        public static func failedValidations(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "验证失败" : "Failed Validations"
+        }
+    }
+
     // MARK: - Connection State
     public enum Connection {
         public static func connected(_ locale: AppLocale) -> String {
@@ -442,7 +469,11 @@ public enum AppStrings {
     // MARK: - Worktrees
     public enum Worktrees {
         public static func title(_ locale: AppLocale) -> String {
-            locale == .zhCN ? "上下文健康快照" : "Context Health Snapshots"
+            locale == .zhCN ? "工作区" : "Worktrees"
+        }
+
+        public static func subtitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "Git 工作区 / 上下文健康 / Agent 负载" : "Git worktrees, context health, and agent load"
         }
 
         public static func snapshotCount(_ locale: AppLocale, count: Int) -> String {

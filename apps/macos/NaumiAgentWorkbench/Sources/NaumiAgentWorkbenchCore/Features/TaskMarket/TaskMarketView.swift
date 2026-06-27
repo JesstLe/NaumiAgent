@@ -81,8 +81,8 @@ public struct TaskMarketView: View {
             }
             .buttonStyle(.bordered)
 
-            Menu(appState.locale == .zhCN ? "Mission" : "Mission") {
-                Button("Mac Agent Workbench MVP") {}
+            Menu(appState.locale == .zhCN ? "目标" : "Mission") {
+                Button(currentMissionTitle) {}
             }
         }
         .padding(.horizontal, 18)
@@ -91,13 +91,13 @@ public struct TaskMarketView: View {
 
     private func filterRail(presentation: TaskMarketDesignPresentation) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(appState.locale == .zhCN ? "MISSION" : "MISSION")
+            Text(appState.locale == .zhCN ? "目标" : "MISSION")
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
-                Text("Mac Agent Workbench MVP")
+                Text(currentMissionTitle)
                     .font(.caption)
                     .fontWeight(.medium)
                     .lineLimit(1)
@@ -209,7 +209,10 @@ public struct TaskMarketView: View {
                 .help(appState.locale == .zhCN ? "筛选" : "Filter")
 
                 Spacer()
-                Text("\(presentation.rows.count + 7) issues")
+                Text(appState.locale == .zhCN
+                    ? "\(presentation.rows.count) 个 issue"
+                    : "\(presentation.rows.count) issues"
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button(appState.locale == .zhCN ? "列" : "Columns") {}
@@ -352,7 +355,7 @@ public struct TaskMarketView: View {
                         .font(.headline)
                     Spacer()
                     Menu(appState.locale == .zhCN ? "置信度" : "Confidence") {
-                        Button("Confidence") {}
+                        Button(appState.locale == .zhCN ? "置信度" : "Confidence") {}
                     }
                 }
 
@@ -381,16 +384,16 @@ public struct TaskMarketView: View {
     private func inspectorGrid(_ issue: TaskMarketDesignIssue) -> some View {
         Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
             GridRow {
-                inspectorLabel(appState.locale == .zhCN ? "Mission" : "Mission")
-                Text("Mac Agent Workbench MVP")
+                inspectorLabel(appState.locale == .zhCN ? "目标" : "Mission")
+                Text(currentMissionTitle)
             }
             GridRow {
                 inspectorLabel(appState.locale == .zhCN ? "创建时间" : "Created")
-                Text("May 22, 2025 09:14")
+                Text(appState.locale == .zhCN ? "2026-06-27 09:14" : "Jun 27, 2026 09:14")
             }
             GridRow {
                 inspectorLabel(appState.locale == .zhCN ? "上下文健康" : "Context Health")
-                StatusBadge(text: "Good", color: .green)
+                StatusBadge(text: appState.locale == .zhCN ? "健康" : "Good", color: .green)
             }
             GridRow {
                 inspectorLabel(appState.locale == .zhCN ? "测试数" : "Tests")
@@ -398,7 +401,10 @@ public struct TaskMarketView: View {
             }
             GridRow {
                 inspectorLabel(appState.locale == .zhCN ? "风险摘要" : "Risk Summary")
-                Text(issue.risk == "High" ? "Concurrency bugs, lost leases" : "Low blast radius")
+                Text(issue.risk == "High"
+                    ? (appState.locale == .zhCN ? "并发缺陷、租约丢失" : "Concurrency bugs, lost leases")
+                    : (appState.locale == .zhCN ? "影响面较低" : "Low blast radius")
+                )
             }
         }
         .font(.caption)
@@ -417,10 +423,10 @@ public struct TaskMarketView: View {
                 Text(bid.agent)
                     .font(.system(size: 14, weight: .semibold))
                 if bid.isLatest {
-                    StatusBadge(text: "Latest", color: .blue)
+                    StatusBadge(text: appState.locale == .zhCN ? "最新" : "Latest", color: .blue)
                 }
                 Spacer()
-                Text("confidence")
+                Text(appState.locale == .zhCN ? "置信度" : "confidence")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Text(bid.confidence)
@@ -430,9 +436,9 @@ public struct TaskMarketView: View {
             }
 
             HStack {
-                inspectorLabel("Est. Files:")
+                inspectorLabel(appState.locale == .zhCN ? "预计文件：" : "Est. Files:")
                 Text(bid.estimate)
-                inspectorLabel("ETA:")
+                inspectorLabel(appState.locale == .zhCN ? "预计耗时：" : "ETA:")
                 Text(bid.eta)
             }
             .font(.caption)
@@ -498,9 +504,9 @@ public struct TaskMarketView: View {
             Text(lease.worktree)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            Text("Owner: \(lease.owner)")
+            Text(appState.locale == .zhCN ? "负责人：\(lease.owner)" : "Owner: \(lease.owner)")
                 .font(.caption2)
-            Text("Lease Expires: \(lease.time)")
+            Text(appState.locale == .zhCN ? "租约到期：\(lease.time)" : "Lease Expires: \(lease.time)")
                 .font(.caption2)
                 .foregroundStyle(color(forTone: lease.tone))
             HStack {
@@ -536,7 +542,7 @@ public struct TaskMarketView: View {
             Toggle(appState.locale == .zhCN ? "自动刷新" : "Auto-refresh", isOn: $autoRefresh)
                 .toggleStyle(.switch)
                 .font(.caption)
-            Text("Workspace: ~/naumi")
+            Text(appState.locale == .zhCN ? "工作区：~/naumi" : "Workspace: ~/naumi")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text("v0.3.0")
@@ -546,6 +552,11 @@ public struct TaskMarketView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var currentMissionTitle: String {
+        appState.snapshot?.missions.first?.title
+            ?? (appState.locale == .zhCN ? "Mac Agent Workbench MVP" : "Mac Agent Workbench MVP")
     }
 
     private func modeBadge(_ mode: String) -> some View {

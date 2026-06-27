@@ -55,7 +55,10 @@ public struct ReviewsView: View {
 
     private func pageHeader(selected: ReviewDesignItem) -> some View {
         HStack(spacing: 12) {
-            Text("Review: \(selected.title) (#\(selected.number))")
+            Text(appState.locale == .zhCN
+                ? "审查：\(selected.title) (#\(selected.number))"
+                : "Review: \(selected.title) (#\(selected.number))"
+            )
                 .font(.system(size: 17, weight: .semibold))
             Text(appState.locale == .zhCN ? "高风险：需要人工审批" : "High Risk: Human Approval Required")
                 .font(.caption)
@@ -70,7 +73,7 @@ public struct ReviewsView: View {
                 Circle()
                     .fill(.green)
                     .frame(width: 7, height: 7)
-                Text("Workspace: ~/naumi")
+                Text(appState.locale == .zhCN ? "工作区：~/naumi" : "Workspace: ~/naumi")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -155,7 +158,7 @@ public struct ReviewsView: View {
                 Spacer()
             }
             HStack {
-                Text("Worktree:")
+                Text(appState.locale == .zhCN ? "工作区：" : "Worktree:")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(item.worktree)
@@ -196,11 +199,11 @@ public struct ReviewsView: View {
 
     private func metaStrip(_ selected: ReviewDesignItem) -> some View {
         HStack(spacing: 24) {
-            metaItem(icon: "clock", text: "Opened: May 22, 2025 09:28")
-            metaItem(icon: "arrow.clockwise", text: "Updated: May 22, 2025 09:36")
-            metaItem(icon: "folder", text: "Worktree: \(selected.worktree)")
-            metaItem(icon: "arrow.triangle.branch", text: "Base: main")
-            metaItem(icon: "arrow.left.arrow.right", text: "Compare: issue-3-market")
+            metaItem(icon: "clock", text: appState.locale == .zhCN ? "打开：2026-06-27 09:28" : "Opened: Jun 27, 2026 09:28")
+            metaItem(icon: "arrow.clockwise", text: appState.locale == .zhCN ? "更新：2026-06-27 09:36" : "Updated: Jun 27, 2026 09:36")
+            metaItem(icon: "folder", text: appState.locale == .zhCN ? "工作区：\(selected.worktree)" : "Worktree: \(selected.worktree)")
+            metaItem(icon: "arrow.triangle.branch", text: appState.locale == .zhCN ? "基线：main" : "Base: main")
+            metaItem(icon: "arrow.left.arrow.right", text: appState.locale == .zhCN ? "对比：issue-3-market" : "Compare: issue-3-market")
             Spacer()
         }
         .padding(.horizontal, 18)
@@ -335,8 +338,8 @@ public struct ReviewsView: View {
                     .fontWeight(.semibold)
                 Spacer()
                 Picker("", selection: .constant("Side-by-side")) {
-                    Text("Side-by-side").tag("Side-by-side")
-                    Text("Unified").tag("Unified")
+                    Text(appState.locale == .zhCN ? "并排" : "Side-by-side").tag("Side-by-side")
+                    Text(appState.locale == .zhCN ? "统一" : "Unified").tag("Unified")
                 }
                 .labelsHidden()
                 .frame(width: 150)
@@ -354,7 +357,7 @@ public struct ReviewsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
                 Divider()
-                Text("issue-3-market (Current)")
+                Text(appState.locale == .zhCN ? "issue-3-market（当前）" : "issue-3-market (Current)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -400,8 +403,8 @@ public struct ReviewsView: View {
                 Text(appState.locale == .zhCN ? "审查时间线" : "REVIEW TIMELINE")
                     .font(.caption)
                     .fontWeight(.semibold)
-                Picker("", selection: .constant("All Events")) {
-                    Text("All Events").tag("All Events")
+                Picker("", selection: .constant("all")) {
+                    Text(appState.locale == .zhCN ? "全部事件" : "All Events").tag("all")
                 }
                 .labelsHidden()
                 .frame(width: 118)
@@ -410,10 +413,10 @@ public struct ReviewsView: View {
 
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 5) {
                 GridRow {
-                    timelineHeader("Time")
-                    timelineHeader("Event")
-                    timelineHeader("Actor")
-                    timelineHeader("Details")
+                    timelineHeader(appState.locale == .zhCN ? "时间" : "Time")
+                    timelineHeader(appState.locale == .zhCN ? "事件" : "Event")
+                    timelineHeader(appState.locale == .zhCN ? "执行者" : "Actor")
+                    timelineHeader(appState.locale == .zhCN ? "详情" : "Details", isDetails: true)
                 }
                 ForEach(events) { event in
                     GridRow {
@@ -433,11 +436,11 @@ public struct ReviewsView: View {
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    private func timelineHeader(_ text: String) -> some View {
+    private func timelineHeader(_ text: String, isDetails: Bool = false) -> some View {
         Text(text)
             .font(.caption2)
             .foregroundStyle(.secondary)
-            .frame(minWidth: text == "Details" ? 330 : 92, alignment: .leading)
+            .frame(minWidth: isDetails ? 330 : 92, alignment: .leading)
     }
 
     private func reviewInspector(presentation: ReviewsDesignPresentation, selected: ReviewDesignItem) -> some View {
