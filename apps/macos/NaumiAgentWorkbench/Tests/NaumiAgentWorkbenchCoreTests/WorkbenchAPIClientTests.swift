@@ -115,6 +115,24 @@ final class WorkbenchAPIClientTests {
         }
     }
 
+    @Test func cannotConnectToHostThrowsNetworkFailure() async {
+        MockURLProtocol.requestHandler = { _ in
+            throw URLError(.cannotConnectToHost)
+        }
+
+        let client = makeClient()
+        do {
+            _ = try await client.fetchCapabilities()
+            Issue.record("Expected fetchCapabilities() to throw")
+        } catch {
+            if case .networkFailure(let detail) = error {
+                #expect(!detail.isEmpty)
+            } else {
+                Issue.record("Expected APIError.networkFailure, got \(error)")
+            }
+        }
+    }
+
     @Test func fetchSessions() async throws {
         let json = Data(
             """
