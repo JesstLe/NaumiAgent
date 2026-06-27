@@ -18,6 +18,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var failuresResult: Result<FailuresDTO, APIError>?
     var issuesResult: Result<IssuesDTO, APIError>?
     var leasesResult: Result<LeasesDTO, APIError>?
+    var worktreesResult: Result<WorktreesDTO, APIError>?
+    var worktreeResult: Result<WorktreeDTO, APIError>?
+    var keepWorktreeResult: Result<WorktreeDTO, APIError>?
     var missionsResult: Result<MissionsDTO, APIError>?
     var agentProfilesResult: Result<AgentProfilesDTO, APIError>?
     var registerAgentProfileResult: Result<AgentProfileDTO, APIError>?
@@ -203,6 +206,37 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> LeasesDTO {
         guard let result = leasesResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchWorktrees(
+        sessionID: String,
+        taskID: String?,
+        status: String?,
+        limit: Int
+    ) async throws(APIError) -> WorktreesDTO {
+        guard let result = worktreesResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchWorktree(sessionID: String, name: String) async throws(APIError) -> WorktreeDTO {
+        guard let result = worktreeResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func keepWorktree(
+        sessionID: String,
+        name: String,
+        actor: String,
+        reason: String
+    ) async throws(APIError) -> WorktreeDTO {
+        guard let result = keepWorktreeResult else {
             throw .invalidResponse
         }
         return try result.get()

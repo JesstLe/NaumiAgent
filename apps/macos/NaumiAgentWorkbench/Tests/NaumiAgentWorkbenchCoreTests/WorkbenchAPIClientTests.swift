@@ -934,6 +934,146 @@ final class WorkbenchAPIClientTests {
         #expect(response.leases.isEmpty)
     }
 
+    @Test func fetchWorktreesWithFilters() async throws {
+        let sessionID = "sess 中文"
+        let taskID = "task 001/审查"
+        let json = Data(
+            """
+            {"worktrees":[{"name":"wt-api","path":"/repo/.naumi/worktrees/wt-api","branch":"naumi/worktree-wt-api","base_ref":"abc123","status":"clean","task_id":"task 001/审查","dirty_files":0,"commits_ahead":0,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","kept_reason":"","metadata":{"owner":"Backend-Agent"},"removable":true}],"task_id":"task 001/审查","status":"clean","limit":25}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/worktrees",
+                  query["limit"] == "25",
+                  query["task_id"] == taskID,
+                  query["status"] == "clean" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchWorktrees(
+            sessionID: sessionID,
+            taskID: taskID,
+            status: "clean",
+            limit: 25
+        )
+
+        #expect(response.taskID == taskID)
+        #expect(response.status == "clean")
+        #expect(response.limit == 25)
+        #expect(response.worktrees.count == 1)
+
+        let worktree = try #require(response.worktrees.first)
+        #expect(worktree.name == "wt-api")
+        #expect(worktree.path == "/repo/.naumi/worktrees/wt-api")
+        #expect(worktree.branch == "naumi/worktree-wt-api")
+        #expect(worktree.baseRef == "abc123")
+        #expect(worktree.status == "clean")
+        #expect(worktree.taskID == taskID)
+        #expect(worktree.dirtyFiles == 0)
+        #expect(worktree.commitsAhead == 0)
+        #expect(worktree.keptReason == "")
+        #expect(worktree.metadata == ["owner": "Backend-Agent"])
+        #expect(worktree.removable)
+    }
+
+    @Test func fetchWorktreeEncodesPathComponents() async throws {
+        let sessionID = "sess/中文"
+        let worktreeName = "wt-审查"
+        let json = Data(
+            """
+            {"name":"wt-审查","path":"/repo/.naumi/worktrees/wt-review","branch":"naumi/worktree-wt-review","base_ref":"abc123","status":"dirty","task_id":"task-1","dirty_files":2,"commits_ahead":1,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:05:00","kept_reason":"","metadata":{"agent_id":"Reviewer-Agent"},"removable":false}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%2F%E4%B8%AD%E6%96%87/worktrees/wt-%E5%AE%A1%E6%9F%A5" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let worktree = try await client.fetchWorktree(sessionID: sessionID, name: worktreeName)
+
+        #expect(worktree.name == worktreeName)
+        #expect(worktree.status == "dirty")
+        #expect(worktree.dirtyFiles == 2)
+        #expect(worktree.commitsAhead == 1)
+        #expect(worktree.metadata == ["agent_id": "Reviewer-Agent"])
+        #expect(!worktree.removable)
+    }
+
+    @Test func keepWorktreeUsesPOSTAndEncodesBody() async throws {
+        let json = Data(
+            """
+            {"name":"wt-api","path":"/repo/.naumi/worktrees/wt-api","branch":"naumi/worktree-wt-api","base_ref":"abc123","status":"kept","task_id":"task-1","dirty_files":2,"commits_ahead":1,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","kept_reason":"等待人工审查","metadata":{},"removable":false}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/worktrees/wt-api/keep" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard payload?["actor"] as? String == "Reviewer-Agent",
+                  payload?["reason"] as? String == "等待人工审查" else {
+                fatalError("Unexpected body: \(String(describing: payload))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let worktree = try await client.keepWorktree(
+            sessionID: "sess-001",
+            name: "wt-api",
+            actor: "Reviewer-Agent",
+            reason: "等待人工审查"
+        )
+
+        #expect(worktree.name == "wt-api")
+        #expect(worktree.status == "kept")
+        #expect(worktree.keptReason == "等待人工审查")
+        #expect(!worktree.removable)
+    }
+
     @Test func fetchMissionsWithStatus() async throws {
         let json = Data(
             """

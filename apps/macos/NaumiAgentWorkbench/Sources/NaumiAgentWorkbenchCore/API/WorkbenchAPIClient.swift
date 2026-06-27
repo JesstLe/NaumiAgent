@@ -219,6 +219,42 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchWorktrees(
+        sessionID: String,
+        taskID: String?,
+        status: String?,
+        limit: Int
+    ) async throws(APIError) -> WorktreesDTO {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let taskID, !taskID.isEmpty {
+            queryItems.append(URLQueryItem(name: "task_id", value: taskID))
+        }
+        if let status, !status.isEmpty {
+            queryItems.append(URLQueryItem(name: "status", value: status))
+        }
+        return try await get(
+            path: encodePath("workbench", "sessions", sessionID, "worktrees"),
+            queryItems: queryItems
+        )
+    }
+
+    public func fetchWorktree(sessionID: String, name: String) async throws(APIError) -> WorktreeDTO {
+        try await get(path: encodePath("workbench", "sessions", sessionID, "worktrees", name))
+    }
+
+    public func keepWorktree(
+        sessionID: String,
+        name: String,
+        actor: String,
+        reason: String
+    ) async throws(APIError) -> WorktreeDTO {
+        let body = KeepWorktreeRequest(actor: actor, reason: reason)
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "worktrees", name, "keep"),
+            body: body
+        )
+    }
+
     public func fetchMissions(
         sessionID: String,
         status: String?,
@@ -592,6 +628,12 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         let tokenLoadRatio: Double
         let policyConflict: Bool
         let actor: String
+    }
+
+    /// Payload for `POST /workbench/sessions/{session_id}/worktrees/{name}/keep`.
+    private struct KeepWorktreeRequest: Encodable, Sendable {
+        let actor: String
+        let reason: String
     }
 
     /// Payload for `POST /workbench/sessions/{session_id}/missions`.
