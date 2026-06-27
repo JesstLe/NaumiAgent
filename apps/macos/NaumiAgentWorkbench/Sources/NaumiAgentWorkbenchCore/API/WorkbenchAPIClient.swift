@@ -6,13 +6,16 @@ import Foundation
 public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     public let baseURL: URL
     public let session: URLSession
+    private let bearerToken: String?
 
     /// - Parameters:
     ///   - baseURL: Default `http://127.0.0.1:8765/api/v1`.
     ///   - session: Inject a custom `URLSession` for previews/tests.
+    ///   - bearerToken: Optional `Authorization: Bearer <token>` token.
     public init(
         baseURL: URL = URL(string: "http://127.0.0.1:8765/api/v1/")!,
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        bearerToken: String? = nil
     ) {
         // Ensure the base URL ends with a slash so relative paths resolve correctly.
         let baseURLString = baseURL.absoluteString
@@ -22,6 +25,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             self.baseURL = URL(string: baseURLString + "/")!
         }
         self.session = session
+        self.bearerToken = bearerToken
     }
 
     public func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
@@ -393,6 +397,11 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     }
 
     private func performRequest<T: Decodable & Sendable>(_ request: URLRequest) async throws(APIError) -> T {
+        var request = request
+        if let token = bearerToken, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
         let data: Data
         let response: URLResponse
         do {
