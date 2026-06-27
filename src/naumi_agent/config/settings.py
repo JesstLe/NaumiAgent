@@ -64,7 +64,7 @@ class APIConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NAUMI_API__")
 
     host: str = "127.0.0.1"
-    port: int = 8080
+    port: int = 8765
     workers: int = 1
     api_keys: list[str] = Field(default_factory=list)
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])

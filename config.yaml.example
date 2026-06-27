@@ -39,7 +39,9 @@ api:
   # 只有在明确需要外部网络访问时，才可显式设置为 "0.0.0.0"，
   # 并务必同时配置 api_keys 和 cors_origins 进行加固。
   host: "127.0.0.1"
-  port: 8080
+  # 默认端口 8765 与 Mac Workbench 本地 daemon 约定保持一致；
+  # 如需使用其他端口，可显式覆盖或通过 --port 传入。
+  port: 8765
   # 公开部署请配置，例如：["naumi-local-key-please-change"]
   api_keys: []
   cors_origins: ["*"]

@@ -1283,20 +1283,29 @@ def serve(
         "-h",
         help="监听地址（默认 127.0.0.1，仅本地访问；如需暴露网络请显式指定 0.0.0.0）",
     ),
-    port: int = typer.Option(8080, "--port", "-p", help="监听端口"),
+    port: int | None = typer.Option(
+        None,
+        "--port",
+        "-p",
+        help="监听端口（默认 8765，与 Mac Workbench 本地 daemon 一致；支持 --port 显式覆盖）",
+    ),
     config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
     reload: bool = typer.Option(False, "--reload", help="开发模式热重载"),
 ) -> None:
     """启动 REST API 服务."""
     import uvicorn
 
-    os.environ["NAUMI_CONFIG"] = _resolve_config_path(config)
+    resolved_config = _resolve_config_path(config)
+    os.environ["NAUMI_CONFIG"] = resolved_config
+
+    cfg = AppConfig.from_yaml(resolved_config)
+    final_port = port if port is not None else cfg.api.port
 
     if reload:
         uvicorn.run(
             "naumi_agent.api.app:app",
             host=host,
-            port=port,
+            port=final_port,
             reload=True,
             reload_dirs=["src/naumi_agent"],
         )
@@ -1304,7 +1313,7 @@ def serve(
         uvicorn.run(
             "naumi_agent.api.app:app",
             host=host,
-            port=port,
+            port=final_port,
             workers=1,
             log_level="info",
         )

@@ -93,7 +93,15 @@ class TestAppConfig:
     def test_api_host_defaults_to_localhost(self) -> None:
         assert AppConfig().api.host == "127.0.0.1"
 
+    def test_api_port_defaults_to_mac_workbench_daemon_port(self) -> None:
+        assert AppConfig().api.port == 8765
+
     def test_api_host_from_example_yaml(self) -> None:
-        example_path = Path(__file__).resolve().parents[3] / "config.yaml.example"
+        example_path = Path(__file__).resolve().parents[2] / "config.yaml.example"
         config = AppConfig.from_yaml(example_path)
         assert config.api.host == "127.0.0.1"
+
+    def test_api_port_from_example_yaml(self) -> None:
+        example_path = Path(__file__).resolve().parents[2] / "config.yaml.example"
+        config = AppConfig.from_yaml(example_path)
+        assert config.api.port == 8765
