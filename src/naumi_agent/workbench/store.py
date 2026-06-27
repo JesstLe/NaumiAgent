@@ -903,12 +903,31 @@ class WorkbenchStore:
                 params,
             )
             rows = await cursor.fetchall()
-        snapshots: list[dict[str, Any]] = []
-        for row in reversed(rows):
-            snapshot = dict(row)
-            snapshot["reasons"] = cast(list[str], json.loads(snapshot["reasons"]))
-            snapshots.append(snapshot)
-        return snapshots
+        return [self._context_snapshot_from_row(row) for row in reversed(rows)]
+
+    @staticmethod
+    def _context_snapshot_from_row(row: aiosqlite.Row) -> dict[str, Any]:
+        snapshot = dict(row)
+        snapshot["reasons"] = cast(list[str], json.loads(snapshot["reasons"]))
+        return snapshot
+
+    async def get_context_snapshot(
+        self,
+        session_id: str,
+        snapshot_id: str,
+    ) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_context_snapshots
+                   WHERE session_id = ? AND id = ?""",
+                (session_id, snapshot_id),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._context_snapshot_from_row(row)
 
     async def record_validation_run(
         self,

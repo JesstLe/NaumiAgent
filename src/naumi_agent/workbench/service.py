@@ -484,6 +484,16 @@ class WorkbenchService:
             session_id, task_id=task_id, agent_id=agent_id, limit=limit
         )
 
+    async def get_context_snapshot(
+        self,
+        session_id: str,
+        snapshot_id: str,
+    ) -> dict[str, Any] | None:
+        return await self._workbench_store.get_context_snapshot(
+            session_id,
+            snapshot_id,
+        )
+
     async def record_context_health(
         self,
         *,

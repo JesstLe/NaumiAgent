@@ -92,6 +92,7 @@ class _FakeWorkbenchService:
         self.listed_validation_runs: list[dict] = []
         self.requested_validation_runs: list[dict] = []
         self.listed_context_snapshots: list[dict] = []
+        self.requested_context_snapshots: list[dict] = []
         self.listed_approvals: list[dict] = []
         self.listed_agent_profiles: list[dict] = []
         self.listed_failures: list[dict] = []
@@ -522,6 +523,22 @@ class _FakeWorkbenchService:
                 "created_at": "2024-01-01T00:00:00",
             }
         ]
+
+    async def get_context_snapshot(self, session_id: str, snapshot_id: str):
+        self.requested_context_snapshots.append(
+            {"session_id": session_id, "snapshot_id": snapshot_id}
+        )
+        if snapshot_id == "missing-snapshot":
+            return None
+        return {
+            "id": snapshot_id,
+            "session_id": session_id,
+            "agent_id": "agent-1",
+            "task_id": "task-1",
+            "health": "good",
+            "reasons": ["上下文健康"],
+            "created_at": "2024-01-01T00:00:00",
+        }
 
     async def record_context_health(
         self,
@@ -1392,6 +1409,54 @@ async def test_get_context_snapshots_endpoint_returns_snapshots_and_params() -> 
         "agent_id": "agent-2",
         "limit": 25,
     }
+
+
+@pytest.mark.asyncio
+async def test_get_context_snapshot_endpoint_returns_single_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get(
+        "/workbench/sessions/sess-1/context-snapshots/snap-2",
+        headers={"Authorization": "Bearer local-token"},
+    )
+
+    assert response.status_code == 200
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_context_snapshots == [
+        {"session_id": "sess-1", "snapshot_id": "snap-2"}
+    ]
+    assert response.json() == {
+        "id": "snap-2",
+        "session_id": "sess-1",
+        "agent_id": "agent-1",
+        "task_id": "task-1",
+        "health": "good",
+        "reasons": ["上下文健康"],
+        "created_at": "2024-01-01T00:00:00",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_context_snapshot_endpoint_returns_404_for_missing_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get(
+        "/workbench/sessions/sess-1/context-snapshots/missing-snapshot",
+        headers={"Authorization": "Bearer local-token"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "上下文快照不存在"
 
 
 @pytest.mark.asyncio
