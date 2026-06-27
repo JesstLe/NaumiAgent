@@ -71,6 +71,16 @@ public protocol WorkbenchAPIProviding: Sendable {
         requireProposalForRisk: String
     ) async throws(APIError) -> IntentLockDTO
 
+    /// Creates a decision for the given mission.
+    func createDecision(
+        sessionID: String,
+        missionID: String,
+        kind: String,
+        title: String,
+        content: String,
+        actor: String
+    ) async throws(APIError) -> DecisionDTO
+
     /// Runs a validation command in the given session and returns its result.
     func runValidation(
         sessionID: String,

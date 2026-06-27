@@ -14,12 +14,14 @@ from fastapi import HTTPException
 from naumi_agent import __version__
 from naumi_agent.api.routes.workbench import (
     ClaimIssue,
+    DecisionCreate,
     IntentLockCreate,
     IssueAttach,
     MissionCreate,
     ValidationRunCreate,
     attach_workbench_issue,
     claim_workbench_issue,
+    create_decision,
     create_intent_lock,
     create_validation_run,
     create_workbench_mission,
@@ -34,6 +36,7 @@ from naumi_agent.api.routes.workbench import (
 )
 from naumi_agent.workbench.models import (
     ContextHealth,
+    DecisionKind,
     Lease,
     LeaseState,
     Mission,
@@ -57,18 +60,23 @@ class _FakeWorkbenchService:
         self.created_missions: list[dict] = []
         self.attached_issues: list[dict] = []
         self.created_intent_locks: list[dict] = []
+        self.created_decisions: list[dict] = []
         self.run_validations: list[dict] = []
         self.listed_events: list[dict] = []
         self.listed_validation_runs: list[dict] = []
         self.listed_context_snapshots: list[dict] = []
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
+        self._decision_error: Exception | None = None
 
     def set_run_validation_error(self, error: Exception) -> None:
         self._run_validation_error = error
 
     def set_intent_lock_error(self, error: Exception) -> None:
         self._intent_lock_error = error
+
+    def set_decision_error(self, error: Exception) -> None:
+        self._decision_error = error
 
     async def dashboard_snapshot(self, session_id: str):
         return {
@@ -161,6 +169,39 @@ class _FakeWorkbenchService:
             "allowed_paths": list(allowed_paths or []),
             "require_proposal_for_risk": require_proposal_for_risk.value,
             "active": True,
+            "created_at": "2024-01-01T00:00:00",
+        }
+
+    async def create_decision(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        actor: str,
+        kind: DecisionKind,
+        title: str,
+        content: str,
+    ):
+        self.created_decisions.append(
+            {
+                "session_id": session_id,
+                "mission_id": mission_id,
+                "actor": actor,
+                "kind": kind,
+                "title": title,
+                "content": content,
+            }
+        )
+        if self._decision_error is not None:
+            raise self._decision_error
+        return {
+            "id": "decision-1",
+            "session_id": session_id,
+            "mission_id": mission_id,
+            "kind": kind.value,
+            "title": title,
+            "content": content,
+            "actor": actor,
             "created_at": "2024-01-01T00:00:00",
         }
 
@@ -907,3 +948,88 @@ async def test_create_intent_lock_endpoint_maps_value_error_to_400() -> None:
 
     assert exc.value.status_code == 400
     assert exc.value.detail == "意图锁规则不能为空"
+
+
+@pytest.mark.asyncio
+async def test_create_decision_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+    body = DecisionCreate(title="采用 FastAPI", content="使用 FastAPI 承载 Workbench API")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_decision("missing", "mission-1", body, _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_create_decision_endpoint_returns_created_decision() -> None:
+    engine = _FakeEngine(exists=True)
+    body = DecisionCreate(
+        actor="Planner-Agent",
+        kind=DecisionKind.ARCHITECTURE,
+        title="采用 FastAPI",
+        content="使用 FastAPI 承载 Workbench API",
+    )
+
+    response = await create_decision(
+        "sess-1", "mission-1", body, _fake_request(engine), auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.created_decisions == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-1",
+            "actor": "Planner-Agent",
+            "kind": DecisionKind.ARCHITECTURE,
+            "title": "采用 FastAPI",
+            "content": "使用 FastAPI 承载 Workbench API",
+        }
+    ]
+    assert response["id"] == "decision-1"
+    assert response["session_id"] == "sess-1"
+    assert response["mission_id"] == "mission-1"
+    assert response["kind"] == "architecture"
+    assert response["title"] == "采用 FastAPI"
+    assert response["content"] == "使用 FastAPI 承载 Workbench API"
+    assert response["actor"] == "Planner-Agent"
+
+
+@pytest.mark.asyncio
+async def test_create_decision_endpoint_uses_default_actor_and_kind() -> None:
+    engine = _FakeEngine(exists=True)
+    body = DecisionCreate(
+        title="默认治理决策",
+        content="未显式传 actor/kind 时使用产品默认值",
+    )
+
+    response = await create_decision(
+        "sess-1", "mission-1", body, _fake_request(engine), auth="test"
+    )
+
+    assert engine.workbench_service.created_decisions == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-1",
+            "actor": "Human",
+            "kind": DecisionKind.ARCHITECTURE,
+            "title": "默认治理决策",
+            "content": "未显式传 actor/kind 时使用产品默认值",
+        }
+    ]
+    assert response["actor"] == "Human"
+    assert response["kind"] == "architecture"
+
+
+@pytest.mark.asyncio
+async def test_create_decision_endpoint_maps_value_error_to_400() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_decision_error(ValueError("决策标题不能为空"))
+    body = DecisionCreate(title="   ", content="内容")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_decision("sess-1", "mission-1", body, _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "决策标题不能为空"

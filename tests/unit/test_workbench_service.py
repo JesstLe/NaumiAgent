@@ -5,7 +5,7 @@ import sys
 import pytest
 
 from naumi_agent.tasks.store import TaskStore
-from naumi_agent.workbench.models import ContextHealth, LeaseState, RiskLevel
+from naumi_agent.workbench.models import ContextHealth, DecisionKind, LeaseState, RiskLevel
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.workbench.validation import ValidationRunner
@@ -331,3 +331,69 @@ async def test_create_intent_lock_rejects_empty_rule(tmp_path) -> None:
         )
 
     assert await workbench_store.list_intent_locks("s", "mission-1") == []
+
+
+@pytest.mark.asyncio
+async def test_create_decision_persists_decision_and_records_event(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    decision = await service.create_decision(
+        session_id="s",
+        mission_id="mission-1",
+        actor="Planner-Agent",
+        kind=DecisionKind.ARCHITECTURE,
+        title=" 采用 FastAPI ",
+        content=" 使用 FastAPI 承载 Workbench API ",
+    )
+
+    assert decision["session_id"] == "s"
+    assert decision["mission_id"] == "mission-1"
+    assert decision["title"] == "采用 FastAPI"
+    assert decision["content"] == "使用 FastAPI 承载 Workbench API"
+    assert decision["actor"] == "Planner-Agent"
+    assert decision["kind"] == "architecture"
+
+    decisions = await workbench_store.list_decisions("s", "mission-1")
+    assert any(stored.id == decision["id"] for stored in decisions)
+
+    events = await service.list_events("s")
+    event = next((e for e in events if e["type"] == "decision.created"), None)
+    assert event is not None
+    assert event["actor"] == "Planner-Agent"
+    assert event["subject_id"] == decision["id"]
+    assert event["payload"]["mission_id"] == "mission-1"
+    assert event["payload"]["kind"] == "architecture"
+    assert event["payload"]["title"] == "采用 FastAPI"
+
+
+@pytest.mark.asyncio
+async def test_create_decision_rejects_empty_title_or_content(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    with pytest.raises(ValueError, match="决策标题不能为空"):
+        await service.create_decision(
+            session_id="s",
+            mission_id="mission-1",
+            actor="Human",
+            kind=DecisionKind.POLICY,
+            title="   ",
+            content="有效内容",
+        )
+
+    with pytest.raises(ValueError, match="决策内容不能为空"):
+        await service.create_decision(
+            session_id="s",
+            mission_id="mission-1",
+            actor="Human",
+            kind=DecisionKind.POLICY,
+            title="有效标题",
+            content="",
+        )
+
+    assert await workbench_store.list_decisions("s", "mission-1") == []

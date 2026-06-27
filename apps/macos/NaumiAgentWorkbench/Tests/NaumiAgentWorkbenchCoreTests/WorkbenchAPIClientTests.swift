@@ -773,6 +773,62 @@ final class WorkbenchAPIClientTests {
         #expect(lock.createdAt == "2026-06-27T06:00:00")
     }
 
+    @Test func createDecisionUsesPOSTAndEncodesPathAndBody() async throws {
+        let sessionID = "sess 中文"
+        let missionID = "mission 中文"
+        let decisionJSON = Data(
+            """
+            {"id":"decision-001","session_id":"sess 中文","mission_id":"mission 中文","kind":"architecture","title":"采用 FastAPI","content":"使用 FastAPI 承载 Workbench API","actor":"Planner-Agent","created_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/missions/mission%20%E4%B8%AD%E6%96%87/decisions" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["actor"] as? String == "Planner-Agent",
+                  json?["kind"] as? String == "architecture",
+                  json?["title"] as? String == "采用 FastAPI",
+                  json?["content"] as? String == "使用 FastAPI 承载 Workbench API" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, decisionJSON)
+        }
+
+        let client = makeClient()
+        let decision = try await client.createDecision(
+            sessionID: sessionID,
+            missionID: missionID,
+            kind: "architecture",
+            title: "采用 FastAPI",
+            content: "使用 FastAPI 承载 Workbench API",
+            actor: "Planner-Agent"
+        )
+
+        #expect(decision.id == "decision-001")
+        #expect(decision.sessionID == sessionID)
+        #expect(decision.missionID == missionID)
+        #expect(decision.kind == "architecture")
+        #expect(decision.title == "采用 FastAPI")
+        #expect(decision.content == "使用 FastAPI 承载 Workbench API")
+        #expect(decision.actor == "Planner-Agent")
+        #expect(decision.createdAt == "2026-06-27T06:00:00")
+    }
+
     // MARK: - Helpers
 
     private func makeClient() -> WorkbenchAPIClient {

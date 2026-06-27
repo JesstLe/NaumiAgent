@@ -414,6 +414,26 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func createDecision(
+        sessionID: String,
+        missionID: String,
+        kind: String,
+        title: String,
+        content: String,
+        actor: String
+    ) async throws(APIError) -> DecisionDTO {
+        DecisionDTO(
+            id: "decision-1",
+            sessionID: sessionID,
+            missionID: missionID,
+            kind: kind,
+            title: title,
+            content: content,
+            actor: actor,
+            createdAt: "2026-06-27T06:00:00"
+        )
+    }
+
     func runValidation(
         sessionID: String,
         taskID: String,

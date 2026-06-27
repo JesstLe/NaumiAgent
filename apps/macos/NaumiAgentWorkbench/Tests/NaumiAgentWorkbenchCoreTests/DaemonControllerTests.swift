@@ -17,6 +17,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var createMissionResult: Result<MissionDTO, APIError>?
     var attachIssueResult: Result<IssueDTO, APIError>?
     var createIntentLockResult: Result<IntentLockDTO, APIError>?
+    var createDecisionResult: Result<DecisionDTO, APIError>?
     var runValidationResult: Result<ValidationResultDTO, APIError>?
 
     func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
@@ -139,6 +140,20 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         requireProposalForRisk: String
     ) async throws(APIError) -> IntentLockDTO {
         guard let result = createIntentLockResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func createDecision(
+        sessionID: String,
+        missionID: String,
+        kind: String,
+        title: String,
+        content: String,
+        actor: String
+    ) async throws(APIError) -> DecisionDTO {
+        guard let result = createDecisionResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -995,6 +1010,71 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == staleSnapshot)
         #expect(appState.lastError == .httpStatus(500))
     }
+
+    @Test @MainActor func createDecisionSuccessRefreshesSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let decision = makeDecision(id: "decision-001", missionID: "mission-001")
+        let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+
+        await api.setCreateDecisionResult(.success(decision))
+        await api.setSnapshotResult(.success(snapshot))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createDecision(
+            missionID: "mission-001",
+            actor: "Planner-Agent",
+            kind: "architecture",
+            title: "采用 FastAPI",
+            content: "使用 FastAPI 承载 Workbench API"
+        )
+
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func createDecisionWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createDecision(
+            missionID: "mission-001",
+            actor: "Human",
+            kind: "architecture",
+            title: "采用 FastAPI",
+            content: "使用 FastAPI 承载 Workbench API"
+        )
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.snapshot == nil)
+    }
+
+    @Test @MainActor func createDecisionFailurePreservesOldSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        appState.snapshot = staleSnapshot
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateDecisionResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createDecision(
+            missionID: "mission-001",
+            actor: "Human",
+            kind: "architecture",
+            title: "采用 FastAPI",
+            content: "使用 FastAPI 承载 Workbench API"
+        )
+
+        #expect(appState.snapshot == staleSnapshot)
+        #expect(appState.lastError == .httpStatus(500))
+    }
 }
 
 extension FakeWorkbenchAPIProvider {
@@ -1048,6 +1128,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setCreateIntentLockResult(_ result: Result<IntentLockDTO, APIError>) {
         createIntentLockResult = result
+    }
+
+    fileprivate func setCreateDecisionResult(_ result: Result<DecisionDTO, APIError>) {
+        createDecisionResult = result
     }
 
     fileprivate func setRunValidationResult(_ result: Result<ValidationResultDTO, APIError>) {
@@ -1184,6 +1268,19 @@ private func makeIntentLock(id: String, missionID: String) -> IntentLockDTO {
         allowedPaths: ["src/core/README.md"],
         requireProposalForRisk: "high",
         active: true,
+        createdAt: "2026-06-27T06:00:00"
+    )
+}
+
+private func makeDecision(id: String, missionID: String) -> DecisionDTO {
+    DecisionDTO(
+        id: id,
+        sessionID: "sess-001",
+        missionID: missionID,
+        kind: "architecture",
+        title: "采用 FastAPI",
+        content: "使用 FastAPI 承载 Workbench API",
+        actor: "Planner-Agent",
         createdAt: "2026-06-27T06:00:00"
     )
 }

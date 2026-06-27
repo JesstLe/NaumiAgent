@@ -7,7 +7,15 @@ from pathlib import Path
 from typing import Any
 
 from naumi_agent.tasks.store import TaskStore
-from naumi_agent.workbench.models import IntentLock, Lease, Mission, ParallelMode, RiskLevel
+from naumi_agent.workbench.models import (
+    Decision,
+    DecisionKind,
+    IntentLock,
+    Lease,
+    Mission,
+    ParallelMode,
+    RiskLevel,
+)
 from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.workbench.validation import ValidationCommand, ValidationRunner
 
@@ -81,6 +89,48 @@ class WorkbenchService:
     def _intent_lock_to_dict(lock: IntentLock) -> dict[str, Any]:
         data = asdict(lock)
         data["require_proposal_for_risk"] = data["require_proposal_for_risk"].value
+        return data
+
+    async def create_decision(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        actor: str,
+        kind: DecisionKind,
+        title: str,
+        content: str,
+    ) -> dict[str, Any]:
+        if not title or not title.strip():
+            raise ValueError("决策标题不能为空")
+        if not content or not content.strip():
+            raise ValueError("决策内容不能为空")
+
+        decision = await self._workbench_store.add_decision(
+            session_id=session_id,
+            mission_id=mission_id,
+            kind=kind,
+            title=title.strip(),
+            content=content.strip(),
+            actor=actor.strip(),
+        )
+        await self._workbench_store.append_event(
+            session_id=session_id,
+            type="decision.created",
+            actor=decision.actor,
+            subject_id=decision.id,
+            payload={
+                "mission_id": mission_id,
+                "kind": decision.kind.value,
+                "title": decision.title,
+            },
+        )
+        return self._decision_to_dict(decision)
+
+    @staticmethod
+    def _decision_to_dict(decision: Decision) -> dict[str, Any]:
+        data = asdict(decision)
+        data["kind"] = data["kind"].value
         return data
 
     async def attach_issue(
