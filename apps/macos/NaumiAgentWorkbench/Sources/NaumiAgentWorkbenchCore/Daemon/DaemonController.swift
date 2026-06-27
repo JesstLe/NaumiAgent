@@ -21,12 +21,13 @@ public final class DaemonController: Sendable {
         self.apiProvider = apiProvider
     }
 
-    /// Refreshes the daemon connection by fetching status and capabilities.
+    /// Refreshes the daemon connection by fetching the bootstrap payload.
     ///
     /// - Sets `connectionState` to `.connecting` and clears `lastError`.
-    /// - On success, writes `daemonStatus` and `capabilities`, then sets `.connected`.
-    /// - If a session is already selected, refreshes its snapshot; otherwise picks
-    ///   the most recent session from `GET /sessions` and refreshes that snapshot.
+    /// - On success, writes `daemonStatus`, `capabilities`, recent sessions, and
+    ///   the bootstrap snapshot, then sets `.connected`.
+    /// - If a session is already selected, preserves that selection and refreshes
+    ///   its snapshot instead of switching to the bootstrap latest session.
     /// - After a successful snapshot, pre-warms the lightweight first-screen list
     ///   states (missions, agent profiles, issues, leases, failures, events,
     ///   waiting approvals, validation runs, and context snapshots). Failures are isolated to
@@ -41,8 +42,8 @@ public final class DaemonController: Sendable {
         appState.lastError = nil
 
         do {
-            let status = try await apiProvider.fetchDaemonStatus()
-            let capabilities = try await apiProvider.fetchCapabilities()
+            let bootstrap = try await apiProvider.fetchBootstrap(pageSize: 1)
+            let capabilities = bootstrap.capabilities
             guard capabilities.protocolVersion == Self.supportedProtocolVersion else {
                 appState.daemonStatus = nil
                 appState.capabilities = nil
@@ -54,11 +55,17 @@ public final class DaemonController: Sendable {
                 return
             }
 
-            appState.daemonStatus = status
+            appState.daemonStatus = bootstrap.daemonStatus
             appState.capabilities = capabilities
+            appState.sessions = bootstrap.sessions
             appState.connectionState = .connected
 
-            await refreshSnapshot()
+            if appState.selectedSessionID == nil {
+                appState.selectedSessionID = bootstrap.selectedSessionID
+                appState.snapshot = bootstrap.snapshot
+            } else {
+                await refreshSnapshot()
+            }
             await refreshWorkbenchListsAfterConnection()
         } catch {
             appState.lastError = error

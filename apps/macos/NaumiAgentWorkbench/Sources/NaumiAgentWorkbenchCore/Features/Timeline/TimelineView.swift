@@ -4,6 +4,7 @@ import SwiftUI
 public struct TimelineView: View {
     @Bindable public var appState: AppState
     public let daemonController: DaemonController
+    @State private var selectedEventID: String?
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -12,22 +13,55 @@ public struct TimelineView: View {
 
     public var body: some View {
         let presentation = TimelineDashboardPresentation(events: appState.timelineEvents)
+        let selectedEvent = presentation.events.first { $0.id == selectedEventID }
+            ?? presentation.latestEvent
 
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header(presentation: presentation)
-                if let lastError = appState.lastError {
-                    errorCard(error: lastError)
+        VStack(spacing: 0) {
+            header(presentation: presentation)
+            Divider()
+
+            HStack(spacing: 0) {
+                eventRail(presentation: presentation)
+                    .frame(width: 316)
+                    .frame(maxHeight: .infinity)
+                    .clipped()
+
+                Divider()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        summaryStrip(presentation: presentation)
+                        causalChainPanel(presentation: presentation)
+                        actorDistributionPanel(presentation: presentation)
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                summaryStrip(presentation: presentation)
-                dashboardGrid(presentation: presentation)
-                analysisGrid(presentation: presentation)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Divider()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        latestEventPanel(event: selectedEvent)
+                        typeDistributionPanel(presentation: presentation)
+                        if let lastError = appState.lastError {
+                            errorCard(error: lastError)
+                        }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .frame(width: 334)
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(minWidth: 1120, minHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            if selectedEventID == nil {
+                selectedEventID = presentation.latestEvent?.id
+            }
+        }
         .task {
             guard !appState.isPreviewFixture else { return }
             await daemonController.refreshEvents(limit: 50)
@@ -36,13 +70,11 @@ public struct TimelineView: View {
 
     private func header(presentation: TimelineDashboardPresentation) -> some View {
         HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(AppStrings.Timeline.title(appState.locale))
-                    .font(.system(size: 22, weight: .semibold))
-                Text(subtitleText(presentation: presentation))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            Text(AppStrings.Timeline.title(appState.locale))
+                .font(.system(size: 17, weight: .semibold))
+            Text(subtitleText(presentation: presentation))
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Spacer()
 
@@ -57,6 +89,62 @@ public struct TimelineView: View {
             }
             .buttonStyle(.bordered)
         }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 11)
+    }
+
+    private func eventRail(presentation: TimelineDashboardPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label(appState.locale == .zhCN ? "审计事件" : "Audit Events", systemImage: "clock.arrow.circlepath")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Text("\(presentation.totalCount)")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.secondary.opacity(0.10))
+                    .clipShape(Capsule())
+            }
+
+            if let latest = presentation.latestEvent {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(color(for: latest.type))
+                        .frame(width: 8, height: 8)
+                    Text(appState.locale == .zhCN ? "最新：\(latest.type)" : "Latest: \(latest.type)")
+                        .font(.caption)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(10)
+                .background(Color.accentColor.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+
+            ScrollView {
+                VStack(spacing: 10) {
+                    if presentation.events.isEmpty {
+                        emptyState
+                    } else {
+                        ForEach(presentation.events.reversed()) { event in
+                            eventRow(
+                                event: event,
+                                isLatest: event.id == presentation.latestEvent?.id,
+                                isSelected: event.id == selectedEventID
+                            )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectedEventID = event.id
+                                }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     private func summaryStrip(presentation: TimelineDashboardPresentation) -> some View {
@@ -83,38 +171,6 @@ public struct TimelineView: View {
                 systemImage: "bolt.circle",
                 tint: .orange
             )
-        }
-    }
-
-    private func dashboardGrid(presentation: TimelineDashboardPresentation) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            panel(title: appState.locale == .zhCN ? "事件流" : "Event Stream") {
-                if presentation.events.isEmpty {
-                    emptyState
-                } else {
-                    VStack(spacing: 10) {
-                        ForEach(presentation.events.reversed()) { event in
-                            eventRow(event: event, isLatest: event.id == presentation.latestEvent?.id)
-                        }
-                    }
-                }
-            }
-            .frame(minWidth: 420, maxWidth: .infinity, alignment: .top)
-
-            VStack(spacing: 14) {
-                latestEventPanel(event: presentation.latestEvent)
-                typeDistributionPanel(presentation: presentation)
-            }
-            .frame(width: 340, alignment: .top)
-        }
-    }
-
-    private func analysisGrid(presentation: TimelineDashboardPresentation) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            causalChainPanel(presentation: presentation)
-                .frame(minWidth: 520, maxWidth: .infinity, alignment: .top)
-            actorDistributionPanel(presentation: presentation)
-                .frame(width: 360, alignment: .top)
         }
     }
 
@@ -257,7 +313,7 @@ public struct TimelineView: View {
         }
     }
 
-    private func eventRow(event: TimelineEventPresentation, isLatest: Bool) -> some View {
+    private func eventRow(event: TimelineEventPresentation, isLatest: Bool, isSelected: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(spacing: 4) {
                 Circle()
@@ -289,6 +345,8 @@ public struct TimelineView: View {
                     Text(event.timestamp)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
 
                 HStack(spacing: 16) {
@@ -305,10 +363,10 @@ public struct TimelineView: View {
             }
         }
         .padding(12)
-        .background(isLatest ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
+        .background(isSelected ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(isLatest ? Color.accentColor.opacity(0.65) : Color.secondary.opacity(0.13), lineWidth: 1)
+                .stroke(isSelected ? Color.accentColor.opacity(0.65) : Color.secondary.opacity(0.13), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
@@ -382,6 +440,7 @@ public struct TimelineView: View {
             Text(value)
                 .font(.system(size: 13, weight: .medium))
                 .lineLimit(3)
+                .truncationMode(.middle)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -492,6 +551,17 @@ struct TimelineView_Previews: PreviewProvider {
 
 @MainActor
 private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
+    func fetchBootstrap(pageSize: Int) async throws(APIError) -> WorkbenchBootstrapDTO {
+        WorkbenchBootstrapDTO(
+            daemonStatus: try await fetchDaemonStatus(),
+            capabilities: try await fetchCapabilities(),
+            sessions: [],
+            totalSessions: 0,
+            selectedSessionID: nil,
+            snapshot: nil
+        )
+    }
+
     func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
         DaemonStatusDTO(
             status: "running",

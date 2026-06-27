@@ -4,6 +4,7 @@ import SwiftUI
 public struct WorktreesView: View {
     @Bindable public var appState: AppState
     public let daemonController: DaemonController
+    @State private var selectedSnapshotID: String?
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -12,22 +13,55 @@ public struct WorktreesView: View {
 
     public var body: some View {
         let presentation = WorktreesDashboardPresentation(snapshots: appState.contextSnapshots)
+        let selectedSnapshot = presentation.snapshots.first { $0.id == selectedSnapshotID }
+            ?? presentation.selectedSnapshot
 
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header(presentation: presentation)
-                if let lastError = appState.lastError {
-                    errorCard(error: lastError)
+        VStack(spacing: 0) {
+            header(presentation: presentation)
+            Divider()
+
+            HStack(spacing: 0) {
+                snapshotRail(presentation: presentation)
+                    .frame(width: 304)
+                    .frame(maxHeight: .infinity)
+                    .clipped()
+
+                Divider()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        summaryStrip(presentation: presentation)
+                        operationsGrid(presentation: presentation)
+                        healthDistributionPanel(presentation: presentation)
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                summaryStrip(presentation: presentation)
-                dashboardGrid(presentation: presentation)
-                operationsGrid(presentation: presentation)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Divider()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        selectedSnapshotPanel(snapshot: selectedSnapshot)
+                        remediationPanel(presentation: presentation)
+                        if let lastError = appState.lastError {
+                            errorCard(error: lastError)
+                        }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .frame(width: 334)
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(minWidth: 1120, minHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            if selectedSnapshotID == nil {
+                selectedSnapshotID = presentation.selectedSnapshot?.id
+            }
+        }
         .task {
             guard !appState.isPreviewFixture else { return }
             await daemonController.refreshContextSnapshots(limit: 50)
@@ -36,13 +70,11 @@ public struct WorktreesView: View {
 
     private func header(presentation: WorktreesDashboardPresentation) -> some View {
         HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(AppStrings.Worktrees.title(appState.locale))
-                    .font(.system(size: 22, weight: .semibold))
-                Text(subtitleText(presentation: presentation))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            Text(AppStrings.Worktrees.title(appState.locale))
+                .font(.system(size: 17, weight: .semibold))
+            Text(subtitleText(presentation: presentation))
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Spacer()
 
@@ -57,6 +89,55 @@ public struct WorktreesView: View {
             }
             .buttonStyle(.bordered)
         }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 11)
+    }
+
+    private func snapshotRail(presentation: WorktreesDashboardPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label(appState.locale == .zhCN ? "工作区队列" : "Worktree Queue", systemImage: "folder.badge.gearshape")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Text("\(presentation.totalCount)")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.secondary.opacity(0.10))
+                    .clipShape(Capsule())
+            }
+
+            HStack(spacing: 8) {
+                Label(appState.locale == .zhCN ? "需关注" : "Attention", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                Spacer()
+                Text("\(presentation.attentionCount)")
+                    .fontWeight(.semibold)
+            }
+            .font(.caption)
+            .padding(10)
+            .background(Color.orange.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            ScrollView {
+                VStack(spacing: 10) {
+                    if presentation.snapshots.isEmpty {
+                        emptyState
+                    } else {
+                        ForEach(presentation.snapshots) { snapshot in
+                            snapshotRow(snapshot: snapshot, isSelected: snapshot.id == selectedSnapshotID)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectedSnapshotID = snapshot.id
+                                }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     private func summaryStrip(presentation: WorktreesDashboardPresentation) -> some View {
@@ -83,29 +164,6 @@ public struct WorktreesView: View {
                 value: "\(presentation.activeAgentCount)",
                 systemImage: "person.2"
             )
-        }
-    }
-
-    private func dashboardGrid(presentation: WorktreesDashboardPresentation) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            panel(title: appState.locale == .zhCN ? "工作区快照" : "Worktree Snapshots") {
-                if presentation.snapshots.isEmpty {
-                    emptyState
-                } else {
-                    VStack(spacing: 10) {
-                        ForEach(presentation.snapshots) { snapshot in
-                            snapshotRow(snapshot: snapshot, isSelected: snapshot.id == presentation.selectedSnapshot?.id)
-                        }
-                    }
-                }
-            }
-            .frame(minWidth: 360, maxWidth: .infinity, alignment: .top)
-
-            VStack(spacing: 14) {
-                selectedSnapshotPanel(snapshot: presentation.selectedSnapshot)
-                healthDistributionPanel(presentation: presentation)
-            }
-            .frame(width: 340, alignment: .top)
         }
     }
 
@@ -219,11 +277,13 @@ public struct WorktreesView: View {
                         .font(.system(size: 20, weight: .semibold))
                         .lineLimit(1)
 
-                    twoColumnDetail(
-                        leftLabel: AppStrings.Worktrees.agentIDLabel(appState.locale),
-                        leftValue: snapshot.agentID,
-                        rightLabel: AppStrings.Worktrees.createdAtLabel(appState.locale),
-                        rightValue: snapshot.createdAt
+                    detailBlock(
+                        label: AppStrings.Worktrees.agentIDLabel(appState.locale),
+                        value: snapshot.agentID
+                    )
+                    detailBlock(
+                        label: AppStrings.Worktrees.createdAtLabel(appState.locale),
+                        value: snapshot.createdAt
                     )
 
                     detailBlock(
@@ -280,6 +340,7 @@ public struct WorktreesView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .truncationMode(.middle)
                 }
 
                 HStack(spacing: 18) {
@@ -364,6 +425,7 @@ public struct WorktreesView: View {
             Text(value)
                 .font(.system(size: 13, weight: .medium))
                 .lineLimit(3)
+                .truncationMode(.middle)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -498,6 +560,17 @@ struct WorktreesView_Previews: PreviewProvider {
 
 @MainActor
 private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
+    func fetchBootstrap(pageSize: Int) async throws(APIError) -> WorkbenchBootstrapDTO {
+        WorkbenchBootstrapDTO(
+            daemonStatus: try await fetchDaemonStatus(),
+            capabilities: try await fetchCapabilities(),
+            sessions: [],
+            totalSessions: 0,
+            selectedSessionID: nil,
+            snapshot: nil
+        )
+    }
+
     func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
         DaemonStatusDTO(
             status: "running",

@@ -16,28 +16,134 @@ public struct SettingsView: View {
     public var body: some View {
         let presentation = SettingsDashboardPresentation(appState: appState)
 
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                pageHeader
-                summaryStrip(presentation: presentation)
-                contentGrid(presentation: presentation)
-                readinessGrid(presentation: presentation)
+        VStack(spacing: 0) {
+            pageHeader
+            Divider()
+
+            HStack(spacing: 0) {
+                settingsRail(presentation: presentation)
+                    .frame(width: 286)
+                    .frame(maxHeight: .infinity)
+                    .clipped()
+
+                Divider()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        summaryStrip(presentation: presentation)
+                        contentGrid(presentation: presentation)
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Divider()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        runtimePanel(presentation: presentation)
+                        capabilitiesPanel
+                        readinessGrid(presentation: presentation)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .frame(width: 342)
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(minWidth: 1120, minHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var pageHeader: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        HStack(spacing: 12) {
             Text(AppStrings.Settings.title(appState.locale))
-                .font(.system(size: 22, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
             Text(appState.locale == .zhCN ? "语言、治理策略、运行时能力与意图锁" : "Language, governance, runtime capability, and intent locks")
-                .font(.subheadline)
+                .font(.caption)
                 .foregroundStyle(.secondary)
+            Spacer()
+            Picker(AppStrings.Settings.currentLanguageLabel(appState.locale), selection: $appState.locale) {
+                ForEach(AppLocale.allCases) { locale in
+                    Text(locale.rawValue).tag(locale)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 152)
         }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 11)
+    }
+
+    private func settingsRail(presentation: SettingsDashboardPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(appState.locale == .zhCN ? "治理控制台" : "Governance Console", systemImage: "checkmark.shield")
+                .font(.system(size: 14, weight: .semibold))
+
+            railRow(
+                icon: "server.rack",
+                title: appState.locale == .zhCN ? "本地服务" : "Local Service",
+                value: connectionLabel(presentation.connectionState),
+                tint: presentation.connectionState == .connected ? .green : .orange
+            )
+            railRow(
+                icon: "globe",
+                title: AppStrings.Settings.languageSection(appState.locale),
+                value: appState.locale.rawValue,
+                tint: .blue
+            )
+            railRow(
+                icon: "lock.badge.plus",
+                title: AppStrings.Settings.createIntentLockSection(appState.locale),
+                value: draft.canSubmit ? (appState.locale == .zhCN ? "可提交" : "Ready") : (appState.locale == .zhCN ? "待补全" : "Draft"),
+                tint: draft.canSubmit ? .green : .secondary
+            )
+            railRow(
+                icon: "switch.2",
+                title: appState.locale == .zhCN ? "服务能力" : "Capabilities",
+                value: "\(presentation.enabledCapabilityCount)",
+                tint: .purple
+            )
+
+            Divider()
+
+            panel(title: AppStrings.Settings.governanceSection(appState.locale)) {
+                VStack(alignment: .leading, spacing: 10) {
+                    policyRow(AppStrings.Settings.highRiskApprovalPolicy(appState.locale), systemImage: "person.crop.circle.badge.checkmark")
+                    policyRow(AppStrings.Settings.localDaemonPolicy(appState.locale), systemImage: "lock.shield")
+                    policyRow(AppStrings.Settings.writeViaWorkbenchAPIPolicy(appState.locale), systemImage: "arrow.triangle.branch")
+                }
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func railRow(icon: String, title: String, value: String, tint: Color) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(tint)
+                .frame(width: 24, height: 24)
+                .background(tint.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                Text(value)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func summaryStrip(presentation: SettingsDashboardPresentation) -> some View {
@@ -70,25 +176,16 @@ public struct SettingsView: View {
 
     private func contentGrid(presentation: SettingsDashboardPresentation) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            VStack(spacing: 14) {
-                runtimePanel(presentation: presentation)
-                governancePanel
-            }
-            .frame(width: 360, alignment: .top)
-
             intentLockPanel
                 .frame(minWidth: 420, maxWidth: .infinity, alignment: .top)
 
-            VStack(spacing: 14) {
-                languagePanel(presentation: presentation)
-                capabilitiesPanel
-            }
-            .frame(width: 330, alignment: .top)
+            languagePanel(presentation: presentation)
+                .frame(width: 330, alignment: .top)
         }
     }
 
     private func readinessGrid(presentation: SettingsDashboardPresentation) -> some View {
-        HStack(alignment: .top, spacing: 14) {
+        VStack(alignment: .leading, spacing: 14) {
             checklistPanel(
                 title: appState.locale == .zhCN ? "运行时就绪检查" : "Runtime Readiness",
                 items: presentation.runtimeChecklist

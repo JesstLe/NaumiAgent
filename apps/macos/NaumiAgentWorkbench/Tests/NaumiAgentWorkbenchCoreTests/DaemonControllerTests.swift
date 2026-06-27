@@ -4,6 +4,7 @@ import Testing
 
 /// In-memory fake conforming to `WorkbenchAPIProviding` for unit tests.
 actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
+    var bootstrapResult: Result<WorkbenchBootstrapDTO, APIError>?
     var statusResult: Result<DaemonStatusDTO, APIError>?
     var capabilitiesResult: Result<CapabilitiesDTO, APIError>?
     var snapshotResult: Result<WorkbenchSnapshotDTO, APIError>?
@@ -31,9 +32,41 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var fetchDecisionsResult: Result<DecisionsDTO, APIError>?
     var resolveApprovalResult: Result<ApprovalDTO, APIError>?
     var runValidationResult: Result<ValidationResultDTO, APIError>?
+    var bootstrapCallCount: Int = 0
+    var statusCallCount: Int = 0
+    var capabilitiesCallCount: Int = 0
+    var sessionsCallCount: Int = 0
+    var snapshotCallCount: Int = 0
     var runValidationCallCount: Int = 0
 
+    func fetchBootstrap(pageSize: Int) async throws(APIError) -> WorkbenchBootstrapDTO {
+        bootstrapCallCount += 1
+        if let result = bootstrapResult {
+            return try result.get()
+        }
+
+        guard let statusResult, let capabilitiesResult else {
+            throw .invalidResponse
+        }
+        let sessions = try sessionsResult?.get() ?? SessionListDTO(
+            sessions: [],
+            total: 0,
+            page: 1,
+            pageSize: pageSize
+        )
+        let snapshot = try? snapshotResult?.get()
+        return WorkbenchBootstrapDTO(
+            daemonStatus: try statusResult.get(),
+            capabilities: try capabilitiesResult.get(),
+            sessions: sessions.sessions,
+            totalSessions: sessions.total,
+            selectedSessionID: sessions.sessions.first?.id,
+            snapshot: snapshot ?? nil
+        )
+    }
+
     func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
+        statusCallCount += 1
         guard let result = statusResult else {
             throw .invalidResponse
         }
@@ -41,6 +74,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     }
 
     func fetchCapabilities() async throws(APIError) -> CapabilitiesDTO {
+        capabilitiesCallCount += 1
         guard let result = capabilitiesResult else {
             throw .invalidResponse
         }
@@ -48,6 +82,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     }
 
     func fetchSnapshot(sessionID: String) async throws(APIError) -> WorkbenchSnapshotDTO {
+        snapshotCallCount += 1
         guard let result = snapshotResult else {
             throw .invalidResponse
         }
@@ -55,6 +90,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     }
 
     func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO {
+        sessionsCallCount += 1
         guard let result = sessionsResult else {
             throw .invalidResponse
         }
@@ -376,6 +412,50 @@ final class DaemonControllerTests {
         #expect(appState.capabilities == capabilities)
         #expect(appState.lastError == nil)
         #expect(appState.snapshot == nil)
+    }
+
+    @Test @MainActor func refreshConnectionUsesBootstrapForInitialSessionSelection() async throws {
+        let appState = AppState()
+        let api = FakeWorkbenchAPIProvider()
+        let status = makeStatus()
+        let capabilities = makeCapabilities()
+        let session = makeSession(id: "sess-bootstrap", title: "Bootstrap Session")
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-bootstrap",
+            missions: [],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+        let bootstrap = WorkbenchBootstrapDTO(
+            daemonStatus: status,
+            capabilities: capabilities,
+            sessions: [session],
+            totalSessions: 1,
+            selectedSessionID: "sess-bootstrap",
+            snapshot: snapshot
+        )
+
+        await api.setBootstrapResult(.success(bootstrap))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-bootstrap")
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.daemonStatus == status)
+        #expect(appState.capabilities == capabilities)
+        #expect(appState.sessions == [session])
+        #expect(appState.selectedSessionID == "sess-bootstrap")
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+        expectWorkbenchListsPopulated(appState)
+        #expect(await api.bootstrapCallCount == 1)
+        #expect(await api.statusCallCount == 0)
+        #expect(await api.capabilitiesCallCount == 0)
+        #expect(await api.sessionsCallCount == 0)
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func refreshConnectionFailure() async throws {
@@ -2298,6 +2378,10 @@ final class DaemonControllerTests {
 }
 
 extension FakeWorkbenchAPIProvider {
+    fileprivate func setBootstrapResult(_ result: Result<WorkbenchBootstrapDTO, APIError>) {
+        bootstrapResult = result
+    }
+
     fileprivate func setStatusResult(_ result: Result<DaemonStatusDTO, APIError>) {
         statusResult = result
     }
