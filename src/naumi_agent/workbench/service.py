@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from naumi_agent.tasks.store import TaskStore
-from naumi_agent.workbench.models import Lease, Mission, ParallelMode, RiskLevel
+from naumi_agent.workbench.models import IntentLock, Lease, Mission, ParallelMode, RiskLevel
 from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.workbench.validation import ValidationCommand, ValidationRunner
 
@@ -38,6 +38,50 @@ class WorkbenchService:
             payload={"title": mission.title},
         )
         return mission
+
+    async def create_intent_lock(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        actor: str,
+        rule: str,
+        blocked_paths: list[str] | None = None,
+        allowed_paths: list[str] | None = None,
+        require_proposal_for_risk: RiskLevel = RiskLevel.HIGH,
+    ) -> dict[str, Any]:
+        if not rule or not rule.strip():
+            raise ValueError("意图锁规则不能为空")
+
+        cleaned_blocked = [p.strip() for p in (blocked_paths or []) if p and p.strip()]
+        cleaned_allowed = [p.strip() for p in (allowed_paths or []) if p and p.strip()]
+
+        lock = await self._workbench_store.add_intent_lock(
+            session_id=session_id,
+            mission_id=mission_id,
+            rule=rule.strip(),
+            blocked_paths=cleaned_blocked,
+            allowed_paths=cleaned_allowed,
+            require_proposal_for_risk=require_proposal_for_risk,
+        )
+        await self._workbench_store.append_event(
+            session_id=session_id,
+            type="intent_lock.created",
+            actor=actor,
+            subject_id=lock.id,
+            payload={
+                "mission_id": mission_id,
+                "rule": lock.rule,
+                "require_proposal_for_risk": require_proposal_for_risk.value,
+            },
+        )
+        return self._intent_lock_to_dict(lock)
+
+    @staticmethod
+    def _intent_lock_to_dict(lock: IntentLock) -> dict[str, Any]:
+        data = asdict(lock)
+        data["require_proposal_for_risk"] = data["require_proposal_for_risk"].value
+        return data
 
     async def attach_issue(
         self,

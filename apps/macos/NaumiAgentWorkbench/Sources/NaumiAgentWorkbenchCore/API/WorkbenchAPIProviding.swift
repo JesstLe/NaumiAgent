@@ -60,6 +60,17 @@ public protocol WorkbenchAPIProviding: Sendable {
         riskLevel: String
     ) async throws(APIError) -> IssueDTO
 
+    /// Creates an intent lock for the given mission.
+    func createIntentLock(
+        sessionID: String,
+        missionID: String,
+        actor: String,
+        rule: String,
+        blockedPaths: [String],
+        allowedPaths: [String],
+        requireProposalForRisk: String
+    ) async throws(APIError) -> IntentLockDTO
+
     /// Runs a validation command in the given session and returns its result.
     func runValidation(
         sessionID: String,

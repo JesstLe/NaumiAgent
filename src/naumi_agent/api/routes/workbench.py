@@ -49,6 +49,14 @@ class IssueAttach(BaseModel):
     risk_level: RiskLevel = RiskLevel.MEDIUM
 
 
+class IntentLockCreate(BaseModel):
+    actor: str = "Human"
+    rule: str
+    blocked_paths: list[str] = Field(default_factory=list)
+    allowed_paths: list[str] = Field(default_factory=list)
+    require_proposal_for_risk: RiskLevel = RiskLevel.HIGH
+
+
 class ClaimIssue(BaseModel):
     agent_id: str
     duration_minutes: int = Field(default=45, ge=1)
@@ -261,6 +269,38 @@ async def attach_workbench_issue(
         risk_level=body.risk_level,
     )
     return issue
+
+
+@router.post(
+    "/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks",
+    status_code=201,
+)
+async def create_intent_lock(
+    session_id: str,
+    mission_id: str,
+    body: IntentLockCreate,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        lock = await engine.workbench_service.create_intent_lock(
+            session_id=session_id,
+            mission_id=mission_id,
+            actor=body.actor,
+            rule=body.rule,
+            blocked_paths=body.blocked_paths,
+            allowed_paths=body.allowed_paths,
+            require_proposal_for_risk=body.require_proposal_for_risk,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return lock
 
 
 @router.post("/workbench/sessions/{session_id}/issues/{task_id}/claim", status_code=201)

@@ -16,6 +16,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
     var createMissionResult: Result<MissionDTO, APIError>?
     var attachIssueResult: Result<IssueDTO, APIError>?
+    var createIntentLockResult: Result<IntentLockDTO, APIError>?
     var runValidationResult: Result<ValidationResultDTO, APIError>?
 
     func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
@@ -123,6 +124,21 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         riskLevel: String
     ) async throws(APIError) -> IssueDTO {
         guard let result = attachIssueResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func createIntentLock(
+        sessionID: String,
+        missionID: String,
+        actor: String,
+        rule: String,
+        blockedPaths: [String],
+        allowedPaths: [String],
+        requireProposalForRisk: String
+    ) async throws(APIError) -> IntentLockDTO {
+        guard let result = createIntentLockResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -911,6 +927,74 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == staleSnapshot)
         #expect(appState.lastError == .httpStatus(500))
     }
+
+    @Test @MainActor func createIntentLockSuccessRefreshesSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let lock = makeIntentLock(id: "lock-001", missionID: "mission-001")
+        let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+
+        await api.setCreateIntentLockResult(.success(lock))
+        await api.setSnapshotResult(.success(snapshot))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createIntentLock(
+            missionID: "mission-001",
+            actor: "Planner-Agent",
+            rule: "禁止修改 core 模块",
+            blockedPaths: ["src/core"],
+            allowedPaths: ["src/core/README.md"],
+            requireProposalForRisk: "high"
+        )
+
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func createIntentLockWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createIntentLock(
+            missionID: "mission-001",
+            actor: "Human",
+            rule: "禁止修改 core 模块",
+            blockedPaths: [],
+            allowedPaths: [],
+            requireProposalForRisk: "high"
+        )
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.snapshot == nil)
+    }
+
+    @Test @MainActor func createIntentLockFailurePreservesOldSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        appState.snapshot = staleSnapshot
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateIntentLockResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createIntentLock(
+            missionID: "mission-001",
+            actor: "Human",
+            rule: "禁止修改 core 模块",
+            blockedPaths: [],
+            allowedPaths: [],
+            requireProposalForRisk: "high"
+        )
+
+        #expect(appState.snapshot == staleSnapshot)
+        #expect(appState.lastError == .httpStatus(500))
+    }
 }
 
 extension FakeWorkbenchAPIProvider {
@@ -960,6 +1044,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setAttachIssueResult(_ result: Result<IssueDTO, APIError>) {
         attachIssueResult = result
+    }
+
+    fileprivate func setCreateIntentLockResult(_ result: Result<IntentLockDTO, APIError>) {
+        createIntentLockResult = result
     }
 
     fileprivate func setRunValidationResult(_ result: Result<ValidationResultDTO, APIError>) {
@@ -1083,5 +1171,19 @@ private func makeLease(id: String, taskID: String, state: String) -> LeaseDTO {
         worktreeName: "wt-001",
         createdAt: "2026-06-27T06:00:00",
         updatedAt: "2026-06-27T06:00:00"
+    )
+}
+
+private func makeIntentLock(id: String, missionID: String) -> IntentLockDTO {
+    IntentLockDTO(
+        id: id,
+        sessionID: "sess-001",
+        missionID: missionID,
+        rule: "禁止修改 core 模块",
+        blockedPaths: ["src/core"],
+        allowedPaths: ["src/core/README.md"],
+        requireProposalForRisk: "high",
+        active: true,
+        createdAt: "2026-06-27T06:00:00"
     )
 }

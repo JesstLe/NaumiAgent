@@ -136,6 +136,28 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func createIntentLock(
+        sessionID: String,
+        missionID: String,
+        actor: String,
+        rule: String,
+        blockedPaths: [String],
+        allowedPaths: [String],
+        requireProposalForRisk: String
+    ) async throws(APIError) -> IntentLockDTO {
+        let body = CreateIntentLockRequest(
+            actor: actor,
+            rule: rule,
+            blockedPaths: blockedPaths,
+            allowedPaths: allowedPaths,
+            requireProposalForRisk: requireProposalForRisk
+        )
+        return try await post(
+            path: "workbench/sessions/\(sessionID)/missions/\(missionID)/intent-locks",
+            body: body
+        )
+    }
+
     public func runValidation(
         sessionID: String,
         taskID: String,
@@ -289,5 +311,14 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         let actor: String
         let argv: [String]
         let cwd: String?
+    }
+
+    /// Payload for `POST /workbench/sessions/{session_id}/missions/{mission_id}/intent-locks`.
+    private struct CreateIntentLockRequest: Encodable, Sendable {
+        let actor: String
+        let rule: String
+        let blockedPaths: [String]
+        let allowedPaths: [String]
+        let requireProposalForRisk: String
     }
 }
