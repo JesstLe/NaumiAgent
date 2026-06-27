@@ -16,8 +16,10 @@ from naumi_agent.api.routes.workbench import (
     ClaimIssue,
     IssueAttach,
     MissionCreate,
+    ValidationRunCreate,
     attach_workbench_issue,
     claim_workbench_issue,
+    create_validation_run,
     create_workbench_mission,
     expire_workbench_leases,
     get_context_snapshots,
@@ -52,9 +54,14 @@ class _FakeWorkbenchService:
     def __init__(self) -> None:
         self.created_missions: list[dict] = []
         self.attached_issues: list[dict] = []
+        self.run_validations: list[dict] = []
         self.listed_events: list[dict] = []
         self.listed_validation_runs: list[dict] = []
         self.listed_context_snapshots: list[dict] = []
+        self._run_validation_error: Exception | None = None
+
+    def set_run_validation_error(self, error: Exception) -> None:
+        self._run_validation_error = error
 
     async def dashboard_snapshot(self, session_id: str):
         return {
@@ -127,6 +134,33 @@ class _FakeWorkbenchService:
                 "timestamp": "2024-01-01T00:00:00",
             }
         ]
+
+    async def run_validation(
+        self,
+        *,
+        session_id: str,
+        task_id: str,
+        actor: str,
+        argv: list[str],
+        cwd: str | None = None,
+    ):
+        self.run_validations.append(
+            {
+                "session_id": session_id,
+                "task_id": task_id,
+                "actor": actor,
+                "argv": argv,
+                "cwd": cwd,
+            }
+        )
+        if self._run_validation_error is not None:
+            raise self._run_validation_error
+        return {
+            "id": "run-1",
+            "status": "passed",
+            "exit_code": 0,
+            "output": "ok",
+        }
 
     async def list_validation_runs(
         self, session_id: str, task_id: str | None = None, limit: int = 50
@@ -698,3 +732,73 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
     assert response.supports_cloud_sync is False
     assert response.supported_locales == ["zh-CN", "en-US"]
     assert response.protocol_version == 1
+
+
+@pytest.mark.asyncio
+async def test_run_validation_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+    body = ValidationRunCreate(task_id="task-1", argv=["pytest"])
+
+    with pytest.raises(HTTPException) as exc:
+        await create_validation_run("missing", body, _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_run_validation_endpoint_returns_result() -> None:
+    engine = _FakeEngine(exists=True)
+    body = ValidationRunCreate(
+        task_id="task-1",
+        actor="Human",
+        argv=["pytest", "test.py"],
+        cwd="/workspace",
+    )
+
+    response = await create_validation_run("sess-1", body, _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.run_validations == [
+        {
+            "session_id": "sess-1",
+            "task_id": "task-1",
+            "actor": "Human",
+            "argv": ["pytest", "test.py"],
+            "cwd": "/workspace",
+        }
+    ]
+    assert response.model_dump() == {
+        "id": "run-1",
+        "status": "passed",
+        "exit_code": 0,
+        "output": "ok",
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_validation_endpoint_maps_value_error_to_400() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_run_validation_error(
+        ValueError("验证命令不在允许列表：rm -rf /")
+    )
+    body = ValidationRunCreate(task_id="task-1", argv=["rm", "-rf", "/"])
+
+    with pytest.raises(HTTPException) as exc:
+        await create_validation_run("sess-1", body, _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "验证命令不在允许列表：rm -rf /"
+
+
+@pytest.mark.asyncio
+async def test_run_validation_endpoint_maps_runtime_error_to_503() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_run_validation_error(RuntimeError("ValidationRunner 未配置"))
+    body = ValidationRunCreate(task_id="task-1", argv=["pytest"])
+
+    with pytest.raises(HTTPException) as exc:
+        await create_validation_run("sess-1", body, _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "ValidationRunner 未配置"

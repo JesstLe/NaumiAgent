@@ -289,4 +289,36 @@ public final class DaemonController: Sendable {
             appState.lastError = error
         }
     }
+
+    /// Runs a validation command and refreshes validation runs plus snapshot on success.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success, `validationRuns`
+    /// and `snapshot` are refreshed from the backend; on failure `lastError` is set
+    /// and the existing local state is preserved.
+    public func runValidation(
+        taskID: String,
+        actor: String,
+        argv: [String],
+        cwd: String? = nil
+    ) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            _ = try await apiProvider.runValidation(
+                sessionID: sessionID,
+                taskID: taskID,
+                actor: actor,
+                argv: argv,
+                cwd: cwd
+            )
+            await refreshValidationRuns(taskID: taskID)
+            await refreshSnapshot()
+        } catch {
+            appState.lastError = error
+        }
+    }
 }

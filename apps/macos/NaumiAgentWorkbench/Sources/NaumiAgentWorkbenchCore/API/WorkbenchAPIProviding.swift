@@ -59,4 +59,13 @@ public protocol WorkbenchAPIProviding: Sendable {
         parallelMode: String,
         riskLevel: String
     ) async throws(APIError) -> IssueDTO
+
+    /// Runs a validation command in the given session and returns its result.
+    func runValidation(
+        sessionID: String,
+        taskID: String,
+        actor: String,
+        argv: [String],
+        cwd: String?
+    ) async throws(APIError) -> ValidationResultDTO
 }
