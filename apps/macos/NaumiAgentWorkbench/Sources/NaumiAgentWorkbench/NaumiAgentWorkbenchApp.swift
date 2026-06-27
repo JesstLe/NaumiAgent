@@ -62,33 +62,7 @@ struct ContentView: View {
                 daemonController: environment.daemonController
             )
         case .settings:
-            PlaceholderRouteView(
-                route: route,
-                locale: environment.appState.locale
-            )
+            SettingsView(appState: environment.appState)
         }
-    }
-}
-
-/// Lightweight placeholder for routes that are not yet implemented.
-private struct PlaceholderRouteView: View {
-    let route: AppRoute
-    let locale: AppLocale
-
-    var body: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: route.systemImage)
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-            Text(route.displayName(locale: locale))
-                .font(.title2)
-                .fontWeight(.semibold)
-            Text(AppStrings.Navigation.pageUnderConstruction(locale))
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle(route.displayName(locale: locale))
     }
 }

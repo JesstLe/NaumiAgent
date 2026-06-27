@@ -501,4 +501,41 @@ public enum AppStrings {
             return "Cannot reach the local NaumiAgent service. Start it with:\nnaumi-agent api --host 127.0.0.1 --port 8765"
         }
     }
+
+    // MARK: - Settings
+    public enum Settings {
+        public static func title(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "设置" : "Settings"
+        }
+
+        public static func languageSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "语言" : "Language"
+        }
+
+        public static func governanceSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "治理策略" : "Governance Policies"
+        }
+
+        public static func currentLanguageLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "当前语言" : "Current Language"
+        }
+
+        public static func highRiskApprovalPolicy(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "高风险动作需要人工审批"
+                : "High-risk actions require human approval"
+        }
+
+        public static func localDaemonPolicy(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "本地 daemon 仅监听 127.0.0.1"
+                : "Local daemon only listens on 127.0.0.1"
+        }
+
+        public static func writeViaWorkbenchAPIPolicy(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "写操作必须经 Workbench API 转发"
+                : "Write operations must go through the Workbench API"
+        }
+    }
 }
