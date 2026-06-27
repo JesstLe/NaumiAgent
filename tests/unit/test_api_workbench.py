@@ -48,6 +48,7 @@ from naumi_agent.api.routes.workbench import (
     get_workbench_capabilities,
     get_workbench_events,
     get_workbench_snapshot,
+    get_worktrees,
     release_workbench_lease,
     resolve_approval,
     upsert_agent_profile,
@@ -66,6 +67,7 @@ from naumi_agent.workbench.models import (
     ParallelMode,
     RiskLevel,
 )
+from naumi_agent.worktree.models import WorktreeRecord, WorktreeStatus
 
 
 class _FakeSessionStore:
@@ -999,11 +1001,27 @@ class FakeTaskMarket:
         return list(self._expired)
 
 
+class FakeWorktreeManager:
+    def __init__(self, records: list[WorktreeRecord] | None = None) -> None:
+        self.records = list(records or [])
+        self.status_calls: list[str] = []
+
+    async def status(self, name: str = "") -> list[WorktreeRecord]:
+        self.status_calls.append(name)
+        return list(self.records)
+
+
 class _FakeEngine:
-    def __init__(self, exists: bool, workbench_market=None) -> None:
+    def __init__(
+        self,
+        exists: bool,
+        workbench_market=None,
+        worktree_manager: FakeWorktreeManager | None = None,
+    ) -> None:
         self.session_store = _FakeSessionStore(exists)
         self.workbench_service = _FakeWorkbenchService()
         self.workbench_market = workbench_market
+        self.worktree_manager = worktree_manager or FakeWorktreeManager()
         self.loaded: list[str] = []
 
     async def load_session(self, session_id: str) -> bool:
@@ -3187,6 +3205,156 @@ def test_get_lease_route_returns_404_for_missing_lease() -> None:
     assert engine.workbench_service.requested_leases == [
         {"session_id": "sess-1", "lease_id": "missing-lease"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_worktrees_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_worktrees(
+            "missing",
+            _fake_request(engine),
+            task_id=None,
+            status=None,
+            limit=10,
+            auth="test",
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_get_worktrees_endpoint_filters_and_returns_json_ready_records() -> None:
+    worktree_manager = FakeWorktreeManager(
+        [
+            WorktreeRecord(
+                name="wt-api",
+                path="/repo/.naumi/worktrees/wt-api",
+                branch="naumi/worktree-wt-api",
+                base_ref="abc123",
+                status=WorktreeStatus.CLEAN,
+                task_id="task-1",
+                dirty_files=0,
+                commits_ahead=0,
+                created_at="2024-01-01T00:00:00",
+                updated_at="2024-01-01T00:00:00",
+                metadata={"owner": "Backend-Agent"},
+            ),
+            WorktreeRecord(
+                name="wt-dirty",
+                path="/repo/.naumi/worktrees/wt-dirty",
+                branch="naumi/worktree-wt-dirty",
+                base_ref="def456",
+                status=WorktreeStatus.DIRTY,
+                task_id="task-2",
+                dirty_files=3,
+                commits_ahead=1,
+                created_at="2024-01-01T00:00:00",
+                updated_at="2024-01-01T00:01:00",
+            ),
+        ]
+    )
+    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+
+    response = await get_worktrees(
+        "sess-1",
+        _fake_request(engine),
+        task_id="task-1",
+        status="clean",
+        limit=10,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert worktree_manager.status_calls == [""]
+    assert response.model_dump() == {
+        "worktrees": [
+            {
+                "name": "wt-api",
+                "path": "/repo/.naumi/worktrees/wt-api",
+                "branch": "naumi/worktree-wt-api",
+                "base_ref": "abc123",
+                "status": "clean",
+                "task_id": "task-1",
+                "dirty_files": 0,
+                "commits_ahead": 0,
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+                "kept_reason": "",
+                "metadata": {"owner": "Backend-Agent"},
+                "removable": True,
+            }
+        ],
+        "task_id": "task-1",
+        "status": "clean",
+        "limit": 10,
+    }
+
+
+def test_get_worktrees_route_accepts_filters() -> None:
+    worktree_manager = FakeWorktreeManager(
+        [
+            WorktreeRecord(
+                name="wt-kept",
+                path="/repo/.naumi/worktrees/wt-kept",
+                branch="naumi/worktree-wt-kept",
+                base_ref="abc123",
+                status=WorktreeStatus.KEPT,
+                task_id="task-1",
+                dirty_files=0,
+                commits_ahead=2,
+                created_at="2024-01-01T00:00:00",
+                updated_at="2024-01-01T00:03:00",
+                kept_reason="等待人工审查",
+            ),
+            WorktreeRecord(
+                name="wt-clean",
+                path="/repo/.naumi/worktrees/wt-clean",
+                branch="naumi/worktree-wt-clean",
+                base_ref="def456",
+                status=WorktreeStatus.CLEAN,
+                task_id="task-2",
+                created_at="2024-01-01T00:00:00",
+                updated_at="2024-01-01T00:02:00",
+            ),
+        ]
+    )
+    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get(
+        "/workbench/sessions/sess-1/worktrees?task_id=task-1&status=kept"
+    )
+
+    assert response.status_code == 200
+    assert engine.loaded == ["sess-1"]
+    assert response.json() == {
+        "worktrees": [
+            {
+                "name": "wt-kept",
+                "path": "/repo/.naumi/worktrees/wt-kept",
+                "branch": "naumi/worktree-wt-kept",
+                "base_ref": "abc123",
+                "status": "kept",
+                "task_id": "task-1",
+                "dirty_files": 0,
+                "commits_ahead": 2,
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:03:00",
+                "kept_reason": "等待人工审查",
+                "metadata": {},
+                "removable": False,
+            }
+        ],
+        "task_id": "task-1",
+        "status": "kept",
+        "limit": 50,
+    }
 
 
 @pytest.mark.asyncio
