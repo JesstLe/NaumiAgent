@@ -9,6 +9,9 @@ public struct ReviewsView: View {
     @Bindable public var appState: AppState
     public let daemonController: DaemonController
 
+    @State private var validationDraft = ValidationRunDraft()
+    @State private var isProcessing: Bool = false
+
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
         self.daemonController = daemonController
@@ -21,6 +24,7 @@ public struct ReviewsView: View {
                 if let lastError = appState.lastError {
                     errorCard(error: lastError)
                 }
+                runValidationForm
                 runList
             }
             .padding()
@@ -66,6 +70,96 @@ public struct ReviewsView: View {
                         .lineLimit(1)
                 }
             }
+        }
+    }
+
+    // MARK: - Run Validation Form
+
+    private var runValidationForm: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(AppStrings.Reviews.runValidationSectionTitle(appState.locale))
+                .font(.headline)
+
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(AppStrings.Reviews.taskIDLabel(appState.locale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("", text: $validationDraft.taskID)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel(AppStrings.Reviews.taskIDLabel(appState.locale))
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(AppStrings.Reviews.actorLabel(appState.locale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("", text: $validationDraft.actor)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel(AppStrings.Reviews.actorLabel(appState.locale))
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(AppStrings.Reviews.commandLabel(appState.locale))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("", text: $validationDraft.commandLine)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel(AppStrings.Reviews.commandLabel(appState.locale))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(AppStrings.Reviews.cwdLabel(appState.locale))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("", text: $validationDraft.cwd)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel(AppStrings.Reviews.cwdLabel(appState.locale))
+            }
+
+            HStack {
+                Spacer()
+                Button(action: submitRunValidation) {
+                    if isProcessing {
+                        Label(
+                            AppStrings.Reviews.processingLabel(appState.locale),
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                    } else {
+                        Label(
+                            AppStrings.Reviews.runButton(appState.locale),
+                            systemImage: "play.circle"
+                        )
+                    }
+                }
+                .disabled(!canSubmitRunValidation)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var canSubmitRunValidation: Bool {
+        !isProcessing && validationDraft.canSubmit
+    }
+
+    private func submitRunValidation() {
+        let draft = validationDraft
+
+        guard draft.canSubmit else { return }
+
+        isProcessing = true
+        Task { @MainActor in
+            await daemonController.runValidation(
+                taskID: draft.trimmedTaskID,
+                actor: draft.trimmedActor,
+                argv: draft.argv,
+                cwd: draft.normalizedCWD
+            )
+            isProcessing = false
         }
     }
 

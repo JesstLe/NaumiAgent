@@ -19,6 +19,9 @@ struct AppStringsReviewsTests {
         #expect(AppStrings.Reviews.statusPassed(.zhCN) == "通过")
         #expect(AppStrings.Reviews.statusFailed(.zhCN) == "失败")
         #expect(AppStrings.Reviews.statusUnknown(.zhCN, status: "x") == "未知: x")
+        #expect(AppStrings.Reviews.runValidationSectionTitle(.zhCN) == "运行验证")
+        #expect(AppStrings.Reviews.runButton(.zhCN) == "运行")
+        #expect(AppStrings.Reviews.processingLabel(.zhCN) == "处理中…")
     }
 
     @Test func reviewsStringsEnUS() {
@@ -37,6 +40,9 @@ struct AppStringsReviewsTests {
         #expect(AppStrings.Reviews.statusPassed(.enUS) == "Passed")
         #expect(AppStrings.Reviews.statusFailed(.enUS) == "Failed")
         #expect(AppStrings.Reviews.statusUnknown(.enUS, status: "x") == "Unknown: x")
+        #expect(AppStrings.Reviews.runValidationSectionTitle(.enUS) == "Run Validation")
+        #expect(AppStrings.Reviews.runButton(.enUS) == "Run")
+        #expect(AppStrings.Reviews.processingLabel(.enUS) == "Processing…")
     }
 
     @Test func allReviewsStringsAreNonEmpty() {
@@ -56,6 +62,9 @@ struct AppStringsReviewsTests {
             AppStrings.Reviews.statusPassed,
             AppStrings.Reviews.statusFailed,
             { AppStrings.Reviews.statusUnknown($0, status: "x") },
+            AppStrings.Reviews.runValidationSectionTitle,
+            AppStrings.Reviews.runButton,
+            AppStrings.Reviews.processingLabel,
         ]
 
         for string in strings {
