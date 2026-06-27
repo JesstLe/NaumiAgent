@@ -563,6 +563,34 @@ public enum AppStrings {
         public static func healthUnknown(_ locale: AppLocale, health: String) -> String {
             locale == .zhCN ? "未知: \(health)" : "Unknown: \(health)"
         }
+
+        public static func recordContextButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "记录上下文" : "Record Context"
+        }
+
+        public static func recordContextSectionTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "记录上下文健康" : "Record Context Health"
+        }
+
+        public static func minutesSinceSyncLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "距上次同步（分钟）" : "Minutes Since Sync"
+        }
+
+        public static func tokenLoadLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "Token 负载" : "Token Load"
+        }
+
+        public static func policyConflictLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "存在策略冲突" : "Policy Conflict"
+        }
+
+        public static func recordContextSubmitButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "保存快照" : "Save Snapshot"
+        }
+
+        public static func processingLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "处理中…" : "Processing…"
+        }
     }
 
     // MARK: - Reviews
