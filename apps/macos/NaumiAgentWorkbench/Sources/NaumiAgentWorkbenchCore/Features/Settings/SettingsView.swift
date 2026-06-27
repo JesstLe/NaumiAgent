@@ -14,11 +14,28 @@ public struct SettingsView: View {
     }
 
     public var body: some View {
-        Form {
-            languageSection
-            governanceSection
+        VStack(alignment: .leading, spacing: 16) {
+            pageHeader
+
+            Form {
+                languageSection
+                governanceSection
+            }
+            .formStyle(.grouped)
         }
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var pageHeader: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(AppStrings.Navigation.settings(appState.locale))
+                .font(.system(size: 22, weight: .semibold))
+            Text(appState.locale == .zhCN ? "语言、治理策略与意图锁" : "Language, governance, and intent locks")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
     }
 
     // MARK: - Language
