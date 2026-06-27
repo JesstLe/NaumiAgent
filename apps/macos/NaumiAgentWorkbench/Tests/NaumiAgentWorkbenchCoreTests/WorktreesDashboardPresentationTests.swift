@@ -132,6 +132,59 @@ struct WorktreesDashboardPresentationTests {
         #expect(clean.defaultKeepReason(locale: .enUS) == "Keep wt-clean for follow-up governance")
     }
 
+    @Test func exposesSafeRemoveActionStateAndLocalizedReasons() throws {
+        let presentation = WorktreesDashboardPresentation(
+            snapshots: [],
+            worktrees: [
+                makeWorktree(
+                    name: "wt-clean",
+                    taskID: "task-1",
+                    status: "clean",
+                    dirtyFiles: 0,
+                    commitsAhead: 0,
+                    keptReason: "",
+                    metadata: ["agent_id": "Backend-Agent"],
+                    removable: true
+                ),
+                makeWorktree(
+                    name: "wt-dirty",
+                    taskID: "task-2",
+                    status: "dirty",
+                    dirtyFiles: 2,
+                    commitsAhead: 1,
+                    keptReason: "",
+                    metadata: ["agent_id": "Reviewer-Agent"],
+                    removable: false
+                ),
+                makeWorktree(
+                    name: "wt-kept",
+                    taskID: "task-3",
+                    status: "kept",
+                    dirtyFiles: 0,
+                    commitsAhead: 0,
+                    keptReason: "等待人工审查",
+                    metadata: [:],
+                    removable: false
+                ),
+            ]
+        )
+
+        let clean = try #require(presentation.selectedWorktree(id: "wt-clean"))
+        #expect(clean.canRemoveSafely == true)
+        #expect(clean.removeDisabledReason(locale: .zhCN) == nil)
+        #expect(clean.removeDisabledReason(locale: .enUS) == nil)
+
+        let dirty = try #require(presentation.selectedWorktree(id: "wt-dirty"))
+        #expect(dirty.canRemoveSafely == false)
+        #expect(dirty.removeDisabledReason(locale: .zhCN) == "存在未提交或未审查的工作，只能通过强制删除流程处理")
+        #expect(dirty.removeDisabledReason(locale: .enUS) == "Uncommitted or unreviewed work requires the force-remove flow")
+
+        let kept = try #require(presentation.selectedWorktree(id: "wt-kept"))
+        #expect(kept.canRemoveSafely == false)
+        #expect(kept.removeDisabledReason(locale: .zhCN) == "已人工保留，需先确认治理结果")
+        #expect(kept.removeDisabledReason(locale: .enUS) == "Kept worktrees require governance confirmation first")
+    }
+
     private func makeSnapshot(
         id: String,
         agentID: String,

@@ -8,6 +8,7 @@ public struct WorktreesView: View {
     @State private var selectedSnapshotID: String?
     @State private var selectedWorktreeID: String?
     @State private var isKeepingWorktree = false
+    @State private var isRemovingWorktree = false
     @State private var localActionErrorMessage: String?
     private let layout = WorkbenchPageLayout.worktrees
 
@@ -106,6 +107,21 @@ public struct WorktreesView: View {
             )
             await daemonController.refreshContextSnapshots(limit: 50)
             isKeepingWorktree = false
+        }
+    }
+
+    private func removeWorktree(_ worktree: WorktreeManagementRow) {
+        guard worktree.canRemoveSafely, !isRemovingWorktree else { return }
+        let removedID = worktree.id
+        isRemovingWorktree = true
+        Task {
+            await daemonController.removeWorktree(name: worktree.name, discardChanges: false)
+            if appState.lastError == nil,
+               selectedWorktreeID == removedID,
+               !appState.worktrees.contains(where: { $0.name == removedID }) {
+                selectedWorktreeID = appState.worktrees.first?.name
+            }
+            isRemovingWorktree = false
         }
     }
 
@@ -524,6 +540,28 @@ public struct WorktreesView: View {
                             Text(worktree.defaultKeepReason(locale: appState.locale))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        }
+
+                        Button {
+                            removeWorktree(worktree)
+                        } label: {
+                            Label(
+                                isRemovingWorktree
+                                    ? (appState.locale == .zhCN ? "删除中" : "Removing")
+                                    : (appState.locale == .zhCN ? "删除工作区" : "Remove Worktree"),
+                                systemImage: "trash"
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                        .disabled(!worktree.canRemoveSafely || isRemovingWorktree)
+
+                        if let removeDisabledReason = worktree.removeDisabledReason(locale: appState.locale) {
+                            Text(removeDisabledReason)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
