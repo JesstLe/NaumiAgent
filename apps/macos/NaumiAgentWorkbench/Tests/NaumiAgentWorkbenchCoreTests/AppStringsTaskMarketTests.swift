@@ -35,6 +35,11 @@ struct AppStringsTaskMarketTests {
         #expect(AppStrings.TaskMarket.durationLabel(.zhCN) == "时长（分钟）")
         #expect(AppStrings.TaskMarket.claimButton(.zhCN) == "认领")
         #expect(AppStrings.TaskMarket.releaseButton(.zhCN) == "释放租约")
+        #expect(AppStrings.TaskMarket.activeLeasesTitle(.zhCN, count: 4) == "活跃租约 (4)")
+        #expect(AppStrings.TaskMarket.viewAllLeasesButton(.zhCN) == "查看全部租约")
+        #expect(AppStrings.TaskMarket.openWorktreeButton(.zhCN) == "打开工作区")
+        #expect(AppStrings.TaskMarket.reclaimLeaseButton(.zhCN) == "回收租约")
+        #expect(AppStrings.TaskMarket.releasingLeaseLabel(.zhCN) == "释放中…")
         #expect(AppStrings.TaskMarket.createIssueButton(.zhCN) == "新建 Issue")
         #expect(AppStrings.TaskMarket.createIssueSectionTitle(.zhCN) == "新建 Issue")
         #expect(AppStrings.TaskMarket.missionIDLabel(.zhCN) == "目标 ID")
@@ -82,6 +87,11 @@ struct AppStringsTaskMarketTests {
         #expect(AppStrings.TaskMarket.durationLabel(.enUS) == "Duration (minutes)")
         #expect(AppStrings.TaskMarket.claimButton(.enUS) == "Claim")
         #expect(AppStrings.TaskMarket.releaseButton(.enUS) == "Release Lease")
+        #expect(AppStrings.TaskMarket.activeLeasesTitle(.enUS, count: 4) == "Active Leases (4)")
+        #expect(AppStrings.TaskMarket.viewAllLeasesButton(.enUS) == "View All Leases")
+        #expect(AppStrings.TaskMarket.openWorktreeButton(.enUS) == "Open Worktree")
+        #expect(AppStrings.TaskMarket.reclaimLeaseButton(.enUS) == "Reclaim Lease")
+        #expect(AppStrings.TaskMarket.releasingLeaseLabel(.enUS) == "Releasing…")
         #expect(AppStrings.TaskMarket.createIssueButton(.enUS) == "New Issue")
         #expect(AppStrings.TaskMarket.createIssueSectionTitle(.enUS) == "New Issue")
         #expect(AppStrings.TaskMarket.missionIDLabel(.enUS) == "Mission ID")
@@ -130,6 +140,10 @@ struct AppStringsTaskMarketTests {
             AppStrings.TaskMarket.durationLabel,
             AppStrings.TaskMarket.claimButton,
             AppStrings.TaskMarket.releaseButton,
+            AppStrings.TaskMarket.viewAllLeasesButton,
+            AppStrings.TaskMarket.openWorktreeButton,
+            AppStrings.TaskMarket.reclaimLeaseButton,
+            AppStrings.TaskMarket.releasingLeaseLabel,
             AppStrings.TaskMarket.createIssueButton,
             AppStrings.TaskMarket.createIssueSectionTitle,
             AppStrings.TaskMarket.missionIDLabel,

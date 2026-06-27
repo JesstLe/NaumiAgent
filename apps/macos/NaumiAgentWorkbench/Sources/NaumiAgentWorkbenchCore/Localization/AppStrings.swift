@@ -460,6 +460,26 @@ public enum AppStrings {
             locale == .zhCN ? "释放租约" : "Release Lease"
         }
 
+        public static func activeLeasesTitle(_ locale: AppLocale, count: Int) -> String {
+            locale == .zhCN ? "活跃租约 (\(count))" : "Active Leases (\(count))"
+        }
+
+        public static func viewAllLeasesButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "查看全部租约" : "View All Leases"
+        }
+
+        public static func openWorktreeButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "打开工作区" : "Open Worktree"
+        }
+
+        public static func reclaimLeaseButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "回收租约" : "Reclaim Lease"
+        }
+
+        public static func releasingLeaseLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "释放中…" : "Releasing…"
+        }
+
         public static func createIssueButton(_ locale: AppLocale) -> String {
             locale == .zhCN ? "新建 Issue" : "New Issue"
         }
