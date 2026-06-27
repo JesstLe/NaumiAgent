@@ -38,6 +38,7 @@ from naumi_agent.api.routes.workbench import (
     get_daemon_status,
     get_decisions,
     get_failures,
+    get_intent_lock,
     get_intent_locks,
     get_issues,
     get_leases,
@@ -107,6 +108,7 @@ class _FakeWorkbenchService:
         self.listed_missions: list[dict] = []
         self.listed_leases: list[dict] = []
         self.listed_intent_locks: list[dict] = []
+        self.requested_intent_locks: list[dict] = []
         self.listed_decisions: list[dict] = []
         self.requested_decisions: list[dict] = []
         self._run_validation_error: Exception | None = None
@@ -884,6 +886,28 @@ class _FakeWorkbenchService:
                 "created_at": "2024-01-01T00:00:00",
             }
         ]
+
+    async def get_intent_lock(self, session_id: str, mission_id: str, lock_id: str):
+        self.requested_intent_locks.append(
+            {
+                "session_id": session_id,
+                "mission_id": mission_id,
+                "lock_id": lock_id,
+            }
+        )
+        if lock_id == "missing-lock":
+            return None
+        return {
+            "id": lock_id,
+            "session_id": session_id,
+            "mission_id": mission_id,
+            "rule": "禁止修改 core 模块",
+            "blocked_paths": ["src/secret"],
+            "allowed_paths": ["src/secret/README.md"],
+            "require_proposal_for_risk": "high",
+            "active": True,
+            "created_at": "2024-01-01T00:00:00",
+        }
 
     async def list_decisions(self, session_id: str, mission_id: str):
         self.listed_decisions.append(
@@ -3205,6 +3229,80 @@ async def test_get_intent_locks_endpoint_returns_locks_and_mission_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_intent_lock_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_intent_lock(
+            "missing",
+            "mission-1",
+            "lock-1",
+            _fake_request(engine),
+            auth="test",
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_get_intent_lock_endpoint_returns_lock_detail() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_intent_lock(
+        "sess-1",
+        "mission-2",
+        "lock-2",
+        _fake_request(engine),
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_intent_locks == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-2",
+            "lock_id": "lock-2",
+        }
+    ]
+    assert response == {
+        "id": "lock-2",
+        "session_id": "sess-1",
+        "mission_id": "mission-2",
+        "rule": "禁止修改 core 模块",
+        "blocked_paths": ["src/secret"],
+        "allowed_paths": ["src/secret/README.md"],
+        "require_proposal_for_risk": "high",
+        "active": True,
+        "created_at": "2024-01-01T00:00:00",
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_intent_lock_endpoint_returns_404_when_missing() -> None:
+    engine = _FakeEngine(exists=True)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_intent_lock(
+            "sess-1",
+            "mission-2",
+            "missing-lock",
+            _fake_request(engine),
+            auth="test",
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "意图锁不存在"
+    assert engine.workbench_service.requested_intent_locks == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-2",
+            "lock_id": "missing-lock",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_get_decisions_endpoint_requires_existing_session() -> None:
     engine = _FakeEngine(exists=False)
 
@@ -3268,6 +3366,61 @@ def test_get_intent_locks_route_accepts_path_and_returns_array() -> None:
         ],
         "mission_id": "mission-1",
     }
+
+
+def test_get_intent_lock_route_returns_single_lock() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get(
+        "/workbench/sessions/sess-1/missions/mission-1/intent-locks/lock-2"
+    )
+
+    assert response.status_code == 200
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_intent_locks == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-1",
+            "lock_id": "lock-2",
+        }
+    ]
+    assert response.json() == {
+        "id": "lock-2",
+        "session_id": "sess-1",
+        "mission_id": "mission-1",
+        "rule": "禁止修改 core 模块",
+        "blocked_paths": ["src/secret"],
+        "allowed_paths": ["src/secret/README.md"],
+        "require_proposal_for_risk": "high",
+        "active": True,
+        "created_at": "2024-01-01T00:00:00",
+    }
+
+
+def test_get_intent_lock_route_returns_404_for_missing_lock() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get(
+        "/workbench/sessions/sess-1/missions/mission-1/intent-locks/missing-lock"
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "意图锁不存在"}
+    assert engine.workbench_service.requested_intent_locks == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-1",
+            "lock_id": "missing-lock",
+        }
+    ]
 
 
 def test_get_decisions_route_accepts_path_and_returns_array() -> None:

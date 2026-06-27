@@ -829,6 +829,26 @@ async def get_intent_locks(
     return IntentLocksResponse(intent_locks=locks, mission_id=mission_id)
 
 
+@router.get("/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks/{lock_id}")
+async def get_intent_lock(
+    session_id: str,
+    mission_id: str,
+    lock_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    lock = await engine.workbench_service.get_intent_lock(session_id, mission_id, lock_id)
+    if lock is None:
+        raise HTTPException(status_code=404, detail="意图锁不存在")
+    return lock
+
+
 @router.get(
     "/workbench/sessions/{session_id}/missions/{mission_id}/decisions",
     response_model=DecisionsResponse,

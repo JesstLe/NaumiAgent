@@ -127,6 +127,34 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
             )
             assert decision_detail["actor"] == "Planner-Agent"
 
+            intent_lock_response = client.post(
+                f"/api/v1/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks",
+                json={
+                    "actor": "Planner-Agent",
+                    "rule": "高风险变更先提交 proposal",
+                    "blocked_paths": ["src/naumi_agent/core"],
+                    "allowed_paths": ["src/naumi_agent/core/README.md"],
+                    "require_proposal_for_risk": "high",
+                },
+            )
+            assert intent_lock_response.status_code == 201
+            intent_lock = intent_lock_response.json()
+
+            intent_lock_detail_response = client.get(
+                f"/api/v1/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks/{intent_lock['id']}"
+            )
+            assert intent_lock_detail_response.status_code == 200
+            intent_lock_detail = intent_lock_detail_response.json()
+            assert intent_lock_detail["id"] == intent_lock["id"]
+            assert intent_lock_detail["mission_id"] == mission_id
+            assert intent_lock_detail["rule"] == "高风险变更先提交 proposal"
+            assert intent_lock_detail["blocked_paths"] == ["src/naumi_agent/core"]
+            assert intent_lock_detail["allowed_paths"] == [
+                "src/naumi_agent/core/README.md"
+            ]
+            assert intent_lock_detail["require_proposal_for_risk"] == "high"
+            assert intent_lock_detail["active"] is True
+
             issue_response = client.post(
                 f"/api/v1/workbench/sessions/{session_id}/missions/{mission_id}/issues",
                 json={
@@ -296,6 +324,7 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
                 "issue.claimed",
                 "agent_profile.upserted",
                 "issue.created",
+                "intent_lock.created",
                 "decision.created",
                 "mission.created",
             ]

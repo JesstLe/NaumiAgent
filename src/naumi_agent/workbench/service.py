@@ -106,6 +106,16 @@ class WorkbenchService:
         locks = await self._workbench_store.list_intent_locks(session_id, mission_id)
         return [self._intent_lock_to_dict(lock) for lock in locks]
 
+    async def get_intent_lock(
+        self, session_id: str, mission_id: str, lock_id: str
+    ) -> dict[str, Any] | None:
+        lock = await self._workbench_store.get_intent_lock(
+            session_id, mission_id, lock_id
+        )
+        if lock is None:
+            return None
+        return self._intent_lock_to_dict(lock)
+
     async def create_decision(
         self,
         *,

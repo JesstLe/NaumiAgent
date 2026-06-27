@@ -719,6 +719,20 @@ class WorkbenchStore:
             rows = await cursor.fetchall()
         return [_row_to_intent_lock(dict(row)) for row in rows]
 
+    async def get_intent_lock(
+        self, session_id: str, mission_id: str, lock_id: str
+    ) -> IntentLock | None:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_intent_locks
+                   WHERE session_id = ? AND mission_id = ? AND id = ?""",
+                (session_id, mission_id, lock_id),
+            )
+            row = await cursor.fetchone()
+        return _row_to_intent_lock(dict(row)) if row else None
+
     async def create_lease(
         self,
         *,
