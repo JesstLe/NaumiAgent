@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.workbench.models import ContextHealth, LeaseState
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
+from naumi_agent.workbench.validation import ValidationRunner
 
 
 @pytest.mark.asyncio
@@ -201,3 +204,74 @@ async def test_list_context_snapshots_returns_store_snapshots_and_respects_limit
     limited = await service.list_context_snapshots("s", limit=1)
     assert len(limited) == 1
     assert limited[0]["id"] in {snap_a["id"], snap_b["id"]}
+
+
+@pytest.mark.asyncio
+async def test_run_validation_records_run_and_event(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    runner = ValidationRunner(
+        store=workbench_store,
+        allowed_commands=[[sys.executable, "-c"]],
+    )
+    service = WorkbenchService(
+        task_store=task_store,
+        workbench_store=workbench_store,
+        validation_runner=runner,
+        workspace_root=str(tmp_path),
+    )
+
+    argv = [sys.executable, "-c", "print('hello from validation')"]
+    result = await service.run_validation(
+        session_id="s",
+        task_id="task-1",
+        actor="Human",
+        argv=argv,
+    )
+
+    assert result["status"] == "passed"
+    assert result["exit_code"] == 0
+    assert "hello from validation" in result["output"]
+
+    runs = await service.list_validation_runs("s", task_id="task-1")
+    assert any(run["id"] == result["id"] for run in runs)
+    assert next(run for run in runs if run["id"] == result["id"])["cwd"] == str(
+        tmp_path.resolve()
+    )
+
+    events = await service.list_events("s")
+    event = next((e for e in events if e["type"] == "validation.completed"), None)
+    assert event is not None
+    assert event["actor"] == "Human"
+    assert event["subject_id"] == "task-1"
+    assert event["payload"]["run_id"] == result["id"]
+    assert event["payload"]["status"] == "passed"
+    assert event["payload"]["exit_code"] == 0
+    assert event["payload"]["command"] == argv
+
+
+@pytest.mark.asyncio
+async def test_run_validation_rejects_cwd_outside_workspace(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    runner = ValidationRunner(
+        store=workbench_store,
+        allowed_commands=[[sys.executable, "-c"]],
+    )
+    service = WorkbenchService(
+        task_store=task_store,
+        workbench_store=workbench_store,
+        validation_runner=runner,
+        workspace_root=str(tmp_path),
+    )
+
+    with pytest.raises(ValueError, match="工作目录必须在 workspace_root 内"):
+        await service.run_validation(
+            session_id="s",
+            task_id="task-1",
+            actor="Human",
+            argv=[sys.executable, "-c", "print('ok')"],
+            cwd=str(tmp_path.parent),
+        )

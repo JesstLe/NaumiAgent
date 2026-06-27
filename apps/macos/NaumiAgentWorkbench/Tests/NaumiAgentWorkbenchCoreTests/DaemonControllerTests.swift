@@ -16,6 +16,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
     var createMissionResult: Result<MissionDTO, APIError>?
     var attachIssueResult: Result<IssueDTO, APIError>?
+    var runValidationResult: Result<ValidationResultDTO, APIError>?
 
     func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
         guard let result = statusResult else {
@@ -122,6 +123,19 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         riskLevel: String
     ) async throws(APIError) -> IssueDTO {
         guard let result = attachIssueResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func runValidation(
+        sessionID: String,
+        taskID: String,
+        actor: String,
+        argv: [String],
+        cwd: String?
+    ) async throws(APIError) -> ValidationResultDTO {
+        guard let result = runValidationResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -784,6 +798,119 @@ final class DaemonControllerTests {
         #expect(appState.contextSnapshots == [staleSnapshot])
         #expect(appState.lastError == .httpStatus(500))
     }
+
+    @Test @MainActor func runValidationSuccessRefreshesValidationRunsAndSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let result = ValidationResultDTO(
+            id: "run-001",
+            status: "passed",
+            exitCode: 0,
+            output: "ok"
+        )
+        let run = ValidationRunDTO(
+            id: "run-001",
+            sessionID: "sess-001",
+            taskID: "task-001",
+            actor: "Human",
+            command: ["pytest"],
+            cwd: "/workspace",
+            status: "passed",
+            exitCode: 0,
+            output: "ok",
+            startedAt: "2026-06-27T06:00:00",
+            completedAt: "2026-06-27T06:00:01"
+        )
+        let runs = ValidationRunsDTO(validationRuns: [run], taskID: "task-001", limit: 50)
+        let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+
+        await api.setRunValidationResult(.success(result))
+        await api.setValidationRunsResult(.success(runs))
+        await api.setSnapshotResult(.success(snapshot))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.runValidation(
+            taskID: "task-001",
+            actor: "Human",
+            argv: ["pytest"],
+            cwd: "/workspace"
+        )
+
+        #expect(appState.validationRuns == [run])
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func runValidationWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        appState.validationRuns = [
+            ValidationRunDTO(
+                id: "run-stale",
+                sessionID: "old-session",
+                taskID: "task-old",
+                actor: "ValidationRunner",
+                command: [],
+                cwd: "",
+                status: "passed",
+                exitCode: 0,
+                output: "",
+                startedAt: "2026-06-27T05:00:00",
+                completedAt: "2026-06-27T05:00:01"
+            )
+        ]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.runValidation(
+            taskID: "task-001",
+            actor: "Human",
+            argv: ["pytest"],
+            cwd: "/workspace"
+        )
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.validationRuns.count == 1)
+    }
+
+    @Test @MainActor func runValidationFailurePreservesOldData() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleRun = ValidationRunDTO(
+            id: "run-stale",
+            sessionID: "sess-001",
+            taskID: "task-001",
+            actor: "ValidationRunner",
+            command: [],
+            cwd: "",
+            status: "passed",
+            exitCode: 0,
+            output: "",
+            startedAt: "2026-06-27T05:00:00",
+            completedAt: "2026-06-27T05:00:01"
+        )
+        appState.validationRuns = [staleRun]
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        appState.snapshot = staleSnapshot
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setRunValidationResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.runValidation(
+            taskID: "task-001",
+            actor: "Human",
+            argv: ["pytest"],
+            cwd: "/workspace"
+        )
+
+        #expect(appState.validationRuns == [staleRun])
+        #expect(appState.snapshot == staleSnapshot)
+        #expect(appState.lastError == .httpStatus(500))
+    }
 }
 
 extension FakeWorkbenchAPIProvider {
@@ -833,6 +960,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setAttachIssueResult(_ result: Result<IssueDTO, APIError>) {
         attachIssueResult = result
+    }
+
+    fileprivate func setRunValidationResult(_ result: Result<ValidationResultDTO, APIError>) {
+        runValidationResult = result
     }
 }
 

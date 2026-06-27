@@ -339,5 +339,20 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
             updatedAt: "2026-06-27T06:00:00"
         )
     }
+
+    func runValidation(
+        sessionID: String,
+        taskID: String,
+        actor: String,
+        argv: [String],
+        cwd: String?
+    ) async throws(APIError) -> ValidationResultDTO {
+        ValidationResultDTO(
+            id: "run-preview",
+            status: "passed",
+            exitCode: 0,
+            output: "Preview validation passed."
+        )
+    }
 }
 #endif

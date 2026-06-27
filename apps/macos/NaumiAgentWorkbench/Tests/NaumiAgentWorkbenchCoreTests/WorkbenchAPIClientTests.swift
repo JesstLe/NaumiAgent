@@ -661,6 +661,57 @@ final class WorkbenchAPIClientTests {
         #expect(issue.taskID == taskID)
     }
 
+    @Test func runValidationUsesPOSTAndEncodesPath() async throws {
+        let sessionID = "sess 中文"
+        let resultJSON = Data(
+            """
+            {"id":"run-001","status":"passed","exit_code":0,"output":"ok"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/validation-runs" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["task_id"] as? String == "task-001",
+                  json?["actor"] as? String == "Human",
+                  let argv = json?["argv"] as? [String],
+                  argv == ["pytest"],
+                  json?["cwd"] as? String == "/workspace" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, resultJSON)
+        }
+
+        let client = makeClient()
+        let result = try await client.runValidation(
+            sessionID: sessionID,
+            taskID: "task-001",
+            actor: "Human",
+            argv: ["pytest"],
+            cwd: "/workspace"
+        )
+
+        #expect(result.id == "run-001")
+        #expect(result.status == "passed")
+        #expect(result.exitCode == 0)
+        #expect(result.output == "ok")
+    }
+
     // MARK: - Helpers
 
     private func makeClient() -> WorkbenchAPIClient {

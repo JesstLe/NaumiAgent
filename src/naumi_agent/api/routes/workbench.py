@@ -55,6 +55,20 @@ class ClaimIssue(BaseModel):
     worktree_name: str = ""
 
 
+class ValidationRunCreate(BaseModel):
+    task_id: str
+    actor: str = "Human"
+    argv: list[str] = Field(min_length=1)
+    cwd: str | None = None
+
+
+class ValidationRunResultResponse(BaseModel):
+    id: str
+    status: str
+    exit_code: int
+    output: str
+
+
 class WorkbenchEventsResponse(BaseModel):
     events: list[dict[str, Any]]
     limit: int
@@ -311,3 +325,40 @@ async def expire_workbench_leases(
     market = _get_task_market(engine)
     expired = await market.expire_overdue_leases()
     return {"expired": [asdict(lease) for lease in expired]}
+
+
+@router.post(
+    "/workbench/sessions/{session_id}/validation-runs",
+    response_model=ValidationRunResultResponse,
+    status_code=201,
+)
+async def create_validation_run(
+    session_id: str,
+    body: ValidationRunCreate,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        result = await engine.workbench_service.run_validation(
+            session_id=session_id,
+            task_id=body.task_id,
+            actor=body.actor,
+            argv=body.argv,
+            cwd=body.cwd,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return ValidationRunResultResponse(
+        id=result["id"],
+        status=result["status"],
+        exit_code=result["exit_code"],
+        output=result["output"],
+    )

@@ -136,6 +136,25 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func runValidation(
+        sessionID: String,
+        taskID: String,
+        actor: String,
+        argv: [String],
+        cwd: String?
+    ) async throws(APIError) -> ValidationResultDTO {
+        let body = RunValidationRequest(
+            taskID: taskID,
+            actor: actor,
+            argv: argv,
+            cwd: cwd
+        )
+        return try await post(
+            path: "workbench/sessions/\(sessionID)/validation-runs",
+            body: body
+        )
+    }
+
     // MARK: - Private
 
     private func get<T: Decodable & Sendable>(path: String) async throws(APIError) -> T {
@@ -262,5 +281,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         let acceptanceCriteria: [String]
         let parallelMode: String
         let riskLevel: String
+    }
+
+    /// Payload for `POST /workbench/sessions/{session_id}/validation-runs`.
+    private struct RunValidationRequest: Encodable, Sendable {
+        let taskID: String
+        let actor: String
+        let argv: [String]
+        let cwd: String?
     }
 }

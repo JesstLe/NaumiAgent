@@ -3,19 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.workbench.models import Lease, Mission, ParallelMode, RiskLevel
 from naumi_agent.workbench.store import WorkbenchStore
+from naumi_agent.workbench.validation import ValidationCommand, ValidationRunner
 
 
 class WorkbenchService:
     """High-level facade for dashboard operations."""
 
-    def __init__(self, *, task_store: TaskStore, workbench_store: WorkbenchStore) -> None:
+    def __init__(
+        self,
+        *,
+        task_store: TaskStore,
+        workbench_store: WorkbenchStore,
+        validation_runner: ValidationRunner | None = None,
+        workspace_root: str | None = None,
+    ) -> None:
         self._task_store = task_store
         self._workbench_store = workbench_store
+        self._validation_runner = validation_runner
+        self._workspace_root = workspace_root
 
     async def create_mission(self, *, session_id: str, title: str, goal: str) -> Mission:
         mission = await self._workbench_store.create_mission(session_id, title, goal)
@@ -113,3 +124,66 @@ class WorkbenchService:
     async def _list_missions_for_snapshot(self, session_id: str) -> list[dict[str, Any]]:
         missions = await self._workbench_store.list_missions(session_id)
         return [asdict(mission) for mission in missions]
+
+    async def run_validation(
+        self,
+        *,
+        session_id: str,
+        task_id: str,
+        actor: str,
+        argv: list[str],
+        cwd: str | None = None,
+    ) -> dict[str, Any]:
+        """Run an allowlisted validation command and record the result."""
+        if not argv:
+            raise ValueError("验证命令不能为空")
+
+        if self._validation_runner is None:
+            raise RuntimeError("ValidationRunner 未配置")
+
+        resolved_cwd = self._resolve_cwd(cwd)
+        result = await self._validation_runner.run(
+            session_id=session_id,
+            task_id=task_id,
+            actor=actor,
+            command=ValidationCommand(argv=argv, cwd=resolved_cwd),
+        )
+        await self._workbench_store.append_event(
+            session_id=session_id,
+            type="validation.completed",
+            actor=actor,
+            subject_id=task_id,
+            payload={
+                "run_id": result.id,
+                "status": result.status,
+                "exit_code": result.exit_code,
+                "command": argv,
+            },
+        )
+        return {
+            "id": result.id,
+            "status": result.status,
+            "exit_code": result.exit_code,
+            "output": result.output,
+        }
+
+    def _resolve_cwd(self, cwd: str | None) -> str:
+        """Resolve and validate the working directory for a validation run."""
+        if cwd is None:
+            if self._workspace_root is None:
+                raise ValueError("未配置 workspace_root，必须显式指定 cwd")
+            resolved = Path(self._workspace_root).resolve()
+            if not resolved.is_dir():
+                raise ValueError(f"workspace_root 不存在或不是目录：{self._workspace_root}")
+            return str(resolved)
+
+        resolved = Path(cwd).resolve()
+        if not resolved.is_dir():
+            raise ValueError(f"工作目录不存在或不是目录：{cwd}")
+
+        if self._workspace_root is not None:
+            root = Path(self._workspace_root).resolve()
+            if root not in resolved.parents and resolved != root:
+                raise ValueError("工作目录必须在 workspace_root 内")
+
+        return str(resolved)

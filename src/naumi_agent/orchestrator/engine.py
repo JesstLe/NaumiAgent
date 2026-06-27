@@ -55,6 +55,7 @@ from naumi_agent.tools.web import create_web_tools
 from naumi_agent.workbench import WorkbenchStore
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.tools import create_workbench_tools
+from naumi_agent.workbench.validation import ValidationRunner
 from naumi_agent.worktree import WorktreeManager, create_worktree_tools
 
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -432,9 +433,23 @@ class AgentEngine:
 
         self.task_store = TaskStore(config.memory.session_db_path)
         self.workbench_store = WorkbenchStore(config.memory.session_db_path)
+        self.validation_runner = ValidationRunner(
+            store=self.workbench_store,
+            allowed_commands=[
+                ["python3", "-m", "pytest"],
+                ["pytest"],
+                ["python3", "-m", "ruff"],
+                ["ruff"],
+                ["swift", "test"],
+                ["swift", "build"],
+            ],
+            timeout_seconds=120,
+        )
         self.workbench_service = WorkbenchService(
             task_store=self.task_store,
             workbench_store=self.workbench_store,
+            validation_runner=self.validation_runner,
+            workspace_root=str(self.workspace_root),
         )
         self.background_runner = BackgroundRunner(
             BackgroundTaskStore(self._runtime_data_dir / "background")
