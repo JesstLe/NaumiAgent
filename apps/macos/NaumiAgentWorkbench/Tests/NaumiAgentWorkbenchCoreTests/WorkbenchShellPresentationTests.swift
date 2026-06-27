@@ -10,7 +10,7 @@ struct WorkbenchShellPresentationTests {
         #expect(presentation.placesNavigationBelowTitleBar == true)
         #expect(presentation.leadingContentInset == 14)
         #expect(presentation.topNavigationHeight == 42)
-        #expect(presentation.globalStatusHeight == 40)
+        #expect(presentation.globalStatusHeight == 52)
         #expect(presentation.navigationRoutes == AppRoute.topNavigationRoutes)
     }
 }

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Shared layout constants for fixed workbench navigation pages.
@@ -24,5 +25,29 @@ public struct WorkbenchPageLayout: Equatable, Sendable {
 
     public func centralAvailableWidth(in windowWidth: Double) -> Double {
         windowWidth - railWidth - inspectorWidth
+    }
+}
+
+/// Scales a fixed visual design into the current window without clipping columns.
+public struct WorkbenchScaledPageLayout: Equatable, Sendable {
+    public let baseWidth: Double
+    public let baseHeight: Double
+
+    public static let dashboard = WorkbenchScaledPageLayout(baseWidth: 1360, baseHeight: 720)
+    public static let reviews = WorkbenchScaledPageLayout(baseWidth: 1360, baseHeight: 720)
+
+    public init(baseWidth: Double, baseHeight: Double) {
+        self.baseWidth = baseWidth
+        self.baseHeight = baseHeight
+    }
+
+    public func scale(for availableWidth: Double) -> Double {
+        guard baseWidth > 0 else { return 1 }
+        return min(1, max(0.1, availableWidth / baseWidth))
+    }
+
+    public func scaledSize(for availableWidth: Double) -> CGSize {
+        let scale = scale(for: availableWidth)
+        return CGSize(width: baseWidth * scale, height: baseHeight * scale)
     }
 }

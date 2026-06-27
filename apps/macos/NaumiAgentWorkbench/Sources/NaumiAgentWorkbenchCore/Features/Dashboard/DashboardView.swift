@@ -51,22 +51,46 @@ public struct DashboardView: View {
         snapshot: WorkbenchSnapshotDTO,
         presentation: DashboardSnapshotPresentation
     ) -> some View {
+        let layout = WorkbenchScaledPageLayout.dashboard
         let market = TaskMarketDesignPresentation(snapshot: snapshot)
 
-        return VStack(spacing: 0) {
-            HStack(spacing: 0) {
+        return GeometryReader { proxy in
+            let scale = CGFloat(layout.scale(for: Double(proxy.size.width)))
+            let scaledSize = layout.scaledSize(for: Double(proxy.size.width))
+
+            ZStack(alignment: .topLeading) {
+                workbenchLayoutContent(presentation: presentation, market: market)
+                    .frame(
+                        width: layout.baseWidth,
+                        height: layout.baseHeight,
+                        alignment: .topLeading
+                    )
+                    .scaleEffect(scale, anchor: .topLeading)
+                    .frame(width: scaledSize.width, height: scaledSize.height, alignment: .topLeading)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            .clipped()
+        }
+    }
+
+    private func workbenchLayoutContent(
+        presentation: DashboardSnapshotPresentation,
+        market: TaskMarketDesignPresentation
+    ) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
                 workbenchLeftRail(presentation: presentation, market: market)
                     .frame(width: 302)
 
                 Divider()
 
                 sharedCanvas(presentation: presentation, market: market)
-                    .frame(minWidth: 620, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 620, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
                 Divider()
 
                 inspectorPanel(presentation: presentation)
-                    .frame(width: 296)
+                    .frame(width: 296, alignment: .top)
             }
 
             Divider()
@@ -74,7 +98,11 @@ public struct DashboardView: View {
             auditTrail(presentation: presentation)
                 .frame(height: 112)
         }
-        .frame(minWidth: 1180, minHeight: 720)
+        .frame(
+            width: WorkbenchScaledPageLayout.dashboard.baseWidth,
+            height: WorkbenchScaledPageLayout.dashboard.baseHeight,
+            alignment: .topLeading
+        )
     }
 
     private func workbenchHeader(presentation: DashboardSnapshotPresentation) -> some View {
@@ -334,7 +362,7 @@ public struct DashboardView: View {
                     .font(.system(size: 14, weight: .semibold))
             }
             .padding(.horizontal, 16)
-            .padding(.top, 14)
+            .frame(height: 44, alignment: .center)
 
             ZStack {
                 dottedCanvasBackground
