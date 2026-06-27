@@ -28,10 +28,10 @@ public struct WorkbenchShellView: View {
             Divider()
 
             routeView(for: appState.currentRoute)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .clipped()
         }
-        .frame(minWidth: 1180, minHeight: 720)
+        .frame(minWidth: 900, minHeight: 620)
         .sheet(isPresented: $isPresentingMissionComposer) {
             MissionComposerSheet(
                 appState: environment.appState,
@@ -89,11 +89,7 @@ private struct GlobalStatusStrip: View {
         HStack(spacing: 10) {
             ForEach(presentation.items) { item in
                 statusItem(item)
-                    .frame(
-                        minWidth: item.label == "Mission" ? 220 : 96,
-                        maxWidth: item.label == "Mission" ? 320 : 150,
-                        alignment: .leading
-                    )
+                    .frame(width: item.label == "Mission" ? 210 : 112, alignment: .leading)
             }
 
             Spacer(minLength: 8)
@@ -124,6 +120,7 @@ private struct GlobalStatusStrip: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
         .background(color(for: item.tone).opacity(0.08))
@@ -168,7 +165,7 @@ private struct TopNavigationBar: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(minWidth: 430, idealWidth: 540, maxWidth: 620)
+            .frame(minWidth: 360, idealWidth: 520, maxWidth: 620)
             .layoutPriority(2)
 
             Spacer(minLength: 12)

@@ -15,7 +15,7 @@ public struct WorkbenchShellPresentation: Equatable, Sendable {
         placesNavigationBelowTitleBar: Bool = true,
         leadingContentInset: Double = 14,
         topNavigationHeight: Double = 42,
-        globalStatusHeight: Double = 40,
+        globalStatusHeight: Double = 52,
         navigationRoutes: [AppRoute] = AppRoute.topNavigationRoutes
     ) {
         self.showsSyntheticWindowControls = showsSyntheticWindowControls

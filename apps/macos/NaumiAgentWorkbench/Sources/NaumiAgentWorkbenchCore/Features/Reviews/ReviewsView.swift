@@ -20,28 +20,46 @@ public struct ReviewsView: View {
             snapshot: appState.snapshot
         )
         let selected = selectedReview(presentation)
+        let layout = WorkbenchScaledPageLayout.reviews
 
-        VStack(spacing: 0) {
-            pageHeader(selected: selected)
-            Divider()
+        GeometryReader { proxy in
+            let scale = CGFloat(layout.scale(for: Double(proxy.size.width)))
+            let scaledSize = layout.scaledSize(for: Double(proxy.size.width))
 
-            HStack(spacing: 0) {
-                reviewQueueRail(presentation)
-                    .frame(width: 304)
-                Divider()
-                reviewMain(presentation: presentation, selected: selected)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                Divider()
-                reviewInspector(presentation: presentation, selected: selected)
-                    .frame(width: 296)
+            ZStack(alignment: .topLeading) {
+                reviewLayoutContent(presentation: presentation, selected: selected)
+                    .frame(width: layout.baseWidth, height: layout.baseHeight, alignment: .topLeading)
+                    .scaleEffect(scale, anchor: .topLeading)
+                    .frame(width: scaledSize.width, height: scaledSize.height, alignment: .topLeading)
             }
-
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            .clipped()
         }
-        .frame(minWidth: 1180, minHeight: 720)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             selectedReviewID = selected.id
         }
+    }
+
+    private func reviewLayoutContent(
+        presentation: ReviewsDesignPresentation,
+        selected: ReviewDesignItem
+    ) -> some View {
+        HStack(spacing: 0) {
+            reviewQueueRail(presentation)
+                .frame(width: 304)
+            Divider()
+            reviewMain(presentation: presentation, selected: selected)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider()
+            reviewInspector(presentation: presentation, selected: selected)
+                .frame(width: 296)
+        }
+        .frame(
+            width: WorkbenchScaledPageLayout.reviews.baseWidth,
+            height: WorkbenchScaledPageLayout.reviews.baseHeight,
+            alignment: .topLeading
+        )
     }
 
     private func selectedReview(_ presentation: ReviewsDesignPresentation) -> ReviewDesignItem {
@@ -51,33 +69,9 @@ public struct ReviewsView: View {
             ?? presentation.selectedReview
     }
 
-    private func pageHeader(selected: ReviewDesignItem) -> some View {
-        HStack(spacing: 12) {
-            Text(appState.locale == .zhCN
-                ? "审查：\(selected.title) (#\(selected.number))"
-                : "Review: \(selected.title) (#\(selected.number))"
-            )
-                .font(.system(size: 17, weight: .semibold))
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Text(appState.locale == .zhCN ? "高风险：需要人工审批" : "High Risk: Human Approval Required")
-                .font(.caption)
-                .fontWeight(.medium)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.red.opacity(0.10))
-                .foregroundStyle(.red)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-            Spacer()
-        }
-        .padding(.horizontal, 18)
-        .frame(height: 48)
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
-
     private func reviewQueueRail(_ presentation: ReviewsDesignPresentation) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
+            HStack(spacing: 10) {
                 Text(AppStrings.Reviews.title(appState.locale))
                     .font(.system(size: 17, weight: .semibold))
                 Spacer()
