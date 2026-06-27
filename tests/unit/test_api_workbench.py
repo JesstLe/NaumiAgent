@@ -95,6 +95,7 @@ class _FakeWorkbenchService:
         self.listed_context_snapshots: list[dict] = []
         self.requested_context_snapshots: list[dict] = []
         self.listed_approvals: list[dict] = []
+        self.requested_approvals: list[dict] = []
         self.listed_agent_profiles: list[dict] = []
         self.requested_agent_profiles: list[dict] = []
         self.listed_failures: list[dict] = []
@@ -640,6 +641,27 @@ class _FakeWorkbenchService:
                 "updated_at": "2024-01-01T00:00:00",
             }
         ]
+
+    async def get_approval(self, session_id: str, approval_id: str):
+        self.requested_approvals.append(
+            {"session_id": session_id, "approval_id": approval_id}
+        )
+        if approval_id == "missing-approval":
+            return None
+        return {
+            "id": approval_id,
+            "session_id": session_id,
+            "mission_id": "mission-1",
+            "task_id": "task-1",
+            "state": "waiting",
+            "title": "请求审批",
+            "detail": "详情",
+            "requester": "Agent-A",
+            "reviewer": "",
+            "decision_note": "",
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
+        }
 
     async def list_failures(
         self,
@@ -1966,6 +1988,52 @@ async def test_get_approvals_endpoint_without_state_filter() -> None:
     assert response.model_dump()["state"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["approvals"]) == 1
+
+
+def test_get_approval_route_returns_single_approval() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/approvals/approval-2")
+
+    assert response.status_code == 200
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_approvals == [
+        {"session_id": "sess-1", "approval_id": "approval-2"}
+    ]
+    assert response.json() == {
+        "id": "approval-2",
+        "session_id": "sess-1",
+        "mission_id": "mission-1",
+        "task_id": "task-1",
+        "state": "waiting",
+        "title": "请求审批",
+        "detail": "详情",
+        "requester": "Agent-A",
+        "reviewer": "",
+        "decision_note": "",
+        "created_at": "2024-01-01T00:00:00",
+        "updated_at": "2024-01-01T00:00:00",
+    }
+
+
+def test_get_approval_route_returns_404_for_missing_approval() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/approvals/missing-approval")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "审批请求不存在"}
+    assert engine.workbench_service.requested_approvals == [
+        {"session_id": "sess-1", "approval_id": "missing-approval"}
+    ]
 
 
 @pytest.mark.asyncio

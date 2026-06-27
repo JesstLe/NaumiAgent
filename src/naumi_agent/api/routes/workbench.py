@@ -1114,6 +1114,25 @@ async def get_approvals(
     )
 
 
+@router.get("/workbench/sessions/{session_id}/approvals/{approval_id}")
+async def get_approval(
+    session_id: str,
+    approval_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    approval = await engine.workbench_service.get_approval(session_id, approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="审批请求不存在")
+    return approval
+
+
 @router.post("/workbench/sessions/{session_id}/approvals/{approval_id}/resolve")
 async def resolve_approval(
     session_id: str,

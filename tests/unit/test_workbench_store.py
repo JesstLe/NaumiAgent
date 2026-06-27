@@ -443,6 +443,34 @@ async def test_resolve_approval_only_matches_same_session(store: WorkbenchStore)
 
 
 @pytest.mark.asyncio
+async def test_get_approval_returns_matching_session_approval(
+    store: WorkbenchStore,
+) -> None:
+    approval = await store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="请求审批",
+        detail="详情",
+        requester="Agent-A",
+    )
+    _other_session_approval = await store.add_approval(
+        session_id="other",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="其他会话",
+        detail="详情",
+        requester="Agent-A",
+    )
+
+    found = await store.get_approval("s", approval.id)
+
+    assert found == approval
+    assert await store.get_approval("s", "missing-approval") is None
+    assert await store.get_approval("other", approval.id) is None
+
+
+@pytest.mark.asyncio
 async def test_list_approvals_filters_by_session_state_and_orders_newest_first(
     store: WorkbenchStore,
 ) -> None:

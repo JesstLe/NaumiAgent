@@ -123,6 +123,28 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
             assert issue_detail["mission_id"] == mission_id
             assert issue_detail["acceptance_criteria"] == ["dashboard snapshot 必须刷新"]
 
+            approval = asyncio.run(
+                engine.workbench_store.add_approval(
+                    session_id=session_id,
+                    mission_id=mission_id,
+                    task_id=task_id,
+                    title="允许执行高风险验证",
+                    detail="验证通过后允许进入人工审查",
+                    requester="Backend-Agent",
+                )
+            )
+            approval_detail_response = client.get(
+                f"/api/v1/workbench/sessions/{session_id}/approvals/{approval.id}"
+            )
+            assert approval_detail_response.status_code == 200
+            approval_detail = approval_detail_response.json()
+            assert approval_detail["id"] == approval.id
+            assert approval_detail["mission_id"] == mission_id
+            assert approval_detail["task_id"] == task_id
+            assert approval_detail["state"] == "waiting"
+            assert approval_detail["title"] == "允许执行高风险验证"
+            assert approval_detail["requester"] == "Backend-Agent"
+
             agent_response = client.post(
                 f"/api/v1/workbench/sessions/{session_id}/agents/Backend-Agent",
                 json={
