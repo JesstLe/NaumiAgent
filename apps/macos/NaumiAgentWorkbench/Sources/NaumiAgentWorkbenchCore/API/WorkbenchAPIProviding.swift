@@ -83,6 +83,25 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> LeasesDTO
 
+    /// Fetches worktrees for the given session, optionally filtered by task or status.
+    func fetchWorktrees(
+        sessionID: String,
+        taskID: String?,
+        status: String?,
+        limit: Int
+    ) async throws(APIError) -> WorktreesDTO
+
+    /// Fetches one worktree by name.
+    func fetchWorktree(sessionID: String, name: String) async throws(APIError) -> WorktreeDTO
+
+    /// Marks a worktree as kept for human review or follow-up.
+    func keepWorktree(
+        sessionID: String,
+        name: String,
+        actor: String,
+        reason: String
+    ) async throws(APIError) -> WorktreeDTO
+
     /// Fetches missions for the given session, optionally filtered by status.
     func fetchMissions(
         sessionID: String,

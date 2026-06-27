@@ -159,6 +159,39 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         LeasesDTO(leases: [], state: state, taskID: taskID, agentID: agentID, limit: limit)
     }
 
+    func fetchWorktrees(
+        sessionID: String,
+        taskID: String?,
+        status: String?,
+        limit: Int
+    ) async throws(APIError) -> WorktreesDTO {
+        WorktreesDTO(
+            worktrees: [makeWorktree(sessionID: sessionID, name: "wt-preview", taskID: taskID ?? "preview-task")],
+            taskID: taskID,
+            status: status,
+            limit: limit
+        )
+    }
+
+    func fetchWorktree(sessionID: String, name: String) async throws(APIError) -> WorktreeDTO {
+        makeWorktree(sessionID: sessionID, name: name, taskID: "preview-task")
+    }
+
+    func keepWorktree(
+        sessionID: String,
+        name: String,
+        actor: String,
+        reason: String
+    ) async throws(APIError) -> WorktreeDTO {
+        makeWorktree(
+            sessionID: sessionID,
+            name: name,
+            taskID: "preview-task",
+            status: "kept",
+            keptReason: reason
+        )
+    }
+
     func fetchMissions(
         sessionID: String,
         status: String?,
@@ -448,6 +481,30 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
             worktreeName: "wt-preview",
             createdAt: now,
             updatedAt: now
+        )
+    }
+
+    private func makeWorktree(
+        sessionID: String,
+        name: String,
+        taskID: String,
+        status: String = "clean",
+        keptReason: String = ""
+    ) -> WorktreeDTO {
+        WorktreeDTO(
+            name: name,
+            path: "/repo/.naumi/worktrees/\(name)",
+            branch: "naumi/worktree-\(name)",
+            baseRef: "preview-base",
+            status: status,
+            taskID: taskID,
+            dirtyFiles: status == "clean" ? 0 : 2,
+            commitsAhead: status == "clean" ? 0 : 1,
+            createdAt: now,
+            updatedAt: now,
+            keptReason: keptReason,
+            metadata: ["session_id": sessionID],
+            removable: status == "clean" && keptReason.isEmpty
         )
     }
 
