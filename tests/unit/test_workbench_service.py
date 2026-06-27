@@ -130,13 +130,65 @@ async def test_list_events_returns_store_events_and_respects_limit(tmp_path) -> 
 
     all_events = await service.list_events("s", limit=50)
 
-    assert {event["id"] for event in all_events} == {event_a.id, event_b.id}
-    assert all(event in [event_a.to_dict(), event_b.to_dict()] for event in all_events)
+    assert {event["id"] for event in all_events["events"]} == {event_a.id, event_b.id}
+    assert all(
+        event in [event_a.to_dict(), event_b.to_dict()]
+        for event in all_events["events"]
+    )
+    assert all_events["event_type"] is None
+    assert all_events["subject_id"] is None
+    assert all_events["actor"] is None
+    assert all_events["limit"] == 50
 
     limited = await service.list_events("s", limit=1)
 
-    assert len(limited) == 1
-    assert limited[0] in [event_a.to_dict(), event_b.to_dict()]
+    assert len(limited["events"]) == 1
+    assert limited["events"][0] in [event_a.to_dict(), event_b.to_dict()]
+    assert limited["limit"] == 1
+
+
+@pytest.mark.asyncio
+async def test_list_events_forwards_filters_and_reflected_in_response(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    _event_a = await workbench_store.append_event(
+        session_id="s",
+        type="mission.created",
+        actor="Human",
+        subject_id="mission-1",
+        payload={"title": "Mission A"},
+    )
+    event_b = await workbench_store.append_event(
+        session_id="s",
+        type="issue.created",
+        actor="Planner-Agent",
+        subject_id="task-1",
+        payload={"detail": "issue B"},
+    )
+    _event_c = await workbench_store.append_event(
+        session_id="s",
+        type="issue.created",
+        actor="Planner-Agent",
+        subject_id="task-2",
+        payload={"detail": "issue C"},
+    )
+
+    filtered = await service.list_events(
+        "s",
+        event_type="issue.created",
+        subject_id="task-1",
+        actor="Planner-Agent",
+        limit=50,
+    )
+
+    assert [event["id"] for event in filtered["events"]] == [event_b.id]
+    assert filtered["event_type"] == "issue.created"
+    assert filtered["subject_id"] == "task-1"
+    assert filtered["actor"] == "Planner-Agent"
+    assert filtered["limit"] == 50
 
 
 @pytest.mark.asyncio
@@ -339,7 +391,7 @@ async def test_run_validation_records_run_and_event(tmp_path) -> None:
     )
 
     events = await service.list_events("s")
-    event = next((e for e in events if e["type"] == "validation.completed"), None)
+    event = next((e for e in events["events"] if e["type"] == "validation.completed"), None)
     assert event is not None
     assert event["actor"] == "Human"
     assert event["subject_id"] == "task-1"
@@ -404,7 +456,7 @@ async def test_create_intent_lock_persists_lock_and_records_event(tmp_path) -> N
     assert any(stored.id == lock["id"] for stored in locks)
 
     events = await service.list_events("s")
-    event = next((e for e in events if e["type"] == "intent_lock.created"), None)
+    event = next((e for e in events["events"] if e["type"] == "intent_lock.created"), None)
     assert event is not None
     assert event["actor"] == "Planner-Agent"
     assert event["subject_id"] == lock["id"]
@@ -458,7 +510,7 @@ async def test_create_decision_persists_decision_and_records_event(tmp_path) -> 
     assert any(stored.id == decision["id"] for stored in decisions)
 
     events = await service.list_events("s")
-    event = next((e for e in events if e["type"] == "decision.created"), None)
+    event = next((e for e in events["events"] if e["type"] == "decision.created"), None)
     assert event is not None
     assert event["actor"] == "Planner-Agent"
     assert event["subject_id"] == decision["id"]
@@ -532,7 +584,7 @@ async def test_resolve_approval_persists_record_and_emits_event(tmp_path) -> Non
     assert result["decision_note"] == "同意"
 
     events = await service.list_events("s")
-    event = next((e for e in events if e["type"] == "approval.resolved"), None)
+    event = next((e for e in events["events"] if e["type"] == "approval.resolved"), None)
     assert event is not None
     assert event["actor"] == "Human"
     assert event["subject_id"] == approval.id

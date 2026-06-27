@@ -799,3 +799,69 @@ async def test_list_leases_filters_by_session_state_task_agent_and_orders_newest
 
     other_session_leases = await store.list_leases("s2", limit=50)
     assert [lease.id for lease in other_session_leases] == [other_session.id]
+
+
+@pytest.mark.asyncio
+async def test_list_events_filters_by_type_subject_id_actor_and_preserves_order(
+    store: WorkbenchStore,
+) -> None:
+    event_a = await store.append_event(
+        session_id="s",
+        type="mission.created",
+        actor="Human",
+        subject_id="mission-1",
+        payload={"title": "A"},
+    )
+    event_b = await store.append_event(
+        session_id="s",
+        type="issue.created",
+        actor="Planner-Agent",
+        subject_id="task-1",
+        payload={"detail": "B"},
+    )
+    event_c = await store.append_event(
+        session_id="s",
+        type="issue.created",
+        actor="Planner-Agent",
+        subject_id="task-2",
+        payload={"detail": "C"},
+    )
+    event_d = await store.append_event(
+        session_id="s",
+        type="approval.resolved",
+        actor="Human",
+        subject_id="approval-1",
+        payload={"state": "approved"},
+    )
+    event_other = await store.append_event(
+        session_id="s2",
+        type="mission.created",
+        actor="Human",
+        subject_id="mission-1",
+        payload={"title": "Other"},
+    )
+
+    all_events = await store.list_events("s", limit=50)
+    assert [e.id for e in all_events] == [event_a.id, event_b.id, event_c.id, event_d.id]
+
+    by_type = await store.list_events("s", event_type="issue.created", limit=50)
+    assert [e.id for e in by_type] == [event_b.id, event_c.id]
+
+    by_subject = await store.list_events("s", subject_id="task-1", limit=50)
+    assert [e.id for e in by_subject] == [event_b.id]
+
+    by_actor = await store.list_events("s", actor="Human", limit=50)
+    assert [e.id for e in by_actor] == [event_a.id, event_d.id]
+
+    combined = await store.list_events(
+        "s", event_type="issue.created", actor="Planner-Agent", limit=50
+    )
+    assert [e.id for e in combined] == [event_b.id, event_c.id]
+
+    limited = await store.list_events("s", event_type="issue.created", limit=1)
+    assert [e.id for e in limited] == [event_c.id]
+
+    other_session = await store.list_events(
+        "s2", event_type="mission.created", limit=50
+    )
+    assert [e.id for e in other_session] == [event_other.id]
