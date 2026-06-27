@@ -1,19 +1,12 @@
 import SwiftUI
 
-/// Reviews page showing validation runs and pending approvals for the selected session.
-///
-/// Runs are loaded from `GET /workbench/sessions/{id}/validation-runs` and approvals
-/// from `GET /workbench/sessions/{id}/approvals?state=waiting`. Neither list is ever
-/// fabricated locally. The view refreshes automatically on appear and exposes a
-/// manual refresh button in the toolbar.
+/// Reviews visual prototype aligned with the human approval reference screen.
 public struct ReviewsView: View {
     @Bindable public var appState: AppState
     public let daemonController: DaemonController
 
-    @State private var validationDraft = ValidationRunDraft()
-    @State private var approvalDrafts: [String: ApprovalResolveDraft] = [:]
-    @State private var resolvingApprovalIDs: Set<String> = []
-    @State private var isProcessing: Bool = false
+    @State private var selectedReviewID: String?
+    @State private var selectedTab = "Details"
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -21,904 +14,635 @@ public struct ReviewsView: View {
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                header
-                if let lastError = appState.lastError {
-                    errorCard(error: lastError)
-                }
-                approvalsSection
-                runValidationForm
-                runList
+        let presentation = ReviewsDesignPresentation(
+            approvals: appState.approvals,
+            validationRuns: appState.validationRuns,
+            snapshot: appState.snapshot
+        )
+        let selected = selectedReview(presentation)
+
+        VStack(spacing: 0) {
+            pageHeader(selected: selected)
+            Divider()
+
+            HStack(spacing: 0) {
+                reviewQueueRail(presentation)
+                    .frame(width: 304)
+                Divider()
+                reviewMain(presentation: presentation, selected: selected)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider()
+                reviewInspector(presentation: presentation, selected: selected)
+                    .frame(width: 296)
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Divider()
+            footer
         }
+        .frame(minWidth: 1180, minHeight: 720)
+        .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle(AppStrings.Reviews.title(appState.locale))
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: refreshAll) {
-                    Label(
-                        AppStrings.Reviews.refreshButton(appState.locale),
-                        systemImage: "arrow.clockwise"
-                    )
-                }
-            }
-        }
-        .task {
-            syncApprovalDrafts(with: appState.approvals)
-            await refreshBoth()
-        }
-        .onChange(of: appState.approvals) { _, newApprovals in
-            syncApprovalDrafts(with: newApprovals)
+        .onAppear {
+            selectedReviewID = selected.id
         }
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(AppStrings.Reviews.title(appState.locale))
-                .font(.largeTitle)
-                .fontWeight(.bold)
-
-            HStack(spacing: 12) {
-                Text(AppStrings.Reviews.runCount(appState.locale, count: appState.validationRuns.count))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                if let sessionID = appState.selectedSessionID {
-                    Text(sessionID)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-        }
+    private func selectedReview(_ presentation: ReviewsDesignPresentation) -> ReviewDesignItem {
+        presentation.reviewQueues
+            .flatMap(\.items)
+            .first { $0.id == selectedReviewID }
+            ?? presentation.selectedReview
     }
 
-    // MARK: - Pending Approvals
-
-    private var approvalsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(AppStrings.Reviews.pendingApprovalsSectionTitle(appState.locale))
-                    .font(.headline)
-                Spacer()
-                Text(AppStrings.Reviews.approvalCount(appState.locale, count: appState.approvals.count))
+    private func pageHeader(selected: ReviewDesignItem) -> some View {
+        HStack(spacing: 12) {
+            Text("Review: \(selected.title) (#\(selected.number))")
+                .font(.system(size: 17, weight: .semibold))
+            Text(appState.locale == .zhCN ? "高风险：需要人工审批" : "High Risk: Human Approval Required")
+                .font(.caption)
+                .fontWeight(.medium)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.red.opacity(0.10))
+                .foregroundStyle(.red)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+            Spacer()
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(.green)
+                    .frame(width: 7, height: 7)
+                Text("Workspace: ~/naumi")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Image(systemName: "person.crop.circle")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 11)
+    }
 
-            if appState.approvals.isEmpty {
-                emptyApprovalsState
-            } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(appState.approvals, id: \.id) { approval in
-                        approvalRow(approval: approval)
-                        if approval.id != appState.approvals.last?.id {
-                            Divider()
+    private func reviewQueueRail(_ presentation: ReviewsDesignPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(AppStrings.Reviews.title(appState.locale))
+                    .font(.system(size: 17, weight: .semibold))
+                Spacer()
+                Image(systemName: "magnifyingglass")
+                Image(systemName: "line.3.horizontal.decrease")
+                Image(systemName: "square.and.pencil")
+            }
+            .foregroundStyle(.primary)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(presentation.reviewQueues) { queue in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text(queue.title)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text("\(queue.badge)")
+                                    .font(.caption2)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(color(forTone: queue.items.first?.tone ?? "gray").opacity(0.12))
+                                    .foregroundStyle(color(forTone: queue.items.first?.tone ?? "gray"))
+                                    .clipShape(Capsule())
+                            }
+
+                            ForEach(queue.items) { item in
+                                reviewQueueCard(item)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        selectedReviewID = item.id
+                                    }
+                            }
                         }
                     }
                 }
-                .padding()
-                .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    private func approvalRow(approval: ApprovalDTO) -> some View {
-        let draftBinding = binding(for: approval.id)
-        let draft = draftBinding.wrappedValue
-        let isResolving = resolvingApprovalIDs.contains(approval.id)
-        let canResolve = draft.canResolve && !isResolving
-
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                Text(approval.title)
-                    .font(.body)
-                    .fontWeight(.medium)
-                Spacer()
-                StatusBadge(
-                    text: approval.state,
-                    color: approvalStatusColor(for: approval.state)
-                )
-            }
-
-            if !approval.detail.isEmpty {
-                detailItem(
-                    label: AppStrings.Reviews.detailLabel(appState.locale),
-                    value: approval.detail
-                )
-            }
-
-            HStack(spacing: 16) {
-                detailItem(
-                    label: AppStrings.Reviews.taskIDLabel(appState.locale),
-                    value: approval.taskID
-                )
-                detailItem(
-                    label: AppStrings.Reviews.requesterLabel(appState.locale),
-                    value: approval.requester
-                )
-            }
-
-            HStack(spacing: 16) {
-                detailItem(
-                    label: AppStrings.Reviews.createdAtLabel(appState.locale),
-                    value: approval.createdAt
-                )
-                detailItem(
-                    label: AppStrings.Reviews.updatedAtLabel(appState.locale),
-                    value: approval.updatedAt
-                )
-            }
-
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(AppStrings.Reviews.actorLabel(appState.locale))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("", text: draftBinding.actor)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityLabel(AppStrings.Reviews.actorLabel(appState.locale))
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(AppStrings.Reviews.decisionNoteLabel(appState.locale))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("", text: draftBinding.decisionNote)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityLabel(AppStrings.Reviews.decisionNoteLabel(appState.locale))
-                }
-            }
-
+    private func reviewQueueCard(_ item: ReviewDesignItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
+                Image(systemName: item.id == selectedReviewID ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(item.id == selectedReviewID ? .blue : .secondary)
+                Text(item.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
                 Spacer()
-                Button(action: { resolveApproval(approval: approval, state: "rejected") }) {
-                    if isResolving {
-                        Label(
-                            AppStrings.Reviews.processingLabel(appState.locale),
-                            systemImage: "arrow.triangle.2.circlepath"
-                        )
-                    } else {
-                        Label(
-                            AppStrings.Reviews.rejectButton(appState.locale),
-                            systemImage: "xmark.circle"
-                        )
-                    }
-                }
-                .disabled(!canResolve)
-
-                Button(action: { resolveApproval(approval: approval, state: "approved") }) {
-                    if isResolving {
-                        Label(
-                            AppStrings.Reviews.processingLabel(appState.locale),
-                            systemImage: "arrow.triangle.2.circlepath"
-                        )
-                    } else {
-                        Label(
-                            AppStrings.Reviews.approveButton(appState.locale),
-                            systemImage: "checkmark.circle"
-                        )
-                    }
-                }
-                .disabled(!canResolve)
-                .buttonStyle(.borderedProminent)
+                Text(item.risk)
+                    .font(.caption)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(color(forTone: item.tone).opacity(0.12))
+                    .foregroundStyle(color(forTone: item.tone))
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+            }
+            HStack {
+                Image(systemName: "arrow.triangle.branch")
+                    .foregroundStyle(.secondary)
+                Text("#\(item.number) by \(item.agent)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            HStack {
+                Text("Worktree:")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(item.worktree)
+                    .font(.caption)
+                    .lineLimit(1)
+                Spacer()
+                Text(item.time)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
-    }
-
-    private func binding(for approvalID: String) -> Binding<ApprovalResolveDraft> {
-        Binding(
-            get: { approvalDrafts[approvalID] ?? ApprovalResolveDraft() },
-            set: { approvalDrafts[approvalID] = $0 }
+        .padding(11)
+        .background(item.id == selectedReviewID ? Color.accentColor.opacity(0.10) : Color(nsColor: .windowBackgroundColor))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(item.id == selectedReviewID ? Color.accentColor : Color.secondary.opacity(0.12), lineWidth: 1)
         )
-    }
-
-    private func syncApprovalDrafts(with approvals: [ApprovalDTO]) {
-        let ids = Set(approvals.map(\.id))
-        var updated = approvalDrafts.filter { ids.contains($0.key) }
-        for approval in approvals where updated[approval.id] == nil {
-            updated[approval.id] = ApprovalResolveDraft()
-        }
-        approvalDrafts = updated
-    }
-
-    private func resolveApproval(approval: ApprovalDTO, state: String) {
-        let draft = approvalDrafts[approval.id] ?? ApprovalResolveDraft()
-        guard draft.canResolve else { return }
-
-        resolvingApprovalIDs.insert(approval.id)
-        Task { @MainActor in
-            await daemonController.resolveApproval(
-                approvalID: approval.id,
-                actor: draft.trimmedActor,
-                state: state,
-                decisionNote: draft.trimmedDecisionNote
-            )
-            resolvingApprovalIDs.remove(approval.id)
-        }
-    }
-
-    private var emptyApprovalsState: some View {
-        HStack {
-            Spacer()
-            VStack(spacing: 8) {
-                Image(systemName: "checkmark.shield")
-                    .font(.system(size: 32))
-                    .foregroundStyle(.secondary)
-                Text(AppStrings.Reviews.emptyApprovals(appState.locale))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            Spacer()
-        }
-        .padding(.vertical, 32)
-    }
-
-    // MARK: - Run Validation Form
-
-    private var runValidationForm: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(AppStrings.Reviews.runValidationSectionTitle(appState.locale))
-                .font(.headline)
-
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(AppStrings.Reviews.taskIDLabel(appState.locale))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("", text: $validationDraft.taskID)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityLabel(AppStrings.Reviews.taskIDLabel(appState.locale))
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(AppStrings.Reviews.actorLabel(appState.locale))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("", text: $validationDraft.actor)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityLabel(AppStrings.Reviews.actorLabel(appState.locale))
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(AppStrings.Reviews.commandLabel(appState.locale))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextField("", text: $validationDraft.commandLine)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel(AppStrings.Reviews.commandLabel(appState.locale))
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(AppStrings.Reviews.cwdLabel(appState.locale))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextField("", text: $validationDraft.cwd)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel(AppStrings.Reviews.cwdLabel(appState.locale))
-            }
-
-            HStack {
-                Spacer()
-                Button(action: submitRunValidation) {
-                    if isProcessing {
-                        Label(
-                            AppStrings.Reviews.processingLabel(appState.locale),
-                            systemImage: "arrow.triangle.2.circlepath"
-                        )
-                    } else {
-                        Label(
-                            AppStrings.Reviews.runButton(appState.locale),
-                            systemImage: "play.circle"
-                        )
-                    }
-                }
-                .disabled(!canSubmitRunValidation)
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding()
-        .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    private var canSubmitRunValidation: Bool {
-        !isProcessing && validationDraft.canSubmit
-    }
-
-    private func submitRunValidation() {
-        let draft = validationDraft
-
-        guard draft.canSubmit else { return }
-
-        isProcessing = true
-        Task { @MainActor in
-            await daemonController.runValidation(
-                taskID: draft.trimmedTaskID,
-                actor: draft.trimmedActor,
-                argv: draft.argv,
-                cwd: draft.normalizedCWD
-            )
-            isProcessing = false
+    private func reviewMain(presentation: ReviewsDesignPresentation, selected: ReviewDesignItem) -> some View {
+        VStack(spacing: 0) {
+            metaStrip(selected)
+            validationSummary(presentation.validationChecks)
+                .padding(14)
+            HStack(spacing: 0) {
+                filesChanged(presentation.fileChanges)
+                    .frame(width: 192)
+                Divider()
+                diffViewer(presentation.diffRows)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            Divider()
+            reviewTimeline(presentation.timeline)
+                .frame(height: 168)
         }
     }
 
-    // MARK: - Run List
+    private func metaStrip(_ selected: ReviewDesignItem) -> some View {
+        HStack(spacing: 24) {
+            metaItem(icon: "clock", text: "Opened: May 22, 2025 09:28")
+            metaItem(icon: "arrow.clockwise", text: "Updated: May 22, 2025 09:36")
+            metaItem(icon: "folder", text: "Worktree: \(selected.worktree)")
+            metaItem(icon: "arrow.triangle.branch", text: "Base: main")
+            metaItem(icon: "arrow.left.arrow.right", text: "Compare: issue-3-market")
+            Spacer()
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
 
-    @ViewBuilder
-    private var runList: some View {
-        if appState.validationRuns.isEmpty {
-            emptyState
-        } else {
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(presentedRuns) { run in
-                    runRow(run: run)
-                    if run.id != presentedRuns.last?.id {
+    private func metaItem(icon: String, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func validationSummary(_ checks: [ReviewDesignCheck]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text(appState.locale == .zhCN ? "验证摘要" : "Validation Summary")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Text("2 / 2 passed")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+            }
+
+            HStack(spacing: 0) {
+                ForEach(checks) { check in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(check.name)
+                            .font(.caption)
+                            .lineLimit(1)
+                        HStack {
+                            Circle()
+                                .fill(check.status == "passed" ? .green : .secondary)
+                                .frame(width: 6, height: 6)
+                            Text(check.status)
+                                .font(.caption2)
+                                .foregroundStyle(check.status == "passed" ? .green : .secondary)
+                            Spacer()
+                            Text(check.time)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if check.id != checks.last?.id {
                         Divider()
                     }
                 }
             }
-            .padding()
-            .background(Color.secondary.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .background(Color(nsColor: .windowBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
         }
-    }
-
-    private var presentedRuns: [ValidationRunPresentation] {
-        appState.validationRuns.map(ValidationRunPresentation.init)
-    }
-
-    private func runRow(run: ValidationRunPresentation) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                StatusBadge(
-                    text: run.statusLabel(locale: appState.locale),
-                    color: statusColor(for: run.status)
-                )
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(AppStrings.Reviews.completedAtLabel(appState.locale))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(run.completedAt)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            HStack(spacing: 16) {
-                detailItem(
-                    label: AppStrings.Reviews.taskIDLabel(appState.locale),
-                    value: run.taskID
-                )
-                detailItem(
-                    label: AppStrings.Reviews.actorLabel(appState.locale),
-                    value: run.actor
-                )
-                detailItem(
-                    label: AppStrings.Reviews.exitCodeLabel(appState.locale),
-                    value: "\(run.exitCode)"
-                )
-            }
-
-            detailItem(
-                label: AppStrings.Reviews.commandLabel(appState.locale),
-                value: run.commandLine
-            )
-
-            detailItem(
-                label: AppStrings.Reviews.cwdLabel(appState.locale),
-                value: run.cwd
-            )
-
-            if !run.outputSummary.isEmpty {
-                detailItem(
-                    label: AppStrings.Reviews.outputLabel(appState.locale),
-                    value: run.outputSummary
-                )
-            }
-        }
-    }
-
-    private func detailItem(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.body)
-                .fontWeight(.medium)
-                .lineLimit(2)
-        }
-    }
-
-    private func errorCard(error: APIError) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(AppStrings.Dashboard.errorSection(appState.locale))
-                .font(.headline)
-                .foregroundStyle(.red)
-            Text(error.localizedMessage(locale: appState.locale))
-                .font(.body)
-                .foregroundStyle(.red)
-        }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.red.opacity(0.08))
+        .padding(12)
+        .background(Color.green.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.green.opacity(0.25), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    // MARK: - Empty State
+    private func filesChanged(_ files: [ReviewDesignFile]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(appState.locale == .zhCN ? "变更文件 (6)" : "FILES CHANGED (6)")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.top, 12)
 
-    private var emptyState: some View {
-        HStack {
-            Spacer()
-            VStack(spacing: 8) {
-                Image(systemName: "checkmark.shield")
-                    .font(.system(size: 32))
-                    .foregroundStyle(.secondary)
-                Text(AppStrings.Reviews.emptyRuns(appState.locale))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+            ForEach(files) { file in
+                HStack(spacing: 8) {
+                    Image(systemName: file.name.contains(".py") ? "doc.text" : "folder")
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(file.name)
+                            .font(.caption)
+                            .lineLimit(1)
+                        if file.selected {
+                            Text(file.path)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    Text(file.status)
+                        .font(.caption2)
+                        .foregroundStyle(statusTone(file.status))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(file.selected ? Color.accentColor.opacity(0.12) : Color.clear)
             }
+
+            Spacer()
+            HStack(spacing: 10) {
+                legend("A", "Added", .green)
+                legend("M", "Modified", .orange)
+                legend("D", "Deleted", .red)
+            }
+            .padding(10)
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func legend(_ code: String, _ text: String, _ color: Color) -> some View {
+        HStack(spacing: 3) {
+            Text(code)
+                .font(.caption2)
+                .fontWeight(.bold)
+                .foregroundStyle(color)
+            Text(text)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func diffViewer(_ rows: [ReviewDesignDiffRow]) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "doc.text.magnifyingglass")
+                Text("src/naumi_agent/workbench/market.py")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Spacer()
+                Picker("", selection: .constant("Side-by-side")) {
+                    Text("Side-by-side").tag("Side-by-side")
+                    Text("Unified").tag("Unified")
+                }
+                .labelsHidden()
+                .frame(width: 150)
+                Image(systemName: "square.on.square")
+                Image(systemName: "gearshape")
+                Image(systemName: "ellipsis")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            HStack(spacing: 0) {
+                Text("main")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                Divider()
+                Text("issue-3-market (Current)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+            }
+            .frame(height: 30)
+            .background(Color.secondary.opacity(0.05))
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(rows) { row in
+                        HStack(spacing: 0) {
+                            diffLine(row.number, row.old, tone: row.tone == "changed" ? "removed" : "normal")
+                            Divider()
+                            diffLine(row.number, row.new, tone: row.tone)
+                        }
+                    }
+                }
+            }
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+
+    private func diffLine(_ number: Int, _ text: String, tone: String) -> some View {
+        HStack(spacing: 8) {
+            Text("\(number)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, alignment: .trailing)
+            Text(text)
+                .font(.system(size: 11, design: .monospaced))
+                .lineLimit(1)
             Spacer()
         }
-        .padding(.vertical, 32)
+        .padding(.horizontal, 8)
+        .frame(height: 28)
+        .background(diffBackground(tone))
     }
 
-    // MARK: - Helpers
+    private func reviewTimeline(_ events: [ReviewDesignTimelineEvent]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(appState.locale == .zhCN ? "审查时间线" : "REVIEW TIMELINE")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Picker("", selection: .constant("All Events")) {
+                    Text("All Events").tag("All Events")
+                }
+                .labelsHidden()
+                .frame(width: 118)
+                Spacer()
+            }
 
-    private func refreshAll() {
-        Task {
-            await refreshBoth()
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 5) {
+                GridRow {
+                    timelineHeader("Time")
+                    timelineHeader("Event")
+                    timelineHeader("Actor")
+                    timelineHeader("Details")
+                }
+                ForEach(events) { event in
+                    GridRow {
+                        Text(event.time).font(.caption2).foregroundStyle(.secondary)
+                        HStack {
+                            Circle().fill(color(forTone: event.tone)).frame(width: 7, height: 7)
+                            Text(event.event).font(.caption2).foregroundStyle(color(forTone: event.tone))
+                        }
+                        Text(event.actor).font(.caption2).foregroundStyle(.blue)
+                        Text(event.detail).font(.caption2).lineLimit(1)
+                    }
+                }
+            }
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    private func refreshBoth() async {
-        await daemonController.refreshValidationRuns(limit: 50)
-        await daemonController.refreshApprovals(state: "waiting")
+    private func timelineHeader(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .frame(minWidth: text == "Details" ? 330 : 92, alignment: .leading)
     }
 
-    private func statusColor(for status: String) -> Color {
-        switch status.lowercased() {
-        case "passed":
-            return .green
-        case "failed":
-            return .red
-        default:
-            return .secondary
+    private func reviewInspector(presentation: ReviewsDesignPresentation, selected: ReviewDesignItem) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("", selection: $selectedTab) {
+                Text(appState.locale == .zhCN ? "详情" : "Details").tag("Details")
+                Text(appState.locale == .zhCN ? "检查" : "Checks").tag("Checks")
+            }
+            .pickerStyle(.segmented)
+
+            inspectorCard(title: appState.locale == .zhCN ? "风险分析" : "Risk Analysis") {
+                HStack {
+                    Text(appState.locale == .zhCN ? "为什么是高风险？" : "Why high risk?")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    Spacer()
+                    Text(selected.risk)
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(color(forTone: selected.tone).opacity(0.12))
+                        .foregroundStyle(color(forTone: selected.tone))
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                }
+                bullet(appState.locale == .zhCN ? "影响任务市场的租约语义" : "Affects lease semantics in the task market")
+                bullet(appState.locale == .zhCN ? "可能影响多智能体并发" : "Potential impact on multi-agent concurrency")
+                bullet(appState.locale == .zhCN ? "触及核心后端服务" : "Touches core backend service")
+                Text(appState.locale == .zhCN ? "查看风险拆解 ->" : "View risk breakdown ->")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+            }
+
+            inspectorCard(title: appState.locale == .zhCN ? "上下文健康" : "Context Health") {
+                HStack {
+                    Text(appState.locale == .zhCN ? "引用文件均为最新且一致。" : "All referenced files are current and consistent.")
+                        .font(.caption)
+                    Spacer()
+                    StatusBadge(text: "Good", color: .green)
+                }
+            }
+
+            inspectorCard(title: appState.locale == .zhCN ? "验证运行" : "Validation Runs") {
+                ForEach(presentation.validationChecks) { check in
+                    HStack {
+                        Circle()
+                            .fill(check.status == "passed" ? .green : .secondary)
+                            .frame(width: 7, height: 7)
+                        Text(check.name)
+                            .font(.caption)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(check.status)
+                            .font(.caption2)
+                            .foregroundStyle(check.status == "passed" ? .green : .secondary)
+                        Text(check.time)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(appState.locale == .zhCN ? "查看完整验证报告 ->" : "View full validation report ->")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+            }
+
+            inspectorCard(title: appState.locale == .zhCN ? "智能体审查" : "Agent Reviews") {
+                ForEach(presentation.agentReviews) { note in
+                    HStack(alignment: .top, spacing: 9) {
+                        Text(note.initials)
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .frame(width: 28, height: 28)
+                            .background(Color.purple.opacity(0.16))
+                            .foregroundStyle(.purple)
+                            .clipShape(Circle())
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(note.agent).font(.caption).fontWeight(.semibold)
+                                Spacer()
+                                Text(note.time).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Text(note.body)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            inspectorCard(title: appState.locale == .zhCN ? "审批决策" : "Approval Decision") {
+                Text(appState.locale == .zhCN ? "Required: 人工审批" : "Required: Human approval")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button {
+                } label: {
+                    Label(AppStrings.Reviews.approveButton(appState.locale), systemImage: "checkmark")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+
+                Button {
+                } label: {
+                    Label(appState.locale == .zhCN ? "请求修改" : "Request Changes", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+
+                Button(appState.locale == .zhCN ? "转为提案" : "Convert to Proposal") {}
+                    .buttonStyle(.bordered)
+                Button(appState.locale == .zhCN ? "保留工作区" : "Keep Worktree") {}
+                    .buttonStyle(.bordered)
+            }
+
+            Spacer(minLength: 0)
         }
+        .padding(14)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private func approvalStatusColor(for state: String) -> Color {
-        switch state.lowercased() {
-        case "approved":
+    private func inspectorCard<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+            content()
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func bullet(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 7) {
+            Text("•")
+            Text(text)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private var footer: some View {
+        HStack {
+            Circle()
+                .fill(.green)
+                .frame(width: 8, height: 8)
+            Text(appState.locale == .zhCN ? "已连接本地 NaumiAgent Runtime" : "Connected to local NaumiAgent Runtime")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text("v0.3.0")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func statusTone(_ status: String) -> Color {
+        switch status {
+        case "A":
             return .green
-        case "rejected":
-            return .red
-        case "waiting":
+        case "M":
             return .orange
+        case "D":
+            return .red
+        default:
+            return .secondary
+        }
+    }
+
+    private func diffBackground(_ tone: String) -> Color {
+        switch tone {
+        case "added":
+            return Color.green.opacity(0.08)
+        case "changed", "removed":
+            return Color.red.opacity(0.07)
+        default:
+            return Color.clear
+        }
+    }
+
+    private func color(forTone tone: String) -> Color {
+        switch tone {
+        case "red":
+            return .red
+        case "orange":
+            return .orange
+        case "green":
+            return .green
+        case "blue":
+            return .blue
+        case "purple":
+            return .purple
         default:
             return .secondary
         }
     }
 }
-
-#if DEBUG
-struct ReviewsView_Previews: PreviewProvider {
-    @MainActor
-    static var previews: some View {
-        let state = AppState()
-        state.locale = .zhCN
-        state.selectedSessionID = "sess-preview"
-        state.validationRuns = [
-            ValidationRunDTO(
-                id: "run-1",
-                sessionID: "sess-preview",
-                taskID: "task-1",
-                actor: "ValidationRunner",
-                command: ["pytest", "tests/unit"],
-                cwd: "/workspace",
-                status: "passed",
-                exitCode: 0,
-                output: "All tests passed.\n\n",
-                startedAt: "2026-06-27T06:00:00",
-                completedAt: "2026-06-27T06:00:05"
-            ),
-            ValidationRunDTO(
-                id: "run-2",
-                sessionID: "sess-preview",
-                taskID: "task-2",
-                actor: "ValidationRunner",
-                command: ["ruff", "check", "src"],
-                cwd: "/workspace",
-                status: "failed",
-                exitCode: 1,
-                output: "E501 line too long\n\nE502 another error",
-                startedAt: "2026-06-27T06:01:00",
-                completedAt: "2026-06-27T06:01:02"
-            )
-        ]
-        state.approvals = [
-            ApprovalDTO(
-                id: "approval-1",
-                sessionID: "sess-preview",
-                missionID: "mission-1",
-                taskID: "task-1",
-                state: "waiting",
-                title: "请求执行高风险操作",
-                detail: "需要人工确认后继续执行",
-                requester: "Agent-A",
-                reviewer: "",
-                decisionNote: "",
-                createdAt: "2026-06-27T06:00:00",
-                updatedAt: "2026-06-27T06:00:01"
-            )
-        ]
-        return ReviewsView(
-            appState: state,
-            daemonController: DaemonController(
-                appState: state,
-                apiProvider: PreviewWorkbenchAPIProvider()
-            )
-        )
-        .frame(minWidth: 640, minHeight: 420)
-    }
-}
-
-/// Minimal fake provider so the preview compiles without a real daemon.
-@MainActor
-private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
-    func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
-        DaemonStatusDTO(
-            status: "running",
-            version: "0.1.0",
-            pid: 1,
-            host: "127.0.0.1",
-            port: 8765,
-            startedAt: "2026-06-27T06:00:00",
-            workspaceCount: 0
-        )
-    }
-
-    func fetchCapabilities() async throws(APIError) -> CapabilitiesDTO {
-        CapabilitiesDTO(
-            supportsDaemonManagement: false,
-            supportsWorkspaceRegistry: false,
-            supportsValidationRunner: true,
-            supportsCloudSync: false,
-            supportedLocales: ["zh-CN", "en-US"],
-            protocolVersion: 1
-        )
-    }
-
-    func fetchSnapshot(sessionID: String) async throws(APIError) -> WorkbenchSnapshotDTO {
-        WorkbenchSnapshotDTO(
-            sessionID: sessionID,
-            missions: [],
-            tasks: [],
-            issues: [],
-            failures: [],
-            events: []
-        )
-    }
-
-    func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO {
-        SessionListDTO(sessions: [], total: 0, page: page, pageSize: pageSize)
-    }
-
-    func createSession(
-        title: String?,
-        model: String?,
-        systemPrompt: String?
-    ) async throws(APIError) -> SessionDTO {
-        SessionDTO(
-            id: "preview-session",
-            title: title,
-            model: model ?? "preview",
-            createdAt: "2026-06-27T06:00:00",
-            updatedAt: "2026-06-27T06:00:00",
-            messageCount: 0,
-            totalTokens: 0,
-            totalCostUSD: 0,
-            status: "active"
-        )
-    }
-
-    func fetchEvents(
-        sessionID: String,
-        eventType: String?,
-        subjectID: String?,
-        actor: String?,
-        limit: Int
-    ) async throws(APIError) -> WorkbenchEventsDTO {
-        WorkbenchEventsDTO(events: [], eventType: eventType, subjectID: subjectID, actor: actor, limit: limit)
-    }
-
-    func fetchValidationRuns(
-        sessionID: String,
-        taskID: String?,
-        limit: Int
-    ) async throws(APIError) -> ValidationRunsDTO {
-        ValidationRunsDTO(validationRuns: [], taskID: taskID, limit: limit)
-    }
-
-    func fetchContextSnapshots(
-        sessionID: String,
-        taskID: String?,
-        agentID: String?,
-        limit: Int
-    ) async throws(APIError) -> ContextSnapshotsDTO {
-        ContextSnapshotsDTO(contextSnapshots: [], taskID: taskID, agentID: agentID, limit: limit)
-    }
-
-    func recordContextHealth(
-        sessionID: String,
-        taskID: String,
-        agentID: String,
-        minutesSinceSync: Int,
-        tokenLoadRatio: Double,
-        policyConflict: Bool,
-        actor: String
-    ) async throws(APIError) -> ContextSnapshotDTO {
-        ContextSnapshotDTO(
-            id: "preview-snap",
-            sessionID: sessionID,
-            agentID: agentID,
-            taskID: taskID,
-            health: "good",
-            reasons: [],
-            createdAt: "2026-06-27T06:00:00"
-        )
-    }
-
-    func fetchApprovals(
-        sessionID: String,
-        state: String?,
-        limit: Int
-    ) async throws(APIError) -> ApprovalsDTO {
-        ApprovalsDTO(approvals: [], state: state, limit: limit)
-    }
-
-    func fetchFailures(
-        sessionID: String,
-        taskID: String?,
-        status: String?,
-        limit: Int
-    ) async throws(APIError) -> FailuresDTO {
-        FailuresDTO(failures: [], taskID: taskID, status: status, limit: limit)
-    }
-
-    func fetchIssues(
-        sessionID: String,
-        missionID: String?,
-        riskLevel: String?,
-        limit: Int
-    ) async throws(APIError) -> IssuesDTO {
-        IssuesDTO(issues: [], missionID: missionID, riskLevel: riskLevel, limit: limit)
-    }
-
-    func fetchLeases(
-        sessionID: String,
-        state: String?,
-        taskID: String?,
-        agentID: String?,
-        limit: Int
-    ) async throws(APIError) -> LeasesDTO {
-        LeasesDTO(leases: [], state: state, taskID: taskID, agentID: agentID, limit: limit)
-    }
-
-    func fetchMissions(
-        sessionID: String,
-        status: String?,
-        limit: Int
-    ) async throws(APIError) -> MissionsDTO {
-        MissionsDTO(missions: [], status: status, limit: limit)
-    }
-
-    func fetchAgentProfiles(
-        sessionID: String,
-        status: String?,
-        limit: Int
-    ) async throws(APIError) -> AgentProfilesDTO {
-        AgentProfilesDTO(agentProfiles: [], status: status, limit: limit)
-    }
-
-    func registerAgentProfile(
-        sessionID: String,
-        agentID: String,
-        name: String,
-        role: String,
-        capabilities: [String],
-        permissions: [String],
-        maxParallelTasks: Int,
-        status: String,
-        actor: String
-    ) async throws(APIError) -> AgentProfileDTO {
-        AgentProfileDTO(
-            id: agentID,
-            sessionID: sessionID,
-            name: name,
-            role: role,
-            capabilities: capabilities,
-            permissions: permissions,
-            maxParallelTasks: maxParallelTasks,
-            status: status,
-            createdAt: "2026-06-27T06:00:00",
-            updatedAt: "2026-06-27T06:00:00"
-        )
-    }
-
-    func claimIssue(
-        sessionID: String,
-        taskID: String,
-        agentID: String,
-        durationMinutes: Int,
-        worktreeName: String
-    ) async throws(APIError) -> LeaseDTO {
-        LeaseDTO(
-            id: "lease-1",
-            sessionID: sessionID,
-            taskID: taskID,
-            agentID: agentID,
-            state: "active",
-            expiresAt: "2026-06-27T08:00:00",
-            worktreeName: worktreeName,
-            createdAt: "2026-06-27T06:00:00",
-            updatedAt: "2026-06-27T06:00:00"
-        )
-    }
-
-    func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
-        LeaseDTO(
-            id: leaseID,
-            sessionID: sessionID,
-            taskID: "task-1",
-            agentID: "agent-1",
-            state: "released",
-            expiresAt: "2026-06-27T08:00:00",
-            worktreeName: "",
-            createdAt: "2026-06-27T06:00:00",
-            updatedAt: "2026-06-27T06:00:00"
-        )
-    }
-
-    func expireLeases(sessionID: String) async throws(APIError) -> ExpiredLeasesDTO {
-        ExpiredLeasesDTO(expired: [])
-    }
-
-    func createMission(
-        sessionID: String,
-        title: String,
-        goal: String
-    ) async throws(APIError) -> MissionDTO {
-        MissionDTO(
-            id: "mission-1",
-            sessionID: sessionID,
-            title: title,
-            goal: goal,
-            status: "active",
-            createdAt: "2026-06-27T06:00:00",
-            updatedAt: "2026-06-27T06:00:00"
-        )
-    }
-
-    func attachIssue(
-        sessionID: String,
-        missionID: String,
-        taskID: String,
-        acceptanceCriteria: [String],
-        parallelMode: String,
-        riskLevel: String
-    ) async throws(APIError) -> IssueDTO {
-        IssueDTO(
-            sessionID: sessionID,
-            taskID: taskID,
-            missionID: missionID,
-            parallelMode: parallelMode,
-            riskLevel: riskLevel,
-            requiresHumanApproval: false,
-            acceptanceCriteria: acceptanceCriteria,
-            expectedArtifacts: [],
-            relatedBranch: "",
-            relatedWorktree: "",
-            relatedPR: "",
-            createdAt: "2026-06-27T06:00:00",
-            updatedAt: "2026-06-27T06:00:00"
-        )
-    }
-
-    func fetchIntentLocks(sessionID: String, missionID: String) async throws(APIError) -> IntentLocksDTO {
-        IntentLocksDTO(intentLocks: [], missionID: missionID)
-    }
-
-    func fetchDecisions(sessionID: String, missionID: String) async throws(APIError) -> DecisionsDTO {
-        DecisionsDTO(decisions: [], missionID: missionID)
-    }
-
-    func createIntentLock(
-        sessionID: String,
-        missionID: String,
-        actor: String,
-        rule: String,
-        blockedPaths: [String],
-        allowedPaths: [String],
-        requireProposalForRisk: String
-    ) async throws(APIError) -> IntentLockDTO {
-        IntentLockDTO(
-            id: "lock-1",
-            sessionID: sessionID,
-            missionID: missionID,
-            rule: rule,
-            blockedPaths: blockedPaths,
-            allowedPaths: allowedPaths,
-            requireProposalForRisk: requireProposalForRisk,
-            active: true,
-            createdAt: "2026-06-27T06:00:00"
-        )
-    }
-
-    func createDecision(
-        sessionID: String,
-        missionID: String,
-        kind: String,
-        title: String,
-        content: String,
-        actor: String
-    ) async throws(APIError) -> DecisionDTO {
-        DecisionDTO(
-            id: "decision-1",
-            sessionID: sessionID,
-            missionID: missionID,
-            kind: kind,
-            title: title,
-            content: content,
-            actor: actor,
-            createdAt: "2026-06-27T06:00:00"
-        )
-    }
-
-    func resolveApproval(
-        sessionID: String,
-        approvalID: String,
-        actor: String,
-        state: String,
-        decisionNote: String
-    ) async throws(APIError) -> ApprovalDTO {
-        ApprovalDTO(
-            id: approvalID,
-            sessionID: sessionID,
-            missionID: "mission-1",
-            taskID: "task-1",
-            state: state,
-            title: "预览审批",
-            detail: "预览详情",
-            requester: "Agent-A",
-            reviewer: actor,
-            decisionNote: decisionNote,
-            createdAt: "2026-06-27T06:00:00",
-            updatedAt: "2026-06-27T06:00:00"
-        )
-    }
-
-    func runValidation(
-        sessionID: String,
-        taskID: String,
-        actor: String,
-        argv: [String],
-        cwd: String?
-    ) async throws(APIError) -> ValidationResultDTO {
-        ValidationResultDTO(
-            id: "run-preview",
-            status: "passed",
-            exitCode: 0,
-            output: "Preview validation passed."
-        )
-    }
-}
-#endif

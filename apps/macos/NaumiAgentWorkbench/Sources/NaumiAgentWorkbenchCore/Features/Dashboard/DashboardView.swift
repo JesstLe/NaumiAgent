@@ -13,7 +13,10 @@ public struct DashboardView: View {
     public var body: some View {
         Group {
             if let snapshot = appState.snapshot {
-                workbenchLayout(presentation: DashboardSnapshotPresentation(snapshot: snapshot))
+                workbenchLayout(
+                    snapshot: snapshot,
+                    presentation: DashboardSnapshotPresentation(snapshot: snapshot)
+                )
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
@@ -38,8 +41,13 @@ public struct DashboardView: View {
 
     // MARK: - Workbench Layout
 
-    private func workbenchLayout(presentation: DashboardSnapshotPresentation) -> some View {
-        VStack(spacing: 0) {
+    private func workbenchLayout(
+        snapshot: WorkbenchSnapshotDTO,
+        presentation: DashboardSnapshotPresentation
+    ) -> some View {
+        let market = TaskMarketDesignPresentation(snapshot: snapshot)
+
+        return VStack(spacing: 0) {
             workbenchHeader(presentation: presentation)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 12)
@@ -47,18 +55,18 @@ public struct DashboardView: View {
             Divider()
 
             HStack(spacing: 0) {
-                workbenchLeftRail(presentation: presentation)
-                    .frame(width: 244)
+                workbenchLeftRail(presentation: presentation, market: market)
+                    .frame(width: 302)
 
                 Divider()
 
-                sharedCanvas(presentation: presentation)
-                    .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                sharedCanvas(presentation: presentation, market: market)
+                    .frame(minWidth: 620, maxWidth: .infinity, maxHeight: .infinity)
 
                 Divider()
 
                 inspectorPanel(presentation: presentation)
-                    .frame(width: 294)
+                    .frame(width: 296)
             }
 
             Divider()
@@ -66,7 +74,7 @@ public struct DashboardView: View {
             auditTrail(presentation: presentation)
                 .frame(height: 112)
         }
-        .frame(minWidth: 980, minHeight: 640)
+        .frame(minWidth: 1180, minHeight: 720)
     }
 
     private func workbenchHeader(presentation: DashboardSnapshotPresentation) -> some View {
@@ -116,8 +124,11 @@ public struct DashboardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
-    private func workbenchLeftRail(presentation: DashboardSnapshotPresentation) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+    private func workbenchLeftRail(
+        presentation: DashboardSnapshotPresentation,
+        market: TaskMarketDesignPresentation
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
             TextField(AppStrings.Dashboard.searchPlaceholder(appState.locale), text: $searchText)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 12))
@@ -128,24 +139,39 @@ public struct DashboardView: View {
                     railRow(
                         icon: "scope",
                         title: mission.title,
-                        subtitle: mission.status,
+                        subtitle: appState.locale == .zhCN ? "进行中" : "In Progress",
                         color: .indigo
                     )
                 }
+                railRow(icon: "square.grid.2x2", title: "Overview", subtitle: "", color: .secondary)
+                railRow(icon: "person.2", title: AppStrings.Dashboard.agentsSection(appState.locale), subtitle: "4", color: .purple)
+                railRow(icon: "point.3.connected.trianglepath.dotted", title: AppStrings.Dashboard.sharedCanvasSection(appState.locale), subtitle: "selected", color: .blue)
+                railRow(icon: "checkmark.circle", title: AppStrings.Dashboard.validationRunsLabel(appState.locale), subtitle: "12", color: .green)
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                railSectionTitle(AppStrings.Dashboard.issueBacklogSection(appState.locale))
-                if presentation.taskRows.isEmpty {
-                    emptyListLabel(AppStrings.Dashboard.emptyTasks(appState.locale))
-                } else {
-                    ForEach(presentation.taskRows, id: \.id) { row in
-                        railRow(
-                            icon: row.riskLevel == nil ? "checkmark.circle" : "exclamationmark.triangle",
-                            title: row.subject,
-                            subtitle: row.status,
-                            color: row.riskLevel == nil ? .green : .orange
-                        )
+                HStack {
+                    railSectionTitle(AppStrings.Dashboard.issueBacklogSection(appState.locale))
+                    Spacer()
+                    Text("Priority")
+                        .font(.caption2)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                }
+                HStack(spacing: 4) {
+                    miniFilter("All", "12", .blue)
+                    miniFilter("Active", "6", .secondary)
+                    miniFilter("Blocked", "2", .secondary)
+                    miniFilter("Done", "4", .secondary)
+                }
+
+                ScrollView {
+                    VStack(spacing: 4) {
+                        ForEach(market.rows) { row in
+                            dashboardIssueRailRow(row)
+                        }
                     }
                 }
             }
@@ -154,6 +180,71 @@ public struct DashboardView: View {
         }
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func miniFilter(_ title: String, _ count: String, _ color: Color) -> some View {
+        HStack(spacing: 3) {
+            Text(title)
+            Text(count)
+                .foregroundStyle(.secondary)
+        }
+        .font(.caption2)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(color.opacity(0.10))
+        .foregroundStyle(color == .secondary ? .primary : color)
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+    }
+
+    private func dashboardIssueRailRow(_ row: TaskMarketDesignIssue) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top) {
+                Circle()
+                    .fill(statusDotColor(row.status))
+                    .frame(width: 6, height: 6)
+                    .padding(.top, 5)
+                Text("\(row.number)")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 18, alignment: .leading)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(row.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                        Spacer()
+                        Text(row.risk.replacingOccurrences(of: "High", with: "P1").replacingOccurrences(of: "Medium", with: "P2").replacingOccurrences(of: "Low", with: "P3").replacingOccurrences(of: "Critical", with: "P0"))
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(riskColor(row.risk).opacity(0.10))
+                            .foregroundStyle(riskColor(row.risk))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    Text("Agent: \(row.number % 3 == 0 ? "Test-Agent" : "Backend-Agent")")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Text(row.status)
+                            .font(.caption2)
+                            .foregroundStyle(statusDotColor(row.status))
+                        Spacer()
+                        Image(systemName: "checklist")
+                        Text("\(max(1, row.number % 4))/\(max(3, row.number % 6 + 2))")
+                        Image(systemName: "link")
+                        Text("\(row.bids)")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(8)
+        .background(row.number == 3 ? Color.accentColor.opacity(0.10) : Color.clear)
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(row.number == 3 ? Color.accentColor : Color.secondary.opacity(0.12), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 7))
     }
 
     private func railSectionTitle(_ title: String) -> some View {
@@ -189,13 +280,23 @@ public struct DashboardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
-    private func sharedCanvas(presentation: DashboardSnapshotPresentation) -> some View {
+    private func sharedCanvas(
+        presentation: DashboardSnapshotPresentation,
+        market: TaskMarketDesignPresentation
+    ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
+                Text("Show:")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ForEach(["Issues", "Agents", "Worktrees", "Validations", "Approvals", "Dependencies"], id: \.self) { item in
+                    Toggle(item, isOn: .constant(true))
+                        .toggleStyle(.checkbox)
+                        .font(.caption)
+                }
+                Spacer()
                 Text(AppStrings.Dashboard.sharedCanvasSection(appState.locale))
                     .font(.system(size: 14, weight: .semibold))
-                Spacer()
-                StatusBadge(text: AppStrings.Dashboard.validationRunsLabel(appState.locale), color: .teal)
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
@@ -204,13 +305,44 @@ public struct DashboardView: View {
                 dottedCanvasBackground
                 canvasConnectors
 
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 188, maximum: 230), spacing: 14)],
-                    alignment: .center,
-                    spacing: 14
-                ) {
-                    ForEach(presentation.workbench.canvasNodes, id: \.id) { node in
-                        canvasNodeView(node: node)
+                VStack(spacing: 18) {
+                    HStack {
+                        Spacer()
+                        if let mission = presentation.workbench.canvasNodes.first(where: { $0.kind == .mission }) {
+                            canvasNodeView(node: mission)
+                                .frame(width: 260)
+                        }
+                        Spacer()
+                    }
+
+                    HStack(alignment: .center, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("ISSUES")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.secondary)
+                            ForEach(Array(market.rows.prefix(4))) { row in
+                                canvasIssueCard(row)
+                            }
+                        }
+                        .frame(width: 230)
+
+                        VStack(spacing: 14) {
+                            ForEach(presentation.workbench.canvasNodes.filter { $0.kind == .agents }, id: \.id) { node in
+                                canvasNodeView(node: node)
+                            }
+                            ForEach(["Planner-Agent", "Backend-Agent", "Test-Agent", "Reviewer-Agent"], id: \.self) { agent in
+                                compactCanvasPill(agent, color: .purple)
+                            }
+                        }
+                        .frame(width: 172)
+
+                        VStack(spacing: 14) {
+                            ForEach(presentation.workbench.canvasNodes.filter { $0.kind == .worktrees || $0.kind == .validation || $0.kind == .failure || $0.kind == .approval }, id: \.id) { node in
+                                canvasNodeView(node: node)
+                            }
+                        }
+                        .frame(width: 260)
                     }
                 }
                 .padding(24)
@@ -222,6 +354,66 @@ public struct DashboardView: View {
             .padding(.bottom, 16)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func canvasIssueCard(_ row: TaskMarketDesignIssue) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("\(row.number)")
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .frame(width: 18, height: 18)
+                    .background(Color.secondary.opacity(0.12))
+                    .clipShape(Circle())
+                Text(row.title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+                Spacer()
+                Text(row.risk == "High" ? "P1" : row.risk == "Critical" ? "P0" : "P2")
+                    .font(.caption2)
+                    .foregroundStyle(riskColor(row.risk))
+            }
+            Text("Status: \(row.status)")
+                .font(.caption2)
+                .foregroundStyle(statusDotColor(row.status))
+            Text("Agent: \(row.number % 3 == 0 ? "Test-Agent" : "Backend-Agent")")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(row.number == 3 ? Color.accentColor : Color.secondary.opacity(0.22), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func compactCanvasPill(_ title: String, color: Color) -> some View {
+        HStack {
+            Image(systemName: "person.fill")
+                .foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Text(title.contains("Backend") ? "Working on 2 issues" : "Idle")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Circle()
+                .fill(title.contains("Backend") ? .blue : .green)
+                .frame(width: 7, height: 7)
+        }
+        .padding(9)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(color.opacity(0.35), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 7))
     }
 
     private var dottedCanvasBackground: some View {
@@ -302,6 +494,14 @@ public struct DashboardView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(AppStrings.Dashboard.inspectorSection(appState.locale))
                 .font(.system(size: 14, weight: .semibold))
+            Picker("", selection: .constant("Context")) {
+                Text("Context").tag("Context")
+                Text("Diff").tag("Diff")
+                Text("Tests").tag("Tests")
+                Text("Risk").tag("Risk")
+                Text("Approval").tag("Approval")
+            }
+            .pickerStyle(.segmented)
 
             if let inspector = presentation.workbench.inspector {
                 VStack(alignment: .leading, spacing: 10) {
@@ -336,10 +536,55 @@ public struct DashboardView: View {
                 daemonCompact(status: status)
             }
 
+            inspectorStateCard(
+                title: appState.locale == .zhCN ? "验证状态" : "Validation State",
+                tone: .red,
+                lines: [
+                    "Latest Run: #23 (09:36)",
+                    "Result: pytest failed",
+                    "Tests: 12 failed, 3 passed"
+                ]
+            )
+
+            inspectorStateCard(
+                title: appState.locale == .zhCN ? "上下文健康" : "Context Health",
+                tone: .orange,
+                lines: [
+                    "Overall: Stale",
+                    "Files Analyzed: 18",
+                    "Last Updated: 18m ago"
+                ]
+            )
+
             Spacer(minLength: 0)
         }
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func inspectorStateCard(title: String, tone: Color, lines: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(tone)
+            ForEach(lines, id: \.self) { line in
+                Text(line)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Button(title.contains("验证") || title.contains("Validation") ? "Re-run Validation" : "Refresh Context") {}
+                .font(.caption)
+                .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity)
+        }
+        .padding(12)
+        .background(tone.opacity(0.07))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tone.opacity(0.25), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func inspectorDetail(_ label: String, _ value: String) -> some View {
@@ -469,6 +714,34 @@ public struct DashboardView: View {
             return .red
         case .approval:
             return .purple
+        }
+    }
+
+    private func riskColor(_ risk: String) -> Color {
+        switch risk.lowercased() {
+        case "critical":
+            return .red
+        case "high":
+            return .orange
+        case "medium":
+            return .yellow
+        case "low":
+            return .green
+        default:
+            return .secondary
+        }
+    }
+
+    private func statusDotColor(_ status: String) -> Color {
+        switch status.lowercased() {
+        case "leased", "completed", "done", "passed":
+            return .green
+        case "blocked", "failed":
+            return .red
+        case "requires proposal", "in_progress", "active":
+            return .blue
+        default:
+            return .secondary
         }
     }
 
