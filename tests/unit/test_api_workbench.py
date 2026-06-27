@@ -95,6 +95,7 @@ class _FakeWorkbenchService:
         self.listed_agent_profiles: list[dict] = []
         self.listed_failures: list[dict] = []
         self.listed_issues: list[dict] = []
+        self.requested_issues: list[dict] = []
         self.listed_missions: list[dict] = []
         self.listed_leases: list[dict] = []
         self.listed_intent_locks: list[dict] = []
@@ -624,6 +625,26 @@ class _FakeWorkbenchService:
             "mission_id": mission_id,
             "risk_level": risk_level,
             "limit": limit,
+        }
+
+    async def get_issue(self, session_id: str, task_id: str):
+        self.requested_issues.append({"session_id": session_id, "task_id": task_id})
+        if task_id == "missing-task":
+            return None
+        return {
+            "session_id": session_id,
+            "task_id": task_id,
+            "mission_id": "mission-1",
+            "parallel_mode": "cooperative",
+            "risk_level": "high",
+            "requires_human_approval": True,
+            "acceptance_criteria": ["详情页不依赖全量 snapshot"],
+            "expected_artifacts": [],
+            "related_branch": "issue-detail",
+            "related_worktree": "wt-issue-detail",
+            "related_pr": "",
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
         }
 
     async def list_leases(
@@ -2465,6 +2486,52 @@ def test_create_issue_route_accepts_json_body_without_existing_task_id() -> None
     assert response.json()["task_id"] == "task-9"
     assert response.json()["parallel_mode"] == "cooperative"
     assert response.json()["risk_level"] == "high"
+
+
+def test_get_issue_route_returns_single_issue_detail() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/issues/task-2")
+
+    assert response.status_code == 200
+    assert engine.workbench_service.requested_issues == [
+        {"session_id": "sess-1", "task_id": "task-2"}
+    ]
+    assert response.json() == {
+        "session_id": "sess-1",
+        "task_id": "task-2",
+        "mission_id": "mission-1",
+        "parallel_mode": "cooperative",
+        "risk_level": "high",
+        "requires_human_approval": True,
+        "acceptance_criteria": ["详情页不依赖全量 snapshot"],
+        "expected_artifacts": [],
+        "related_branch": "issue-detail",
+        "related_worktree": "wt-issue-detail",
+        "related_pr": "",
+        "created_at": "2024-01-01T00:00:00",
+        "updated_at": "2024-01-01T00:00:00",
+    }
+
+
+def test_get_issue_route_returns_404_for_missing_issue() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/issues/missing-task")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "issue 不存在"
+    assert engine.workbench_service.requested_issues == [
+        {"session_id": "sess-1", "task_id": "missing-task"}
+    ]
 
 
 @pytest.mark.asyncio
