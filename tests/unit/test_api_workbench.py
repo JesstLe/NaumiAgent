@@ -32,6 +32,7 @@ from naumi_agent.api.routes.workbench import (
     get_daemon_status,
     get_failures,
     get_issues,
+    get_leases,
     get_missions,
     get_validation_runs,
     get_workbench_capabilities,
@@ -77,6 +78,7 @@ class _FakeWorkbenchService:
         self.listed_failures: list[dict] = []
         self.listed_issues: list[dict] = []
         self.listed_missions: list[dict] = []
+        self.listed_leases: list[dict] = []
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
@@ -429,6 +431,43 @@ class _FakeWorkbenchService:
             ],
             "mission_id": mission_id,
             "risk_level": risk_level,
+            "limit": limit,
+        }
+
+    async def list_leases(
+        self,
+        session_id: str,
+        state: str | None = None,
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        limit: int = 50,
+    ):
+        self.listed_leases.append(
+            {
+                "session_id": session_id,
+                "state": state,
+                "task_id": task_id,
+                "agent_id": agent_id,
+                "limit": limit,
+            }
+        )
+        return {
+            "leases": [
+                {
+                    "id": "lease-1",
+                    "session_id": session_id,
+                    "task_id": task_id or "task-1",
+                    "agent_id": agent_id or "agent-1",
+                    "state": state or "active",
+                    "expires_at": "2024-01-01T01:00:00",
+                    "worktree_name": "wt-1",
+                    "created_at": "2024-01-01T00:00:00",
+                    "updated_at": "2024-01-01T00:00:00",
+                }
+            ],
+            "state": state,
+            "task_id": task_id,
+            "agent_id": agent_id,
             "limit": limit,
         }
 
@@ -1566,3 +1605,98 @@ async def test_get_issues_endpoint_without_filters() -> None:
     assert response.model_dump()["risk_level"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["issues"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_leases_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_leases(
+            "missing",
+            _fake_request(engine),
+            state=None,
+            task_id=None,
+            agent_id=None,
+            limit=10,
+            auth="test",
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_get_leases_endpoint_returns_leases_and_params() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_leases(
+        "sess-1",
+        _fake_request(engine),
+        state="active",
+        task_id="task-2",
+        agent_id="agent-2",
+        limit=25,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_leases == [
+        {
+            "session_id": "sess-1",
+            "state": "active",
+            "task_id": "task-2",
+            "agent_id": "agent-2",
+            "limit": 25,
+        }
+    ]
+    assert response.model_dump() == {
+        "leases": [
+            {
+                "id": "lease-1",
+                "session_id": "sess-1",
+                "task_id": "task-2",
+                "agent_id": "agent-2",
+                "state": "active",
+                "expires_at": "2024-01-01T01:00:00",
+                "worktree_name": "wt-1",
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+            }
+        ],
+        "state": "active",
+        "task_id": "task-2",
+        "agent_id": "agent-2",
+        "limit": 25,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_leases_endpoint_without_filters() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_leases(
+        "sess-1",
+        _fake_request(engine),
+        state=None,
+        task_id=None,
+        agent_id=None,
+        limit=50,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_leases == [
+        {
+            "session_id": "sess-1",
+            "state": None,
+            "task_id": None,
+            "agent_id": None,
+            "limit": 50,
+        }
+    ]
+    assert response.model_dump()["state"] is None
+    assert response.model_dump()["task_id"] is None
+    assert response.model_dump()["agent_id"] is None
+    assert response.model_dump()["limit"] == 50
+    assert len(response.model_dump()["leases"]) == 1

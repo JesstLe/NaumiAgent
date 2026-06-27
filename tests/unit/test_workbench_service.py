@@ -714,3 +714,51 @@ async def test_dashboard_snapshot_mission_order_unchanged_by_list_missions_param
 
     snapshot_after = await service.dashboard_snapshot("s")
     assert [m["id"] for m in snapshot_after["missions"]] == [mission_a.id, mission_b.id]
+
+
+@pytest.mark.asyncio
+async def test_list_leases_returns_wrapper_and_json_friendly_state_strings(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    active = await workbench_store.create_lease(
+        session_id="s",
+        task_id="task-a",
+        agent_id="agent-1",
+        expires_at="2099-01-01T00:00:00",
+        worktree_name="wt-a",
+    )
+    released = await workbench_store.create_lease(
+        session_id="s",
+        task_id="task-b",
+        agent_id="agent-2",
+        expires_at="2099-01-01T00:00:00",
+        worktree_name="wt-b",
+    )
+    await workbench_store.update_lease_state(released.id, LeaseState.RELEASED)
+
+    all_leases = await service.list_leases("s", limit=50)
+    assert all(isinstance(lease["state"], str) for lease in all_leases["leases"])
+    assert {lease["id"] for lease in all_leases["leases"]} == {active.id, released.id}
+    assert all_leases["state"] is None
+    assert all_leases["task_id"] is None
+    assert all_leases["agent_id"] is None
+    assert all_leases["limit"] == 50
+
+    active_only = await service.list_leases("s", state=LeaseState.ACTIVE, limit=50)
+    assert [lease["id"] for lease in active_only["leases"]] == [active.id]
+    assert active_only["state"] == "active"
+    assert active_only["task_id"] is None
+    assert active_only["agent_id"] is None
+
+    filtered = await service.list_leases(
+        "s", state="released", task_id="task-b", agent_id="agent-2", limit=10
+    )
+    assert [lease["id"] for lease in filtered["leases"]] == [released.id]
+    assert filtered["state"] == "released"
+    assert filtered["task_id"] == "task-b"
+    assert filtered["agent_id"] == "agent-2"
+    assert filtered["limit"] == 10
+    assert filtered["leases"][0]["state"] == "released"

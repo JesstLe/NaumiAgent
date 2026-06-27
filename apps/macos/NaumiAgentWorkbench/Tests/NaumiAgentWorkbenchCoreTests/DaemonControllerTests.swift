@@ -14,6 +14,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var approvalsResult: Result<ApprovalsDTO, APIError>?
     var failuresResult: Result<FailuresDTO, APIError>?
     var issuesResult: Result<IssuesDTO, APIError>?
+    var leasesResult: Result<LeasesDTO, APIError>?
     var missionsResult: Result<MissionsDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
@@ -113,6 +114,19 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> IssuesDTO {
         guard let result = issuesResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchLeases(
+        sessionID: String,
+        state: String?,
+        taskID: String?,
+        agentID: String?,
+        limit: Int
+    ) async throws(APIError) -> LeasesDTO {
+        guard let result = leasesResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -463,7 +477,7 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func claimIssueSuccessRefreshesSnapshotAndIssues() async throws {
+    @Test @MainActor func claimIssueSuccessRefreshesSnapshotIssuesAndLeases() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -472,10 +486,12 @@ final class DaemonControllerTests {
         let snapshot = makeSnapshot(sessionID: "sess-001", lease: lease)
         let issue = makeIssue(taskID: "task-001")
         let issues = IssuesDTO(issues: [issue], missionID: nil, riskLevel: nil, limit: 50)
+        let leases = LeasesDTO(leases: [lease], state: nil, taskID: nil, agentID: nil, limit: 50)
 
         await api.setClaimIssueResult(.success(lease))
         await api.setSnapshotResult(.success(snapshot))
         await api.setIssuesResult(.success(issues))
+        await api.setLeasesResult(.success(leases))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.claimIssue(
@@ -487,10 +503,11 @@ final class DaemonControllerTests {
 
         #expect(appState.snapshot == snapshot)
         #expect(appState.issues == [issue])
+        #expect(appState.leases == [lease])
         #expect(appState.lastError == nil)
     }
 
-    @Test @MainActor func claimIssueSnapshotFailureIsNotClearedByIssuesRefresh() async throws {
+    @Test @MainActor func claimIssueSnapshotFailureIsNotClearedByIssuesOrLeasesRefresh() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -498,10 +515,12 @@ final class DaemonControllerTests {
         let lease = makeLease(id: "lease-001", taskID: "task-001", state: "active")
         let issue = makeIssue(taskID: "task-001")
         let issues = IssuesDTO(issues: [issue], missionID: nil, riskLevel: nil, limit: 50)
+        let leases = LeasesDTO(leases: [lease], state: nil, taskID: nil, agentID: nil, limit: 50)
 
         await api.setClaimIssueResult(.success(lease))
         await api.setSnapshotResult(.failure(.httpStatus(503)))
         await api.setIssuesResult(.success(issues))
+        await api.setLeasesResult(.success(leases))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.claimIssue(
@@ -512,6 +531,7 @@ final class DaemonControllerTests {
         )
 
         #expect(appState.issues == [issue])
+        #expect(appState.leases == [lease])
         #expect(appState.snapshot == nil)
         #expect(appState.lastError == .httpStatus(503))
     }
@@ -534,25 +554,28 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == nil)
     }
 
-    @Test @MainActor func releaseLeaseSuccessRefreshesSnapshot() async throws {
+    @Test @MainActor func releaseLeaseSuccessRefreshesSnapshotAndLeases() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
         let api = FakeWorkbenchAPIProvider()
         let lease = makeLease(id: "lease-001", taskID: "task-001", state: "released")
         let snapshot = makeSnapshot(sessionID: "sess-001", lease: lease)
+        let leases = LeasesDTO(leases: [lease], state: nil, taskID: nil, agentID: nil, limit: 50)
 
         await api.setReleaseLeaseResult(.success(lease))
         await api.setSnapshotResult(.success(snapshot))
+        await api.setLeasesResult(.success(leases))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.releaseLease(leaseID: "lease-001")
 
         #expect(appState.snapshot == snapshot)
+        #expect(appState.leases == [lease])
         #expect(appState.lastError == nil)
     }
 
-    @Test @MainActor func expireLeasesSuccessRefreshesSnapshot() async throws {
+    @Test @MainActor func expireLeasesSuccessRefreshesSnapshotAndLeases() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -560,14 +583,17 @@ final class DaemonControllerTests {
         let expiredLease = makeLease(id: "lease-001", taskID: "task-001", state: "expired")
         let expired = ExpiredLeasesDTO(expired: [expiredLease])
         let snapshot = makeSnapshot(sessionID: "sess-001", lease: expiredLease)
+        let leases = LeasesDTO(leases: [expiredLease], state: nil, taskID: nil, agentID: nil, limit: 50)
 
         await api.setExpireLeasesResult(.success(expired))
         await api.setSnapshotResult(.success(snapshot))
+        await api.setLeasesResult(.success(leases))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.expireLeases()
 
         #expect(appState.snapshot == snapshot)
+        #expect(appState.leases == [expiredLease])
         #expect(appState.lastError == nil)
     }
 
@@ -1173,6 +1199,59 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
+    @Test @MainActor func refreshLeasesSuccessWritesToAppState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let lease = makeLease(id: "lease-001", taskID: "task-001", state: "active")
+        let leases = LeasesDTO(
+            leases: [lease],
+            state: "active",
+            taskID: "task-001",
+            agentID: "agent-001",
+            limit: 25
+        )
+
+        await api.setLeasesResult(.success(leases))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshLeases(state: "active", taskID: "task-001", agentID: "agent-001", limit: 25)
+
+        #expect(appState.leases == [lease])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshLeasesWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        appState.leases = [makeLease(id: "lease-stale", taskID: "task-old", state: "active")]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshLeases(limit: 50)
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.leases.isEmpty)
+    }
+
+    @Test @MainActor func refreshLeasesFailurePreservesOldList() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleLease = makeLease(id: "lease-stale", taskID: "task-001", state: "active")
+        appState.leases = [staleLease]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setLeasesResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshLeases(limit: 50)
+
+        #expect(appState.leases == [staleLease])
+        #expect(appState.lastError == .httpStatus(500))
+    }
+
     @Test @MainActor func runValidationSuccessRefreshesValidationRunsSnapshotAndFailures() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -1535,6 +1614,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setIssuesResult(_ result: Result<IssuesDTO, APIError>) {
         issuesResult = result
+    }
+
+    fileprivate func setLeasesResult(_ result: Result<LeasesDTO, APIError>) {
+        leasesResult = result
     }
 
     fileprivate func setMissionsResult(_ result: Result<MissionsDTO, APIError>) {

@@ -15,6 +15,7 @@ from naumi_agent.workbench.models import (
     IntentLock,
     IssueMetadata,
     Lease,
+    LeaseState,
     Mission,
     ParallelMode,
     RiskLevel,
@@ -311,6 +312,26 @@ class WorkbenchService:
         return await self._workbench_store.list_failures(
             session_id, task_id=task_id, status=status, limit=limit
         )
+
+    async def list_leases(
+        self,
+        session_id: str,
+        state: LeaseState | str | None = None,
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        leases = await self._workbench_store.list_leases(
+            session_id, state=state, task_id=task_id, agent_id=agent_id, limit=limit
+        )
+        state_value = state.value if isinstance(state, LeaseState) else state
+        return {
+            "leases": [self._lease_to_dict(lease) for lease in leases],
+            "state": state_value,
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "limit": limit,
+        }
 
     async def list_missions(
         self,

@@ -287,6 +287,16 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         IssuesDTO(issues: [], missionID: missionID, riskLevel: riskLevel, limit: limit)
     }
 
+    func fetchLeases(
+        sessionID: String,
+        state: String?,
+        taskID: String?,
+        agentID: String?,
+        limit: Int
+    ) async throws(APIError) -> LeasesDTO {
+        LeasesDTO(leases: [], state: state, taskID: taskID, agentID: agentID, limit: limit)
+    }
+
     func fetchMissions(
         sessionID: String,
         status: String?,

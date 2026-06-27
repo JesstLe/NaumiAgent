@@ -51,6 +51,15 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> IssuesDTO
 
+    /// Fetches leases for the given session, optionally filtered by state, task, or agent.
+    func fetchLeases(
+        sessionID: String,
+        state: String?,
+        taskID: String?,
+        agentID: String?,
+        limit: Int
+    ) async throws(APIError) -> LeasesDTO
+
     /// Fetches missions for the given session, optionally filtered by status.
     func fetchMissions(
         sessionID: String,

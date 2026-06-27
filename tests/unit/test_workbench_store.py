@@ -8,6 +8,7 @@ from naumi_agent.workbench.models import (
     ContextHealth,
     DecisionKind,
     FailureKind,
+    LeaseState,
     ParallelMode,
     RiskLevel,
 )
@@ -77,6 +78,23 @@ async def _set_issue_timestamps(
                SET created_at = ?, updated_at = ?
                WHERE session_id = ? AND task_id = ?""",
             (created_at, created_at, session_id, task_id),
+        )
+        await db.commit()
+
+
+async def _set_lease_timestamps(
+    store: WorkbenchStore,
+    lease_id: str,
+    *,
+    created_at: str,
+    updated_at: str,
+) -> None:
+    async with aiosqlite.connect(store._db_path) as db:
+        await db.execute(
+            """UPDATE workbench_leases
+               SET created_at = ?, updated_at = ?
+               WHERE id = ?""",
+            (created_at, updated_at, lease_id),
         )
         await db.commit()
 
@@ -686,3 +704,98 @@ async def test_list_missions_status_filter_with_limit_and_order(store: Workbench
 
     active_newest = await store.list_missions("s", status="active", newest_first=True, limit=1)
     assert [m.id for m in active_newest] == [active_b.id]
+
+
+@pytest.mark.asyncio
+async def test_list_leases_filters_by_session_state_task_agent_and_orders_newest_first(
+    store: WorkbenchStore,
+) -> None:
+    active_a = await store.create_lease(
+        session_id="s",
+        task_id="task-a",
+        agent_id="agent-1",
+        expires_at="2099-01-01T00:00:00",
+        worktree_name="wt-a",
+    )
+    released_b = await store.create_lease(
+        session_id="s",
+        task_id="task-b",
+        agent_id="agent-2",
+        expires_at="2099-01-01T00:00:00",
+        worktree_name="wt-b",
+    )
+    await store.update_lease_state(released_b.id, LeaseState.RELEASED)
+    expired_a = await store.create_lease(
+        session_id="s",
+        task_id="task-a",
+        agent_id="agent-1",
+        expires_at="2099-01-01T00:00:00",
+        worktree_name="wt-a2",
+    )
+    await store.update_lease_state(expired_a.id, LeaseState.EXPIRED)
+    other_session = await store.create_lease(
+        session_id="s2",
+        task_id="task-a",
+        agent_id="agent-1",
+        expires_at="2099-01-01T00:00:00",
+        worktree_name="wt-other",
+    )
+
+    # Pin timestamps so ordering/limit assertions are deterministic.
+    # active_a is newest, released_b middle, expired_a oldest.
+    await _set_lease_timestamps(
+        store,
+        active_a.id,
+        created_at="2026-06-27T08:02:00",
+        updated_at="2026-06-27T08:02:00",
+    )
+    await _set_lease_timestamps(
+        store,
+        released_b.id,
+        created_at="2026-06-27T08:01:00",
+        updated_at="2026-06-27T08:01:00",
+    )
+    await _set_lease_timestamps(
+        store,
+        expired_a.id,
+        created_at="2026-06-27T08:00:00",
+        updated_at="2026-06-27T08:00:00",
+    )
+    await _set_lease_timestamps(
+        store,
+        other_session.id,
+        created_at="2026-06-27T08:03:00",
+        updated_at="2026-06-27T08:03:00",
+    )
+
+    all_leases = await store.list_leases("s", limit=50)
+    assert [lease.id for lease in all_leases] == [active_a.id, released_b.id, expired_a.id]
+    assert all(isinstance(lease.state, LeaseState) for lease in all_leases)
+    assert all(lease.session_id == "s" for lease in all_leases)
+
+    active_only = await store.list_leases("s", state=LeaseState.ACTIVE, limit=50)
+    assert [lease.id for lease in active_only] == [active_a.id]
+    assert all(lease.state == LeaseState.ACTIVE for lease in active_only)
+
+    active_by_string = await store.list_leases("s", state="active", limit=50)
+    assert [lease.id for lease in active_by_string] == [active_a.id]
+
+    released_only = await store.list_leases("s", state="released", limit=50)
+    assert [lease.id for lease in released_only] == [released_b.id]
+
+    task_a_leases = await store.list_leases("s", task_id="task-a", limit=50)
+    assert [lease.id for lease in task_a_leases] == [active_a.id, expired_a.id]
+
+    agent_2_leases = await store.list_leases("s", agent_id="agent-2", limit=50)
+    assert [lease.id for lease in agent_2_leases] == [released_b.id]
+
+    combined = await store.list_leases(
+        "s", state="released", task_id="task-b", agent_id="agent-2", limit=50
+    )
+    assert [lease.id for lease in combined] == [released_b.id]
+
+    limited = await store.list_leases("s", limit=2)
+    assert [lease.id for lease in limited] == [active_a.id, released_b.id]
+
+    other_session_leases = await store.list_leases("s2", limit=50)
+    assert [lease.id for lease in other_session_leases] == [other_session.id]
