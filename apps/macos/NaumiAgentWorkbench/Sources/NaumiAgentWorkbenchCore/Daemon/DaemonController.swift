@@ -695,6 +695,45 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Creates a backing task, attaches it as an issue, and refreshes the mission
+    /// issue list, timeline events, and snapshot on success.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. The API remains the
+    /// single writer; local state is refreshed from daemon responses.
+    public func createIssue(
+        missionID: String,
+        title: String,
+        description: String,
+        blockedBy: [String],
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            _ = try await apiProvider.createIssue(
+                sessionID: sessionID,
+                missionID: missionID,
+                title: title,
+                description: description,
+                blockedBy: blockedBy,
+                acceptanceCriteria: acceptanceCriteria,
+                parallelMode: parallelMode,
+                riskLevel: riskLevel
+            )
+            await refreshIssues(missionID: missionID)
+            await refreshEvents(limit: 50)
+            await refreshSnapshot()
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Creates an intent lock for a mission and refreshes the timeline events
     /// and snapshot on success.
     ///

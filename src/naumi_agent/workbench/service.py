@@ -236,6 +236,50 @@ class WorkbenchService:
         )
         return asdict(issue)
 
+    async def create_issue(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        title: str,
+        description: str = "",
+        blocked_by: list[str] | None = None,
+        acceptance_criteria: list[str] | None = None,
+        parallel_mode: ParallelMode = ParallelMode.EXCLUSIVE,
+        risk_level: RiskLevel = RiskLevel.MEDIUM,
+    ) -> dict[str, Any]:
+        cleaned_title = title.strip()
+        if not cleaned_title:
+            raise ValueError("issue 标题不能为空")
+
+        cleaned_description = description.strip()
+        cleaned_blockers = [
+            blocker.strip() for blocker in (blocked_by or []) if blocker and blocker.strip()
+        ]
+        cleaned_acceptance_criteria = [
+            item.strip()
+            for item in (acceptance_criteria or [])
+            if item and item.strip()
+        ]
+
+        task = await self._task_store.create_task(
+            subject=cleaned_title,
+            description=cleaned_description,
+            blocked_by=cleaned_blockers,
+        )
+        await self.attach_issue(
+            session_id=session_id,
+            mission_id=mission_id,
+            task_id=task.id,
+            acceptance_criteria=cleaned_acceptance_criteria,
+            parallel_mode=parallel_mode,
+            risk_level=risk_level,
+        )
+        issue = await self._workbench_store.get_issue(session_id, task.id)
+        if issue is None:
+            raise RuntimeError("issue 创建后无法读取")
+        return self._issue_to_dict(issue)
+
     async def list_issues(
         self,
         session_id: str,

@@ -26,6 +26,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
     var createMissionResult: Result<MissionDTO, APIError>?
     var attachIssueResult: Result<IssueDTO, APIError>?
+    var createIssueResult: Result<IssueDTO, APIError>?
     var createIntentLockResult: Result<IntentLockDTO, APIError>?
     var fetchIntentLocksResult: Result<IntentLocksDTO, APIError>?
     var createDecisionResult: Result<DecisionDTO, APIError>?
@@ -293,6 +294,22 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         riskLevel: String
     ) async throws(APIError) -> IssueDTO {
         guard let result = attachIssueResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func createIssue(
+        sessionID: String,
+        missionID: String,
+        title: String,
+        description: String,
+        blockedBy: [String],
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async throws(APIError) -> IssueDTO {
+        guard let result = createIssueResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -1233,6 +1250,59 @@ final class DaemonControllerTests {
         #expect(appState.timelineEvents == [event])
         #expect(appState.snapshot == nil)
         #expect(appState.lastError == .httpStatus(503))
+    }
+
+    @Test @MainActor func createIssueSuccessRefreshesSnapshotMissionIssuesAndEvents() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let issue = makeIssue(taskID: "task-009", missionID: "mission-001")
+        let snapshot = makeSnapshot(sessionID: "sess-001", issues: [issue])
+        let issues = IssuesDTO(issues: [issue], missionID: "mission-001", riskLevel: nil, limit: 50)
+        let event = makeEvent(id: "evt-009", type: "issue.created", subjectID: "task-009")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
+
+        await api.setCreateIssueResult(.success(issue))
+        await api.setSnapshotResult(.success(snapshot))
+        await api.setIssuesResult(.success(issues))
+        await api.setEventsResult(.success(events))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createIssue(
+            missionID: "mission-001",
+            title: "实现 Issue 创建 API",
+            description: "创建 backing task",
+            blockedBy: ["1"],
+            acceptanceCriteria: ["可被 Agent claim"],
+            parallelMode: "cooperative",
+            riskLevel: "high"
+        )
+
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.issues == [issue])
+        #expect(appState.timelineEvents == [event])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func createIssueWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createIssue(
+            missionID: "mission-001",
+            title: "Title",
+            description: "",
+            blockedBy: [],
+            acceptanceCriteria: [],
+            parallelMode: "exclusive",
+            riskLevel: "low"
+        )
+
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.snapshot == nil)
     }
 
     @Test @MainActor func refreshEventsSuccessWritesToAppState() async throws {
@@ -2460,6 +2530,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setAttachIssueResult(_ result: Result<IssueDTO, APIError>) {
         attachIssueResult = result
+    }
+
+    fileprivate func setCreateIssueResult(_ result: Result<IssueDTO, APIError>) {
+        createIssueResult = result
     }
 
     fileprivate func setCreateIntentLockResult(_ result: Result<IntentLockDTO, APIError>) {
