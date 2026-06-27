@@ -90,6 +90,48 @@ struct WorktreesDashboardPresentationTests {
         #expect(presentation.worktreeRows[2].statusTone == .kept)
     }
 
+    @Test func selectsWorktreeAndExposesKeepActionState() throws {
+        let presentation = WorktreesDashboardPresentation(
+            snapshots: [],
+            worktrees: [
+                makeWorktree(
+                    name: "wt-clean",
+                    taskID: "task-1",
+                    status: "clean",
+                    dirtyFiles: 0,
+                    commitsAhead: 0,
+                    keptReason: "",
+                    metadata: ["agent_id": "Backend-Agent"],
+                    removable: true
+                ),
+                makeWorktree(
+                    name: "wt-kept",
+                    taskID: "task-2",
+                    status: "kept",
+                    dirtyFiles: 0,
+                    commitsAhead: 1,
+                    keptReason: "等待人工审查",
+                    metadata: ["agent_id": "Reviewer-Agent"],
+                    removable: false
+                ),
+            ]
+        )
+
+        let defaultSelection = try #require(presentation.selectedWorktree(id: nil))
+        #expect(defaultSelection.name == "wt-clean")
+
+        let selected = try #require(presentation.selectedWorktree(id: "wt-kept"))
+        #expect(selected.path == "/repo/.naumi/worktrees/wt-kept")
+        #expect(selected.canKeep == false)
+        #expect(selected.keepDisabledReason(locale: .zhCN) == "已保留")
+        #expect(selected.keepDisabledReason(locale: .enUS) == "Already kept")
+
+        let clean = try #require(presentation.selectedWorktree(id: "wt-clean"))
+        #expect(clean.canKeep == true)
+        #expect(clean.defaultKeepReason(locale: .zhCN) == "人工保留 wt-clean，等待后续治理")
+        #expect(clean.defaultKeepReason(locale: .enUS) == "Keep wt-clean for follow-up governance")
+    }
+
     private func makeSnapshot(
         id: String,
         agentID: String,
