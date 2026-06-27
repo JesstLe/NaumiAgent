@@ -11,6 +11,15 @@ public enum AppRoute: String, CaseIterable, Identifiable, Hashable, Sendable {
 
     public var id: String { rawValue }
 
+    public static let topNavigationRoutes: [AppRoute] = [
+        .dashboard,
+        .taskMarket,
+        .worktrees,
+        .reviews,
+        .timeline,
+        .settings
+    ]
+
     /// Localized display name. 默认中文，en-US fallback。
     public func displayName(locale: AppLocale) -> String {
         switch self {
