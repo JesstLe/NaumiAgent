@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from naumi_agent.workbench.models import ContextHealth, DecisionKind, ParallelMode, RiskLevel
+from naumi_agent.workbench.models import (
+    ApprovalState,
+    ContextHealth,
+    DecisionKind,
+    ParallelMode,
+    RiskLevel,
+)
 from naumi_agent.workbench.store import WorkbenchStore
 
 
@@ -125,6 +131,73 @@ async def test_list_validation_runs_filters_and_orders(store: WorkbenchStore) ->
 
     limited = await store.list_validation_runs("s", limit=1)
     assert [run["id"] for run in limited] == [run_c["id"]]
+
+
+@pytest.mark.asyncio
+async def test_add_and_resolve_approval_round_trip(store: WorkbenchStore) -> None:
+    approval = await store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="  允许重构 core 模块  ",
+        detail="  重构后保持现有测试通过  ",
+        requester="  Agent-A  ",
+    )
+
+    assert approval.session_id == "s"
+    assert approval.mission_id == "mission-1"
+    assert approval.task_id == "task-1"
+    assert approval.title == "允许重构 core 模块"
+    assert approval.detail == "重构后保持现有测试通过"
+    assert approval.requester == "Agent-A"
+    assert approval.state == ApprovalState.WAITING
+    assert approval.reviewer == ""
+    assert approval.decision_note == ""
+
+    resolved = await store.resolve_approval(
+        session_id="s",
+        approval_id=approval.id,
+        state=ApprovalState.APPROVED,
+        reviewer="  Human  ",
+        decision_note="  同意，但需补充回归测试  ",
+    )
+    assert resolved is not None
+    assert resolved.id == approval.id
+    assert resolved.state == ApprovalState.APPROVED
+    assert resolved.reviewer == "Human"
+    assert resolved.decision_note == "同意，但需补充回归测试"
+    assert resolved.updated_at >= approval.updated_at
+
+
+@pytest.mark.asyncio
+async def test_resolve_approval_only_matches_same_session(store: WorkbenchStore) -> None:
+    approval = await store.add_approval(
+        session_id="s1",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="请求审批",
+        detail="详情",
+        requester="Agent-A",
+    )
+
+    result = await store.resolve_approval(
+        session_id="s2",
+        approval_id=approval.id,
+        state=ApprovalState.REJECTED,
+        reviewer="Human",
+        decision_note="",
+    )
+    assert result is None
+
+    unchanged = await store.resolve_approval(
+        session_id="s1",
+        approval_id=approval.id,
+        state=ApprovalState.APPROVED,
+        reviewer="Human",
+        decision_note="",
+    )
+    assert unchanged is not None
+    assert unchanged.state == ApprovalState.APPROVED
 
 
 @pytest.mark.asyncio

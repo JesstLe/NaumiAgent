@@ -356,6 +356,36 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Resolves an approval request as approved or rejected and refreshes the snapshot on success.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the local snapshot is never mutated directly.
+    public func resolveApproval(
+        approvalID: String,
+        actor: String,
+        state: String,
+        decisionNote: String
+    ) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            _ = try await apiProvider.resolveApproval(
+                sessionID: sessionID,
+                approvalID: approvalID,
+                actor: actor,
+                state: state,
+                decisionNote: decisionNote
+            )
+            await refreshSnapshot()
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Runs a validation command and refreshes validation runs plus snapshot on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. On success, `validationRuns`

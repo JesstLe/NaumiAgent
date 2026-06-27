@@ -9,6 +9,8 @@ from typing import Any, cast
 import aiosqlite
 
 from naumi_agent.workbench.models import (
+    Approval,
+    ApprovalState,
     ContextHealth,
     Decision,
     DecisionKind,
@@ -150,6 +152,23 @@ CREATE TABLE IF NOT EXISTS workbench_failures (
 )
 """
 
+_CREATE_APPROVALS = """
+CREATE TABLE IF NOT EXISTS workbench_approvals (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    mission_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    title TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    requester TEXT NOT NULL,
+    reviewer TEXT NOT NULL,
+    decision_note TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+"""
+
 
 class WorkbenchStore:
     """SQLite-backed state for the workbench dashboard."""
@@ -170,6 +189,7 @@ class WorkbenchStore:
         await db.execute(_CREATE_CONTEXT_SNAPSHOTS)
         await db.execute(_CREATE_VALIDATION_RUNS)
         await db.execute(_CREATE_FAILURES)
+        await db.execute(_CREATE_APPROVALS)
         await db.commit()
         self._initialized = True
 
@@ -782,6 +802,90 @@ class WorkbenchStore:
             rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
+    async def add_approval(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        task_id: str,
+        title: str,
+        detail: str,
+        requester: str,
+        state: ApprovalState = ApprovalState.WAITING,
+    ) -> Approval:
+        now = now_iso()
+        approval = Approval(
+            id=uuid.uuid4().hex[:12],
+            session_id=session_id,
+            mission_id=mission_id,
+            task_id=task_id,
+            state=state,
+            title=title.strip(),
+            detail=detail.strip(),
+            requester=requester.strip(),
+            reviewer="",
+            decision_note="",
+            created_at=now,
+            updated_at=now,
+        )
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                """INSERT INTO workbench_approvals
+                   (id, session_id, mission_id, task_id, state, title, detail,
+                    requester, reviewer, decision_note, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    approval.id,
+                    approval.session_id,
+                    approval.mission_id,
+                    approval.task_id,
+                    approval.state.value,
+                    approval.title,
+                    approval.detail,
+                    approval.requester,
+                    approval.reviewer,
+                    approval.decision_note,
+                    approval.created_at,
+                    approval.updated_at,
+                ),
+            )
+            await db.commit()
+        return approval
+
+    async def resolve_approval(
+        self,
+        session_id: str,
+        approval_id: str,
+        state: ApprovalState,
+        reviewer: str,
+        decision_note: str,
+    ) -> Approval | None:
+        now = now_iso()
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                """UPDATE workbench_approvals
+                   SET state = ?, reviewer = ?, decision_note = ?, updated_at = ?
+                   WHERE id = ? AND session_id = ?""",
+                (
+                    state.value,
+                    reviewer.strip(),
+                    decision_note.strip(),
+                    now,
+                    approval_id,
+                    session_id,
+                ),
+            )
+            await db.commit()
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM workbench_approvals WHERE id = ? AND session_id = ?",
+                (approval_id, session_id),
+            )
+            row = await cursor.fetchone()
+        return _row_to_approval(dict(row)) if row else None
+
 
 def _row_to_issue(row: dict[str, Any]) -> IssueMetadata:
     return IssueMetadata(
@@ -849,6 +953,23 @@ def _row_to_lease(row: dict[str, Any]) -> Lease:
         state=LeaseState(row["state"]),
         expires_at=row["expires_at"],
         worktree_name=row["worktree_name"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _row_to_approval(row: dict[str, Any]) -> Approval:
+    return Approval(
+        id=row["id"],
+        session_id=row["session_id"],
+        mission_id=row["mission_id"],
+        task_id=row["task_id"],
+        state=ApprovalState(row["state"]),
+        title=row["title"],
+        detail=row["detail"],
+        requester=row["requester"],
+        reviewer=row["reviewer"],
+        decision_note=row["decision_note"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

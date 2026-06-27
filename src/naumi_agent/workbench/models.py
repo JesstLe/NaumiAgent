@@ -150,6 +150,22 @@ class Decision:
 
 
 @dataclass
+class Approval:
+    id: str
+    session_id: str
+    mission_id: str
+    task_id: str
+    state: ApprovalState
+    title: str
+    detail: str
+    requester: str
+    reviewer: str
+    decision_note: str
+    created_at: str = field(default_factory=now_iso)
+    updated_at: str = field(default_factory=now_iso)
+
+
+@dataclass
 class WorkbenchEvent:
     session_id: str
     type: str

@@ -18,6 +18,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var attachIssueResult: Result<IssueDTO, APIError>?
     var createIntentLockResult: Result<IntentLockDTO, APIError>?
     var createDecisionResult: Result<DecisionDTO, APIError>?
+    var resolveApprovalResult: Result<ApprovalDTO, APIError>?
     var runValidationResult: Result<ValidationResultDTO, APIError>?
 
     func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
@@ -154,6 +155,19 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         actor: String
     ) async throws(APIError) -> DecisionDTO {
         guard let result = createDecisionResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func resolveApproval(
+        sessionID: String,
+        approvalID: String,
+        actor: String,
+        state: String,
+        decisionNote: String
+    ) async throws(APIError) -> ApprovalDTO {
+        guard let result = resolveApprovalResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -1075,6 +1089,68 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == staleSnapshot)
         #expect(appState.lastError == .httpStatus(500))
     }
+
+    @Test @MainActor func resolveApprovalSuccessRefreshesSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let approval = makeApproval(id: "approval-001", missionID: "mission-001", state: "approved")
+        let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+
+        await api.setResolveApprovalResult(.success(approval))
+        await api.setSnapshotResult(.success(snapshot))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.resolveApproval(
+            approvalID: "approval-001",
+            actor: "Human",
+            state: "approved",
+            decisionNote: "同意"
+        )
+
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func resolveApprovalWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.resolveApproval(
+            approvalID: "approval-001",
+            actor: "Human",
+            state: "rejected",
+            decisionNote: ""
+        )
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.snapshot == nil)
+    }
+
+    @Test @MainActor func resolveApprovalFailurePreservesOldSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        appState.snapshot = staleSnapshot
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setResolveApprovalResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.resolveApproval(
+            approvalID: "approval-001",
+            actor: "Human",
+            state: "approved",
+            decisionNote: "同意"
+        )
+
+        #expect(appState.snapshot == staleSnapshot)
+        #expect(appState.lastError == .httpStatus(500))
+    }
 }
 
 extension FakeWorkbenchAPIProvider {
@@ -1132,6 +1208,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setCreateDecisionResult(_ result: Result<DecisionDTO, APIError>) {
         createDecisionResult = result
+    }
+
+    fileprivate func setResolveApprovalResult(_ result: Result<ApprovalDTO, APIError>) {
+        resolveApprovalResult = result
     }
 
     fileprivate func setRunValidationResult(_ result: Result<ValidationResultDTO, APIError>) {
@@ -1282,5 +1362,22 @@ private func makeDecision(id: String, missionID: String) -> DecisionDTO {
         content: "使用 FastAPI 承载 Workbench API",
         actor: "Planner-Agent",
         createdAt: "2026-06-27T06:00:00"
+    )
+}
+
+private func makeApproval(id: String, missionID: String, state: String) -> ApprovalDTO {
+    ApprovalDTO(
+        id: id,
+        sessionID: "sess-001",
+        missionID: missionID,
+        taskID: "task-001",
+        state: state,
+        title: "允许重构 core 模块",
+        detail: "保持测试通过",
+        requester: "Agent-A",
+        reviewer: "Human",
+        decisionNote: "同意",
+        createdAt: "2026-06-27T06:00:00",
+        updatedAt: "2026-06-27T06:00:01"
     )
 }
