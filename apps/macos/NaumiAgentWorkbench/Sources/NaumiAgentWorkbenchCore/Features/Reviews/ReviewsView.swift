@@ -319,6 +319,26 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         ContextSnapshotsDTO(contextSnapshots: [], taskID: taskID, agentID: agentID, limit: limit)
     }
 
+    func recordContextHealth(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        minutesSinceSync: Int,
+        tokenLoadRatio: Double,
+        policyConflict: Bool,
+        actor: String
+    ) async throws(APIError) -> ContextSnapshotDTO {
+        ContextSnapshotDTO(
+            id: "preview-snap",
+            sessionID: sessionID,
+            agentID: agentID,
+            taskID: taskID,
+            health: "good",
+            reasons: [],
+            createdAt: "2026-06-27T06:00:00"
+        )
+    }
+
     func fetchApprovals(
         sessionID: String,
         state: String?,

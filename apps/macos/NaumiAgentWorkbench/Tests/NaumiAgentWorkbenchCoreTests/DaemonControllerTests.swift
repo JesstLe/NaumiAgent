@@ -11,6 +11,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var eventsResult: Result<WorkbenchEventsDTO, APIError>?
     var validationRunsResult: Result<ValidationRunsDTO, APIError>?
     var contextSnapshotsResult: Result<ContextSnapshotsDTO, APIError>?
+    var recordContextHealthResult: Result<ContextSnapshotDTO, APIError>?
     var approvalsResult: Result<ApprovalsDTO, APIError>?
     var failuresResult: Result<FailuresDTO, APIError>?
     var issuesResult: Result<IssuesDTO, APIError>?
@@ -88,6 +89,21 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> ContextSnapshotsDTO {
         guard let result = contextSnapshotsResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func recordContextHealth(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        minutesSinceSync: Int,
+        tokenLoadRatio: Double,
+        policyConflict: Bool,
+        actor: String
+    ) async throws(APIError) -> ContextSnapshotDTO {
+        guard let result = recordContextHealthResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -1167,6 +1183,157 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
+    @Test @MainActor func recordContextHealthSuccessPrependsSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let existingSnapshot = ContextSnapshotDTO(
+            id: "snap-002",
+            sessionID: "sess-001",
+            agentID: "agent-001",
+            taskID: "task-001",
+            health: "good",
+            reasons: ["现有快照"],
+            createdAt: "2026-06-27T06:00:00"
+        )
+        appState.contextSnapshots = [existingSnapshot]
+
+        let api = FakeWorkbenchAPIProvider()
+        let newSnapshot = ContextSnapshotDTO(
+            id: "snap-001",
+            sessionID: "sess-001",
+            agentID: "agent-001",
+            taskID: "task-001",
+            health: "good",
+            reasons: ["上下文健康"],
+            createdAt: "2026-06-27T06:01:00"
+        )
+        await api.setRecordContextHealthResult(.success(newSnapshot))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.recordContextHealth(
+            taskID: "task-001",
+            agentID: "agent-001",
+            minutesSinceSync: 5,
+            tokenLoadRatio: 0.75,
+            policyConflict: false,
+            actor: "Human"
+        )
+
+        #expect(appState.contextSnapshots == [newSnapshot, existingSnapshot])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func recordContextHealthSuccessReplacesDuplicateSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let oldSnapshot = ContextSnapshotDTO(
+            id: "snap-001",
+            sessionID: "sess-001",
+            agentID: "agent-001",
+            taskID: "task-001",
+            health: "stale",
+            reasons: ["旧数据"],
+            createdAt: "2026-06-27T06:00:00"
+        )
+        let otherSnapshot = ContextSnapshotDTO(
+            id: "snap-002",
+            sessionID: "sess-001",
+            agentID: "agent-001",
+            taskID: "task-001",
+            health: "good",
+            reasons: ["其他快照"],
+            createdAt: "2026-06-27T06:00:30"
+        )
+        appState.contextSnapshots = [oldSnapshot, otherSnapshot]
+
+        let api = FakeWorkbenchAPIProvider()
+        let updatedSnapshot = ContextSnapshotDTO(
+            id: "snap-001",
+            sessionID: "sess-001",
+            agentID: "agent-001",
+            taskID: "task-001",
+            health: "good",
+            reasons: ["已更新"],
+            createdAt: "2026-06-27T06:01:00"
+        )
+        await api.setRecordContextHealthResult(.success(updatedSnapshot))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.recordContextHealth(
+            taskID: "task-001",
+            agentID: "agent-001",
+            minutesSinceSync: 3,
+            tokenLoadRatio: 0.5,
+            policyConflict: false,
+            actor: "Human"
+        )
+
+        #expect(appState.contextSnapshots == [updatedSnapshot, otherSnapshot])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func recordContextHealthWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        appState.contextSnapshots = [
+            ContextSnapshotDTO(
+                id: "snap-stale",
+                sessionID: "old-session",
+                agentID: "agent-old",
+                taskID: "task-old",
+                health: "stale",
+                reasons: ["旧数据"],
+                createdAt: "2026-06-27T05:00:00"
+            )
+        ]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.recordContextHealth(
+            taskID: "task-001",
+            agentID: "agent-001",
+            minutesSinceSync: 5,
+            tokenLoadRatio: 0.75,
+            policyConflict: false,
+            actor: "Human"
+        )
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.contextSnapshots.isEmpty)
+    }
+
+    @Test @MainActor func recordContextHealthFailurePreservesOldList() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleSnapshot = ContextSnapshotDTO(
+            id: "snap-stale",
+            sessionID: "sess-001",
+            agentID: "agent-001",
+            taskID: "task-001",
+            health: "stale",
+            reasons: ["旧数据"],
+            createdAt: "2026-06-27T05:00:00"
+        )
+        appState.contextSnapshots = [staleSnapshot]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setRecordContextHealthResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.recordContextHealth(
+            taskID: "task-001",
+            agentID: "agent-001",
+            minutesSinceSync: 5,
+            tokenLoadRatio: 0.75,
+            policyConflict: false,
+            actor: "Human"
+        )
+
+        #expect(appState.contextSnapshots == [staleSnapshot])
+        #expect(appState.lastError == .httpStatus(500))
+    }
+
     @Test @MainActor func refreshApprovalsSuccessWritesToAppState() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -1837,6 +2004,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setContextSnapshotsResult(_ result: Result<ContextSnapshotsDTO, APIError>) {
         contextSnapshotsResult = result
+    }
+
+    fileprivate func setRecordContextHealthResult(_ result: Result<ContextSnapshotDTO, APIError>) {
+        recordContextHealthResult = result
     }
 
     fileprivate func setApprovalsResult(_ result: Result<ApprovalsDTO, APIError>) {

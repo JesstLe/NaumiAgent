@@ -101,6 +101,28 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func recordContextHealth(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        minutesSinceSync: Int,
+        tokenLoadRatio: Double,
+        policyConflict: Bool,
+        actor: String
+    ) async throws(APIError) -> ContextSnapshotDTO {
+        let body = RecordContextHealthRequest(
+            agentID: agentID,
+            minutesSinceSync: minutesSinceSync,
+            tokenLoadRatio: tokenLoadRatio,
+            policyConflict: policyConflict,
+            actor: actor
+        )
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "issues", taskID, "context-health"),
+            body: body
+        )
+    }
+
     public func fetchApprovals(
         sessionID: String,
         state: String?,
@@ -492,6 +514,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         let agentID: String
         let durationMinutes: Int
         let worktreeName: String
+    }
+
+    /// Payload for `POST /workbench/sessions/{session_id}/issues/{task_id}/context-health`.
+    private struct RecordContextHealthRequest: Encodable, Sendable {
+        let agentID: String
+        let minutesSinceSync: Int
+        let tokenLoadRatio: Double
+        let policyConflict: Bool
+        let actor: String
     }
 
     /// Payload for `POST /workbench/sessions/{session_id}/missions`.
