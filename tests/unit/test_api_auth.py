@@ -127,6 +127,10 @@ class TestAuthMiddleware:
         def health():
             return {"status": "up"}
 
+        @app.get("/api/v1/health")
+        def api_health():
+            return {"status": "up"}
+
         return TestClient(app)
 
     def test_accepts_bearer_for_protected_route(self, client: TestClient) -> None:
@@ -152,3 +156,8 @@ class TestAuthMiddleware:
     def test_public_path_bypasses_auth(self, client: TestClient) -> None:
         response = client.get("/health")
         assert response.status_code == 200
+
+    def test_api_v1_health_bypasses_auth(self, client: TestClient) -> None:
+        response = client.get("/api/v1/health")
+        assert response.status_code == 200
+        assert response.json() == {"status": "up"}

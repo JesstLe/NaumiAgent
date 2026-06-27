@@ -12,7 +12,7 @@ from naumi_agent.api.deps import extract_api_key
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    PUBLIC_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+    PUBLIC_PATHS = {"/health", "/api/v1/health", "/docs", "/openapi.json", "/redoc"}
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path in self.PUBLIC_PATHS:
