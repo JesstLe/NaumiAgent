@@ -182,6 +182,47 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Records a context health update for the currently selected session and issue.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success the returned
+    /// snapshot is inserted at the front of `appState.contextSnapshots` (removing
+    /// any previous entry with the same ID to avoid duplicates); on failure
+    /// `appState.lastError` is set. Missing session clears the local snapshot list
+    /// to avoid showing stale data from another session. API failures leave the
+    /// local list unchanged.
+    public func recordContextHealth(
+        taskID: String,
+        agentID: String,
+        minutesSinceSync: Int,
+        tokenLoadRatio: Double,
+        policyConflict: Bool,
+        actor: String
+    ) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.contextSnapshots = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let snapshot = try await apiProvider.recordContextHealth(
+                sessionID: sessionID,
+                taskID: taskID,
+                agentID: agentID,
+                minutesSinceSync: minutesSinceSync,
+                tokenLoadRatio: tokenLoadRatio,
+                policyConflict: policyConflict,
+                actor: actor
+            )
+            var snapshots = appState.contextSnapshots
+            snapshots.removeAll { $0.id == snapshot.id }
+            appState.contextSnapshots = [snapshot] + snapshots
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Fetches approval requests for the currently selected session.
     ///
     /// Defaults to returning only `waiting` approvals so the UI can present a
