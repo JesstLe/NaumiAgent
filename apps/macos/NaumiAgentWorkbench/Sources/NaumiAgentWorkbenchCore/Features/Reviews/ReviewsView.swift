@@ -50,15 +50,23 @@ public struct ReviewsView: View {
         presentation: ReviewsDesignPresentation,
         selected: ReviewDesignItem
     ) -> some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 0) {
             reviewQueueRail(presentation)
-                .frame(width: 304)
+                .frame(
+                    width: 304,
+                    height: WorkbenchScaledPageLayout.reviews.baseHeight,
+                    alignment: .topLeading
+                )
             Divider()
             reviewMain(presentation: presentation, selected: selected)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             Divider()
             reviewInspector(presentation: presentation, selected: selected)
-                .frame(width: 340)
+                .frame(
+                    width: 340,
+                    height: WorkbenchScaledPageLayout.reviews.baseHeight,
+                    alignment: .topLeading
+                )
         }
         .frame(
             width: WorkbenchScaledPageLayout.reviews.baseWidth,
