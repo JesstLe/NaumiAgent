@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -309,6 +310,28 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
             assert worktree_detail["metadata"] == {"agent_id": "Backend-Agent"}
             assert worktree_detail["removable"] is False
 
+            worktree_path = tmp_path / "missing-wt-api-smoke"
+            worktree_path.mkdir()
+            subprocess.run(
+                ["git", "init"],
+                cwd=worktree_path,
+                capture_output=True,
+                check=True,
+                text=True,
+            )
+
+            keep_worktree_response = client.post(
+                f"/api/v1/workbench/sessions/{session_id}/worktrees/wt-api-smoke/keep",
+                json={"actor": "Reviewer-Agent", "reason": "等待人工审查"},
+            )
+            assert keep_worktree_response.status_code == 200
+            kept_worktree = keep_worktree_response.json()
+            assert kept_worktree["name"] == "wt-api-smoke"
+            assert kept_worktree["task_id"] == task_id
+            assert kept_worktree["status"] == "kept"
+            assert kept_worktree["kept_reason"] == "等待人工审查"
+            assert kept_worktree["removable"] is False
+
             context_response = client.post(
                 f"/api/v1/workbench/sessions/{session_id}/issues/{task_id}/context-health",
                 json={
@@ -382,6 +405,7 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
             assert event_types == [
                 "validation.completed",
                 "context_health.recorded",
+                "worktree.kept",
                 "issue.claimed",
                 "agent_profile.upserted",
                 "issue.created",

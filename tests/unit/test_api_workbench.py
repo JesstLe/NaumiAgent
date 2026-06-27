@@ -24,6 +24,7 @@ from naumi_agent.api.routes.workbench import (
     IssueAttach,
     MissionCreate,
     ValidationRunCreate,
+    WorktreeKeep,
     attach_workbench_issue,
     claim_workbench_issue,
     create_context_health_snapshot,
@@ -50,6 +51,7 @@ from naumi_agent.api.routes.workbench import (
     get_workbench_snapshot,
     get_worktree,
     get_worktrees,
+    keep_worktree,
     release_workbench_lease,
     resolve_approval,
     upsert_agent_profile,
@@ -1006,6 +1008,7 @@ class FakeWorktreeManager:
     def __init__(self, records: list[WorktreeRecord] | None = None) -> None:
         self.records = list(records or [])
         self.status_calls: list[str] = []
+        self.keep_calls: list[dict[str, str]] = []
 
     async def status(self, name: str = "") -> WorktreeRecord | list[WorktreeRecord]:
         self.status_calls.append(name)
@@ -1018,6 +1021,39 @@ class FakeWorktreeManager:
             raise KeyError(name)
         return list(self.records)
 
+    async def keep(self, name: str, reason: str = "") -> str:
+        self.keep_calls.append({"name": name, "reason": reason})
+        record = await self.status(name)
+        if isinstance(record, list):
+            raise KeyError(name)
+        record.status = WorktreeStatus.KEPT
+        record.kept_reason = reason.strip()
+        return "已保留 worktree 供审查。\n\n### Worktree"
+
+
+class FakeWorkbenchStore:
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    async def append_event(
+        self,
+        *,
+        session_id: str,
+        type: str,
+        actor: str,
+        subject_id: str,
+        payload: dict | None = None,
+    ):
+        self.events.append(
+            {
+                "session_id": session_id,
+                "type": type,
+                "actor": actor,
+                "subject_id": subject_id,
+                "payload": payload or {},
+            }
+        )
+
 
 class _FakeEngine:
     def __init__(
@@ -1028,6 +1064,7 @@ class _FakeEngine:
     ) -> None:
         self.session_store = _FakeSessionStore(exists)
         self.workbench_service = _FakeWorkbenchService()
+        self.workbench_store = FakeWorkbenchStore()
         self.workbench_market = workbench_market
         self.worktree_manager = worktree_manager or FakeWorktreeManager()
         self.loaded: list[str] = []
@@ -3250,6 +3287,18 @@ async def test_get_worktree_endpoint_requires_existing_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_keep_worktree_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+    body = WorktreeKeep(actor="Human", reason="等待人工审查")
+
+    with pytest.raises(HTTPException) as exc:
+        await keep_worktree("missing", "wt-api", body, _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
 async def test_get_worktrees_endpoint_filters_and_returns_json_ready_records() -> None:
     worktree_manager = FakeWorktreeManager(
         [
@@ -3453,6 +3502,72 @@ def test_get_worktree_route_maps_invalid_name_to_400() -> None:
     assert response.status_code == 400
     assert response.json() == {"detail": "worktree 名称不能包含路径分隔符"}
     assert engine.worktree_manager.status_calls == ["bad/name"]
+
+
+def test_keep_worktree_route_marks_worktree_kept_and_records_audit_event() -> None:
+    worktree_manager = FakeWorktreeManager(
+        [
+            WorktreeRecord(
+                name="wt-api",
+                path="/repo/.naumi/worktrees/wt-api",
+                branch="naumi/worktree-wt-api",
+                base_ref="abc123",
+                status=WorktreeStatus.DIRTY,
+                task_id="task-1",
+                dirty_files=2,
+                commits_ahead=1,
+                created_at="2024-01-01T00:00:00",
+                updated_at="2024-01-01T00:04:00",
+            )
+        ]
+    )
+    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/worktrees/wt-api/keep",
+        json={"actor": "Reviewer-Agent", "reason": "等待人工审查"},
+    )
+
+    assert response.status_code == 200
+    assert engine.loaded == ["sess-1"]
+    assert worktree_manager.keep_calls == [
+        {"name": "wt-api", "reason": "等待人工审查"}
+    ]
+    assert response.json()["status"] == "kept"
+    assert response.json()["kept_reason"] == "等待人工审查"
+    assert response.json()["removable"] is False
+    assert engine.workbench_store.events == [
+        {
+            "session_id": "sess-1",
+            "type": "worktree.kept",
+            "actor": "Reviewer-Agent",
+            "subject_id": "wt-api",
+            "payload": {"reason": "等待人工审查"},
+        }
+    ]
+
+
+def test_keep_worktree_route_returns_404_for_missing_worktree() -> None:
+    engine = _FakeEngine(exists=True, worktree_manager=FakeWorktreeManager())
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/worktrees/missing-worktree/keep",
+        json={"reason": "等待人工审查"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "worktree 不存在"}
+    assert engine.worktree_manager.keep_calls == [
+        {"name": "missing-worktree", "reason": "等待人工审查"}
+    ]
 
 
 @pytest.mark.asyncio
