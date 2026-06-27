@@ -11,6 +11,7 @@ public final class AppState: Sendable {
     public var connectionState: ConnectionState = .disconnected
     public var daemonStatus: DaemonStatusDTO? = nil
     public var capabilities: CapabilitiesDTO? = nil
+    public var sessions: [SessionDTO] = []
     public var snapshot: WorkbenchSnapshotDTO? = nil
     public var timelineEvents: [EventDTO] = []
     public var validationRuns: [ValidationRunDTO] = []
