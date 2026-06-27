@@ -570,6 +570,20 @@ class WorkbenchStore:
             rows = await cursor.fetchall()
         return [_row_to_decision(dict(row)) for row in rows]
 
+    async def get_decision(
+        self, session_id: str, mission_id: str, decision_id: str
+    ) -> Decision | None:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_decisions
+                   WHERE session_id = ? AND mission_id = ? AND id = ?""",
+                (session_id, mission_id, decision_id),
+            )
+            row = await cursor.fetchone()
+        return _row_to_decision(dict(row)) if row else None
+
     async def append_event(
         self,
         *,

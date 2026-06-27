@@ -197,6 +197,43 @@ async def test_decision_and_audit_event_are_persisted(store: WorkbenchStore) -> 
 
 
 @pytest.mark.asyncio
+async def test_get_decision_returns_matching_session_and_mission_decision(
+    store: WorkbenchStore,
+) -> None:
+    decision = await store.add_decision(
+        session_id="s",
+        mission_id="mission-1",
+        kind=DecisionKind.POLICY,
+        title="采用策略 A",
+        content="内容 A",
+        actor="Planner-Agent",
+    )
+    _other_mission_decision = await store.add_decision(
+        session_id="s",
+        mission_id="mission-2",
+        kind=DecisionKind.POLICY,
+        title="其他 mission",
+        content="内容 B",
+        actor="Planner-Agent",
+    )
+    _other_session_decision = await store.add_decision(
+        session_id="other",
+        mission_id="mission-1",
+        kind=DecisionKind.POLICY,
+        title="其他 session",
+        content="内容 C",
+        actor="Planner-Agent",
+    )
+
+    found = await store.get_decision("s", "mission-1", decision.id)
+
+    assert found == decision
+    assert await store.get_decision("s", "mission-1", "missing-decision") is None
+    assert await store.get_decision("s", "mission-2", decision.id) is None
+    assert await store.get_decision("other", "mission-1", decision.id) is None
+
+
+@pytest.mark.asyncio
 async def test_get_event_returns_matching_session_event(store: WorkbenchStore) -> None:
     event = await store.append_event(
         session_id="s",

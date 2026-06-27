@@ -100,6 +100,33 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
                 == "验证 mission、issue、claim、context、validation 和 snapshot"
             )
 
+            decision_response = client.post(
+                f"/api/v1/workbench/sessions/{session_id}/missions/{mission_id}/decisions",
+                json={
+                    "title": "采用本地 FastAPI 合同",
+                    "content": "SwiftUI 通过本地 HTTP 和事件流访问 Workbench。",
+                    "actor": "Planner-Agent",
+                    "kind": "architecture",
+                },
+            )
+            assert decision_response.status_code == 201
+            decision = decision_response.json()
+
+            decision_detail_response = client.get(
+                f"/api/v1/workbench/sessions/{session_id}/missions/{mission_id}/decisions/{decision['id']}"
+            )
+            assert decision_detail_response.status_code == 200
+            decision_detail = decision_detail_response.json()
+            assert decision_detail["id"] == decision["id"]
+            assert decision_detail["mission_id"] == mission_id
+            assert decision_detail["kind"] == "architecture"
+            assert decision_detail["title"] == "采用本地 FastAPI 合同"
+            assert (
+                decision_detail["content"]
+                == "SwiftUI 通过本地 HTTP 和事件流访问 Workbench。"
+            )
+            assert decision_detail["actor"] == "Planner-Agent"
+
             issue_response = client.post(
                 f"/api/v1/workbench/sessions/{session_id}/missions/{mission_id}/issues",
                 json={
@@ -269,6 +296,7 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
                 "issue.claimed",
                 "agent_profile.upserted",
                 "issue.created",
+                "decision.created",
                 "mission.created",
             ]
 

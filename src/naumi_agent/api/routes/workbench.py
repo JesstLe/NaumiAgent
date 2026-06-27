@@ -849,6 +849,28 @@ async def get_decisions(
     return DecisionsResponse(decisions=decisions, mission_id=mission_id)
 
 
+@router.get("/workbench/sessions/{session_id}/missions/{mission_id}/decisions/{decision_id}")
+async def get_decision(
+    session_id: str,
+    mission_id: str,
+    decision_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    decision = await engine.workbench_service.get_decision(
+        session_id, mission_id, decision_id
+    )
+    if decision is None:
+        raise HTTPException(status_code=404, detail="决策不存在")
+    return decision
+
+
 @router.post("/workbench/sessions/{session_id}/issues/{task_id}/claim", status_code=201)
 async def claim_workbench_issue(
     session_id: str,

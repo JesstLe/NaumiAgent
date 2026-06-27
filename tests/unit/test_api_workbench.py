@@ -108,6 +108,7 @@ class _FakeWorkbenchService:
         self.listed_leases: list[dict] = []
         self.listed_intent_locks: list[dict] = []
         self.listed_decisions: list[dict] = []
+        self.requested_decisions: list[dict] = []
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
@@ -900,6 +901,27 @@ class _FakeWorkbenchService:
                 "created_at": "2024-01-01T00:00:00",
             }
         ]
+
+    async def get_decision(self, session_id: str, mission_id: str, decision_id: str):
+        self.requested_decisions.append(
+            {
+                "session_id": session_id,
+                "mission_id": mission_id,
+                "decision_id": decision_id,
+            }
+        )
+        if decision_id == "missing-decision":
+            return None
+        return {
+            "id": decision_id,
+            "session_id": session_id,
+            "mission_id": mission_id,
+            "kind": "architecture",
+            "title": "采用 FastAPI",
+            "content": "使用 FastAPI 承载 Workbench API",
+            "actor": "Planner-Agent",
+            "created_at": "2024-01-01T00:00:00",
+        }
 
 
 class FakeTaskMarket:
@@ -3273,3 +3295,57 @@ def test_get_decisions_route_accepts_path_and_returns_array() -> None:
         ],
         "mission_id": "mission-1",
     }
+
+
+def test_get_decision_route_returns_single_decision() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get(
+        "/workbench/sessions/sess-1/missions/mission-1/decisions/decision-2"
+    )
+
+    assert response.status_code == 200
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_decisions == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-1",
+            "decision_id": "decision-2",
+        }
+    ]
+    assert response.json() == {
+        "id": "decision-2",
+        "session_id": "sess-1",
+        "mission_id": "mission-1",
+        "kind": "architecture",
+        "title": "采用 FastAPI",
+        "content": "使用 FastAPI 承载 Workbench API",
+        "actor": "Planner-Agent",
+        "created_at": "2024-01-01T00:00:00",
+    }
+
+
+def test_get_decision_route_returns_404_for_missing_decision() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get(
+        "/workbench/sessions/sess-1/missions/mission-1/decisions/missing-decision"
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "决策不存在"}
+    assert engine.workbench_service.requested_decisions == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-1",
+            "decision_id": "missing-decision",
+        }
+    ]

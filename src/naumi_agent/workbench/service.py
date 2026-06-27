@@ -154,6 +154,16 @@ class WorkbenchService:
         decisions = await self._workbench_store.list_decisions(session_id, mission_id)
         return [self._decision_to_dict(decision) for decision in decisions]
 
+    async def get_decision(
+        self, session_id: str, mission_id: str, decision_id: str
+    ) -> dict[str, Any] | None:
+        decision = await self._workbench_store.get_decision(
+            session_id, mission_id, decision_id
+        )
+        if decision is None:
+            return None
+        return self._decision_to_dict(decision)
+
     async def resolve_approval(
         self,
         *,
