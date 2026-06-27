@@ -812,6 +812,154 @@ final class WorkbenchAPIClientTests {
         #expect(response.missions.isEmpty)
     }
 
+    @Test func fetchAgentProfilesWithStatus() async throws {
+        let sessionID = "sess 中文"
+        let status = "busy"
+        let json = Data(
+            """
+            {"agent_profiles":[{"id":"agent-a","session_id":"sess 中文","name":"后端智能体","role":"coder","capabilities":["api","swift-client"],"permissions":["read","write"],"max_parallel_tasks":2,"status":"busy","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}],"status":"busy","limit":25}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/agents",
+                  query["limit"] == "25",
+                  query["status"] == status else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchAgentProfiles(
+            sessionID: sessionID,
+            status: status,
+            limit: 25
+        )
+
+        #expect(response.status == status)
+        #expect(response.limit == 25)
+        #expect(response.agentProfiles.count == 1)
+
+        let profile = try #require(response.agentProfiles.first)
+        #expect(profile.id == "agent-a")
+        #expect(profile.sessionID == sessionID)
+        #expect(profile.name == "后端智能体")
+        #expect(profile.role == "coder")
+        #expect(profile.capabilities == ["api", "swift-client"])
+        #expect(profile.permissions == ["read", "write"])
+        #expect(profile.maxParallelTasks == 2)
+        #expect(profile.status == status)
+    }
+
+    @Test func fetchAgentProfilesWithoutStatus() async throws {
+        let json = Data(
+            """
+            {"agent_profiles":[],"status":null,"limit":50}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/agents?limit=50" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchAgentProfiles(sessionID: "sess-001", status: nil, limit: 50)
+
+        #expect(response.status == nil)
+        #expect(response.limit == 50)
+        #expect(response.agentProfiles.isEmpty)
+    }
+
+    @Test func registerAgentProfileUsesPOSTAndEncodesPathAndBody() async throws {
+        let sessionID = "sess/中文"
+        let agentID = "agent/后端"
+        let profileJSON = Data(
+            """
+            {"id":"agent/后端","session_id":"sess/中文","name":"后端智能体","role":"coder","capabilities":["api","swift-client"],"permissions":["read","write"],"max_parallel_tasks":2,"status":"busy","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%2F%E4%B8%AD%E6%96%87/agents/agent%2F%E5%90%8E%E7%AB%AF" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["name"] as? String == "后端智能体",
+                  json?["role"] as? String == "coder",
+                  let capabilities = json?["capabilities"] as? [String],
+                  capabilities == ["api", "swift-client"],
+                  let permissions = json?["permissions"] as? [String],
+                  permissions == ["read", "write"],
+                  json?["max_parallel_tasks"] as? Int == 2,
+                  json?["status"] as? String == "busy",
+                  json?["actor"] as? String == "Human" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, profileJSON)
+        }
+
+        let client = makeClient()
+        let profile = try await client.registerAgentProfile(
+            sessionID: sessionID,
+            agentID: agentID,
+            name: "后端智能体",
+            role: "coder",
+            capabilities: ["api", "swift-client"],
+            permissions: ["read", "write"],
+            maxParallelTasks: 2,
+            status: "busy",
+            actor: "Human"
+        )
+
+        #expect(profile.id == agentID)
+        #expect(profile.sessionID == sessionID)
+        #expect(profile.name == "后端智能体")
+        #expect(profile.role == "coder")
+        #expect(profile.capabilities == ["api", "swift-client"])
+        #expect(profile.permissions == ["read", "write"])
+        #expect(profile.maxParallelTasks == 2)
+        #expect(profile.status == "busy")
+    }
+
     @Test func claimIssue() async throws {
         let leaseJSON = Data(
             """

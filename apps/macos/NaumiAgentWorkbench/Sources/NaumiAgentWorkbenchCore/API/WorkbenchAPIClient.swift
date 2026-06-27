@@ -173,6 +173,47 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchAgentProfiles(
+        sessionID: String,
+        status: String?,
+        limit: Int
+    ) async throws(APIError) -> AgentProfilesDTO {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let status, !status.isEmpty {
+            queryItems.append(URLQueryItem(name: "status", value: status))
+        }
+        return try await get(
+            path: encodePath("workbench", "sessions", sessionID, "agents"),
+            queryItems: queryItems
+        )
+    }
+
+    public func registerAgentProfile(
+        sessionID: String,
+        agentID: String,
+        name: String,
+        role: String,
+        capabilities: [String],
+        permissions: [String],
+        maxParallelTasks: Int,
+        status: String,
+        actor: String
+    ) async throws(APIError) -> AgentProfileDTO {
+        let body = RegisterAgentProfileRequest(
+            name: name,
+            role: role,
+            capabilities: capabilities,
+            permissions: permissions,
+            maxParallelTasks: maxParallelTasks,
+            status: status,
+            actor: actor
+        )
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "agents", agentID),
+            body: body
+        )
+    }
+
     public func claimIssue(
         sessionID: String,
         taskID: String,
@@ -446,6 +487,17 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         let acceptanceCriteria: [String]
         let parallelMode: String
         let riskLevel: String
+    }
+
+    /// Payload for `POST /workbench/sessions/{session_id}/agents/{agent_id}`.
+    private struct RegisterAgentProfileRequest: Encodable, Sendable {
+        let name: String
+        let role: String
+        let capabilities: [String]
+        let permissions: [String]
+        let maxParallelTasks: Int
+        let status: String
+        let actor: String
     }
 
     /// Payload for `POST /workbench/sessions/{session_id}/validation-runs`.
