@@ -33,7 +33,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     }
 
     public func fetchSnapshot(sessionID: String) async throws(APIError) -> WorkbenchSnapshotDTO {
-        try await get(path: "workbench/sessions/\(sessionID)/snapshot")
+        try await get(path: encodePath("workbench", "sessions", sessionID, "snapshot"))
     }
 
     public func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO {
@@ -41,7 +41,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     }
 
     public func fetchEvents(sessionID: String, limit: Int) async throws(APIError) -> WorkbenchEventsDTO {
-        try await get(path: "workbench/sessions/\(sessionID)/events?limit=\(limit)")
+        try await get(path: encodePath("workbench", "sessions", sessionID, "events") + "?limit=\(limit)")
     }
 
     public func fetchValidationRuns(
@@ -54,7 +54,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             queryItems.append(URLQueryItem(name: "task_id", value: taskID))
         }
         return try await get(
-            path: "workbench/sessions/\(sessionID)/validation-runs",
+            path: encodePath("workbench", "sessions", sessionID, "validation-runs"),
             queryItems: queryItems
         )
     }
@@ -73,7 +73,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             queryItems.append(URLQueryItem(name: "agent_id", value: agentID))
         }
         return try await get(
-            path: "workbench/sessions/\(sessionID)/context-snapshots",
+            path: encodePath("workbench", "sessions", sessionID, "context-snapshots"),
             queryItems: queryItems
         )
     }
@@ -88,7 +88,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             queryItems.append(URLQueryItem(name: "state", value: state))
         }
         return try await get(
-            path: "workbench/sessions/\(sessionID)/approvals",
+            path: encodePath("workbench", "sessions", sessionID, "approvals"),
             queryItems: queryItems
         )
     }
@@ -107,7 +107,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             queryItems.append(URLQueryItem(name: "status", value: status))
         }
         return try await get(
-            path: "workbench/sessions/\(sessionID)/failures",
+            path: encodePath("workbench", "sessions", sessionID, "failures"),
             queryItems: queryItems
         )
     }
@@ -126,7 +126,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             queryItems.append(URLQueryItem(name: "risk_level", value: riskLevel))
         }
         return try await get(
-            path: "workbench/sessions/\(sessionID)/issues",
+            path: encodePath("workbench", "sessions", sessionID, "issues"),
             queryItems: queryItems
         )
     }
@@ -149,7 +149,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             queryItems.append(URLQueryItem(name: "agent_id", value: agentID))
         }
         return try await get(
-            path: "workbench/sessions/\(sessionID)/leases",
+            path: encodePath("workbench", "sessions", sessionID, "leases"),
             queryItems: queryItems
         )
     }
@@ -164,7 +164,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             queryItems.append(URLQueryItem(name: "status", value: status))
         }
         return try await get(
-            path: "workbench/sessions/\(sessionID)/missions",
+            path: encodePath("workbench", "sessions", sessionID, "missions"),
             queryItems: queryItems
         )
     }
@@ -182,17 +182,17 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             worktreeName: worktreeName
         )
         return try await post(
-            path: "workbench/sessions/\(sessionID)/issues/\(taskID)/claim",
+            path: encodePath("workbench", "sessions", sessionID, "issues", taskID, "claim"),
             body: body
         )
     }
 
     public func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
-        try await post(path: "workbench/sessions/\(sessionID)/leases/\(leaseID)/release")
+        try await post(path: encodePath("workbench", "sessions", sessionID, "leases", leaseID, "release"))
     }
 
     public func expireLeases(sessionID: String) async throws(APIError) -> ExpiredLeasesDTO {
-        try await post(path: "workbench/sessions/\(sessionID)/leases/expire")
+        try await post(path: encodePath("workbench", "sessions", sessionID, "leases", "expire"))
     }
 
     public func createMission(
@@ -202,7 +202,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     ) async throws(APIError) -> MissionDTO {
         let body = CreateMissionRequest(title: title, goal: goal)
         return try await post(
-            path: "workbench/sessions/\(sessionID)/missions",
+            path: encodePath("workbench", "sessions", sessionID, "missions"),
             body: body
         )
     }
@@ -222,7 +222,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             riskLevel: riskLevel
         )
         return try await post(
-            path: "workbench/sessions/\(sessionID)/missions/\(missionID)/issues",
+            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "issues"),
             body: body
         )
     }
@@ -244,7 +244,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             requireProposalForRisk: requireProposalForRisk
         )
         return try await post(
-            path: "workbench/sessions/\(sessionID)/missions/\(missionID)/intent-locks",
+            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "intent-locks"),
             body: body
         )
     }
@@ -264,7 +264,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             content: content
         )
         return try await post(
-            path: "workbench/sessions/\(sessionID)/missions/\(missionID)/decisions",
+            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "decisions"),
             body: body
         )
     }
@@ -282,7 +282,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             decisionNote: decisionNote
         )
         return try await post(
-            path: "workbench/sessions/\(sessionID)/approvals/\(approvalID)/resolve",
+            path: encodePath("workbench", "sessions", sessionID, "approvals", approvalID, "resolve"),
             body: body
         )
     }
@@ -301,12 +301,21 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             cwd: cwd
         )
         return try await post(
-            path: "workbench/sessions/\(sessionID)/validation-runs",
+            path: encodePath("workbench", "sessions", sessionID, "validation-runs"),
             body: body
         )
     }
 
     // MARK: - Private
+
+    /// Builds a relative path from individual components, percent-encoding each one
+    /// separately so that `/` inside a dynamic ID becomes `%2F` instead of a route separator.
+    private func encodePath(_ components: String...) -> String {
+        let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))
+        return components
+            .map { $0.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0 }
+            .joined(separator: "/")
+    }
 
     private func get<T: Decodable & Sendable>(path: String) async throws(APIError) -> T {
         guard let url = url(for: path) else {
@@ -366,8 +375,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         return try await performRequest(request)
     }
 
-    /// Builds an absolute URL from a relative path, percent-encoding any characters
-    /// in the path segment that are not valid (spaces, Chinese characters, etc.).
+    /// Builds an absolute URL from a relative path that is already percent-encoded.
     /// Query strings are preserved unchanged so existing callers such as
     /// `fetchSessions(page:pageSize:)` continue to work.
     private func url(for path: String) -> URL? {
@@ -381,10 +389,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             queryPart = ""
         }
 
-        guard let encodedPath = pathPart.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
-            return nil
-        }
-        return URL(string: encodedPath + queryPart, relativeTo: baseURL)?.absoluteURL
+        return URL(string: pathPart + queryPart, relativeTo: baseURL)?.absoluteURL
     }
 
     private func performRequest<T: Decodable & Sendable>(_ request: URLRequest) async throws(APIError) -> T {
