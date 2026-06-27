@@ -48,6 +48,7 @@ from naumi_agent.api.routes.workbench import (
     get_workbench_capabilities,
     get_workbench_events,
     get_workbench_snapshot,
+    get_worktree,
     get_worktrees,
     release_workbench_lease,
     resolve_approval,
@@ -1006,8 +1007,15 @@ class FakeWorktreeManager:
         self.records = list(records or [])
         self.status_calls: list[str] = []
 
-    async def status(self, name: str = "") -> list[WorktreeRecord]:
+    async def status(self, name: str = "") -> WorktreeRecord | list[WorktreeRecord]:
         self.status_calls.append(name)
+        if "/" in name:
+            raise ValueError("worktree 名称不能包含路径分隔符")
+        if name:
+            for record in self.records:
+                if record.name == name:
+                    return record
+            raise KeyError(name)
         return list(self.records)
 
 
@@ -3226,6 +3234,22 @@ async def test_get_worktrees_endpoint_requires_existing_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_worktree_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_worktree(
+            "missing",
+            "wt-api",
+            _fake_request(engine),
+            auth="test",
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
 async def test_get_worktrees_endpoint_filters_and_returns_json_ready_records() -> None:
     worktree_manager = FakeWorktreeManager(
         [
@@ -3355,6 +3379,80 @@ def test_get_worktrees_route_accepts_filters() -> None:
         "status": "kept",
         "limit": 50,
     }
+
+
+def test_get_worktree_route_returns_single_worktree() -> None:
+    worktree_manager = FakeWorktreeManager(
+        [
+            WorktreeRecord(
+                name="wt-api",
+                path="/repo/.naumi/worktrees/wt-api",
+                branch="naumi/worktree-wt-api",
+                base_ref="abc123",
+                status=WorktreeStatus.DIRTY,
+                task_id="task-1",
+                dirty_files=2,
+                commits_ahead=1,
+                created_at="2024-01-01T00:00:00",
+                updated_at="2024-01-01T00:04:00",
+                metadata={"agent_id": "Backend-Agent"},
+            )
+        ]
+    )
+    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/worktrees/wt-api")
+
+    assert response.status_code == 200
+    assert engine.loaded == ["sess-1"]
+    assert worktree_manager.status_calls == ["wt-api"]
+    assert response.json() == {
+        "name": "wt-api",
+        "path": "/repo/.naumi/worktrees/wt-api",
+        "branch": "naumi/worktree-wt-api",
+        "base_ref": "abc123",
+        "status": "dirty",
+        "task_id": "task-1",
+        "dirty_files": 2,
+        "commits_ahead": 1,
+        "created_at": "2024-01-01T00:00:00",
+        "updated_at": "2024-01-01T00:04:00",
+        "kept_reason": "",
+        "metadata": {"agent_id": "Backend-Agent"},
+        "removable": False,
+    }
+
+
+def test_get_worktree_route_returns_404_for_missing_worktree() -> None:
+    engine = _FakeEngine(exists=True, worktree_manager=FakeWorktreeManager())
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/worktrees/missing-worktree")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "worktree 不存在"}
+    assert engine.worktree_manager.status_calls == ["missing-worktree"]
+
+
+def test_get_worktree_route_maps_invalid_name_to_400() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/worktrees/bad/name")
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "worktree 名称不能包含路径分隔符"}
+    assert engine.worktree_manager.status_calls == ["bad/name"]
 
 
 @pytest.mark.asyncio

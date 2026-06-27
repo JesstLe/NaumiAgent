@@ -297,6 +297,18 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
             assert worktree["metadata"] == {"agent_id": "Backend-Agent"}
             assert worktree["removable"] is False
 
+            worktree_detail_response = client.get(
+                f"/api/v1/workbench/sessions/{session_id}/worktrees/wt-api-smoke"
+            )
+            assert worktree_detail_response.status_code == 200
+            worktree_detail = worktree_detail_response.json()
+            assert worktree_detail["name"] == "wt-api-smoke"
+            assert worktree_detail["branch"] == "naumi/worktree-wt-api-smoke"
+            assert worktree_detail["task_id"] == task_id
+            assert worktree_detail["status"] == "missing"
+            assert worktree_detail["metadata"] == {"agent_id": "Backend-Agent"}
+            assert worktree_detail["removable"] is False
+
             context_response = client.post(
                 f"/api/v1/workbench/sessions/{session_id}/issues/{task_id}/context-health",
                 json={
