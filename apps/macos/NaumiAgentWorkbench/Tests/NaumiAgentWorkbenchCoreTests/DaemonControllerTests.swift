@@ -1975,6 +1975,142 @@ final class DaemonControllerTests {
         #expect(appState.approvals == [staleApproval])
         #expect(appState.lastError == .httpStatus(500))
     }
+
+    @Test @MainActor func registerAgentProfileSuccessRefreshesAgentProfilesEventsAndSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let profile = makeAgentProfile(id: "agent-001", sessionID: "sess-001", status: "idle")
+        let profiles = AgentProfilesDTO(agentProfiles: [profile], status: nil, limit: 50)
+        let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        let event = makeEvent(id: "evt-001", type: "agent.registered", subjectID: "agent-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
+
+        await api.setRegisterAgentProfileResult(.success(profile))
+        await api.setAgentProfilesResult(.success(profiles))
+        await api.setSnapshotResult(.success(snapshot))
+        await api.setEventsResult(.success(events))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.registerAgentProfile(
+            agentID: "agent-001",
+            name: "后端智能体",
+            role: "coder",
+            capabilities: ["api", "swift-client"],
+            permissions: ["read", "write"],
+            maxParallelTasks: 2,
+            status: "busy",
+            actor: "Human"
+        )
+
+        #expect(appState.agentProfiles == [profile])
+        #expect(appState.timelineEvents == [event])
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func registerAgentProfileWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        appState.agentProfiles = [
+            makeAgentProfile(id: "agent-stale", sessionID: "old-session", status: "idle")
+        ]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.registerAgentProfile(
+            agentID: "agent-001",
+            name: "后端智能体",
+            role: "coder",
+            capabilities: ["api"],
+            permissions: ["read"],
+            maxParallelTasks: 1,
+            status: "idle",
+            actor: "Human"
+        )
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.agentProfiles.isEmpty)
+    }
+
+    @Test @MainActor func registerAgentProfileFailurePreservesAgentProfilesAndSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleProfile = makeAgentProfile(id: "agent-stale", sessionID: "sess-001", status: "idle")
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        appState.agentProfiles = [staleProfile]
+        appState.snapshot = staleSnapshot
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setRegisterAgentProfileResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.registerAgentProfile(
+            agentID: "agent-001",
+            name: "后端智能体",
+            role: "coder",
+            capabilities: ["api"],
+            permissions: ["read"],
+            maxParallelTasks: 1,
+            status: "idle",
+            actor: "Human"
+        )
+
+        #expect(appState.agentProfiles == [staleProfile])
+        #expect(appState.snapshot == staleSnapshot)
+        #expect(appState.lastError == .httpStatus(500))
+    }
+
+    @Test @MainActor func refreshAgentProfilesSuccessWritesToAppState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let profile = makeAgentProfile(id: "agent-001", sessionID: "sess-001", status: "idle")
+        let profiles = AgentProfilesDTO(agentProfiles: [profile], status: "idle", limit: 25)
+
+        await api.setAgentProfilesResult(.success(profiles))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshAgentProfiles(status: "idle", limit: 25)
+
+        #expect(appState.agentProfiles == [profile])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshAgentProfilesWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        appState.agentProfiles = [
+            makeAgentProfile(id: "agent-stale", sessionID: "old-session", status: "idle")
+        ]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshAgentProfiles(limit: 50)
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.agentProfiles.isEmpty)
+    }
+
+    @Test @MainActor func refreshAgentProfilesFailurePreservesOldList() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleProfile = makeAgentProfile(id: "agent-stale", sessionID: "sess-001", status: "idle")
+        appState.agentProfiles = [staleProfile]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setAgentProfilesResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshAgentProfiles(limit: 50)
+
+        #expect(appState.agentProfiles == [staleProfile])
+        #expect(appState.lastError == .httpStatus(500))
+    }
 }
 
 extension FakeWorkbenchAPIProvider {
@@ -2028,6 +2164,14 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setMissionsResult(_ result: Result<MissionsDTO, APIError>) {
         missionsResult = result
+    }
+
+    fileprivate func setAgentProfilesResult(_ result: Result<AgentProfilesDTO, APIError>) {
+        agentProfilesResult = result
+    }
+
+    fileprivate func setRegisterAgentProfileResult(_ result: Result<AgentProfileDTO, APIError>) {
+        registerAgentProfileResult = result
     }
 
     fileprivate func setClaimIssueResult(_ result: Result<LeaseDTO, APIError>) {
@@ -2096,6 +2240,7 @@ private func configureWorkbenchListResults(for api: FakeWorkbenchAPIProvider, se
         reasons: ["上下文健康"],
         createdAt: "2026-06-27T06:00:00"
     )
+    let agentProfile = makeAgentProfile(id: "agent-\(sessionID)", sessionID: sessionID, status: "idle")
 
     await api.setMissionsResult(.success(MissionsDTO(missions: [mission], status: nil, limit: 50)))
     await api.setIssuesResult(.success(IssuesDTO(issues: [issue], missionID: nil, riskLevel: nil, limit: 50)))
@@ -2105,6 +2250,7 @@ private func configureWorkbenchListResults(for api: FakeWorkbenchAPIProvider, se
     await api.setApprovalsResult(.success(ApprovalsDTO(approvals: [approval], state: "waiting", limit: 50)))
     await api.setValidationRunsResult(.success(ValidationRunsDTO(validationRuns: [run], taskID: nil, limit: 50)))
     await api.setContextSnapshotsResult(.success(ContextSnapshotsDTO(contextSnapshots: [contextSnapshot], taskID: nil, agentID: nil, limit: 50)))
+    await api.setAgentProfilesResult(.success(AgentProfilesDTO(agentProfiles: [agentProfile], status: nil, limit: 50)))
 }
 
 @MainActor
@@ -2120,6 +2266,7 @@ private func expectWorkbenchListsPopulated(
     #expect(appState.approvals.count == 1, sourceLocation: sourceLocation)
     #expect(appState.validationRuns.count == 1, sourceLocation: sourceLocation)
     #expect(appState.contextSnapshots.count == 1, sourceLocation: sourceLocation)
+    #expect(appState.agentProfiles.count == 1, sourceLocation: sourceLocation)
 }
 
 @MainActor
@@ -2135,6 +2282,22 @@ private func expectWorkbenchListsEmpty(
     #expect(appState.approvals.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.validationRuns.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.contextSnapshots.isEmpty, sourceLocation: sourceLocation)
+    #expect(appState.agentProfiles.isEmpty, sourceLocation: sourceLocation)
+}
+
+private func makeAgentProfile(id: String, sessionID: String, status: String) -> AgentProfileDTO {
+    AgentProfileDTO(
+        id: id,
+        sessionID: sessionID,
+        name: "智能体 \(id)",
+        role: "coder",
+        capabilities: ["api"],
+        permissions: ["read"],
+        maxParallelTasks: 2,
+        status: status,
+        createdAt: "2026-06-27T06:00:00",
+        updatedAt: "2026-06-27T06:00:00"
+    )
 }
 
 private func makeStatus() -> DaemonStatusDTO {
