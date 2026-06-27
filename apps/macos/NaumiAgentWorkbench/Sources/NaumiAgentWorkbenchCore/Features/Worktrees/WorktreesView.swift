@@ -9,6 +9,9 @@ public struct WorktreesView: View {
     @State private var selectedWorktreeID: String?
     @State private var isKeepingWorktree = false
     @State private var isRemovingWorktree = false
+    @State private var isPresentingContextRecorder = false
+    @State private var contextHealthDraft = ContextHealthRecordDraft()
+    @State private var isRecordingContextHealth = false
     @State private var localActionErrorMessage: String?
     private let layout = WorkbenchPageLayout.worktrees
 
@@ -32,7 +35,11 @@ public struct WorktreesView: View {
         let selectedWorktree = presentation.selectedWorktree(id: selectedWorktreeID)
 
         VStack(spacing: 0) {
-            header(presentation: presentation)
+            header(
+                presentation: presentation,
+                selectedWorktree: selectedWorktree,
+                selectedSnapshot: selectedSnapshot
+            )
             Divider()
 
             HStack(spacing: 0) {
@@ -84,6 +91,26 @@ public struct WorktreesView: View {
             if selectedWorktreeID == nil {
                 selectedWorktreeID = presentation.selectedWorktree(id: nil)?.id
             }
+            if contextHealthDraft.trimmedTaskID.isEmpty || contextHealthDraft.trimmedAgentID.isEmpty {
+                contextHealthDraft = defaultContextHealthDraft(
+                    worktree: selectedWorktree,
+                    snapshot: selectedSnapshot
+                )
+            }
+        }
+        .sheet(isPresented: $isPresentingContextRecorder) {
+            ContextHealthRecordSheet(
+                appState: appState,
+                daemonController: daemonController,
+                draft: $contextHealthDraft,
+                isRecording: $isRecordingContextHealth,
+                onRecorded: {
+                    contextHealthDraft = defaultContextHealthDraft(
+                        worktree: selectedWorktree,
+                        snapshot: selectedSnapshot
+                    )
+                }
+            )
         }
         .task {
             guard !appState.isPreviewFixture else { return }
@@ -136,7 +163,11 @@ public struct WorktreesView: View {
         }
     }
 
-    private func header(presentation: WorktreesDashboardPresentation) -> some View {
+    private func header(
+        presentation: WorktreesDashboardPresentation,
+        selectedWorktree: WorktreeManagementRow?,
+        selectedSnapshot: ContextSnapshotPresentation?
+    ) -> some View {
         HStack(alignment: .center, spacing: 16) {
             Text(AppStrings.Worktrees.title(appState.locale))
                 .font(.system(size: 17, weight: .semibold))
@@ -145,6 +176,20 @@ public struct WorktreesView: View {
                 .foregroundStyle(.secondary)
 
             Spacer()
+
+            Button {
+                contextHealthDraft = defaultContextHealthDraft(
+                    worktree: selectedWorktree,
+                    snapshot: selectedSnapshot
+                )
+                isPresentingContextRecorder = true
+            } label: {
+                Label(
+                    AppStrings.Worktrees.recordContextButton(appState.locale),
+                    systemImage: "waveform.path.ecg"
+                )
+            }
+            .buttonStyle(.borderedProminent)
 
             Button {
                 if !appState.isPreviewFixture {
@@ -159,6 +204,32 @@ public struct WorktreesView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 11)
+    }
+
+    private func defaultContextHealthDraft(
+        worktree: WorktreeManagementRow?,
+        snapshot: ContextSnapshotPresentation?
+    ) -> ContextHealthRecordDraft {
+        let taskID = nonPlaceholder(worktree?.taskID) ?? nonPlaceholder(snapshot?.taskID) ?? ""
+        let agentID = nonPlaceholder(worktree?.agentID) ?? nonPlaceholder(snapshot?.agentID) ?? ""
+        return ContextHealthRecordDraft(
+            taskID: taskID,
+            agentID: agentID,
+            minutesSinceSync: 0,
+            tokenLoadPercent: 25,
+            policyConflict: false,
+            actor: "Human"
+        )
+    }
+
+    private func nonPlaceholder(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              value != "-"
+        else {
+            return nil
+        }
+        return value
     }
 
     private func snapshotRail(presentation: WorktreesDashboardPresentation) -> some View {
@@ -840,6 +911,98 @@ public struct WorktreesView: View {
             return "questionmark.folder"
         default:
             return "waveform.path.ecg"
+        }
+    }
+}
+
+private struct ContextHealthRecordSheet: View {
+    let appState: AppState
+    let daemonController: DaemonController
+    @Binding var draft: ContextHealthRecordDraft
+    @Binding var isRecording: Bool
+    let onRecorded: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(AppStrings.Worktrees.recordContextSectionTitle(appState.locale))
+                .font(.headline)
+
+            Form {
+                TextField(AppStrings.Worktrees.taskIDLabel(appState.locale), text: $draft.taskID)
+                TextField(AppStrings.Worktrees.agentIDLabel(appState.locale), text: $draft.agentID)
+                TextField(AppStrings.Reviews.actorLabel(appState.locale), text: $draft.actor)
+
+                Stepper(
+                    "\(AppStrings.Worktrees.minutesSinceSyncLabel(appState.locale)): \(draft.minutesSinceSync)",
+                    value: $draft.minutesSinceSync,
+                    in: 0...1440,
+                    step: 5
+                )
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text(AppStrings.Worktrees.tokenLoadLabel(appState.locale))
+                        Spacer()
+                        Text("\(Int(draft.tokenLoadPercent.rounded()))%")
+                            .fontWeight(.semibold)
+                    }
+                    Slider(value: $draft.tokenLoadPercent, in: 0...100, step: 1)
+                }
+
+                Toggle(
+                    AppStrings.Worktrees.policyConflictLabel(appState.locale),
+                    isOn: $draft.policyConflict
+                )
+            }
+            .frame(minWidth: 380)
+
+            HStack {
+                Spacer()
+
+                Button(AppStrings.MissionComposer.cancelButton(appState.locale)) {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button {
+                    recordContextHealth()
+                } label: {
+                    Label(
+                        isRecording
+                            ? AppStrings.Worktrees.processingLabel(appState.locale)
+                            : AppStrings.Worktrees.recordContextSubmitButton(appState.locale),
+                        systemImage: "checkmark.circle"
+                    )
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!draft.canSubmit || isRecording)
+            }
+        }
+        .padding()
+        .frame(minWidth: 420, minHeight: 310)
+    }
+
+    private func recordContextHealth() {
+        guard draft.canSubmit, !isRecording else { return }
+        let submission = draft
+        isRecording = true
+        Task {
+            await daemonController.recordContextHealth(
+                taskID: submission.trimmedTaskID,
+                agentID: submission.trimmedAgentID,
+                minutesSinceSync: submission.minutesSinceSync,
+                tokenLoadRatio: submission.tokenLoadRatio,
+                policyConflict: submission.policyConflict,
+                actor: submission.trimmedActor
+            )
+            isRecording = false
+            if appState.lastError == nil {
+                onRecorded()
+                dismiss()
+            }
         }
     }
 }
