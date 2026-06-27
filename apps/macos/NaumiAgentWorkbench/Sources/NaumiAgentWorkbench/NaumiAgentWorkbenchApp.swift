@@ -27,7 +27,6 @@ struct NaumiAgentWorkbenchApp: App {
                     }
                 }
         }
-        .windowStyle(.hiddenTitleBar)
     }
 }
 

@@ -7,7 +7,8 @@ struct WorkbenchShellPresentationTests {
         let presentation = WorkbenchShellPresentation()
 
         #expect(presentation.showsSyntheticWindowControls == false)
-        #expect(presentation.leadingContentInset >= 72)
+        #expect(presentation.placesNavigationBelowTitleBar == true)
+        #expect(presentation.leadingContentInset == 14)
         #expect(presentation.navigationRoutes == AppRoute.topNavigationRoutes)
     }
 }
