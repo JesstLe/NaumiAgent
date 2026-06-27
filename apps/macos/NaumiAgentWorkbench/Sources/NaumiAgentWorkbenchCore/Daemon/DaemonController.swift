@@ -8,6 +8,8 @@ import Observation
 /// WebSockets.
 @MainActor
 public final class DaemonController: Sendable {
+    public static let supportedProtocolVersion = 1
+
     public let appState: AppState
     public let apiProvider: WorkbenchAPIProviding
 
@@ -41,6 +43,16 @@ public final class DaemonController: Sendable {
         do {
             let status = try await apiProvider.fetchDaemonStatus()
             let capabilities = try await apiProvider.fetchCapabilities()
+            guard capabilities.protocolVersion == Self.supportedProtocolVersion else {
+                appState.daemonStatus = nil
+                appState.capabilities = nil
+                appState.lastError = .protocolVersionMismatch(
+                    expected: Self.supportedProtocolVersion,
+                    actual: capabilities.protocolVersion
+                )
+                appState.connectionState = .disconnected
+                return
+            }
 
             appState.daemonStatus = status
             appState.capabilities = capabilities

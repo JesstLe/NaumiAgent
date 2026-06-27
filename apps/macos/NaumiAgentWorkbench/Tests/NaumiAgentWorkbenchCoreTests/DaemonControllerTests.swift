@@ -401,6 +401,29 @@ final class DaemonControllerTests {
         #expect(appState.capabilities == nil)
     }
 
+    @Test @MainActor func refreshConnectionRejectsUnsupportedProtocolVersion() async throws {
+        let appState = AppState()
+        let api = FakeWorkbenchAPIProvider()
+
+        await api.setStatusResult(.success(makeStatus()))
+        await api.setCapabilitiesResult(.success(CapabilitiesDTO(
+            supportsDaemonManagement: false,
+            supportsWorkspaceRegistry: true,
+            supportsValidationRunner: true,
+            supportsCloudSync: false,
+            supportedLocales: ["zh-CN", "en-US"],
+            protocolVersion: 999
+        )))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .disconnected)
+        #expect(appState.daemonStatus == nil)
+        #expect(appState.capabilities == nil)
+        #expect(appState.lastError == .protocolVersionMismatch(expected: 1, actual: 999))
+    }
+
     @Test @MainActor func refreshConnectionClearsPreviousError() async throws {
         let appState = AppState()
         appState.lastError = .httpStatus(500)
