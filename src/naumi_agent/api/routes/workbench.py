@@ -366,6 +366,15 @@ async def websocket_workbench_events(websocket: WebSocket, session_id: str):
         return
 
     await websocket.send_json({"type": "connected", "session_id": session_id})
+    await _send_workbench_event_refresh(
+        websocket,
+        engine,
+        session_id,
+        event_type=None,
+        subject_id=None,
+        actor=None,
+        limit=50,
+    )
 
     try:
         while True:
@@ -384,21 +393,40 @@ async def websocket_workbench_events(websocket: WebSocket, session_id: str):
                 continue
 
             limit = _bounded_event_stream_limit(data.get("limit", 50))
-            result = await engine.workbench_service.list_events(
+            await _send_workbench_event_refresh(
+                websocket,
+                engine,
                 session_id,
                 event_type=data.get("event_type"),
                 subject_id=data.get("subject_id"),
                 actor=data.get("actor"),
                 limit=limit,
             )
-            events = result["events"]
-            for event in events:
-                await websocket.send_json({"type": "workbench.event", "event": event})
-            await websocket.send_json(
-                {"type": "refresh_complete", "count": len(events)}
-            )
     except WebSocketDisconnect:
         pass
+
+
+async def _send_workbench_event_refresh(
+    websocket: WebSocket,
+    engine: Any,
+    session_id: str,
+    *,
+    event_type: str | None,
+    subject_id: str | None,
+    actor: str | None,
+    limit: int,
+) -> None:
+    result = await engine.workbench_service.list_events(
+        session_id,
+        event_type=event_type,
+        subject_id=subject_id,
+        actor=actor,
+        limit=limit,
+    )
+    events = result["events"]
+    for event in events:
+        await websocket.send_json({"type": "workbench.event", "event": event})
+    await websocket.send_json({"type": "refresh_complete", "count": len(events)})
 
 
 def _bounded_event_stream_limit(value: Any) -> int:

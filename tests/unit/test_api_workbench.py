@@ -50,6 +50,7 @@ from naumi_agent.api.routes.workbench import (
     release_workbench_lease,
     resolve_approval,
     upsert_agent_profile,
+    websocket_workbench_events,
 )
 from naumi_agent.api.routes.workbench import (
     router as workbench_router,
@@ -792,6 +793,26 @@ def _fake_request(engine: _FakeEngine):
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(engine=engine)))
 
 
+class _RecordingWorkbenchWebSocket:
+    def __init__(self, engine: _FakeEngine) -> None:
+        self.app = SimpleNamespace(state=SimpleNamespace(engine=engine))
+        self.accepted = False
+        self.closed = False
+        self.sent_json: list[dict] = []
+
+    async def accept(self) -> None:
+        self.accepted = True
+
+    async def send_json(self, payload: dict) -> None:
+        self.sent_json.append(payload)
+
+    async def close(self) -> None:
+        self.closed = True
+
+    async def receive_json(self) -> dict:
+        raise WebSocketDisconnect()
+
+
 class _FakeSessionStoreWithCount:
     def __init__(self, total: int) -> None:
         self.total = total
@@ -1005,6 +1026,8 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
 
     with client.websocket_connect("/workbench/sessions/sess-1/events/stream") as websocket:
         assert websocket.receive_json() == {"type": "connected", "session_id": "sess-1"}
+        assert websocket.receive_json()["type"] == "workbench.event"
+        assert websocket.receive_json() == {"type": "refresh_complete", "count": 1}
         websocket.send_json(
             {
                 "type": "refresh",
@@ -1020,6 +1043,13 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
 
     assert engine.loaded == ["sess-1"]
     assert engine.workbench_service.listed_events == [
+        {
+            "session_id": "sess-1",
+            "event_type": None,
+            "subject_id": None,
+            "actor": None,
+            "limit": 50,
+        },
         {
             "session_id": "sess-1",
             "event_type": "issue.created",
@@ -1041,6 +1071,42 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
         },
     }
     assert complete_message == {"type": "refresh_complete", "count": 1}
+
+
+@pytest.mark.asyncio
+async def test_workbench_event_stream_sends_initial_audit_events_on_connect() -> None:
+    engine = _FakeEngine(exists=True)
+    websocket = _RecordingWorkbenchWebSocket(engine)
+
+    await websocket_workbench_events(websocket, "sess-1")
+
+    assert websocket.accepted is True
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_events == [
+        {
+            "session_id": "sess-1",
+            "event_type": None,
+            "subject_id": None,
+            "actor": None,
+            "limit": 50,
+        }
+    ]
+    assert websocket.sent_json == [
+        {"type": "connected", "session_id": "sess-1"},
+        {
+            "type": "workbench.event",
+            "event": {
+                "id": "evt-1",
+                "session_id": "sess-1",
+                "type": "mission.created",
+                "actor": "Human",
+                "subject_id": "mission-1",
+                "payload": {"title": "Mac 工作台"},
+                "timestamp": "2024-01-01T00:00:00",
+            },
+        },
+        {"type": "refresh_complete", "count": 1},
+    ]
 
 
 @pytest.mark.asyncio
