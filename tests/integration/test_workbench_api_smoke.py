@@ -88,6 +88,18 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
             assert mission_response.status_code == 201
             mission_id = mission_response.json()["id"]
 
+            mission_detail_response = client.get(
+                f"/api/v1/workbench/sessions/{session_id}/missions/{mission_id}"
+            )
+            assert mission_detail_response.status_code == 200
+            mission_detail = mission_detail_response.json()
+            assert mission_detail["id"] == mission_id
+            assert mission_detail["title"] == "实现 SwiftUI 工作台闭环"
+            assert (
+                mission_detail["goal"]
+                == "验证 mission、issue、claim、context、validation 和 snapshot"
+            )
+
             issue_response = client.post(
                 f"/api/v1/workbench/sessions/{session_id}/missions/{mission_id}/issues",
                 json={

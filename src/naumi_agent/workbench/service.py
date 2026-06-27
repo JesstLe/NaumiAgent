@@ -587,6 +587,13 @@ class WorkbenchService:
             "limit": limit,
         }
 
+    async def get_mission(self, session_id: str, mission_id: str) -> dict[str, Any] | None:
+        missions = await self._workbench_store.list_missions(session_id)
+        for mission in missions:
+            if mission.id == mission_id:
+                return asdict(mission)
+        return None
+
     async def _list_missions_for_snapshot(self, session_id: str) -> list[dict[str, Any]]:
         # Keep the original snapshot behavior: no status filter, no limit, oldest first.
         missions = await self._workbench_store.list_missions(session_id)
