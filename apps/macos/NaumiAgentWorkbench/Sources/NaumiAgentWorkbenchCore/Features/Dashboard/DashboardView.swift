@@ -55,8 +55,8 @@ public struct DashboardView: View {
         let market = TaskMarketDesignPresentation(snapshot: snapshot)
 
         return GeometryReader { proxy in
-            let scale = CGFloat(layout.scale(for: Double(proxy.size.width)))
-            let scaledSize = layout.scaledSize(for: Double(proxy.size.width))
+            let scale = CGFloat(layout.scale(for: proxy.size))
+            let scaledSize = layout.scaledSize(for: proxy.size)
 
             ZStack(alignment: .topLeading) {
                 workbenchLayoutContent(presentation: presentation, market: market)
@@ -77,7 +77,11 @@ public struct DashboardView: View {
         presentation: DashboardSnapshotPresentation,
         market: TaskMarketDesignPresentation
     ) -> some View {
-        VStack(spacing: 0) {
+        let auditTrailHeight: CGFloat = 112
+        let dividerHeight: CGFloat = 1
+        let mainHeight = CGFloat(WorkbenchScaledPageLayout.dashboard.baseHeight) - auditTrailHeight - dividerHeight
+
+        return VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
                 workbenchLeftRail(presentation: presentation, market: market)
                     .frame(width: 302)
@@ -92,11 +96,13 @@ public struct DashboardView: View {
                 inspectorPanel(presentation: presentation)
                     .frame(width: 296, alignment: .top)
             }
+            .frame(height: mainHeight, alignment: .top)
+            .clipped()
 
             Divider()
 
             auditTrail(presentation: presentation)
-                .frame(height: 112)
+                .frame(height: auditTrailHeight)
         }
         .frame(
             width: WorkbenchScaledPageLayout.dashboard.baseWidth,
