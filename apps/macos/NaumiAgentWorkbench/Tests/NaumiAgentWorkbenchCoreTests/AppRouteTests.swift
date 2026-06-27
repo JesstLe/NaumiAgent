@@ -28,6 +28,17 @@ struct AppRouteTests {
         }
     }
 
+    @Test func topNavigationUsesReferenceOrder() {
+        #expect(AppRoute.topNavigationRoutes == [
+            .dashboard,
+            .taskMarket,
+            .worktrees,
+            .reviews,
+            .timeline,
+            .settings
+        ])
+    }
+
     @Test func routePlaceholderStrings() {
         #expect(AppStrings.Navigation.pageUnderConstruction(.zhCN) == "页面建设中")
         #expect(AppStrings.Navigation.pageUnderConstruction(.enUS) == "Page under construction")

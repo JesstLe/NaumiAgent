@@ -36,44 +36,16 @@ struct ContentView: View {
 
     var body: some View {
         @Bindable var appState = environment.appState
-        NavigationSplitView {
-            SidebarView(
+        VStack(spacing: 0) {
+            TopNavigationBar(
                 appState: environment.appState,
-                daemonController: environment.daemonController
+                daemonController: environment.daemonController,
+                isPresentingMissionComposer: $isPresentingMissionComposer
             )
-            .navigationSplitViewColumnWidth(min: 180, ideal: 220)
-        } detail: {
-            routeView(for: appState.currentRoute)
-        }
-        .toolbar {
-            ToolbarItem {
-                Button {
-                    Task {
-                        await environment.daemonController.refreshConnection()
-                    }
-                } label: {
-                    Label(
-                        AppStrings.ConnectionControl.refreshButton(appState.locale),
-                        systemImage: "arrow.clockwise"
-                    )
-                }
-                .labelStyle(.titleAndIcon)
-                .help(AppStrings.ConnectionControl.refreshButtonHelp(appState.locale))
-                .disabled(appState.connectionState == .connecting)
-            }
 
-            ToolbarItem {
-                Button {
-                    isPresentingMissionComposer = true
-                } label: {
-                    Label(
-                        AppStrings.MissionComposer.newMissionButton(appState.locale),
-                        systemImage: "plus"
-                    )
-                }
-                .labelStyle(.titleAndIcon)
-                .help(AppStrings.MissionComposer.newMissionButton(appState.locale))
-            }
+            Divider()
+
+            routeView(for: appState.currentRoute)
         }
         .sheet(isPresented: $isPresentingMissionComposer) {
             MissionComposerSheet(
@@ -113,6 +85,90 @@ struct ContentView: View {
                 appState: environment.appState,
                 daemonController: environment.daemonController
             )
+        }
+    }
+}
+
+struct TopNavigationBar: View {
+    let appState: AppState
+    let daemonController: DaemonController
+    @Binding var isPresentingMissionComposer: Bool
+
+    var body: some View {
+        @Bindable var appState = appState
+
+        HStack(spacing: 14) {
+            HStack(spacing: 8) {
+                Circle().fill(.red).frame(width: 12, height: 12)
+                Circle().fill(.yellow).frame(width: 12, height: 12)
+                Circle().fill(.green).frame(width: 12, height: 12)
+            }
+
+            Text("NaumiAgent Workbench")
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 172, alignment: .leading)
+
+            Picker("", selection: $appState.currentRoute) {
+                ForEach(AppRoute.topNavigationRoutes) { route in
+                    Label(route.displayName(locale: appState.locale), systemImage: route.systemImage)
+                        .tag(route)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 560)
+
+            Spacer()
+
+            Button {
+                Task {
+                    await daemonController.refreshConnection()
+                }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            .help(AppStrings.ConnectionControl.refreshButtonHelp(appState.locale))
+            .disabled(appState.connectionState == .connecting)
+
+            Button {
+                isPresentingMissionComposer = true
+            } label: {
+                Label(
+                    AppStrings.MissionComposer.newMissionButton(appState.locale),
+                    systemImage: "plus"
+                )
+            }
+            .buttonStyle(.bordered)
+
+            Menu {
+                Button("Mac Agent Workbench MVP") {}
+            } label: {
+                Label("Mission", systemImage: "chevron.down")
+            }
+            .menuStyle(.borderlessButton)
+
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(connectionColor)
+                    .frame(width: 7, height: 7)
+                Text("Workspace: ~/naumi")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var connectionColor: Color {
+        switch appState.connectionState {
+        case .connected:
+            return .green
+        case .connecting:
+            return .orange
+        case .disconnected, .stale:
+            return .red
         }
     }
 }
