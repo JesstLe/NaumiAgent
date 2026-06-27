@@ -43,6 +43,21 @@ struct SettingsDashboardPresentationTests {
         #expect(presentation.activeMissionTitle == "实现 SwiftUI 工作台骨架")
         #expect(presentation.enabledCapabilityCount == 2)
         #expect(presentation.governancePolicyCount == 3)
+        #expect(presentation.runtimeChecklist.map(\.kind) == [
+            .loopbackOnly,
+            .protocolCompatible,
+            .validationRunnerAvailable,
+        ])
+        #expect(presentation.runtimeChecklist.map(\.state) == [
+            .passed,
+            .passed,
+            .passed,
+        ])
+        #expect(presentation.governanceChecklist.map(\.kind) == [
+            .humanApproval,
+            .workbenchWritePath,
+            .intentLockReady,
+        ])
     }
 
     @Test func disconnectedRuntimeUsesPlaceholderEndpoint() {
@@ -51,5 +66,10 @@ struct SettingsDashboardPresentationTests {
         #expect(presentation.runtimeEndpoint == "-")
         #expect(presentation.activeMissionTitle == "-")
         #expect(presentation.enabledCapabilityCount == 0)
+        #expect(presentation.runtimeChecklist.map(\.state) == [
+            .blocked,
+            .blocked,
+            .blocked,
+        ])
     }
 }

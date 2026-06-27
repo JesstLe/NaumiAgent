@@ -21,6 +21,7 @@ public struct TimelineView: View {
                 }
                 summaryStrip(presentation: presentation)
                 dashboardGrid(presentation: presentation)
+                analysisGrid(presentation: presentation)
             }
             .padding(.horizontal, 22)
             .padding(.vertical, 18)
@@ -105,6 +106,93 @@ public struct TimelineView: View {
                 typeDistributionPanel(presentation: presentation)
             }
             .frame(width: 340, alignment: .top)
+        }
+    }
+
+    private func analysisGrid(presentation: TimelineDashboardPresentation) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            causalChainPanel(presentation: presentation)
+                .frame(minWidth: 520, maxWidth: .infinity, alignment: .top)
+            actorDistributionPanel(presentation: presentation)
+                .frame(width: 360, alignment: .top)
+        }
+    }
+
+    private func causalChainPanel(presentation: TimelineDashboardPresentation) -> some View {
+        panel(title: appState.locale == .zhCN ? "最近因果链" : "Recent Causal Chain") {
+            if presentation.causalChain.isEmpty {
+                emptyState
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(presentation.causalChain) { step in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text("\(step.order)")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 22, height: 22)
+                                .background(color(for: step.type))
+                                .clipShape(Circle())
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 8) {
+                                    Label(step.type, systemImage: iconName(for: step.type))
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(step.timestamp)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                HStack(spacing: 18) {
+                                    compactDetail(label: AppStrings.Timeline.actorLabel(appState.locale), value: step.actor)
+                                    compactDetail(label: AppStrings.Timeline.subjectLabel(appState.locale), value: step.subjectID)
+                                }
+                                if !step.payloadSummary.isEmpty {
+                                    Text(step.payloadSummary)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                        }
+                        .padding(12)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+        }
+    }
+
+    private func actorDistributionPanel(presentation: TimelineDashboardPresentation) -> some View {
+        panel(title: appState.locale == .zhCN ? "执行者分布" : "Actor Distribution") {
+            if presentation.actorBuckets.isEmpty {
+                emptyState
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(presentation.actorBuckets) { bucket in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(bucket.actor)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .lineLimit(1)
+                                Spacer()
+                                Text("\(bucket.count)")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            GeometryReader { proxy in
+                                let width = max(8, proxy.size.width * CGFloat(bucket.count) / CGFloat(max(1, presentation.totalCount)))
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.accentColor.opacity(0.65))
+                                    .frame(width: width, height: 6)
+                            }
+                            .frame(height: 6)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
         }
     }
 

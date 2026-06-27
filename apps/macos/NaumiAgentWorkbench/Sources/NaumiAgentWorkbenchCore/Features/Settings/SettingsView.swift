@@ -21,6 +21,7 @@ public struct SettingsView: View {
                 pageHeader
                 summaryStrip(presentation: presentation)
                 contentGrid(presentation: presentation)
+                readinessGrid(presentation: presentation)
             }
             .padding(.horizontal, 22)
             .padding(.vertical, 18)
@@ -83,6 +84,44 @@ public struct SettingsView: View {
                 capabilitiesPanel
             }
             .frame(width: 330, alignment: .top)
+        }
+    }
+
+    private func readinessGrid(presentation: SettingsDashboardPresentation) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            checklistPanel(
+                title: appState.locale == .zhCN ? "运行时就绪检查" : "Runtime Readiness",
+                items: presentation.runtimeChecklist
+            )
+            checklistPanel(
+                title: appState.locale == .zhCN ? "治理护栏检查" : "Governance Guardrails",
+                items: presentation.governanceChecklist
+            )
+        }
+    }
+
+    private func checklistPanel(title: String, items: [SettingsChecklistItem]) -> some View {
+        panel(title: title) {
+            VStack(spacing: 10) {
+                ForEach(items) { item in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: item.systemImage)
+                            .foregroundStyle(color(for: item.state))
+                            .frame(width: 22)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title(locale: appState.locale))
+                                .font(.system(size: 14, weight: .semibold))
+                            Text(item.stateLabel(locale: appState.locale))
+                                .font(.caption)
+                                .foregroundStyle(color(for: item.state))
+                        }
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(color(for: item.state).opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
         }
     }
 
@@ -328,6 +367,17 @@ public struct SettingsView: View {
             return appState.locale == .zhCN ? "未连接" : "Disconnected"
         case .stale:
             return appState.locale == .zhCN ? "已过期" : "Stale"
+        }
+    }
+
+    private func color(for state: SettingsChecklistState) -> Color {
+        switch state {
+        case .passed:
+            return .green
+        case .warning:
+            return .orange
+        case .blocked:
+            return .red
         }
     }
 }

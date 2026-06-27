@@ -15,6 +15,9 @@ struct TimelineDashboardPresentationTests {
         #expect(presentation.typeBuckets.map(\.type) == ["task.updated", "mission.created"])
         #expect(presentation.typeBuckets.map(\.count) == [2, 1])
         #expect(presentation.latestEvent?.id == "3")
+        #expect(presentation.actorBuckets.map(\.actor) == ["Agent", "Human"])
+        #expect(presentation.actorBuckets.map(\.count) == [2, 1])
+        #expect(presentation.causalChain.map(\.eventID) == ["3", "2", "1"])
     }
 
     @Test func emptyTimelineUsesNilLatestEvent() {
@@ -23,6 +26,18 @@ struct TimelineDashboardPresentationTests {
         #expect(presentation.totalCount == 0)
         #expect(presentation.latestEvent == nil)
         #expect(presentation.typeBuckets.isEmpty)
+        #expect(presentation.actorBuckets.isEmpty)
+        #expect(presentation.causalChain.isEmpty)
+    }
+
+    @Test func causalChainKeepsOnlyMostRecentSixEvents() {
+        let events = (1...8).map { index in
+            makeEvent(id: "\(index)", type: "task.updated", actor: "Agent")
+        }
+
+        let presentation = TimelineDashboardPresentation(events: events)
+
+        #expect(presentation.causalChain.map(\.eventID) == ["8", "7", "6", "5", "4", "3"])
     }
 
     private func makeEvent(id: String, type: String, actor: String) -> EventDTO {

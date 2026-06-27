@@ -15,6 +15,10 @@ struct WorktreesDashboardPresentationTests {
         #expect(presentation.attentionCount == 2)
         #expect(presentation.activeAgentCount == 2)
         #expect(presentation.selectedSnapshot?.id == "3")
+        #expect(presentation.agentBuckets.map(\.agentID) == ["agent-b", "agent-a"])
+        #expect(presentation.agentBuckets.first?.snapshotCount == 2)
+        #expect(presentation.agentBuckets.first?.attentionCount == 2)
+        #expect(presentation.agentBuckets.first?.worstHealth == "conflicted")
     }
 
     @Test func emptySnapshotsUseNilSelection() {
@@ -22,6 +26,20 @@ struct WorktreesDashboardPresentationTests {
 
         #expect(presentation.totalCount == 0)
         #expect(presentation.selectedSnapshot == nil)
+        #expect(presentation.agentBuckets.isEmpty)
+        #expect(presentation.recommendedActions.isEmpty)
+    }
+
+    @Test func conflictedSnapshotProducesRemediationActions() {
+        let presentation = WorktreesDashboardPresentation(snapshots: [
+            makeSnapshot(id: "1", agentID: "agent-a", health: "conflicted"),
+        ])
+
+        #expect(presentation.recommendedActions.map(\.kind) == [
+            .pauseAgent,
+            .refreshContext,
+            .openReview,
+        ])
     }
 
     private func makeSnapshot(
