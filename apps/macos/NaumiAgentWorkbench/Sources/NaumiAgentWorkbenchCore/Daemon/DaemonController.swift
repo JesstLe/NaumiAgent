@@ -25,8 +25,13 @@ public final class DaemonController: Sendable {
     /// - On success, writes `daemonStatus` and `capabilities`, then sets `.connected`.
     /// - If a session is already selected, refreshes its snapshot; otherwise picks
     ///   the most recent session from `GET /sessions` and refreshes that snapshot.
+    /// - After a successful snapshot, pre-warms the lightweight first-screen list
+    ///   states (missions, issues, leases, failures, events, waiting approvals,
+    ///   validation runs, and context snapshots). Failures are isolated to
+    ///   `lastError` and do not affect the connection state.
     /// - Snapshot/session failures keep the daemon `.connected` and record the
-    ///   error in `lastError` while clearing stale snapshot data.
+    ///   error in `lastError` while clearing stale snapshot data. List pre-warming
+    ///   is skipped in this case to avoid a half-ready UI state.
     /// - On status/capabilities failure, writes the `APIError` to `lastError`
     ///   and sets `.disconnected`.
     public func refreshConnection() async {
@@ -42,9 +47,45 @@ public final class DaemonController: Sendable {
             appState.connectionState = .connected
 
             await refreshSnapshot()
+            await refreshWorkbenchListsAfterConnection()
         } catch {
             appState.lastError = error
             appState.connectionState = .disconnected
+        }
+    }
+
+    /// Pre-warms lightweight first-screen list states after a successful connection.
+    ///
+    /// Called after `refreshSnapshot()` when a session is selected and its snapshot
+    /// is available. Each refresh uses the existing `refreshX` method semantics:
+    /// successes write to `appState`, failures preserve existing local data, and
+    /// the first pre-warm failure remains visible in `lastError`. Connection state
+    /// is never mutated here.
+    private func refreshWorkbenchListsAfterConnection() async {
+        guard appState.selectedSessionID != nil, appState.snapshot != nil else {
+            return
+        }
+
+        var preWarmError: APIError?
+        await refreshMissions()
+        preWarmError = preWarmError ?? appState.lastError
+        await refreshIssues()
+        preWarmError = preWarmError ?? appState.lastError
+        await refreshLeases()
+        preWarmError = preWarmError ?? appState.lastError
+        await refreshFailures()
+        preWarmError = preWarmError ?? appState.lastError
+        await refreshEvents(limit: 50)
+        preWarmError = preWarmError ?? appState.lastError
+        await refreshApprovals(state: "waiting")
+        preWarmError = preWarmError ?? appState.lastError
+        await refreshValidationRuns()
+        preWarmError = preWarmError ?? appState.lastError
+        await refreshContextSnapshots()
+        preWarmError = preWarmError ?? appState.lastError
+
+        if let preWarmError {
+            appState.lastError = preWarmError
         }
     }
 

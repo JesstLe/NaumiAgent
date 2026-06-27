@@ -356,7 +356,7 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
-    @Test @MainActor func refreshConnectionRefreshesSnapshotForSelectedSession() async throws {
+    @Test @MainActor func refreshConnectionRefreshesSnapshotAndPreWarmsListsForSelectedSession() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-existing"
 
@@ -373,6 +373,7 @@ final class DaemonControllerTests {
         await api.setStatusResult(.success(makeStatus()))
         await api.setCapabilitiesResult(.success(makeCapabilities()))
         await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-existing")
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.refreshConnection()
@@ -381,9 +382,10 @@ final class DaemonControllerTests {
         #expect(appState.selectedSessionID == "sess-existing")
         #expect(appState.snapshot == snapshot)
         #expect(appState.lastError == nil)
+        expectWorkbenchListsPopulated(appState)
     }
 
-    @Test @MainActor func refreshConnectionAutoSelectsMostRecentSession() async throws {
+    @Test @MainActor func refreshConnectionAutoSelectsRecentSessionAndPreWarmsLists() async throws {
         let appState = AppState()
         #expect(appState.selectedSessionID == nil)
 
@@ -418,6 +420,7 @@ final class DaemonControllerTests {
         await api.setCapabilitiesResult(.success(makeCapabilities()))
         await api.setSessionsResult(.success(sessions))
         await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-latest")
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.refreshConnection()
@@ -426,6 +429,44 @@ final class DaemonControllerTests {
         #expect(appState.selectedSessionID == "sess-latest")
         #expect(appState.snapshot == snapshot)
         #expect(appState.lastError == nil)
+        expectWorkbenchListsPopulated(appState)
+    }
+
+    @Test @MainActor func refreshConnectionPreWarmFailureKeepsConnectedAndReportsFirstError() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-existing"
+
+        let api = FakeWorkbenchAPIProvider()
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-existing",
+            missions: [],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+
+        await api.setStatusResult(.success(makeStatus()))
+        await api.setCapabilitiesResult(.success(makeCapabilities()))
+        await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-existing")
+        await api.setMissionsResult(.failure(.httpStatus(502)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.selectedSessionID == "sess-existing")
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == .httpStatus(502))
+        #expect(appState.missions.isEmpty)
+        #expect(appState.issues.count == 1)
+        #expect(appState.leases.count == 1)
+        #expect(appState.failures.count == 1)
+        #expect(appState.timelineEvents.count == 1)
+        #expect(appState.approvals.count == 1)
+        #expect(appState.validationRuns.count == 1)
+        #expect(appState.contextSnapshots.count == 1)
     }
 
     @Test @MainActor func refreshConnectionKeepsConnectedWhenSessionsEmpty() async throws {
@@ -451,7 +492,7 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
-    @Test @MainActor func refreshConnectionKeepsConnectedAndClearsSnapshotOnSnapshotFailure() async throws {
+    @Test @MainActor func refreshConnectionSnapshotFailureSkipsPreWarmingAndKeepsSnapshotError() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-existing"
         appState.snapshot = WorkbenchSnapshotDTO(
@@ -467,6 +508,7 @@ final class DaemonControllerTests {
         await api.setStatusResult(.success(makeStatus()))
         await api.setCapabilitiesResult(.success(makeCapabilities()))
         await api.setSnapshotResult(.failure(.httpStatus(500)))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-existing")
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.refreshConnection()
@@ -475,6 +517,7 @@ final class DaemonControllerTests {
         #expect(appState.selectedSessionID == "sess-existing")
         #expect(appState.snapshot == nil)
         #expect(appState.lastError == .httpStatus(500))
+        expectWorkbenchListsEmpty(appState)
     }
 
     @Test @MainActor func claimIssueSuccessRefreshesSnapshotIssuesLeasesAndEvents() async throws {
@@ -1707,6 +1750,76 @@ extension FakeWorkbenchAPIProvider {
     fileprivate func setRunValidationResult(_ result: Result<ValidationResultDTO, APIError>) {
         runValidationResult = result
     }
+}
+
+private func configureWorkbenchListResults(for api: FakeWorkbenchAPIProvider, sessionID: String) async {
+    let mission = makeMission(id: "mission-\(sessionID)", sessionID: sessionID)
+    let issue = makeIssue(taskID: "task-\(sessionID)")
+    let lease = makeLease(id: "lease-\(sessionID)", taskID: "task-\(sessionID)", state: "active")
+    let failure = makeFailure(id: "failure-\(sessionID)", taskID: "task-\(sessionID)", status: "open")
+    let event = makeEvent(id: "evt-\(sessionID)", type: "test.event", subjectID: "subject-\(sessionID)")
+    let approval = makeApproval(id: "approval-\(sessionID)", missionID: "mission-\(sessionID)", state: "waiting")
+    let run = ValidationRunDTO(
+        id: "run-\(sessionID)",
+        sessionID: sessionID,
+        taskID: "task-\(sessionID)",
+        actor: "ValidationRunner",
+        command: ["pytest"],
+        cwd: "/workspace",
+        status: "passed",
+        exitCode: 0,
+        output: "ok",
+        startedAt: "2026-06-27T06:00:00",
+        completedAt: "2026-06-27T06:00:01"
+    )
+    let contextSnapshot = ContextSnapshotDTO(
+        id: "ctx-\(sessionID)",
+        sessionID: sessionID,
+        agentID: "agent-\(sessionID)",
+        taskID: "task-\(sessionID)",
+        health: "good",
+        reasons: ["上下文健康"],
+        createdAt: "2026-06-27T06:00:00"
+    )
+
+    await api.setMissionsResult(.success(MissionsDTO(missions: [mission], status: nil, limit: 50)))
+    await api.setIssuesResult(.success(IssuesDTO(issues: [issue], missionID: nil, riskLevel: nil, limit: 50)))
+    await api.setLeasesResult(.success(LeasesDTO(leases: [lease], state: nil, taskID: nil, agentID: nil, limit: 50)))
+    await api.setFailuresResult(.success(FailuresDTO(failures: [failure], taskID: nil, status: nil, limit: 50)))
+    await api.setEventsResult(.success(WorkbenchEventsDTO(events: [event], limit: 50)))
+    await api.setApprovalsResult(.success(ApprovalsDTO(approvals: [approval], state: "waiting", limit: 50)))
+    await api.setValidationRunsResult(.success(ValidationRunsDTO(validationRuns: [run], taskID: nil, limit: 50)))
+    await api.setContextSnapshotsResult(.success(ContextSnapshotsDTO(contextSnapshots: [contextSnapshot], taskID: nil, agentID: nil, limit: 50)))
+}
+
+@MainActor
+private func expectWorkbenchListsPopulated(
+    _ appState: AppState,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    #expect(appState.missions.count == 1, sourceLocation: sourceLocation)
+    #expect(appState.issues.count == 1, sourceLocation: sourceLocation)
+    #expect(appState.leases.count == 1, sourceLocation: sourceLocation)
+    #expect(appState.failures.count == 1, sourceLocation: sourceLocation)
+    #expect(appState.timelineEvents.count == 1, sourceLocation: sourceLocation)
+    #expect(appState.approvals.count == 1, sourceLocation: sourceLocation)
+    #expect(appState.validationRuns.count == 1, sourceLocation: sourceLocation)
+    #expect(appState.contextSnapshots.count == 1, sourceLocation: sourceLocation)
+}
+
+@MainActor
+private func expectWorkbenchListsEmpty(
+    _ appState: AppState,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    #expect(appState.missions.isEmpty, sourceLocation: sourceLocation)
+    #expect(appState.issues.isEmpty, sourceLocation: sourceLocation)
+    #expect(appState.leases.isEmpty, sourceLocation: sourceLocation)
+    #expect(appState.failures.isEmpty, sourceLocation: sourceLocation)
+    #expect(appState.timelineEvents.isEmpty, sourceLocation: sourceLocation)
+    #expect(appState.approvals.isEmpty, sourceLocation: sourceLocation)
+    #expect(appState.validationRuns.isEmpty, sourceLocation: sourceLocation)
+    #expect(appState.contextSnapshots.isEmpty, sourceLocation: sourceLocation)
 }
 
 private func makeStatus() -> DaemonStatusDTO {
