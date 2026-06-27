@@ -988,6 +988,25 @@ async def get_agent_profiles(
     )
 
 
+@router.get("/workbench/sessions/{session_id}/agents/{agent_id}")
+async def get_agent_profile(
+    session_id: str,
+    agent_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    profile = await engine.workbench_service.get_agent_profile(session_id, agent_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="智能体不存在")
+    return profile
+
+
 @router.post("/workbench/sessions/{session_id}/agents/{agent_id}", status_code=201)
 async def upsert_agent_profile(
     session_id: str,

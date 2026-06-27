@@ -96,6 +96,7 @@ class _FakeWorkbenchService:
         self.requested_context_snapshots: list[dict] = []
         self.listed_approvals: list[dict] = []
         self.listed_agent_profiles: list[dict] = []
+        self.requested_agent_profiles: list[dict] = []
         self.listed_failures: list[dict] = []
         self.requested_failures: list[dict] = []
         self.listed_issues: list[dict] = []
@@ -300,6 +301,25 @@ class _FakeWorkbenchService:
             ],
             "status": status,
             "limit": limit,
+        }
+
+    async def get_agent_profile(self, session_id: str, agent_id: str):
+        self.requested_agent_profiles.append(
+            {"session_id": session_id, "agent_id": agent_id}
+        )
+        if agent_id == "missing-agent":
+            return None
+        return {
+            "id": agent_id,
+            "session_id": session_id,
+            "name": "Backend Agent",
+            "role": "coder",
+            "capabilities": ["code", "test"],
+            "permissions": ["read", "write"],
+            "max_parallel_tasks": 2,
+            "status": "busy",
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
         }
 
     async def create_intent_lock(
@@ -2788,6 +2808,50 @@ def test_upsert_agent_profile_route_accepts_json_body() -> None:
         }
     ]
     assert response.json()["status"] == "busy"
+
+
+def test_get_agent_profile_route_returns_single_profile() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/agents/agent-2")
+
+    assert response.status_code == 200
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_agent_profiles == [
+        {"session_id": "sess-1", "agent_id": "agent-2"}
+    ]
+    assert response.json() == {
+        "id": "agent-2",
+        "session_id": "sess-1",
+        "name": "Backend Agent",
+        "role": "coder",
+        "capabilities": ["code", "test"],
+        "permissions": ["read", "write"],
+        "max_parallel_tasks": 2,
+        "status": "busy",
+        "created_at": "2024-01-01T00:00:00",
+        "updated_at": "2024-01-01T00:00:00",
+    }
+
+
+def test_get_agent_profile_route_returns_404_for_missing_profile() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/agents/missing-agent")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "智能体不存在"}
+    assert engine.workbench_service.requested_agent_profiles == [
+        {"session_id": "sess-1", "agent_id": "missing-agent"}
+    ]
 
 
 def test_create_issue_route_accepts_json_body_without_existing_task_id() -> None:

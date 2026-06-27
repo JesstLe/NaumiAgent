@@ -137,6 +137,18 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
             )
             assert agent_response.status_code == 201
 
+            agent_detail_response = client.get(
+                f"/api/v1/workbench/sessions/{session_id}/agents/Backend-Agent"
+            )
+            assert agent_detail_response.status_code == 200
+            agent_detail = agent_detail_response.json()
+            assert agent_detail["id"] == "Backend-Agent"
+            assert agent_detail["name"] == "Backend Agent"
+            assert agent_detail["role"] == "api"
+            assert agent_detail["capabilities"] == ["python", "fastapi"]
+            assert agent_detail["permissions"] == ["read", "test"]
+            assert agent_detail["status"] == "busy"
+
             claim_response = client.post(
                 f"/api/v1/workbench/sessions/{session_id}/issues/{task_id}/claim",
                 json={

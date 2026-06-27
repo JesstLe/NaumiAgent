@@ -381,6 +381,14 @@ class WorkbenchService:
             "limit": limit,
         }
 
+    async def get_agent_profile(
+        self, session_id: str, agent_id: str
+    ) -> dict[str, Any] | None:
+        profile = await self._workbench_store.get_agent_profile(session_id, agent_id)
+        if profile is None:
+            return None
+        return self._agent_profile_to_dict(profile)
+
     @staticmethod
     def _agent_profile_to_dict(profile: AgentProfile) -> dict[str, Any]:
         return asdict(profile)

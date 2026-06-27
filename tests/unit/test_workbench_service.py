@@ -253,6 +253,58 @@ async def test_register_agent_profile_records_event_and_snapshot_card(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_get_agent_profile_returns_single_profile(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    profile = await workbench_store.upsert_agent_profile(
+        session_id="s",
+        agent_id="agent-a",
+        name="Backend Agent",
+        role="coder",
+        capabilities=["code", "test"],
+        permissions=["read", "write"],
+        max_parallel_tasks=2,
+        status="busy",
+    )
+
+    result = await service.get_agent_profile("s", profile.id)
+
+    assert result == {
+        "id": "agent-a",
+        "session_id": "s",
+        "name": "Backend Agent",
+        "role": "coder",
+        "capabilities": ["code", "test"],
+        "permissions": ["read", "write"],
+        "max_parallel_tasks": 2,
+        "status": "busy",
+        "created_at": profile.created_at,
+        "updated_at": profile.updated_at,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_agent_profile_returns_none_for_missing_or_other_session(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    await workbench_store.upsert_agent_profile(
+        session_id="s",
+        agent_id="agent-a",
+        name="Backend Agent",
+        role="coder",
+    )
+
+    assert await service.get_agent_profile("s", "missing-agent") is None
+    assert await service.get_agent_profile("other", "agent-a") is None
+
+
+@pytest.mark.asyncio
 async def test_dashboard_snapshot_includes_only_active_leases(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")
