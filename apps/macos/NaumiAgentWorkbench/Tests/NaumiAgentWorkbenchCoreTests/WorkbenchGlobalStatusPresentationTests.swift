@@ -98,7 +98,9 @@ struct WorkbenchGlobalStatusPresentationTests {
             activeForm: "plan",
             owner: nil,
             blocks: [],
-            blockedBy: []
+            blockedBy: [],
+            createdAt: "2026-06-27T09:00:00",
+            updatedAt: "2026-06-27T09:00:00"
         )
     }
 
@@ -161,9 +163,9 @@ struct WorkbenchGlobalStatusPresentationTests {
             kind: "test_failed",
             title: id,
             detail: id,
+            sourceID: "run-1",
             status: status,
-            createdAt: "2026-06-27T09:00:00",
-            updatedAt: "2026-06-27T09:00:00"
+            createdAt: "2026-06-27T09:00:00"
         )
     }
 }

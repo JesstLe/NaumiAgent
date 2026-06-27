@@ -18,14 +18,18 @@ public struct WorkbenchShellView: View {
                 daemonController: environment.daemonController,
                 isPresentingMissionComposer: $isPresentingMissionComposer
             )
+            .frame(height: WorkbenchShellPresentation().topNavigationHeight)
 
             Divider()
 
             GlobalStatusStrip(appState: environment.appState)
+                .frame(height: WorkbenchShellPresentation().globalStatusHeight)
 
             Divider()
 
             routeView(for: appState.currentRoute)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .clipped()
         }
         .frame(minWidth: 1180, minHeight: 720)
         .sheet(isPresented: $isPresentingMissionComposer) {
@@ -97,8 +101,7 @@ private struct GlobalStatusStrip: View {
         .padding(.leading, 14)
         .padding(.trailing, 14)
         .padding(.vertical, 7)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 36)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(Color(nsColor: .controlBackgroundColor))
         .layoutPriority(3)
     }
@@ -219,7 +222,7 @@ private struct TopNavigationBar: View {
         .padding(.leading, shellPresentation.leadingContentInset)
         .padding(.trailing, 14)
         .padding(.vertical, 7)
-        .frame(minHeight: 42)
+        .frame(maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 

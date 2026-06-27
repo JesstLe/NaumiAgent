@@ -9,6 +9,8 @@ struct WorkbenchShellPresentationTests {
         #expect(presentation.showsSyntheticWindowControls == false)
         #expect(presentation.placesNavigationBelowTitleBar == true)
         #expect(presentation.leadingContentInset == 14)
+        #expect(presentation.topNavigationHeight == 42)
+        #expect(presentation.globalStatusHeight == 40)
         #expect(presentation.navigationRoutes == AppRoute.topNavigationRoutes)
     }
 }
