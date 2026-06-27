@@ -18,6 +18,7 @@ public struct TaskMarketView: View {
     @State private var isPresentingIssueAttachment = false
     @State private var attachmentDraft = IssueAttachmentDraft()
     @State private var isAttachingIssue = false
+    @State private var releasingLeaseID: String?
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -45,7 +46,7 @@ public struct TaskMarketView: View {
                     marketTable(presentation: presentation)
                     Divider()
                     activeLeasesStrip(presentation.activeLeases)
-                        .frame(height: 124)
+                        .frame(height: 150)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -616,9 +617,9 @@ public struct TaskMarketView: View {
     private func activeLeasesStrip(_ leases: [TaskMarketDesignLease]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(appState.locale == .zhCN ? "活跃租约 (4)" : "Active Leases (4)")
+                Text(AppStrings.TaskMarket.activeLeasesTitle(appState.locale, count: leases.count))
                     .font(.headline)
-                Button(appState.locale == .zhCN ? "查看全部租约" : "View All Leases") {}
+                Button(AppStrings.TaskMarket.viewAllLeasesButton(appState.locale)) {}
                     .buttonStyle(.bordered)
                 Spacer()
                 Image(systemName: "xmark")
@@ -658,11 +659,19 @@ public struct TaskMarketView: View {
                 Circle()
                     .fill(color(forTone: lease.tone))
                     .frame(width: 6, height: 6)
-                Text(lease.status)
+                Text(leaseStatusTitle(for: lease))
                     .font(.caption2)
                 Spacer()
-                Button(lease.tone == "red" ? "Reclaim" : "Open Worktree") {}
+                Button {
+                    if lease.tone == "red" {
+                        return
+                    }
+                    releaseLease(lease)
+                } label: {
+                    Text(leaseActionTitle(for: lease))
+                }
                     .font(.caption2)
+                    .disabled(releasingLeaseID != nil || lease.tone == "red")
             }
         }
         .padding(9)
@@ -673,6 +682,41 @@ public struct TaskMarketView: View {
                 .stroke(color(forTone: lease.tone).opacity(0.55), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func leaseActionTitle(for lease: TaskMarketDesignLease) -> String {
+        if releasingLeaseID == lease.leaseID {
+            return AppStrings.TaskMarket.releasingLeaseLabel(appState.locale)
+        }
+        if lease.tone == "red" {
+            return AppStrings.TaskMarket.reclaimLeaseButton(appState.locale)
+        }
+        if lease.tone == "orange" || lease.status.lowercased() == "active" {
+            return AppStrings.TaskMarket.releaseButton(appState.locale)
+        }
+        return AppStrings.TaskMarket.openWorktreeButton(appState.locale)
+    }
+
+    private func leaseStatusTitle(for lease: TaskMarketDesignLease) -> String {
+        switch lease.status.lowercased() {
+        case "active":
+            return appState.locale == .zhCN ? "活跃" : "Active"
+        case "expiring soon":
+            return appState.locale == .zhCN ? "即将过期" : "Expiring Soon"
+        case "expired":
+            return appState.locale == .zhCN ? "已过期" : "Expired"
+        default:
+            return lease.status
+        }
+    }
+
+    private func releaseLease(_ lease: TaskMarketDesignLease) {
+        guard releasingLeaseID == nil, lease.tone != "red" else { return }
+        releasingLeaseID = lease.leaseID
+        Task {
+            await daemonController.releaseLease(leaseID: lease.leaseID)
+            releasingLeaseID = nil
+        }
     }
 
     private var footer: some View {

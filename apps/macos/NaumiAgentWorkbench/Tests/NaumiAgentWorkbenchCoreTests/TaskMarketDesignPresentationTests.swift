@@ -15,6 +15,10 @@ struct TaskMarketDesignPresentationTests {
         #expect(presentation.filters.riskLevels.map(\.label) == ["Critical", "High", "Medium", "Low"])
         #expect(presentation.rows[0].title == "实现 API Client")
         #expect(presentation.rows[1].status == "Blocked")
+        #expect(presentation.activeLeases[0].leaseID == "lzh-001")
+        #expect(presentation.activeLeases[0].title == "实现 API Client")
+        #expect(presentation.activeLeases[0].worktree == "wt-api-client")
+        #expect(presentation.activeLeases[0].owner == "agent-a")
     }
 
     @Test func exposesClaimActionStateAndLocalizedDisabledReasons() {

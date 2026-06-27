@@ -43,7 +43,14 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
         }
         filters = TaskMarketDesignFilters.reference
         bids = Self.fixtureBids
-        activeLeases = Self.fixtureLeases
+        let liveLeases = Self.liveLeases(from: snapshot)
+        var filledLeases = liveLeases
+        for fixture in Self.fixtureLeases where filledLeases.count < 4 {
+            if !filledLeases.contains(where: { $0.leaseID == fixture.leaseID || $0.worktree == fixture.worktree }) {
+                filledLeases.append(fixture)
+            }
+        }
+        activeLeases = Array(filledLeases.prefix(4))
     }
 
     private static func normalizedRisk(_ risk: String) -> String {
@@ -85,6 +92,27 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
             return "backend"
         }
         return "core"
+    }
+
+    private static func liveLeases(from snapshot: WorkbenchSnapshotDTO?) -> [TaskMarketDesignLease] {
+        guard let snapshot else { return [] }
+        let tasksByID = Dictionary(uniqueKeysWithValues: snapshot.tasks.map { ($0.id, $0) })
+        return snapshot.leases
+            .filter { $0.state.lowercased() == "active" }
+            .enumerated()
+            .map { index, lease in
+                let task = tasksByID[lease.taskID]
+                return TaskMarketDesignLease(
+                    leaseID: lease.id,
+                    number: index + 1,
+                    title: task?.subject ?? lease.taskID,
+                    worktree: lease.worktreeName.isEmpty ? "-" : lease.worktreeName,
+                    owner: lease.agentID,
+                    status: "Active",
+                    time: lease.expiresAt,
+                    tone: "green"
+                )
+            }
     }
 
     private static let fixtureRows: [TaskMarketDesignIssue] = [
@@ -209,10 +237,10 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
     ]
 
     private static let fixtureLeases: [TaskMarketDesignLease] = [
-        TaskMarketDesignLease(number: 3, title: "Validation Failure Cards", worktree: "issue-3-failure-cards", owner: "Test-Agent", status: "Active", time: "42m remaining", tone: "green"),
-        TaskMarketDesignLease(number: 6, title: "Context Health Indicators", worktree: "issue-6-context-health", owner: "Backend-Agent", status: "Active", time: "15m remaining", tone: "green"),
-        TaskMarketDesignLease(number: 9, title: "Agent Memory Store", worktree: "issue-9-memory-store", owner: "Backend-Agent", status: "Expiring Soon", time: "3m remaining", tone: "orange"),
-        TaskMarketDesignLease(number: 10, title: "Audit Export", worktree: "issue-10-audit-export", owner: "Reviewer-Agent", status: "Expired", time: "-2m overdue", tone: "red")
+        TaskMarketDesignLease(leaseID: "fixture-lease-3", number: 3, title: "Validation Failure Cards", worktree: "issue-3-failure-cards", owner: "Test-Agent", status: "Active", time: "42m remaining", tone: "green"),
+        TaskMarketDesignLease(leaseID: "fixture-lease-6", number: 6, title: "Context Health Indicators", worktree: "issue-6-context-health", owner: "Backend-Agent", status: "Active", time: "15m remaining", tone: "green"),
+        TaskMarketDesignLease(leaseID: "fixture-lease-9", number: 9, title: "Agent Memory Store", worktree: "issue-9-memory-store", owner: "Backend-Agent", status: "Expiring Soon", time: "3m remaining", tone: "orange"),
+        TaskMarketDesignLease(leaseID: "fixture-lease-10", number: 10, title: "Audit Export", worktree: "issue-10-audit-export", owner: "Reviewer-Agent", status: "Expired", time: "-2m overdue", tone: "red")
     ]
 }
 
@@ -337,7 +365,8 @@ public struct TaskMarketDesignBid: Equatable, Sendable, Identifiable {
 }
 
 public struct TaskMarketDesignLease: Equatable, Sendable, Identifiable {
-    public var id: String { worktree }
+    public var id: String { leaseID }
+    public let leaseID: String
     public let number: Int
     public let title: String
     public let worktree: String
