@@ -12,6 +12,9 @@ public struct TaskMarketView: View {
     @State private var claimDurationMinutes = 45
     @State private var claimWorktreeName = ""
     @State private var isClaimingIssue = false
+    @State private var isPresentingIssueComposer = false
+    @State private var issueDraft = IssueCreationDraft()
+    @State private var isCreatingIssue = false
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -63,6 +66,25 @@ public struct TaskMarketView: View {
             if claimWorktreeName.isEmpty, let selected {
                 claimWorktreeName = selected.defaultClaimWorktreeName
             }
+            if issueDraft.trimmedMissionID.isEmpty {
+                issueDraft.missionID = currentMissionID
+            }
+        }
+        .onChange(of: currentMissionID) { _, missionID in
+            if issueDraft.trimmedMissionID.isEmpty {
+                issueDraft.missionID = missionID
+            }
+        }
+        .sheet(isPresented: $isPresentingIssueComposer) {
+            IssueCreationSheet(
+                appState: appState,
+                daemonController: daemonController,
+                draft: $issueDraft,
+                isCreatingIssue: $isCreatingIssue,
+                onCreated: {
+                    issueDraft = issueDraftForCurrentMission()
+                }
+            )
         }
     }
 
@@ -75,6 +97,18 @@ public struct TaskMarketView: View {
                 .foregroundStyle(.secondary)
 
             Spacer()
+
+            Button {
+                issueDraft = issueDraftForCurrentMission()
+                isPresentingIssueComposer = true
+            } label: {
+                Label(
+                    AppStrings.TaskMarket.createIssueButton(appState.locale),
+                    systemImage: "plus.circle"
+                )
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(currentMissionID.isEmpty)
 
             Button {
                 autoRefresh.toggle()
@@ -638,6 +672,16 @@ public struct TaskMarketView: View {
             ?? (appState.locale == .zhCN ? "Mac Agent Workbench MVP" : "Mac Agent Workbench MVP")
     }
 
+    private var currentMissionID: String {
+        appState.snapshot?.missions.first?.id
+            ?? appState.missions.first?.id
+            ?? ""
+    }
+
+    private func issueDraftForCurrentMission() -> IssueCreationDraft {
+        IssueCreationDraft(missionID: currentMissionID)
+    }
+
     private func modeBadge(_ mode: String) -> some View {
         HStack(spacing: 4) {
             Text(String(mode.prefix(1)).uppercased())
@@ -722,6 +766,136 @@ public struct TaskMarketView: View {
             return .purple
         default:
             return .secondary
+        }
+    }
+}
+
+private struct IssueCreationSheet: View {
+    let appState: AppState
+    let daemonController: DaemonController
+    @Binding var draft: IssueCreationDraft
+    @Binding var isCreatingIssue: Bool
+    let onCreated: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(AppStrings.TaskMarket.createIssueSectionTitle(appState.locale))
+                .font(.headline)
+
+            Form {
+                TextField("Mission ID", text: $draft.missionID)
+
+                TextField(
+                    AppStrings.TaskMarket.issueTitleLabel(appState.locale),
+                    text: $draft.title
+                )
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(AppStrings.TaskMarket.issueDescriptionLabel(appState.locale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: $draft.description)
+                        .frame(minHeight: 74)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5)
+                                .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                        )
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(AppStrings.TaskMarket.blockedByLabel(appState.locale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: $draft.blockedByText)
+                        .frame(minHeight: 46)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5)
+                                .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                        )
+                    Text(AppStrings.TaskMarket.blockedByHelp(appState.locale))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(AppStrings.TaskMarket.acceptanceCriteriaTitle(appState.locale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: $draft.acceptanceCriteriaText)
+                        .frame(minHeight: 58)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5)
+                                .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                        )
+                    Text(AppStrings.TaskMarket.acceptanceCriteriaHelp(appState.locale))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Picker(AppStrings.TaskMarket.columnParallelMode(appState.locale), selection: $draft.parallelMode) {
+                    Text("exclusive").tag("exclusive")
+                    Text("cooperative").tag("cooperative")
+                    Text("competitive").tag("competitive")
+                    Text("exploratory").tag("exploratory")
+                }
+
+                Picker(AppStrings.TaskMarket.columnRisk(appState.locale), selection: $draft.riskLevel) {
+                    Text("low").tag("low")
+                    Text("medium").tag("medium")
+                    Text("high").tag("high")
+                    Text("critical").tag("critical")
+                }
+            }
+            .frame(minWidth: 420)
+
+            HStack {
+                Spacer()
+
+                Button(AppStrings.MissionComposer.cancelButton(appState.locale)) {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button {
+                    createIssue()
+                } label: {
+                    Label(
+                        isCreatingIssue
+                            ? AppStrings.TaskMarket.processingLabel(appState.locale)
+                            : AppStrings.TaskMarket.createIssueSubmitButton(appState.locale),
+                        systemImage: "plus.circle"
+                    )
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(!draft.canSubmit || isCreatingIssue)
+            }
+        }
+        .padding()
+        .frame(minWidth: 460, minHeight: 520)
+    }
+
+    private func createIssue() {
+        guard draft.canSubmit, !isCreatingIssue else { return }
+        let submission = draft
+        isCreatingIssue = true
+        Task {
+            await daemonController.createIssue(
+                missionID: submission.trimmedMissionID,
+                title: submission.trimmedTitle,
+                description: submission.trimmedDescription,
+                blockedBy: submission.blockedBy,
+                acceptanceCriteria: submission.acceptanceCriteria,
+                parallelMode: submission.parallelMode,
+                riskLevel: submission.riskLevel
+            )
+            isCreatingIssue = false
+            if appState.lastError == nil {
+                onCreated()
+                dismiss()
+            }
         }
     }
 }

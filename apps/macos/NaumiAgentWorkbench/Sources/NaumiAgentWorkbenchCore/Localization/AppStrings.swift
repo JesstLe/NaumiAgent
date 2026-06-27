@@ -460,6 +460,38 @@ public enum AppStrings {
             locale == .zhCN ? "释放租约" : "Release Lease"
         }
 
+        public static func createIssueButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "新建 Issue" : "New Issue"
+        }
+
+        public static func createIssueSectionTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "新建 Issue" : "New Issue"
+        }
+
+        public static func issueTitleLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "标题" : "Title"
+        }
+
+        public static func issueDescriptionLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "描述" : "Description"
+        }
+
+        public static func blockedByLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "阻塞依赖" : "Blocked By"
+        }
+
+        public static func blockedByHelp(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "每行一个任务 ID" : "One task ID per line"
+        }
+
+        public static func acceptanceCriteriaHelp(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "每行一条验收标准" : "One acceptance criterion per line"
+        }
+
+        public static func createIssueSubmitButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "创建 Issue" : "Create Issue"
+        }
+
         public static func processingLabel(_ locale: AppLocale) -> String {
             locale == .zhCN ? "处理中…" : "Processing…"
         }
