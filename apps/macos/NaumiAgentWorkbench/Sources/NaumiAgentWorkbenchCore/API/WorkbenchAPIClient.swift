@@ -36,6 +36,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         try await get(path: "workbench/capabilities")
     }
 
+    public func fetchBootstrap(pageSize: Int = 1) async throws(APIError) -> WorkbenchBootstrapDTO {
+        try await get(
+            path: "workbench/bootstrap",
+            queryItems: [URLQueryItem(name: "page_size", value: String(pageSize))]
+        )
+    }
+
     public func fetchSnapshot(sessionID: String) async throws(APIError) -> WorkbenchSnapshotDTO {
         try await get(path: encodePath("workbench", "sessions", sessionID, "snapshot"))
     }
