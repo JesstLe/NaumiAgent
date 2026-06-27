@@ -5,6 +5,7 @@ public struct WorktreesView: View {
     @Bindable public var appState: AppState
     public let daemonController: DaemonController
     @State private var selectedSnapshotID: String?
+    private let layout = WorkbenchPageLayout.worktrees
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -22,7 +23,7 @@ public struct WorktreesView: View {
 
             HStack(spacing: 0) {
                 snapshotRail(presentation: presentation)
-                    .frame(width: 304)
+                    .frame(width: layout.railWidth)
                     .frame(maxHeight: .infinity)
                     .clipped()
 
@@ -52,7 +53,7 @@ public struct WorktreesView: View {
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                .frame(width: 334)
+                .frame(width: layout.inspectorWidth)
             }
         }
         .frame(minWidth: 1120, minHeight: 700)
@@ -170,9 +171,9 @@ public struct WorktreesView: View {
     private func operationsGrid(presentation: WorktreesDashboardPresentation) -> some View {
         HStack(alignment: .top, spacing: 14) {
             agentWorkloadPanel(presentation: presentation)
-                .frame(minWidth: 420, maxWidth: .infinity, alignment: .top)
+                .frame(minWidth: layout.primaryColumnWidth, maxWidth: .infinity, alignment: .top)
             remediationPanel(presentation: presentation)
-                .frame(width: 420, alignment: .top)
+                .frame(width: layout.secondaryColumnWidth, alignment: .top)
         }
     }
 

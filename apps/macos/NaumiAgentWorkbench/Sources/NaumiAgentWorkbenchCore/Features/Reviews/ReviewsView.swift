@@ -54,35 +54,31 @@ public struct ReviewsView: View {
     }
 
     private func pageHeader(selected: ReviewDesignItem) -> some View {
-        HStack(spacing: 12) {
-            Text(appState.locale == .zhCN
-                ? "审查：\(selected.title) (#\(selected.number))"
-                : "Review: \(selected.title) (#\(selected.number))"
-            )
-                .font(.system(size: 17, weight: .semibold))
-            Text(appState.locale == .zhCN ? "高风险：需要人工审批" : "High Risk: Human Approval Required")
-                .font(.caption)
-                .fontWeight(.medium)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.red.opacity(0.10))
-                .foregroundStyle(.red)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-            Spacer()
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(.green)
-                    .frame(width: 7, height: 7)
-                Text(appState.locale == .zhCN ? "工作区：~/naumi" : "Workspace: ~/naumi")
+        ZStack {
+            Color(nsColor: .windowBackgroundColor)
+
+            HStack(spacing: 12) {
+                Text(appState.locale == .zhCN
+                    ? "审查：\(selected.title) (#\(selected.number))"
+                    : "Review: \(selected.title) (#\(selected.number))"
+                )
+                    .font(.system(size: 17, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(appState.locale == .zhCN ? "高风险：需要人工审批" : "High Risk: Human Approval Required")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.red.opacity(0.10))
+                    .foregroundStyle(.red)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                Spacer()
             }
-            Image(systemName: "person.crop.circle")
-                .font(.title3)
-                .foregroundStyle(.secondary)
+            .padding(.horizontal, 18)
+            .offset(y: 28)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 11)
+        .frame(height: 48)
     }
 
     private func reviewQueueRail(_ presentation: ReviewsDesignPresentation) -> some View {
