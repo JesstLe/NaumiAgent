@@ -68,8 +68,14 @@ class TaskMarket:
         )
         return lease
 
-    async def release(self, lease_id: str) -> Lease | None:
-        lease = await self._workbench_store.update_lease_state(lease_id, LeaseState.RELEASED)
+    async def release(self, session_id: str, lease_id: str) -> Lease | None:
+        if not self._task_store.session_id or session_id != self._task_store.session_id:
+            return None
+        lease = await self._workbench_store.update_lease_state(
+            lease_id,
+            LeaseState.RELEASED,
+            session_id=session_id,
+        )
         if lease is None:
             return None
         await self._reset_task_to_pending(lease.task_id)

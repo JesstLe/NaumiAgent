@@ -724,8 +724,8 @@ class FakeTaskMarket:
             raise RuntimeError("FakeTaskMarket: lease not configured")
         return self._lease
 
-    async def release(self, lease_id: str) -> Lease | None:
-        self.released.append(lease_id)
+    async def release(self, session_id: str, lease_id: str) -> Lease | None:
+        self.released.append({"session_id": session_id, "lease_id": lease_id})
         return self._lease
 
     async def expire_overdue_leases(self, *, now=None) -> list[Lease]:
@@ -1568,7 +1568,9 @@ async def test_release_lease_endpoint_returns_404_when_missing() -> None:
         await release_workbench_lease("sess-1", "lease-missing", _fake_request(engine), auth="test")
 
     assert engine.loaded == ["sess-1"]
-    assert market.released == ["lease-missing"]
+    assert market.released == [
+        {"session_id": "sess-1", "lease_id": "lease-missing"}
+    ]
     assert exc.value.status_code == 404
     assert exc.value.detail == "租约不存在"
 
@@ -1592,7 +1594,7 @@ async def test_release_lease_endpoint_returns_released_lease() -> None:
         "sess-1", "lease-2", request, auth="test"
     )
 
-    assert market.released == ["lease-2"]
+    assert market.released == [{"session_id": "sess-1", "lease_id": "lease-2"}]
     assert response["id"] == "lease-2"
     assert response["state"] == LeaseState.RELEASED
 
