@@ -495,7 +495,10 @@ public enum AppStrings {
         }
 
         public static func networkFailure(_ locale: AppLocale) -> String {
-            locale == .zhCN ? "网络请求失败" : "Network request failed"
+            if locale == .zhCN {
+                return "无法连接本地 NaumiAgent 服务，请先启动：\nnaumi-agent api --host 127.0.0.1 --port 8765"
+            }
+            return "Cannot reach the local NaumiAgent service. Start it with:\nnaumi-agent api --host 127.0.0.1 --port 8765"
         }
     }
 }
