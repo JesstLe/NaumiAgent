@@ -350,6 +350,110 @@ async def test_list_context_snapshots_returns_store_snapshots_and_respects_limit
 
 
 @pytest.mark.asyncio
+async def test_record_context_health_evaluates_persists_and_records_event(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    mission = await service.create_mission(
+        session_id="s",
+        title="Mac 工作台",
+        goal="可视化治理多 Agent 研发",
+    )
+    task = await task_store.create_task("同步上下文")
+    await service.attach_issue(
+        session_id="s",
+        mission_id=mission.id,
+        task_id=task.id,
+        acceptance_criteria=["必须记录健康度"],
+    )
+
+    snapshot = await service.record_context_health(
+        session_id="s",
+        task_id=task.id,
+        agent_id=" Agent-A ",
+        minutes_since_sync=75,
+        token_load_ratio=0.2,
+        actor="Human",
+    )
+
+    assert snapshot["agent_id"] == "Agent-A"
+    assert snapshot["task_id"] == task.id
+    assert snapshot["health"] == "stale"
+    assert snapshot["reasons"] == ["超过 60 分钟未同步上下文"]
+
+    stored = await service.list_context_snapshots(
+        "s", task_id=task.id, agent_id="Agent-A"
+    )
+    assert [item["id"] for item in stored] == [snapshot["id"]]
+
+    events = await service.list_events("s", event_type="context_health.recorded")
+    event = events["events"][0]
+    assert event["actor"] == "Human"
+    assert event["subject_id"] == task.id
+    assert event["payload"] == {
+        "agent_id": "Agent-A",
+        "health": "stale",
+        "reasons": ["超过 60 分钟未同步上下文"],
+        "mission_id": mission.id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_record_context_health_reports_missing_inputs(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    with pytest.raises(ValueError, match="issue 不存在"):
+        await service.record_context_health(
+            session_id="s",
+            task_id="missing",
+            agent_id="Agent-A",
+            minutes_since_sync=0,
+            token_load_ratio=0.1,
+        )
+
+    mission = await service.create_mission(session_id="s", title="M", goal="G")
+    task = await task_store.create_task("同步上下文")
+    await service.attach_issue(
+        session_id="s",
+        mission_id=mission.id,
+        task_id=task.id,
+        acceptance_criteria=[],
+    )
+
+    with pytest.raises(ValueError, match="agent_id 不能为空"):
+        await service.record_context_health(
+            session_id="s",
+            task_id=task.id,
+            agent_id=" ",
+            minutes_since_sync=0,
+            token_load_ratio=0.1,
+        )
+
+    with pytest.raises(ValueError, match="minutes_since_sync 不能为负数"):
+        await service.record_context_health(
+            session_id="s",
+            task_id=task.id,
+            agent_id="Agent-A",
+            minutes_since_sync=-1,
+            token_load_ratio=0.1,
+        )
+
+    with pytest.raises(ValueError, match="token_load_ratio 不能为负数"):
+        await service.record_context_health(
+            session_id="s",
+            task_id=task.id,
+            agent_id="Agent-A",
+            minutes_since_sync=0,
+            token_load_ratio=-0.1,
+        )
+
+
+@pytest.mark.asyncio
 async def test_list_approvals_returns_json_friendly_state_strings(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")
