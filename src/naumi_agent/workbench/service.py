@@ -209,6 +209,14 @@ class WorkbenchService:
         )
         return [self._approval_to_dict(approval) for approval in approvals]
 
+    async def get_approval(
+        self, session_id: str, approval_id: str
+    ) -> dict[str, Any] | None:
+        approval = await self._workbench_store.get_approval(session_id, approval_id)
+        if approval is None:
+            return None
+        return self._approval_to_dict(approval)
+
     async def attach_issue(
         self,
         *,

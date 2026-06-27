@@ -879,6 +879,57 @@ async def test_list_approvals_returns_json_friendly_state_strings(tmp_path) -> N
 
 
 @pytest.mark.asyncio
+async def test_get_approval_returns_json_friendly_approval_detail(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    approval = await workbench_store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="请求审批",
+        detail="需要人工确认高风险变更",
+        requester="Agent-A",
+    )
+
+    result = await service.get_approval("s", approval.id)
+
+    assert result is not None
+    assert result["id"] == approval.id
+    assert result["session_id"] == "s"
+    assert result["mission_id"] == "mission-1"
+    assert result["task_id"] == "task-1"
+    assert result["state"] == "waiting"
+    assert result["title"] == "请求审批"
+    assert result["detail"] == "需要人工确认高风险变更"
+    assert result["requester"] == "Agent-A"
+    assert result["reviewer"] == ""
+    assert result["decision_note"] == ""
+
+
+@pytest.mark.asyncio
+async def test_get_approval_returns_none_for_missing_or_other_session(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    approval = await workbench_store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="请求审批",
+        detail="详情",
+        requester="Agent-A",
+    )
+
+    assert await service.get_approval("s", "missing-approval") is None
+    assert await service.get_approval("other", approval.id) is None
+
+
+@pytest.mark.asyncio
 async def test_list_failures_returns_store_rows_and_respects_filters(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")

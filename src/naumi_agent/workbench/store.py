@@ -1257,6 +1257,18 @@ class WorkbenchStore:
             rows = await cursor.fetchall()
         return [_row_to_approval(dict(row)) for row in rows]
 
+    async def get_approval(self, session_id: str, approval_id: str) -> Approval | None:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_approvals
+                   WHERE session_id = ? AND id = ?""",
+                (session_id, approval_id),
+            )
+            row = await cursor.fetchone()
+        return _row_to_approval(dict(row)) if row else None
+
 
 def _row_to_issue(row: dict[str, Any]) -> IssueMetadata:
     return IssueMetadata(
