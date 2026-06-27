@@ -97,6 +97,42 @@ async def test_create_issue_creates_backing_task_and_issue_metadata(tmp_path) ->
 
 
 @pytest.mark.asyncio
+async def test_attach_issue_rejects_missing_mission(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+    task = await task_store.create_task("不要绑定到孤儿 mission")
+
+    with pytest.raises(ValueError, match="mission 不存在"):
+        await service.attach_issue(
+            session_id="s",
+            mission_id="missing-mission",
+            task_id=task.id,
+            acceptance_criteria=["必须拒绝孤儿 issue"],
+        )
+
+    assert await workbench_store.get_issue("s", task.id) is None
+
+
+@pytest.mark.asyncio
+async def test_create_issue_rejects_missing_mission_without_creating_task(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    with pytest.raises(ValueError, match="mission 不存在"):
+        await service.create_issue(
+            session_id="s",
+            mission_id="missing-mission",
+            title="不要先创建孤儿 backing task",
+        )
+
+    assert await task_store.list_tasks() == []
+
+
+@pytest.mark.asyncio
 async def test_register_agent_profile_records_event_and_snapshot_card(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")
