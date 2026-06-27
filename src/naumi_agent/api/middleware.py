@@ -8,6 +8,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from naumi_agent.api.deps import extract_api_key
+
 
 class AuthMiddleware(BaseHTTPMiddleware):
     PUBLIC_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
@@ -20,13 +22,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if config is None:
             return await call_next(request)
 
+        api_key = extract_api_key(request)
+
         if request.url.path.startswith("/api/v1/ws"):
-            api_key = request.query_params.get("api_key")
             if config.api.api_keys and api_key not in config.api.api_keys:
                 return JSONResponse(status_code=401, content={"error": "Invalid API key"})
             return await call_next(request)
-
-        api_key = request.headers.get("X-API-Key")
 
         if config.api.api_keys:
             if not api_key or api_key not in config.api.api_keys:
