@@ -19,7 +19,6 @@ public struct SettingsView: View {
             governanceSection
         }
         .padding()
-        .navigationTitle(AppStrings.Settings.title(appState.locale))
     }
 
     // MARK: - Language

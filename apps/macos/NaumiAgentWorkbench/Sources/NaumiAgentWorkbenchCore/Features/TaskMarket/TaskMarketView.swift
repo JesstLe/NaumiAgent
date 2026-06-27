@@ -48,7 +48,6 @@ public struct TaskMarketView: View {
         }
         .frame(minWidth: 1120, minHeight: 700)
         .background(Color(nsColor: .windowBackgroundColor))
-        .navigationTitle(AppStrings.TaskMarket.title(appState.locale))
         .onAppear {
             if selectedTaskID == nil {
                 selectedTaskID = presentation.selectedIssue?.taskID

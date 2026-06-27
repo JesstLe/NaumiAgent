@@ -26,7 +26,6 @@ public struct TimelineView: View {
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .navigationTitle(AppStrings.Timeline.title(appState.locale))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(action: {

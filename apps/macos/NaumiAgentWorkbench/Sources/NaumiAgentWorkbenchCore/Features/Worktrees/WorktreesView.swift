@@ -26,7 +26,6 @@ public struct WorktreesView: View {
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .navigationTitle(AppStrings.Worktrees.title(appState.locale))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(action: {
