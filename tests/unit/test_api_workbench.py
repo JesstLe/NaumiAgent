@@ -14,11 +14,13 @@ from fastapi import HTTPException
 from naumi_agent import __version__
 from naumi_agent.api.routes.workbench import (
     ClaimIssue,
+    IntentLockCreate,
     IssueAttach,
     MissionCreate,
     ValidationRunCreate,
     attach_workbench_issue,
     claim_workbench_issue,
+    create_intent_lock,
     create_validation_run,
     create_workbench_mission,
     expire_workbench_leases,
@@ -54,14 +56,19 @@ class _FakeWorkbenchService:
     def __init__(self) -> None:
         self.created_missions: list[dict] = []
         self.attached_issues: list[dict] = []
+        self.created_intent_locks: list[dict] = []
         self.run_validations: list[dict] = []
         self.listed_events: list[dict] = []
         self.listed_validation_runs: list[dict] = []
         self.listed_context_snapshots: list[dict] = []
         self._run_validation_error: Exception | None = None
+        self._intent_lock_error: Exception | None = None
 
     def set_run_validation_error(self, error: Exception) -> None:
         self._run_validation_error = error
+
+    def set_intent_lock_error(self, error: Exception) -> None:
+        self._intent_lock_error = error
 
     async def dashboard_snapshot(self, session_id: str):
         return {
@@ -119,6 +126,42 @@ class _FakeWorkbenchService:
             "related_pr": "",
             "created_at": "2024-01-01T00:00:00",
             "updated_at": "2024-01-01T00:00:00",
+        }
+
+    async def create_intent_lock(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        actor: str,
+        rule: str,
+        blocked_paths: list[str] | None = None,
+        allowed_paths: list[str] | None = None,
+        require_proposal_for_risk: RiskLevel = RiskLevel.HIGH,
+    ):
+        self.created_intent_locks.append(
+            {
+                "session_id": session_id,
+                "mission_id": mission_id,
+                "actor": actor,
+                "rule": rule,
+                "blocked_paths": blocked_paths,
+                "allowed_paths": allowed_paths,
+                "require_proposal_for_risk": require_proposal_for_risk,
+            }
+        )
+        if self._intent_lock_error is not None:
+            raise self._intent_lock_error
+        return {
+            "id": "lock-1",
+            "session_id": session_id,
+            "mission_id": mission_id,
+            "rule": rule,
+            "blocked_paths": list(blocked_paths or []),
+            "allowed_paths": list(allowed_paths or []),
+            "require_proposal_for_risk": require_proposal_for_risk.value,
+            "active": True,
+            "created_at": "2024-01-01T00:00:00",
         }
 
     async def list_events(self, session_id: str, limit: int = 50):
@@ -802,3 +845,65 @@ async def test_run_validation_endpoint_maps_runtime_error_to_503() -> None:
 
     assert exc.value.status_code == 503
     assert exc.value.detail == "ValidationRunner 未配置"
+
+
+@pytest.mark.asyncio
+async def test_create_intent_lock_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+    body = IntentLockCreate(rule="禁止修改 core 模块")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_intent_lock("missing", "mission-1", body, _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_create_intent_lock_endpoint_returns_created_lock() -> None:
+    engine = _FakeEngine(exists=True)
+    body = IntentLockCreate(
+        actor="Planner-Agent",
+        rule="禁止修改 src/secret 下文件",
+        blocked_paths=["src/secret"],
+        allowed_paths=["src/secret/README.md"],
+        require_proposal_for_risk=RiskLevel.HIGH,
+    )
+
+    response = await create_intent_lock(
+        "sess-1", "mission-1", body, _fake_request(engine), auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.created_intent_locks == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-1",
+            "actor": "Planner-Agent",
+            "rule": "禁止修改 src/secret 下文件",
+            "blocked_paths": ["src/secret"],
+            "allowed_paths": ["src/secret/README.md"],
+            "require_proposal_for_risk": RiskLevel.HIGH,
+        }
+    ]
+    assert response["id"] == "lock-1"
+    assert response["session_id"] == "sess-1"
+    assert response["mission_id"] == "mission-1"
+    assert response["rule"] == "禁止修改 src/secret 下文件"
+    assert response["blocked_paths"] == ["src/secret"]
+    assert response["allowed_paths"] == ["src/secret/README.md"]
+    assert response["require_proposal_for_risk"] == "high"
+    assert response["active"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_intent_lock_endpoint_maps_value_error_to_400() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_intent_lock_error(ValueError("意图锁规则不能为空"))
+    body = IntentLockCreate(rule="   ")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_intent_lock("sess-1", "mission-1", body, _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "意图锁规则不能为空"

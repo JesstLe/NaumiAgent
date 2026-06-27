@@ -340,6 +340,28 @@ private final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func createIntentLock(
+        sessionID: String,
+        missionID: String,
+        actor: String,
+        rule: String,
+        blockedPaths: [String],
+        allowedPaths: [String],
+        requireProposalForRisk: String
+    ) async throws(APIError) -> IntentLockDTO {
+        IntentLockDTO(
+            id: "lock-1",
+            sessionID: sessionID,
+            missionID: missionID,
+            rule: rule,
+            blockedPaths: blockedPaths,
+            allowedPaths: allowedPaths,
+            requireProposalForRisk: requireProposalForRisk,
+            active: true,
+            createdAt: "2026-06-27T06:00:00"
+        )
+    }
+
     func runValidation(
         sessionID: String,
         taskID: String,

@@ -5,7 +5,7 @@ import sys
 import pytest
 
 from naumi_agent.tasks.store import TaskStore
-from naumi_agent.workbench.models import ContextHealth, LeaseState
+from naumi_agent.workbench.models import ContextHealth, LeaseState, RiskLevel
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.workbench.validation import ValidationRunner
@@ -275,3 +275,59 @@ async def test_run_validation_rejects_cwd_outside_workspace(tmp_path) -> None:
             argv=[sys.executable, "-c", "print('ok')"],
             cwd=str(tmp_path.parent),
         )
+
+
+@pytest.mark.asyncio
+async def test_create_intent_lock_persists_lock_and_records_event(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    lock = await service.create_intent_lock(
+        session_id="s",
+        mission_id="mission-1",
+        actor="Planner-Agent",
+        rule="禁止修改 src/naumi_agent/api/routes 下除 workbench.py 外的文件",
+        blocked_paths=[" src/secret  ", "", "  "],
+        allowed_paths=["src/naumi_agent/api/routes/workbench.py", "  ", ""],
+        require_proposal_for_risk=RiskLevel.CRITICAL,
+    )
+
+    assert lock["session_id"] == "s"
+    assert lock["mission_id"] == "mission-1"
+    assert lock["rule"] == "禁止修改 src/naumi_agent/api/routes 下除 workbench.py 外的文件"
+    assert lock["blocked_paths"] == ["src/secret"]
+    assert lock["allowed_paths"] == ["src/naumi_agent/api/routes/workbench.py"]
+    assert lock["require_proposal_for_risk"] == "critical"
+    assert lock["active"] is True
+
+    locks = await workbench_store.list_intent_locks("s", "mission-1")
+    assert any(stored.id == lock["id"] for stored in locks)
+
+    events = await service.list_events("s")
+    event = next((e for e in events if e["type"] == "intent_lock.created"), None)
+    assert event is not None
+    assert event["actor"] == "Planner-Agent"
+    assert event["subject_id"] == lock["id"]
+    assert event["payload"]["mission_id"] == "mission-1"
+    assert event["payload"]["rule"] == lock["rule"]
+    assert event["payload"]["require_proposal_for_risk"] == "critical"
+
+
+@pytest.mark.asyncio
+async def test_create_intent_lock_rejects_empty_rule(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    with pytest.raises(ValueError, match="意图锁规则不能为空"):
+        await service.create_intent_lock(
+            session_id="s",
+            mission_id="mission-1",
+            actor="Human",
+            rule="   ",
+        )
+
+    assert await workbench_store.list_intent_locks("s", "mission-1") == []
