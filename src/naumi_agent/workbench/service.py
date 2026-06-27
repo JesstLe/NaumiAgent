@@ -251,6 +251,15 @@ class WorkbenchService:
         tasks = await self._task_store.list_tasks()
         events = await self._workbench_store.list_events(session_id, limit=50)
         failures = await self._workbench_store.list_failures(session_id)
+        validation_runs = await self._workbench_store.list_validation_runs(
+            session_id, limit=50
+        )
+        context_snapshots = await self._workbench_store.list_context_snapshots(
+            session_id, limit=50
+        )
+        approvals = await self._workbench_store.list_approvals(
+            session_id, state=ApprovalState.WAITING, limit=50
+        )
         issues = []
         leases = []
         for task in tasks:
@@ -268,6 +277,9 @@ class WorkbenchService:
             "leases": leases,
             "failures": failures,
             "events": [event.to_dict() for event in events],
+            "validation_runs": validation_runs,
+            "context_snapshots": context_snapshots,
+            "approvals": [self._approval_to_dict(approval) for approval in approvals],
         }
 
     @staticmethod
