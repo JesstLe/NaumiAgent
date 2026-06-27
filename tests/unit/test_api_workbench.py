@@ -1009,6 +1009,7 @@ class FakeWorktreeManager:
         self.records = list(records or [])
         self.status_calls: list[str] = []
         self.keep_calls: list[dict[str, str]] = []
+        self.remove_calls: list[dict[str, object]] = []
 
     async def status(self, name: str = "") -> WorktreeRecord | list[WorktreeRecord]:
         self.status_calls.append(name)
@@ -1029,6 +1030,16 @@ class FakeWorktreeManager:
         record.status = WorktreeStatus.KEPT
         record.kept_reason = reason.strip()
         return "已保留 worktree 供审查。\n\n### Worktree"
+
+    async def remove(self, name: str, discard_changes: bool = False) -> str:
+        self.remove_calls.append({"name": name, "discard_changes": discard_changes})
+        record = await self.status(name)
+        if isinstance(record, list):
+            raise KeyError(name)
+        if not discard_changes and not record.removable:
+            return "拒绝删除：worktree 中仍有未保存或未审查的工作。"
+        self.records = [item for item in self.records if item.name != name]
+        return f"已删除 worktree：{name}"
 
 
 class FakeWorkbenchStore:
@@ -3567,6 +3578,124 @@ def test_keep_worktree_route_returns_404_for_missing_worktree() -> None:
     assert response.json() == {"detail": "worktree 不存在"}
     assert engine.worktree_manager.keep_calls == [
         {"name": "missing-worktree", "reason": "等待人工审查"}
+    ]
+
+
+def test_delete_worktree_route_removes_worktree_and_records_audit_event() -> None:
+    worktree_manager = FakeWorktreeManager(
+        [
+            WorktreeRecord(
+                name="wt-clean",
+                path="/repo/.naumi/worktrees/wt-clean",
+                branch="naumi/worktree-wt-clean",
+                base_ref="abc123",
+                status=WorktreeStatus.CLEAN,
+                task_id="task-1",
+                dirty_files=0,
+                commits_ahead=0,
+                created_at="2024-01-01T00:00:00",
+                updated_at="2024-01-01T00:04:00",
+            )
+        ]
+    )
+    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.delete("/workbench/sessions/sess-1/worktrees/wt-clean")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "name": "wt-clean",
+        "discard_changes": False,
+        "message": "已删除 worktree：wt-clean",
+    }
+    assert worktree_manager.remove_calls == [
+        {"name": "wt-clean", "discard_changes": False}
+    ]
+    assert engine.workbench_store.events == [
+        {
+            "session_id": "sess-1",
+            "type": "worktree.removed",
+            "actor": "Human",
+            "subject_id": "wt-clean",
+            "payload": {"discard_changes": False},
+        }
+    ]
+
+
+def test_delete_worktree_route_rejects_dirty_without_discard_changes() -> None:
+    worktree_manager = FakeWorktreeManager(
+        [
+            WorktreeRecord(
+                name="wt-dirty",
+                path="/repo/.naumi/worktrees/wt-dirty",
+                branch="naumi/worktree-wt-dirty",
+                base_ref="abc123",
+                status=WorktreeStatus.DIRTY,
+                task_id="task-1",
+                dirty_files=2,
+                commits_ahead=1,
+                created_at="2024-01-01T00:00:00",
+                updated_at="2024-01-01T00:04:00",
+            )
+        ]
+    )
+    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.delete("/workbench/sessions/sess-1/worktrees/wt-dirty")
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "拒绝删除：worktree 中仍有未保存或未审查的工作。"
+    }
+    assert worktree_manager.remove_calls == [
+        {"name": "wt-dirty", "discard_changes": False}
+    ]
+    assert engine.workbench_store.events == []
+
+
+def test_delete_worktree_route_force_removes_dirty_worktree() -> None:
+    worktree_manager = FakeWorktreeManager(
+        [
+            WorktreeRecord(
+                name="wt-dirty",
+                path="/repo/.naumi/worktrees/wt-dirty",
+                branch="naumi/worktree-wt-dirty",
+                base_ref="abc123",
+                status=WorktreeStatus.DIRTY,
+                task_id="task-1",
+                dirty_files=2,
+                commits_ahead=1,
+                created_at="2024-01-01T00:00:00",
+                updated_at="2024-01-01T00:04:00",
+            )
+        ]
+    )
+    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.delete(
+        "/workbench/sessions/sess-1/worktrees/wt-dirty?discard_changes=true"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "name": "wt-dirty",
+        "discard_changes": True,
+        "message": "已删除 worktree：wt-dirty",
+    }
+    assert worktree_manager.remove_calls == [
+        {"name": "wt-dirty", "discard_changes": True}
     ]
 
 

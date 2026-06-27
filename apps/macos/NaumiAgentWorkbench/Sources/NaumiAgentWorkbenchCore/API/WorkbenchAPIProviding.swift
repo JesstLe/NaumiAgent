@@ -102,6 +102,13 @@ public protocol WorkbenchAPIProviding: Sendable {
         reason: String
     ) async throws(APIError) -> WorktreeDTO
 
+    /// Removes a tracked worktree. `discardChanges` force-removes dirty worktrees.
+    func removeWorktree(
+        sessionID: String,
+        name: String,
+        discardChanges: Bool
+    ) async throws(APIError) -> WorktreeRemovalDTO
+
     /// Fetches missions for the given session, optionally filtered by status.
     func fetchMissions(
         sessionID: String,

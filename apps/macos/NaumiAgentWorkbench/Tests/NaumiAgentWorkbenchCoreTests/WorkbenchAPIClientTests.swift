@@ -1074,6 +1074,46 @@ final class WorkbenchAPIClientTests {
         #expect(!worktree.removable)
     }
 
+    @Test func removeWorktreeUsesDELETEAndDiscardQuery() async throws {
+        let json = Data(
+            """
+            {"name":"wt-dirty","discard_changes":true,"message":"已删除 worktree：wt-dirty"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%2F001/worktrees/wt-dirty",
+                  query["discard_changes"] == "true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "DELETE" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let result = try await client.removeWorktree(
+            sessionID: "sess/001",
+            name: "wt-dirty",
+            discardChanges: true
+        )
+
+        #expect(result.name == "wt-dirty")
+        #expect(result.discardChanges)
+        #expect(result.message == "已删除 worktree：wt-dirty")
+    }
+
     @Test func fetchMissionsWithStatus() async throws {
         let json = Data(
             """

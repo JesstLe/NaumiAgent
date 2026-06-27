@@ -255,6 +255,17 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func removeWorktree(
+        sessionID: String,
+        name: String,
+        discardChanges: Bool
+    ) async throws(APIError) -> WorktreeRemovalDTO {
+        try await delete(
+            path: encodePath("workbench", "sessions", sessionID, "worktrees", name),
+            queryItems: [URLQueryItem(name: "discard_changes", value: discardChanges ? "true" : "false")]
+        )
+    }
+
     public func fetchMissions(
         sessionID: String,
         status: String?,
@@ -556,6 +567,24 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
 
+        return try await performRequest(request)
+    }
+
+    private func delete<T: Decodable & Sendable>(
+        path: String,
+        queryItems: [URLQueryItem]
+    ) async throws(APIError) -> T {
+        guard let url = url(for: path),
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            throw .invalidURL
+        }
+        components.queryItems = queryItems
+        guard let requestURL = components.url else {
+            throw .invalidURL
+        }
+
+        var request = URLRequest(url: requestURL)
+        request.httpMethod = "DELETE"
         return try await performRequest(request)
     }
 
