@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from naumi_agent import __version__
 from naumi_agent.api.deps import AuthDep
 from naumi_agent.workbench.market import TaskMarket
-from naumi_agent.workbench.models import ParallelMode, RiskLevel
+from naumi_agent.workbench.models import DecisionKind, ParallelMode, RiskLevel
 
 router = APIRouter(tags=["workbench"])
 
@@ -55,6 +55,13 @@ class IntentLockCreate(BaseModel):
     blocked_paths: list[str] = Field(default_factory=list)
     allowed_paths: list[str] = Field(default_factory=list)
     require_proposal_for_risk: RiskLevel = RiskLevel.HIGH
+
+
+class DecisionCreate(BaseModel):
+    actor: str = "Human"
+    kind: DecisionKind = DecisionKind.ARCHITECTURE
+    title: str
+    content: str
 
 
 class ClaimIssue(BaseModel):
@@ -301,6 +308,37 @@ async def create_intent_lock(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return lock
+
+
+@router.post(
+    "/workbench/sessions/{session_id}/missions/{mission_id}/decisions",
+    status_code=201,
+)
+async def create_decision(
+    session_id: str,
+    mission_id: str,
+    body: DecisionCreate,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        decision = await engine.workbench_service.create_decision(
+            session_id=session_id,
+            mission_id=mission_id,
+            actor=body.actor,
+            kind=body.kind,
+            title=body.title,
+            content=body.content,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return decision
 
 
 @router.post("/workbench/sessions/{session_id}/issues/{task_id}/claim", status_code=201)

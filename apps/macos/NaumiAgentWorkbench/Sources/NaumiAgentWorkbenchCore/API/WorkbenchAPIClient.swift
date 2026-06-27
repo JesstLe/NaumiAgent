@@ -158,6 +158,26 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func createDecision(
+        sessionID: String,
+        missionID: String,
+        kind: String,
+        title: String,
+        content: String,
+        actor: String
+    ) async throws(APIError) -> DecisionDTO {
+        let body = CreateDecisionRequest(
+            actor: actor,
+            kind: kind,
+            title: title,
+            content: content
+        )
+        return try await post(
+            path: "workbench/sessions/\(sessionID)/missions/\(missionID)/decisions",
+            body: body
+        )
+    }
+
     public func runValidation(
         sessionID: String,
         taskID: String,
@@ -320,5 +340,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         let blockedPaths: [String]
         let allowedPaths: [String]
         let requireProposalForRisk: String
+    }
+
+    /// Payload for `POST /workbench/sessions/{session_id}/missions/{mission_id}/decisions`.
+    private struct CreateDecisionRequest: Encodable, Sendable {
+        let actor: String
+        let kind: String
+        let title: String
+        let content: String
     }
 }
