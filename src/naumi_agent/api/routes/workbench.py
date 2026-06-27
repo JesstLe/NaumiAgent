@@ -16,6 +16,7 @@ from naumi_agent.workbench.market import TaskMarket
 from naumi_agent.workbench.models import ApprovalState, DecisionKind, ParallelMode, RiskLevel
 
 router = APIRouter(tags=["workbench"])
+LOCAL_DAEMON_BIND_HOST = "127.0.0.1"
 
 
 class DaemonStatusResponse(BaseModel):
@@ -210,7 +211,7 @@ async def get_daemon_status(request: Request, auth: str = AuthDep):
         status="running",
         version=__version__,
         pid=os.getpid(),
-        host=request.url.hostname or "127.0.0.1",
+        host=LOCAL_DAEMON_BIND_HOST,
         port=request.url.port or 8765,
         started_at=started_at,
         workspace_count=await _count_workspaces(engine),

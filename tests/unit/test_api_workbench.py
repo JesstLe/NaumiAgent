@@ -762,7 +762,7 @@ class _FakeSessionStoreWithCount:
 def _fake_status_request(
     engine: _FakeEngine,
     started_at: str = "2026-06-27T10:00:00+00:00",
-    hostname: str = "127.0.0.1",
+    hostname: str | None = "127.0.0.1",
     port: int = 8765,
 ):
     return SimpleNamespace(
@@ -1636,10 +1636,33 @@ async def test_daemon_status_returns_expected_fields() -> None:
     assert response.status == "running"
     assert response.version == __version__
     assert response.pid == os.getpid()
-    assert response.host == "localhost"
+    assert response.host == "127.0.0.1"
     assert response.port == 9876
     assert response.started_at == "2026-06-27T10:00:00+00:00"
     assert response.workspace_count == 7
+
+
+@pytest.mark.asyncio
+async def test_daemon_status_normalizes_missing_host_to_loopback() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store = _FakeSessionStoreWithCount(total=0)
+    request = _fake_status_request(engine, hostname=None, port=8765)
+
+    response = await get_daemon_status(request, auth="test")
+
+    assert response.host == "127.0.0.1"
+    assert response.port == 8765
+
+
+@pytest.mark.asyncio
+async def test_daemon_status_does_not_echo_request_host() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store = _FakeSessionStoreWithCount(total=0)
+    request = _fake_status_request(engine, hostname="example.test", port=8765)
+
+    response = await get_daemon_status(request, auth="test")
+
+    assert response.host == "127.0.0.1"
 
 
 @pytest.mark.asyncio
