@@ -96,6 +96,40 @@ struct DashboardSnapshotPresentationTests {
         #expect(last.timestamp == "2026-06-27T05:40:00")
     }
 
+    @Test func workbenchPresentationKeepsSharedCanvasLandmarks() throws {
+        let snapshot = try loadZHSnapshot()
+        let presentation = DashboardSnapshotPresentation(snapshot: snapshot)
+
+        #expect(presentation.workbench.leftMissionTitle == "实现 SwiftUI 工作台骨架")
+        #expect(presentation.workbench.leftIssueCount == 1)
+        #expect(presentation.workbench.leftTaskCount == 2)
+        #expect(presentation.workbench.leftFailureCount == 1)
+
+        #expect(presentation.workbench.canvasNodes.map(\.kind) == [
+            .mission,
+            .issue,
+            .agents,
+            .worktrees,
+            .validation,
+            .failure,
+            .approval
+        ])
+
+        let inspector = try #require(presentation.workbench.inspector)
+        #expect(inspector.title == "实现 API Client")
+        #expect(inspector.status == "in_progress")
+        #expect(inspector.riskLevel == "medium")
+        #expect(inspector.parallelMode == "exclusive")
+        #expect(inspector.owner == "agent-a")
+        #expect(inspector.requiresHumanApproval == true)
+        #expect(inspector.acceptanceCriteriaCount == 2)
+
+        #expect(presentation.workbench.auditRows.map(\.type) == [
+            "mission.created",
+            "task.updated"
+        ])
+    }
+
     @Test func recentEventRowsLimitToFive() throws {
         let snapshot = WorkbenchSnapshotDTO(
             sessionID: "sess-limit",

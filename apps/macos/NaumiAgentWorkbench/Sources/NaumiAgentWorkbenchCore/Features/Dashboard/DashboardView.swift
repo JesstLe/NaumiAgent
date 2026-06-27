@@ -4,33 +4,472 @@ import SwiftUI
 /// Displays connection state, daemon/version, counts and the current snapshot content.
 public struct DashboardView: View {
     @Bindable public var appState: AppState
+    @State private var searchText = ""
 
     public init(appState: AppState) {
         self.appState = appState
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                header
-                if let status = appState.daemonStatus {
-                    daemonCard(status: status)
-                }
-                countsGrid
-                if let snapshot = appState.snapshot {
-                    snapshotContent(snapshot: snapshot)
-                }
-                if let lastError = appState.lastError {
-                    errorCard(error: lastError)
-                }
-                if appState.snapshot == nil {
-                    emptyState
+        Group {
+            if let snapshot = appState.snapshot {
+                workbenchLayout(presentation: DashboardSnapshotPresentation(snapshot: snapshot))
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        header
+                        if let status = appState.daemonStatus {
+                            daemonCard(status: status)
+                        }
+                        countsGrid
+                        if let lastError = appState.lastError {
+                            errorCard(error: lastError)
+                        }
+                        emptyState
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle(AppStrings.Dashboard.title(appState.locale))
+    }
+
+    // MARK: - Workbench Layout
+
+    private func workbenchLayout(presentation: DashboardSnapshotPresentation) -> some View {
+        VStack(spacing: 0) {
+            workbenchHeader(presentation: presentation)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+
+            Divider()
+
+            HStack(spacing: 0) {
+                workbenchLeftRail(presentation: presentation)
+                    .frame(width: 244)
+
+                Divider()
+
+                sharedCanvas(presentation: presentation)
+                    .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+
+                Divider()
+
+                inspectorPanel(presentation: presentation)
+                    .frame(width: 294)
+            }
+
+            Divider()
+
+            auditTrail(presentation: presentation)
+                .frame(height: 112)
+        }
+        .frame(minWidth: 980, minHeight: 640)
+    }
+
+    private func workbenchHeader(presentation: DashboardSnapshotPresentation) -> some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("NaumiAgent Workbench")
+                    .font(.system(size: 18, weight: .semibold))
+                Text(presentation.workbench.leftMissionTitle ?? AppStrings.Dashboard.title(appState.locale))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            StatusBadge(
+                text: appState.connectionState.displayName(locale: appState.locale),
+                color: connectionColor
+            )
+
+            Spacer()
+
+            compactMetric(
+                label: AppStrings.Dashboard.tasksLabel(appState.locale),
+                value: "\(presentation.workbench.leftTaskCount)"
+            )
+            compactMetric(
+                label: AppStrings.Dashboard.issuesLabel(appState.locale),
+                value: "\(presentation.workbench.leftIssueCount)"
+            )
+            compactMetric(
+                label: AppStrings.Dashboard.failuresLabel(appState.locale),
+                value: "\(presentation.workbench.leftFailureCount)"
+            )
+        }
+    }
+
+    private func compactMetric(label: String, value: String) -> some View {
+        HStack(spacing: 6) {
+            Text(value)
+                .font(.system(size: 13, weight: .semibold))
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func workbenchLeftRail(presentation: DashboardSnapshotPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            TextField(AppStrings.Dashboard.searchPlaceholder(appState.locale), text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12))
+
+            VStack(alignment: .leading, spacing: 8) {
+                railSectionTitle(AppStrings.Dashboard.missionSection(appState.locale))
+                if let mission = presentation.currentMission {
+                    railRow(
+                        icon: "scope",
+                        title: mission.title,
+                        subtitle: mission.status,
+                        color: .indigo
+                    )
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                railSectionTitle(AppStrings.Dashboard.issueBacklogSection(appState.locale))
+                if presentation.taskRows.isEmpty {
+                    emptyListLabel(AppStrings.Dashboard.emptyTasks(appState.locale))
+                } else {
+                    ForEach(presentation.taskRows, id: \.id) { row in
+                        railRow(
+                            icon: row.riskLevel == nil ? "checkmark.circle" : "exclamationmark.triangle",
+                            title: row.subject,
+                            subtitle: row.status,
+                            color: row.riskLevel == nil ? .green : .orange
+                        )
+                    }
+                }
+            }
+
+            Spacer(minLength: 8)
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func railSectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.caption)
+            .fontWeight(.semibold)
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
+    }
+
+    private func railRow(icon: String, title: String, subtitle: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func sharedCanvas(presentation: DashboardSnapshotPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(AppStrings.Dashboard.sharedCanvasSection(appState.locale))
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                StatusBadge(text: AppStrings.Dashboard.validationRunsLabel(appState.locale), color: .teal)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+
+            ZStack {
+                dottedCanvasBackground
+                canvasConnectors
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 188, maximum: 230), spacing: 14)],
+                    alignment: .center,
+                    spacing: 14
+                ) {
+                    ForEach(presentation.workbench.canvasNodes, id: \.id) { node in
+                        canvasNodeView(node: node)
+                    }
+                }
+                .padding(24)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var dottedCanvasBackground: some View {
+        Canvas { context, size in
+            for x in stride(from: 12.0, through: size.width, by: 24.0) {
+                for y in stride(from: 12.0, through: size.height, by: 24.0) {
+                    let dot = Path(ellipseIn: CGRect(x: x, y: y, width: 2, height: 2))
+                    context.fill(dot, with: .color(Color.secondary.opacity(0.18)))
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var canvasConnectors: some View {
+        Canvas { context, size in
+            var path = Path()
+            path.move(to: CGPoint(x: size.width * 0.18, y: size.height * 0.28))
+            path.addCurve(
+                to: CGPoint(x: size.width * 0.72, y: size.height * 0.34),
+                control1: CGPoint(x: size.width * 0.34, y: size.height * 0.18),
+                control2: CGPoint(x: size.width * 0.58, y: size.height * 0.42)
+            )
+            path.move(to: CGPoint(x: size.width * 0.24, y: size.height * 0.62))
+            path.addCurve(
+                to: CGPoint(x: size.width * 0.78, y: size.height * 0.68),
+                control1: CGPoint(x: size.width * 0.38, y: size.height * 0.74),
+                control2: CGPoint(x: size.width * 0.62, y: size.height * 0.52)
+            )
+            context.stroke(path, with: .color(Color.accentColor.opacity(0.22)), lineWidth: 2)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func canvasNodeView(node: DashboardCanvasNode) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: iconName(for: node.kind))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(color(for: node.kind))
+
+                Text(label(for: node.kind))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+            }
+
+            Text(node.title)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(2)
+                .frame(minHeight: 34, alignment: .topLeading)
+
+            HStack {
+                Text(subtitle(for: node))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                Text(node.status)
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+            }
+        }
+        .padding(12)
+        .frame(height: 126)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(color(for: node.kind).opacity(0.28), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .shadow(color: .black.opacity(0.05), radius: 10, y: 4)
+    }
+
+    private func inspectorPanel(presentation: DashboardSnapshotPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(AppStrings.Dashboard.inspectorSection(appState.locale))
+                .font(.system(size: 14, weight: .semibold))
+
+            if let inspector = presentation.workbench.inspector {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(inspector.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .lineLimit(2)
+
+                    StatusBadge(text: inspector.status, color: statusColor(for: inspector.status))
+
+                    inspectorDetail(AppStrings.Dashboard.ownerLabel(appState.locale), inspector.owner ?? "-")
+                    inspectorDetail(AppStrings.Dashboard.riskLabel(appState.locale), inspector.riskLevel ?? "-")
+                    inspectorDetail(AppStrings.Dashboard.parallelModeLabel(appState.locale), inspector.parallelMode ?? "-")
+                    inspectorDetail(
+                        AppStrings.Dashboard.acceptanceCriteriaLabel(appState.locale),
+                        inspector.acceptanceCriteriaCount.map(String.init) ?? "-"
+                    )
+                    inspectorDetail(
+                        AppStrings.Dashboard.humanApprovalLabel(appState.locale),
+                        inspector.requiresHumanApproval
+                            ? AppStrings.Dashboard.approvalRequiredValue(appState.locale)
+                            : AppStrings.Dashboard.approvalNotRequiredValue(appState.locale)
+                    )
+                }
+                .padding(12)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                emptyListLabel(AppStrings.Dashboard.noSelection(appState.locale))
+            }
+
+            if let status = appState.daemonStatus {
+                daemonCompact(status: status)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func inspectorDetail(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.caption)
+                .fontWeight(.medium)
+                .lineLimit(1)
+        }
+    }
+
+    private func daemonCompact(status: DaemonStatusDTO) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            railSectionTitle(AppStrings.Dashboard.daemonSection(appState.locale))
+            inspectorDetail(AppStrings.Dashboard.daemonStatusLabel(appState.locale), status.status)
+            inspectorDetail(AppStrings.Dashboard.daemonHostLabel(appState.locale), "\(status.host):\(status.port)")
+            inspectorDetail(AppStrings.Dashboard.daemonPIDLabel(appState.locale), "\(status.pid)")
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func auditTrail(presentation: DashboardSnapshotPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(AppStrings.Dashboard.auditTrailSection(appState.locale))
+                .font(.system(size: 13, weight: .semibold))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(presentation.workbench.auditRows, id: \.id) { row in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(row.type)
+                                .font(.system(size: 12, weight: .medium))
+                                .lineLimit(1)
+                            Text("\(row.actor) · \(row.timestamp)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .frame(width: 210, alignment: .leading)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func iconName(for kind: DashboardCanvasNodeKind) -> String {
+        switch kind {
+        case .mission:
+            return "scope"
+        case .issue:
+            return "exclamationmark.triangle"
+        case .agents:
+            return "person.2"
+        case .worktrees:
+            return "folder.badge.gearshape"
+        case .validation:
+            return "checkmark.seal"
+        case .failure:
+            return "xmark.octagon"
+        case .approval:
+            return "hand.raised"
+        }
+    }
+
+    private func label(for kind: DashboardCanvasNodeKind) -> String {
+        switch kind {
+        case .mission:
+            return AppStrings.Dashboard.missionSection(appState.locale)
+        case .issue:
+            return AppStrings.Dashboard.issueBacklogSection(appState.locale)
+        case .agents:
+            return AppStrings.Dashboard.agentsSection(appState.locale)
+        case .worktrees:
+            return AppStrings.Dashboard.gitWorktreesLabel(appState.locale)
+        case .validation:
+            return AppStrings.Dashboard.validationRunsLabel(appState.locale)
+        case .failure:
+            return AppStrings.Dashboard.failuresSection(appState.locale)
+        case .approval:
+            return AppStrings.Dashboard.humanApprovalLabel(appState.locale)
+        }
+    }
+
+    private func subtitle(for node: DashboardCanvasNode) -> String {
+        switch node.kind {
+        case .mission:
+            return AppStrings.Dashboard.missionSection(appState.locale)
+        case .agents:
+            return AppStrings.Dashboard.agentsLabel(appState.locale)
+        case .worktrees:
+            return AppStrings.Dashboard.gitWorktreesLabel(appState.locale)
+        case .validation:
+            return AppStrings.Dashboard.validationRunsLabel(appState.locale)
+        case .approval:
+            return AppStrings.Dashboard.humanApprovalLabel(appState.locale)
+        case .issue, .failure:
+            return node.subtitle
+        }
+    }
+
+    private func color(for kind: DashboardCanvasNodeKind) -> Color {
+        switch kind {
+        case .mission:
+            return .indigo
+        case .issue:
+            return .orange
+        case .agents:
+            return .blue
+        case .worktrees:
+            return .green
+        case .validation:
+            return .teal
+        case .failure:
+            return .red
+        case .approval:
+            return .purple
+        }
     }
 
     // MARK: - Header
