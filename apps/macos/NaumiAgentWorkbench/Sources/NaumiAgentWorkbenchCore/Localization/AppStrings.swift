@@ -520,6 +520,18 @@ public enum AppStrings {
         public static func statusUnknown(_ locale: AppLocale, status: String) -> String {
             locale == .zhCN ? "未知: \(status)" : "Unknown: \(status)"
         }
+
+        public static func runValidationSectionTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "运行验证" : "Run Validation"
+        }
+
+        public static func runButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "运行" : "Run"
+        }
+
+        public static func processingLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "处理中…" : "Processing…"
+        }
     }
 
     // MARK: - Timeline
