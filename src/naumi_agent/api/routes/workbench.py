@@ -584,6 +584,25 @@ async def get_missions(
     )
 
 
+@router.get("/workbench/sessions/{session_id}/missions/{mission_id}")
+async def get_mission(
+    session_id: str,
+    mission_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    mission = await engine.workbench_service.get_mission(session_id, mission_id)
+    if mission is None:
+        raise HTTPException(status_code=404, detail="mission 不存在")
+    return mission
+
+
 @router.post("/workbench/sessions/{session_id}/missions", status_code=201)
 async def create_workbench_mission(
     session_id: str,

@@ -96,6 +96,7 @@ class _FakeWorkbenchService:
         self.listed_failures: list[dict] = []
         self.listed_issues: list[dict] = []
         self.requested_issues: list[dict] = []
+        self.requested_missions: list[dict] = []
         self.listed_missions: list[dict] = []
         self.listed_leases: list[dict] = []
         self.listed_intent_locks: list[dict] = []
@@ -711,6 +712,22 @@ class _FakeWorkbenchService:
             ],
             "status": status,
             "limit": limit,
+        }
+
+    async def get_mission(self, session_id: str, mission_id: str):
+        self.requested_missions.append(
+            {"session_id": session_id, "mission_id": mission_id}
+        )
+        if mission_id == "missing-mission":
+            return None
+        return {
+            "id": mission_id,
+            "session_id": session_id,
+            "title": "Mac 工作台",
+            "goal": "补齐 Mission 详情 API",
+            "status": "planning",
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
         }
 
     async def list_intent_locks(self, session_id: str, mission_id: str):
@@ -1480,6 +1497,46 @@ async def test_get_missions_endpoint_without_status_filter() -> None:
     assert response.model_dump()["status"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["missions"]) == 1
+
+
+def test_get_mission_route_returns_single_mission_detail() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/missions/mission-2")
+
+    assert response.status_code == 200
+    assert engine.workbench_service.requested_missions == [
+        {"session_id": "sess-1", "mission_id": "mission-2"}
+    ]
+    assert response.json() == {
+        "id": "mission-2",
+        "session_id": "sess-1",
+        "title": "Mac 工作台",
+        "goal": "补齐 Mission 详情 API",
+        "status": "planning",
+        "created_at": "2024-01-01T00:00:00",
+        "updated_at": "2024-01-01T00:00:00",
+    }
+
+
+def test_get_mission_route_returns_404_for_missing_mission() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/missions/missing-mission")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "mission 不存在"
+    assert engine.workbench_service.requested_missions == [
+        {"session_id": "sess-1", "mission_id": "missing-mission"}
+    ]
 
 
 @pytest.mark.asyncio

@@ -97,6 +97,39 @@ async def test_create_issue_creates_backing_task_and_issue_metadata(tmp_path) ->
 
 
 @pytest.mark.asyncio
+async def test_get_mission_returns_json_friendly_mission(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    mission = await service.create_mission(
+        session_id="s",
+        title="Mac 工作台",
+        goal="让治理页可以直接读取 Mission 详情",
+    )
+
+    detail = await service.get_mission("s", mission.id)
+
+    assert detail is not None
+    assert detail["id"] == mission.id
+    assert detail["session_id"] == "s"
+    assert detail["title"] == "Mac 工作台"
+    assert detail["goal"] == "让治理页可以直接读取 Mission 详情"
+    assert detail["status"] == "planning"
+
+
+@pytest.mark.asyncio
+async def test_get_mission_returns_none_for_missing_mission(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    assert await service.get_mission("s", "missing-mission") is None
+
+
+@pytest.mark.asyncio
 async def test_get_issue_returns_json_friendly_issue_metadata(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")
