@@ -811,7 +811,7 @@ async def expire_workbench_leases(
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     market = _get_task_market(engine)
-    expired = await market.expire_overdue_leases()
+    expired = await market.expire_overdue_leases(session_id=session_id)
     return {"expired": [asdict(lease) for lease in expired]}
 
 
