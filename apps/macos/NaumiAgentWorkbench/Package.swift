@@ -17,6 +17,10 @@ let package = Package(
             name: "NaumiAgentWorkbench",
             targets: ["NaumiAgentWorkbench"]
         ),
+        .executable(
+            name: "NaumiAgentWorkbenchSnapshot",
+            targets: ["NaumiAgentWorkbenchSnapshot"]
+        ),
     ],
     targets: [
         .target(
@@ -27,6 +31,11 @@ let package = Package(
             name: "NaumiAgentWorkbench",
             dependencies: ["NaumiAgentWorkbenchCore"],
             path: "Sources/NaumiAgentWorkbench"
+        ),
+        .executableTarget(
+            name: "NaumiAgentWorkbenchSnapshot",
+            dependencies: ["NaumiAgentWorkbenchCore"],
+            path: "Tools/NaumiAgentWorkbenchSnapshot"
         ),
         .testTarget(
             name: "NaumiAgentWorkbenchCoreTests",

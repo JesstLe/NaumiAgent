@@ -12,6 +12,14 @@ final class WorkbenchPreviewLoaderTests {
         #expect(mode == .enabled(.enUS))
     }
 
+    @Test func requestedRouteReadsTopNavigationRoute() {
+        let route = WorkbenchPreviewLoader.requestedRoute(
+            from: ["/bin/test", "--preview-fixture", "zh", "--preview-route", "task-market"]
+        )
+
+        #expect(route == .taskMarket)
+    }
+
     @Test func requestedModeDefaultsDisabledWhenMissingFlag() {
         let mode = WorkbenchPreviewLoader.requestedMode(from: ["/bin/test"])
 
@@ -39,12 +47,16 @@ final class WorkbenchPreviewLoaderTests {
         #expect(appState.selectedSessionID == "sess-zh-001")
         #expect(appState.sessions.count == 1)
         #expect(appState.snapshot?.sessionID == "sess-zh-001")
+        #expect(appState.isPreviewFixture == true)
         #expect(appState.daemonStatus != nil)
         #expect(appState.capabilities != nil)
         #expect(appState.missions.count == 1)
         #expect(appState.issues.count == 1)
         #expect(appState.failures.count == 1)
         #expect(!appState.timelineEvents.isEmpty)
+        #expect(appState.validationRuns.count == 2)
+        #expect(appState.contextSnapshots.count == 3)
+        #expect(appState.approvals.count == 2)
     }
 
     @Test func applyEnglishFixtureIntoAppState() throws {

@@ -24,6 +24,7 @@ public final class AppState: Sendable {
     public var agentProfiles: [AgentProfileDTO] = []
     public var lastError: APIError? = nil
     public var locale: AppLocale = .default
+    public var isPreviewFixture: Bool = false
 
     public init() {}
 

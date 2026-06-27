@@ -47,6 +47,34 @@ public enum WorkbenchPreviewLoader {
         }
     }
 
+    public static func requestedRoute(from arguments: [String]) -> AppRoute? {
+        guard let flagIndex = arguments.firstIndex(of: "--preview-route"),
+              arguments.indices.contains(flagIndex + 1) else {
+            return nil
+        }
+
+        return route(for: arguments[flagIndex + 1])
+    }
+
+    public static func route(for argument: String) -> AppRoute? {
+        switch argument.lowercased() {
+        case "dashboard", "overview":
+            return .dashboard
+        case "taskmarket", "task-market", "market":
+            return .taskMarket
+        case "worktrees", "worktree", "workspaces":
+            return .worktrees
+        case "reviews", "review":
+            return .reviews
+        case "timeline", "events":
+            return .timeline
+        case "settings", "setting":
+            return .settings
+        default:
+            return nil
+        }
+    }
+
     @MainActor
     public static func applyPreviewState(
         locale: AppLocale,
@@ -67,13 +95,14 @@ public enum WorkbenchPreviewLoader {
         appState.selectedSessionID = snapshot.sessionID
         appState.selectedWorkspace = nil
         appState.currentRoute = .dashboard
+        appState.isPreviewFixture = true
 
         appState.sessions = [previewSession(from: snapshot, locale: locale)]
         appState.missions = snapshot.missions
         appState.agentProfiles = snapshot.agentProfiles
-        appState.validationRuns = []
-        appState.contextSnapshots = []
-        appState.approvals = []
+        appState.validationRuns = previewValidationRuns(from: snapshot, locale: locale)
+        appState.contextSnapshots = previewContextSnapshots(from: snapshot, locale: locale)
+        appState.approvals = previewApprovals(from: snapshot, locale: locale)
         appState.timelineEvents = snapshot.events
         appState.issues = snapshot.issues
         appState.failures = snapshot.failures
@@ -160,5 +189,135 @@ public enum WorkbenchPreviewLoader {
             totalCostUSD: 0.0,
             status: "active"
         )
+    }
+
+    private static func previewValidationRuns(
+        from snapshot: WorkbenchSnapshotDTO,
+        locale: AppLocale
+    ) -> [ValidationRunDTO] {
+        let firstTaskID = snapshot.tasks.first?.id ?? "task-preview"
+        let secondTaskID = snapshot.tasks.dropFirst().first?.id ?? firstTaskID
+        let commandOne = locale == .zhCN
+            ? ["ruff", "check", "src/"]
+            : ["ruff", "check", "src/"]
+        let commandTwo = locale == .zhCN
+            ? ["pytest", "tests/unit/test_workbench_market.py", "-q"]
+            : ["pytest", "tests/unit/test_workbench_market.py", "-q"]
+
+        return [
+            ValidationRunDTO(
+                id: "preview-validation-1",
+                sessionID: snapshot.sessionID,
+                taskID: firstTaskID,
+                actor: "Backend-Agent",
+                command: commandOne,
+                cwd: "/Users/lv/Workspace/NaumiAgent",
+                status: "passed",
+                exitCode: 0,
+                output: locale == .zhCN ? "静态检查通过" : "Static checks passed",
+                startedAt: "2026-06-27T09:28:00",
+                completedAt: "2026-06-27T09:28:18"
+            ),
+            ValidationRunDTO(
+                id: "preview-validation-2",
+                sessionID: snapshot.sessionID,
+                taskID: secondTaskID,
+                actor: "Test-Agent",
+                command: commandTwo,
+                cwd: "/Users/lv/Workspace/NaumiAgent",
+                status: "passed",
+                exitCode: 0,
+                output: locale == .zhCN ? "12 passed" : "12 passed",
+                startedAt: "2026-06-27T09:29:00",
+                completedAt: "2026-06-27T09:29:31"
+            )
+        ]
+    }
+
+    private static func previewContextSnapshots(
+        from snapshot: WorkbenchSnapshotDTO,
+        locale: AppLocale
+    ) -> [ContextSnapshotDTO] {
+        let firstTaskID = snapshot.tasks.first?.id ?? "task-preview"
+        let secondTaskID = snapshot.tasks.dropFirst().first?.id ?? firstTaskID
+        return [
+            ContextSnapshotDTO(
+                id: "preview-context-1",
+                sessionID: snapshot.sessionID,
+                agentID: "Backend-Agent",
+                taskID: firstTaskID,
+                health: "good",
+                reasons: locale == .zhCN
+                    ? ["引用文件已同步", "租约上下文完整"]
+                    : ["Referenced files are current", "Lease context is complete"],
+                createdAt: "2026-06-27T09:35:00"
+            ),
+            ContextSnapshotDTO(
+                id: "preview-context-2",
+                sessionID: snapshot.sessionID,
+                agentID: "Reviewer-Agent",
+                taskID: secondTaskID,
+                health: "stale",
+                reasons: locale == .zhCN
+                    ? ["分支已更新", "需要刷新差异上下文"]
+                    : ["Branch was updated", "Diff context needs refresh"],
+                createdAt: "2026-06-27T09:18:00"
+            ),
+            ContextSnapshotDTO(
+                id: "preview-context-3",
+                sessionID: snapshot.sessionID,
+                agentID: "Planner-Agent",
+                taskID: firstTaskID,
+                health: "conflicted",
+                reasons: locale == .zhCN
+                    ? ["目标锁策略存在冲突"]
+                    : ["Intent lock policy conflict"],
+                createdAt: "2026-06-27T09:09:00"
+            )
+        ]
+    }
+
+    private static func previewApprovals(
+        from snapshot: WorkbenchSnapshotDTO,
+        locale: AppLocale
+    ) -> [ApprovalDTO] {
+        let missionID = snapshot.missions.first?.id ?? "mission-preview"
+        let firstTaskID = snapshot.tasks.first?.id ?? "task-preview"
+        let secondTaskID = snapshot.tasks.dropFirst().first?.id ?? firstTaskID
+
+        return [
+            ApprovalDTO(
+                id: "preview-approval-1",
+                sessionID: snapshot.sessionID,
+                missionID: missionID,
+                taskID: firstTaskID,
+                state: "waiting",
+                title: locale == .zhCN ? "任务市场租约策略" : "Task Market Lease Policy",
+                detail: locale == .zhCN
+                    ? "高风险并发路径需要人工确认。"
+                    : "High-risk concurrency path requires human confirmation.",
+                requester: "Backend-Agent",
+                reviewer: "Human",
+                decisionNote: "",
+                createdAt: "2026-06-27T09:28:00",
+                updatedAt: "2026-06-27T09:36:00"
+            ),
+            ApprovalDTO(
+                id: "preview-approval-2",
+                sessionID: snapshot.sessionID,
+                missionID: missionID,
+                taskID: secondTaskID,
+                state: "waiting",
+                title: locale == .zhCN ? "验证失败卡片" : "Validation Failure Cards",
+                detail: locale == .zhCN
+                    ? "需要确认失败卡片的文案和重试动作。"
+                    : "Confirm failure-card copy and retry action.",
+                requester: "Test-Agent",
+                reviewer: "Human",
+                decisionNote: "",
+                createdAt: "2026-06-27T09:21:00",
+                updatedAt: "2026-06-27T09:31:00"
+            )
+        ]
     }
 }

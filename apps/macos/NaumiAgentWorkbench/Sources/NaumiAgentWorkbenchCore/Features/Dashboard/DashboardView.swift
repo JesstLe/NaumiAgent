@@ -47,12 +47,6 @@ public struct DashboardView: View {
         let market = TaskMarketDesignPresentation(snapshot: snapshot)
 
         return VStack(spacing: 0) {
-            workbenchHeader(presentation: presentation)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
-
-            Divider()
-
             HStack(spacing: 0) {
                 workbenchLeftRail(presentation: presentation, market: market)
                     .frame(width: 302)
@@ -79,7 +73,7 @@ public struct DashboardView: View {
     private func workbenchHeader(presentation: DashboardSnapshotPresentation) -> some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("NaumiAgent Workbench")
+                Text(AppStrings.Dashboard.title(appState.locale))
                     .font(.system(size: 18, weight: .semibold))
                 Text(presentation.workbench.leftMissionTitle ?? AppStrings.Dashboard.title(appState.locale))
                     .font(.caption)

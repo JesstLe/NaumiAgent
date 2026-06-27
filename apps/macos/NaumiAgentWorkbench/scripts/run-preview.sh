@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 locale="${1:-zh}"
+route="${2:-}"
 case "$locale" in
   zh | zh-CN | zh_cn)
     fixture_locale="zh"
@@ -12,7 +13,7 @@ case "$locale" in
     fixture_locale="en"
     ;;
   *)
-    echo "用法: ./scripts/run-preview.sh [zh|en]" >&2
+    echo "用法: ./scripts/run-preview.sh [zh|en] [dashboard|task-market|worktrees|reviews|timeline|settings]" >&2
     exit 64
     ;;
 esac
@@ -48,5 +49,10 @@ cat > "$bundle_dir/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-/usr/bin/open -n "$bundle_dir" --args --preview-fixture "$fixture_locale"
-echo "已打开 NaumiAgentWorkbench 预览模式: $fixture_locale"
+args=(--preview-fixture "$fixture_locale")
+if [[ -n "$route" ]]; then
+  args+=(--preview-route "$route")
+fi
+
+/usr/bin/open -n "$bundle_dir" --args "${args[@]}"
+echo "已打开 NaumiAgentWorkbench 预览模式: $fixture_locale ${route:+route=$route}"

@@ -26,21 +26,9 @@ public struct WorktreesView: View {
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: {
-                    Task {
-                        await daemonController.refreshContextSnapshots(limit: 50)
-                    }
-                }) {
-                    Label(
-                        AppStrings.Worktrees.refreshButton(appState.locale),
-                        systemImage: "arrow.clockwise"
-                    )
-                }
-            }
-        }
+        .background(Color(nsColor: .windowBackgroundColor))
         .task {
+            guard !appState.isPreviewFixture else { return }
             await daemonController.refreshContextSnapshots(limit: 50)
         }
     }
@@ -48,28 +36,45 @@ public struct WorktreesView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(AppStrings.Worktrees.title(appState.locale))
-                .font(.largeTitle)
-                .fontWeight(.bold)
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(AppStrings.Worktrees.title(appState.locale))
+                    .font(.system(size: 22, weight: .semibold))
 
-            HStack(spacing: 12) {
-                Text(
-                    AppStrings.Worktrees.snapshotCount(
-                        appState.locale,
-                        count: appState.contextSnapshots.count
+                HStack(spacing: 12) {
+                    Text(
+                        AppStrings.Worktrees.snapshotCount(
+                            appState.locale,
+                            count: appState.contextSnapshots.count
+                        )
                     )
-                )
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
 
-                if let sessionID = appState.selectedSessionID {
-                    Text(sessionID)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    if let sessionID = appState.selectedSessionID {
+                        Text(sessionID)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
+
+            Spacer()
+
+            Button {
+                if !appState.isPreviewFixture {
+                    Task {
+                        await daemonController.refreshContextSnapshots(limit: 50)
+                    }
+                }
+            } label: {
+                Label(
+                    AppStrings.Worktrees.refreshButton(appState.locale),
+                    systemImage: "arrow.clockwise"
+                )
+            }
+            .buttonStyle(.bordered)
         }
     }
 

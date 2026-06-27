@@ -25,7 +25,9 @@ public struct TaskMarketView: View {
 
             HStack(spacing: 0) {
                 filterRail(presentation: presentation)
-                    .frame(width: 248)
+                    .frame(width: 240, alignment: .leading)
+                    .frame(maxHeight: .infinity)
+                    .clipped()
 
                 Divider()
 
@@ -40,7 +42,9 @@ public struct TaskMarketView: View {
                 Divider()
 
                 issueInspector(issue: selected, bids: presentation.bids)
-                    .frame(width: 386)
+                    .frame(width: 320, alignment: .leading)
+                    .frame(maxHeight: .infinity)
+                    .clipped()
             }
 
             Divider()
@@ -92,10 +96,22 @@ public struct TaskMarketView: View {
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
 
-            Picker("", selection: .constant("Mac Agent Workbench MVP")) {
-                Text("Mac Agent Workbench MVP").tag("Mac Agent Workbench MVP")
+            HStack(spacing: 8) {
+                Text("Mac Agent Workbench MVP")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 6)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .labelsHidden()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondary.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
 
             HStack(spacing: 6) {
                 Circle()
@@ -134,6 +150,8 @@ public struct TaskMarketView: View {
             .frame(maxWidth: .infinity)
         }
         .padding(14)
+        .frame(width: 240, alignment: .leading)
+        .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
@@ -150,6 +168,7 @@ public struct TaskMarketView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             ForEach(filters, id: \.label) { filter in
                 HStack(spacing: 7) {
@@ -161,7 +180,9 @@ public struct TaskMarketView: View {
                         .frame(width: 6, height: 6)
                     Text(filter.label)
                         .font(.caption)
-                    Spacer()
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     Text("\(filter.count)")
                         .font(.caption2)
                         .padding(.horizontal, 7)
@@ -169,8 +190,10 @@ public struct TaskMarketView: View {
                         .background(Color.secondary.opacity(0.08))
                         .clipShape(RoundedRectangle(cornerRadius: 5))
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func marketTable(presentation: TaskMarketDesignPresentation) -> some View {
@@ -217,16 +240,16 @@ public struct TaskMarketView: View {
     }
 
     private var tableHeader: some View {
-        HStack(spacing: 10) {
-            Text("#").frame(width: 26, alignment: .leading)
-            Text(AppStrings.TaskMarket.columnIssue(appState.locale)).frame(minWidth: 190, maxWidth: .infinity, alignment: .leading)
-            Text(AppStrings.TaskMarket.columnParallelMode(appState.locale)).frame(width: 105, alignment: .leading)
-            Text(AppStrings.TaskMarket.columnRisk(appState.locale)).frame(width: 76, alignment: .leading)
-            Text(AppStrings.TaskMarket.columnDependencies(appState.locale)).frame(width: 98, alignment: .leading)
-            Text(AppStrings.TaskMarket.columnBids(appState.locale)).frame(width: 56, alignment: .leading)
-            Text(AppStrings.TaskMarket.columnLease(appState.locale)).frame(width: 92, alignment: .leading)
-            Text(AppStrings.TaskMarket.columnWorktree(appState.locale)).frame(width: 120, alignment: .leading)
-            Text(AppStrings.TaskMarket.columnStatus(appState.locale)).frame(width: 116, alignment: .leading)
+        HStack(spacing: 8) {
+            Text("#").frame(width: 22, alignment: .leading)
+            Text(AppStrings.TaskMarket.columnIssue(appState.locale)).frame(minWidth: 170, maxWidth: .infinity, alignment: .leading)
+            Text(AppStrings.TaskMarket.columnParallelMode(appState.locale)).frame(width: 82, alignment: .leading)
+            Text(AppStrings.TaskMarket.columnRisk(appState.locale)).frame(width: 62, alignment: .leading)
+            Text(AppStrings.TaskMarket.columnDependencies(appState.locale)).frame(width: 76, alignment: .leading)
+            Text(AppStrings.TaskMarket.columnBids(appState.locale)).frame(width: 44, alignment: .leading)
+            Text(AppStrings.TaskMarket.columnLease(appState.locale)).frame(width: 82, alignment: .leading)
+            Text(AppStrings.TaskMarket.columnWorktree(appState.locale)).frame(width: 95, alignment: .leading)
+            Text(AppStrings.TaskMarket.columnStatus(appState.locale)).frame(width: 90, alignment: .leading)
         }
         .font(.caption)
         .fontWeight(.semibold)
@@ -234,10 +257,10 @@ public struct TaskMarketView: View {
     }
 
     private func designIssueRow(_ row: TaskMarketDesignIssue) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Text("\(row.number)")
                 .font(.system(size: 13, weight: .medium))
-                .frame(width: 26, alignment: .leading)
+                .frame(width: 22, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title)
@@ -254,32 +277,37 @@ public struct TaskMarketView: View {
                     .background(Color.secondary.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             }
-            .frame(minWidth: 190, maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 170, maxWidth: .infinity, alignment: .leading)
 
             modeBadge(row.parallelMode)
-                .frame(width: 105, alignment: .leading)
+                .frame(width: 82, alignment: .leading)
             riskBadge(row.risk)
-                .frame(width: 76, alignment: .leading)
+                .frame(width: 62, alignment: .leading)
             Text(row.dependency)
                 .font(.caption)
                 .foregroundStyle(row.dependency.contains("Blocked") ? .red : .secondary)
-                .frame(width: 98, alignment: .leading)
+                .lineLimit(1)
+                .frame(width: 76, alignment: .leading)
             Text("\(row.bids)")
                 .font(.system(size: 13, weight: .semibold))
-                .frame(width: 56, alignment: .leading)
+                .frame(width: 44, alignment: .leading)
             Text(row.lease)
                 .font(.caption)
                 .foregroundStyle(row.lease.contains("remaining") ? .green : .primary)
-                .frame(width: 92, alignment: .leading)
+                .lineLimit(1)
+                .frame(width: 82, alignment: .leading)
             Text(row.worktree)
                 .font(.caption)
                 .foregroundStyle(row.worktree == "-" ? .secondary : .primary)
-                .frame(width: 120, alignment: .leading)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(width: 95, alignment: .leading)
             Text(row.status)
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(statusColor(row.status))
-                .frame(width: 116, alignment: .leading)
+                .lineLimit(1)
+                .frame(width: 90, alignment: .leading)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
@@ -418,12 +446,12 @@ public struct TaskMarketView: View {
                     .buttonStyle(.borderedProminent)
                 Button(appState.locale == .zhCN ? "请求方案" : "Request Proposal") {}
                     .buttonStyle(.bordered)
-                Spacer()
                 Button(appState.locale == .zhCN ? "拒绝竞标" : "Reject Bid") {}
                     .buttonStyle(.bordered)
                     .foregroundStyle(.red)
             }
             .font(.caption)
+            .controlSize(.small)
         }
         .padding(12)
         .background(Color(nsColor: .controlBackgroundColor))
@@ -531,6 +559,8 @@ public struct TaskMarketView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             Text(mode)
                 .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
     }
 
