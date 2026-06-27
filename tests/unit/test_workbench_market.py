@@ -79,3 +79,56 @@ async def test_claim_records_related_worktree_on_issue(stores) -> None:
     issue = await workbench_store.get_issue("s", task.id)
     assert issue is not None
     assert issue.related_worktree == "issue-1-backend"
+
+
+@pytest.mark.asyncio
+async def test_release_ignores_lease_from_other_session(stores) -> None:
+    task_store, workbench_store, task = stores
+    market = TaskMarket(task_store=task_store, workbench_store=workbench_store)
+    own_lease = await market.claim(
+        task_id=task.id, agent_id="Backend-Agent", duration_minutes=45
+    )
+    other_lease = await workbench_store.create_lease(
+        session_id="other-session",
+        task_id="other-task",
+        agent_id="Other-Agent",
+        expires_at="2099-01-01T00:00:00",
+    )
+
+    result = await market.release(session_id="s", lease_id=other_lease.id)
+
+    assert result is None
+    refreshed_other = await workbench_store.list_leases(
+        "other-session", state=LeaseState.ACTIVE
+    )
+    assert [lease.id for lease in refreshed_other] == [other_lease.id]
+    refreshed_own = await workbench_store.list_leases("s", state=LeaseState.ACTIVE)
+    assert [lease.id for lease in refreshed_own] == [own_lease.id]
+
+
+@pytest.mark.asyncio
+async def test_release_rejects_session_argument_that_differs_from_active_session(stores) -> None:
+    task_store, workbench_store, task = stores
+    market = TaskMarket(task_store=task_store, workbench_store=workbench_store)
+    own_lease = await market.claim(
+        task_id=task.id, agent_id="Backend-Agent", duration_minutes=45
+    )
+    other_lease = await workbench_store.create_lease(
+        session_id="other-session",
+        task_id=task.id,
+        agent_id="Other-Agent",
+        expires_at="2099-01-01T00:00:00",
+    )
+
+    result = await market.release(session_id="other-session", lease_id=other_lease.id)
+
+    assert result is None
+    refreshed_other = await workbench_store.list_leases(
+        "other-session", state=LeaseState.ACTIVE
+    )
+    assert [lease.id for lease in refreshed_other] == [other_lease.id]
+    active_task = await task_store.get_task(task.id)
+    assert active_task is not None
+    assert active_task.status == TaskStatus.IN_PROGRESS
+    refreshed_own = await workbench_store.list_leases("s", state=LeaseState.ACTIVE)
+    assert [lease.id for lease in refreshed_own] == [own_lease.id]

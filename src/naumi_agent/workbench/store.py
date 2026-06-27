@@ -746,17 +746,39 @@ class WorkbenchStore:
             row = await cursor.fetchone()
         return _row_to_lease(dict(row)) if row else None
 
-    async def update_lease_state(self, lease_id: str, state: LeaseState) -> Lease | None:
+    async def update_lease_state(
+        self,
+        lease_id: str,
+        state: LeaseState,
+        *,
+        session_id: str | None = None,
+    ) -> Lease | None:
         now = now_iso()
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
-            await db.execute(
-                "UPDATE workbench_leases SET state = ?, updated_at = ? WHERE id = ?",
-                (state.value, now, lease_id),
-            )
+            if session_id is None:
+                await db.execute(
+                    "UPDATE workbench_leases SET state = ?, updated_at = ? WHERE id = ?",
+                    (state.value, now, lease_id),
+                )
+            else:
+                await db.execute(
+                    """UPDATE workbench_leases
+                       SET state = ?, updated_at = ?
+                       WHERE id = ? AND session_id = ?""",
+                    (state.value, now, lease_id, session_id),
+                )
             await db.commit()
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute("SELECT * FROM workbench_leases WHERE id = ?", (lease_id,))
+            if session_id is None:
+                cursor = await db.execute(
+                    "SELECT * FROM workbench_leases WHERE id = ?", (lease_id,)
+                )
+            else:
+                cursor = await db.execute(
+                    "SELECT * FROM workbench_leases WHERE id = ? AND session_id = ?",
+                    (lease_id, session_id),
+                )
             row = await cursor.fetchone()
         return _row_to_lease(dict(row)) if row else None
 
