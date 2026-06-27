@@ -386,6 +386,51 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     }
 }
 
+actor FakeWorkbenchEventProvider: WorkbenchEventProviding {
+    private var continuation: AsyncThrowingStream<WorkbenchEventStreamMessage, Error>.Continuation?
+    private(set) var connectedSessionIDs: [String] = []
+
+    func connect(sessionID: String) async throws(APIError) -> any WorkbenchEventStreaming {
+        connectedSessionIDs.append(sessionID)
+        let stream = AsyncThrowingStream<WorkbenchEventStreamMessage, Error> { continuation in
+            self.continuation = continuation
+        }
+        return FakeWorkbenchEventStream(stream: stream)
+    }
+
+    func emit(_ message: WorkbenchEventStreamMessage) {
+        continuation?.yield(message)
+    }
+
+    func fail(_ error: APIError) {
+        continuation?.finish(throwing: error)
+    }
+
+    func finish() {
+        continuation?.finish()
+    }
+}
+
+struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
+    let stream: AsyncThrowingStream<WorkbenchEventStreamMessage, Error>
+
+    func next() async throws(APIError) -> WorkbenchEventStreamMessage {
+        do {
+            var iterator = stream.makeAsyncIterator()
+            guard let message = try await iterator.next() else {
+                throw APIError.networkFailure("event stream ended")
+            }
+            return message
+        } catch let error as APIError {
+            throw error
+        } catch {
+            throw .networkFailure(String(describing: error))
+        }
+    }
+
+    func cancel() async {}
+}
+
 @Suite
 final class DaemonControllerTests {
 
@@ -694,6 +739,72 @@ final class DaemonControllerTests {
         #expect(appState.sessions.isEmpty)
         #expect(appState.snapshot == nil)
         #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func eventStreamRefreshesSnapshotAndWorkbenchListsOnWorkbenchEvent() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-events"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let mission = makeMission(id: "mission-events", sessionID: "sess-events")
+        let snapshot = makeSnapshot(sessionID: "sess-events", missions: [mission])
+
+        await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-events")
+
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.startEventStream()
+
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-events"]
+        }
+        #expect(await eventProvider.connectedSessionIDs == ["sess-events"])
+
+        await eventProvider.emit(.connected(sessionID: "sess-events"))
+        await eventProvider.emit(.event(makeEvent(id: "evt-refresh", type: "issue.claimed", subjectID: "task-1")))
+
+        await waitUntil {
+            await api.snapshotCallCount >= 1 && appState.snapshot == snapshot
+        }
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.snapshot == snapshot)
+        expectWorkbenchListsPopulated(appState)
+        #expect(appState.lastError == nil)
+
+        await controller.stopEventStream()
+    }
+
+    @Test @MainActor func eventStreamFailureMarksConnectionStaleAndRecordsError() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-events"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+
+        await controller.startEventStream()
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-events"]
+        }
+        await eventProvider.fail(.networkFailure("lost websocket"))
+
+        await waitUntil {
+            appState.connectionState == .stale
+        }
+
+        #expect(appState.lastError == .networkFailure("lost websocket"))
+
+        await controller.stopEventStream()
     }
 
     @Test @MainActor func refreshConnectionSnapshotFailureSkipsPreWarmingAndKeepsSnapshotError() async throws {
@@ -2593,6 +2704,22 @@ private func configureWorkbenchListResults(for api: FakeWorkbenchAPIProvider, se
     await api.setValidationRunsResult(.success(ValidationRunsDTO(validationRuns: [run], taskID: nil, limit: 50)))
     await api.setContextSnapshotsResult(.success(ContextSnapshotsDTO(contextSnapshots: [contextSnapshot], taskID: nil, agentID: nil, limit: 50)))
     await api.setAgentProfilesResult(.success(AgentProfilesDTO(agentProfiles: [agentProfile], status: nil, limit: 50)))
+}
+
+@MainActor
+private func waitUntil(
+    timeoutNanoseconds: UInt64 = 1_000_000_000,
+    condition: @escaping @MainActor () async -> Bool,
+    sourceLocation: SourceLocation = #_sourceLocation
+) async {
+    let deadline = ContinuousClock.now + .nanoseconds(Int64(timeoutNanoseconds))
+    while ContinuousClock.now < deadline {
+        if await condition() {
+            return
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+    }
+    Issue.record("Timed out waiting for condition", sourceLocation: sourceLocation)
 }
 
 @MainActor
