@@ -559,6 +559,13 @@ class WorkbenchService:
             session_id, task_id=task_id, status=status, limit=limit
         )
 
+    async def get_failure(
+        self,
+        session_id: str,
+        failure_id: str,
+    ) -> dict[str, Any] | None:
+        return await self._workbench_store.get_failure(session_id, failure_id)
+
     async def list_leases(
         self,
         session_id: str,

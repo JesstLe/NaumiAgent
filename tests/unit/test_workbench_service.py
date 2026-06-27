@@ -799,6 +799,47 @@ async def test_list_failures_returns_store_rows_and_respects_filters(tmp_path) -
 
 
 @pytest.mark.asyncio
+async def test_get_failure_returns_single_failure(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    failure = await workbench_store.create_failure(
+        session_id="s",
+        task_id="task-a",
+        kind=FailureKind.TEST_FAILED,
+        title="测试失败",
+        detail="pytest failed",
+        source_id="run-a",
+    )
+
+    result = await service.get_failure("s", failure["id"])
+
+    assert result == failure
+
+
+@pytest.mark.asyncio
+async def test_get_failure_returns_none_for_missing_or_other_session(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    failure = await workbench_store.create_failure(
+        session_id="s",
+        task_id="task-a",
+        kind=FailureKind.TEST_FAILED,
+        title="测试失败",
+        detail="pytest failed",
+        source_id="run-a",
+    )
+
+    assert await service.get_failure("s", "missing-failure") is None
+    assert await service.get_failure("other-session", failure["id"]) is None
+
+
+@pytest.mark.asyncio
 async def test_run_validation_records_run_and_event(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")
