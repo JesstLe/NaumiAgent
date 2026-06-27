@@ -434,11 +434,68 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Refreshes the paginated session list and writes it to `appState.sessions`.
+    ///
+    /// This method does not require a selected session. On success it updates
+    /// `sessions` and clears `lastError`. On API failure the existing session
+    /// list is preserved and the error is recorded in `lastError`.
+    public func refreshSessions(page: Int, pageSize: Int) async {
+        do {
+            let list = try await apiProvider.fetchSessions(page: page, pageSize: pageSize)
+            appState.sessions = list.sessions
+            appState.lastError = nil
+        } catch {
+            appState.lastError = error
+        }
+    }
+
+    /// Selects a session by ID, clearing any session-scoped local state to avoid
+    /// stale cross-session data, then fetches its snapshot.
+    ///
+    /// If the snapshot is fetched successfully the lightweight first-screen
+    /// workbench lists are pre-warmed using the same semantics as
+    /// `refreshConnection()`. On snapshot failure the selection remains set to
+    /// the requested ID, the local session-scoped lists stay cleared, and the
+    /// error is recorded in `lastError`.
+    public func selectSession(_ sessionID: String) async {
+        appState.selectedSessionID = sessionID
+        clearSessionScopedState()
+        appState.lastError = nil
+
+        await refreshSnapshot()
+
+        guard appState.snapshot != nil else {
+            return
+        }
+
+        await refreshWorkbenchListsAfterConnection()
+    }
+
+    /// Clears local state that is scoped to the currently selected session.
+    ///
+    /// This is used when switching sessions so that the UI never shows data from
+    /// a previously selected session. Global state such as `sessions`,
+    /// `daemonStatus`, `capabilities`, `connectionState`, `locale`, and
+    /// `selectedSessionID` are intentionally preserved.
+    private func clearSessionScopedState() {
+        appState.snapshot = nil
+        appState.timelineEvents = []
+        appState.validationRuns = []
+        appState.contextSnapshots = []
+        appState.approvals = []
+        appState.failures = []
+        appState.issues = []
+        appState.leases = []
+        appState.missions = []
+        appState.agentProfiles = []
+    }
+
     /// Refreshes the snapshot for the currently selected session.
     ///
     /// When no session is selected, the most recent session from `GET /sessions`
-    /// is chosen automatically. Failures are written to `appState.lastError` and
-    /// the snapshot is cleared to avoid showing stale data.
+    /// is chosen automatically and the fetched session list is also written to
+    /// `appState.sessions`. Failures are written to `appState.lastError` and the
+    /// snapshot is cleared to avoid showing stale data.
     func refreshSnapshot() async {
         let sessionID: String
         if let existingID = appState.selectedSessionID {
@@ -446,6 +503,7 @@ public final class DaemonController: Sendable {
         } else {
             do {
                 let list = try await apiProvider.fetchSessions(page: 1, pageSize: 1)
+                appState.sessions = list.sessions
                 guard let firstSession = list.sessions.first else {
                     appState.snapshot = nil
                     return

@@ -481,6 +481,7 @@ final class DaemonControllerTests {
 
         #expect(appState.connectionState == .connected)
         #expect(appState.selectedSessionID == "sess-latest")
+        #expect(appState.sessions == [session])
         #expect(appState.snapshot == snapshot)
         #expect(appState.lastError == nil)
         expectWorkbenchListsPopulated(appState)
@@ -542,6 +543,7 @@ final class DaemonControllerTests {
 
         #expect(appState.connectionState == .connected)
         #expect(appState.selectedSessionID == nil)
+        #expect(appState.sessions.isEmpty)
         #expect(appState.snapshot == nil)
         #expect(appState.lastError == nil)
     }
@@ -569,6 +571,137 @@ final class DaemonControllerTests {
 
         #expect(appState.connectionState == .connected)
         #expect(appState.selectedSessionID == "sess-existing")
+        #expect(appState.snapshot == nil)
+        #expect(appState.lastError == .httpStatus(500))
+        expectWorkbenchListsEmpty(appState)
+    }
+
+    @Test @MainActor func refreshSessionsSuccessWritesSessionsAndClearsStaleError() async throws {
+        let appState = AppState()
+        appState.lastError = .httpStatus(500)
+
+        let session = makeSession(id: "sess-001", title: "Session One")
+        let sessions = SessionListDTO(
+            sessions: [session],
+            total: 1,
+            page: 1,
+            pageSize: 10
+        )
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setSessionsResult(.success(sessions))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshSessions(page: 1, pageSize: 10)
+
+        #expect(appState.sessions == [session])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshSessionsFailurePreservesOldSessionsAndRecordsError() async throws {
+        let appState = AppState()
+        let oldSession = makeSession(id: "sess-old", title: "Old Session")
+        appState.sessions = [oldSession]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setSessionsResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshSessions(page: 1, pageSize: 10)
+
+        #expect(appState.sessions == [oldSession])
+        #expect(appState.lastError == .httpStatus(500))
+    }
+
+    @Test @MainActor func selectSessionSuccessClearsStaleListsSelectsAndPreWarms() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-old"
+        appState.snapshot = makeSnapshot(sessionID: "sess-old", missions: [])
+        appState.timelineEvents = [makeEvent(id: "evt-old", type: "old.event", subjectID: "old")]
+        appState.validationRuns = [ValidationRunDTO(
+            id: "run-old",
+            sessionID: "sess-old",
+            taskID: "task-old",
+            actor: "Runner",
+            command: [],
+            cwd: "",
+            status: "passed",
+            exitCode: 0,
+            output: "",
+            startedAt: "2026-06-27T05:00:00",
+            completedAt: "2026-06-27T05:00:01"
+        )]
+        appState.contextSnapshots = [ContextSnapshotDTO(
+            id: "ctx-old",
+            sessionID: "sess-old",
+            agentID: "agent-old",
+            taskID: "task-old",
+            health: "good",
+            reasons: [],
+            createdAt: "2026-06-27T05:00:00"
+        )]
+        appState.approvals = [makeApproval(id: "approval-old", missionID: "mission-old", state: "waiting")]
+        appState.failures = [makeFailure(id: "failure-old", taskID: "task-old", status: "open")]
+        appState.issues = [makeIssue(taskID: "task-old")]
+        appState.leases = [makeLease(id: "lease-old", taskID: "task-old", state: "active")]
+        appState.missions = [makeMission(id: "mission-old", sessionID: "sess-old")]
+        appState.agentProfiles = [makeAgentProfile(id: "agent-old", sessionID: "sess-old", status: "idle")]
+
+        let api = FakeWorkbenchAPIProvider()
+        let snapshot = makeSnapshot(sessionID: "sess-new", missions: [])
+        await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-new")
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.selectSession("sess-new")
+
+        #expect(appState.selectedSessionID == "sess-new")
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+        expectWorkbenchListsPopulated(appState)
+    }
+
+    @Test @MainActor func selectSessionSnapshotFailureClearsListsKeepsSelectionAndSkipsPreWarm() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-old"
+        appState.snapshot = makeSnapshot(sessionID: "sess-old", missions: [])
+        appState.timelineEvents = [makeEvent(id: "evt-old", type: "old.event", subjectID: "old")]
+        appState.validationRuns = [ValidationRunDTO(
+            id: "run-old",
+            sessionID: "sess-old",
+            taskID: "task-old",
+            actor: "Runner",
+            command: [],
+            cwd: "",
+            status: "passed",
+            exitCode: 0,
+            output: "",
+            startedAt: "2026-06-27T05:00:00",
+            completedAt: "2026-06-27T05:00:01"
+        )]
+        appState.contextSnapshots = [ContextSnapshotDTO(
+            id: "ctx-old",
+            sessionID: "sess-old",
+            agentID: "agent-old",
+            taskID: "task-old",
+            health: "good",
+            reasons: [],
+            createdAt: "2026-06-27T05:00:00"
+        )]
+        appState.approvals = [makeApproval(id: "approval-old", missionID: "mission-old", state: "waiting")]
+        appState.failures = [makeFailure(id: "failure-old", taskID: "task-old", status: "open")]
+        appState.issues = [makeIssue(taskID: "task-old")]
+        appState.leases = [makeLease(id: "lease-old", taskID: "task-old", state: "active")]
+        appState.missions = [makeMission(id: "mission-old", sessionID: "sess-old")]
+        appState.agentProfiles = [makeAgentProfile(id: "agent-old", sessionID: "sess-old", status: "idle")]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setSnapshotResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.selectSession("sess-new")
+
+        #expect(appState.selectedSessionID == "sess-new")
         #expect(appState.snapshot == nil)
         #expect(appState.lastError == .httpStatus(500))
         expectWorkbenchListsEmpty(appState)
@@ -2486,5 +2619,19 @@ private func makeFailure(id: String, taskID: String, status: String) -> FailureD
         sourceID: "run-001",
         status: status,
         createdAt: "2026-06-27T06:00:00"
+    )
+}
+
+private func makeSession(id: String, title: String) -> SessionDTO {
+    SessionDTO(
+        id: id,
+        title: title,
+        model: "gpt-4o",
+        createdAt: "2026-06-27T06:00:00",
+        updatedAt: "2026-06-27T06:30:00",
+        messageCount: 1,
+        totalTokens: 10,
+        totalCostUSD: 0.001,
+        status: "active"
     )
 }
