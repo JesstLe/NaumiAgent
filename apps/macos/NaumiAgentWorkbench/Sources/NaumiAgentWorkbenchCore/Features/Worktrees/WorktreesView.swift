@@ -72,7 +72,7 @@ public struct WorktreesView: View {
         HStack(alignment: .center, spacing: 16) {
             Text(AppStrings.Worktrees.title(appState.locale))
                 .font(.system(size: 17, weight: .semibold))
-            Text(subtitleText(presentation: presentation))
+            Text("\(AppStrings.Worktrees.subtitle(appState.locale)) · \(subtitleText(presentation: presentation))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
