@@ -471,6 +471,33 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Marks a worktree as kept and refreshes worktrees plus audit events.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. The API is the only
+    /// writer; on success the local worktree list and timeline events are
+    /// refreshed from the backend. Failures preserve existing local worktree
+    /// state and record `lastError`.
+    public func keepWorktree(name: String, actor: String, reason: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            _ = try await apiProvider.keepWorktree(
+                sessionID: sessionID,
+                name: name,
+                actor: actor,
+                reason: reason
+            )
+            await refreshWorktrees()
+            await refreshEvents(limit: 50)
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Fetches missions for the currently selected session.
     ///
     /// Requires `appState.selectedSessionID` to be set. On success the missions
