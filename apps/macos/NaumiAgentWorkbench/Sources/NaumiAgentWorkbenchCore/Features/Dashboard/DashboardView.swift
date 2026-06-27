@@ -376,7 +376,7 @@ public struct DashboardView: View {
                 dottedCanvasBackground
                 canvasConnectors
 
-                VStack(spacing: 18) {
+                VStack(spacing: 12) {
                     HStack {
                         Spacer()
                         if let mission = presentation.workbench.canvasNodes.first(where: { $0.kind == .mission }) {
@@ -386,7 +386,7 @@ public struct DashboardView: View {
                         Spacer()
                     }
 
-                    HStack(alignment: .center, spacing: 16) {
+                    HStack(alignment: .center, spacing: 14) {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("ISSUES")
                                 .font(.caption)
@@ -398,7 +398,7 @@ public struct DashboardView: View {
                         }
                         .frame(width: 220)
 
-                        VStack(spacing: 14) {
+                        VStack(spacing: 8) {
                             ForEach(presentation.workbench.canvasNodes.filter { $0.kind == .agents }, id: \.id) { node in
                                 canvasNodeView(node: node)
                             }
@@ -408,7 +408,7 @@ public struct DashboardView: View {
                         }
                         .frame(width: 160)
 
-                        VStack(spacing: 14) {
+                        VStack(spacing: 8) {
                             ForEach(presentation.workbench.canvasNodes.filter { $0.kind == .worktrees || $0.kind == .validation || $0.kind == .failure || $0.kind == .approval }, id: \.id) { node in
                                 canvasNodeView(node: node)
                             }
@@ -416,7 +416,7 @@ public struct DashboardView: View {
                         .frame(width: 240)
                     }
                 }
-                .padding(24)
+                .padding(16)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .textBackgroundColor))
@@ -455,7 +455,7 @@ public struct DashboardView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
-        .padding(10)
+        .padding(8)
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 7)
@@ -481,7 +481,7 @@ public struct DashboardView: View {
                 .fill(title.contains("Backend") ? .blue : .green)
                 .frame(width: 7, height: 7)
         }
-        .padding(9)
+        .padding(8)
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 7)
@@ -523,7 +523,7 @@ public struct DashboardView: View {
     }
 
     private func canvasNodeView(node: DashboardCanvasNode) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Image(systemName: iconName(for: node.kind))
                     .font(.system(size: 15, weight: .semibold))
@@ -537,9 +537,9 @@ public struct DashboardView: View {
             }
 
             Text(node.title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .lineLimit(2)
-                .frame(minHeight: 34, alignment: .topLeading)
+                .frame(minHeight: 22, alignment: .topLeading)
 
             HStack {
                 Text(subtitle(for: node))
@@ -553,8 +553,8 @@ public struct DashboardView: View {
                     .lineLimit(1)
             }
         }
-        .padding(12)
-        .frame(height: 126)
+        .padding(9)
+        .frame(height: 88)
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
