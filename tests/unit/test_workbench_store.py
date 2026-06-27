@@ -853,7 +853,7 @@ async def test_list_leases_filters_by_session_state_task_agent_and_orders_newest
 
 
 @pytest.mark.asyncio
-async def test_list_events_filters_by_type_subject_id_actor_and_preserves_order(
+async def test_list_events_filters_by_type_subject_id_actor_and_returns_newest_first(
     store: WorkbenchStore,
 ) -> None:
     event_a = await store.append_event(
@@ -893,21 +893,21 @@ async def test_list_events_filters_by_type_subject_id_actor_and_preserves_order(
     )
 
     all_events = await store.list_events("s", limit=50)
-    assert [e.id for e in all_events] == [event_a.id, event_b.id, event_c.id, event_d.id]
+    assert [e.id for e in all_events] == [event_d.id, event_c.id, event_b.id, event_a.id]
 
     by_type = await store.list_events("s", event_type="issue.created", limit=50)
-    assert [e.id for e in by_type] == [event_b.id, event_c.id]
+    assert [e.id for e in by_type] == [event_c.id, event_b.id]
 
     by_subject = await store.list_events("s", subject_id="task-1", limit=50)
     assert [e.id for e in by_subject] == [event_b.id]
 
     by_actor = await store.list_events("s", actor="Human", limit=50)
-    assert [e.id for e in by_actor] == [event_a.id, event_d.id]
+    assert [e.id for e in by_actor] == [event_d.id, event_a.id]
 
     combined = await store.list_events(
         "s", event_type="issue.created", actor="Planner-Agent", limit=50
     )
-    assert [e.id for e in combined] == [event_b.id, event_c.id]
+    assert [e.id for e in combined] == [event_c.id, event_b.id]
 
     limited = await store.list_events("s", event_type="issue.created", limit=1)
     assert [e.id for e in limited] == [event_c.id]

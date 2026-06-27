@@ -637,7 +637,7 @@ class WorkbenchStore:
                 params,
             )
             rows = await cursor.fetchall()
-        return [_row_to_event(dict(row)) for row in reversed(rows)]
+        return [_row_to_event(dict(row)) for row in rows]
 
     async def add_intent_lock(
         self,
