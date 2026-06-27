@@ -1431,6 +1431,51 @@ async def test_list_leases_returns_wrapper_and_json_friendly_state_strings(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_get_lease_returns_json_friendly_lease_detail(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    lease = await workbench_store.create_lease(
+        session_id="s",
+        task_id="task-a",
+        agent_id="agent-1",
+        expires_at="2099-01-01T00:00:00",
+        worktree_name="wt-a",
+    )
+
+    result = await service.get_lease("s", lease.id)
+
+    assert result is not None
+    assert result["id"] == lease.id
+    assert result["session_id"] == "s"
+    assert result["task_id"] == "task-a"
+    assert result["agent_id"] == "agent-1"
+    assert result["state"] == "active"
+    assert result["worktree_name"] == "wt-a"
+
+
+@pytest.mark.asyncio
+async def test_get_lease_returns_none_for_missing_or_other_session(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    lease = await workbench_store.create_lease(
+        session_id="s",
+        task_id="task-a",
+        agent_id="agent-1",
+        expires_at="2099-01-01T00:00:00",
+        worktree_name="wt-a",
+    )
+
+    assert await service.get_lease("s", "missing-lease") is None
+    assert await service.get_lease("other", lease.id) is None
+
+
+@pytest.mark.asyncio
 async def test_list_intent_locks_returns_json_friendly_strings(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")

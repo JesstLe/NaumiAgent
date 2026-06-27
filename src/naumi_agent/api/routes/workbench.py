@@ -1049,6 +1049,25 @@ async def get_leases(
     )
 
 
+@router.get("/workbench/sessions/{session_id}/leases/{lease_id}")
+async def get_lease(
+    session_id: str,
+    lease_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    lease = await engine.workbench_service.get_lease(session_id, lease_id)
+    if lease is None:
+        raise HTTPException(status_code=404, detail="租约不存在")
+    return lease
+
+
 @router.get(
     "/workbench/sessions/{session_id}/approvals",
     response_model=ApprovalsResponse,

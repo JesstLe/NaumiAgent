@@ -100,6 +100,7 @@ class _FakeWorkbenchService:
         self.requested_failures: list[dict] = []
         self.listed_issues: list[dict] = []
         self.requested_issues: list[dict] = []
+        self.requested_leases: list[dict] = []
         self.requested_missions: list[dict] = []
         self.listed_missions: list[dict] = []
         self.listed_leases: list[dict] = []
@@ -760,6 +761,22 @@ class _FakeWorkbenchService:
             "task_id": task_id,
             "agent_id": agent_id,
             "limit": limit,
+        }
+
+    async def get_lease(self, session_id: str, lease_id: str):
+        self.requested_leases.append({"session_id": session_id, "lease_id": lease_id})
+        if lease_id == "missing-lease":
+            return None
+        return {
+            "id": lease_id,
+            "session_id": session_id,
+            "task_id": "task-1",
+            "agent_id": "agent-1",
+            "state": "active",
+            "expires_at": "2024-01-01T01:00:00",
+            "worktree_name": "wt-1",
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
         }
 
     async def list_missions(
@@ -2949,6 +2966,49 @@ async def test_get_leases_endpoint_without_filters() -> None:
     assert response.model_dump()["agent_id"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["leases"]) == 1
+
+
+def test_get_lease_route_returns_single_lease() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/leases/lease-2")
+
+    assert response.status_code == 200
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_leases == [
+        {"session_id": "sess-1", "lease_id": "lease-2"}
+    ]
+    assert response.json() == {
+        "id": "lease-2",
+        "session_id": "sess-1",
+        "task_id": "task-1",
+        "agent_id": "agent-1",
+        "state": "active",
+        "expires_at": "2024-01-01T01:00:00",
+        "worktree_name": "wt-1",
+        "created_at": "2024-01-01T00:00:00",
+        "updated_at": "2024-01-01T00:00:00",
+    }
+
+
+def test_get_lease_route_returns_404_for_missing_lease() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions/sess-1/leases/missing-lease")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "租约不存在"}
+    assert engine.workbench_service.requested_leases == [
+        {"session_id": "sess-1", "lease_id": "missing-lease"}
+    ]
 
 
 @pytest.mark.asyncio

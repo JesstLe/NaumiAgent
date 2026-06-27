@@ -602,6 +602,12 @@ class WorkbenchService:
             "limit": limit,
         }
 
+    async def get_lease(self, session_id: str, lease_id: str) -> dict[str, Any] | None:
+        lease = await self._workbench_store.get_lease(session_id, lease_id)
+        if lease is None:
+            return None
+        return self._lease_to_dict(lease)
+
     async def list_missions(
         self,
         session_id: str,
