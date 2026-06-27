@@ -14,6 +14,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var approvalsResult: Result<ApprovalsDTO, APIError>?
     var failuresResult: Result<FailuresDTO, APIError>?
     var issuesResult: Result<IssuesDTO, APIError>?
+    var missionsResult: Result<MissionsDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
@@ -112,6 +113,17 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> IssuesDTO {
         guard let result = issuesResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchMissions(
+        sessionID: String,
+        status: String?,
+        limit: Int
+    ) async throws(APIError) -> MissionsDTO {
+        guard let result = missionsResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -588,7 +600,7 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func createMissionSuccessRefreshesSnapshotAndIssues() async throws {
+    @Test @MainActor func createMissionSuccessRefreshesMissionsIssuesAndSnapshot() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -596,16 +608,19 @@ final class DaemonControllerTests {
         let mission = makeMission(id: "mission-001", sessionID: "sess-001")
         let snapshot = makeSnapshot(sessionID: "sess-001", missions: [mission])
         let issues = IssuesDTO(issues: [], missionID: nil, riskLevel: nil, limit: 50)
+        let missions = MissionsDTO(missions: [mission], status: nil, limit: 50)
 
         await api.setCreateMissionResult(.success(mission))
         await api.setSnapshotResult(.success(snapshot))
         await api.setIssuesResult(.success(issues))
+        await api.setMissionsResult(.success(missions))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createMission(title: "Mac 工作台", goal: "补齐 API 调用面")
 
-        #expect(appState.snapshot == snapshot)
+        #expect(appState.missions == [mission])
         #expect(appState.issues.isEmpty)
+        #expect(appState.snapshot == snapshot)
         #expect(appState.lastError == nil)
     }
 
@@ -645,17 +660,66 @@ final class DaemonControllerTests {
         let api = FakeWorkbenchAPIProvider()
         let mission = makeMission(id: "mission-001", sessionID: "sess-001")
         let issues = IssuesDTO(issues: [], missionID: nil, riskLevel: nil, limit: 50)
+        let missions = MissionsDTO(missions: [mission], status: nil, limit: 50)
 
         await api.setCreateMissionResult(.success(mission))
         await api.setSnapshotResult(.failure(.httpStatus(503)))
         await api.setIssuesResult(.success(issues))
+        await api.setMissionsResult(.success(missions))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createMission(title: "Mac 工作台", goal: "补齐 API 调用面")
 
+        #expect(appState.missions == [mission])
         #expect(appState.issues.isEmpty)
         #expect(appState.snapshot == nil)
         #expect(appState.lastError == .httpStatus(503))
+    }
+
+    @Test @MainActor func refreshMissionsSuccessWritesMissions() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let mission = makeMission(id: "mission-001", sessionID: "sess-001")
+        let missions = MissionsDTO(missions: [mission], status: "active", limit: 25)
+
+        await api.setMissionsResult(.success(missions))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshMissions(status: "active", limit: 25)
+
+        #expect(appState.missions == [mission])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshMissionsWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshMissions(status: "active", limit: 25)
+
+        #expect(appState.missions.isEmpty)
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+    }
+
+    @Test @MainActor func refreshMissionsFailurePreservesOldMissions() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleMission = makeMission(id: "mission-stale", sessionID: "sess-001")
+        appState.missions = [staleMission]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setMissionsResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshMissions(status: "active", limit: 25)
+
+        #expect(appState.missions == [staleMission])
+        #expect(appState.lastError == .httpStatus(500))
     }
 
     @Test @MainActor func attachIssueSuccessRefreshesSnapshotAndMissionIssues() async throws {
@@ -1471,6 +1535,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setIssuesResult(_ result: Result<IssuesDTO, APIError>) {
         issuesResult = result
+    }
+
+    fileprivate func setMissionsResult(_ result: Result<MissionsDTO, APIError>) {
+        missionsResult = result
     }
 
     fileprivate func setClaimIssueResult(_ result: Result<LeaseDTO, APIError>) {

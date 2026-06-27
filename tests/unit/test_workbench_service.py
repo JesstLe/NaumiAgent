@@ -639,3 +639,78 @@ async def test_list_issues_returns_json_friendly_strings_and_respects_filters(
     limited = await service.list_issues("s", limit=2)
     assert len(limited["issues"]) == 2
     assert limited["limit"] == 2
+
+
+
+@pytest.mark.asyncio
+async def test_list_missions_returns_wrapper_and_json_friendly_fields(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    mission = await workbench_store.create_mission("s", "Mac 工作台", "可视化治理")
+
+    all_missions = await service.list_missions("s", limit=50)
+    assert all_missions["missions"][0]["id"] == mission.id
+    assert all_missions["missions"][0]["title"] == "Mac 工作台"
+    assert all_missions["status"] is None
+    assert all_missions["limit"] == 50
+    assert all(isinstance(m["status"], str) for m in all_missions["missions"])
+
+    filtered = await service.list_missions("s", status="planning", limit=10)
+    assert len(filtered["missions"]) == 1
+    assert filtered["status"] == "planning"
+    assert filtered["limit"] == 10
+
+
+@pytest.mark.asyncio
+async def test_list_missions_filters_by_status(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    await workbench_store.create_mission("s", "Planning", "Goal")
+    active = await workbench_store.create_mission("s", "Active", "Goal")
+    async with aiosqlite.connect(workbench_store._db_path) as db:
+        await db.execute(
+            "UPDATE workbench_missions SET status = ? WHERE id = ?",
+            ("active", active.id),
+        )
+        await db.commit()
+
+    result = await service.list_missions("s", status="active", limit=50)
+    assert [m["id"] for m in result["missions"]] == [active.id]
+    assert result["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_snapshot_mission_order_unchanged_by_list_missions_params(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    mission_a = await service.create_mission(session_id="s", title="A", goal="G")
+    mission_b = await service.create_mission(session_id="s", title="B", goal="G")
+
+    async with aiosqlite.connect(workbench_store._db_path) as db:
+        await db.execute(
+            "UPDATE workbench_missions SET created_at = ?, updated_at = ? WHERE id = ?",
+            ("2026-06-27T08:00:00", "2026-06-27T08:00:00", mission_a.id),
+        )
+        await db.execute(
+            "UPDATE workbench_missions SET created_at = ?, updated_at = ? WHERE id = ?",
+            ("2026-06-27T08:01:00", "2026-06-27T08:01:00", mission_b.id),
+        )
+        await db.commit()
+
+    snapshot = await service.dashboard_snapshot("s")
+    assert [m["id"] for m in snapshot["missions"]] == [mission_a.id, mission_b.id]
+
+    newest = await workbench_store.list_missions("s", newest_first=True, limit=1)
+    assert [m.id for m in newest] == [mission_b.id]
+
+    snapshot_after = await service.dashboard_snapshot("s")
+    assert [m["id"] for m in snapshot_after["missions"]] == [mission_a.id, mission_b.id]

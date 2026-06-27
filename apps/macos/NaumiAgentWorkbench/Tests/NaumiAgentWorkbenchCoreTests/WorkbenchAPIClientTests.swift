@@ -624,6 +624,81 @@ final class WorkbenchAPIClientTests {
         #expect(response.issues.isEmpty)
     }
 
+    @Test func fetchMissionsWithStatus() async throws {
+        let json = Data(
+            """
+            {"missions":[{"id":"mission-001","session_id":"sess-001","title":"Mac 工作台","goal":"补齐 API 调用面","status":"active","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"status":"active","limit":25}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.path == "/api/v1/workbench/sessions/sess-001/missions",
+                  query["limit"] == "25",
+                  query["status"] == "active" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchMissions(sessionID: "sess-001", status: "active", limit: 25)
+
+        #expect(response.status == "active")
+        #expect(response.limit == 25)
+        #expect(response.missions.count == 1)
+
+        let mission = try #require(response.missions.first)
+        #expect(mission.id == "mission-001")
+        #expect(mission.sessionID == "sess-001")
+        #expect(mission.title == "Mac 工作台")
+        #expect(mission.goal == "补齐 API 调用面")
+        #expect(mission.status == "active")
+    }
+
+    @Test func fetchMissionsWithoutStatus() async throws {
+        let json = Data(
+            """
+            {"missions":[],"status":null,"limit":50}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/missions?limit=50" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchMissions(sessionID: "sess-001", status: nil, limit: 50)
+
+        #expect(response.status == nil)
+        #expect(response.limit == 50)
+        #expect(response.missions.isEmpty)
+    }
+
     @Test func claimIssue() async throws {
         let leaseJSON = Data(
             """

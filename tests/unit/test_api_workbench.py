@@ -32,6 +32,7 @@ from naumi_agent.api.routes.workbench import (
     get_daemon_status,
     get_failures,
     get_issues,
+    get_missions,
     get_validation_runs,
     get_workbench_capabilities,
     get_workbench_events,
@@ -75,6 +76,7 @@ class _FakeWorkbenchService:
         self.listed_approvals: list[dict] = []
         self.listed_failures: list[dict] = []
         self.listed_issues: list[dict] = []
+        self.listed_missions: list[dict] = []
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
@@ -430,6 +432,35 @@ class _FakeWorkbenchService:
             "limit": limit,
         }
 
+    async def list_missions(
+        self,
+        session_id: str,
+        status: str | None = None,
+        limit: int = 50,
+    ):
+        self.listed_missions.append(
+            {
+                "session_id": session_id,
+                "status": status,
+                "limit": limit,
+            }
+        )
+        return {
+            "missions": [
+                {
+                    "id": "mission-1",
+                    "session_id": session_id,
+                    "title": "Mac 工作台",
+                    "goal": "补齐 API 调用面",
+                    "status": status or "planning",
+                    "created_at": "2024-01-01T00:00:00",
+                    "updated_at": "2024-01-01T00:00:00",
+                }
+            ],
+            "status": status,
+            "limit": limit,
+        }
+
 
 class FakeTaskMarket:
     def __init__(self) -> None:
@@ -714,6 +745,63 @@ async def test_create_mission_endpoint_returns_created_mission() -> None:
     assert response["goal"] == "可视化治理多 Agent 研发"
     assert "id" in response
     assert response["status"] == "planning"
+
+
+@pytest.mark.asyncio
+async def test_get_missions_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_missions("missing", _fake_request(engine), status=None, limit=10, auth="test")
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_get_missions_endpoint_returns_missions_and_params() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_missions(
+        "sess-1", _fake_request(engine), status="active", limit=25, auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_missions == [
+        {"session_id": "sess-1", "status": "active", "limit": 25}
+    ]
+    assert response.model_dump() == {
+        "missions": [
+            {
+                "id": "mission-1",
+                "session_id": "sess-1",
+                "title": "Mac 工作台",
+                "goal": "补齐 API 调用面",
+                "status": "active",
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+            }
+        ],
+        "status": "active",
+        "limit": 25,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_missions_endpoint_without_status_filter() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_missions(
+        "sess-1", _fake_request(engine), status=None, limit=50, auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_missions == [
+        {"session_id": "sess-1", "status": None, "limit": 50}
+    ]
+    assert response.model_dump()["status"] is None
+    assert response.model_dump()["limit"] == 50
+    assert len(response.model_dump()["missions"]) == 1
 
 
 @pytest.mark.asyncio

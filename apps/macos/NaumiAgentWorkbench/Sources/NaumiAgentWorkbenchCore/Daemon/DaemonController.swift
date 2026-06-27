@@ -214,6 +214,33 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Fetches missions for the currently selected session.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success the missions
+    /// are written to `appState.missions`; on failure `appState.lastError` is
+    /// set. Missing session clears the local missions list to avoid showing stale
+    /// data from another session. API failures leave the local list
+    /// unchanged.
+    public func refreshMissions(status: String? = nil, limit: Int = 50) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.missions = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchMissions(
+                sessionID: sessionID,
+                status: status,
+                limit: limit
+            )
+            appState.missions = response.missions
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Refreshes the snapshot for the currently selected session.
     ///
     /// When no session is selected, the most recent session from `GET /sessions`
@@ -322,12 +349,14 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Creates a mission in the selected session and refreshes the snapshot
-    /// and issues list on success.
+    /// Creates a mission in the selected session and refreshes the missions,
+    /// issues, and snapshot lists on success. Snapshot is refreshed last so
+    /// that a snapshot failure does not wipe state already updated by earlier
+    /// refreshes.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot and issues are never mutated
-    /// directly.
+    /// `appState.lastError`; the local snapshot, missions, and issues are never
+    /// mutated directly.
     public func createMission(title: String, goal: String) async {
         guard let sessionID = appState.selectedSessionID else {
             appState.lastError = .missingSelectedSession
@@ -341,6 +370,7 @@ public final class DaemonController: Sendable {
                 title: title,
                 goal: goal
             )
+            await refreshMissions()
             await refreshIssues()
             await refreshSnapshot()
         } catch {
