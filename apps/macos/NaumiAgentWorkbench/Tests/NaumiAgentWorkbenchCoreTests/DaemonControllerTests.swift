@@ -2058,6 +2058,77 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
+    @Test @MainActor func keepWorktreeSuccessRefreshesWorktreesAndEvents() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleWorktree = makeWorktree(name: "wt-api-client", taskID: "task-001", status: "active")
+        let keptWorktree = makeWorktree(
+            name: "wt-api-client",
+            taskID: "task-001",
+            status: "kept",
+            keptReason: "等待人工审查"
+        )
+        appState.worktrees = [staleWorktree]
+
+        let api = FakeWorkbenchAPIProvider()
+        let events = WorkbenchEventsDTO(
+            events: [makeEvent(id: "evt-keep", type: "worktree.kept", subjectID: "wt-api-client")],
+            limit: 50
+        )
+        await api.setKeepWorktreeResult(.success(keptWorktree))
+        await api.setWorktreesResult(.success(WorktreesDTO(worktrees: [keptWorktree], taskID: nil, status: nil, limit: 50)))
+        await api.setEventsResult(.success(events))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.keepWorktree(
+            name: "wt-api-client",
+            actor: "Reviewer-Agent",
+            reason: "等待人工审查"
+        )
+
+        #expect(appState.worktrees == [keptWorktree])
+        #expect(appState.timelineEvents == events.events)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func keepWorktreeWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        let staleWorktree = makeWorktree(name: "wt-stale", taskID: "task-old", status: "active")
+        appState.worktrees = [staleWorktree]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.keepWorktree(
+            name: "wt-stale",
+            actor: "Reviewer-Agent",
+            reason: "等待人工审查"
+        )
+
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.worktrees == [staleWorktree])
+    }
+
+    @Test @MainActor func keepWorktreeFailurePreservesOldList() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleWorktree = makeWorktree(name: "wt-stale", taskID: "task-001", status: "active")
+        appState.worktrees = [staleWorktree]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setKeepWorktreeResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.keepWorktree(
+            name: "wt-stale",
+            actor: "Reviewer-Agent",
+            reason: "等待人工审查"
+        )
+
+        #expect(appState.worktrees == [staleWorktree])
+        #expect(appState.lastError == .httpStatus(500))
+    }
+
     @Test @MainActor func runValidationSuccessRefreshesValidationRunsFailuresSnapshotAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -2696,6 +2767,10 @@ extension FakeWorkbenchAPIProvider {
         worktreesResult = result
     }
 
+    fileprivate func setKeepWorktreeResult(_ result: Result<WorktreeDTO, APIError>) {
+        keepWorktreeResult = result
+    }
+
     fileprivate func setMissionsResult(_ result: Result<MissionsDTO, APIError>) {
         missionsResult = result
     }
@@ -2977,7 +3052,12 @@ private func makeLease(id: String, taskID: String, state: String) -> LeaseDTO {
     )
 }
 
-private func makeWorktree(name: String, taskID: String, status: String) -> WorktreeDTO {
+private func makeWorktree(
+    name: String,
+    taskID: String,
+    status: String,
+    keptReason: String = ""
+) -> WorktreeDTO {
     WorktreeDTO(
         name: name,
         path: "/repo/.naumi/worktrees/\(name)",
@@ -2989,7 +3069,7 @@ private func makeWorktree(name: String, taskID: String, status: String) -> Workt
         commitsAhead: 1,
         createdAt: "2026-06-27T06:00:00",
         updatedAt: "2026-06-27T06:00:00",
-        keptReason: "",
+        keptReason: keptReason,
         metadata: ["agent_id": "local-agent"],
         removable: true
     )
