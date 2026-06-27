@@ -347,6 +347,36 @@ class WorkbenchStore:
             row = await cursor.fetchone()
         return _row_to_issue(dict(row)) if row else None
 
+    async def list_issues(
+        self,
+        session_id: str,
+        mission_id: str | None = None,
+        risk_level: str | None = None,
+        limit: int = 50,
+    ) -> list[IssueMetadata]:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            params: list[Any] = [session_id]
+            filters = ["session_id = ?"]
+            if mission_id is not None:
+                filters.append("mission_id = ?")
+                params.append(mission_id)
+            if risk_level is not None:
+                filters.append("risk_level = ?")
+                params.append(risk_level)
+            params.append(limit)
+            where_clause = " AND ".join(filters)
+            cursor = await db.execute(
+                f"""SELECT * FROM workbench_issues
+                   WHERE {where_clause}
+                   ORDER BY created_at DESC
+                   LIMIT ?""",
+                params,
+            )
+            rows = await cursor.fetchall()
+        return [_row_to_issue(dict(row)) for row in rows]
+
     async def add_decision(
         self,
         *,

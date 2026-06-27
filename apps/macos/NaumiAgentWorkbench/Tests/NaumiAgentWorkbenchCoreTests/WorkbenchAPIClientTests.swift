@@ -535,6 +535,95 @@ final class WorkbenchAPIClientTests {
         #expect(response.failures.isEmpty)
     }
 
+    @Test func fetchIssuesWithFilters() async throws {
+        let sessionID = "sess 中文"
+        let missionID = "mission 中文"
+        let riskLevel = "high"
+        let json = Data(
+            """
+            {"issues":[{"session_id":"sess 中文","task_id":"task-001","mission_id":"mission 中文","parallel_mode":"exclusive","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["通过测试"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"mission_id":"mission 中文","risk_level":"high","limit":25}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/issues",
+                  query["limit"] == "25",
+                  query["mission_id"] == missionID,
+                  query["risk_level"] == riskLevel else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchIssues(
+            sessionID: sessionID,
+            missionID: missionID,
+            riskLevel: riskLevel,
+            limit: 25
+        )
+
+        #expect(response.missionID == missionID)
+        #expect(response.riskLevel == riskLevel)
+        #expect(response.limit == 25)
+        #expect(response.issues.count == 1)
+
+        let issue = try #require(response.issues.first)
+        #expect(issue.sessionID == sessionID)
+        #expect(issue.taskID == "task-001")
+        #expect(issue.missionID == missionID)
+        #expect(issue.parallelMode == "exclusive")
+        #expect(issue.riskLevel == "high")
+        #expect(issue.acceptanceCriteria == ["通过测试"])
+    }
+
+    @Test func fetchIssuesWithoutFilters() async throws {
+        let json = Data(
+            """
+            {"issues":[],"mission_id":null,"risk_level":null,"limit":50}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/issues?limit=50" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchIssues(
+            sessionID: "sess-001",
+            missionID: nil,
+            riskLevel: nil,
+            limit: 50
+        )
+
+        #expect(response.missionID == nil)
+        #expect(response.riskLevel == nil)
+        #expect(response.limit == 50)
+        #expect(response.issues.isEmpty)
+    }
+
     @Test func claimIssue() async throws {
         let leaseJSON = Data(
             """

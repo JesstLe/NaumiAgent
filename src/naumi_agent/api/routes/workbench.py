@@ -121,6 +121,13 @@ class FailuresResponse(BaseModel):
     limit: int
 
 
+class IssuesResponse(BaseModel):
+    issues: list[dict[str, Any]]
+    mission_id: str | None
+    risk_level: str | None
+    limit: int
+
+
 def _get_task_market(engine) -> TaskMarket:
     market = getattr(engine, "workbench_market", None)
     if market is not None:
@@ -448,6 +455,35 @@ async def expire_workbench_leases(
     market = _get_task_market(engine)
     expired = await market.expire_overdue_leases()
     return {"expired": [asdict(lease) for lease in expired]}
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/issues",
+    response_model=IssuesResponse,
+)
+async def get_issues(
+    session_id: str,
+    request: Request,
+    mission_id: str | None = Query(default=None),
+    risk_level: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    issues = await engine.workbench_service.list_issues(
+        session_id, mission_id=mission_id, risk_level=risk_level, limit=limit
+    )
+    return IssuesResponse(
+        issues=issues["issues"],
+        mission_id=mission_id,
+        risk_level=risk_level,
+        limit=limit,
+    )
 
 
 @router.get(

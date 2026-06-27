@@ -112,6 +112,25 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchIssues(
+        sessionID: String,
+        missionID: String?,
+        riskLevel: String?,
+        limit: Int
+    ) async throws(APIError) -> IssuesDTO {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let missionID, !missionID.isEmpty {
+            queryItems.append(URLQueryItem(name: "mission_id", value: missionID))
+        }
+        if let riskLevel, !riskLevel.isEmpty {
+            queryItems.append(URLQueryItem(name: "risk_level", value: riskLevel))
+        }
+        return try await get(
+            path: "workbench/sessions/\(sessionID)/issues",
+            queryItems: queryItems
+        )
+    }
+
     public func claimIssue(
         sessionID: String,
         taskID: String,

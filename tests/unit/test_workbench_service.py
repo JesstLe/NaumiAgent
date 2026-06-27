@@ -12,6 +12,7 @@ from naumi_agent.workbench.models import (
     DecisionKind,
     FailureKind,
     LeaseState,
+    ParallelMode,
     RiskLevel,
 )
 from naumi_agent.workbench.service import WorkbenchService
@@ -582,3 +583,59 @@ async def test_resolve_approval_returns_none_when_missing(tmp_path) -> None:
         decision_note="",
     )
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_list_issues_returns_json_friendly_strings_and_respects_filters(
+    tmp_path,
+) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    await workbench_store.upsert_issue(
+        session_id="s",
+        task_id="task-a",
+        mission_id="mission-1",
+        parallel_mode=ParallelMode.EXCLUSIVE,
+        risk_level=RiskLevel.HIGH,
+        acceptance_criteria=["AC1"],
+    )
+    await workbench_store.upsert_issue(
+        session_id="s",
+        task_id="task-b",
+        mission_id="mission-1",
+        parallel_mode=ParallelMode.COOPERATIVE,
+        risk_level=RiskLevel.MEDIUM,
+        acceptance_criteria=["AC2"],
+    )
+    await workbench_store.upsert_issue(
+        session_id="s",
+        task_id="task-c",
+        mission_id="mission-2",
+        parallel_mode=ParallelMode.COMPETITIVE,
+        risk_level=RiskLevel.HIGH,
+        acceptance_criteria=["AC3"],
+    )
+
+    all_issues = await service.list_issues("s", limit=50)
+    assert all(isinstance(i["risk_level"], str) for i in all_issues["issues"])
+    assert all(isinstance(i["parallel_mode"], str) for i in all_issues["issues"])
+    assert {i["task_id"] for i in all_issues["issues"]} == {"task-a", "task-b", "task-c"}
+    assert all_issues["mission_id"] is None
+    assert all_issues["risk_level"] is None
+    assert all_issues["limit"] == 50
+
+    mission_1_high = await service.list_issues(
+        "s", mission_id="mission-1", risk_level="high", limit=50
+    )
+    assert [i["task_id"] for i in mission_1_high["issues"]] == ["task-a"]
+    assert mission_1_high["risk_level"] == "high"
+    assert mission_1_high["mission_id"] == "mission-1"
+    assert mission_1_high["issues"][0]["risk_level"] == "high"
+    assert mission_1_high["issues"][0]["parallel_mode"] == "exclusive"
+
+    limited = await service.list_issues("s", limit=2)
+    assert len(limited["issues"]) == 2
+    assert limited["limit"] == 2

@@ -43,6 +43,14 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> FailuresDTO
 
+    /// Fetches issues for the given session, optionally filtered by mission or risk level.
+    func fetchIssues(
+        sessionID: String,
+        missionID: String?,
+        riskLevel: String?,
+        limit: Int
+    ) async throws(APIError) -> IssuesDTO
+
     /// Claims an open issue for the given agent, creating a new lease.
     func claimIssue(
         sessionID: String,
