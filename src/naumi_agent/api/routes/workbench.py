@@ -7,7 +7,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from naumi_agent import __version__
@@ -348,6 +348,65 @@ async def get_workbench_events(
         actor=result["actor"],
         limit=result["limit"],
     )
+
+
+@router.websocket("/workbench/sessions/{session_id}/events/stream")
+async def websocket_workbench_events(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    engine = websocket.app.state.engine
+
+    session = await engine.session_store.load(session_id)
+    if not session:
+        await websocket.send_json({"type": "error", "message": "Session not found"})
+        await websocket.close()
+        return
+    if not await engine.load_session(session_id):
+        await websocket.send_json({"type": "error", "message": "Session not found"})
+        await websocket.close()
+        return
+
+    await websocket.send_json({"type": "connected", "session_id": session_id})
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            message_type = data.get("type")
+            if message_type == "ping":
+                await websocket.send_json({"type": "pong"})
+                continue
+            if message_type != "refresh":
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"Unsupported workbench event stream message: {message_type}",
+                    }
+                )
+                continue
+
+            limit = _bounded_event_stream_limit(data.get("limit", 50))
+            result = await engine.workbench_service.list_events(
+                session_id,
+                event_type=data.get("event_type"),
+                subject_id=data.get("subject_id"),
+                actor=data.get("actor"),
+                limit=limit,
+            )
+            events = result["events"]
+            for event in events:
+                await websocket.send_json({"type": "workbench.event", "event": event})
+            await websocket.send_json(
+                {"type": "refresh_complete", "count": len(events)}
+            )
+    except WebSocketDisconnect:
+        pass
+
+
+def _bounded_event_stream_limit(value: Any) -> int:
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return 50
+    return max(1, min(limit, 200))
 
 
 @router.get(

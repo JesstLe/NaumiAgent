@@ -1,0 +1,127 @@
+import Foundation
+import Testing
+@testable import NaumiAgentWorkbenchCore
+
+@Suite
+final class WorkbenchEventClientTests {
+    @Test func eventStreamURLUsesWebSocketSchemeAndEncodedSessionID() throws {
+        let url = try WorkbenchEventClient.eventStreamURL(
+            baseURL: URL(string: "http://127.0.0.1:8765/api/v1")!,
+            sessionID: "sess/中文"
+        )
+
+        #expect(
+            url.absoluteString
+                == "ws://127.0.0.1:8765/api/v1/workbench/sessions/sess%2F%E4%B8%AD%E6%96%87/events/stream"
+        )
+    }
+
+    @Test func eventStreamURLPreservesHTTPSAsWSS() throws {
+        let url = try WorkbenchEventClient.eventStreamURL(
+            baseURL: URL(string: "https://localhost:9000/api/v1/")!,
+            sessionID: "sess-001"
+        )
+
+        #expect(url.absoluteString == "wss://localhost:9000/api/v1/workbench/sessions/sess-001/events/stream")
+    }
+
+    @Test func connectStartsTaskAndAddsBearerToken() async throws {
+        let transport = RecordingWorkbenchWebSocketTransport(messages: [
+            .string(#"{"type":"connected","session_id":"sess-001"}"#),
+        ])
+        let client = WorkbenchEventClient(
+            baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
+            transport: transport,
+            bearerToken: "local-token"
+        )
+
+        let stream = try await client.connect(sessionID: "sess-001")
+        let request = try #require(await transport.requests.first)
+
+        #expect(request.url?.absoluteString == "ws://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/events/stream")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer local-token")
+        #expect(await transport.task.resumeCallCount == 1)
+
+        let message = try await stream.next()
+        #expect(message == .connected(sessionID: "sess-001"))
+    }
+
+    @Test func nextDecodesWorkbenchEventEnvelope() async throws {
+        let transport = RecordingWorkbenchWebSocketTransport(messages: [
+            .string(
+                """
+                {"type":"workbench.event","event":{"id":"evt-001","session_id":"sess-001","type":"issue.claimed","actor":"Backend-Agent","subject_id":"task-001","payload":{"lease_id":"lease-001"},"timestamp":"2026-06-27T06:00:00"}}
+                """
+            ),
+        ])
+        let client = WorkbenchEventClient(
+            baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
+            transport: transport
+        )
+
+        let stream = try await client.connect(sessionID: "sess-001")
+        let message = try await stream.next()
+
+        guard case .event(let event) = message else {
+            Issue.record("Expected workbench event, got \(message)")
+            return
+        }
+        #expect(event.id == "evt-001")
+        #expect(event.type == "issue.claimed")
+        #expect(event.payload["lease_id"] == .string("lease-001"))
+    }
+
+    @Test func nextRejectsMalformedEventEnvelope() async throws {
+        let transport = RecordingWorkbenchWebSocketTransport(messages: [
+            .string(#"{"type":"workbench.event"}"#),
+        ])
+        let client = WorkbenchEventClient(
+            baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
+            transport: transport
+        )
+
+        let stream = try await client.connect(sessionID: "sess-001")
+        await #expect(throws: APIError.decodingFailed("workbench.event missing event payload")) {
+            _ = try await stream.next()
+        }
+    }
+}
+
+private actor RecordingWorkbenchWebSocketTransport: WorkbenchWebSocketTransporting {
+    let task: RecordingWorkbenchWebSocketTask
+    private(set) var requests: [URLRequest] = []
+
+    init(messages: [URLSessionWebSocketTask.Message]) {
+        self.task = RecordingWorkbenchWebSocketTask(messages: messages)
+    }
+
+    func makeWebSocketTask(with request: URLRequest) -> WorkbenchWebSocketTasking {
+        requests.append(request)
+        return task
+    }
+}
+
+private actor RecordingWorkbenchWebSocketTask: WorkbenchWebSocketTasking {
+    private var messages: [URLSessionWebSocketTask.Message]
+    private(set) var resumeCallCount = 0
+    private(set) var cancelCallCount = 0
+
+    init(messages: [URLSessionWebSocketTask.Message]) {
+        self.messages = messages
+    }
+
+    func start() {
+        resumeCallCount += 1
+    }
+
+    func cancelStream(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        cancelCallCount += 1
+    }
+
+    func receiveMessage() async throws -> URLSessionWebSocketTask.Message {
+        guard !messages.isEmpty else {
+            throw URLError(.networkConnectionLost)
+        }
+        return messages.removeFirst()
+    }
+}

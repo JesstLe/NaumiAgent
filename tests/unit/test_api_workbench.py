@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from naumi_agent import __version__
 from naumi_agent.api.routes.workbench import (
@@ -977,6 +978,69 @@ def test_get_events_route_accepts_type_query_alias() -> None:
         }
     ]
     assert response.json()["event_type"] == "issue.created"
+
+
+def test_workbench_event_stream_rejects_missing_session() -> None:
+    engine = _FakeEngine(exists=False)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    with client.websocket_connect("/workbench/sessions/missing/events/stream") as websocket:
+        assert websocket.receive_json() == {
+            "type": "error",
+            "message": "Session not found",
+        }
+        with pytest.raises(WebSocketDisconnect):
+            websocket.receive_text()
+
+
+def test_workbench_event_stream_refreshes_audit_events() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    with client.websocket_connect("/workbench/sessions/sess-1/events/stream") as websocket:
+        assert websocket.receive_json() == {"type": "connected", "session_id": "sess-1"}
+        websocket.send_json(
+            {
+                "type": "refresh",
+                "limit": 7,
+                "event_type": "issue.created",
+                "subject_id": "task-2",
+                "actor": "Planner-Agent",
+            }
+        )
+
+        event_message = websocket.receive_json()
+        complete_message = websocket.receive_json()
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_events == [
+        {
+            "session_id": "sess-1",
+            "event_type": "issue.created",
+            "subject_id": "task-2",
+            "actor": "Planner-Agent",
+            "limit": 7,
+        }
+    ]
+    assert event_message == {
+        "type": "workbench.event",
+        "event": {
+            "id": "evt-1",
+            "session_id": "sess-1",
+            "type": "issue.created",
+            "actor": "Planner-Agent",
+            "subject_id": "task-2",
+            "payload": {"title": "Mac 工作台"},
+            "timestamp": "2024-01-01T00:00:00",
+        },
+    }
+    assert complete_message == {"type": "refresh_complete", "count": 1}
 
 
 @pytest.mark.asyncio
