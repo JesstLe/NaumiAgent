@@ -468,6 +468,10 @@ public enum AppStrings {
             locale == .zhCN ? "新建 Issue" : "New Issue"
         }
 
+        public static func missionIDLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "目标 ID" : "Mission ID"
+        }
+
         public static func issueTitleLabel(_ locale: AppLocale) -> String {
             locale == .zhCN ? "标题" : "Title"
         }
@@ -490,6 +494,18 @@ public enum AppStrings {
 
         public static func createIssueSubmitButton(_ locale: AppLocale) -> String {
             locale == .zhCN ? "创建 Issue" : "Create Issue"
+        }
+
+        public static func attachIssueButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "挂载任务" : "Attach Task"
+        }
+
+        public static func attachIssueSectionTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "挂载已有任务" : "Attach Existing Task"
+        }
+
+        public static func attachIssueSubmitButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "挂载为 Issue" : "Attach as Issue"
         }
 
         public static func processingLabel(_ locale: AppLocale) -> String {

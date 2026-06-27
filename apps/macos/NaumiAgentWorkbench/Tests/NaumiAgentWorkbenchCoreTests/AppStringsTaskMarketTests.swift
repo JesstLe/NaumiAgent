@@ -37,12 +37,16 @@ struct AppStringsTaskMarketTests {
         #expect(AppStrings.TaskMarket.releaseButton(.zhCN) == "释放租约")
         #expect(AppStrings.TaskMarket.createIssueButton(.zhCN) == "新建 Issue")
         #expect(AppStrings.TaskMarket.createIssueSectionTitle(.zhCN) == "新建 Issue")
+        #expect(AppStrings.TaskMarket.missionIDLabel(.zhCN) == "目标 ID")
         #expect(AppStrings.TaskMarket.issueTitleLabel(.zhCN) == "标题")
         #expect(AppStrings.TaskMarket.issueDescriptionLabel(.zhCN) == "描述")
         #expect(AppStrings.TaskMarket.blockedByLabel(.zhCN) == "阻塞依赖")
         #expect(AppStrings.TaskMarket.blockedByHelp(.zhCN) == "每行一个任务 ID")
         #expect(AppStrings.TaskMarket.acceptanceCriteriaHelp(.zhCN) == "每行一条验收标准")
         #expect(AppStrings.TaskMarket.createIssueSubmitButton(.zhCN) == "创建 Issue")
+        #expect(AppStrings.TaskMarket.attachIssueButton(.zhCN) == "挂载任务")
+        #expect(AppStrings.TaskMarket.attachIssueSectionTitle(.zhCN) == "挂载已有任务")
+        #expect(AppStrings.TaskMarket.attachIssueSubmitButton(.zhCN) == "挂载为 Issue")
         #expect(AppStrings.TaskMarket.processingLabel(.zhCN) == "处理中…")
     }
 
@@ -80,12 +84,16 @@ struct AppStringsTaskMarketTests {
         #expect(AppStrings.TaskMarket.releaseButton(.enUS) == "Release Lease")
         #expect(AppStrings.TaskMarket.createIssueButton(.enUS) == "New Issue")
         #expect(AppStrings.TaskMarket.createIssueSectionTitle(.enUS) == "New Issue")
+        #expect(AppStrings.TaskMarket.missionIDLabel(.enUS) == "Mission ID")
         #expect(AppStrings.TaskMarket.issueTitleLabel(.enUS) == "Title")
         #expect(AppStrings.TaskMarket.issueDescriptionLabel(.enUS) == "Description")
         #expect(AppStrings.TaskMarket.blockedByLabel(.enUS) == "Blocked By")
         #expect(AppStrings.TaskMarket.blockedByHelp(.enUS) == "One task ID per line")
         #expect(AppStrings.TaskMarket.acceptanceCriteriaHelp(.enUS) == "One acceptance criterion per line")
         #expect(AppStrings.TaskMarket.createIssueSubmitButton(.enUS) == "Create Issue")
+        #expect(AppStrings.TaskMarket.attachIssueButton(.enUS) == "Attach Task")
+        #expect(AppStrings.TaskMarket.attachIssueSectionTitle(.enUS) == "Attach Existing Task")
+        #expect(AppStrings.TaskMarket.attachIssueSubmitButton(.enUS) == "Attach as Issue")
         #expect(AppStrings.TaskMarket.processingLabel(.enUS) == "Processing…")
     }
 
@@ -124,12 +132,16 @@ struct AppStringsTaskMarketTests {
             AppStrings.TaskMarket.releaseButton,
             AppStrings.TaskMarket.createIssueButton,
             AppStrings.TaskMarket.createIssueSectionTitle,
+            AppStrings.TaskMarket.missionIDLabel,
             AppStrings.TaskMarket.issueTitleLabel,
             AppStrings.TaskMarket.issueDescriptionLabel,
             AppStrings.TaskMarket.blockedByLabel,
             AppStrings.TaskMarket.blockedByHelp,
             AppStrings.TaskMarket.acceptanceCriteriaHelp,
             AppStrings.TaskMarket.createIssueSubmitButton,
+            AppStrings.TaskMarket.attachIssueButton,
+            AppStrings.TaskMarket.attachIssueSectionTitle,
+            AppStrings.TaskMarket.attachIssueSubmitButton,
             AppStrings.TaskMarket.processingLabel,
         ]
 
