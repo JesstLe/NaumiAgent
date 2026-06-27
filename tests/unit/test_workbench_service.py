@@ -107,6 +107,88 @@ async def test_dashboard_snapshot_includes_only_active_leases(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_dashboard_snapshot_includes_validation_runs_context_snapshots_and_waiting_approvals(
+    tmp_path,
+) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    run = await workbench_store.record_validation_run(
+        session_id="s",
+        task_id="task-1",
+        actor="ValidationRunner",
+        command=["pytest", "test_a.py"],
+        cwd="/workspace",
+        status="passed",
+        exit_code=0,
+        output="ok",
+        started_at="2024-01-01T00:00:00",
+        completed_at="2024-01-01T00:00:01",
+    )
+    snapshot = await workbench_store.record_context_snapshot(
+        session_id="s",
+        agent_id="agent-1",
+        task_id="task-1",
+        health=ContextHealth.GOOD,
+        reasons=["上下文健康"],
+    )
+    waiting = await workbench_store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="等待审批",
+        detail="详情",
+        requester="Agent-A",
+    )
+    approved = await workbench_store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-2",
+        title="已批准",
+        detail="详情",
+        requester="Agent-B",
+        state=ApprovalState.APPROVED,
+    )
+    rejected = await workbench_store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-3",
+        title="已拒绝",
+        detail="详情",
+        requester="Agent-C",
+        state=ApprovalState.REJECTED,
+    )
+    other_session = await workbench_store.add_approval(
+        session_id="other",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="其他会话审批",
+        detail="详情",
+        requester="Agent-D",
+    )
+
+    result = await service.dashboard_snapshot("s")
+
+    assert "validation_runs" in result
+    assert [r["id"] for r in result["validation_runs"]] == [run["id"]]
+    assert result["validation_runs"][0]["status"] == "passed"
+
+    assert "context_snapshots" in result
+    assert [s["id"] for s in result["context_snapshots"]] == [snapshot["id"]]
+    assert result["context_snapshots"][0]["health"] == "good"
+
+    assert "approvals" in result
+    assert {a["id"] for a in result["approvals"]} == {waiting.id}
+    assert all(isinstance(a["state"], str) for a in result["approvals"])
+    assert result["approvals"][0]["state"] == "waiting"
+    assert approved.id not in {a["id"] for a in result["approvals"]}
+    assert rejected.id not in {a["id"] for a in result["approvals"]}
+    assert other_session.id not in {a["id"] for a in result["approvals"]}
+
+
+@pytest.mark.asyncio
 async def test_list_events_returns_store_events_and_respects_limit(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")
