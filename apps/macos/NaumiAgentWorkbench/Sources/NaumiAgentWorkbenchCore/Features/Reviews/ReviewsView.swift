@@ -41,7 +41,6 @@ public struct ReviewsView: View {
         }
         .frame(minWidth: 1180, minHeight: 720)
         .background(Color(nsColor: .windowBackgroundColor))
-        .navigationTitle(AppStrings.Reviews.title(appState.locale))
         .onAppear {
             selectedReviewID = selected.id
         }

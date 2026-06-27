@@ -36,7 +36,6 @@ public struct DashboardView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .navigationTitle(AppStrings.Dashboard.title(appState.locale))
     }
 
     // MARK: - Workbench Layout

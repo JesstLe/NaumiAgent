@@ -6,7 +6,7 @@ struct NaumiAgentWorkbenchApp: App {
     @State private var environment = AppEnvironment()
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("NaumiAgent Workbench") {
             ContentView()
                 .environment(environment)
                 .task {
@@ -27,6 +27,7 @@ struct NaumiAgentWorkbenchApp: App {
                     }
                 }
         }
+        .windowStyle(.hiddenTitleBar)
     }
 }
 
@@ -93,23 +94,18 @@ struct TopNavigationBar: View {
     let appState: AppState
     let daemonController: DaemonController
     @Binding var isPresentingMissionComposer: Bool
+    private let shellPresentation = WorkbenchShellPresentation()
 
     var body: some View {
         @Bindable var appState = appState
 
         HStack(spacing: 14) {
-            HStack(spacing: 8) {
-                Circle().fill(.red).frame(width: 12, height: 12)
-                Circle().fill(.yellow).frame(width: 12, height: 12)
-                Circle().fill(.green).frame(width: 12, height: 12)
-            }
-
             Text("NaumiAgent Workbench")
                 .font(.system(size: 14, weight: .semibold))
                 .frame(width: 172, alignment: .leading)
 
             Picker("", selection: $appState.currentRoute) {
-                ForEach(AppRoute.topNavigationRoutes) { route in
+                ForEach(shellPresentation.navigationRoutes) { route in
                     Label(route.displayName(locale: appState.locale), systemImage: route.systemImage)
                         .tag(route)
                 }
@@ -156,7 +152,8 @@ struct TopNavigationBar: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.leading, shellPresentation.leadingContentInset)
+        .padding(.trailing, 14)
         .padding(.vertical, 8)
         .background(Color(nsColor: .windowBackgroundColor))
     }
