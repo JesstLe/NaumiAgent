@@ -26,8 +26,8 @@ public final class DaemonController: Sendable {
     /// - If a session is already selected, refreshes its snapshot; otherwise picks
     ///   the most recent session from `GET /sessions` and refreshes that snapshot.
     /// - After a successful snapshot, pre-warms the lightweight first-screen list
-    ///   states (missions, issues, leases, failures, events, waiting approvals,
-    ///   validation runs, and context snapshots). Failures are isolated to
+    ///   states (missions, agent profiles, issues, leases, failures, events,
+    ///   waiting approvals, validation runs, and context snapshots). Failures are isolated to
     ///   `lastError` and do not affect the connection state.
     /// - Snapshot/session failures keep the daemon `.connected` and record the
     ///   error in `lastError` while clearing stale snapshot data. List pre-warming
@@ -68,6 +68,8 @@ public final class DaemonController: Sendable {
 
         var preWarmError: APIError?
         await refreshMissions()
+        preWarmError = preWarmError ?? appState.lastError
+        await refreshAgentProfiles()
         preWarmError = preWarmError ?? appState.lastError
         await refreshIssues()
         preWarmError = preWarmError ?? appState.lastError
@@ -357,6 +359,76 @@ public final class DaemonController: Sendable {
                 limit: limit
             )
             appState.missions = response.missions
+        } catch {
+            appState.lastError = error
+        }
+    }
+
+    /// Fetches agent capability profiles for the currently selected session.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success the agent
+    /// profiles are written to `appState.agentProfiles`; on failure
+    /// `appState.lastError` is set. Missing session clears the local agent
+    /// profiles list to avoid showing stale data from another session. API
+    /// failures leave the local list unchanged.
+    public func refreshAgentProfiles(status: String? = nil, limit: Int = 50) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.agentProfiles = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchAgentProfiles(
+                sessionID: sessionID,
+                status: status,
+                limit: limit
+            )
+            appState.agentProfiles = response.agentProfiles
+        } catch {
+            appState.lastError = error
+        }
+    }
+
+    /// Registers or updates an agent capability profile in the selected session.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success the profile
+    /// is registered with the API, then `agentProfiles`, timeline events, and
+    /// snapshot are refreshed; on failure `appState.lastError` is set and the
+    /// existing local `agentProfiles` and snapshot are preserved.
+    public func registerAgentProfile(
+        agentID: String,
+        name: String,
+        role: String,
+        capabilities: [String],
+        permissions: [String],
+        maxParallelTasks: Int,
+        status: String,
+        actor: String
+    ) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.agentProfiles = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            _ = try await apiProvider.registerAgentProfile(
+                sessionID: sessionID,
+                agentID: agentID,
+                name: name,
+                role: role,
+                capabilities: capabilities,
+                permissions: permissions,
+                maxParallelTasks: maxParallelTasks,
+                status: status,
+                actor: actor
+            )
+            await refreshAgentProfiles()
+            await refreshEvents(limit: 50)
+            await refreshSnapshot()
         } catch {
             appState.lastError = error
         }
