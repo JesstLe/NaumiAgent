@@ -198,6 +198,50 @@ public enum AppStrings {
             locale == .zhCN ? "最近事件" : "Recent Events"
         }
 
+        public static func sharedCanvasSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "共享画板" : "Shared Canvas"
+        }
+
+        public static func issueBacklogSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "问题队列" : "Issue Backlog"
+        }
+
+        public static func inspectorSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "检查器" : "Inspector"
+        }
+
+        public static func auditTrailSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "审计流" : "Audit Trail"
+        }
+
+        public static func searchPlaceholder(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "搜索任务、分支、智能体" : "Search tasks, branches, agents"
+        }
+
+        public static func humanApprovalLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "人工审批" : "Human Approval"
+        }
+
+        public static func approvalRequiredValue(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "需要" : "Required"
+        }
+
+        public static func approvalNotRequiredValue(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "不需要" : "Not Required"
+        }
+
+        public static func gitWorktreesLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "Git 工作区" : "Git Worktrees"
+        }
+
+        public static func validationRunsLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "验证运行" : "Validation Runs"
+        }
+
+        public static func noSelection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无选中对象" : "No selection"
+        }
+
         public static func statusLabel(_ locale: AppLocale) -> String {
             locale == .zhCN ? "状态" : "Status"
         }

@@ -4,6 +4,7 @@ import Foundation
 /// Keeps SwiftUI-agnostic logic testable without View infrastructure.
 public struct DashboardSnapshotPresentation: Equatable, Sendable {
     public let currentMission: DashboardMissionSummary?
+    public let workbench: DashboardWorkbenchPresentation
     public let agentRows: [DashboardAgentRow]
     public let taskRows: [DashboardTaskRow]
     public let issueRows: [DashboardIssueRow]
@@ -11,9 +12,10 @@ public struct DashboardSnapshotPresentation: Equatable, Sendable {
     public let recentEventRows: [DashboardEventRow]
 
     public init(snapshot: WorkbenchSnapshotDTO) {
-        self.currentMission = snapshot.missions.first.map {
+        let currentMission = snapshot.missions.first.map {
             DashboardMissionSummary(id: $0.id, title: $0.title, status: $0.status)
         }
+        self.currentMission = currentMission
 
         self.agentRows = Array(snapshot.agentProfiles.prefix(5)).map { profile in
             DashboardAgentRow(
@@ -26,10 +28,8 @@ public struct DashboardSnapshotPresentation: Equatable, Sendable {
             )
         }
 
-        let issueByTaskID = Dictionary(
-            grouping: snapshot.issues,
-            by: \.taskID
-        )
+        let issueByTaskID = Dictionary(grouping: snapshot.issues, by: \.taskID)
+        let taskByID = Dictionary(uniqueKeysWithValues: snapshot.tasks.map { ($0.id, $0) })
 
         // Keep the first screen dense but scannable.
         self.taskRows = Array(snapshot.tasks.prefix(5)).map { task in
@@ -76,7 +76,192 @@ public struct DashboardSnapshotPresentation: Equatable, Sendable {
                 timestamp: event.timestamp
             )
         }
+
+        self.workbench = DashboardWorkbenchPresentation(
+            mission: currentMission,
+            tasks: snapshot.tasks,
+            issues: snapshot.issues,
+            agentProfiles: snapshot.agentProfiles,
+            leases: snapshot.leases,
+            failures: snapshot.failures,
+            events: snapshot.events,
+            taskByID: taskByID
+        )
     }
+}
+
+public struct DashboardWorkbenchPresentation: Equatable, Sendable {
+    public let leftMissionTitle: String?
+    public let leftIssueCount: Int
+    public let leftTaskCount: Int
+    public let leftFailureCount: Int
+    public let canvasNodes: [DashboardCanvasNode]
+    public let inspector: DashboardInspectorSummary?
+    public let auditRows: [DashboardAuditRow]
+
+    public init(
+        mission: DashboardMissionSummary?,
+        tasks: [TaskDTO],
+        issues: [IssueDTO],
+        agentProfiles: [AgentProfileDTO],
+        leases: [LeaseDTO],
+        failures: [FailureDTO],
+        events: [EventDTO],
+        taskByID: [String: TaskDTO]
+    ) {
+        leftMissionTitle = mission?.title
+        leftIssueCount = issues.count
+        leftTaskCount = tasks.count
+        leftFailureCount = failures.count
+
+        var nodes: [DashboardCanvasNode] = []
+        if let mission {
+            nodes.append(
+                DashboardCanvasNode(
+                    id: mission.id,
+                    kind: .mission,
+                    title: mission.title,
+                    subtitle: "Mission",
+                    status: mission.status
+                )
+            )
+        }
+        if let issue = issues.first {
+            nodes.append(
+                DashboardCanvasNode(
+                    id: "issue-\(issue.taskID)",
+                    kind: .issue,
+                    title: taskByID[issue.taskID]?.subject ?? issue.taskID,
+                    subtitle: issue.riskLevel,
+                    status: issue.parallelMode
+                )
+            )
+        }
+        if !agentProfiles.isEmpty {
+            nodes.append(
+                DashboardCanvasNode(
+                    id: "agents",
+                    kind: .agents,
+                    title: "\(agentProfiles.count)",
+                    subtitle: "Agents",
+                    status: agentProfiles.first?.status ?? ""
+                )
+            )
+        }
+        if !leases.isEmpty {
+            nodes.append(
+                DashboardCanvasNode(
+                    id: "worktrees",
+                    kind: .worktrees,
+                    title: leases.first?.worktreeName ?? "\(leases.count)",
+                    subtitle: "Git Worktrees",
+                    status: leases.first?.state ?? ""
+                )
+            )
+        }
+        if !tasks.isEmpty {
+            nodes.append(
+                DashboardCanvasNode(
+                    id: "validation",
+                    kind: .validation,
+                    title: "\(tasks.filter { $0.status == "completed" }.count)/\(tasks.count)",
+                    subtitle: "Validation Runs",
+                    status: "tracked"
+                )
+            )
+        }
+        if let failure = failures.first {
+            nodes.append(
+                DashboardCanvasNode(
+                    id: failure.id,
+                    kind: .failure,
+                    title: failure.title,
+                    subtitle: failure.kind,
+                    status: failure.status
+                )
+            )
+        }
+        if let issue = issues.first(where: \.requiresHumanApproval) {
+            nodes.append(
+                DashboardCanvasNode(
+                    id: "approval-\(issue.taskID)",
+                    kind: .approval,
+                    title: taskByID[issue.taskID]?.subject ?? issue.taskID,
+                    subtitle: "Human Approval",
+                    status: issue.riskLevel
+                )
+            )
+        }
+        canvasNodes = nodes
+
+        if let issue = issues.first, let task = taskByID[issue.taskID] {
+            inspector = DashboardInspectorSummary(
+                title: task.subject,
+                status: task.status,
+                owner: task.owner,
+                riskLevel: issue.riskLevel,
+                parallelMode: issue.parallelMode,
+                requiresHumanApproval: issue.requiresHumanApproval,
+                acceptanceCriteriaCount: issue.acceptanceCriteria.count
+            )
+        } else if let task = tasks.first {
+            inspector = DashboardInspectorSummary(
+                title: task.subject,
+                status: task.status,
+                owner: task.owner,
+                riskLevel: nil,
+                parallelMode: nil,
+                requiresHumanApproval: false,
+                acceptanceCriteriaCount: nil
+            )
+        } else {
+            inspector = nil
+        }
+
+        auditRows = Array(events.suffix(5)).map {
+            DashboardAuditRow(
+                id: $0.id,
+                type: $0.type,
+                actor: $0.actor,
+                timestamp: $0.timestamp
+            )
+        }
+    }
+}
+
+public enum DashboardCanvasNodeKind: String, Equatable, Sendable {
+    case mission
+    case issue
+    case agents
+    case worktrees
+    case validation
+    case failure
+    case approval
+}
+
+public struct DashboardCanvasNode: Equatable, Sendable {
+    public let id: String
+    public let kind: DashboardCanvasNodeKind
+    public let title: String
+    public let subtitle: String
+    public let status: String
+}
+
+public struct DashboardInspectorSummary: Equatable, Sendable {
+    public let title: String
+    public let status: String
+    public let owner: String?
+    public let riskLevel: String?
+    public let parallelMode: String?
+    public let requiresHumanApproval: Bool
+    public let acceptanceCriteriaCount: Int?
+}
+
+public struct DashboardAuditRow: Equatable, Sendable {
+    public let id: String
+    public let type: String
+    public let actor: String
+    public let timestamp: String
 }
 
 public struct DashboardMissionSummary: Equatable, Sendable {
