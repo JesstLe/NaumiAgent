@@ -18,6 +18,7 @@ public struct ReviewsDesignPresentation: Equatable, Sendable {
         let waitingItems = approvals.prefix(2).enumerated().map { index, approval in
             ReviewDesignItem(
                 id: approval.id,
+                taskID: approval.taskID,
                 title: approval.title,
                 number: index == 0 ? 3 : 7,
                 agent: approval.requester,
@@ -56,21 +57,29 @@ public struct ReviewsDesignPresentation: Equatable, Sendable {
         agentReviews = Self.fixtureAgentReviews
     }
 
+    public func defaultValidationDraft(for review: ReviewDesignItem) -> ValidationRunDraft {
+        ValidationRunDraft(
+            taskID: review.taskID,
+            actor: review.agent,
+            commandLine: "pytest tests/unit/test_workbench_market.py -q"
+        )
+    }
+
     private static let fixtureWaiting = [
-        ReviewDesignItem(id: "wait-1", title: "Task Market Lease", number: 3, agent: "Backend-Agent", worktree: "issue-3-market", time: "09:28", risk: "High", tone: "red"),
-        ReviewDesignItem(id: "wait-2", title: "Validation Failure Cards", number: 7, agent: "Backend-Agent", worktree: "issue-7-failure-cards", time: "09:21", risk: "High", tone: "red")
+        ReviewDesignItem(id: "wait-1", taskID: "design-lease", title: "Task Market Lease", number: 3, agent: "Backend-Agent", worktree: "issue-3-market", time: "09:28", risk: "High", tone: "red"),
+        ReviewDesignItem(id: "wait-2", taskID: "design-failure-cards", title: "Validation Failure Cards", number: 7, agent: "Backend-Agent", worktree: "issue-7-failure-cards", time: "09:21", risk: "High", tone: "red")
     ]
 
     private static let fixtureRequestChanges = [
-        ReviewDesignItem(id: "change-1", title: "Intent Lock Policy", number: 4, agent: "Backend-Agent", worktree: "issue-4-lock-policy", time: "Yesterday", risk: "Medium", tone: "orange")
+        ReviewDesignItem(id: "change-1", taskID: "design-intent-lock", title: "Intent Lock Policy", number: 4, agent: "Backend-Agent", worktree: "issue-4-lock-policy", time: "Yesterday", risk: "Medium", tone: "orange")
     ]
 
     private static let fixtureAutoMerge = [
-        ReviewDesignItem(id: "auto-1", title: "Telemetry Context Health", number: 6, agent: "Backend-Agent", worktree: "issue-6-telemetry", time: "May 21", risk: "Low", tone: "green")
+        ReviewDesignItem(id: "auto-1", taskID: "design-context-health", title: "Telemetry Context Health", number: 6, agent: "Backend-Agent", worktree: "issue-6-telemetry", time: "May 21", risk: "Low", tone: "green")
     ]
 
     private static let fixtureHighRisk = [
-        ReviewDesignItem(id: "risk-1", title: "Terminal UI Protocol", number: 5, agent: "Backend-Agent", worktree: "issue-5-terminal-ui", time: "May 20", risk: "High", tone: "red")
+        ReviewDesignItem(id: "risk-1", taskID: "design-terminal", title: "Terminal UI Protocol", number: 5, agent: "Backend-Agent", worktree: "issue-5-terminal-ui", time: "May 20", risk: "High", tone: "red")
     ]
 
     private static let fixtureFiles = [
@@ -118,6 +127,7 @@ public struct ReviewDesignQueue: Equatable, Sendable, Identifiable {
 
 public struct ReviewDesignItem: Equatable, Sendable, Identifiable {
     public let id: String
+    public let taskID: String
     public let title: String
     public let number: Int
     public let agent: String

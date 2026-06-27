@@ -7,6 +7,10 @@ public struct ReviewsView: View {
 
     @State private var selectedReviewID: String?
     @State private var selectedTab = "Details"
+    @State private var validationDraft = ValidationRunDraft(
+        commandLine: "pytest tests/unit/test_workbench_market.py -q"
+    )
+    @State private var isRunningValidation = false
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -38,6 +42,7 @@ public struct ReviewsView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             selectedReviewID = selected.id
+            validationDraft = presentation.defaultValidationDraft(for: selected)
         }
     }
 
@@ -105,6 +110,7 @@ public struct ReviewsView: View {
                                     .contentShape(Rectangle())
                                     .onTapGesture {
                                         selectedReviewID = item.id
+                                        validationDraft = presentation.defaultValidationDraft(for: item)
                                     }
                             }
                         }
@@ -488,6 +494,8 @@ public struct ReviewsView: View {
                 Text(appState.locale == .zhCN ? "查看完整验证报告 ->" : "View full validation report ->")
                     .font(.caption)
                     .foregroundStyle(.blue)
+                Divider()
+                validationCommandPanel(selected: selected)
             }
 
             inspectorCard(title: appState.locale == .zhCN ? "智能体审查" : "Agent Reviews") {
@@ -544,6 +552,55 @@ public struct ReviewsView: View {
         }
         .padding(14)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func validationCommandPanel(selected: ReviewDesignItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(AppStrings.Reviews.runValidationSectionTitle(appState.locale))
+                .font(.caption)
+                .fontWeight(.semibold)
+
+            TextField(AppStrings.Reviews.taskIDLabel(appState.locale), text: $validationDraft.taskID)
+                .textFieldStyle(.roundedBorder)
+            TextField(AppStrings.Reviews.actorLabel(appState.locale), text: $validationDraft.actor)
+                .textFieldStyle(.roundedBorder)
+            TextField(AppStrings.Reviews.commandLabel(appState.locale), text: $validationDraft.commandLine)
+                .textFieldStyle(.roundedBorder)
+            TextField(AppStrings.Reviews.cwdLabel(appState.locale), text: $validationDraft.cwd)
+                .textFieldStyle(.roundedBorder)
+
+            Button {
+                runValidation()
+            } label: {
+                Label(
+                    isRunningValidation
+                        ? AppStrings.Reviews.processingLabel(appState.locale)
+                        : AppStrings.Reviews.runButton(appState.locale),
+                    systemImage: "play.circle"
+                )
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!validationDraft.canSubmit || isRunningValidation)
+            .onChange(of: selected.id) { _, _ in
+                validationDraft.taskID = selected.taskID
+            }
+        }
+    }
+
+    private func runValidation() {
+        guard validationDraft.canSubmit, !isRunningValidation else { return }
+        let draft = validationDraft
+        isRunningValidation = true
+        Task {
+            await daemonController.runValidation(
+                taskID: draft.trimmedTaskID,
+                actor: draft.trimmedActor,
+                argv: draft.argv,
+                cwd: draft.normalizedCWD
+            )
+            isRunningValidation = false
+        }
     }
 
     private func inspectorCard<Content: View>(
