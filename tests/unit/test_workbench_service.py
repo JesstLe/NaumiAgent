@@ -48,6 +48,55 @@ async def test_dashboard_snapshot_contains_core_cards(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_issue_creates_backing_task_and_issue_metadata(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    blocker = await task_store.create_task("先完成 API client")
+    mission = await service.create_mission(
+        session_id="s",
+        title="Mac 工作台",
+        goal="让用户能直接从 Mac App 创建可认领 Issue",
+    )
+
+    issue = await service.create_issue(
+        session_id="s",
+        mission_id=mission.id,
+        title="实现 Issue 创建 API",
+        description="创建 backing task 并绑定 workbench metadata",
+        blocked_by=[blocker.id],
+        acceptance_criteria=["dashboard 刷新后可见", "可被 Agent claim"],
+        parallel_mode=ParallelMode.COOPERATIVE,
+        risk_level=RiskLevel.HIGH,
+    )
+
+    tasks = await task_store.list_tasks()
+    created_task = next(task for task in tasks if task.id == issue["task_id"])
+
+    assert created_task.subject == "实现 Issue 创建 API"
+    assert created_task.description == "创建 backing task 并绑定 workbench metadata"
+    assert created_task.blocked_by == [blocker.id]
+    assert issue["session_id"] == "s"
+    assert issue["mission_id"] == mission.id
+    assert issue["acceptance_criteria"] == ["dashboard 刷新后可见", "可被 Agent claim"]
+    assert issue["parallel_mode"] == "cooperative"
+    assert issue["risk_level"] == "high"
+
+    snapshot = await service.dashboard_snapshot("s")
+    assert [task["subject"] for task in snapshot["tasks"]] == [
+        "先完成 API client",
+        "实现 Issue 创建 API",
+    ]
+    assert snapshot["issues"][0]["task_id"] == created_task.id
+
+    events = await service.list_events("s", event_type="issue.created")
+    assert events["events"][0]["subject_id"] == created_task.id
+    assert events["events"][0]["payload"]["mission_id"] == mission.id
+
+
+@pytest.mark.asyncio
 async def test_register_agent_profile_records_event_and_snapshot_card(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")

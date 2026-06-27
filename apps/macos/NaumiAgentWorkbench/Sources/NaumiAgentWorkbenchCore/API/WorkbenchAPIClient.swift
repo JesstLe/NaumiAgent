@@ -333,6 +333,30 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func createIssue(
+        sessionID: String,
+        missionID: String,
+        title: String,
+        description: String,
+        blockedBy: [String],
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async throws(APIError) -> IssueDTO {
+        let body = CreateIssueRequest(
+            title: title,
+            description: description,
+            blockedBy: blockedBy,
+            acceptanceCriteria: acceptanceCriteria,
+            parallelMode: parallelMode,
+            riskLevel: riskLevel
+        )
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "issues"),
+            body: body
+        )
+    }
+
     public func fetchIntentLocks(
         sessionID: String,
         missionID: String
@@ -579,6 +603,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     /// Payload for `POST /workbench/sessions/{session_id}/missions/{mission_id}/issues`.
     private struct AttachIssueRequest: Encodable, Sendable {
         let taskID: String
+        let acceptanceCriteria: [String]
+        let parallelMode: String
+        let riskLevel: String
+    }
+
+    /// Payload for creating a new backing task and attaching it as an issue.
+    private struct CreateIssueRequest: Encodable, Sendable {
+        let title: String
+        let description: String
+        let blockedBy: [String]
         let acceptanceCriteria: [String]
         let parallelMode: String
         let riskLevel: String

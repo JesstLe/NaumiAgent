@@ -78,6 +78,7 @@ class _FakeSessionStore:
 class _FakeWorkbenchService:
     def __init__(self) -> None:
         self.created_missions: list[dict] = []
+        self.created_issues: list[dict] = []
         self.attached_issues: list[dict] = []
         self.registered_agent_profiles: list[dict] = []
         self.created_intent_locks: list[dict] = []
@@ -146,6 +147,46 @@ class _FakeWorkbenchService:
             title=title,
             goal=goal,
         )
+
+    async def create_issue(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        title: str,
+        description: str = "",
+        blocked_by: list[str] | None = None,
+        acceptance_criteria: list[str],
+        parallel_mode: ParallelMode = ParallelMode.EXCLUSIVE,
+        risk_level: RiskLevel = RiskLevel.MEDIUM,
+    ):
+        self.created_issues.append(
+            {
+                "session_id": session_id,
+                "mission_id": mission_id,
+                "title": title,
+                "description": description,
+                "blocked_by": list(blocked_by or []),
+                "acceptance_criteria": acceptance_criteria,
+                "parallel_mode": parallel_mode,
+                "risk_level": risk_level,
+            }
+        )
+        return {
+            "session_id": session_id,
+            "task_id": "task-9",
+            "mission_id": mission_id,
+            "parallel_mode": parallel_mode.value,
+            "risk_level": risk_level.value,
+            "requires_human_approval": True,
+            "acceptance_criteria": list(acceptance_criteria),
+            "expected_artifacts": [],
+            "related_branch": "",
+            "related_worktree": "",
+            "related_pr": "",
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
+        }
 
     async def attach_issue(
         self,
@@ -2205,6 +2246,43 @@ def test_upsert_agent_profile_route_accepts_json_body() -> None:
         }
     ]
     assert response.json()["status"] == "busy"
+
+
+def test_create_issue_route_accepts_json_body_without_existing_task_id() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/missions/mission-1/issues",
+        json={
+            "title": "实现 Issue 创建 API",
+            "description": "创建 backing task 并绑定 workbench metadata",
+            "blocked_by": ["1"],
+            "acceptance_criteria": ["dashboard 刷新后可见", "可被 Agent claim"],
+            "parallel_mode": "cooperative",
+            "risk_level": "high",
+        },
+    )
+
+    assert response.status_code == 201
+    assert engine.workbench_service.created_issues == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-1",
+            "title": "实现 Issue 创建 API",
+            "description": "创建 backing task 并绑定 workbench metadata",
+            "blocked_by": ["1"],
+            "acceptance_criteria": ["dashboard 刷新后可见", "可被 Agent claim"],
+            "parallel_mode": ParallelMode.COOPERATIVE,
+            "risk_level": RiskLevel.HIGH,
+        }
+    ]
+    assert response.json()["task_id"] == "task-9"
+    assert response.json()["parallel_mode"] == "cooperative"
+    assert response.json()["risk_level"] == "high"
 
 
 @pytest.mark.asyncio

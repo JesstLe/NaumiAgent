@@ -53,7 +53,10 @@ class MissionCreate(BaseModel):
 
 
 class IssueAttach(BaseModel):
-    task_id: str
+    task_id: str | None = None
+    title: str | None = None
+    description: str = ""
+    blocked_by: list[str] = Field(default_factory=list)
     acceptance_criteria: list[str] = Field(default_factory=list)
     parallel_mode: ParallelMode = ParallelMode.EXCLUSIVE
     risk_level: RiskLevel = RiskLevel.MEDIUM
@@ -499,7 +502,10 @@ async def create_workbench_mission(
     return asdict(mission)
 
 
-@router.post("/workbench/sessions/{session_id}/missions/{mission_id}/issues")
+@router.post(
+    "/workbench/sessions/{session_id}/missions/{mission_id}/issues",
+    status_code=201,
+)
 async def attach_workbench_issue(
     session_id: str,
     mission_id: str,
@@ -513,14 +519,29 @@ async def attach_workbench_issue(
         raise HTTPException(status_code=404, detail="Session not found")
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    issue = await engine.workbench_service.attach_issue(
-        session_id=session_id,
-        mission_id=mission_id,
-        task_id=body.task_id,
-        acceptance_criteria=body.acceptance_criteria,
-        parallel_mode=body.parallel_mode,
-        risk_level=body.risk_level,
-    )
+    try:
+        if body.task_id:
+            issue = await engine.workbench_service.attach_issue(
+                session_id=session_id,
+                mission_id=mission_id,
+                task_id=body.task_id,
+                acceptance_criteria=body.acceptance_criteria,
+                parallel_mode=body.parallel_mode,
+                risk_level=body.risk_level,
+            )
+        else:
+            issue = await engine.workbench_service.create_issue(
+                session_id=session_id,
+                mission_id=mission_id,
+                title=body.title or "",
+                description=body.description,
+                blocked_by=body.blocked_by,
+                acceptance_criteria=body.acceptance_criteria,
+                parallel_mode=body.parallel_mode,
+                risk_level=body.risk_level,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return issue
 
 

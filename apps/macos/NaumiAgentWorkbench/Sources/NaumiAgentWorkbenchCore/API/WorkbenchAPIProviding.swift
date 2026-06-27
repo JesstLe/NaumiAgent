@@ -141,6 +141,16 @@ public protocol WorkbenchAPIProviding: Sendable {
         parallelMode: String,
         riskLevel: String
     ) async throws(APIError) -> IssueDTO
+    func createIssue(
+        sessionID: String,
+        missionID: String,
+        title: String,
+        description: String,
+        blockedBy: [String],
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async throws(APIError) -> IssueDTO
 
     /// Fetches intent locks for the given session and mission.
     func fetchIntentLocks(
