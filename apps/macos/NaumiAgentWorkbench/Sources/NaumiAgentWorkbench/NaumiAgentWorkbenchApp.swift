@@ -34,6 +34,22 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem {
                 Button {
+                    Task {
+                        await environment.daemonController.refreshConnection()
+                    }
+                } label: {
+                    Label(
+                        AppStrings.ConnectionControl.refreshButton(appState.locale),
+                        systemImage: "arrow.clockwise"
+                    )
+                }
+                .labelStyle(.titleAndIcon)
+                .help(AppStrings.ConnectionControl.refreshButtonHelp(appState.locale))
+                .disabled(appState.connectionState == .connecting)
+            }
+
+            ToolbarItem {
+                Button {
                     isPresentingMissionComposer = true
                 } label: {
                     Label(
