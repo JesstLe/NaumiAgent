@@ -3,6 +3,25 @@ import Foundation
 /// Centralized user-facing strings. 默认中文，en-US fallback。
 public enum AppStrings {
 
+    // MARK: - Session Selector
+    public enum SessionSelector {
+        public static func sectionTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "会话" : "Sessions"
+        }
+
+        public static func refreshButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "刷新" : "Refresh"
+        }
+
+        public static func emptySessions(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "未加载会话" : "No sessions loaded"
+        }
+
+        public static func messageCountLabel(_ locale: AppLocale, count: Int) -> String {
+            locale == .zhCN ? "\(count) 条消息" : "\(count) messages"
+        }
+    }
+
     // MARK: - Navigation
     public enum Navigation {
         public static func dashboard(_ locale: AppLocale) -> String {
