@@ -273,6 +273,39 @@ async def test_intent_locks_round_trip(store: WorkbenchStore) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_intent_lock_returns_matching_session_and_mission_lock(
+    store: WorkbenchStore,
+) -> None:
+    mission = await store.create_mission("s", "M1", "G")
+    other_mission = await store.create_mission("s", "M2", "G")
+    lock = await store.add_intent_lock(
+        session_id="s",
+        mission_id=mission.id,
+        rule="高风险变更必须先提交 proposal",
+        blocked_paths=["src/core"],
+        allowed_paths=["src/core/README.md"],
+        require_proposal_for_risk=RiskLevel.HIGH,
+    )
+    _other_mission_lock = await store.add_intent_lock(
+        session_id="s",
+        mission_id=other_mission.id,
+        rule="其他 mission 的规则",
+    )
+    _other_session_lock = await store.add_intent_lock(
+        session_id="other",
+        mission_id=mission.id,
+        rule="其他 session 的规则",
+    )
+
+    found = await store.get_intent_lock("s", mission.id, lock.id)
+
+    assert found == lock
+    assert await store.get_intent_lock("s", mission.id, "missing-lock") is None
+    assert await store.get_intent_lock("s", other_mission.id, lock.id) is None
+    assert await store.get_intent_lock("other", mission.id, lock.id) is None
+
+
+@pytest.mark.asyncio
 async def test_list_validation_runs_filters_and_orders(store: WorkbenchStore) -> None:
     run_a = await store.record_validation_run(
         session_id="s",

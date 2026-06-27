@@ -1201,6 +1201,39 @@ async def test_create_intent_lock_rejects_empty_rule(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_intent_lock_returns_json_friendly_lock_detail(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+    lock = await service.create_intent_lock(
+        session_id="s",
+        mission_id="mission-1",
+        actor="Planner-Agent",
+        rule="高风险变更必须先提交 proposal",
+        blocked_paths=["src/core"],
+        allowed_paths=["src/core/README.md"],
+        require_proposal_for_risk=RiskLevel.HIGH,
+    )
+    _other_mission_lock = await service.create_intent_lock(
+        session_id="s",
+        mission_id="mission-2",
+        actor="Planner-Agent",
+        rule="其他 mission 的规则",
+    )
+
+    result = await service.get_intent_lock("s", "mission-1", lock["id"])
+
+    assert result == lock
+    assert result["require_proposal_for_risk"] == "high"
+    assert result["blocked_paths"] == ["src/core"]
+    assert result["allowed_paths"] == ["src/core/README.md"]
+    assert await service.get_intent_lock("s", "mission-1", "missing-lock") is None
+    assert await service.get_intent_lock("s", "mission-2", lock["id"]) is None
+    assert await service.get_intent_lock("other", "mission-1", lock["id"]) is None
+
+
+@pytest.mark.asyncio
 async def test_create_decision_persists_decision_and_records_event(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")
