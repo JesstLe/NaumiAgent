@@ -304,7 +304,7 @@ public final class DaemonController: Sendable {
     }
 
     /// Claims an issue on behalf of an agent and refreshes the leases, issues,
-    /// and snapshot lists on success.
+    /// timeline events, and snapshot lists on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
     /// `appState.lastError`; the local snapshot, issues, and leases are never
@@ -331,13 +331,15 @@ public final class DaemonController: Sendable {
             )
             await refreshLeases()
             await refreshIssues()
+            await refreshEvents(limit: 50)
             await refreshSnapshot()
         } catch {
             appState.lastError = error
         }
     }
 
-    /// Releases a lease and refreshes the leases and snapshot lists on success.
+    /// Releases a lease and refreshes the leases, timeline events, and
+    /// snapshot lists on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
     /// `appState.lastError`; the local snapshot and leases are never mutated
@@ -355,14 +357,15 @@ public final class DaemonController: Sendable {
                 leaseID: leaseID
             )
             await refreshLeases()
+            await refreshEvents(limit: 50)
             await refreshSnapshot()
         } catch {
             appState.lastError = error
         }
     }
 
-    /// Expires overdue leases in the selected session and refreshes the leases
-    /// and snapshot lists on success.
+    /// Expires overdue leases in the selected session and refreshes the leases,
+    /// timeline events, and snapshot lists on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
     /// `appState.lastError`; the local snapshot and leases are never mutated
@@ -377,6 +380,7 @@ public final class DaemonController: Sendable {
         do {
             _ = try await apiProvider.expireLeases(sessionID: sessionID)
             await refreshLeases()
+            await refreshEvents(limit: 50)
             await refreshSnapshot()
         } catch {
             appState.lastError = error
@@ -384,9 +388,9 @@ public final class DaemonController: Sendable {
     }
 
     /// Creates a mission in the selected session and refreshes the missions,
-    /// issues, and snapshot lists on success. Snapshot is refreshed last so
-    /// that a snapshot failure does not wipe state already updated by earlier
-    /// refreshes.
+    /// issues, timeline events, and snapshot lists on success. Snapshot is
+    /// refreshed last so that a snapshot failure does not wipe state already
+    /// updated by earlier refreshes.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
     /// `appState.lastError`; the local snapshot, missions, and issues are never
@@ -406,14 +410,15 @@ public final class DaemonController: Sendable {
             )
             await refreshMissions()
             await refreshIssues()
+            await refreshEvents(limit: 50)
             await refreshSnapshot()
         } catch {
             appState.lastError = error
         }
     }
 
-    /// Attaches an issue to a mission and refreshes the snapshot and the
-    /// filtered issues list for that mission on success.
+    /// Attaches an issue to a mission and refreshes the filtered issues list,
+    /// timeline events, and snapshot for that mission on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
     /// `appState.lastError`; the local snapshot and issues are never mutated
@@ -441,13 +446,15 @@ public final class DaemonController: Sendable {
                 riskLevel: riskLevel
             )
             await refreshIssues(missionID: missionID)
+            await refreshEvents(limit: 50)
             await refreshSnapshot()
         } catch {
             appState.lastError = error
         }
     }
 
-    /// Creates an intent lock for a mission and refreshes the snapshot on success.
+    /// Creates an intent lock for a mission and refreshes the timeline events
+    /// and snapshot on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
     /// `appState.lastError`; the local snapshot is never mutated directly.
@@ -475,13 +482,15 @@ public final class DaemonController: Sendable {
                 allowedPaths: allowedPaths,
                 requireProposalForRisk: requireProposalForRisk
             )
+            await refreshEvents(limit: 50)
             await refreshSnapshot()
         } catch {
             appState.lastError = error
         }
     }
 
-    /// Creates a decision for a mission and refreshes the snapshot on success.
+    /// Creates a decision for a mission and refreshes the timeline events and
+    /// snapshot on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
     /// `appState.lastError`; the local snapshot is never mutated directly.
@@ -507,6 +516,7 @@ public final class DaemonController: Sendable {
                 content: content,
                 actor: actor
             )
+            await refreshEvents(limit: 50)
             await refreshSnapshot()
         } catch {
             appState.lastError = error
@@ -514,7 +524,7 @@ public final class DaemonController: Sendable {
     }
 
     /// Resolves an approval request as approved or rejected and refreshes the
-    /// snapshot and waiting approvals list on success.
+    /// timeline events, waiting approvals list, and snapshot on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
     /// `appState.lastError`; the local snapshot and approvals are never mutated
@@ -539,19 +549,21 @@ public final class DaemonController: Sendable {
                 state: state,
                 decisionNote: decisionNote
             )
-            await refreshSnapshot()
+            await refreshEvents(limit: 50)
             await refreshApprovals(state: "waiting")
+            await refreshSnapshot()
         } catch {
             appState.lastError = error
         }
     }
 
-    /// Runs a validation command and refreshes validation runs, failures, and
-    /// snapshot on success.
+    /// Runs a validation command and refreshes validation runs, failures,
+    /// timeline events, and snapshot on success.
     ///
-    /// Requires `appState.selectedSessionID` to be set. On success, `validationRuns`,
-    /// `failures`, and `snapshot` are refreshed from the backend; on failure
-    /// `lastError` is set and the existing local state is preserved.
+    /// Requires `appState.selectedSessionID` to be set. On success,
+    /// `validationRuns`, `failures`, `timelineEvents`, and `snapshot` are
+    /// refreshed from the backend; on failure `lastError` is set and the
+    /// existing local state is preserved.
     public func runValidation(
         taskID: String,
         actor: String,
@@ -574,6 +586,7 @@ public final class DaemonController: Sendable {
             )
             await refreshValidationRuns(taskID: taskID)
             await refreshFailures(taskID: taskID)
+            await refreshEvents(limit: 50)
             await refreshSnapshot()
         } catch {
             appState.lastError = error
