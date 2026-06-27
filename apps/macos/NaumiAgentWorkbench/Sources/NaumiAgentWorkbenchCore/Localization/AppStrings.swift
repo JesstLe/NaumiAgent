@@ -99,6 +99,19 @@ public enum AppStrings {
         }
     }
 
+    // MARK: - Connection Control
+    public enum ConnectionControl {
+        public static func refreshButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "重试连接" : "Refresh Connection"
+        }
+
+        public static func refreshButtonHelp(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "手动刷新本地服务连接"
+                : "Manually refresh the local daemon connection"
+        }
+    }
+
     // MARK: - Dashboard
     public enum Dashboard {
         public static func title(_ locale: AppLocale) -> String {
