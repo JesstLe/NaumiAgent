@@ -55,7 +55,9 @@ final class WorkbenchPreviewLoaderTests {
         #expect(appState.failures.count == 1)
         #expect(!appState.timelineEvents.isEmpty)
         #expect(appState.validationRuns.count == 2)
-        #expect(appState.contextSnapshots.count == 3)
+        #expect(appState.contextSnapshots.count == 6)
+        #expect(appState.worktrees.count == 3)
+        #expect(appState.worktrees.map(\.name) == ["wt-api-client", "wt-review-risk", "wt-validation-card"])
         #expect(appState.approvals.count == 2)
     }
 
@@ -76,6 +78,8 @@ final class WorkbenchPreviewLoaderTests {
         #expect(appState.sessions.count == 1)
         #expect(appState.sessions.first?.id == "sess-en-001")
         #expect(appState.daemonStatus?.status == "running")
+        #expect(appState.worktrees.count == 3)
+        #expect(appState.worktrees.last?.keptReason == "Waiting for human review")
     }
 
     @Test func malformedLocaleErrorsByDefault() {
