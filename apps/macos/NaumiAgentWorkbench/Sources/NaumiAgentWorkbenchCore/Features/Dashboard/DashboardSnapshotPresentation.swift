@@ -4,6 +4,7 @@ import Foundation
 /// Keeps SwiftUI-agnostic logic testable without View infrastructure.
 public struct DashboardSnapshotPresentation: Equatable, Sendable {
     public let currentMission: DashboardMissionSummary?
+    public let agentRows: [DashboardAgentRow]
     public let taskRows: [DashboardTaskRow]
     public let issueRows: [DashboardIssueRow]
     public let failureRows: [DashboardFailureRow]
@@ -12,6 +13,17 @@ public struct DashboardSnapshotPresentation: Equatable, Sendable {
     public init(snapshot: WorkbenchSnapshotDTO) {
         self.currentMission = snapshot.missions.first.map {
             DashboardMissionSummary(id: $0.id, title: $0.title, status: $0.status)
+        }
+
+        self.agentRows = Array(snapshot.agentProfiles.prefix(5)).map { profile in
+            DashboardAgentRow(
+                id: profile.id,
+                name: profile.name,
+                role: profile.role,
+                status: profile.status,
+                capabilityCount: profile.capabilities.count,
+                maxParallelTasks: profile.maxParallelTasks
+            )
         }
 
         let issueByTaskID = Dictionary(
@@ -71,6 +83,15 @@ public struct DashboardMissionSummary: Equatable, Sendable {
     public let id: String
     public let title: String
     public let status: String
+}
+
+public struct DashboardAgentRow: Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let role: String
+    public let status: String
+    public let capabilityCount: Int
+    public let maxParallelTasks: Int
 }
 
 public struct DashboardTaskRow: Equatable, Sendable {

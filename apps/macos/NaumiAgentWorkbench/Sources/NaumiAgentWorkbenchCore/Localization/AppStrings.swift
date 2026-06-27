@@ -87,6 +87,10 @@ public enum AppStrings {
             locale == .zhCN ? "目标" : "Missions"
         }
 
+        public static func agentsLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "智能体" : "Agents"
+        }
+
         public static func tasksLabel(_ locale: AppLocale) -> String {
             locale == .zhCN ? "任务" : "Tasks"
         }
@@ -123,6 +127,10 @@ public enum AppStrings {
             locale == .zhCN ? "任务队列" : "Task Queue"
         }
 
+        public static func agentsSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "智能体状态" : "Agent Status"
+        }
+
         public static func failuresSection(_ locale: AppLocale) -> String {
             locale == .zhCN ? "失败验证" : "Validation Failures"
         }
@@ -147,6 +155,18 @@ public enum AppStrings {
             locale == .zhCN ? "当前形态" : "Active Form"
         }
 
+        public static func roleLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "角色" : "Role"
+        }
+
+        public static func capabilitiesLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "能力数" : "Capabilities"
+        }
+
+        public static func maxParallelTasksLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "并行上限" : "Parallel Limit"
+        }
+
         public static func kindLabel(_ locale: AppLocale) -> String {
             locale == .zhCN ? "类型" : "Kind"
         }
@@ -169,6 +189,10 @@ public enum AppStrings {
 
         public static func emptyTasks(_ locale: AppLocale) -> String {
             locale == .zhCN ? "暂无任务" : "No tasks"
+        }
+
+        public static func emptyAgents(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无智能体" : "No agents"
         }
 
         public static func emptyFailures(_ locale: AppLocale) -> String {

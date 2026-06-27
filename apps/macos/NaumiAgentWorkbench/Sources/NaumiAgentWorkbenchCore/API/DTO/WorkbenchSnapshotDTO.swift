@@ -6,6 +6,7 @@ import Foundation
 public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
     public let sessionID: String
     public let missions: [MissionDTO]
+    public let agentProfiles: [AgentProfileDTO]
     public let tasks: [TaskDTO]
     public let issues: [IssueDTO]
     public let leases: [LeaseDTO]
@@ -15,6 +16,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
     public enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case missions
+        case agentProfiles = "agent_profiles"
         case tasks
         case issues
         case leases
@@ -25,6 +27,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
     public init(
         sessionID: String,
         missions: [MissionDTO],
+        agentProfiles: [AgentProfileDTO] = [],
         tasks: [TaskDTO],
         issues: [IssueDTO],
         leases: [LeaseDTO] = [],
@@ -33,6 +36,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
     ) {
         self.sessionID = sessionID
         self.missions = missions
+        self.agentProfiles = agentProfiles
         self.tasks = tasks
         self.issues = issues
         self.leases = leases
@@ -44,6 +48,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         sessionID = try container.decode(String.self, forKey: .sessionID)
         missions = try container.decode([MissionDTO].self, forKey: .missions)
+        agentProfiles = try container.decodeIfPresent([AgentProfileDTO].self, forKey: .agentProfiles) ?? []
         tasks = try container.decode([TaskDTO].self, forKey: .tasks)
         issues = try container.decode([IssueDTO].self, forKey: .issues)
         leases = try container.decodeIfPresent([LeaseDTO].self, forKey: .leases) ?? []

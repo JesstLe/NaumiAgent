@@ -11,6 +11,32 @@
       "updated_at": "2026-06-27T05:30:00"
     }
   ],
+  "agent_profiles": [
+    {
+      "id": "agent-a",
+      "session_id": "sess-en-001",
+      "name": "Backend Agent",
+      "role": "coder",
+      "capabilities": ["api", "swift-client"],
+      "permissions": ["read", "write"],
+      "max_parallel_tasks": 2,
+      "status": "busy",
+      "created_at": "2026-06-27T05:05:00",
+      "updated_at": "2026-06-27T05:45:00"
+    },
+    {
+      "id": "agent-b",
+      "session_id": "sess-en-001",
+      "name": "Validation Agent",
+      "role": "validator",
+      "capabilities": ["test", "review"],
+      "permissions": ["read"],
+      "max_parallel_tasks": 1,
+      "status": "idle",
+      "created_at": "2026-06-27T05:06:00",
+      "updated_at": "2026-06-27T05:35:00"
+    }
+  ],
   "tasks": [
     {
       "id": "1",

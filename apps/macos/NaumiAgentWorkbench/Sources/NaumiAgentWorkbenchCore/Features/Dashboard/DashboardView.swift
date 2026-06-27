@@ -127,6 +127,11 @@ public struct DashboardView: View {
                     color: .blue
                 )
                 countCard(
+                    title: AppStrings.Dashboard.agentsLabel(appState.locale),
+                    count: appState.snapshot?.agentProfiles.count ?? 0,
+                    color: .green
+                )
+                countCard(
                     title: AppStrings.Dashboard.tasksLabel(appState.locale),
                     count: appState.snapshot?.tasks.count ?? 0,
                     color: .purple
@@ -174,6 +179,7 @@ public struct DashboardView: View {
             if let mission = presentation.currentMission {
                 missionCard(mission: mission)
             }
+            agentsSection(rows: presentation.agentRows)
             taskQueueSection(rows: presentation.taskRows)
             failuresSection(rows: presentation.failureRows)
             eventsSection(rows: presentation.recentEventRows)
@@ -192,6 +198,50 @@ public struct DashboardView: View {
                         value: mission.status
                     )
                 }
+            }
+        }
+    }
+
+    private func agentsSection(rows: [DashboardAgentRow]) -> some View {
+        sectionCard(title: AppStrings.Dashboard.agentsSection(appState.locale)) {
+            VStack(alignment: .leading, spacing: 12) {
+                if rows.isEmpty {
+                    emptyListLabel(AppStrings.Dashboard.emptyAgents(appState.locale))
+                } else {
+                    ForEach(rows, id: \.id) { row in
+                        agentRowView(row: row)
+                        if row.id != rows.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func agentRowView(row: DashboardAgentRow) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text(row.name)
+                    .font(.body)
+                    .fontWeight(.medium)
+                Spacer()
+                StatusBadge(text: row.status, color: statusColor(for: row.status))
+            }
+
+            HStack(spacing: 16) {
+                detailItem(
+                    label: AppStrings.Dashboard.roleLabel(appState.locale),
+                    value: row.role
+                )
+                detailItem(
+                    label: AppStrings.Dashboard.capabilitiesLabel(appState.locale),
+                    value: "\(row.capabilityCount)"
+                )
+                detailItem(
+                    label: AppStrings.Dashboard.maxParallelTasksLabel(appState.locale),
+                    value: "\(row.maxParallelTasks)"
+                )
             }
         }
     }
@@ -372,7 +422,7 @@ public struct DashboardView: View {
         switch status.lowercased() {
         case "completed", "done", "closed", "resolved":
             return .green
-        case "in_progress", "running", "active":
+        case "in_progress", "running", "active", "busy":
             return .blue
         case "blocked", "failed", "open":
             return .red
