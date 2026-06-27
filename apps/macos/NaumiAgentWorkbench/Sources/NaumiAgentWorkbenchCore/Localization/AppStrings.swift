@@ -691,6 +691,16 @@ public enum AppStrings {
                 : "The daemon does not support '\(name)'"
         }
 
+        public static func protocolVersionMismatch(
+            _ locale: AppLocale,
+            expected: Int,
+            actual: Int
+        ) -> String {
+            locale == .zhCN
+                ? "Workbench 协议版本不兼容：需要 \(expected)，当前 daemon 返回 \(actual)"
+                : "Workbench protocol mismatch: expected \(expected), daemon returned \(actual)"
+        }
+
         private static func localizedCapabilityName(_ locale: AppLocale, capability: String) -> String {
             switch capability {
             case "validation_runner":
