@@ -55,20 +55,16 @@ class _SmokeEngine:
 def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) -> None:
     """Create the local Mac App flow through HTTP and verify snapshot freshness."""
 
-    async def _prepare_engine() -> tuple[_SmokeEngine, str, str]:
+    async def _prepare_engine() -> tuple[_SmokeEngine, str]:
         engine = _SmokeEngine(
             db_path=tmp_path / "workbench-smoke.db",
             workspace_root=tmp_path,
         )
         session = await engine.session_store.create_session(title="Mac Workbench Smoke")
         engine.task_store.set_session(session.id)
-        task = await engine.task_store.create_task(
-            "实现 API smoke",
-            description="从 Mac App HTTP 合同验证 dashboard 刷新",
-        )
-        return engine, session.id, task.id
+        return engine, session.id
 
-    engine, session_id, task_id = asyncio.run(_prepare_engine())
+    engine, session_id = asyncio.run(_prepare_engine())
     app = FastAPI()
     app.state.engine = engine
     app.state.config = AppConfig(
@@ -95,13 +91,16 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
             issue_response = client.post(
                 f"/api/v1/workbench/sessions/{session_id}/missions/{mission_id}/issues",
                 json={
-                    "task_id": task_id,
+                    "title": "实现 API smoke",
+                    "description": "从 Mac App HTTP 合同验证 dashboard 刷新",
+                    "blocked_by": [],
                     "acceptance_criteria": ["dashboard snapshot 必须刷新"],
                     "parallel_mode": "exclusive",
                     "risk_level": "medium",
                 },
             )
-            assert issue_response.status_code == 200
+            assert issue_response.status_code == 201
+            task_id = issue_response.json()["task_id"]
 
             agent_response = client.post(
                 f"/api/v1/workbench/sessions/{session_id}/agents/Backend-Agent",
@@ -159,6 +158,7 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
 
             assert snapshot["session_id"] == session_id
             assert [mission["id"] for mission in snapshot["missions"]] == [mission_id]
+            assert [task["subject"] for task in snapshot["tasks"]] == ["实现 API smoke"]
             assert [issue["task_id"] for issue in snapshot["issues"]] == [task_id]
             assert snapshot["issues"][0]["related_worktree"] == "wt-api-smoke"
             assert [lease["agent_id"] for lease in snapshot["leases"]] == ["Backend-Agent"]
