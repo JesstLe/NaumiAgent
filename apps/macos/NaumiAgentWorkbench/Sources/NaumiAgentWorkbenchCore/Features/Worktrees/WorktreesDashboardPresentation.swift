@@ -68,6 +68,13 @@ public struct WorktreesDashboardPresentation: Equatable, Sendable {
             }
         self.recommendedActions = WorktreeRecommendedAction.actions(for: selectedSnapshot?.health)
     }
+
+    public func selectedWorktree(id: String?) -> WorktreeManagementRow? {
+        guard let id else {
+            return worktreeRows.first
+        }
+        return worktreeRows.first { $0.id == id } ?? worktreeRows.first
+    }
 }
 
 public enum WorktreeStatusTone: Equatable, Sendable {
@@ -80,6 +87,7 @@ public enum WorktreeStatusTone: Equatable, Sendable {
 public struct WorktreeManagementRow: Equatable, Sendable, Identifiable {
     public var id: String { name }
     public let name: String
+    public let path: String
     public let taskID: String
     public let agentID: String
     public let branch: String
@@ -104,8 +112,28 @@ public struct WorktreeManagementRow: Equatable, Sendable, Identifiable {
         return .normal
     }
 
+    public var canKeep: Bool {
+        !isKept
+    }
+
+    private var isKept: Bool {
+        !keptReason.isEmpty || status.lowercased() == "kept"
+    }
+
+    public func defaultKeepReason(locale: AppLocale) -> String {
+        locale == .zhCN
+            ? "人工保留 \(name)，等待后续治理"
+            : "Keep \(name) for follow-up governance"
+    }
+
+    public func keepDisabledReason(locale: AppLocale) -> String? {
+        guard !canKeep else { return nil }
+        return locale == .zhCN ? "已保留" : "Already kept"
+    }
+
     public init(worktree: WorktreeDTO) {
         self.name = worktree.name
+        self.path = worktree.path
         self.taskID = worktree.taskID
         self.agentID = worktree.metadata["agent_id"] ?? worktree.metadata["owner"] ?? "-"
         self.branch = worktree.branch

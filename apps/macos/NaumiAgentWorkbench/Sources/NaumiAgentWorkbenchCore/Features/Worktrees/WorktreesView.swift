@@ -5,6 +5,8 @@ public struct WorktreesView: View {
     @Bindable public var appState: AppState
     public let daemonController: DaemonController
     @State private var selectedSnapshotID: String?
+    @State private var selectedWorktreeID: String?
+    @State private var isKeepingWorktree = false
     private let layout = WorkbenchPageLayout.worktrees
 
     public init(appState: AppState, daemonController: DaemonController) {
@@ -19,6 +21,7 @@ public struct WorktreesView: View {
         )
         let selectedSnapshot = presentation.snapshots.first { $0.id == selectedSnapshotID }
             ?? presentation.selectedSnapshot
+        let selectedWorktree = presentation.selectedWorktree(id: selectedWorktreeID)
 
         VStack(spacing: 0) {
             header(presentation: presentation)
@@ -48,6 +51,7 @@ public struct WorktreesView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
+                        selectedWorktreePanel(worktree: selectedWorktree)
                         selectedSnapshotPanel(snapshot: selectedSnapshot)
                         remediationPanel(presentation: presentation)
                         if let lastError = appState.lastError {
@@ -66,6 +70,9 @@ public struct WorktreesView: View {
             if selectedSnapshotID == nil {
                 selectedSnapshotID = presentation.selectedSnapshot?.id
             }
+            if selectedWorktreeID == nil {
+                selectedWorktreeID = presentation.selectedWorktree(id: nil)?.id
+            }
         }
         .task {
             guard !appState.isPreviewFixture else { return }
@@ -76,6 +83,20 @@ public struct WorktreesView: View {
     private func refreshWorktreesPage() async {
         await daemonController.refreshWorktrees(limit: 50)
         await daemonController.refreshContextSnapshots(limit: 50)
+    }
+
+    private func keepWorktree(_ worktree: WorktreeManagementRow) {
+        guard worktree.canKeep, !isKeepingWorktree else { return }
+        isKeepingWorktree = true
+        Task {
+            await daemonController.keepWorktree(
+                name: worktree.name,
+                actor: "Human",
+                reason: worktree.defaultKeepReason(locale: appState.locale)
+            )
+            await daemonController.refreshContextSnapshots(limit: 50)
+            isKeepingWorktree = false
+        }
     }
 
     private func header(presentation: WorktreesDashboardPresentation) -> some View {
@@ -182,12 +203,17 @@ public struct WorktreesView: View {
             if presentation.worktreeRows.isEmpty {
                 emptyWorktreesState
             } else {
+                let effectiveSelectedWorktreeID = presentation.selectedWorktree(id: selectedWorktreeID)?.id
                 ScrollView(.horizontal, showsIndicators: false) {
                     VStack(spacing: 0) {
                         worktreeHeaderRow
                         Divider()
                         ForEach(presentation.worktreeRows) { row in
-                            worktreeDataRow(row)
+                            worktreeDataRow(row, isSelected: row.id == effectiveSelectedWorktreeID)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectedWorktreeID = row.id
+                                }
                             if row.id != presentation.worktreeRows.last?.id {
                                 Divider()
                             }
@@ -223,7 +249,7 @@ public struct WorktreesView: View {
         .padding(.vertical, 8)
     }
 
-    private func worktreeDataRow(_ row: WorktreeManagementRow) -> some View {
+    private func worktreeDataRow(_ row: WorktreeManagementRow, isSelected: Bool) -> some View {
         HStack(spacing: 8) {
             Text(row.name)
                 .font(.system(size: 13, weight: .semibold))
@@ -264,7 +290,11 @@ public struct WorktreesView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
-        .background(color(for: row.statusTone).opacity(row.statusTone == .normal ? 0.0 : 0.06))
+        .background(
+            isSelected
+                ? Color.accentColor.opacity(0.10)
+                : color(for: row.statusTone).opacity(row.statusTone == .normal ? 0.0 : 0.06)
+        )
     }
 
     private func worktreeColumnTitle(_ title: String, width: Double) -> some View {
@@ -392,6 +422,74 @@ public struct WorktreesView: View {
                 }
             } else {
                 emptyState
+            }
+        }
+    }
+
+    private func selectedWorktreePanel(worktree: WorktreeManagementRow?) -> some View {
+        panel(title: appState.locale == .zhCN ? "工作区详情" : "Worktree Details") {
+            if let worktree {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "folder.badge.gearshape")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(color(for: worktree.statusTone))
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(worktree.name)
+                                .font(.system(size: 18, weight: .semibold))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            StatusBadge(text: worktreeStatusLabel(worktree.status), color: color(for: worktree.statusTone))
+                        }
+                        Spacer(minLength: 0)
+                    }
+
+                    detailBlock(label: appState.locale == .zhCN ? "路径" : "Path", value: worktree.path)
+                    detailBlock(label: appState.locale == .zhCN ? "分支" : "Branch", value: worktree.branch)
+                    twoColumnDetail(
+                        leftLabel: AppStrings.Worktrees.taskIDLabel(appState.locale),
+                        leftValue: worktree.taskID,
+                        rightLabel: AppStrings.Worktrees.agentIDLabel(appState.locale),
+                        rightValue: worktree.agentID
+                    )
+                    twoColumnDetail(
+                        leftLabel: appState.locale == .zhCN ? "脏文件" : "Dirty Files",
+                        leftValue: "\(worktree.dirtyFiles)",
+                        rightLabel: appState.locale == .zhCN ? "领先提交" : "Commits Ahead",
+                        rightValue: "\(worktree.commitsAhead)"
+                    )
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(appState.locale == .zhCN ? "动作" : "Actions")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            keepWorktree(worktree)
+                        } label: {
+                            Label(
+                                isKeepingWorktree
+                                    ? (appState.locale == .zhCN ? "保留中" : "Keeping")
+                                    : (appState.locale == .zhCN ? "保留工作区" : "Keep Worktree"),
+                                systemImage: "pin"
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!worktree.canKeep || isKeepingWorktree)
+
+                        if let disabledReason = worktree.keepDisabledReason(locale: appState.locale) {
+                            Text(disabledReason)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(worktree.defaultKeepReason(locale: appState.locale))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } else {
+                emptyWorktreesState
             }
         }
     }
