@@ -15,6 +15,7 @@ public final class AppState: Sendable {
     public var timelineEvents: [EventDTO] = []
     public var validationRuns: [ValidationRunDTO] = []
     public var contextSnapshots: [ContextSnapshotDTO] = []
+    public var approvals: [ApprovalDTO] = []
     public var lastError: APIError? = nil
     public var locale: AppLocale = .default
 

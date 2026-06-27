@@ -130,6 +130,34 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Fetches approval requests for the currently selected session.
+    ///
+    /// Defaults to returning only `waiting` approvals so the UI can present a
+    /// pending-approvals list. Requires `appState.selectedSessionID` to be set.
+    /// On success the approvals are written to `appState.approvals`; on failure
+    /// `appState.lastError` is set. Missing session clears the local approvals
+    /// list to avoid showing stale data from another session. API failures leave
+    /// the local list unchanged.
+    public func refreshApprovals(state: String? = "waiting", limit: Int = 50) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.approvals = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchApprovals(
+                sessionID: sessionID,
+                state: state,
+                limit: limit
+            )
+            appState.approvals = response.approvals
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Refreshes the snapshot for the currently selected session.
     ///
     /// When no session is selected, the most recent session from `GET /sessions`
@@ -356,10 +384,12 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Resolves an approval request as approved or rejected and refreshes the snapshot on success.
+    /// Resolves an approval request as approved or rejected and refreshes the
+    /// snapshot and waiting approvals list on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot is never mutated directly.
+    /// `appState.lastError`; the local snapshot and approvals are never mutated
+    /// directly.
     public func resolveApproval(
         approvalID: String,
         actor: String,
@@ -381,6 +411,7 @@ public final class DaemonController: Sendable {
                 decisionNote: decisionNote
             )
             await refreshSnapshot()
+            await refreshApprovals(state: "waiting")
         } catch {
             appState.lastError = error
         }

@@ -11,6 +11,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var eventsResult: Result<WorkbenchEventsDTO, APIError>?
     var validationRunsResult: Result<ValidationRunsDTO, APIError>?
     var contextSnapshotsResult: Result<ContextSnapshotsDTO, APIError>?
+    var approvalsResult: Result<ApprovalsDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
@@ -74,6 +75,17 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> ContextSnapshotsDTO {
         guard let result = contextSnapshotsResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchApprovals(
+        sessionID: String,
+        state: String?,
+        limit: Int
+    ) async throws(APIError) -> ApprovalsDTO {
+        guard let result = approvalsResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -844,6 +856,55 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
+    @Test @MainActor func refreshApprovalsSuccessWritesToAppState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let approval = makeApproval(id: "approval-001", missionID: "mission-001", state: "waiting")
+        let approvals = ApprovalsDTO(approvals: [approval], state: "waiting", limit: 25)
+
+        await api.setApprovalsResult(.success(approvals))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshApprovals(state: "waiting", limit: 25)
+
+        #expect(appState.approvals == [approval])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshApprovalsWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        appState.approvals = [
+            makeApproval(id: "approval-stale", missionID: "mission-001", state: "waiting")
+        ]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshApprovals(state: "waiting", limit: 50)
+
+        #expect(appState.lastError != nil)
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.approvals.isEmpty)
+    }
+
+    @Test @MainActor func refreshApprovalsFailurePreservesOldList() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleApproval = makeApproval(id: "approval-stale", missionID: "mission-001", state: "waiting")
+        appState.approvals = [staleApproval]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setApprovalsResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshApprovals(state: "waiting", limit: 50)
+
+        #expect(appState.approvals == [staleApproval])
+        #expect(appState.lastError == .httpStatus(500))
+    }
+
     @Test @MainActor func runValidationSuccessRefreshesValidationRunsAndSnapshot() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -1090,16 +1151,19 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func resolveApprovalSuccessRefreshesSnapshot() async throws {
+    @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotAndWaitingApprovals() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
         let api = FakeWorkbenchAPIProvider()
-        let approval = makeApproval(id: "approval-001", missionID: "mission-001", state: "approved")
+        let resolvedApproval = makeApproval(id: "approval-001", missionID: "mission-001", state: "approved")
+        let waitingApproval = makeApproval(id: "approval-002", missionID: "mission-001", state: "waiting")
         let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        let approvals = ApprovalsDTO(approvals: [waitingApproval], state: "waiting", limit: 50)
 
-        await api.setResolveApprovalResult(.success(approval))
+        await api.setResolveApprovalResult(.success(resolvedApproval))
         await api.setSnapshotResult(.success(snapshot))
+        await api.setApprovalsResult(.success(approvals))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.resolveApproval(
@@ -1110,6 +1174,7 @@ final class DaemonControllerTests {
         )
 
         #expect(appState.snapshot == snapshot)
+        #expect(appState.approvals == [waitingApproval])
         #expect(appState.lastError == nil)
     }
 
@@ -1136,6 +1201,8 @@ final class DaemonControllerTests {
         appState.selectedSessionID = "sess-001"
         let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
         appState.snapshot = staleSnapshot
+        let staleApproval = makeApproval(id: "approval-stale", missionID: "mission-001", state: "waiting")
+        appState.approvals = [staleApproval]
 
         let api = FakeWorkbenchAPIProvider()
         await api.setResolveApprovalResult(.failure(.httpStatus(500)))
@@ -1149,6 +1216,7 @@ final class DaemonControllerTests {
         )
 
         #expect(appState.snapshot == staleSnapshot)
+        #expect(appState.approvals == [staleApproval])
         #expect(appState.lastError == .httpStatus(500))
     }
 }
@@ -1180,6 +1248,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setContextSnapshotsResult(_ result: Result<ContextSnapshotsDTO, APIError>) {
         contextSnapshotsResult = result
+    }
+
+    fileprivate func setApprovalsResult(_ result: Result<ApprovalsDTO, APIError>) {
+        approvalsResult = result
     }
 
     fileprivate func setClaimIssueResult(_ result: Result<LeaseDTO, APIError>) {

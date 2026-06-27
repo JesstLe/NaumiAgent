@@ -28,6 +28,13 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> ContextSnapshotsDTO
 
+    /// Fetches approval requests for the given session, optionally filtered by state.
+    func fetchApprovals(
+        sessionID: String,
+        state: String?,
+        limit: Int
+    ) async throws(APIError) -> ApprovalsDTO
+
     /// Claims an open issue for the given agent, creating a new lease.
     func claimIssue(
         sessionID: String,

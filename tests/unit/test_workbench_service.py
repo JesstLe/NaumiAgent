@@ -213,6 +213,43 @@ async def test_list_context_snapshots_returns_store_snapshots_and_respects_limit
 
 
 @pytest.mark.asyncio
+async def test_list_approvals_returns_json_friendly_state_strings(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    waiting = await workbench_store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-1",
+        title="等待审批",
+        detail="详情",
+        requester="Agent-A",
+    )
+    approved = await workbench_store.add_approval(
+        session_id="s",
+        mission_id="mission-1",
+        task_id="task-2",
+        title="已批准",
+        detail="详情",
+        requester="Agent-B",
+        state=ApprovalState.APPROVED,
+    )
+
+    all_approvals = await service.list_approvals("s", limit=50)
+    assert {a["id"] for a in all_approvals} == {waiting.id, approved.id}
+    assert all(isinstance(a["state"], str) for a in all_approvals)
+    approvals_by_id = {a["id"]: a for a in all_approvals}
+    assert approvals_by_id[waiting.id]["state"] == "waiting"
+    assert approvals_by_id[approved.id]["state"] == "approved"
+
+    waiting_only = await service.list_approvals("s", state=ApprovalState.WAITING, limit=50)
+    assert [a["id"] for a in waiting_only] == [waiting.id]
+    assert waiting_only[0]["state"] == "waiting"
+
+
+@pytest.mark.asyncio
 async def test_run_validation_records_run_and_event(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")
