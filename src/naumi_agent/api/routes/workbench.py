@@ -128,6 +128,12 @@ class IssuesResponse(BaseModel):
     limit: int
 
 
+class MissionsResponse(BaseModel):
+    missions: list[dict[str, Any]]
+    status: str | None
+    limit: int
+
+
 def _get_task_market(engine) -> TaskMarket:
     market = getattr(engine, "workbench_market", None)
     if market is not None:
@@ -281,6 +287,31 @@ async def get_failures(
     )
     return FailuresResponse(
         failures=failures, task_id=task_id, status=status, limit=limit
+    )
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/missions",
+    response_model=MissionsResponse,
+)
+async def get_missions(
+    session_id: str,
+    request: Request,
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    missions = await engine.workbench_service.list_missions(
+        session_id, status=status, limit=limit
+    )
+    return MissionsResponse(
+        missions=missions["missions"], status=status, limit=limit
     )
 
 

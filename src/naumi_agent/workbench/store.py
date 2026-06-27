@@ -226,15 +226,34 @@ class WorkbenchStore:
             await db.commit()
         return mission
 
-    async def list_missions(self, session_id: str) -> list[Mission]:
+    async def list_missions(
+        self,
+        session_id: str,
+        status: str | None = None,
+        limit: int | None = None,
+        newest_first: bool = False,
+    ) -> list[Mission]:
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
             db.row_factory = aiosqlite.Row
+
+            conditions = ["session_id = ?"]
+            params: list[Any] = [session_id]
+            if status is not None:
+                conditions.append("status = ?")
+                params.append(status)
+
+            where_clause = " AND ".join(conditions)
+            order_clause = "created_at DESC" if newest_first else "created_at"
+            limit_clause = " LIMIT ?" if limit is not None else ""
+            if limit is not None:
+                params.append(limit)
+
             cursor = await db.execute(
-                """SELECT * FROM workbench_missions
-                   WHERE session_id = ?
-                   ORDER BY created_at""",
-                (session_id,),
+                f"""SELECT * FROM workbench_missions
+                   WHERE {where_clause}
+                   ORDER BY {order_clause}{limit_clause}""",
+                tuple(params),
             )
             rows = await cursor.fetchall()
         return [

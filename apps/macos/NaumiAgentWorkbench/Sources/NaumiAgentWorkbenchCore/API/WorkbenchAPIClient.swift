@@ -131,6 +131,21 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchMissions(
+        sessionID: String,
+        status: String?,
+        limit: Int
+    ) async throws(APIError) -> MissionsDTO {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let status, !status.isEmpty {
+            queryItems.append(URLQueryItem(name: "status", value: status))
+        }
+        return try await get(
+            path: "workbench/sessions/\(sessionID)/missions",
+            queryItems: queryItems
+        )
+    }
+
     public func claimIssue(
         sessionID: String,
         taskID: String,

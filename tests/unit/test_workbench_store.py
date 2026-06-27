@@ -569,3 +569,120 @@ async def test_list_issues_filters_by_session_mission_risk_and_orders_newest_fir
 
     other_session_issues = await store.list_issues("s2", limit=50)
     assert [i.task_id for i in other_session_issues] == [issue_other_session.task_id]
+
+
+
+async def _set_mission_status(
+    store: WorkbenchStore,
+    mission_id: str,
+    *,
+    status: str,
+) -> None:
+    async with aiosqlite.connect(store._db_path) as db:
+        await db.execute(
+            "UPDATE workbench_missions SET status = ? WHERE id = ?",
+            (status, mission_id),
+        )
+        await db.commit()
+
+
+async def _set_mission_timestamps(
+    store: WorkbenchStore,
+    mission_id: str,
+    *,
+    created_at: str,
+    updated_at: str,
+) -> None:
+    async with aiosqlite.connect(store._db_path) as db:
+        await db.execute(
+            "UPDATE workbench_missions SET created_at = ?, updated_at = ? WHERE id = ?",
+            (created_at, updated_at, mission_id),
+        )
+        await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_list_missions_defaults_match_snapshot_behavior(store: WorkbenchStore) -> None:
+    mission_a = await store.create_mission("s", "Mission A", "Goal A")
+    mission_b = await store.create_mission("s", "Mission B", "Goal B")
+    await store.create_mission("s2", "Mission Other", "Goal Other")
+
+    await _set_mission_timestamps(
+        store, mission_a.id, created_at="2026-06-27T08:00:00", updated_at="2026-06-27T08:00:00"
+    )
+    await _set_mission_timestamps(
+        store, mission_b.id, created_at="2026-06-27T08:01:00", updated_at="2026-06-27T08:01:00"
+    )
+
+    default = await store.list_missions("s")
+    assert [m.id for m in default] == [mission_a.id, mission_b.id]
+    assert all(m.session_id == "s" for m in default)
+
+
+@pytest.mark.asyncio
+async def test_list_missions_filters_by_status_and_session(store: WorkbenchStore) -> None:
+    planning = await store.create_mission("s", "Planning Mission", "Goal")
+    active = await store.create_mission("s", "Active Mission", "Goal")
+    await store.create_mission("s2", "Other Planning", "Goal")
+
+    await _set_mission_status(store, active.id, status="active")
+
+    planning_only = await store.list_missions("s", status="planning")
+    assert [m.id for m in planning_only] == [planning.id]
+    assert all(m.status == "planning" for m in planning_only)
+
+    active_only = await store.list_missions("s", status="active")
+    assert [m.id for m in active_only] == [active.id]
+
+    other_session = await store.list_missions("s2", status="planning")
+    assert len(other_session) == 1
+    assert other_session[0].session_id == "s2"
+
+
+@pytest.mark.asyncio
+async def test_list_missions_respects_limit_and_newest_first(store: WorkbenchStore) -> None:
+    mission_a = await store.create_mission("s", "Mission A", "Goal")
+    mission_b = await store.create_mission("s", "Mission B", "Goal")
+    mission_c = await store.create_mission("s", "Mission C", "Goal")
+
+    await _set_mission_timestamps(
+        store, mission_a.id, created_at="2026-06-27T08:00:00", updated_at="2026-06-27T08:00:00"
+    )
+    await _set_mission_timestamps(
+        store, mission_b.id, created_at="2026-06-27T08:01:00", updated_at="2026-06-27T08:01:00"
+    )
+    await _set_mission_timestamps(
+        store, mission_c.id, created_at="2026-06-27T08:02:00", updated_at="2026-06-27T08:02:00"
+    )
+
+    limited = await store.list_missions("s", limit=2)
+    assert [m.id for m in limited] == [mission_a.id, mission_b.id]
+
+    newest_first = await store.list_missions("s", newest_first=True)
+    assert [m.id for m in newest_first] == [mission_c.id, mission_b.id, mission_a.id]
+
+    newest_limited = await store.list_missions("s", newest_first=True, limit=2)
+    assert [m.id for m in newest_limited] == [mission_c.id, mission_b.id]
+
+
+@pytest.mark.asyncio
+async def test_list_missions_status_filter_with_limit_and_order(store: WorkbenchStore) -> None:
+    active_a = await store.create_mission("s", "Active A", "Goal")
+    active_b = await store.create_mission("s", "Active B", "Goal")
+    planning = await store.create_mission("s", "Planning", "Goal")
+
+    await _set_mission_status(store, active_a.id, status="active")
+    await _set_mission_status(store, active_b.id, status="active")
+
+    await _set_mission_timestamps(
+        store, active_a.id, created_at="2026-06-27T08:00:00", updated_at="2026-06-27T08:00:00"
+    )
+    await _set_mission_timestamps(
+        store, active_b.id, created_at="2026-06-27T08:01:00", updated_at="2026-06-27T08:01:00"
+    )
+    await _set_mission_timestamps(
+        store, planning.id, created_at="2026-06-27T08:02:00", updated_at="2026-06-27T08:02:00"
+    )
+
+    active_newest = await store.list_missions("s", status="active", newest_first=True, limit=1)
+    assert [m.id for m in active_newest] == [active_b.id]

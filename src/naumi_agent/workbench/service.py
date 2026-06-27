@@ -312,7 +312,23 @@ class WorkbenchService:
             session_id, task_id=task_id, status=status, limit=limit
         )
 
+    async def list_missions(
+        self,
+        session_id: str,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        missions = await self._workbench_store.list_missions(
+            session_id, status=status, limit=limit
+        )
+        return {
+            "missions": [asdict(mission) for mission in missions],
+            "status": status,
+            "limit": limit,
+        }
+
     async def _list_missions_for_snapshot(self, session_id: str) -> list[dict[str, Any]]:
+        # Keep the original snapshot behavior: no status filter, no limit, oldest first.
         missions = await self._workbench_store.list_missions(session_id)
         return [asdict(mission) for mission in missions]
 
