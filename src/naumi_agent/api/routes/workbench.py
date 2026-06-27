@@ -128,6 +128,14 @@ class IssuesResponse(BaseModel):
     limit: int
 
 
+class LeasesResponse(BaseModel):
+    leases: list[dict[str, Any]]
+    state: str | None
+    task_id: str | None
+    agent_id: str | None
+    limit: int
+
+
 class MissionsResponse(BaseModel):
     missions: list[dict[str, Any]]
     status: str | None
@@ -513,6 +521,37 @@ async def get_issues(
         issues=issues["issues"],
         mission_id=mission_id,
         risk_level=risk_level,
+        limit=limit,
+    )
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/leases",
+    response_model=LeasesResponse,
+)
+async def get_leases(
+    session_id: str,
+    request: Request,
+    state: str | None = Query(default=None),
+    task_id: str | None = Query(default=None),
+    agent_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not await engine.load_session(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    leases = await engine.workbench_service.list_leases(
+        session_id, state=state, task_id=task_id, agent_id=agent_id, limit=limit
+    )
+    return LeasesResponse(
+        leases=leases["leases"],
+        state=state,
+        task_id=task_id,
+        agent_id=agent_id,
         limit=limit,
     )
 

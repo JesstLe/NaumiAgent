@@ -631,6 +631,40 @@ class WorkbenchStore:
             rows = await cursor.fetchall()
         return [_row_to_lease(dict(row)) for row in rows]
 
+    async def list_leases(
+        self,
+        session_id: str,
+        state: LeaseState | str | None = None,
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        limit: int = 50,
+    ) -> list[Lease]:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            params: list[Any] = [session_id]
+            filters = ["session_id = ?"]
+            if state is not None:
+                filters.append("state = ?")
+                params.append(state.value if isinstance(state, LeaseState) else state)
+            if task_id is not None:
+                filters.append("task_id = ?")
+                params.append(task_id)
+            if agent_id is not None:
+                filters.append("agent_id = ?")
+                params.append(agent_id)
+            params.append(limit)
+            where_clause = " AND ".join(filters)
+            cursor = await db.execute(
+                f"""SELECT * FROM workbench_leases
+                   WHERE {where_clause}
+                   ORDER BY updated_at DESC, created_at DESC
+                   LIMIT ?""",
+                params,
+            )
+            rows = await cursor.fetchall()
+        return [_row_to_lease(dict(row)) for row in rows]
+
     async def force_lease_expiry_for_test(self, lease_id: str, expires_at: str) -> None:
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)

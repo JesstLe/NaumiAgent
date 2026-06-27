@@ -624,6 +624,101 @@ final class WorkbenchAPIClientTests {
         #expect(response.issues.isEmpty)
     }
 
+    @Test func fetchLeasesWithFilters() async throws {
+        let sessionID = "sess 中文"
+        let taskID = "task 001/审查"
+        let agentID = "agent 001/测试"
+        let state = "active"
+        let json = Data(
+            """
+            {"leases":[{"id":"lease-001","session_id":"sess 中文","task_id":"task 001/审查","agent_id":"agent 001/测试","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"state":"active","task_id":"task 001/审查","agent_id":"agent 001/测试","limit":25}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/leases",
+                  query["limit"] == "25",
+                  query["state"] == state,
+                  query["task_id"] == taskID,
+                  query["agent_id"] == agentID else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchLeases(
+            sessionID: sessionID,
+            state: state,
+            taskID: taskID,
+            agentID: agentID,
+            limit: 25
+        )
+
+        #expect(response.state == state)
+        #expect(response.taskID == taskID)
+        #expect(response.agentID == agentID)
+        #expect(response.limit == 25)
+        #expect(response.leases.count == 1)
+
+        let lease = try #require(response.leases.first)
+        #expect(lease.id == "lease-001")
+        #expect(lease.sessionID == sessionID)
+        #expect(lease.taskID == taskID)
+        #expect(lease.agentID == agentID)
+        #expect(lease.state == state)
+        #expect(lease.worktreeName == "wt-001")
+    }
+
+    @Test func fetchLeasesWithoutFilters() async throws {
+        let json = Data(
+            """
+            {"leases":[],"state":null,"task_id":null,"agent_id":null,"limit":50}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/leases?limit=50" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let response = try await client.fetchLeases(
+            sessionID: "sess-001",
+            state: nil,
+            taskID: nil,
+            agentID: nil,
+            limit: 50
+        )
+
+        #expect(response.state == nil)
+        #expect(response.taskID == nil)
+        #expect(response.agentID == nil)
+        #expect(response.limit == 50)
+        #expect(response.leases.isEmpty)
+    }
+
     @Test func fetchMissionsWithStatus() async throws {
         let json = Data(
             """

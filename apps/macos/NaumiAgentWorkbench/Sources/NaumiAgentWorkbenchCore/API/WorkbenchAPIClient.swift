@@ -131,6 +131,29 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchLeases(
+        sessionID: String,
+        state: String?,
+        taskID: String?,
+        agentID: String?,
+        limit: Int
+    ) async throws(APIError) -> LeasesDTO {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let state, !state.isEmpty {
+            queryItems.append(URLQueryItem(name: "state", value: state))
+        }
+        if let taskID, !taskID.isEmpty {
+            queryItems.append(URLQueryItem(name: "task_id", value: taskID))
+        }
+        if let agentID, !agentID.isEmpty {
+            queryItems.append(URLQueryItem(name: "agent_id", value: agentID))
+        }
+        return try await get(
+            path: "workbench/sessions/\(sessionID)/leases",
+            queryItems: queryItems
+        )
+    }
+
     public func fetchMissions(
         sessionID: String,
         status: String?,

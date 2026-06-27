@@ -214,6 +214,34 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Fetches leases for the currently selected session.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success the leases
+    /// are written to `appState.leases`; on failure `appState.lastError` is
+    /// set. Missing session clears the local leases list to avoid showing stale
+    /// data from another session. API failures leave the local list unchanged.
+    public func refreshLeases(state: String? = nil, taskID: String? = nil, agentID: String? = nil, limit: Int = 50) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.leases = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchLeases(
+                sessionID: sessionID,
+                state: state,
+                taskID: taskID,
+                agentID: agentID,
+                limit: limit
+            )
+            appState.leases = response.leases
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Fetches missions for the currently selected session.
     ///
     /// Requires `appState.selectedSessionID` to be set. On success the missions
@@ -275,12 +303,12 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Claims an issue on behalf of an agent and refreshes the snapshot and
-    /// issues list on success.
+    /// Claims an issue on behalf of an agent and refreshes the leases, issues,
+    /// and snapshot lists on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot and issues are never mutated
-    /// directly.
+    /// `appState.lastError`; the local snapshot, issues, and leases are never
+    /// mutated directly.
     public func claimIssue(
         taskID: String,
         agentID: String,
@@ -301,6 +329,7 @@ public final class DaemonController: Sendable {
                 durationMinutes: durationMinutes,
                 worktreeName: worktreeName
             )
+            await refreshLeases()
             await refreshIssues()
             await refreshSnapshot()
         } catch {
@@ -308,10 +337,11 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Releases a lease and refreshes the snapshot on success.
+    /// Releases a lease and refreshes the leases and snapshot lists on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot is never mutated directly.
+    /// `appState.lastError`; the local snapshot and leases are never mutated
+    /// directly.
     public func releaseLease(leaseID: String) async {
         guard let sessionID = appState.selectedSessionID else {
             appState.lastError = .missingSelectedSession
@@ -324,16 +354,19 @@ public final class DaemonController: Sendable {
                 sessionID: sessionID,
                 leaseID: leaseID
             )
+            await refreshLeases()
             await refreshSnapshot()
         } catch {
             appState.lastError = error
         }
     }
 
-    /// Expires overdue leases in the selected session and refreshes the snapshot on success.
+    /// Expires overdue leases in the selected session and refreshes the leases
+    /// and snapshot lists on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot is never mutated directly.
+    /// `appState.lastError`; the local snapshot and leases are never mutated
+    /// directly.
     public func expireLeases() async {
         guard let sessionID = appState.selectedSessionID else {
             appState.lastError = .missingSelectedSession
@@ -343,6 +376,7 @@ public final class DaemonController: Sendable {
         appState.lastError = nil
         do {
             _ = try await apiProvider.expireLeases(sessionID: sessionID)
+            await refreshLeases()
             await refreshSnapshot()
         } catch {
             appState.lastError = error
