@@ -22,15 +22,11 @@ struct ContentView: View {
     var body: some View {
         @Bindable var appState = environment.appState
         NavigationSplitView {
-            List(AppRoute.allCases, selection: $appState.currentRoute) { route in
-                NavigationLink(value: route) {
-                    Label(
-                        route.displayName(locale: appState.locale),
-                        systemImage: route.systemImage
-                    )
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 160, ideal: 180)
+            SidebarView(
+                appState: environment.appState,
+                daemonController: environment.daemonController
+            )
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220)
         } detail: {
             routeView(for: appState.currentRoute)
         }
@@ -64,5 +60,139 @@ struct ContentView: View {
         case .settings:
             SettingsView(appState: environment.appState)
         }
+    }
+}
+
+struct SidebarView: View {
+    let appState: AppState
+    let daemonController: DaemonController
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SessionSelectorSection(
+                appState: appState,
+                daemonController: daemonController
+            )
+
+            Divider()
+
+            routeList
+        }
+    }
+
+    private var routeList: some View {
+        @Bindable var appState = appState
+        return List(AppRoute.allCases, selection: $appState.currentRoute) { route in
+            NavigationLink(value: route) {
+                Label(
+                    route.displayName(locale: appState.locale),
+                    systemImage: route.systemImage
+                )
+            }
+        }
+        .listStyle(.sidebar)
+    }
+}
+
+struct SessionSelectorSection: View {
+    let appState: AppState
+    let daemonController: DaemonController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(AppStrings.SessionSelector.sectionTitle(appState.locale))
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                Spacer()
+
+                Button {
+                    Task {
+                        await daemonController.refreshSessions(page: 1, pageSize: 20)
+                    }
+                } label: {
+                    Label(
+                        AppStrings.SessionSelector.refreshButton(appState.locale),
+                        systemImage: "arrow.clockwise"
+                    )
+                    .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .help(AppStrings.SessionSelector.refreshButton(appState.locale))
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+
+            if appState.sessions.isEmpty {
+                Text(AppStrings.SessionSelector.emptySessions(appState.locale))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(appState.sessions, id: \.id) { session in
+                            SessionRow(
+                                session: session,
+                                isSelected: appState.selectedSessionID == session.id,
+                                locale: appState.locale
+                            )
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                Task {
+                                    await daemonController.selectSession(session.id)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
+                }
+                .frame(minHeight: 60, maxHeight: 160)
+            }
+        }
+    }
+}
+
+struct SessionRow: View {
+    let session: SessionDTO
+    let isSelected: Bool
+    let locale: AppLocale
+
+    private var displayTitle: String {
+        if let title = session.title, !title.isEmpty {
+            return title
+        }
+        return session.id
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayTitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+
+                HStack(spacing: 4) {
+                    Text(session.id)
+                        .lineLimit(1)
+                    Text("·")
+                    Text(session.status)
+                    Text("·")
+                    Text(AppStrings.SessionSelector.messageCountLabel(locale, count: session.messageCount))
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 }
