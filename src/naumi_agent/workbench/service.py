@@ -451,6 +451,7 @@ class WorkbenchService:
             if lease is not None:
                 leases.append(self._lease_to_dict(lease))
         return {
+            "version": 1,
             "session_id": session_id,
             "missions": await self._list_missions_for_snapshot(session_id),
             "agent_profiles": [
