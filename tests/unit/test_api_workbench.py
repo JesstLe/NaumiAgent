@@ -3521,6 +3521,65 @@ async def test_release_lease_endpoint_returns_released_lease() -> None:
 
 
 @pytest.mark.asyncio
+async def test_release_lease_endpoint_can_return_fresh_snapshot() -> None:
+    market = FakeTaskMarket()
+    lease = Lease(
+        id="lease-2",
+        session_id="sess-1",
+        task_id="task-2",
+        agent_id="Agent-2",
+        state=LeaseState.RELEASED,
+        expires_at="2024-01-01T02:00:00",
+    )
+    market.set_lease(lease)
+    engine = _FakeEngine(exists=True, workbench_market=market)
+
+    response = await release_workbench_lease(
+        "sess-1",
+        "lease-2",
+        _fake_request(engine),
+        include_snapshot=True,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert response["lease"]["id"] == "lease-2"
+    assert response["lease"]["state"] == LeaseState.RELEASED
+    assert response["snapshot"]["version"] == 1
+    assert response["snapshot"]["session_id"] == "sess-1"
+
+
+def test_release_lease_route_can_return_fresh_snapshot() -> None:
+    market = FakeTaskMarket()
+    lease = Lease(
+        id="lease-2",
+        session_id="sess-1",
+        task_id="task-2",
+        agent_id="Agent-2",
+        state=LeaseState.RELEASED,
+        expires_at="2024-01-01T02:00:00",
+    )
+    market.set_lease(lease)
+    engine = _FakeEngine(exists=True, workbench_market=market)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/leases/lease-2/release",
+        params={"include_snapshot": "true"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["lease"]["id"] == "lease-2"
+    assert body["lease"]["state"] == "released"
+    assert body["snapshot"]["version"] == 1
+    assert body["snapshot"]["session_id"] == "sess-1"
+
+
+@pytest.mark.asyncio
 async def test_release_lease_endpoint_reports_unavailable_task_market() -> None:
     market = FakeTaskMarket()
     market.set_release_error(RuntimeError("task market unavailable"))
