@@ -34,6 +34,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var agentProfileResult: Result<AgentProfileDTO, APIError>?
     var registerAgentProfileResult: Result<AgentProfileDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
+    var claimIssueWithSnapshotResult: Result<LeaseSnapshotDTO, APIError>?
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
     var createMissionResult: Result<MissionDTO, APIError>?
@@ -54,6 +55,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var capabilitiesCallCount: Int = 0
     var sessionsCallCount: Int = 0
     var snapshotCallCount: Int = 0
+    var claimIssueWithSnapshotCallCount: Int = 0
     var runValidationCallCount: Int = 0
     var createdSessions: [[String: String?]] = []
     var createdMissions: [[String: String]] = []
@@ -384,6 +386,20 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         worktreeName: String
     ) async throws(APIError) -> LeaseDTO {
         guard let result = claimIssueResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func claimIssueWithSnapshot(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        durationMinutes: Int,
+        worktreeName: String
+    ) async throws(APIError) -> LeaseSnapshotDTO {
+        claimIssueWithSnapshotCallCount += 1
+        guard let result = claimIssueWithSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -1518,8 +1534,7 @@ final class DaemonControllerTests {
         let event = makeEvent(id: "evt-001", type: "issue.claimed", subjectID: "task-001")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
-        await api.setClaimIssueResult(.success(lease))
-        await api.setSnapshotResult(.success(snapshot))
+        await api.setClaimIssueWithSnapshotResult(.success(LeaseSnapshotDTO(lease: lease, snapshot: snapshot)))
         await api.setIssuesResult(.success(issues))
         await api.setLeasesResult(.success(leases))
         await api.setEventsResult(.success(events))
@@ -1539,20 +1554,20 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
-    @Test @MainActor func claimIssueSnapshotFailureIsNotClearedByEventsIssuesOrLeasesRefresh() async throws {
+    @Test @MainActor func claimIssueSuccessUsesIncludedSnapshotWithoutExtraSnapshotFetch() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
         let api = FakeWorkbenchAPIProvider()
         let lease = makeLease(id: "lease-001", taskID: "task-001", state: "active")
+        let snapshot = makeSnapshot(sessionID: "sess-001", lease: lease)
         let issue = makeIssue(taskID: "task-001")
         let issues = IssuesDTO(issues: [issue], missionID: nil, riskLevel: nil, limit: 50)
         let leases = LeasesDTO(leases: [lease], state: nil, taskID: nil, agentID: nil, limit: 50)
         let event = makeEvent(id: "evt-001", type: "issue.claimed", subjectID: "task-001")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
-        await api.setClaimIssueResult(.success(lease))
-        await api.setSnapshotResult(.failure(.httpStatus(503)))
+        await api.setClaimIssueWithSnapshotResult(.success(LeaseSnapshotDTO(lease: lease, snapshot: snapshot)))
         await api.setIssuesResult(.success(issues))
         await api.setLeasesResult(.success(leases))
         await api.setEventsResult(.success(events))
@@ -1565,11 +1580,44 @@ final class DaemonControllerTests {
             worktreeName: "wt-001"
         )
 
+        #expect(appState.snapshot == snapshot)
         #expect(appState.issues == [issue])
         #expect(appState.leases == [lease])
         #expect(appState.timelineEvents == [event])
-        #expect(appState.snapshot == nil)
+        #expect(appState.lastError == nil)
+        #expect(await api.claimIssueWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
+    }
+
+    @Test @MainActor func claimIssueWithSnapshotFailurePreservesExistingState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        let staleIssue = makeIssue(taskID: "stale-task")
+        let staleLease = makeLease(id: "stale-lease", taskID: "stale-task", state: "active")
+        let staleEvent = makeEvent(id: "stale-event", type: "task.updated", subjectID: "stale-task")
+        appState.snapshot = staleSnapshot
+        appState.issues = [staleIssue]
+        appState.leases = [staleLease]
+        appState.timelineEvents = [staleEvent]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setClaimIssueWithSnapshotResult(.failure(.httpStatus(503)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.claimIssue(
+            taskID: "task-001",
+            agentID: "local-agent",
+            durationMinutes: 30,
+            worktreeName: "wt-001"
+        )
+
+        #expect(appState.snapshot == staleSnapshot)
+        #expect(appState.issues == [staleIssue])
+        #expect(appState.leases == [staleLease])
+        #expect(appState.timelineEvents == [staleEvent])
         #expect(appState.lastError == .httpStatus(503))
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func claimIssueWithoutSelectedSessionRecordsError() async throws {
@@ -4063,6 +4111,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setClaimIssueResult(_ result: Result<LeaseDTO, APIError>) {
         claimIssueResult = result
+    }
+
+    fileprivate func setClaimIssueWithSnapshotResult(_ result: Result<LeaseSnapshotDTO, APIError>) {
+        claimIssueWithSnapshotResult = result
     }
 
     fileprivate func setLeaseResult(_ result: Result<LeaseDTO, APIError>) {

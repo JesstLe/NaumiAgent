@@ -172,6 +172,15 @@ public protocol WorkbenchAPIProviding: Sendable {
         worktreeName: String
     ) async throws(APIError) -> LeaseDTO
 
+    /// Claims an open issue and returns the backend's fresh authoritative snapshot.
+    func claimIssueWithSnapshot(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        durationMinutes: Int,
+        worktreeName: String
+    ) async throws(APIError) -> LeaseSnapshotDTO
+
     /// Releases an existing lease, returning the updated lease record.
     func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO
 

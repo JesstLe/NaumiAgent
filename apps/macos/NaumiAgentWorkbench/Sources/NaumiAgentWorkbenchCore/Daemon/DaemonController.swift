@@ -1034,8 +1034,8 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Claims an issue on behalf of an agent and refreshes the leases, issues,
-    /// timeline events, and snapshot lists on success.
+    /// Claims an issue on behalf of an agent and refreshes leases, issues,
+    /// timeline events, and the authoritative snapshot on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
     /// `appState.lastError`; the local snapshot, issues, and leases are never
@@ -1053,17 +1053,17 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            _ = try await apiProvider.claimIssue(
+            let response = try await apiProvider.claimIssueWithSnapshot(
                 sessionID: sessionID,
                 taskID: taskID,
                 agentID: agentID,
                 durationMinutes: durationMinutes,
                 worktreeName: worktreeName
             )
+            appState.snapshot = response.snapshot
             await refreshLeases()
             await refreshIssues()
             await refreshEvents(limit: 50)
-            await refreshSnapshot()
         } catch {
             appState.lastError = error
         }

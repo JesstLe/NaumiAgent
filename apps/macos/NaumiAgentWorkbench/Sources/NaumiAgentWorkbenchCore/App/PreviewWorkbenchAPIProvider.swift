@@ -363,6 +363,24 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func claimIssueWithSnapshot(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        durationMinutes: Int,
+        worktreeName: String
+    ) async throws(APIError) -> LeaseSnapshotDTO {
+        let lease = try await claimIssue(
+            sessionID: sessionID,
+            taskID: taskID,
+            agentID: agentID,
+            durationMinutes: durationMinutes,
+            worktreeName: worktreeName
+        )
+        let snapshot = try await fetchSnapshot(sessionID: sessionID)
+        return LeaseSnapshotDTO(lease: lease, snapshot: snapshot)
+    }
+
     func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
         makeLease(sessionID: sessionID, leaseID: leaseID, taskID: "preview-task", state: "released")
     }

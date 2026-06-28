@@ -376,6 +376,24 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func claimIssueWithSnapshot(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        durationMinutes: Int,
+        worktreeName: String
+    ) async throws(APIError) -> LeaseSnapshotDTO {
+        let body = ClaimIssueRequest(
+            agentID: agentID,
+            durationMinutes: durationMinutes,
+            worktreeName: worktreeName
+        )
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "issues", taskID, "claim") + "?include_snapshot=true",
+            body: body
+        )
+    }
+
     public func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
         try await post(path: encodePath("workbench", "sessions", sessionID, "leases", leaseID, "release"))
     }
