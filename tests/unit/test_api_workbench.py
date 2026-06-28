@@ -4343,6 +4343,58 @@ async def test_create_decision_endpoint_returns_created_decision() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_decision_endpoint_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    body = DecisionCreate(
+        actor="Reviewer-Agent",
+        kind=DecisionKind.POLICY,
+        title="采用人工审批闸门",
+        content="高风险变更必须进入审批队列",
+    )
+
+    response = await create_decision(
+        "sess-1",
+        "mission-1",
+        body,
+        _fake_request(engine),
+        include_snapshot=True,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert response["decision"]["id"] == "decision-1"
+    assert response["decision"]["kind"] == "policy"
+    assert response["snapshot"]["version"] == 1
+    assert response["snapshot"]["session_id"] == "sess-1"
+
+
+def test_create_decision_route_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/missions/mission-1/decisions",
+        params={"include_snapshot": "true"},
+        json={
+            "actor": "Reviewer-Agent",
+            "kind": "policy",
+            "title": "采用人工审批闸门",
+            "content": "高风险变更必须进入审批队列",
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["decision"]["id"] == "decision-1"
+    assert body["decision"]["kind"] == "policy"
+    assert body["snapshot"]["version"] == 1
+    assert body["snapshot"]["session_id"] == "sess-1"
+
+
+@pytest.mark.asyncio
 async def test_create_decision_endpoint_uses_default_actor_and_kind() -> None:
     engine = _FakeEngine(exists=True)
     body = DecisionCreate(
