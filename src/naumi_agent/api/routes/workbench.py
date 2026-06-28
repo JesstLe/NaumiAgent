@@ -990,6 +990,7 @@ async def create_intent_lock(
     mission_id: str,
     body: IntentLockCreate,
     request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -1010,7 +1011,16 @@ async def create_intent_lock(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return lock
+    if not include_snapshot:
+        return lock
+
+    try:
+        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"intent_lock": lock, "snapshot": snapshot}
 
 
 @router.post(
