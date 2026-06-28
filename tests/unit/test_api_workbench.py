@@ -2781,6 +2781,38 @@ async def test_claim_issue_endpoint_returns_created_lease() -> None:
 
 
 @pytest.mark.asyncio
+async def test_claim_issue_endpoint_can_return_fresh_snapshot() -> None:
+    market = FakeTaskMarket()
+    lease = Lease(
+        id="lease-1",
+        session_id="sess-1",
+        task_id="task-1",
+        agent_id="Agent-1",
+        state=LeaseState.ACTIVE,
+        expires_at="2024-01-01T01:00:00",
+        worktree_name="wt-1",
+    )
+    market.set_lease(lease)
+    engine = _FakeEngine(exists=True, workbench_market=market)
+    body = ClaimIssue(agent_id="Agent-1", duration_minutes=30, worktree_name="wt-1")
+
+    response = await claim_workbench_issue(
+        "sess-1",
+        "task-1",
+        body,
+        _fake_request(engine),
+        include_snapshot=True,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert response["lease"]["id"] == "lease-1"
+    assert response["lease"]["task_id"] == "task-1"
+    assert response["snapshot"]["version"] == 1
+    assert response["snapshot"]["session_id"] == "sess-1"
+
+
+@pytest.mark.asyncio
 async def test_claim_issue_endpoint_maps_value_error_to_400() -> None:
     market = FakeTaskMarket()
     market.set_claim_error(ValueError("任务 #task-1 不存在"))
