@@ -59,4 +59,26 @@ public struct WorkbenchScaledPageLayout: Equatable, Sendable {
         let scale = scale(for: availableSize)
         return CGSize(width: baseWidth * scale, height: baseHeight * scale)
     }
+
+    public func viewport(for availableSize: CGSize) -> WorkbenchScaledViewport {
+        let scale = scale(for: availableSize)
+        let scaledSize = CGSize(width: baseWidth * scale, height: baseHeight * scale)
+
+        return WorkbenchScaledViewport(
+            scale: scale,
+            scaledSize: scaledSize,
+            containerSize: CGSize(
+                width: availableSize.width,
+                height: max(availableSize.height, scaledSize.height)
+            ),
+            showsVerticalScroll: scaledSize.height > availableSize.height
+        )
+    }
+}
+
+public struct WorkbenchScaledViewport: Equatable, Sendable {
+    public let scale: Double
+    public let scaledSize: CGSize
+    public let containerSize: CGSize
+    public let showsVerticalScroll: Bool
 }

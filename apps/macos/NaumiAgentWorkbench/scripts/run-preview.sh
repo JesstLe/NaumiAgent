@@ -19,8 +19,14 @@ case "$locale" in
 esac
 
 bundle_dir="${TMPDIR:-/tmp}/NaumiAgentWorkbenchPreview.app"
+bundle_id="ai.naumi.workbench.preview"
 
 swift build
+
+if pgrep -f "$bundle_dir/Contents/MacOS/NaumiAgentWorkbench" >/dev/null 2>&1; then
+  pkill -f "$bundle_dir/Contents/MacOS/NaumiAgentWorkbench" || true
+  sleep 0.4
+fi
 
 rm -rf "$bundle_dir"
 mkdir -p "$bundle_dir/Contents/MacOS" "$bundle_dir/Contents/Resources/Fixtures"
@@ -36,7 +42,7 @@ cat > "$bundle_dir/Contents/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key>
   <string>NaumiAgentWorkbench</string>
   <key>CFBundleIdentifier</key>
-  <string>ai.naumi.workbench.preview</string>
+  <string>__BUNDLE_ID__</string>
   <key>CFBundleName</key>
   <string>NaumiAgentWorkbenchPreview</string>
   <key>CFBundlePackageType</key>
@@ -48,6 +54,7 @@ cat > "$bundle_dir/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+perl -0pi -e "s/__BUNDLE_ID__/$bundle_id/g" "$bundle_dir/Contents/Info.plist"
 
 args=(--preview-fixture "$fixture_locale")
 if [[ -n "$route" ]]; then
