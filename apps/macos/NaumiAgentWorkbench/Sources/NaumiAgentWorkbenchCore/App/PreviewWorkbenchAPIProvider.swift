@@ -118,7 +118,28 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         agentID: String?,
         limit: Int
     ) async throws(APIError) -> ContextSnapshotsDTO {
-        ContextSnapshotsDTO(contextSnapshots: [], taskID: taskID, agentID: agentID, limit: limit)
+        ContextSnapshotsDTO(
+            contextSnapshots: [
+                makeContextSnapshot(
+                    sessionID: sessionID,
+                    snapshotID: "preview-context",
+                    taskID: taskID ?? "preview-task",
+                    agentID: agentID ?? "Preview-Agent"
+                )
+            ],
+            taskID: taskID,
+            agentID: agentID,
+            limit: limit
+        )
+    }
+
+    func fetchContextSnapshot(sessionID: String, snapshotID: String) async throws(APIError) -> ContextSnapshotDTO {
+        makeContextSnapshot(
+            sessionID: sessionID,
+            snapshotID: snapshotID,
+            taskID: "preview-task",
+            agentID: "Preview-Agent"
+        )
     }
 
     func recordContextHealth(
@@ -130,14 +151,13 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         policyConflict: Bool,
         actor: String
     ) async throws(APIError) -> ContextSnapshotDTO {
-        ContextSnapshotDTO(
-            id: "preview-context",
+        makeContextSnapshot(
             sessionID: sessionID,
-            agentID: agentID,
+            snapshotID: "preview-context",
             taskID: taskID,
+            agentID: agentID,
             health: policyConflict ? "stale" : "fresh",
-            reasons: ["preview"],
-            createdAt: now
+            reasons: policyConflict ? ["preview policy conflict"] : ["preview"]
         )
     }
 
@@ -572,6 +592,25 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
             output: "preview validation passed",
             startedAt: now,
             completedAt: now
+        )
+    }
+
+    private func makeContextSnapshot(
+        sessionID: String,
+        snapshotID: String,
+        taskID: String,
+        agentID: String,
+        health: String = "fresh",
+        reasons: [String] = ["preview"]
+    ) -> ContextSnapshotDTO {
+        ContextSnapshotDTO(
+            id: snapshotID,
+            sessionID: sessionID,
+            agentID: agentID,
+            taskID: taskID,
+            health: health,
+            reasons: reasons,
+            createdAt: now
         )
     }
 
