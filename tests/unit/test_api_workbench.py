@@ -141,6 +141,7 @@ class _FakeWorkbenchService:
         self._list_failures_error: Exception | None = None
         self._get_failure_error: Exception | None = None
         self._context_health_error: Exception | None = None
+        self._list_agent_profiles_error: Exception | None = None
         self._resolve_approval_error: Exception | None = None
         self._resolve_approval_result: dict | None = None
         self._dashboard_snapshot_error: Exception | None = None
@@ -222,6 +223,9 @@ class _FakeWorkbenchService:
 
     def set_get_failure_error(self, error: Exception) -> None:
         self._get_failure_error = error
+
+    def set_list_agent_profiles_error(self, error: Exception) -> None:
+        self._list_agent_profiles_error = error
 
     def set_list_approvals_error(self, error: Exception) -> None:
         self._list_approvals_error = error
@@ -382,6 +386,8 @@ class _FakeWorkbenchService:
         status: str | None = None,
         limit: int = 50,
     ):
+        if self._list_agent_profiles_error is not None:
+            raise self._list_agent_profiles_error
         self.listed_agent_profiles.append(
             {"session_id": session_id, "status": status, "limit": limit}
         )
@@ -3852,6 +3858,42 @@ async def test_get_agent_profiles_endpoint_returns_profiles_and_params() -> None
         "status": "busy",
         "limit": 25,
     }
+
+
+@pytest.mark.asyncio
+async def test_get_agent_profiles_endpoint_reports_invalid_profile_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_agent_profiles_error(
+        ValueError("agent status filter is invalid")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_agent_profiles(
+            "sess-1", _fake_request(engine), status="invalid", limit=10, auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_agent_profiles == []
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "agent status filter is invalid"
+
+
+@pytest.mark.asyncio
+async def test_get_agent_profiles_endpoint_reports_unavailable_profile_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_agent_profiles_error(
+        RuntimeError("agent profile store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_agent_profiles(
+            "sess-1", _fake_request(engine), status=None, limit=10, auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_agent_profiles == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "agent profile store unavailable"
 
 
 @pytest.mark.asyncio
