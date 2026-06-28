@@ -699,9 +699,14 @@ async def get_failures(
         raise HTTPException(status_code=404, detail="Session not found")
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    failures = await engine.workbench_service.list_failures(
-        session_id, task_id=task_id, status=status, limit=limit
-    )
+    try:
+        failures = await engine.workbench_service.list_failures(
+            session_id, task_id=task_id, status=status, limit=limit
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return FailuresResponse(
         failures=failures, task_id=task_id, status=status, limit=limit
     )
