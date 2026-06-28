@@ -430,6 +430,12 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         try await post(path: encodePath("workbench", "sessions", sessionID, "leases", "expire"))
     }
 
+    public func expireLeasesWithSnapshot(sessionID: String) async throws(APIError) -> ExpiredLeasesSnapshotDTO {
+        try await post(
+            path: encodePath("workbench", "sessions", sessionID, "leases", "expire") + "?include_snapshot=true"
+        )
+    }
+
     public func createMission(
         sessionID: String,
         title: String,
