@@ -2118,6 +2118,39 @@ async def test_create_context_health_endpoint_maps_value_error_to_400() -> None:
     assert exc.value.detail == "issue 不存在，无法同步上下文健康度"
 
 
+@pytest.mark.asyncio
+async def test_create_context_health_endpoint_reports_unavailable_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_context_health_error(
+        RuntimeError("context health store unavailable")
+    )
+    body = ContextHealthRecord(
+        agent_id="Agent-A",
+        minutes_since_sync=75,
+        token_load_ratio=0.2,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_context_health_snapshot(
+            "sess-1", "task-2", body, _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.recorded_context_health == [
+        {
+            "session_id": "sess-1",
+            "task_id": "task-2",
+            "agent_id": "Agent-A",
+            "minutes_since_sync": 75,
+            "token_load_ratio": 0.2,
+            "policy_conflict": False,
+            "actor": "Human",
+        }
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "context health store unavailable"
+
+
 def test_create_context_health_route_accepts_json_body() -> None:
     engine = _FakeEngine(exists=True)
     app = FastAPI()
