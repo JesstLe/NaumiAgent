@@ -391,11 +391,12 @@ public final class DaemonController: Sendable {
     /// Records a context health update for the currently selected session and issue.
     ///
     /// Requires `appState.selectedSessionID` to be set. On success the returned
-    /// snapshot is inserted at the front of `appState.contextSnapshots` (removing
-    /// any previous entry with the same ID to avoid duplicates); on failure
-    /// `appState.lastError` is set. Missing session clears the local snapshot list
-    /// to avoid showing stale data from another session. API failures leave the
-    /// local list unchanged.
+    /// context snapshot is inserted at the front of `appState.contextSnapshots`
+    /// (removing any previous entry with the same ID to avoid duplicates), and
+    /// the backend-provided workbench snapshot becomes the global truth; on
+    /// failure `appState.lastError` is set. Missing session clears the local
+    /// snapshot list to avoid showing stale data from another session. API
+    /// failures leave the local list unchanged.
     public func recordContextHealth(
         taskID: String,
         agentID: String,
@@ -412,7 +413,7 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            let snapshot = try await apiProvider.recordContextHealth(
+            let response = try await apiProvider.recordContextHealthWithSnapshot(
                 sessionID: sessionID,
                 taskID: taskID,
                 agentID: agentID,
@@ -421,9 +422,10 @@ public final class DaemonController: Sendable {
                 policyConflict: policyConflict,
                 actor: actor
             )
+            appState.snapshot = response.snapshot
             var snapshots = appState.contextSnapshots
-            snapshots.removeAll { $0.id == snapshot.id }
-            appState.contextSnapshots = [snapshot] + snapshots
+            snapshots.removeAll { $0.id == response.contextSnapshot.id }
+            appState.contextSnapshots = [response.contextSnapshot] + snapshots
         } catch {
             appState.lastError = error
         }

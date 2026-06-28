@@ -161,6 +161,29 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func recordContextHealthWithSnapshot(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        minutesSinceSync: Int,
+        tokenLoadRatio: Double,
+        policyConflict: Bool,
+        actor: String
+    ) async throws(APIError) -> ContextHealthSnapshotDTO {
+        ContextHealthSnapshotDTO(
+            contextSnapshot: try await recordContextHealth(
+                sessionID: sessionID,
+                taskID: taskID,
+                agentID: agentID,
+                minutesSinceSync: minutesSinceSync,
+                tokenLoadRatio: tokenLoadRatio,
+                policyConflict: policyConflict,
+                actor: actor
+            ),
+            snapshot: try await fetchSnapshot(sessionID: sessionID)
+        )
+    }
+
     func fetchApprovals(
         sessionID: String,
         state: String?,

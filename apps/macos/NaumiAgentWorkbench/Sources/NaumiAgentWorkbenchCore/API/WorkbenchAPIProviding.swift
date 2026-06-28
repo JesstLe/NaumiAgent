@@ -60,6 +60,17 @@ public protocol WorkbenchAPIProviding: Sendable {
         actor: String
     ) async throws(APIError) -> ContextSnapshotDTO
 
+    /// Records a context health update and returns the backend's fresh authoritative snapshot.
+    func recordContextHealthWithSnapshot(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        minutesSinceSync: Int,
+        tokenLoadRatio: Double,
+        policyConflict: Bool,
+        actor: String
+    ) async throws(APIError) -> ContextHealthSnapshotDTO
+
     /// Fetches approval requests for the given session, optionally filtered by state.
     func fetchApprovals(
         sessionID: String,
