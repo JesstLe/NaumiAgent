@@ -26,3 +26,19 @@ public struct ValidationResultDTO: Decodable, Equatable, Sendable {
         self.output = output
     }
 }
+
+/// Response returned when a validation run asks the backend for a fresh snapshot.
+public struct ValidationResultSnapshotDTO: Decodable, Equatable, Sendable {
+    public let validationRun: ValidationResultDTO
+    public let snapshot: WorkbenchSnapshotDTO
+
+    public enum CodingKeys: String, CodingKey {
+        case validationRun = "validation_run"
+        case snapshot
+    }
+
+    public init(validationRun: ValidationResultDTO, snapshot: WorkbenchSnapshotDTO) {
+        self.validationRun = validationRun
+        self.snapshot = snapshot
+    }
+}

@@ -575,6 +575,25 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func runValidationWithSnapshot(
+        sessionID: String,
+        taskID: String,
+        actor: String,
+        argv: [String],
+        cwd: String?
+    ) async throws(APIError) -> ValidationResultSnapshotDTO {
+        let body = RunValidationRequest(
+            taskID: taskID,
+            actor: actor,
+            argv: argv,
+            cwd: cwd
+        )
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "validation-runs") + "?include_snapshot=true",
+            body: body
+        )
+    }
+
     // MARK: - Private
 
     /// Builds a relative path from individual components, percent-encoding each one

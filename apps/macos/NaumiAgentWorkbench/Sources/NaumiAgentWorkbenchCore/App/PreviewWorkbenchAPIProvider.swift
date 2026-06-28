@@ -554,6 +554,25 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         ValidationResultDTO(id: "preview-run", status: "passed", exitCode: 0, output: argv.joined(separator: " "))
     }
 
+    func runValidationWithSnapshot(
+        sessionID: String,
+        taskID: String,
+        actor: String,
+        argv: [String],
+        cwd: String?
+    ) async throws(APIError) -> ValidationResultSnapshotDTO {
+        ValidationResultSnapshotDTO(
+            validationRun: try await runValidation(
+                sessionID: sessionID,
+                taskID: taskID,
+                actor: actor,
+                argv: argv,
+                cwd: cwd
+            ),
+            snapshot: try await fetchSnapshot(sessionID: sessionID)
+        )
+    }
+
     private func makeApproval(
         sessionID: String,
         approvalID: String,

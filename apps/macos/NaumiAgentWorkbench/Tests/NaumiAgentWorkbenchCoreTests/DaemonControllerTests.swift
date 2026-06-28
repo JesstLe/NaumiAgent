@@ -49,6 +49,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var fetchDecisionResult: Result<DecisionDTO, APIError>?
     var resolveApprovalResult: Result<ApprovalDTO, APIError>?
     var runValidationResult: Result<ValidationResultDTO, APIError>?
+    var runValidationWithSnapshotResult: Result<ValidationResultSnapshotDTO, APIError>?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var statusCallCount: Int = 0
@@ -57,6 +58,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var snapshotCallCount: Int = 0
     var claimIssueWithSnapshotCallCount: Int = 0
     var runValidationCallCount: Int = 0
+    var runValidationWithSnapshotCallCount: Int = 0
     var createdSessions: [[String: String?]] = []
     var createdMissions: [[String: String]] = []
 
@@ -552,6 +554,20 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     ) async throws(APIError) -> ValidationResultDTO {
         runValidationCallCount += 1
         guard let result = runValidationResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func runValidationWithSnapshot(
+        sessionID: String,
+        taskID: String,
+        actor: String,
+        argv: [String],
+        cwd: String?
+    ) async throws(APIError) -> ValidationResultSnapshotDTO {
+        runValidationWithSnapshotCallCount += 1
+        guard let result = runValidationWithSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -2783,6 +2799,68 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(409))
     }
 
+    @Test @MainActor func runValidationSuccessUsesIncludedSnapshotWithoutExtraSnapshotFetch() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleSnapshot = makeSnapshot(
+            sessionID: "sess-001",
+            missions: [makeMission(id: "mission-stale", sessionID: "sess-001")]
+        )
+        appState.snapshot = staleSnapshot
+
+        let api = FakeWorkbenchAPIProvider()
+        let freshSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        let result = ValidationResultSnapshotDTO(
+            validationRun: ValidationResultDTO(
+                id: "run-001",
+                status: "passed",
+                exitCode: 0,
+                output: "ok"
+            ),
+            snapshot: freshSnapshot
+        )
+        let run = ValidationRunDTO(
+            id: "run-001",
+            sessionID: "sess-001",
+            taskID: "task-001",
+            actor: "Human",
+            command: ["pytest"],
+            cwd: "/workspace",
+            status: "passed",
+            exitCode: 0,
+            output: "ok",
+            startedAt: "2026-06-27T06:00:00",
+            completedAt: "2026-06-27T06:00:01"
+        )
+        let runs = ValidationRunsDTO(validationRuns: [run], taskID: "task-001", limit: 50)
+        let failure = makeFailure(id: "failure-001", taskID: "task-001", status: "open")
+        let failures = FailuresDTO(failures: [failure], taskID: "task-001", status: nil, limit: 50)
+        let event = makeEvent(id: "evt-001", type: "validation.ran", subjectID: "run-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
+
+        await api.setRunValidationWithSnapshotResult(.success(result))
+        await api.setValidationRunsResult(.success(runs))
+        await api.setFailuresResult(.success(failures))
+        await api.setEventsResult(.success(events))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.runValidation(
+            taskID: "task-001",
+            actor: "Human",
+            argv: ["pytest"],
+            cwd: "/workspace"
+        )
+
+        #expect(appState.validationRuns == [run])
+        #expect(appState.failures == [failure])
+        #expect(appState.snapshot == freshSnapshot)
+        #expect(appState.snapshot != staleSnapshot)
+        #expect(appState.timelineEvents == [event])
+        #expect(appState.lastError == nil)
+        #expect(await api.runValidationWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
+    }
+
     @Test @MainActor func runValidationSuccessRefreshesValidationRunsFailuresSnapshotAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -2814,10 +2892,11 @@ final class DaemonControllerTests {
         let event = makeEvent(id: "evt-001", type: "validation.ran", subjectID: "run-001")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
-        await api.setRunValidationResult(.success(result))
+        await api.setRunValidationWithSnapshotResult(.success(
+            ValidationResultSnapshotDTO(validationRun: result, snapshot: snapshot)
+        ))
         await api.setValidationRunsResult(.success(runs))
         await api.setFailuresResult(.success(failures))
-        await api.setSnapshotResult(.success(snapshot))
         await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
@@ -2833,6 +2912,8 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == snapshot)
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
+        #expect(await api.runValidationWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func runValidationWithoutSelectedSessionRecordsError() async throws {
@@ -2891,7 +2972,7 @@ final class DaemonControllerTests {
         appState.snapshot = staleSnapshot
 
         let api = FakeWorkbenchAPIProvider()
-        await api.setRunValidationResult(.failure(.httpStatus(500)))
+        await api.setRunValidationWithSnapshotResult(.failure(.httpStatus(500)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.runValidation(
@@ -2905,6 +2986,7 @@ final class DaemonControllerTests {
         #expect(appState.failures == [staleFailure])
         #expect(appState.snapshot == staleSnapshot)
         #expect(appState.lastError == .httpStatus(500))
+        #expect(await api.runValidationWithSnapshotCallCount == 1)
     }
 
     @Test @MainActor func runValidationBlockedWhenCapabilitiesLackValidationRunner() async throws {
@@ -2941,7 +3023,7 @@ final class DaemonControllerTests {
         appState.timelineEvents = [staleEvent]
 
         let api = FakeWorkbenchAPIProvider()
-        await api.setRunValidationResult(.failure(.httpStatus(500)))
+        await api.setRunValidationWithSnapshotResult(.failure(.httpStatus(500)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.runValidation(
@@ -2957,6 +3039,7 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == staleSnapshot)
         #expect(appState.timelineEvents == [staleEvent])
         #expect(await api.runValidationCallCount == 0)
+        #expect(await api.runValidationWithSnapshotCallCount == 0)
     }
 
     @Test @MainActor func runValidationWithNilCapabilitiesAllowsSuccess() async throws {
@@ -2991,10 +3074,11 @@ final class DaemonControllerTests {
         let event = makeEvent(id: "evt-001", type: "validation.ran", subjectID: "run-001")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
-        await api.setRunValidationResult(.success(result))
+        await api.setRunValidationWithSnapshotResult(.success(
+            ValidationResultSnapshotDTO(validationRun: result, snapshot: snapshot)
+        ))
         await api.setValidationRunsResult(.success(runs))
         await api.setFailuresResult(.success(failures))
-        await api.setSnapshotResult(.success(snapshot))
         await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
@@ -3010,7 +3094,8 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == snapshot)
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
-        #expect(await api.runValidationCallCount == 1)
+        #expect(await api.runValidationWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func createIntentLockSuccessRefreshesSnapshotAndEvents() async throws {
@@ -4171,6 +4256,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setRunValidationResult(_ result: Result<ValidationResultDTO, APIError>) {
         runValidationResult = result
+    }
+
+    fileprivate func setRunValidationWithSnapshotResult(_ result: Result<ValidationResultSnapshotDTO, APIError>) {
+        runValidationWithSnapshotResult = result
     }
 }
 

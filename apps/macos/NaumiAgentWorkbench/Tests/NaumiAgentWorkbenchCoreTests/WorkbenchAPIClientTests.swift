@@ -2134,6 +2134,59 @@ final class WorkbenchAPIClientTests {
         #expect(result.output == "ok")
     }
 
+    @Test func runValidationWithSnapshotRequestsFreshSnapshot() async throws {
+        let sessionID = "sess 中文"
+        let resultJSON = Data(
+            """
+            {"validation_run":{"id":"run-001","status":"passed","exit_code":0,"output":"ok"},"snapshot":{"session_id":"sess 中文","summary":{"current_mission_title":"验证后刷新","active_agents":2,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/validation-runs?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["task_id"] as? String == "task-001",
+                  json?["actor"] as? String == "Human",
+                  let argv = json?["argv"] as? [String],
+                  argv == ["pytest"],
+                  json?["cwd"] as? String == "/workspace" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, resultJSON)
+        }
+
+        let client = makeClient()
+        let result = try await client.runValidationWithSnapshot(
+            sessionID: sessionID,
+            taskID: "task-001",
+            actor: "Human",
+            argv: ["pytest"],
+            cwd: "/workspace"
+        )
+
+        #expect(result.validationRun.id == "run-001")
+        #expect(result.validationRun.status == "passed")
+        #expect(result.validationRun.exitCode == 0)
+        #expect(result.validationRun.output == "ok")
+        #expect(result.snapshot.sessionID == "sess 中文")
+        #expect(result.snapshot.summary?.currentMissionTitle == "验证后刷新")
+    }
+
     @Test func createIntentLockUsesPOSTAndEncodesPathAndBody() async throws {
         let sessionID = "sess 中文"
         let missionID = "mission 中文"
