@@ -50,6 +50,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var fetchIntentLocksResult: Result<IntentLocksDTO, APIError>?
     var fetchIntentLockResult: Result<IntentLockDTO, APIError>?
     var createDecisionResult: Result<DecisionDTO, APIError>?
+    var createDecisionWithSnapshotResult: Result<DecisionSnapshotDTO, APIError>?
     var fetchDecisionsResult: Result<DecisionsDTO, APIError>?
     var fetchDecisionResult: Result<DecisionDTO, APIError>?
     var resolveApprovalResult: Result<ApprovalDTO, APIError>?
@@ -67,6 +68,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var attachIssueWithSnapshotCallCount: Int = 0
     var createIssueWithSnapshotCallCount: Int = 0
     var createIntentLockWithSnapshotCallCount: Int = 0
+    var createDecisionWithSnapshotCallCount: Int = 0
     var runValidationCallCount: Int = 0
     var runValidationWithSnapshotCallCount: Int = 0
     var createdSessions: [[String: String?]] = []
@@ -618,6 +620,21 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         actor: String
     ) async throws(APIError) -> DecisionDTO {
         guard let result = createDecisionResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func createDecisionWithSnapshot(
+        sessionID: String,
+        missionID: String,
+        kind: String,
+        title: String,
+        content: String,
+        actor: String
+    ) async throws(APIError) -> DecisionSnapshotDTO {
+        createDecisionWithSnapshotCallCount += 1
+        guard let result = createDecisionWithSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -3461,7 +3478,7 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func createDecisionSuccessRefreshesSnapshotAndEvents() async throws {
+    @Test @MainActor func createDecisionSuccessUsesIncludedSnapshotAndRefreshesLists() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -3472,9 +3489,10 @@ final class DaemonControllerTests {
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
         let decisions = DecisionsDTO(decisions: [decision], missionID: "mission-001")
 
-        await api.setCreateDecisionResult(.success(decision))
+        await api.setCreateDecisionWithSnapshotResult(.success(
+            DecisionSnapshotDTO(decision: decision, snapshot: snapshot)
+        ))
         await api.setFetchDecisionsResult(.success(decisions))
-        await api.setSnapshotResult(.success(snapshot))
         await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
@@ -3490,6 +3508,8 @@ final class DaemonControllerTests {
         #expect(appState.decisions == [decision])
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
+        #expect(await api.createDecisionWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func createDecisionWithoutSelectedSessionRecordsError() async throws {
@@ -3518,7 +3538,7 @@ final class DaemonControllerTests {
         appState.snapshot = staleSnapshot
 
         let api = FakeWorkbenchAPIProvider()
-        await api.setCreateDecisionResult(.failure(.httpStatus(500)))
+        await api.setCreateDecisionWithSnapshotResult(.failure(.httpStatus(500)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createDecision(
@@ -4501,6 +4521,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setCreateDecisionResult(_ result: Result<DecisionDTO, APIError>) {
         createDecisionResult = result
+    }
+
+    fileprivate func setCreateDecisionWithSnapshotResult(_ result: Result<DecisionSnapshotDTO, APIError>) {
+        createDecisionWithSnapshotResult = result
     }
 
     fileprivate func setFetchDecisionsResult(_ result: Result<DecisionsDTO, APIError>) {

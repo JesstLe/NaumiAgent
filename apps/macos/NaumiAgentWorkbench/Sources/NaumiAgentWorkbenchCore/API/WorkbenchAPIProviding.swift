@@ -313,6 +313,16 @@ public protocol WorkbenchAPIProviding: Sendable {
         actor: String
     ) async throws(APIError) -> DecisionDTO
 
+    /// Creates a governance decision and returns the backend's fresh authoritative snapshot.
+    func createDecisionWithSnapshot(
+        sessionID: String,
+        missionID: String,
+        kind: String,
+        title: String,
+        content: String,
+        actor: String
+    ) async throws(APIError) -> DecisionSnapshotDTO
+
     /// Resolves an approval request as approved or rejected.
     func resolveApproval(
         sessionID: String,

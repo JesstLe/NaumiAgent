@@ -2569,6 +2569,58 @@ final class WorkbenchAPIClientTests {
         #expect(decision.createdAt == "2026-06-27T06:00:00")
     }
 
+    @Test func createDecisionWithSnapshotRequestsFreshSnapshot() async throws {
+        let sessionID = "sess 中文"
+        let missionID = "mission 中文"
+        let responseJSON = Data(
+            """
+            {"decision":{"id":"decision-001","session_id":"sess 中文","mission_id":"mission 中文","kind":"architecture","title":"采用 FastAPI","content":"使用 FastAPI 承载 Workbench API","actor":"Planner-Agent","created_at":"2026-06-27T06:00:00"},"snapshot":{"session_id":"sess 中文","summary":{"current_mission_title":"治理决策更新","active_agents":0,"open_issues":0,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/missions/mission%20%E4%B8%AD%E6%96%87/decisions?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["actor"] as? String == "Planner-Agent",
+                  json?["kind"] as? String == "architecture",
+                  json?["title"] as? String == "采用 FastAPI",
+                  json?["content"] as? String == "使用 FastAPI 承载 Workbench API" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient()
+        let response = try await client.createDecisionWithSnapshot(
+            sessionID: sessionID,
+            missionID: missionID,
+            kind: "architecture",
+            title: "采用 FastAPI",
+            content: "使用 FastAPI 承载 Workbench API",
+            actor: "Planner-Agent"
+        )
+
+        #expect(response.decision.id == "decision-001")
+        #expect(response.decision.missionID == missionID)
+        #expect(response.snapshot.sessionID == sessionID)
+        #expect(response.snapshot.summary?.currentMissionTitle == "治理决策更新")
+    }
+
     @Test func resolveApprovalUsesPOSTAndEncodesPathAndBody() async throws {
         let sessionID = "sess 中文"
         let approvalID = "approval 001 审批"

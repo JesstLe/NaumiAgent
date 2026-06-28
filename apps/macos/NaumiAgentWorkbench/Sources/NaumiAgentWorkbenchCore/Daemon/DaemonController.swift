@@ -1291,11 +1291,12 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Creates a decision for a mission and refreshes the decision list, timeline
-    /// events, and snapshot on success.
+    /// Creates a decision for a mission and refreshes the decision list and
+    /// timeline events on success.
     ///
-    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot is never mutated directly.
+    /// Requires `appState.selectedSessionID` to be set. The mutation response
+    /// supplies the authoritative snapshot; follow-up refresh failures are
+    /// preserved without mutating the local decision list directly.
     public func createDecision(
         missionID: String,
         actor: String,
@@ -1310,7 +1311,7 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            _ = try await apiProvider.createDecision(
+            let response = try await apiProvider.createDecisionWithSnapshot(
                 sessionID: sessionID,
                 missionID: missionID,
                 kind: kind,
@@ -1318,9 +1319,13 @@ public final class DaemonController: Sendable {
                 content: content,
                 actor: actor
             )
+            appState.snapshot = response.snapshot
+            var refreshError: APIError?
             await refreshDecisions(missionID: missionID)
+            refreshError = refreshError ?? appState.lastError
             await refreshEvents(limit: 50)
-            await refreshSnapshot()
+            refreshError = refreshError ?? appState.lastError
+            appState.lastError = refreshError
         } catch {
             appState.lastError = error
         }
