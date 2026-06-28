@@ -974,6 +974,27 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Loads one audit event into the selected detail state.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the previous selected event is preserved.
+    public func loadEvent(eventID: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            appState.selectedEvent = try await apiProvider.fetchEvent(
+                sessionID: sessionID,
+                eventID: eventID
+            )
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Loads one governance decision into the selected detail state.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in

@@ -2795,6 +2795,50 @@ final class DaemonControllerTests {
         #expect(appState.selectedApproval == oldApproval)
     }
 
+    @Test @MainActor func loadEventSuccessStoresSelectedEvent() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let event = makeEvent(id: "event-001", type: "issue.claimed", subjectID: "task-001")
+        await api.setEventResult(.success(event))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadEvent(eventID: "event-001")
+
+        #expect(appState.selectedEvent == event)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadEventWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        let oldEvent = makeEvent(id: "event-old", type: "mission.created", subjectID: "mission-001")
+        appState.selectedEvent = oldEvent
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadEvent(eventID: "event-001")
+
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.selectedEvent == oldEvent)
+    }
+
+    @Test @MainActor func loadEventFailurePreservesOldSelectedEvent() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let oldEvent = makeEvent(id: "event-old", type: "mission.created", subjectID: "mission-001")
+        appState.selectedEvent = oldEvent
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setEventResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadEvent(eventID: "event-001")
+
+        #expect(appState.lastError == .httpStatus(500))
+        #expect(appState.selectedEvent == oldEvent)
+    }
+
     @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotApprovalsAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -3028,6 +3072,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setEventsResult(_ result: Result<WorkbenchEventsDTO, APIError>) {
         eventsResult = result
+    }
+
+    fileprivate func setEventResult(_ result: Result<EventDTO, APIError>) {
+        eventResult = result
     }
 
     fileprivate func setValidationRunsResult(_ result: Result<ValidationRunsDTO, APIError>) {
