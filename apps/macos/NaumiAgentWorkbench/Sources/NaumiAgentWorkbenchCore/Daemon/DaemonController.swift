@@ -1121,14 +1121,15 @@ public final class DaemonController: Sendable {
     }
 
     /// Creates a mission in the selected session and refreshes the missions,
-    /// issues, timeline events, and snapshot lists on success. Snapshot is
-    /// refreshed last so that a snapshot failure does not wipe state already
-    /// updated by earlier refreshes.
+    /// issues, and timeline events on success. The global snapshot is taken
+    /// from the mutation response so the first screen can update without an
+    /// extra snapshot fetch.
     ///
     /// If no session is selected, creates a default session named after the
     /// mission first so the first-run "New Mission" action can recover an empty
-    /// bootstrap state. Failures are recorded in `appState.lastError`; the local
-    /// snapshot, missions, and issues are never mutated directly.
+    /// bootstrap state. Failures are recorded in `appState.lastError`, including
+    /// the first follow-up list refresh failure after a successful mutation; the
+    /// local missions and issues are never mutated directly.
     public func createMission(title: String, goal: String) async {
         if appState.selectedSessionID == nil {
             await createSession(title: title, model: nil, systemPrompt: nil)
@@ -1143,15 +1144,20 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            _ = try await apiProvider.createMission(
+            let response = try await apiProvider.createMissionWithSnapshot(
                 sessionID: sessionID,
                 title: title,
                 goal: goal
             )
+            appState.snapshot = response.snapshot
+            var refreshError: APIError?
             await refreshMissions()
+            refreshError = refreshError ?? appState.lastError
             await refreshIssues()
+            refreshError = refreshError ?? appState.lastError
             await refreshEvents(limit: 50)
-            await refreshSnapshot()
+            refreshError = refreshError ?? appState.lastError
+            appState.lastError = refreshError
         } catch {
             appState.lastError = error
         }

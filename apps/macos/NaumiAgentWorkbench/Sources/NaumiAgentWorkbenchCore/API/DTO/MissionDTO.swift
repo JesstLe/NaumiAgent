@@ -38,3 +38,14 @@ public struct MissionDTO: Decodable, Equatable, Sendable {
         self.updatedAt = updatedAt
     }
 }
+
+/// Response returned when mission creation asks the backend for a fresh snapshot.
+public struct MissionSnapshotDTO: Decodable, Equatable, Sendable {
+    public let mission: MissionDTO
+    public let snapshot: WorkbenchSnapshotDTO
+
+    public init(mission: MissionDTO, snapshot: WorkbenchSnapshotDTO) {
+        self.mission = mission
+        self.snapshot = snapshot
+    }
+}

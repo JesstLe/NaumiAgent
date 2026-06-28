@@ -1979,6 +1979,51 @@ final class WorkbenchAPIClientTests {
         #expect(mission.sessionID == sessionID)
     }
 
+    @Test func createMissionWithSnapshotRequestsFreshSnapshot() async throws {
+        let responseJSON = Data(
+            """
+            {"mission":{"id":"mission-001","session_id":"sess-001","title":"Mac 工作台","goal":"补齐 API 调用面","status":"active","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"},"snapshot":{"session_id":"sess-001","summary":{"current_mission_title":"Mac 工作台","active_agents":0,"open_issues":0,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[{"id":"mission-001","session_id":"sess-001","title":"Mac 工作台","goal":"补齐 API 调用面","status":"active","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/missions?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["title"] as? String == "Mac 工作台",
+                  json?["goal"] as? String == "补齐 API 调用面" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient()
+        let response = try await client.createMissionWithSnapshot(
+            sessionID: "sess-001",
+            title: "Mac 工作台",
+            goal: "补齐 API 调用面"
+        )
+
+        #expect(response.mission.id == "mission-001")
+        #expect(response.snapshot.sessionID == "sess-001")
+        #expect(response.snapshot.summary?.currentMissionTitle == "Mac 工作台")
+        #expect(response.snapshot.missions == [response.mission])
+    }
+
     @Test func attachIssue() async throws {
         let issueJSON = Data(
             """

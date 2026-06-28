@@ -39,6 +39,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
     var createMissionResult: Result<MissionDTO, APIError>?
+    var createMissionWithSnapshotResult: Result<MissionSnapshotDTO, APIError>?
     var missionResult: Result<MissionDTO, APIError>?
     var attachIssueResult: Result<IssueDTO, APIError>?
     var createIssueResult: Result<IssueDTO, APIError>?
@@ -59,6 +60,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var snapshotCallCount: Int = 0
     var recordContextHealthWithSnapshotCallCount: Int = 0
     var claimIssueWithSnapshotCallCount: Int = 0
+    var createMissionWithSnapshotCallCount: Int = 0
     var runValidationCallCount: Int = 0
     var runValidationWithSnapshotCallCount: Int = 0
     var createdSessions: [[String: String?]] = []
@@ -450,6 +452,23 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
             "goal": goal,
         ])
         guard let result = createMissionResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func createMissionWithSnapshot(
+        sessionID: String,
+        title: String,
+        goal: String
+    ) async throws(APIError) -> MissionSnapshotDTO {
+        createMissionWithSnapshotCallCount += 1
+        createdMissions.append([
+            "sessionID": sessionID,
+            "title": title,
+            "goal": goal,
+        ])
+        guard let result = createMissionWithSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -1764,8 +1783,9 @@ final class DaemonControllerTests {
         let event = makeEvent(id: "evt-001", type: "mission.created", subjectID: "mission-001")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
-        await api.setCreateMissionResult(.success(mission))
-        await api.setSnapshotResult(.success(snapshot))
+        await api.setCreateMissionWithSnapshotResult(.success(
+            MissionSnapshotDTO(mission: mission, snapshot: snapshot)
+        ))
         await api.setIssuesResult(.success(issues))
         await api.setMissionsResult(.success(missions))
         await api.setEventsResult(.success(events))
@@ -1778,6 +1798,41 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == snapshot)
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
+        #expect(await api.snapshotCallCount == 0)
+    }
+
+    @Test @MainActor func createMissionSuccessUsesIncludedSnapshotWithoutExtraSnapshotFetch() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        appState.snapshot = staleSnapshot
+
+        let api = FakeWorkbenchAPIProvider()
+        let mission = makeMission(id: "mission-001", sessionID: "sess-001")
+        let freshSnapshot = makeSnapshot(sessionID: "sess-001", missions: [mission])
+        let issues = IssuesDTO(issues: [], missionID: nil, riskLevel: nil, limit: 50)
+        let missions = MissionsDTO(missions: [mission], status: nil, limit: 50)
+        let event = makeEvent(id: "evt-001", type: "mission.created", subjectID: "mission-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
+
+        await api.setCreateMissionWithSnapshotResult(.success(
+            MissionSnapshotDTO(mission: mission, snapshot: freshSnapshot)
+        ))
+        await api.setIssuesResult(.success(issues))
+        await api.setMissionsResult(.success(missions))
+        await api.setEventsResult(.success(events))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createMission(title: "Mac 工作台", goal: "补齐 API 调用面")
+
+        #expect(appState.missions == [mission])
+        #expect(appState.issues.isEmpty)
+        #expect(appState.snapshot == freshSnapshot)
+        #expect(appState.snapshot != staleSnapshot)
+        #expect(appState.timelineEvents == [event])
+        #expect(appState.lastError == nil)
+        #expect(await api.createMissionWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func createMissionWithoutSelectedSessionCreatesDefaultSessionFirst() async throws {
@@ -1794,8 +1849,9 @@ final class DaemonControllerTests {
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
         await api.setCreateSessionResult(.success(session))
-        await api.setCreateMissionResult(.success(mission))
-        await api.setSnapshotResult(.success(snapshot))
+        await api.setCreateMissionWithSnapshotResult(.success(
+            MissionSnapshotDTO(mission: mission, snapshot: snapshot)
+        ))
         await configureWorkbenchListResults(for: api, sessionID: "sess-new")
         await api.setIssuesResult(.success(issues))
         await api.setMissionsResult(.success(missions))
@@ -1821,6 +1877,8 @@ final class DaemonControllerTests {
         #expect(appState.issues.isEmpty)
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
+        #expect(await api.snapshotCallCount == 1)
+        #expect(await api.createMissionWithSnapshotCallCount == 1)
     }
 
     @Test @MainActor func createMissionWithoutSelectedSessionRecordsSessionCreationError() async throws {
@@ -1846,7 +1904,7 @@ final class DaemonControllerTests {
         appState.snapshot = staleSnapshot
 
         let api = FakeWorkbenchAPIProvider()
-        await api.setCreateMissionResult(.failure(.httpStatus(500)))
+        await api.setCreateMissionWithSnapshotResult(.failure(.httpStatus(500)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createMission(title: "Title", goal: "Goal")
@@ -1855,31 +1913,33 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func createMissionSnapshotFailureIsNotClearedByEventsIssuesOrMissionsRefresh() async throws {
+    @Test @MainActor func createMissionListRefreshFailureKeepsIncludedSnapshot() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
         let api = FakeWorkbenchAPIProvider()
         let mission = makeMission(id: "mission-001", sessionID: "sess-001")
+        let snapshot = makeSnapshot(sessionID: "sess-001", missions: [mission])
         let issues = IssuesDTO(issues: [], missionID: nil, riskLevel: nil, limit: 50)
-        let missions = MissionsDTO(missions: [mission], status: nil, limit: 50)
         let event = makeEvent(id: "evt-001", type: "mission.created", subjectID: "mission-001")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
-        await api.setCreateMissionResult(.success(mission))
-        await api.setSnapshotResult(.failure(.httpStatus(503)))
+        await api.setCreateMissionWithSnapshotResult(.success(
+            MissionSnapshotDTO(mission: mission, snapshot: snapshot)
+        ))
         await api.setIssuesResult(.success(issues))
-        await api.setMissionsResult(.success(missions))
+        await api.setMissionsResult(.failure(.httpStatus(503)))
         await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createMission(title: "Mac 工作台", goal: "补齐 API 调用面")
 
-        #expect(appState.missions == [mission])
+        #expect(appState.missions.isEmpty)
         #expect(appState.issues.isEmpty)
         #expect(appState.timelineEvents == [event])
-        #expect(appState.snapshot == nil)
+        #expect(appState.snapshot == snapshot)
         #expect(appState.lastError == .httpStatus(503))
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func refreshMissionsSuccessWritesMissions() async throws {
@@ -4266,6 +4326,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setMissionResult(_ result: Result<MissionDTO, APIError>) {
         missionResult = result
+    }
+
+    fileprivate func setCreateMissionWithSnapshotResult(_ result: Result<MissionSnapshotDTO, APIError>) {
+        createMissionWithSnapshotResult = result
     }
 
     fileprivate func setAgentProfilesResult(_ result: Result<AgentProfilesDTO, APIError>) {
