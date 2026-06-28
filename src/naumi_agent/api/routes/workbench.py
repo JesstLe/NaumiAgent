@@ -608,9 +608,14 @@ async def get_context_snapshots(
         raise HTTPException(status_code=404, detail="Session not found")
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    snapshots = await engine.workbench_service.list_context_snapshots(
-        session_id, task_id=task_id, agent_id=agent_id, limit=limit
-    )
+    try:
+        snapshots = await engine.workbench_service.list_context_snapshots(
+            session_id, task_id=task_id, agent_id=agent_id, limit=limit
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return ContextSnapshotsResponse(
         context_snapshots=snapshots, task_id=task_id, agent_id=agent_id, limit=limit
     )
