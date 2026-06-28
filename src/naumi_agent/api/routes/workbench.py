@@ -1391,9 +1391,14 @@ async def get_approvals(
         raise HTTPException(status_code=404, detail="Session not found")
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    approvals = await engine.workbench_service.list_approvals(
-        session_id, state=state, limit=limit
-    )
+    try:
+        approvals = await engine.workbench_service.list_approvals(
+            session_id, state=state, limit=limit
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return ApprovalsResponse(
         approvals=approvals,
         state=state.value if state is not None else None,
