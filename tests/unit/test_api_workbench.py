@@ -130,6 +130,7 @@ class _FakeWorkbenchService:
         self._get_event_error: Exception | None = None
         self._list_validation_runs_error: Exception | None = None
         self._get_validation_run_error: Exception | None = None
+        self._list_context_snapshots_error: Exception | None = None
 
     def set_run_validation_error(self, error: Exception) -> None:
         self._run_validation_error = error
@@ -166,6 +167,9 @@ class _FakeWorkbenchService:
 
     def set_get_validation_run_error(self, error: Exception) -> None:
         self._get_validation_run_error = error
+
+    def set_list_context_snapshots_error(self, error: Exception) -> None:
+        self._list_context_snapshots_error = error
 
     async def dashboard_snapshot(self, session_id: str):
         if self._dashboard_snapshot_error is not None:
@@ -586,6 +590,8 @@ class _FakeWorkbenchService:
         agent_id: str | None = None,
         limit: int = 50,
     ):
+        if self._list_context_snapshots_error is not None:
+            raise self._list_context_snapshots_error
         self.listed_context_snapshots.append(
             {
                 "session_id": session_id,
@@ -1881,6 +1887,50 @@ async def test_get_context_snapshots_endpoint_returns_snapshots_and_params() -> 
         "agent_id": "agent-2",
         "limit": 25,
     }
+
+
+@pytest.mark.asyncio
+async def test_get_context_snapshots_endpoint_reports_unavailable_context_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_context_snapshots_error(
+        RuntimeError("context snapshot store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_context_snapshots(
+            "sess-1",
+            _fake_request(engine),
+            task_id="task-2",
+            agent_id="agent-2",
+            limit=25,
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "context snapshot store unavailable"
+
+
+@pytest.mark.asyncio
+async def test_get_context_snapshots_endpoint_reports_invalid_context_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_context_snapshots_error(
+        ValueError("context snapshot filter is invalid")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_context_snapshots(
+            "sess-1",
+            _fake_request(engine),
+            task_id="task-2",
+            agent_id="agent-2",
+            limit=25,
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "context snapshot filter is invalid"
 
 
 @pytest.mark.asyncio
