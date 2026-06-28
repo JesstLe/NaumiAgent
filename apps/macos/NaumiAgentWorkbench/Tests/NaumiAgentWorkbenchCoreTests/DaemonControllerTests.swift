@@ -39,6 +39,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
     var releaseLeaseWithSnapshotResult: Result<LeaseSnapshotDTO, APIError>?
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
+    var expireLeasesWithSnapshotResult: Result<ExpiredLeasesSnapshotDTO, APIError>?
     var createMissionResult: Result<MissionDTO, APIError>?
     var createMissionWithSnapshotResult: Result<MissionSnapshotDTO, APIError>?
     var missionResult: Result<MissionDTO, APIError>?
@@ -67,6 +68,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var recordContextHealthWithSnapshotCallCount: Int = 0
     var claimIssueWithSnapshotCallCount: Int = 0
     var releaseLeaseWithSnapshotCallCount: Int = 0
+    var expireLeasesWithSnapshotCallCount: Int = 0
     var createMissionWithSnapshotCallCount: Int = 0
     var attachIssueWithSnapshotCallCount: Int = 0
     var createIssueWithSnapshotCallCount: Int = 0
@@ -456,6 +458,14 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
 
     func expireLeases(sessionID: String) async throws(APIError) -> ExpiredLeasesDTO {
         guard let result = expireLeasesResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func expireLeasesWithSnapshot(sessionID: String) async throws(APIError) -> ExpiredLeasesSnapshotDTO {
+        expireLeasesWithSnapshotCallCount += 1
+        guard let result = expireLeasesWithSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -1816,20 +1826,20 @@ final class DaemonControllerTests {
         #expect(await api.snapshotCallCount == 0)
     }
 
-    @Test @MainActor func expireLeasesSuccessRefreshesSnapshotLeasesAndEvents() async throws {
+    @Test @MainActor func expireLeasesSuccessUsesIncludedSnapshotAndRefreshesLists() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
         let api = FakeWorkbenchAPIProvider()
         let expiredLease = makeLease(id: "lease-001", taskID: "task-001", state: "expired")
-        let expired = ExpiredLeasesDTO(expired: [expiredLease])
         let snapshot = makeSnapshot(sessionID: "sess-001", lease: expiredLease)
         let leases = LeasesDTO(leases: [expiredLease], state: nil, taskID: nil, agentID: nil, limit: 50)
         let event = makeEvent(id: "evt-001", type: "leases.expired", subjectID: "lease-001")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
-        await api.setExpireLeasesResult(.success(expired))
-        await api.setSnapshotResult(.success(snapshot))
+        await api.setExpireLeasesWithSnapshotResult(.success(
+            ExpiredLeasesSnapshotDTO(expired: [expiredLease], snapshot: snapshot)
+        ))
         await api.setLeasesResult(.success(leases))
         await api.setEventsResult(.success(events))
 
@@ -1840,6 +1850,8 @@ final class DaemonControllerTests {
         #expect(appState.leases == [expiredLease])
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
+        #expect(await api.expireLeasesWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func expireLeasesWithoutSelectedSessionRecordsError() async throws {
@@ -1862,7 +1874,7 @@ final class DaemonControllerTests {
         appState.snapshot = staleSnapshot
 
         let api = FakeWorkbenchAPIProvider()
-        await api.setExpireLeasesResult(.failure(.httpStatus(500)))
+        await api.setExpireLeasesWithSnapshotResult(.failure(.httpStatus(500)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.expireLeases()
@@ -4521,6 +4533,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setExpireLeasesResult(_ result: Result<ExpiredLeasesDTO, APIError>) {
         expireLeasesResult = result
+    }
+
+    fileprivate func setExpireLeasesWithSnapshotResult(_ result: Result<ExpiredLeasesSnapshotDTO, APIError>) {
+        expireLeasesWithSnapshotResult = result
     }
 
     fileprivate func setCreateMissionResult(_ result: Result<MissionDTO, APIError>) {

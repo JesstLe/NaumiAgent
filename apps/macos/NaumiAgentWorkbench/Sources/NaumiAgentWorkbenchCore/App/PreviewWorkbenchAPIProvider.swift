@@ -418,6 +418,12 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         ExpiredLeasesDTO(expired: [])
     }
 
+    func expireLeasesWithSnapshot(sessionID: String) async throws(APIError) -> ExpiredLeasesSnapshotDTO {
+        let expired = try await expireLeases(sessionID: sessionID)
+        let snapshot = try await fetchSnapshot(sessionID: sessionID)
+        return ExpiredLeasesSnapshotDTO(expired: expired.expired, snapshot: snapshot)
+    }
+
     func createMission(
         sessionID: String,
         title: String,

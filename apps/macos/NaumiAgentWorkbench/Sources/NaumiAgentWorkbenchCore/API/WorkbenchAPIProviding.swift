@@ -201,6 +201,9 @@ public protocol WorkbenchAPIProviding: Sendable {
     /// Expires overdue leases in the given session, returning the leases that were expired.
     func expireLeases(sessionID: String) async throws(APIError) -> ExpiredLeasesDTO
 
+    /// Expires overdue leases and returns the backend's fresh authoritative snapshot.
+    func expireLeasesWithSnapshot(sessionID: String) async throws(APIError) -> ExpiredLeasesSnapshotDTO
+
     /// Creates a mission inside the selected session.
     func createMission(
         sessionID: String,
