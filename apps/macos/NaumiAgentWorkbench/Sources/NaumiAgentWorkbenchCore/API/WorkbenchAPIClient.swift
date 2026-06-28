@@ -297,6 +297,10 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchMission(sessionID: String, missionID: String) async throws(APIError) -> MissionDTO {
+        try await get(path: encodePath("workbench", "sessions", sessionID, "missions", missionID))
+    }
+
     public func fetchAgentProfiles(
         sessionID: String,
         status: String?,

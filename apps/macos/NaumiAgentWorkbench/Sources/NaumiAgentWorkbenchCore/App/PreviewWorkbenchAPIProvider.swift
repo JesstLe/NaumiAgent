@@ -252,7 +252,15 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         status: String?,
         limit: Int
     ) async throws(APIError) -> MissionsDTO {
-        MissionsDTO(missions: [], status: status, limit: limit)
+        MissionsDTO(
+            missions: [makeMission(id: "preview-mission", sessionID: sessionID)],
+            status: status,
+            limit: limit
+        )
+    }
+
+    func fetchMission(sessionID: String, missionID: String) async throws(APIError) -> MissionDTO {
+        makeMission(id: missionID, sessionID: sessionID)
     }
 
     func fetchAgentProfiles(
