@@ -3700,6 +3700,8 @@ private func configureWorkbenchListResults(for api: FakeWorkbenchAPIProvider, se
     let failure = makeFailure(id: "failure-\(sessionID)", taskID: "task-\(sessionID)", status: "open")
     let event = makeEvent(id: "evt-\(sessionID)", type: "test.event", subjectID: "subject-\(sessionID)")
     let approval = makeApproval(id: "approval-\(sessionID)", missionID: "mission-\(sessionID)", state: "waiting")
+    let decision = makeDecision(id: "decision-\(sessionID)", missionID: "mission-\(sessionID)")
+    let intentLock = makeIntentLock(id: "lock-\(sessionID)", missionID: "mission-\(sessionID)")
     let run = ValidationRunDTO(
         id: "run-\(sessionID)",
         sessionID: sessionID,
@@ -3731,6 +3733,8 @@ private func configureWorkbenchListResults(for api: FakeWorkbenchAPIProvider, se
     await api.setFailuresResult(.success(FailuresDTO(failures: [failure], taskID: nil, status: nil, limit: 50)))
     await api.setEventsResult(.success(WorkbenchEventsDTO(events: [event], limit: 50)))
     await api.setApprovalsResult(.success(ApprovalsDTO(approvals: [approval], state: "waiting", limit: 50)))
+    await api.setFetchDecisionsResult(.success(DecisionsDTO(decisions: [decision], missionID: mission.id)))
+    await api.setFetchIntentLocksResult(.success(IntentLocksDTO(intentLocks: [intentLock], missionID: mission.id)))
     await api.setValidationRunsResult(.success(ValidationRunsDTO(validationRuns: [run], taskID: nil, limit: 50)))
     await api.setContextSnapshotsResult(.success(ContextSnapshotsDTO(contextSnapshots: [contextSnapshot], taskID: nil, agentID: nil, limit: 50)))
     await api.setAgentProfilesResult(.success(AgentProfilesDTO(agentProfiles: [agentProfile], status: nil, limit: 50)))
@@ -3764,6 +3768,8 @@ private func expectWorkbenchListsPopulated(
     #expect(appState.failures.count == 1, sourceLocation: sourceLocation)
     #expect(appState.timelineEvents.count == 1, sourceLocation: sourceLocation)
     #expect(appState.approvals.count == 1, sourceLocation: sourceLocation)
+    #expect(appState.decisions.count == 1, sourceLocation: sourceLocation)
+    #expect(appState.intentLocks.count == 1, sourceLocation: sourceLocation)
     #expect(appState.validationRuns.count == 1, sourceLocation: sourceLocation)
     #expect(appState.contextSnapshots.count == 1, sourceLocation: sourceLocation)
     #expect(appState.agentProfiles.count == 1, sourceLocation: sourceLocation)
@@ -3781,6 +3787,8 @@ private func expectWorkbenchListsEmpty(
     #expect(appState.failures.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.timelineEvents.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.approvals.isEmpty, sourceLocation: sourceLocation)
+    #expect(appState.decisions.isEmpty, sourceLocation: sourceLocation)
+    #expect(appState.intentLocks.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.validationRuns.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.contextSnapshots.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.agentProfiles.isEmpty, sourceLocation: sourceLocation)
@@ -3817,6 +3825,8 @@ private func seedWorkbenchLists(_ appState: AppState) {
     appState.worktrees = [makeWorktree(name: "wt-stale", taskID: "task-old", status: "active")]
     appState.missions = [makeMission(id: "mission-stale", sessionID: "sess-stale")]
     appState.agentProfiles = [makeAgentProfile(id: "agent-stale", sessionID: "sess-stale", status: "idle")]
+    appState.decisions = [makeDecision(id: "decision-stale", missionID: "mission-stale")]
+    appState.intentLocks = [makeIntentLock(id: "lock-stale", missionID: "mission-stale")]
 }
 
 private func makeAgentProfile(id: String, sessionID: String, status: String) -> AgentProfileDTO {
