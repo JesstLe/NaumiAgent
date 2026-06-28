@@ -290,6 +290,27 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Loads one context health snapshot into the selected detail state.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the previous selected context snapshot is preserved.
+    public func loadContextSnapshot(snapshotID: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            appState.selectedContextSnapshot = try await apiProvider.fetchContextSnapshot(
+                sessionID: sessionID,
+                snapshotID: snapshotID
+            )
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Records a context health update for the currently selected session and issue.
     ///
     /// Requires `appState.selectedSessionID` to be set. On success the returned
