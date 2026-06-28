@@ -14,7 +14,7 @@ public struct WorkbenchShellView: View {
         @Bindable var appState = environment.appState
 
         GeometryReader { proxy in
-            let routeLayout = scaledLayout(for: appState.currentRoute)
+            let routeLayout = appState.currentRoute.workbenchPageLayout
             let viewport = shellPresentation.shellViewport(
                 for: proxy.size,
                 pageLayout: routeLayout
@@ -101,13 +101,6 @@ public struct WorkbenchShellView: View {
                 appState: environment.appState,
                 daemonController: environment.daemonController
             )
-        }
-    }
-
-    private func scaledLayout(for route: AppRoute) -> WorkbenchScaledPageLayout {
-        switch route {
-        case .dashboard, .taskMarket, .worktrees, .reviews, .timeline, .settings:
-            return WorkbenchScaledPageLayout.dashboard
         }
     }
 }

@@ -54,4 +54,21 @@ public enum AppRoute: String, CaseIterable, Identifiable, Hashable, Sendable {
             return "gearshape"
         }
     }
+
+    public var workbenchPageLayout: WorkbenchScaledPageLayout {
+        switch self {
+        case .dashboard:
+            return .dashboard
+        case .taskMarket:
+            return .taskMarket
+        case .worktrees:
+            return .worktrees
+        case .reviews:
+            return .reviews
+        case .timeline:
+            return .timeline
+        case .settings:
+            return .settings
+        }
+    }
 }
