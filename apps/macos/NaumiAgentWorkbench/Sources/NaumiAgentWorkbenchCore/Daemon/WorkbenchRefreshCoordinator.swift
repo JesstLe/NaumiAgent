@@ -17,6 +17,7 @@ public enum WorkbenchRefreshOutcome: Sendable, Equatable {
 @MainActor
 public final class WorkbenchRefreshCoordinator: Sendable {
     public var refreshInterval: Duration
+    public var eventStreamHealthProbeInterval: Duration
 
     private let daemonController: DaemonController?
     private let refreshOperation: @MainActor () async -> Void
@@ -27,10 +28,12 @@ public final class WorkbenchRefreshCoordinator: Sendable {
     /// Creates a coordinator that refreshes through the given daemon controller.
     public init(
         daemonController: DaemonController,
-        refreshInterval: Duration = .seconds(5)
+        refreshInterval: Duration = .seconds(5),
+        eventStreamHealthProbeInterval: Duration = .seconds(15)
     ) {
         self.daemonController = daemonController
         self.refreshInterval = refreshInterval
+        self.eventStreamHealthProbeInterval = eventStreamHealthProbeInterval
         self.refreshOperation = { await daemonController.refreshConnection() }
         self.eventStreamHealthProbeOperation = { await daemonController.pingEventStream() }
     }
@@ -40,10 +43,12 @@ public final class WorkbenchRefreshCoordinator: Sendable {
     /// Used by tests to inject a controllable refresh closure.
     internal init(
         refreshInterval: Duration = .seconds(5),
+        eventStreamHealthProbeInterval: Duration = .seconds(15),
         refreshOperation: @escaping @MainActor () async -> Void
     ) {
         self.daemonController = nil
         self.refreshInterval = refreshInterval
+        self.eventStreamHealthProbeInterval = eventStreamHealthProbeInterval
         self.refreshOperation = refreshOperation
         self.eventStreamHealthProbeOperation = {}
     }
@@ -53,11 +58,13 @@ public final class WorkbenchRefreshCoordinator: Sendable {
     /// Used by tests to inject independently controllable closures.
     internal init(
         refreshInterval: Duration = .seconds(5),
+        eventStreamHealthProbeInterval: Duration = .seconds(15),
         eventStreamHealthProbeOperation: @escaping @MainActor () async -> Void,
         refreshOperation: @escaping @MainActor () async -> Void
     ) {
         self.daemonController = nil
         self.refreshInterval = refreshInterval
+        self.eventStreamHealthProbeInterval = eventStreamHealthProbeInterval
         self.refreshOperation = refreshOperation
         self.eventStreamHealthProbeOperation = eventStreamHealthProbeOperation
     }
@@ -106,6 +113,18 @@ public final class WorkbenchRefreshCoordinator: Sendable {
             // Sleep until the next tick. Cancellation immediately ends the loop
             // without leaving multiple timers running.
             try? await Task.sleep(for: refreshInterval)
+        }
+    }
+
+    /// Starts an endless event-stream liveness probe loop.
+    ///
+    /// The loop is intentionally separate from snapshot refresh so a slow REST
+    /// refresh cannot block WebSocket health checks.
+    public func startPeriodicEventStreamHealthProbes() async {
+        while !Task.isCancelled {
+            _ = await probeEventStreamOnce()
+
+            try? await Task.sleep(for: eventStreamHealthProbeInterval)
         }
     }
 }
