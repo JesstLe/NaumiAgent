@@ -187,6 +187,15 @@ public final class DaemonController: Sendable {
         preWarmError = preWarmError ?? appState.lastError
         await refreshApprovals(state: "waiting")
         preWarmError = preWarmError ?? appState.lastError
+        if let missionID = appState.snapshot?.missions.first?.id ?? appState.missions.first?.id {
+            await refreshDecisions(missionID: missionID)
+            preWarmError = preWarmError ?? appState.lastError
+            await refreshIntentLocks(missionID: missionID)
+            preWarmError = preWarmError ?? appState.lastError
+        } else {
+            appState.decisions = []
+            appState.intentLocks = []
+        }
         await refreshValidationRuns()
         preWarmError = preWarmError ?? appState.lastError
         await refreshContextSnapshots()
