@@ -690,6 +690,61 @@ final class WorkbenchAPIClientTests {
         #expect(snapshot.createdAt == "2026-06-27T06:00:00")
     }
 
+    @Test func recordContextHealthWithSnapshotRequestsFreshSnapshot() async throws {
+        let sessionID = "sess/中文"
+        let taskID = "task/审查"
+        let responseJSON = Data(
+            """
+            {"context_snapshot":{"id":"snap-001","session_id":"sess/中文","agent_id":"agent-001","task_id":"task/审查","health":"good","reasons":["上下文健康"],"created_at":"2026-06-27T06:00:00"},"snapshot":{"session_id":"sess/中文","summary":{"current_mission_title":"上下文刷新","active_agents":1,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%2F%E4%B8%AD%E6%96%87/issues/task%2F%E5%AE%A1%E6%9F%A5/context-health?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["agent_id"] as? String == "agent-001",
+                  json?["minutes_since_sync"] as? Int == 5,
+                  json?["token_load_ratio"] as? Double == 0.75,
+                  json?["policy_conflict"] as? Bool == false,
+                  json?["actor"] as? String == "Human" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient()
+        let response = try await client.recordContextHealthWithSnapshot(
+            sessionID: sessionID,
+            taskID: taskID,
+            agentID: "agent-001",
+            minutesSinceSync: 5,
+            tokenLoadRatio: 0.75,
+            policyConflict: false,
+            actor: "Human"
+        )
+
+        #expect(response.contextSnapshot.id == "snap-001")
+        #expect(response.contextSnapshot.sessionID == sessionID)
+        #expect(response.contextSnapshot.taskID == taskID)
+        #expect(response.snapshot.sessionID == sessionID)
+        #expect(response.snapshot.summary?.currentMissionTitle == "上下文刷新")
+    }
+
     @Test func fetchApprovalsWithState() async throws {
         let sessionID = "sess 中文"
         let state = "waiting"

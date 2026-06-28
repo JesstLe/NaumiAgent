@@ -155,6 +155,28 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func recordContextHealthWithSnapshot(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        minutesSinceSync: Int,
+        tokenLoadRatio: Double,
+        policyConflict: Bool,
+        actor: String
+    ) async throws(APIError) -> ContextHealthSnapshotDTO {
+        let body = RecordContextHealthRequest(
+            agentID: agentID,
+            minutesSinceSync: minutesSinceSync,
+            tokenLoadRatio: tokenLoadRatio,
+            policyConflict: policyConflict,
+            actor: actor
+        )
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "issues", taskID, "context-health") + "?include_snapshot=true",
+            body: body
+        )
+    }
+
     public func fetchApprovals(
         sessionID: String,
         state: String?,

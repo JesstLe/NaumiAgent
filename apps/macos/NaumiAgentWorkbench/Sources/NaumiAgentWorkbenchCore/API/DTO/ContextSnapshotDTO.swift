@@ -39,3 +39,19 @@ public struct ContextSnapshotDTO: Decodable, Equatable, Sendable {
         self.createdAt = createdAt
     }
 }
+
+/// Response returned when recording context health asks the backend for a fresh snapshot.
+public struct ContextHealthSnapshotDTO: Decodable, Equatable, Sendable {
+    public let contextSnapshot: ContextSnapshotDTO
+    public let snapshot: WorkbenchSnapshotDTO
+
+    public enum CodingKeys: String, CodingKey {
+        case contextSnapshot = "context_snapshot"
+        case snapshot
+    }
+
+    public init(contextSnapshot: ContextSnapshotDTO, snapshot: WorkbenchSnapshotDTO) {
+        self.contextSnapshot = contextSnapshot
+        self.snapshot = snapshot
+    }
+}

@@ -17,6 +17,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var contextSnapshotsResult: Result<ContextSnapshotsDTO, APIError>?
     var contextSnapshotResult: Result<ContextSnapshotDTO, APIError>?
     var recordContextHealthResult: Result<ContextSnapshotDTO, APIError>?
+    var recordContextHealthWithSnapshotResult: Result<ContextHealthSnapshotDTO, APIError>?
     var approvalsResult: Result<ApprovalsDTO, APIError>?
     var approvalResult: Result<ApprovalDTO, APIError>?
     var failuresResult: Result<FailuresDTO, APIError>?
@@ -56,6 +57,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var capabilitiesCallCount: Int = 0
     var sessionsCallCount: Int = 0
     var snapshotCallCount: Int = 0
+    var recordContextHealthWithSnapshotCallCount: Int = 0
     var claimIssueWithSnapshotCallCount: Int = 0
     var runValidationCallCount: Int = 0
     var runValidationWithSnapshotCallCount: Int = 0
@@ -204,6 +206,22 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         actor: String
     ) async throws(APIError) -> ContextSnapshotDTO {
         guard let result = recordContextHealthResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func recordContextHealthWithSnapshot(
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        minutesSinceSync: Int,
+        tokenLoadRatio: Double,
+        policyConflict: Bool,
+        actor: String
+    ) async throws(APIError) -> ContextHealthSnapshotDTO {
+        recordContextHealthWithSnapshotCallCount += 1
+        guard let result = recordContextHealthWithSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -2301,7 +2319,12 @@ final class DaemonControllerTests {
             reasons: ["上下文健康"],
             createdAt: "2026-06-27T06:01:00"
         )
-        await api.setRecordContextHealthResult(.success(newSnapshot))
+        await api.setRecordContextHealthWithSnapshotResult(.success(
+            ContextHealthSnapshotDTO(
+                contextSnapshot: newSnapshot,
+                snapshot: makeSnapshot(sessionID: "sess-001", missions: [])
+            )
+        ))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.recordContextHealth(
@@ -2315,6 +2338,60 @@ final class DaemonControllerTests {
 
         #expect(appState.contextSnapshots == [newSnapshot, existingSnapshot])
         #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func recordContextHealthSuccessUsesIncludedWorkbenchSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleWorkbenchSnapshot = makeSnapshot(
+            sessionID: "sess-001",
+            missions: [makeMission(id: "mission-stale", sessionID: "sess-001")]
+        )
+        appState.snapshot = staleWorkbenchSnapshot
+        let existingSnapshot = ContextSnapshotDTO(
+            id: "snap-002",
+            sessionID: "sess-001",
+            agentID: "agent-001",
+            taskID: "task-001",
+            health: "stale",
+            reasons: ["旧上下文"],
+            createdAt: "2026-06-27T06:00:00"
+        )
+        appState.contextSnapshots = [existingSnapshot]
+
+        let api = FakeWorkbenchAPIProvider()
+        let freshWorkbenchSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        let newContextSnapshot = ContextSnapshotDTO(
+            id: "snap-001",
+            sessionID: "sess-001",
+            agentID: "agent-001",
+            taskID: "task-001",
+            health: "good",
+            reasons: ["上下文健康"],
+            createdAt: "2026-06-27T06:01:00"
+        )
+        await api.setRecordContextHealthWithSnapshotResult(.success(
+            ContextHealthSnapshotDTO(
+                contextSnapshot: newContextSnapshot,
+                snapshot: freshWorkbenchSnapshot
+            )
+        ))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.recordContextHealth(
+            taskID: "task-001",
+            agentID: "agent-001",
+            minutesSinceSync: 5,
+            tokenLoadRatio: 0.75,
+            policyConflict: false,
+            actor: "Human"
+        )
+
+        #expect(appState.contextSnapshots == [newContextSnapshot, existingSnapshot])
+        #expect(appState.snapshot == freshWorkbenchSnapshot)
+        #expect(appState.snapshot != staleWorkbenchSnapshot)
+        #expect(appState.lastError == nil)
+        #expect(await api.recordContextHealthWithSnapshotCallCount == 1)
     }
 
     @Test @MainActor func recordContextHealthSuccessReplacesDuplicateSnapshot() async throws {
@@ -2350,7 +2427,12 @@ final class DaemonControllerTests {
             reasons: ["已更新"],
             createdAt: "2026-06-27T06:01:00"
         )
-        await api.setRecordContextHealthResult(.success(updatedSnapshot))
+        await api.setRecordContextHealthWithSnapshotResult(.success(
+            ContextHealthSnapshotDTO(
+                contextSnapshot: updatedSnapshot,
+                snapshot: makeSnapshot(sessionID: "sess-001", missions: [])
+            )
+        ))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.recordContextHealth(
@@ -2412,7 +2494,7 @@ final class DaemonControllerTests {
         appState.contextSnapshots = [staleSnapshot]
 
         let api = FakeWorkbenchAPIProvider()
-        await api.setRecordContextHealthResult(.failure(.httpStatus(500)))
+        await api.setRecordContextHealthWithSnapshotResult(.failure(.httpStatus(500)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.recordContextHealth(
@@ -4128,6 +4210,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setRecordContextHealthResult(_ result: Result<ContextSnapshotDTO, APIError>) {
         recordContextHealthResult = result
+    }
+
+    fileprivate func setRecordContextHealthWithSnapshotResult(_ result: Result<ContextHealthSnapshotDTO, APIError>) {
+        recordContextHealthWithSnapshotResult = result
     }
 
     fileprivate func setApprovalsResult(_ result: Result<ApprovalsDTO, APIError>) {
