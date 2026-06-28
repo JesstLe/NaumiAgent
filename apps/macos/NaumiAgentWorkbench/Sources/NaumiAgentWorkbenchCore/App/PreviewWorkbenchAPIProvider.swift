@@ -429,6 +429,24 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         IntentLocksDTO(intentLocks: [], missionID: missionID)
     }
 
+    func fetchIntentLock(
+        sessionID: String,
+        missionID: String,
+        lockID: String
+    ) async throws(APIError) -> IntentLockDTO {
+        IntentLockDTO(
+            id: lockID,
+            sessionID: sessionID,
+            missionID: missionID,
+            rule: "Preview intent lock",
+            blockedPaths: ["src/naumi_agent/core"],
+            allowedPaths: ["docs/adr"],
+            requireProposalForRisk: "high",
+            active: true,
+            createdAt: now
+        )
+    }
+
     func createIntentLock(
         sessionID: String,
         missionID: String,

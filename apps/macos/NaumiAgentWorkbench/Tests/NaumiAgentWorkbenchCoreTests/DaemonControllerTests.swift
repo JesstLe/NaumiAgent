@@ -42,6 +42,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var createIssueResult: Result<IssueDTO, APIError>?
     var createIntentLockResult: Result<IntentLockDTO, APIError>?
     var fetchIntentLocksResult: Result<IntentLocksDTO, APIError>?
+    var fetchIntentLockResult: Result<IntentLockDTO, APIError>?
     var createDecisionResult: Result<DecisionDTO, APIError>?
     var fetchDecisionsResult: Result<DecisionsDTO, APIError>?
     var resolveApprovalResult: Result<ApprovalDTO, APIError>?
@@ -435,6 +436,17 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
 
     func fetchIntentLocks(sessionID: String, missionID: String) async throws(APIError) -> IntentLocksDTO {
         guard let result = fetchIntentLocksResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchIntentLock(
+        sessionID: String,
+        missionID: String,
+        lockID: String
+    ) async throws(APIError) -> IntentLockDTO {
+        guard let result = fetchIntentLockResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -2960,6 +2972,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setCreateIntentLockResult(_ result: Result<IntentLockDTO, APIError>) {
         createIntentLockResult = result
+    }
+
+    fileprivate func setFetchIntentLockResult(_ result: Result<IntentLockDTO, APIError>) {
+        fetchIntentLockResult = result
     }
 
     fileprivate func setCreateDecisionResult(_ result: Result<DecisionDTO, APIError>) {

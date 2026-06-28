@@ -2566,6 +2566,46 @@ final class WorkbenchAPIClientTests {
         #expect(lock.createdAt == "2026-06-27T06:00:00")
     }
 
+    @Test func fetchIntentLockEncodesPathComponentsAndDecodesPolicy() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/审查"
+        let lockID = "lock/核心 001"
+        let json = Data(
+            """
+            {"id":"lock/核心 001","session_id":"sess/中文","mission_id":"mission/审查","rule":"高风险变更必须先提案","blocked_paths":["src/naumi_agent/core"],"allowed_paths":["docs/adr"],"require_proposal_for_risk":"high","active":true,"created_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%2F%E4%B8%AD%E6%96%87/missions/mission%2F%E5%AE%A1%E6%9F%A5/intent-locks/lock%2F%E6%A0%B8%E5%BF%83%20001" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let lock = try await client.fetchIntentLock(sessionID: sessionID, missionID: missionID, lockID: lockID)
+
+        #expect(lock.id == lockID)
+        #expect(lock.sessionID == sessionID)
+        #expect(lock.missionID == missionID)
+        #expect(lock.rule == "高风险变更必须先提案")
+        #expect(lock.blockedPaths == ["src/naumi_agent/core"])
+        #expect(lock.allowedPaths == ["docs/adr"])
+        #expect(lock.requireProposalForRisk == "high")
+        #expect(lock.active)
+        #expect(lock.createdAt == "2026-06-27T06:00:00")
+    }
+
     @Test func fetchDecisionsEncodesPathAndDecodesResponse() async throws {
         let sessionID = "sess 中文"
         let missionID = "mission 中文"
