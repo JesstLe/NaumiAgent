@@ -428,6 +428,17 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func createMissionWithSnapshot(
+        sessionID: String,
+        title: String,
+        goal: String
+    ) async throws(APIError) -> MissionSnapshotDTO {
+        MissionSnapshotDTO(
+            mission: try await createMission(sessionID: sessionID, title: title, goal: goal),
+            snapshot: try await fetchSnapshot(sessionID: sessionID)
+        )
+    }
+
     func attachIssue(
         sessionID: String,
         missionID: String,

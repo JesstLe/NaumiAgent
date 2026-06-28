@@ -436,6 +436,18 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func createMissionWithSnapshot(
+        sessionID: String,
+        title: String,
+        goal: String
+    ) async throws(APIError) -> MissionSnapshotDTO {
+        let body = CreateMissionRequest(title: title, goal: goal)
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "missions") + "?include_snapshot=true",
+            body: body
+        )
+    }
+
     public func attachIssue(
         sessionID: String,
         missionID: String,

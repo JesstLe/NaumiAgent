@@ -205,6 +205,13 @@ public protocol WorkbenchAPIProviding: Sendable {
         goal: String
     ) async throws(APIError) -> MissionDTO
 
+    /// Creates a mission and returns the backend's fresh authoritative snapshot.
+    func createMissionWithSnapshot(
+        sessionID: String,
+        title: String,
+        goal: String
+    ) async throws(APIError) -> MissionSnapshotDTO
+
     /// Attaches an issue to a mission.
     func attachIssue(
         sessionID: String,
