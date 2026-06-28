@@ -1024,6 +1024,27 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Loads one approval request into the selected detail state.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the previous selected approval is preserved.
+    public func loadApproval(approvalID: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            appState.selectedApproval = try await apiProvider.fetchApproval(
+                sessionID: sessionID,
+                approvalID: approvalID
+            )
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Resolves an approval request as approved or rejected and refreshes the
     /// timeline events, waiting approvals list, and snapshot on success.
     ///
