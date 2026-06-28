@@ -112,6 +112,20 @@ public struct DashboardSnapshotPresentation: Equatable, Sendable {
             cwd: cwd?.isEmpty == false ? cwd : nil
         )
     }
+
+    public func contextRefreshCommand() -> DashboardContextRefreshCommand? {
+        let taskID = failureRows.first?.taskID
+            ?? issueRows.first?.taskID
+            ?? taskRows.first?.id
+        guard let taskID, !taskID.isEmpty else { return nil }
+
+        let owner = workbench.inspector?.owner?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return DashboardContextRefreshCommand(
+            taskID: taskID,
+            agentID: owner?.isEmpty == false ? owner : nil,
+            limit: 50
+        )
+    }
 }
 
 public struct DashboardValidationRerunCommand: Equatable, Sendable {
@@ -122,6 +136,16 @@ public struct DashboardValidationRerunCommand: Equatable, Sendable {
 
     public var canSubmit: Bool {
         !taskID.isEmpty && !actor.isEmpty && !command.isEmpty
+    }
+}
+
+public struct DashboardContextRefreshCommand: Equatable, Sendable {
+    public let taskID: String
+    public let agentID: String?
+    public let limit: Int
+
+    public var canSubmit: Bool {
+        !taskID.isEmpty && limit > 0
     }
 }
 
