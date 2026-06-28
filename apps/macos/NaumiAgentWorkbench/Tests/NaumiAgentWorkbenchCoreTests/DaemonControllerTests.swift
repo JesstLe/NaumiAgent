@@ -922,6 +922,45 @@ final class DaemonControllerTests {
         await controller.stopEventStream()
     }
 
+    @Test @MainActor func eventStreamConnectedAfterStaleRefreshesSnapshotAndWorkbenchLists() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-reconnect"
+        appState.connectionState = .stale
+        appState.snapshot = makeSnapshot(sessionID: "sess-reconnect", missions: [])
+
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let mission = makeMission(id: "mission-reconnect", sessionID: "sess-reconnect")
+        let snapshot = makeSnapshot(sessionID: "sess-reconnect", missions: [mission])
+
+        await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-reconnect")
+
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.startEventStream()
+
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-reconnect"]
+        }
+
+        await eventProvider.emit(.connected(sessionID: "sess-reconnect"))
+
+        await waitUntil {
+            await api.snapshotCallCount >= 1 && appState.snapshot == snapshot
+        }
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.snapshot == snapshot)
+        expectWorkbenchListsPopulated(appState)
+        #expect(appState.lastError == nil)
+
+        await controller.stopEventStream()
+    }
+
     @Test @MainActor func eventStreamFailureMarksConnectionStaleAndRecordsError() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-events"

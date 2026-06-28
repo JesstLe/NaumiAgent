@@ -144,6 +144,10 @@ public final class DaemonController: Sendable {
         case .connected:
             if appState.connectionState == .stale {
                 appState.connectionState = .connected
+                await refreshSnapshot()
+                if appState.snapshot != nil {
+                    await refreshWorkbenchListsAfterConnection()
+                }
             }
         case .event:
             await refreshSnapshot()
