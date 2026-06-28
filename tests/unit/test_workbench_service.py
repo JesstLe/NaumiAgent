@@ -5,6 +5,7 @@ import sys
 import aiosqlite
 import pytest
 
+from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.workbench.models import (
     ApprovalState,
@@ -46,6 +47,72 @@ async def test_dashboard_snapshot_contains_core_cards(tmp_path) -> None:
     assert snapshot["missions"][0]["title"] == "Mac 工作台"
     assert snapshot["issues"][0]["task_id"] == task.id
     assert snapshot["tasks"][0]["subject"] == "实现任务市场"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_snapshot_includes_status_strip_summary(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    mission = await service.create_mission(
+        session_id="s",
+        title="Mac Agent Workbench MVP",
+        goal="给 Mac App 状态条提供后端真相",
+    )
+    active_task = await task_store.create_task("实现 API summary")
+    blocked_task = await task_store.create_task("修复阻塞 issue")
+    await task_store.update_task(active_task.id, status=TaskStatus.IN_PROGRESS)
+    await task_store.update_task(blocked_task.id, status=TaskStatus.BLOCKED)
+    for task in (active_task, blocked_task):
+        await service.attach_issue(
+            session_id="s",
+            mission_id=mission.id,
+            task_id=task.id,
+            acceptance_criteria=["状态条必须来自后端 snapshot"],
+        )
+    await service.register_agent_profile(
+        session_id="s",
+        agent_id="agent-a",
+        name="Backend Agent",
+        role="api",
+        status="busy",
+    )
+    await service.register_agent_profile(
+        session_id="s",
+        agent_id="agent-b",
+        name="Reviewer Agent",
+        role="review",
+        status="idle",
+    )
+    await workbench_store.add_approval(
+        session_id="s",
+        mission_id=mission.id,
+        task_id=active_task.id,
+        title="等待审批",
+        detail="详情",
+        requester="Backend-Agent",
+    )
+    await workbench_store.create_failure(
+        session_id="s",
+        task_id=active_task.id,
+        kind=FailureKind.TEST_FAILED,
+        title="测试失败",
+        detail="pytest failed",
+        source_id="run-1",
+    )
+
+    snapshot = await service.dashboard_snapshot("s")
+
+    assert snapshot["summary"] == {
+        "current_mission_title": "Mac Agent Workbench MVP",
+        "active_agents": 1,
+        "open_issues": 2,
+        "blocked_issues": 1,
+        "pending_approvals": 1,
+        "failed_validations": 1,
+    }
 
 
 @pytest.mark.asyncio
