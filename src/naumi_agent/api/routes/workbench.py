@@ -1015,9 +1015,14 @@ async def get_decision(
         raise HTTPException(status_code=404, detail="Session not found")
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    decision = await engine.workbench_service.get_decision(
-        session_id, mission_id, decision_id
-    )
+    try:
+        decision = await engine.workbench_service.get_decision(
+            session_id, mission_id, decision_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if decision is None:
         raise HTTPException(status_code=404, detail="决策不存在")
     return decision

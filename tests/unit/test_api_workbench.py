@@ -40,6 +40,7 @@ from naumi_agent.api.routes.workbench import (
     get_context_snapshot,
     get_context_snapshots,
     get_daemon_status,
+    get_decision,
     get_decisions,
     get_failure,
     get_failures,
@@ -141,6 +142,7 @@ class _FakeWorkbenchService:
         self._get_intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
         self._list_decisions_error: Exception | None = None
+        self._get_decision_error: Exception | None = None
         self._agent_profile_error: Exception | None = None
         self._get_agent_profile_error: Exception | None = None
         self._list_failures_error: Exception | None = None
@@ -174,6 +176,9 @@ class _FakeWorkbenchService:
 
     def set_list_decisions_error(self, error: Exception) -> None:
         self._list_decisions_error = error
+
+    def set_get_decision_error(self, error: Exception) -> None:
+        self._get_decision_error = error
 
     def set_agent_profile_error(self, error: Exception) -> None:
         self._agent_profile_error = error
@@ -1094,6 +1099,8 @@ class _FakeWorkbenchService:
                 "decision_id": decision_id,
             }
         )
+        if self._get_decision_error is not None:
+            raise self._get_decision_error
         if decision_id == "missing-decision":
             return None
         return {
@@ -5166,6 +5173,58 @@ async def test_get_decisions_endpoint_maps_runtime_error_to_503() -> None:
     assert engine.workbench_service.listed_decisions == []
     assert exc.value.status_code == 503
     assert exc.value.detail == "决策日志暂不可用"
+
+
+@pytest.mark.asyncio
+async def test_get_decision_endpoint_maps_value_error_to_400() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_decision_error(ValueError("决策标识无效"))
+
+    with pytest.raises(HTTPException) as exc:
+        await get_decision(
+            "sess-1",
+            "mission-2",
+            "bad-decision",
+            _fake_request(engine),
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_decisions == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-2",
+            "decision_id": "bad-decision",
+        }
+    ]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "决策标识无效"
+
+
+@pytest.mark.asyncio
+async def test_get_decision_endpoint_maps_runtime_error_to_503() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_decision_error(RuntimeError("决策详情暂不可用"))
+
+    with pytest.raises(HTTPException) as exc:
+        await get_decision(
+            "sess-1",
+            "mission-2",
+            "decision-2",
+            _fake_request(engine),
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_decisions == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-2",
+            "decision_id": "decision-2",
+        }
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "决策详情暂不可用"
 
 
 def test_get_intent_locks_route_accepts_path_and_returns_array() -> None:
