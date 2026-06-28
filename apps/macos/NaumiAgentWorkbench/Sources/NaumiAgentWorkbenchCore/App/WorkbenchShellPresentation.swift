@@ -8,6 +8,7 @@ public struct WorkbenchShellPresentation: Equatable, Sendable {
     public let leadingContentInset: Double
     public let topNavigationHeight: Double
     public let globalStatusHeight: Double
+    public let designCanvasWidth: Double
     public let minimumWindowWidth: Double
     public let minimumWindowHeight: Double
     public let navigationRoutes: [AppRoute]
@@ -19,6 +20,7 @@ public struct WorkbenchShellPresentation: Equatable, Sendable {
         leadingContentInset: Double = 14,
         topNavigationHeight: Double = 42,
         globalStatusHeight: Double = 0,
+        designCanvasWidth: Double = 1440,
         minimumWindowWidth: Double = 1180,
         minimumWindowHeight: Double = 760,
         navigationRoutes: [AppRoute] = AppRoute.topNavigationRoutes,
@@ -29,9 +31,19 @@ public struct WorkbenchShellPresentation: Equatable, Sendable {
         self.leadingContentInset = leadingContentInset
         self.topNavigationHeight = topNavigationHeight
         self.globalStatusHeight = globalStatusHeight
+        self.designCanvasWidth = designCanvasWidth
         self.minimumWindowWidth = minimumWindowWidth
         self.minimumWindowHeight = minimumWindowHeight
         self.navigationRoutes = navigationRoutes
         self.nativeWindowTitle = nativeWindowTitle
+    }
+
+    public func navigationScale(for availableWidth: Double) -> Double {
+        guard designCanvasWidth > 0 else { return 1 }
+        return max(0.1, availableWidth / designCanvasWidth)
+    }
+
+    public func scaledTopNavigationHeight(for availableWidth: Double) -> Double {
+        topNavigationHeight * navigationScale(for: availableWidth)
     }
 }

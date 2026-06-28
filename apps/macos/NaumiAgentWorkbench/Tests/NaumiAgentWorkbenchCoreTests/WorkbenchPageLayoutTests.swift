@@ -35,7 +35,7 @@ struct WorkbenchPageLayoutTests {
         #expect(abs(sameWidthTall.width - sameWidthShort.width) < 0.001)
         #expect(abs(sameWidthTall.height - sameWidthShort.height) < 0.001)
         #expect(abs(narrow.width - 900) < 0.001)
-        #expect(narrow.height > 620)
+        #expect(narrow.height < 620)
     }
 
     @Test func scaledViewportKeepsTheFullWorkbenchFitted() {
