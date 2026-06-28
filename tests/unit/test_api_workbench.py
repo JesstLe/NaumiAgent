@@ -3349,6 +3349,80 @@ async def test_resolve_approval_endpoint_returns_resolved_approval() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolve_approval_endpoint_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_resolve_approval_result(
+        {
+            "id": "approval-1",
+            "session_id": "sess-1",
+            "mission_id": "mission-1",
+            "task_id": "task-1",
+            "state": "approved",
+            "title": "允许重构",
+            "detail": "保持测试通过",
+            "requester": "Agent-A",
+            "reviewer": "Human",
+            "decision_note": "同意",
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:01",
+        }
+    )
+    body = ApprovalResolve(actor="Human", state=ApprovalState.APPROVED, decision_note="同意")
+
+    response = await resolve_approval(
+        "sess-1",
+        "approval-1",
+        body,
+        _fake_request(engine),
+        include_snapshot=True,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert response["approval"]["id"] == "approval-1"
+    assert response["approval"]["state"] == "approved"
+    assert response["snapshot"]["version"] == 1
+    assert response["snapshot"]["session_id"] == "sess-1"
+
+
+def test_resolve_approval_route_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_resolve_approval_result(
+        {
+            "id": "approval-1",
+            "session_id": "sess-1",
+            "mission_id": "mission-1",
+            "task_id": "task-1",
+            "state": "approved",
+            "title": "允许重构",
+            "detail": "保持测试通过",
+            "requester": "Agent-A",
+            "reviewer": "Human",
+            "decision_note": "同意",
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:01",
+        }
+    )
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/approvals/approval-1/resolve",
+        params={"include_snapshot": "true"},
+        json={"actor": "Human", "state": "approved", "decision_note": "同意"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["approval"]["id"] == "approval-1"
+    assert body["approval"]["state"] == "approved"
+    assert body["snapshot"]["version"] == 1
+    assert body["snapshot"]["session_id"] == "sess-1"
+
+
+@pytest.mark.asyncio
 async def test_resolve_approval_endpoint_returns_404_when_missing() -> None:
     engine = _FakeEngine(exists=True)
     engine.workbench_service.set_resolve_approval_result(None)
