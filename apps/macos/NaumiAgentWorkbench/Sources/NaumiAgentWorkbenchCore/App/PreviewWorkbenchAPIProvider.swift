@@ -101,7 +101,15 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         taskID: String?,
         limit: Int
     ) async throws(APIError) -> ValidationRunsDTO {
-        ValidationRunsDTO(validationRuns: [], taskID: taskID, limit: limit)
+        ValidationRunsDTO(
+            validationRuns: [makeValidationRun(sessionID: sessionID, runID: "preview-run", taskID: taskID ?? "preview-task")],
+            taskID: taskID,
+            limit: limit
+        )
+    }
+
+    func fetchValidationRun(sessionID: String, runID: String) async throws(APIError) -> ValidationRunDTO {
+        makeValidationRun(sessionID: sessionID, runID: runID, taskID: "preview-task")
     }
 
     func fetchContextSnapshots(
@@ -515,6 +523,22 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
             subjectID: "preview-mission",
             payload: ["title": .string("Mac 工作台预览")],
             timestamp: now
+        )
+    }
+
+    private func makeValidationRun(sessionID: String, runID: String, taskID: String) -> ValidationRunDTO {
+        ValidationRunDTO(
+            id: runID,
+            sessionID: sessionID,
+            taskID: taskID,
+            actor: "Preview-Agent",
+            command: ["pytest", "tests/unit/test_api_workbench.py", "-q"],
+            cwd: "/Users/lv/Workspace/NaumiAgent",
+            status: "passed",
+            exitCode: 0,
+            output: "preview validation passed",
+            startedAt: now,
+            completedAt: now
         )
     }
 

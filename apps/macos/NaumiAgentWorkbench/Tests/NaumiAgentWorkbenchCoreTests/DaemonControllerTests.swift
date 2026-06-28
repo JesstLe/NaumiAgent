@@ -13,6 +13,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var eventsResult: Result<WorkbenchEventsDTO, APIError>?
     var eventResult: Result<EventDTO, APIError>?
     var validationRunsResult: Result<ValidationRunsDTO, APIError>?
+    var validationRunResult: Result<ValidationRunDTO, APIError>?
     var contextSnapshotsResult: Result<ContextSnapshotsDTO, APIError>?
     var recordContextHealthResult: Result<ContextSnapshotDTO, APIError>?
     var approvalsResult: Result<ApprovalsDTO, APIError>?
@@ -140,6 +141,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> ValidationRunsDTO {
         guard let result = validationRunsResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchValidationRun(sessionID: String, runID: String) async throws(APIError) -> ValidationRunDTO {
+        guard let result = validationRunResult else {
             throw .invalidResponse
         }
         return try result.get()
