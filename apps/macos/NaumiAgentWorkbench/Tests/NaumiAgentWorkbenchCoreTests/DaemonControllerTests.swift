@@ -577,6 +577,8 @@ struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
         limit: Int
     ) async throws(APIError) {}
 
+    func sendPing() async throws(APIError) {}
+
     func cancel() async {}
 }
 
