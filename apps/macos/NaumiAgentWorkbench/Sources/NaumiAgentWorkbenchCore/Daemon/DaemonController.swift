@@ -1123,12 +1123,19 @@ public final class DaemonController: Sendable {
     /// refreshed last so that a snapshot failure does not wipe state already
     /// updated by earlier refreshes.
     ///
-    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot, missions, and issues are never
-    /// mutated directly.
+    /// If no session is selected, creates a default session named after the
+    /// mission first so the first-run "New Mission" action can recover an empty
+    /// bootstrap state. Failures are recorded in `appState.lastError`; the local
+    /// snapshot, missions, and issues are never mutated directly.
     public func createMission(title: String, goal: String) async {
+        if appState.selectedSessionID == nil {
+            await createSession(title: title, model: nil, systemPrompt: nil)
+        }
+
         guard let sessionID = appState.selectedSessionID else {
-            appState.lastError = .missingSelectedSession
+            if appState.lastError == nil {
+                appState.lastError = .missingSelectedSession
+            }
             return
         }
 
