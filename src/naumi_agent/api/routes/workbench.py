@@ -323,13 +323,13 @@ async def get_workbench_bootstrap(
         page_size=page_size,
     )
     session_dicts = [_session_to_bootstrap_dict(session) for session in sessions]
-    candidate_session_id = session_dicts[0]["id"] if session_dicts else None
     selected_session_id = None
     snapshot = None
 
-    if candidate_session_id is not None and await engine.load_session(
-        candidate_session_id
-    ):
+    for session_dict in session_dicts:
+        candidate_session_id = session_dict["id"]
+        if not await engine.load_session(candidate_session_id):
+            continue
         try:
             snapshot = await engine.workbench_service.dashboard_snapshot(
                 candidate_session_id
@@ -341,6 +341,7 @@ async def get_workbench_bootstrap(
             )
         else:
             selected_session_id = candidate_session_id
+            break
 
     return WorkbenchBootstrapResponse(
         daemon_status=await _build_daemon_status(request),
