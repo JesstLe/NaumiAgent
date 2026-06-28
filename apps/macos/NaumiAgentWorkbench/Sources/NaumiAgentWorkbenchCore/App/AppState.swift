@@ -24,6 +24,7 @@ public final class AppState: Sendable {
     public var missions: [MissionDTO] = []
     public var agentProfiles: [AgentProfileDTO] = []
     public var selectedEvent: EventDTO? = nil
+    public var selectedValidationRun: ValidationRunDTO? = nil
     public var selectedDecision: DecisionDTO? = nil
     public var selectedIntentLock: IntentLockDTO? = nil
     public var selectedApproval: ApprovalDTO? = nil

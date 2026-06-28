@@ -2839,6 +2839,50 @@ final class DaemonControllerTests {
         #expect(appState.selectedEvent == oldEvent)
     }
 
+    @Test @MainActor func loadValidationRunSuccessStoresSelectedValidationRun() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let run = makeValidationRun(id: "run-001", taskID: "task-001", status: "failed")
+        await api.setValidationRunResult(.success(run))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadValidationRun(runID: "run-001")
+
+        #expect(appState.selectedValidationRun == run)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadValidationRunWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        let oldRun = makeValidationRun(id: "run-old", taskID: "task-001", status: "passed")
+        appState.selectedValidationRun = oldRun
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadValidationRun(runID: "run-001")
+
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.selectedValidationRun == oldRun)
+    }
+
+    @Test @MainActor func loadValidationRunFailurePreservesOldSelectedValidationRun() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let oldRun = makeValidationRun(id: "run-old", taskID: "task-001", status: "passed")
+        appState.selectedValidationRun = oldRun
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setValidationRunResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadValidationRun(runID: "run-001")
+
+        #expect(appState.lastError == .httpStatus(500))
+        #expect(appState.selectedValidationRun == oldRun)
+    }
+
     @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotApprovalsAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -3080,6 +3124,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setValidationRunsResult(_ result: Result<ValidationRunsDTO, APIError>) {
         validationRunsResult = result
+    }
+
+    fileprivate func setValidationRunResult(_ result: Result<ValidationRunDTO, APIError>) {
+        validationRunResult = result
     }
 
     fileprivate func setContextSnapshotsResult(_ result: Result<ContextSnapshotsDTO, APIError>) {
@@ -3466,6 +3514,22 @@ private func makeDecision(id: String, missionID: String) -> DecisionDTO {
         content: "使用 FastAPI 承载 Workbench API",
         actor: "Planner-Agent",
         createdAt: "2026-06-27T06:00:00"
+    )
+}
+
+private func makeValidationRun(id: String, taskID: String, status: String) -> ValidationRunDTO {
+    ValidationRunDTO(
+        id: id,
+        sessionID: "sess-001",
+        taskID: taskID,
+        actor: "ValidationRunner",
+        command: ["pytest", "tests/unit/test_workbench.py", "-q"],
+        cwd: "/repo",
+        status: status,
+        exitCode: status == "passed" ? 0 : 1,
+        output: status == "passed" ? "passed" : "failed",
+        startedAt: "2026-06-27T06:00:00",
+        completedAt: "2026-06-27T06:00:10"
     )
 }
 

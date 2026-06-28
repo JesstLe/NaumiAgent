@@ -1100,6 +1100,27 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Loads one validation run into the selected detail state.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the previous selected validation run is preserved.
+    public func loadValidationRun(runID: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            appState.selectedValidationRun = try await apiProvider.fetchValidationRun(
+                sessionID: sessionID,
+                runID: runID
+            )
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Runs a validation command and refreshes validation runs, failures,
     /// timeline events, and snapshot on success.
     ///
