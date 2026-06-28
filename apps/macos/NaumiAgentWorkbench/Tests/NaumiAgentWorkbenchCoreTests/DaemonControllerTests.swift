@@ -49,6 +49,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var resolveApprovalResult: Result<ApprovalDTO, APIError>?
     var runValidationResult: Result<ValidationResultDTO, APIError>?
     var bootstrapCallCount: Int = 0
+    var bootstrapPageSizes: [Int] = []
     var statusCallCount: Int = 0
     var capabilitiesCallCount: Int = 0
     var sessionsCallCount: Int = 0
@@ -57,6 +58,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
 
     func fetchBootstrap(pageSize: Int) async throws(APIError) -> WorkbenchBootstrapDTO {
         bootstrapCallCount += 1
+        bootstrapPageSizes.append(pageSize)
         if let result = bootstrapResult {
             return try result.get()
         }
@@ -734,6 +736,7 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
         expectWorkbenchListsPopulated(appState)
         #expect(await api.bootstrapCallCount == 1)
+        #expect(await api.bootstrapPageSizes == [5])
         #expect(await api.statusCallCount == 0)
         #expect(await api.capabilitiesCallCount == 0)
         #expect(await api.sessionsCallCount == 0)
