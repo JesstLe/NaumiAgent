@@ -14,6 +14,7 @@ public struct ReviewsView: View {
     @State private var approvalDraft = ApprovalResolveDraft()
     @State private var isResolvingApproval = false
     @State private var isConvertingToProposal = false
+    @State private var isKeepingWorktree = false
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -590,8 +591,19 @@ public struct ReviewsView: View {
                 }
                     .buttonStyle(.bordered)
                     .disabled(proposalConversionCommand(for: selected) == nil || isConvertingToProposal)
-                Button(appState.locale == .zhCN ? "保留工作区" : "Keep Worktree") {}
-                    .buttonStyle(.bordered)
+                Button {
+                    keepWorktree(selected)
+                } label: {
+                    Label(
+                        isKeepingWorktree
+                            ? AppStrings.Reviews.keepingWorktreeLabel(appState.locale)
+                            : AppStrings.Reviews.keepWorktreeButton(appState.locale),
+                        systemImage: "folder.badge.gearshape"
+                    )
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(worktreeKeepCommand(for: selected) == nil || isKeepingWorktree)
             }
 
             Spacer(minLength: 0)
@@ -697,6 +709,31 @@ public struct ReviewsView: View {
             missionID: appState.snapshot?.missions.first?.id ?? "",
             actor: approvalDraft.trimmedActor,
             decisionNote: approvalDraft.trimmedDecisionNote,
+            locale: appState.locale
+        )
+    }
+
+    private func keepWorktree(_ selected: ReviewDesignItem) {
+        guard let command = worktreeKeepCommand(for: selected), !isKeepingWorktree else {
+            return
+        }
+
+        isKeepingWorktree = true
+        Task {
+            await daemonController.keepWorktree(
+                name: command.name,
+                actor: command.actor,
+                reason: command.reason
+            )
+            isKeepingWorktree = false
+        }
+    }
+
+    private func worktreeKeepCommand(for selected: ReviewDesignItem) -> ReviewWorktreeKeepCommand? {
+        ReviewWorktreeKeepCommand(
+            review: selected,
+            worktrees: appState.worktrees,
+            actor: approvalDraft.trimmedActor,
             locale: appState.locale
         )
     }

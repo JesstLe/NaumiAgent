@@ -779,6 +779,14 @@ public enum AppStrings {
         public static func convertingToProposalLabel(_ locale: AppLocale) -> String {
             locale == .zhCN ? "正在转为提案…" : "Converting…"
         }
+
+        public static func keepWorktreeButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "保留工作区" : "Keep Worktree"
+        }
+
+        public static func keepingWorktreeLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "正在保留工作区…" : "Keeping…"
+        }
     }
 
     // MARK: - Timeline
