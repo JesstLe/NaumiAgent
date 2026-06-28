@@ -20,7 +20,7 @@ public struct ScaledWorkbenchPage<Content: View>: View {
             let scale = CGFloat(viewport.scale)
 
             ScrollView(.vertical, showsIndicators: viewport.showsVerticalScroll) {
-                ZStack(alignment: .topLeading) {
+                ZStack(alignment: .top) {
                     content
                         .frame(
                             width: layout.baseWidth,
@@ -37,7 +37,7 @@ public struct ScaledWorkbenchPage<Content: View>: View {
                 .frame(
                     width: viewport.containerSize.width,
                     height: viewport.containerSize.height,
-                    alignment: .topLeading
+                    alignment: .top
                 )
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)

@@ -4,6 +4,7 @@ import SwiftUI
 public struct WorkbenchShellView: View {
     public let environment: AppEnvironment
     @State private var isPresentingMissionComposer = false
+    private let shellPresentation = WorkbenchShellPresentation()
 
     public init(environment: AppEnvironment) {
         self.environment = environment
@@ -18,7 +19,7 @@ public struct WorkbenchShellView: View {
                 daemonController: environment.daemonController,
                 isPresentingMissionComposer: $isPresentingMissionComposer
             )
-            .frame(height: WorkbenchShellPresentation().topNavigationHeight)
+            .frame(height: shellPresentation.topNavigationHeight)
 
             Divider()
 
@@ -26,7 +27,10 @@ public struct WorkbenchShellView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .clipped()
         }
-        .frame(minWidth: 900, minHeight: 620)
+        .frame(
+            minWidth: shellPresentation.minimumWindowWidth,
+            minHeight: shellPresentation.minimumWindowHeight
+        )
         .sheet(isPresented: $isPresentingMissionComposer) {
             MissionComposerSheet(
                 appState: environment.appState,

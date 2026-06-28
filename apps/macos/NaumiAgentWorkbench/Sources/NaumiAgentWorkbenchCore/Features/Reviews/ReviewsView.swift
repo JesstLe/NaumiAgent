@@ -190,7 +190,7 @@ public struct ReviewsView: View {
     }
 
     private func metaStrip(_ selected: ReviewDesignItem) -> some View {
-        HStack(spacing: 24) {
+        HStack(spacing: 16) {
             metaItem(icon: "clock", text: appState.locale == .zhCN ? "打开：2026-06-27 09:28" : "Opened: Jun 27, 2026 09:28")
             metaItem(icon: "arrow.clockwise", text: appState.locale == .zhCN ? "更新：2026-06-27 09:36" : "Updated: Jun 27, 2026 09:36")
             metaItem(icon: "folder", text: appState.locale == .zhCN ? "工作区：\(selected.worktree)" : "Worktree: \(selected.worktree)")
@@ -210,6 +210,8 @@ public struct ReviewsView: View {
             Text(text)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
         }
     }
 
@@ -443,152 +445,158 @@ public struct ReviewsView: View {
             }
             .pickerStyle(.segmented)
 
-            inspectorCard(title: appState.locale == .zhCN ? "风险分析" : "Risk Analysis") {
-                HStack {
-                    Text(appState.locale == .zhCN ? "为什么是高风险？" : "Why high risk?")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                    Spacer()
-                    Text(selected.risk)
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(color(forTone: selected.tone).opacity(0.12))
-                        .foregroundStyle(color(forTone: selected.tone))
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
-                }
-                bullet(appState.locale == .zhCN ? "影响任务市场的租约语义" : "Affects lease semantics in the task market")
-                bullet(appState.locale == .zhCN ? "可能影响多智能体并发" : "Potential impact on multi-agent concurrency")
-                bullet(appState.locale == .zhCN ? "触及核心后端服务" : "Touches core backend service")
-                Text(appState.locale == .zhCN ? "查看风险拆解 ->" : "View risk breakdown ->")
-                    .font(.caption)
-                    .foregroundStyle(.blue)
-            }
-
-            inspectorCard(title: appState.locale == .zhCN ? "上下文健康" : "Context Health") {
-                HStack {
-                    Text(appState.locale == .zhCN ? "引用文件均为最新且一致。" : "All referenced files are current and consistent.")
-                        .font(.caption)
-                    Spacer()
-                    StatusBadge(text: "Good", color: .green)
-                }
-            }
-
-            inspectorCard(title: appState.locale == .zhCN ? "验证运行" : "Validation Runs") {
-                ForEach(presentation.validationChecks) { check in
-                    HStack {
-                        Circle()
-                            .fill(check.status == "passed" ? .green : .secondary)
-                            .frame(width: 7, height: 7)
-                        Text(check.name)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    inspectorCard(title: appState.locale == .zhCN ? "风险分析" : "Risk Analysis") {
+                        HStack {
+                            Text(appState.locale == .zhCN ? "为什么是高风险？" : "Why high risk?")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                            Spacer()
+                            Text(selected.risk)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(color(forTone: selected.tone).opacity(0.12))
+                                .foregroundStyle(color(forTone: selected.tone))
+                                .clipShape(RoundedRectangle(cornerRadius: 5))
+                        }
+                        bullet(appState.locale == .zhCN ? "影响任务市场的租约语义" : "Affects lease semantics in the task market")
+                        bullet(appState.locale == .zhCN ? "可能影响多智能体并发" : "Potential impact on multi-agent concurrency")
+                        bullet(appState.locale == .zhCN ? "触及核心后端服务" : "Touches core backend service")
+                        Text(appState.locale == .zhCN ? "查看风险拆解 ->" : "View risk breakdown ->")
                             .font(.caption)
-                            .lineLimit(1)
-                        Spacer()
-                        Text(check.status)
-                            .font(.caption2)
-                            .foregroundStyle(check.status == "passed" ? .green : .secondary)
-                        Text(check.time)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.blue)
                     }
-                }
-                Text(appState.locale == .zhCN ? "查看完整验证报告 ->" : "View full validation report ->")
-                    .font(.caption)
-                    .foregroundStyle(.blue)
-                Divider()
-                validationCommandPanel(selected: selected)
-            }
 
-            inspectorCard(title: appState.locale == .zhCN ? "智能体审查" : "Agent Reviews") {
-                ForEach(presentation.agentReviews) { note in
-                    HStack(alignment: .top, spacing: 9) {
-                        Text(note.initials)
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .frame(width: 28, height: 28)
-                            .background(Color.purple.opacity(0.16))
-                            .foregroundStyle(.purple)
-                            .clipShape(Circle())
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack {
-                                Text(note.agent).font(.caption).fontWeight(.semibold)
-                                Spacer()
-                                Text(note.time).font(.caption2).foregroundStyle(.secondary)
-                            }
-                            Text(note.body)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                    inspectorCard(title: appState.locale == .zhCN ? "上下文健康" : "Context Health") {
+                        HStack {
+                            Text(appState.locale == .zhCN ? "引用文件均为最新且一致。" : "All referenced files are current and consistent.")
+                                .font(.caption)
+                            Spacer()
+                            StatusBadge(text: "Good", color: .green)
                         }
                     }
+
+                    inspectorCard(title: appState.locale == .zhCN ? "验证运行" : "Validation Runs") {
+                        ForEach(presentation.validationChecks) { check in
+                            HStack {
+                                Circle()
+                                    .fill(check.status == "passed" ? .green : .secondary)
+                                    .frame(width: 7, height: 7)
+                                Text(check.name)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(check.status)
+                                    .font(.caption2)
+                                    .foregroundStyle(check.status == "passed" ? .green : .secondary)
+                                Text(check.time)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Text(appState.locale == .zhCN ? "查看完整验证报告 ->" : "View full validation report ->")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                        Divider()
+                        validationCommandPanel(selected: selected)
+                    }
+
+                    inspectorCard(title: appState.locale == .zhCN ? "智能体审查" : "Agent Reviews") {
+                        ForEach(presentation.agentReviews) { note in
+                            HStack(alignment: .top, spacing: 9) {
+                                Text(note.initials)
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .frame(width: 28, height: 28)
+                                    .background(Color.purple.opacity(0.16))
+                                    .foregroundStyle(.purple)
+                                    .clipShape(Circle())
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack {
+                                        Text(note.agent).font(.caption).fontWeight(.semibold)
+                                        Spacer()
+                                        Text(note.time).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    Text(note.body)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+
+                    inspectorCard(title: appState.locale == .zhCN ? "审批决策" : "Approval Decision") {
+                        Text(appState.locale == .zhCN ? "Required: 人工审批" : "Required: Human approval")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField(AppStrings.Reviews.actorLabel(appState.locale), text: $approvalDraft.actor)
+                            .textFieldStyle(.roundedBorder)
+                        TextField(AppStrings.Reviews.decisionNoteLabel(appState.locale), text: $approvalDraft.decisionNote)
+                            .textFieldStyle(.roundedBorder)
+                        Button {
+                            resolveApproval(selected, state: .approved)
+                        } label: {
+                            Label(
+                                isResolvingApproval
+                                    ? AppStrings.Reviews.processingLabel(appState.locale)
+                                    : AppStrings.Reviews.approveButton(appState.locale),
+                                systemImage: "checkmark"
+                            )
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+                        .disabled(!approvalDraft.canResolve || isResolvingApproval)
+
+                        Button {
+                            resolveApproval(selected, state: .rejected)
+                        } label: {
+                            Label(
+                                isResolvingApproval
+                                    ? AppStrings.Reviews.processingLabel(appState.locale)
+                                    : (appState.locale == .zhCN ? "请求修改" : "Request Changes"),
+                                systemImage: "arrow.clockwise"
+                            )
+                                .frame(maxWidth: .infinity)
+                        }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.orange)
+                            .disabled(!approvalDraft.canResolve || isResolvingApproval)
+
+                        Button {
+                            convertToProposal(selected)
+                        } label: {
+                            Label(
+                                isConvertingToProposal
+                                    ? AppStrings.Reviews.convertingToProposalLabel(appState.locale)
+                                    : AppStrings.Reviews.convertToProposalButton(appState.locale),
+                                systemImage: "doc.badge.plus"
+                            )
+                                .frame(maxWidth: .infinity)
+                        }
+                            .buttonStyle(.bordered)
+                            .disabled(proposalConversionCommand(for: selected) == nil || isConvertingToProposal)
+                        Button {
+                            keepWorktree(selected)
+                        } label: {
+                            Label(
+                                isKeepingWorktree
+                                    ? AppStrings.Reviews.keepingWorktreeLabel(appState.locale)
+                                    : AppStrings.Reviews.keepWorktreeButton(appState.locale),
+                                systemImage: "folder.badge.gearshape"
+                            )
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(worktreeKeepCommand(for: selected) == nil || isKeepingWorktree)
+                    }
                 }
+                .padding(.bottom, 4)
             }
-
-            inspectorCard(title: appState.locale == .zhCN ? "审批决策" : "Approval Decision") {
-                Text(appState.locale == .zhCN ? "Required: 人工审批" : "Required: Human approval")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextField(AppStrings.Reviews.actorLabel(appState.locale), text: $approvalDraft.actor)
-                    .textFieldStyle(.roundedBorder)
-                TextField(AppStrings.Reviews.decisionNoteLabel(appState.locale), text: $approvalDraft.decisionNote)
-                    .textFieldStyle(.roundedBorder)
-                Button {
-                    resolveApproval(selected, state: .approved)
-                } label: {
-                    Label(
-                        isResolvingApproval
-                            ? AppStrings.Reviews.processingLabel(appState.locale)
-                            : AppStrings.Reviews.approveButton(appState.locale),
-                        systemImage: "checkmark"
-                    )
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
-                .disabled(!approvalDraft.canResolve || isResolvingApproval)
-
-                Button {
-                    resolveApproval(selected, state: .rejected)
-                } label: {
-                    Label(
-                        isResolvingApproval
-                            ? AppStrings.Reviews.processingLabel(appState.locale)
-                            : (appState.locale == .zhCN ? "请求修改" : "Request Changes"),
-                        systemImage: "arrow.clockwise"
-                    )
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.orange)
-                .disabled(!approvalDraft.canResolve || isResolvingApproval)
-
-                Button {
-                    convertToProposal(selected)
-                } label: {
-                    Label(
-                        isConvertingToProposal
-                            ? AppStrings.Reviews.convertingToProposalLabel(appState.locale)
-                            : AppStrings.Reviews.convertToProposalButton(appState.locale),
-                        systemImage: "doc.badge.plus"
-                    )
-                        .frame(maxWidth: .infinity)
-                }
-                    .buttonStyle(.bordered)
-                    .disabled(proposalConversionCommand(for: selected) == nil || isConvertingToProposal)
-                Button {
-                    keepWorktree(selected)
-                } label: {
-                    Label(
-                        isKeepingWorktree
-                            ? AppStrings.Reviews.keepingWorktreeLabel(appState.locale)
-                            : AppStrings.Reviews.keepWorktreeButton(appState.locale),
-                        systemImage: "folder.badge.gearshape"
-                    )
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(worktreeKeepCommand(for: selected) == nil || isKeepingWorktree)
-            }
+            .scrollIndicators(.hidden)
 
             Spacer(minLength: 0)
         }
