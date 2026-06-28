@@ -49,6 +49,12 @@ class WorkbenchBootstrapResponse(BaseModel):
     snapshot: dict[str, Any] | None
 
 
+class WorkbenchSessionCreate(BaseModel):
+    title: str = "Mac 工作台"
+    model: str | None = None
+    system_prompt: str | None = None
+
+
 class MissionCreate(BaseModel):
     title: str
     goal: str
@@ -309,6 +315,48 @@ async def get_daemon_status(request: Request, auth: str = AuthDep):
 @router.get("/workbench/capabilities", response_model=WorkbenchCapabilitiesResponse)
 async def get_workbench_capabilities(request: Request, auth: str = AuthDep):
     return _build_capabilities()
+
+
+@router.post(
+    "/workbench/sessions",
+    response_model=WorkbenchBootstrapResponse,
+    status_code=201,
+)
+async def create_workbench_session(
+    body: WorkbenchSessionCreate,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    title = body.title.strip() or "Mac 工作台"
+    try:
+        session = await engine.session_store.create_session(
+            title=title,
+            model=body.model,
+            system_prompt=body.system_prompt,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    session_id = getattr(session, "id", "")
+    if not session_id or not await engine.load_session(session_id):
+        raise HTTPException(status_code=503, detail="会话创建后无法加载")
+
+    try:
+        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return WorkbenchBootstrapResponse(
+        daemon_status=await _build_daemon_status(request),
+        capabilities=_build_capabilities(),
+        sessions=[_session_to_bootstrap_dict(session)],
+        total_sessions=await _count_workspaces(engine),
+        selected_session_id=session_id,
+        snapshot=snapshot,
+    )
 
 
 @router.get("/workbench/bootstrap", response_model=WorkbenchBootstrapResponse)
