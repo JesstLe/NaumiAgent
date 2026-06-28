@@ -742,7 +742,10 @@ final class DaemonControllerTests {
 
     @Test @MainActor func refreshConnectionFailure() async throws {
         let appState = AppState()
+        appState.selectedSessionID = "sess-events"
+        appState.connectionState = .connected
         let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
 
         await api.setStatusResult(.failure(.httpStatus(503)))
         await api.setCapabilitiesResult(.success(CapabilitiesDTO(
@@ -754,13 +757,23 @@ final class DaemonControllerTests {
             protocolVersion: 1
         )))
 
-        let controller = DaemonController(appState: appState, apiProvider: api)
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.startEventStream()
+        await waitUntil {
+            controller.hasActiveEventStream
+        }
+
         await controller.refreshConnection()
 
         #expect(appState.connectionState == .disconnected)
         #expect(appState.lastError == .httpStatus(503))
         #expect(appState.daemonStatus == nil)
         #expect(appState.capabilities == nil)
+        #expect(controller.hasActiveEventStream == false)
     }
 
     @Test @MainActor func refreshConnectionRejectsUnsupportedProtocolVersion() async throws {
