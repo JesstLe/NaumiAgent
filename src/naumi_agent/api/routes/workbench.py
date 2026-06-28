@@ -579,7 +579,12 @@ async def get_validation_run(
         raise HTTPException(status_code=404, detail="Session not found")
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    run = await engine.workbench_service.get_validation_run(session_id, run_id)
+    try:
+        run = await engine.workbench_service.get_validation_run(session_id, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if run is None:
         raise HTTPException(status_code=404, detail="验证运行不存在")
     return run
