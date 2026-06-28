@@ -910,6 +910,33 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Creates a new backend session, inserts it into the local session list,
+    /// then selects it using the same snapshot/list pre-warm path as manual
+    /// session switching.
+    ///
+    /// This action is intentionally available without an existing selected
+    /// session so the Mac app can recover from an empty bootstrap state.
+    public func createSession(
+        title: String?,
+        model: String?,
+        systemPrompt: String?
+    ) async {
+        appState.lastError = nil
+
+        do {
+            let session = try await apiProvider.createSession(
+                title: title,
+                model: model,
+                systemPrompt: systemPrompt
+            )
+            appState.sessions.removeAll { $0.id == session.id }
+            appState.sessions.insert(session, at: 0)
+            await selectSession(session.id)
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Selects a session by ID, clearing any session-scoped local state to avoid
     /// stale cross-session data, then fetches its snapshot.
     ///
