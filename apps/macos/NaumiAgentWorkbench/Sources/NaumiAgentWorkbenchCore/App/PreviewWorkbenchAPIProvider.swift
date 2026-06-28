@@ -457,6 +457,27 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func attachIssueWithSnapshot(
+        sessionID: String,
+        missionID: String,
+        taskID: String,
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async throws(APIError) -> IssueSnapshotDTO {
+        IssueSnapshotDTO(
+            issue: try await attachIssue(
+                sessionID: sessionID,
+                missionID: missionID,
+                taskID: taskID,
+                acceptanceCriteria: acceptanceCriteria,
+                parallelMode: parallelMode,
+                riskLevel: riskLevel
+            ),
+            snapshot: try await fetchSnapshot(sessionID: sessionID)
+        )
+    }
+
     func createIssue(
         sessionID: String,
         missionID: String,

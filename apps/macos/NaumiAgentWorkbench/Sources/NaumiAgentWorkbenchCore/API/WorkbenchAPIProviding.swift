@@ -221,6 +221,17 @@ public protocol WorkbenchAPIProviding: Sendable {
         parallelMode: String,
         riskLevel: String
     ) async throws(APIError) -> IssueDTO
+
+    /// Attaches an issue to a mission and returns the backend's fresh authoritative snapshot.
+    func attachIssueWithSnapshot(
+        sessionID: String,
+        missionID: String,
+        taskID: String,
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async throws(APIError) -> IssueSnapshotDTO
+
     func createIssue(
         sessionID: String,
         missionID: String,

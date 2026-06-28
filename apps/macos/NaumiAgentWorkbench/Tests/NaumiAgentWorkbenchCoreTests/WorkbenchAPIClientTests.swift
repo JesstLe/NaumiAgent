@@ -2077,6 +2077,58 @@ final class WorkbenchAPIClientTests {
         #expect(issue.acceptanceCriteria == ["通过 Swift 编译"])
     }
 
+    @Test func attachIssueWithSnapshotRequestsFreshSnapshot() async throws {
+        let responseJSON = Data(
+            """
+            {"issue":{"session_id":"sess-001","task_id":"task-001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"medium","requires_human_approval":false,"acceptance_criteria":["通过 Swift 编译"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"},"snapshot":{"session_id":"sess-001","summary":{"current_mission_title":"Mac 工作台","active_agents":0,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[{"session_id":"sess-001","task_id":"task-001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"medium","requires_human_approval":false,"acceptance_criteria":["通过 Swift 编译"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/missions/mission-001/issues?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["task_id"] as? String == "task-001",
+                  let criteria = json?["acceptance_criteria"] as? [String],
+                  criteria == ["通过 Swift 编译"],
+                  json?["parallel_mode"] as? String == "exclusive",
+                  json?["risk_level"] as? String == "medium" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient()
+        let response = try await client.attachIssueWithSnapshot(
+            sessionID: "sess-001",
+            missionID: "mission-001",
+            taskID: "task-001",
+            acceptanceCriteria: ["通过 Swift 编译"],
+            parallelMode: "exclusive",
+            riskLevel: "medium"
+        )
+
+        #expect(response.issue.taskID == "task-001")
+        #expect(response.issue.missionID == "mission-001")
+        #expect(response.snapshot.sessionID == "sess-001")
+        #expect(response.snapshot.summary?.openIssues == 1)
+        #expect(response.snapshot.issues == [response.issue])
+    }
+
     @Test func createIssueUsesPOSTAndEncodesBackingTaskFields() async throws {
         let issueJSON = Data(
             """
