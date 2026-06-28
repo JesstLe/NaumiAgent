@@ -33,6 +33,7 @@ from naumi_agent.api.routes.workbench import (
     create_validation_run,
     create_workbench_mission,
     expire_workbench_leases,
+    get_agent_profile,
     get_agent_profiles,
     get_approval,
     get_approvals,
@@ -138,6 +139,7 @@ class _FakeWorkbenchService:
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
         self._agent_profile_error: Exception | None = None
+        self._get_agent_profile_error: Exception | None = None
         self._list_failures_error: Exception | None = None
         self._get_failure_error: Exception | None = None
         self._context_health_error: Exception | None = None
@@ -226,6 +228,9 @@ class _FakeWorkbenchService:
 
     def set_list_agent_profiles_error(self, error: Exception) -> None:
         self._list_agent_profiles_error = error
+
+    def set_get_agent_profile_error(self, error: Exception) -> None:
+        self._get_agent_profile_error = error
 
     def set_list_approvals_error(self, error: Exception) -> None:
         self._list_approvals_error = error
@@ -414,6 +419,8 @@ class _FakeWorkbenchService:
         self.requested_agent_profiles.append(
             {"session_id": session_id, "agent_id": agent_id}
         )
+        if self._get_agent_profile_error is not None:
+            raise self._get_agent_profile_error
         if agent_id == "missing-agent":
             return None
         return {
@@ -4026,6 +4033,46 @@ def test_get_agent_profile_route_returns_404_for_missing_profile() -> None:
     assert engine.workbench_service.requested_agent_profiles == [
         {"session_id": "sess-1", "agent_id": "missing-agent"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_agent_profile_endpoint_reports_invalid_profile_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_agent_profile_error(
+        ValueError("agent id is invalid")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_agent_profile(
+            "sess-1", "agent-2", _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_agent_profiles == [
+        {"session_id": "sess-1", "agent_id": "agent-2"}
+    ]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "agent id is invalid"
+
+
+@pytest.mark.asyncio
+async def test_get_agent_profile_endpoint_reports_unavailable_profile_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_agent_profile_error(
+        RuntimeError("agent profile detail store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_agent_profile(
+            "sess-1", "agent-2", _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_agent_profiles == [
+        {"session_id": "sess-1", "agent_id": "agent-2"}
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "agent profile detail store unavailable"
 
 
 def test_create_issue_route_accepts_json_body_without_existing_task_id() -> None:

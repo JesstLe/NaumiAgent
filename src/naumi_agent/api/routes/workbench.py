@@ -1181,7 +1181,12 @@ async def get_agent_profile(
         raise HTTPException(status_code=404, detail="Session not found")
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    profile = await engine.workbench_service.get_agent_profile(session_id, agent_id)
+    try:
+        profile = await engine.workbench_service.get_agent_profile(session_id, agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if profile is None:
         raise HTTPException(status_code=404, detail="智能体不存在")
     return profile
