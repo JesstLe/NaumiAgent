@@ -2287,6 +2287,60 @@ async def test_create_context_health_endpoint_records_snapshot() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_context_health_endpoint_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    body = ContextHealthRecord(
+        agent_id="Agent-A",
+        minutes_since_sync=75,
+        token_load_ratio=0.2,
+        policy_conflict=False,
+        actor="Human",
+    )
+
+    response = await create_context_health_snapshot(
+        "sess-1",
+        "task-2",
+        body,
+        _fake_request(engine),
+        include_snapshot=True,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert response["context_snapshot"]["id"] == "snap-1"
+    assert response["context_snapshot"]["health"] == "stale"
+    assert response["snapshot"]["version"] == 1
+    assert response["snapshot"]["session_id"] == "sess-1"
+
+
+def test_create_context_health_route_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/issues/task-2/context-health",
+        params={"include_snapshot": "true"},
+        json={
+            "agent_id": "Agent-A",
+            "minutes_since_sync": 75,
+            "token_load_ratio": 0.2,
+            "policy_conflict": False,
+            "actor": "Human",
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["context_snapshot"]["id"] == "snap-1"
+    assert body["context_snapshot"]["health"] == "stale"
+    assert body["snapshot"]["version"] == 1
+    assert body["snapshot"]["session_id"] == "sess-1"
+
+
+@pytest.mark.asyncio
 async def test_create_context_health_endpoint_maps_value_error_to_400() -> None:
     engine = _FakeEngine(exists=True)
     engine.workbench_service.set_context_health_error(
