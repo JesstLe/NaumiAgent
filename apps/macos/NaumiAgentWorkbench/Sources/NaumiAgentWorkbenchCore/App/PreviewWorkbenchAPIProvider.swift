@@ -290,6 +290,22 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func keepWorktreeWithSnapshot(
+        sessionID: String,
+        name: String,
+        actor: String,
+        reason: String
+    ) async throws(APIError) -> WorktreeSnapshotDTO {
+        let worktree = try await keepWorktree(
+            sessionID: sessionID,
+            name: name,
+            actor: actor,
+            reason: reason
+        )
+        let snapshot = try await fetchSnapshot(sessionID: sessionID)
+        return WorktreeSnapshotDTO(worktree: worktree, snapshot: snapshot)
+    }
+
     func removeWorktree(
         sessionID: String,
         name: String,

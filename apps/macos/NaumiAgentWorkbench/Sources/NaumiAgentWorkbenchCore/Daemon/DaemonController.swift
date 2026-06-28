@@ -657,10 +657,10 @@ public final class DaemonController: Sendable {
 
     /// Marks a worktree as kept and refreshes worktrees plus audit events.
     ///
-    /// Requires `appState.selectedSessionID` to be set. The API is the only
-    /// writer; on success the local worktree list and timeline events are
-    /// refreshed from the backend. Failures preserve existing local worktree
-    /// state and record `lastError`.
+    /// Requires `appState.selectedSessionID` to be set. The mutation response
+    /// supplies the authoritative snapshot; on success the local worktree list
+    /// and timeline events are refreshed from the backend. Failures preserve
+    /// existing local worktree state and record `lastError`.
     public func keepWorktree(name: String, actor: String, reason: String) async {
         guard let sessionID = appState.selectedSessionID else {
             appState.lastError = .missingSelectedSession
@@ -669,14 +669,19 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            _ = try await apiProvider.keepWorktree(
+            let response = try await apiProvider.keepWorktreeWithSnapshot(
                 sessionID: sessionID,
                 name: name,
                 actor: actor,
                 reason: reason
             )
+            appState.snapshot = response.snapshot
+            var refreshError: APIError?
             await refreshWorktrees()
+            refreshError = refreshError ?? appState.lastError
             await refreshEvents(limit: 50)
+            refreshError = refreshError ?? appState.lastError
+            appState.lastError = refreshError
         } catch {
             appState.lastError = error
         }

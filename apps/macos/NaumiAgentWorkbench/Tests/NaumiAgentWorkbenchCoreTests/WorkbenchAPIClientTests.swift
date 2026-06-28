@@ -1405,6 +1405,51 @@ final class WorkbenchAPIClientTests {
         #expect(!worktree.removable)
     }
 
+    @Test func keepWorktreeWithSnapshotRequestsFreshSnapshot() async throws {
+        let responseJSON = Data(
+            """
+            {"worktree":{"name":"wt-api","path":"/repo/.naumi/worktrees/wt-api","branch":"naumi/worktree-wt-api","base_ref":"abc123","status":"kept","task_id":"task-1","dirty_files":2,"commits_ahead":1,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","kept_reason":"等待人工审查","metadata":{},"removable":false},"snapshot":{"session_id":"sess-001","summary":{"current_mission_title":"保留工作区后刷新","active_agents":0,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/worktrees/wt-api/keep?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard payload?["actor"] as? String == "Reviewer-Agent",
+                  payload?["reason"] as? String == "等待人工审查" else {
+                fatalError("Unexpected body: \(String(describing: payload))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient()
+        let response = try await client.keepWorktreeWithSnapshot(
+            sessionID: "sess-001",
+            name: "wt-api",
+            actor: "Reviewer-Agent",
+            reason: "等待人工审查"
+        )
+
+        #expect(response.worktree.name == "wt-api")
+        #expect(response.worktree.status == "kept")
+        #expect(response.snapshot.sessionID == "sess-001")
+        #expect(response.snapshot.summary?.currentMissionTitle == "保留工作区后刷新")
+    }
+
     @Test func removeWorktreeUsesDELETEAndDiscardQuery() async throws {
         let json = Data(
             """

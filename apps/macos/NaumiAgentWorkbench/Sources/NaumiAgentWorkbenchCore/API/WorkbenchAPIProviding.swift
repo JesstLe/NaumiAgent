@@ -134,6 +134,14 @@ public protocol WorkbenchAPIProviding: Sendable {
         reason: String
     ) async throws(APIError) -> WorktreeDTO
 
+    /// Marks a worktree as kept and returns the backend's fresh authoritative snapshot.
+    func keepWorktreeWithSnapshot(
+        sessionID: String,
+        name: String,
+        actor: String,
+        reason: String
+    ) async throws(APIError) -> WorktreeSnapshotDTO
+
     /// Removes a tracked worktree. `discardChanges` force-removes dirty worktrees.
     func removeWorktree(
         sessionID: String,
