@@ -3059,6 +3059,50 @@ final class DaemonControllerTests {
         #expect(appState.selectedLease == oldLease)
     }
 
+    @Test @MainActor func loadWorktreeSuccessStoresSelectedWorktree() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let worktree = makeWorktree(name: "wt-api-client", taskID: "task-001", status: "active")
+        await api.setWorktreeResult(.success(worktree))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadWorktree(name: "wt-api-client")
+
+        #expect(appState.selectedWorktree == worktree)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadWorktreeWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        let oldWorktree = makeWorktree(name: "wt-old", taskID: "task-001", status: "active")
+        appState.selectedWorktree = oldWorktree
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadWorktree(name: "wt-api-client")
+
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.selectedWorktree == oldWorktree)
+    }
+
+    @Test @MainActor func loadWorktreeFailurePreservesOldSelectedWorktree() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let oldWorktree = makeWorktree(name: "wt-old", taskID: "task-001", status: "active")
+        appState.selectedWorktree = oldWorktree
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setWorktreeResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadWorktree(name: "wt-api-client")
+
+        #expect(appState.lastError == .httpStatus(500))
+        #expect(appState.selectedWorktree == oldWorktree)
+    }
+
     @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotApprovalsAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -3348,6 +3392,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setWorktreesResult(_ result: Result<WorktreesDTO, APIError>) {
         worktreesResult = result
+    }
+
+    fileprivate func setWorktreeResult(_ result: Result<WorktreeDTO, APIError>) {
+        worktreeResult = result
     }
 
     fileprivate func setKeepWorktreeResult(_ result: Result<WorktreeDTO, APIError>) {

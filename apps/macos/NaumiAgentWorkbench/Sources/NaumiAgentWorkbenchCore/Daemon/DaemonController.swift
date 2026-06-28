@@ -555,6 +555,27 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Loads one worktree into the selected detail state.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the previous selected worktree is preserved.
+    public func loadWorktree(name: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            appState.selectedWorktree = try await apiProvider.fetchWorktree(
+                sessionID: sessionID,
+                name: name
+            )
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Marks a worktree as kept and refreshes worktrees plus audit events.
     ///
     /// Requires `appState.selectedSessionID` to be set. The API is the only
