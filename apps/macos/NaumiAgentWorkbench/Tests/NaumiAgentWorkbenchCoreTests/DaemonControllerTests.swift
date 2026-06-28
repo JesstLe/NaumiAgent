@@ -570,6 +570,13 @@ struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
         }
     }
 
+    func requestRefresh(
+        eventType: String?,
+        subjectID: String?,
+        actor: String?,
+        limit: Int
+    ) async throws(APIError) {}
+
     func cancel() async {}
 }
 
