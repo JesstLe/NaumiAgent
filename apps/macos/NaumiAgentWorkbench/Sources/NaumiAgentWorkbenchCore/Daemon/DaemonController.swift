@@ -1206,10 +1206,11 @@ public final class DaemonController: Sendable {
     }
 
     /// Creates a backing task, attaches it as an issue, and refreshes the mission
-    /// issue list, timeline events, and snapshot on success.
+    /// issue list and timeline events on success.
     ///
-    /// Requires `appState.selectedSessionID` to be set. The API remains the
-    /// single writer; local state is refreshed from daemon responses.
+    /// Requires `appState.selectedSessionID` to be set. The mutation response
+    /// supplies the authoritative snapshot; follow-up list refresh failures are
+    /// preserved without mutating the local issue list directly.
     public func createIssue(
         missionID: String,
         title: String,
@@ -1226,7 +1227,7 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            _ = try await apiProvider.createIssue(
+            let response = try await apiProvider.createIssueWithSnapshot(
                 sessionID: sessionID,
                 missionID: missionID,
                 title: title,
@@ -1236,9 +1237,13 @@ public final class DaemonController: Sendable {
                 parallelMode: parallelMode,
                 riskLevel: riskLevel
             )
+            appState.snapshot = response.snapshot
+            var refreshError: APIError?
             await refreshIssues(missionID: missionID)
+            refreshError = refreshError ?? appState.lastError
             await refreshEvents(limit: 50)
-            await refreshSnapshot()
+            refreshError = refreshError ?? appState.lastError
+            appState.lastError = refreshError
         } catch {
             appState.lastError = error
         }
