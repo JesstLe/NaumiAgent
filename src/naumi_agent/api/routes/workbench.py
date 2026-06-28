@@ -238,7 +238,7 @@ async def _count_workspaces(engine) -> int:
     try:
         _, total = await session_store.list_sessions(page=1, page_size=1)
         return int(total)
-    except (AttributeError, TypeError, ValueError):
+    except (AttributeError, RuntimeError, TypeError, ValueError):
         return 0
 
 
@@ -318,10 +318,15 @@ async def get_workbench_bootstrap(
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
-    sessions, total = await engine.session_store.list_sessions(
-        page=1,
-        page_size=page_size,
-    )
+    try:
+        sessions, total = await engine.session_store.list_sessions(
+            page=1,
+            page_size=page_size,
+        )
+    except RuntimeError:
+        logger.exception("Workbench bootstrap could not read session registry")
+        sessions = []
+        total = 0
     session_dicts = [_session_to_bootstrap_dict(session) for session in sessions]
     selected_session_id = None
     snapshot = None

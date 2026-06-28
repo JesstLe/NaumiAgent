@@ -86,11 +86,21 @@ from naumi_agent.worktree.models import WorktreeRecord, WorktreeStatus
 class _FakeSessionStore:
     def __init__(self, exists: bool) -> None:
         self.exists = exists
+        self.list_sessions_error: Exception | None = None
 
     async def load(self, session_id: str):
         if not self.exists:
             return None
         return SimpleNamespace(id=session_id)
+
+    async def list_sessions(
+        self, page: int = 1, page_size: int = 20, query: str = ""
+    ) -> tuple[list[SimpleNamespace], int]:
+        if self.list_sessions_error is not None:
+            raise self.list_sessions_error
+        if not self.exists:
+            return ([], 0)
+        return ([SimpleNamespace(id="sess-1")], 1)
 
 
 class _FakeWorkbenchService:
@@ -3450,6 +3460,23 @@ async def test_workbench_bootstrap_does_not_select_unloadable_latest_session() -
     assert response.snapshot is None
     assert response.daemon_status.status == "running"
     assert engine.loaded == ["sess-broken"]
+
+
+@pytest.mark.asyncio
+async def test_workbench_bootstrap_degrades_when_session_registry_is_unavailable() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store.list_sessions_error = RuntimeError("session registry unavailable")
+    request = _fake_status_request(engine)
+
+    response = await get_workbench_bootstrap(request, page_size=5, auth="test")
+
+    assert response.sessions == []
+    assert response.total_sessions == 0
+    assert response.selected_session_id is None
+    assert response.snapshot is None
+    assert response.daemon_status.status == "running"
+    assert response.capabilities.protocol_version == 1
+    assert engine.loaded == []
 
 
 @pytest.mark.asyncio
