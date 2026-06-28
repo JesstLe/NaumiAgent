@@ -13,19 +13,26 @@ public struct WorkbenchShellView: View {
     public var body: some View {
         @Bindable var appState = environment.appState
 
-        VStack(spacing: 0) {
-            TopNavigationBar(
-                appState: environment.appState,
-                daemonController: environment.daemonController,
-                isPresentingMissionComposer: $isPresentingMissionComposer
+        GeometryReader { proxy in
+            let navigationHeight = CGFloat(
+                shellPresentation.scaledTopNavigationHeight(for: Double(proxy.size.width))
             )
-            .frame(height: shellPresentation.topNavigationHeight)
 
-            Divider()
+            VStack(spacing: 0) {
+                ScaledTopNavigationBar(
+                    appState: environment.appState,
+                    daemonController: environment.daemonController,
+                    isPresentingMissionComposer: $isPresentingMissionComposer
+                )
+                .frame(height: navigationHeight)
 
-            routeView(for: appState.currentRoute)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .clipped()
+                Divider()
+
+                routeView(for: appState.currentRoute)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .clipped()
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
         }
         .frame(
             minWidth: shellPresentation.minimumWindowWidth,
@@ -72,6 +79,39 @@ public struct WorkbenchShellView: View {
                 appState: environment.appState,
                 daemonController: environment.daemonController
             )
+        }
+    }
+}
+
+private struct ScaledTopNavigationBar: View {
+    let appState: AppState
+    let daemonController: DaemonController
+    @Binding var isPresentingMissionComposer: Bool
+    private let shellPresentation = WorkbenchShellPresentation()
+
+    var body: some View {
+        GeometryReader { proxy in
+            let scale = CGFloat(
+                shellPresentation.navigationScale(for: Double(proxy.size.width))
+            )
+
+            TopNavigationBar(
+                appState: appState,
+                daemonController: daemonController,
+                isPresentingMissionComposer: $isPresentingMissionComposer
+            )
+            .frame(
+                width: shellPresentation.designCanvasWidth,
+                height: shellPresentation.topNavigationHeight,
+                alignment: .topLeading
+            )
+            .scaleEffect(scale, anchor: .topLeading)
+            .frame(
+                width: proxy.size.width,
+                height: proxy.size.height,
+                alignment: .topLeading
+            )
+            .clipped()
         }
     }
 }
