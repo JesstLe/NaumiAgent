@@ -2791,6 +2791,31 @@ async def test_resolve_approval_endpoint_maps_value_error_to_400() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolve_approval_endpoint_reports_unavailable_approval_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_resolve_approval_error(
+        RuntimeError("approval store unavailable")
+    )
+    body = ApprovalResolve(actor="Human", state=ApprovalState.APPROVED)
+
+    with pytest.raises(HTTPException) as exc:
+        await resolve_approval("sess-1", "approval-1", body, _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.resolved_approvals == [
+        {
+            "session_id": "sess-1",
+            "approval_id": "approval-1",
+            "actor": "Human",
+            "state": ApprovalState.APPROVED,
+            "decision_note": "",
+        }
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "approval store unavailable"
+
+
+@pytest.mark.asyncio
 async def test_release_lease_endpoint_returns_404_when_missing() -> None:
     market = FakeTaskMarket()
     market.set_lease(None)
