@@ -577,6 +577,28 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func createIntentLockWithSnapshot(
+        sessionID: String,
+        missionID: String,
+        actor: String,
+        rule: String,
+        blockedPaths: [String],
+        allowedPaths: [String],
+        requireProposalForRisk: String
+    ) async throws(APIError) -> IntentLockSnapshotDTO {
+        let body = CreateIntentLockRequest(
+            actor: actor,
+            rule: rule,
+            blockedPaths: blockedPaths,
+            allowedPaths: allowedPaths,
+            requireProposalForRisk: requireProposalForRisk
+        )
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "intent-locks") + "?include_snapshot=true",
+            body: body
+        )
+    }
+
     public func fetchDecisions(
         sessionID: String,
         missionID: String

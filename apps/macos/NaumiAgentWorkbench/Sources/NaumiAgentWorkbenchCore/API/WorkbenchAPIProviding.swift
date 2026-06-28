@@ -279,6 +279,17 @@ public protocol WorkbenchAPIProviding: Sendable {
         requireProposalForRisk: String
     ) async throws(APIError) -> IntentLockDTO
 
+    /// Creates an intent lock and returns the backend's fresh authoritative snapshot.
+    func createIntentLockWithSnapshot(
+        sessionID: String,
+        missionID: String,
+        actor: String,
+        rule: String,
+        blockedPaths: [String],
+        allowedPaths: [String],
+        requireProposalForRisk: String
+    ) async throws(APIError) -> IntentLockSnapshotDTO
+
     /// Fetches decisions for the given session and mission.
     func fetchDecisions(
         sessionID: String,

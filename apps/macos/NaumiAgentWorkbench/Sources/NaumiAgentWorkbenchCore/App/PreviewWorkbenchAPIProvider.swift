@@ -567,6 +567,29 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func createIntentLockWithSnapshot(
+        sessionID: String,
+        missionID: String,
+        actor: String,
+        rule: String,
+        blockedPaths: [String],
+        allowedPaths: [String],
+        requireProposalForRisk: String
+    ) async throws(APIError) -> IntentLockSnapshotDTO {
+        IntentLockSnapshotDTO(
+            intentLock: try await createIntentLock(
+                sessionID: sessionID,
+                missionID: missionID,
+                actor: actor,
+                rule: rule,
+                blockedPaths: blockedPaths,
+                allowedPaths: allowedPaths,
+                requireProposalForRisk: requireProposalForRisk
+            ),
+            snapshot: try await fetchSnapshot(sessionID: sessionID)
+        )
+    }
+
     func fetchDecisions(sessionID: String, missionID: String) async throws(APIError) -> DecisionsDTO {
         DecisionsDTO(decisions: [], missionID: missionID)
     }

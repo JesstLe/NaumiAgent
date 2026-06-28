@@ -46,6 +46,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var createIssueResult: Result<IssueDTO, APIError>?
     var createIssueWithSnapshotResult: Result<IssueSnapshotDTO, APIError>?
     var createIntentLockResult: Result<IntentLockDTO, APIError>?
+    var createIntentLockWithSnapshotResult: Result<IntentLockSnapshotDTO, APIError>?
     var fetchIntentLocksResult: Result<IntentLocksDTO, APIError>?
     var fetchIntentLockResult: Result<IntentLockDTO, APIError>?
     var createDecisionResult: Result<DecisionDTO, APIError>?
@@ -65,6 +66,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var createMissionWithSnapshotCallCount: Int = 0
     var attachIssueWithSnapshotCallCount: Int = 0
     var createIssueWithSnapshotCallCount: Int = 0
+    var createIntentLockWithSnapshotCallCount: Int = 0
     var runValidationCallCount: Int = 0
     var runValidationWithSnapshotCallCount: Int = 0
     var createdSessions: [[String: String?]] = []
@@ -568,6 +570,22 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         requireProposalForRisk: String
     ) async throws(APIError) -> IntentLockDTO {
         guard let result = createIntentLockResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func createIntentLockWithSnapshot(
+        sessionID: String,
+        missionID: String,
+        actor: String,
+        rule: String,
+        blockedPaths: [String],
+        allowedPaths: [String],
+        requireProposalForRisk: String
+    ) async throws(APIError) -> IntentLockSnapshotDTO {
+        createIntentLockWithSnapshotCallCount += 1
+        guard let result = createIntentLockWithSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -3318,7 +3336,7 @@ final class DaemonControllerTests {
         #expect(await api.snapshotCallCount == 0)
     }
 
-    @Test @MainActor func createIntentLockSuccessRefreshesSnapshotAndEvents() async throws {
+    @Test @MainActor func createIntentLockSuccessUsesIncludedSnapshotAndRefreshesLists() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -3329,9 +3347,10 @@ final class DaemonControllerTests {
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
         let locks = IntentLocksDTO(intentLocks: [lock], missionID: "mission-001")
 
-        await api.setCreateIntentLockResult(.success(lock))
+        await api.setCreateIntentLockWithSnapshotResult(.success(
+            IntentLockSnapshotDTO(intentLock: lock, snapshot: snapshot)
+        ))
         await api.setFetchIntentLocksResult(.success(locks))
-        await api.setSnapshotResult(.success(snapshot))
         await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
@@ -3348,6 +3367,8 @@ final class DaemonControllerTests {
         #expect(appState.intentLocks == [lock])
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
+        #expect(await api.createIntentLockWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func createIntentLockWithoutSelectedSessionRecordsError() async throws {
@@ -3377,7 +3398,7 @@ final class DaemonControllerTests {
         appState.snapshot = staleSnapshot
 
         let api = FakeWorkbenchAPIProvider()
-        await api.setCreateIntentLockResult(.failure(.httpStatus(500)))
+        await api.setCreateIntentLockWithSnapshotResult(.failure(.httpStatus(500)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createIntentLock(
@@ -4464,6 +4485,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setCreateIntentLockResult(_ result: Result<IntentLockDTO, APIError>) {
         createIntentLockResult = result
+    }
+
+    fileprivate func setCreateIntentLockWithSnapshotResult(_ result: Result<IntentLockSnapshotDTO, APIError>) {
+        createIntentLockWithSnapshotResult = result
     }
 
     fileprivate func setFetchIntentLocksResult(_ result: Result<IntentLocksDTO, APIError>) {
