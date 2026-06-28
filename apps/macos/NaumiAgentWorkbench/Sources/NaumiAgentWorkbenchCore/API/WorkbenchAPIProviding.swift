@@ -25,6 +25,9 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> WorkbenchEventsDTO
 
+    /// Fetches one audit event by id for detail drill-downs.
+    func fetchEvent(sessionID: String, eventID: String) async throws(APIError) -> EventDTO
+
     /// Fetches validation runs for the given session, optionally filtered by task.
     func fetchValidationRuns(
         sessionID: String,

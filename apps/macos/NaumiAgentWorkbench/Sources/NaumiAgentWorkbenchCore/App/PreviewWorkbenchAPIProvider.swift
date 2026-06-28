@@ -83,7 +83,17 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         actor: String?,
         limit: Int
     ) async throws(APIError) -> WorkbenchEventsDTO {
-        WorkbenchEventsDTO(events: [], eventType: eventType, subjectID: subjectID, actor: actor, limit: limit)
+        WorkbenchEventsDTO(
+            events: [makeEvent(sessionID: sessionID, eventID: "preview-event")],
+            eventType: eventType,
+            subjectID: subjectID,
+            actor: actor,
+            limit: limit
+        )
+    }
+
+    func fetchEvent(sessionID: String, eventID: String) async throws(APIError) -> EventDTO {
+        makeEvent(sessionID: sessionID, eventID: eventID)
     }
 
     func fetchValidationRuns(
@@ -493,6 +503,18 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
             worktreeName: "wt-preview",
             createdAt: now,
             updatedAt: now
+        )
+    }
+
+    private func makeEvent(sessionID: String, eventID: String) -> EventDTO {
+        EventDTO(
+            id: eventID,
+            sessionID: sessionID,
+            type: "mission.created",
+            actor: "Preview-Agent",
+            subjectID: "preview-mission",
+            payload: ["title": .string("Mac 工作台预览")],
+            timestamp: now
         )
     }
 
