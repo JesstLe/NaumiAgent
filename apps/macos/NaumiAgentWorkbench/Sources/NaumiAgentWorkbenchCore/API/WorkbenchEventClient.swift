@@ -11,6 +11,12 @@ public enum WorkbenchEventStreamMessage: Equatable, Sendable {
 /// Event stream returned by `WorkbenchEventProviding`.
 public protocol WorkbenchEventStreaming: Sendable {
     func next() async throws(APIError) -> WorkbenchEventStreamMessage
+    func requestRefresh(
+        eventType: String?,
+        subjectID: String?,
+        actor: String?,
+        limit: Int
+    ) async throws(APIError)
     func cancel() async
 }
 
@@ -24,6 +30,7 @@ public protocol WorkbenchWebSocketTasking: Sendable {
     func start() async
     func cancelStream(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) async
     func receiveMessage() async throws -> URLSessionWebSocketTask.Message
+    func sendMessage(_ message: URLSessionWebSocketTask.Message) async throws
 }
 
 /// Injectable WebSocket transport for production `URLSession` and tests.
@@ -42,6 +49,10 @@ extension URLSessionWebSocketTask: WorkbenchWebSocketTasking {
 
     public func receiveMessage() async throws -> URLSessionWebSocketTask.Message {
         try await receive()
+    }
+
+    public func sendMessage(_ message: URLSessionWebSocketTask.Message) async throws {
+        try await send(message)
     }
 }
 
@@ -128,10 +139,16 @@ public actor WorkbenchEventClient: Sendable, WorkbenchEventProviding {
 public struct WorkbenchEventStream: Sendable, WorkbenchEventStreaming {
     private let task: WorkbenchWebSocketTasking
     private let decoder: JSONDecoder
+    private let encoder: JSONEncoder
 
-    public init(task: WorkbenchWebSocketTasking, decoder: JSONDecoder = JSONDecoder()) {
+    public init(
+        task: WorkbenchWebSocketTasking,
+        decoder: JSONDecoder = JSONDecoder(),
+        encoder: JSONEncoder = JSONEncoder()
+    ) {
         self.task = task
         self.decoder = decoder
+        self.encoder = encoder
     }
 
     public func next() async throws(APIError) -> WorkbenchEventStreamMessage {
@@ -164,6 +181,52 @@ public struct WorkbenchEventStream: Sendable, WorkbenchEventStreaming {
 
     public func cancel() async {
         await task.cancelStream(with: .goingAway, reason: nil)
+    }
+
+    public func requestRefresh(
+        eventType: String? = nil,
+        subjectID: String? = nil,
+        actor: String? = nil,
+        limit: Int
+    ) async throws(APIError) {
+        let request = WorkbenchEventRefreshRequest(
+            eventType: eventType,
+            subjectID: subjectID,
+            actor: actor,
+            limit: limit
+        )
+        let data: Data
+        do {
+            data = try encoder.encode(request)
+        } catch {
+            throw .decodingFailed(String(describing: error))
+        }
+
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw .decodingFailed("refresh request is not UTF-8 JSON")
+        }
+
+        do {
+            try await task.sendMessage(.string(text))
+        } catch {
+            throw .networkFailure(String(describing: error))
+        }
+    }
+}
+
+private struct WorkbenchEventRefreshRequest: Encodable {
+    let type = "refresh"
+    let eventType: String?
+    let subjectID: String?
+    let actor: String?
+    let limit: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case eventType = "event_type"
+        case subjectID = "subject_id"
+        case actor
+        case limit
     }
 }
 

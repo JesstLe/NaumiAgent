@@ -71,6 +71,39 @@ final class WorkbenchEventClientTests {
         #expect(event.payload["lease_id"] == .string("lease-001"))
     }
 
+    @Test func requestRefreshSendsFilteredRefreshMessage() async throws {
+        let transport = RecordingWorkbenchWebSocketTransport(messages: [])
+        let client = WorkbenchEventClient(
+            baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
+            transport: transport
+        )
+
+        let stream = try await client.connect(sessionID: "sess-001")
+        try await stream.requestRefresh(
+            eventType: "validation.passed",
+            subjectID: "task-001",
+            actor: "Backend-Agent",
+            limit: 25
+        )
+
+        let sentMessages = await transport.task.sentMessages
+        #expect(sentMessages.count == 1)
+
+        guard case .string(let text) = try #require(sentMessages.first) else {
+            Issue.record("Expected refresh message to be sent as text JSON")
+            return
+        }
+        let payload = try #require(text.data(using: .utf8))
+        let json = try #require(
+            try JSONSerialization.jsonObject(with: payload) as? [String: Any]
+        )
+        #expect(json["type"] as? String == "refresh")
+        #expect(json["event_type"] as? String == "validation.passed")
+        #expect(json["subject_id"] as? String == "task-001")
+        #expect(json["actor"] as? String == "Backend-Agent")
+        #expect(json["limit"] as? Int == 25)
+    }
+
     @Test func nextRejectsMalformedEventEnvelope() async throws {
         let transport = RecordingWorkbenchWebSocketTransport(messages: [
             .string(#"{"type":"workbench.event"}"#),
@@ -105,6 +138,7 @@ private actor RecordingWorkbenchWebSocketTask: WorkbenchWebSocketTasking {
     private var messages: [URLSessionWebSocketTask.Message]
     private(set) var resumeCallCount = 0
     private(set) var cancelCallCount = 0
+    private(set) var sentMessages: [URLSessionWebSocketTask.Message] = []
 
     init(messages: [URLSessionWebSocketTask.Message]) {
         self.messages = messages
@@ -116,6 +150,10 @@ private actor RecordingWorkbenchWebSocketTask: WorkbenchWebSocketTasking {
 
     func cancelStream(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         cancelCallCount += 1
+    }
+
+    func sendMessage(_ message: URLSessionWebSocketTask.Message) async throws {
+        sentMessages.append(message)
     }
 
     func receiveMessage() async throws -> URLSessionWebSocketTask.Message {
