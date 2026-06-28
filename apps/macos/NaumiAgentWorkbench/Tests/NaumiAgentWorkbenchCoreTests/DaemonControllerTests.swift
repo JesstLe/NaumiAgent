@@ -45,6 +45,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var fetchIntentLockResult: Result<IntentLockDTO, APIError>?
     var createDecisionResult: Result<DecisionDTO, APIError>?
     var fetchDecisionsResult: Result<DecisionsDTO, APIError>?
+    var fetchDecisionResult: Result<DecisionDTO, APIError>?
     var resolveApprovalResult: Result<ApprovalDTO, APIError>?
     var runValidationResult: Result<ValidationResultDTO, APIError>?
     var bootstrapCallCount: Int = 0
@@ -469,6 +470,17 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
 
     func fetchDecisions(sessionID: String, missionID: String) async throws(APIError) -> DecisionsDTO {
         guard let result = fetchDecisionsResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchDecision(
+        sessionID: String,
+        missionID: String,
+        decisionID: String
+    ) async throws(APIError) -> DecisionDTO {
+        guard let result = fetchDecisionResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -2980,6 +2992,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setCreateDecisionResult(_ result: Result<DecisionDTO, APIError>) {
         createDecisionResult = result
+    }
+
+    fileprivate func setFetchDecisionResult(_ result: Result<DecisionDTO, APIError>) {
+        fetchDecisionResult = result
     }
 
     fileprivate func setResolveApprovalResult(_ result: Result<ApprovalDTO, APIError>) {

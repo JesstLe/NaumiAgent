@@ -473,6 +473,23 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         DecisionsDTO(decisions: [], missionID: missionID)
     }
 
+    func fetchDecision(
+        sessionID: String,
+        missionID: String,
+        decisionID: String
+    ) async throws(APIError) -> DecisionDTO {
+        DecisionDTO(
+            id: decisionID,
+            sessionID: sessionID,
+            missionID: missionID,
+            kind: "architecture",
+            title: "Preview decision",
+            content: "Preview governance decision",
+            actor: "Preview-Agent",
+            createdAt: now
+        )
+    }
+
     func createDecision(
         sessionID: String,
         missionID: String,

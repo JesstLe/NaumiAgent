@@ -235,6 +235,13 @@ public protocol WorkbenchAPIProviding: Sendable {
         missionID: String
     ) async throws(APIError) -> DecisionsDTO
 
+    /// Fetches one governance decision by id for review detail views.
+    func fetchDecision(
+        sessionID: String,
+        missionID: String,
+        decisionID: String
+    ) async throws(APIError) -> DecisionDTO
+
     /// Creates a decision for the given mission.
     func createDecision(
         sessionID: String,
