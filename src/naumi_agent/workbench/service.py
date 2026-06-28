@@ -441,6 +441,23 @@ class WorkbenchService:
         approvals = await self._workbench_store.list_approvals(
             session_id, state=ApprovalState.WAITING, limit=50
         )
+        missions = await self._list_missions_for_snapshot(session_id)
+        intent_locks: list[dict[str, Any]] = []
+        decisions: list[dict[str, Any]] = []
+        for mission in missions:
+            mission_id = mission["id"]
+            intent_locks.extend(
+                self._intent_lock_to_dict(lock)
+                for lock in await self._workbench_store.list_intent_locks(
+                    session_id, mission_id
+                )
+            )
+            decisions.extend(
+                self._decision_to_dict(decision)
+                for decision in await self._workbench_store.list_decisions(
+                    session_id, mission_id
+                )
+            )
         issues = []
         leases = []
         for task in tasks:
@@ -453,10 +470,12 @@ class WorkbenchService:
         return {
             "version": 1,
             "session_id": session_id,
-            "missions": await self._list_missions_for_snapshot(session_id),
+            "missions": missions,
             "agent_profiles": [
                 self._agent_profile_to_dict(profile) for profile in agent_profiles
             ],
+            "intent_locks": intent_locks,
+            "decisions": decisions,
             "tasks": [asdict(task) for task in tasks],
             "issues": issues,
             "leases": leases,
