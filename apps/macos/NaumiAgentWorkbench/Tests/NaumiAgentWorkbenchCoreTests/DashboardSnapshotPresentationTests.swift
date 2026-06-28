@@ -174,6 +174,18 @@ struct DashboardSnapshotPresentationTests {
         #expect(command.canSubmit)
     }
 
+    @Test func contextRefreshCommandTargetsCurrentFailureTaskAndOwner() throws {
+        let snapshot = try loadZHSnapshot()
+        let presentation = DashboardSnapshotPresentation(snapshot: snapshot)
+
+        let command = try #require(presentation.contextRefreshCommand())
+
+        #expect(command.taskID == "2")
+        #expect(command.agentID == "agent-a")
+        #expect(command.limit == 50)
+        #expect(command.canSubmit)
+    }
+
     @Test func recentEventRowsLimitToFive() throws {
         let snapshot = WorkbenchSnapshotDTO(
             sessionID: "sess-limit",

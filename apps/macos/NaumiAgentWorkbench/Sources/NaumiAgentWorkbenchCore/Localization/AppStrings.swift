@@ -352,6 +352,10 @@ public enum AppStrings {
         public static func runningValidationLabel(_ locale: AppLocale) -> String {
             locale == .zhCN ? "验证中…" : "Running…"
         }
+
+        public static func refreshingContextLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "刷新中…" : "Refreshing…"
+        }
     }
 
     // MARK: - Task Market

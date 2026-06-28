@@ -7,6 +7,7 @@ public struct DashboardView: View {
     public let daemonController: DaemonController
     @State private var searchText = ""
     @State private var isRerunningValidation = false
+    @State private var isRefreshingContext = false
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -580,73 +581,84 @@ public struct DashboardView: View {
             }
             .pickerStyle(.segmented)
 
-            if let inspector = presentation.workbench.inspector {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(inspector.title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .lineLimit(2)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let inspector = presentation.workbench.inspector {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(inspector.title)
+                                .font(.system(size: 15, weight: .semibold))
+                                .lineLimit(2)
 
-                    StatusBadge(text: inspector.status, color: statusColor(for: inspector.status))
+                            StatusBadge(text: inspector.status, color: statusColor(for: inspector.status))
 
-                    inspectorDetail(AppStrings.Dashboard.ownerLabel(appState.locale), inspector.owner ?? "-")
-                    inspectorDetail(AppStrings.Dashboard.riskLabel(appState.locale), inspector.riskLevel ?? "-")
-                    inspectorDetail(AppStrings.Dashboard.parallelModeLabel(appState.locale), inspector.parallelMode ?? "-")
-                    inspectorDetail(
-                        AppStrings.Dashboard.acceptanceCriteriaLabel(appState.locale),
-                        inspector.acceptanceCriteriaCount.map(String.init) ?? "-"
-                    )
-                    inspectorDetail(
-                        AppStrings.Dashboard.humanApprovalLabel(appState.locale),
-                        inspector.requiresHumanApproval
-                            ? AppStrings.Dashboard.approvalRequiredValue(appState.locale)
-                            : AppStrings.Dashboard.approvalNotRequiredValue(appState.locale)
-                    )
-                }
-                .padding(12)
-                .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else {
-                emptyListLabel(AppStrings.Dashboard.noSelection(appState.locale))
-            }
-
-            if let status = appState.daemonStatus {
-                daemonCompact(status: status)
-            }
-
-            let validationCommand = presentation.validationRerunCommand(validationRuns: appState.validationRuns)
-            inspectorStateCard(
-                title: AppStrings.Dashboard.validationStateTitle(appState.locale),
-                tone: .red,
-                lines: [
-                    appState.locale == .zhCN ? "最近运行：#23 (09:36)" : "Latest Run: #23 (09:36)",
-                    appState.locale == .zhCN ? "结果：pytest failed" : "Result: pytest failed",
-                    appState.locale == .zhCN ? "测试：12 失败，3 通过" : "Tests: 12 failed, 3 passed"
-                ],
-                buttonTitle: isRerunningValidation
-                    ? AppStrings.Dashboard.runningValidationLabel(appState.locale)
-                    : AppStrings.Dashboard.rerunValidationButton(appState.locale),
-                isDisabled: isRerunningValidation || validationCommand?.canSubmit != true,
-                action: {
-                    if let validationCommand {
-                        rerunValidation(validationCommand)
+                            inspectorDetail(AppStrings.Dashboard.ownerLabel(appState.locale), inspector.owner ?? "-")
+                            inspectorDetail(AppStrings.Dashboard.riskLabel(appState.locale), inspector.riskLevel ?? "-")
+                            inspectorDetail(AppStrings.Dashboard.parallelModeLabel(appState.locale), inspector.parallelMode ?? "-")
+                            inspectorDetail(
+                                AppStrings.Dashboard.acceptanceCriteriaLabel(appState.locale),
+                                inspector.acceptanceCriteriaCount.map(String.init) ?? "-"
+                            )
+                            inspectorDetail(
+                                AppStrings.Dashboard.humanApprovalLabel(appState.locale),
+                                inspector.requiresHumanApproval
+                                    ? AppStrings.Dashboard.approvalRequiredValue(appState.locale)
+                                    : AppStrings.Dashboard.approvalNotRequiredValue(appState.locale)
+                            )
+                        }
+                        .padding(12)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        emptyListLabel(AppStrings.Dashboard.noSelection(appState.locale))
                     }
+
+                    if let status = appState.daemonStatus {
+                        daemonCompact(status: status)
+                    }
+
+                    let validationCommand = presentation.validationRerunCommand(validationRuns: appState.validationRuns)
+                    inspectorStateCard(
+                        title: AppStrings.Dashboard.validationStateTitle(appState.locale),
+                        tone: .red,
+                        lines: [
+                            appState.locale == .zhCN ? "最近运行：#23 (09:36)" : "Latest Run: #23 (09:36)",
+                            appState.locale == .zhCN ? "结果：pytest failed" : "Result: pytest failed",
+                            appState.locale == .zhCN ? "测试：12 失败，3 通过" : "Tests: 12 failed, 3 passed"
+                        ],
+                        buttonTitle: isRerunningValidation
+                            ? AppStrings.Dashboard.runningValidationLabel(appState.locale)
+                            : AppStrings.Dashboard.rerunValidationButton(appState.locale),
+                        isDisabled: isRerunningValidation || validationCommand?.canSubmit != true,
+                        action: {
+                            if let validationCommand {
+                                rerunValidation(validationCommand)
+                            }
+                        }
+                    )
+
+                    let contextCommand = presentation.contextRefreshCommand()
+                    inspectorStateCard(
+                        title: AppStrings.Dashboard.contextHealthTitle(appState.locale),
+                        tone: .orange,
+                        lines: [
+                            appState.locale == .zhCN ? "整体：过期" : "Overall: Stale",
+                            appState.locale == .zhCN ? "已分析文件：18" : "Files Analyzed: 18",
+                            appState.locale == .zhCN ? "更新：18 分钟前" : "Last Updated: 18m ago"
+                        ],
+                        buttonTitle: isRefreshingContext
+                            ? AppStrings.Dashboard.refreshingContextLabel(appState.locale)
+                            : AppStrings.Dashboard.refreshContextButton(appState.locale),
+                        isDisabled: isRefreshingContext || contextCommand?.canSubmit != true,
+                        action: {
+                            if let contextCommand {
+                                refreshContext(contextCommand)
+                            }
+                        }
+                    )
                 }
-            )
-
-            inspectorStateCard(
-                title: AppStrings.Dashboard.contextHealthTitle(appState.locale),
-                tone: .orange,
-                lines: [
-                    appState.locale == .zhCN ? "整体：过期" : "Overall: Stale",
-                    appState.locale == .zhCN ? "已分析文件：18" : "Files Analyzed: 18",
-                    appState.locale == .zhCN ? "更新：18 分钟前" : "Last Updated: 18m ago"
-                ],
-                buttonTitle: AppStrings.Dashboard.refreshContextButton(appState.locale),
-                isDisabled: true,
-                action: {}
-            )
-
-            Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 6)
+            }
         }
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
@@ -698,6 +710,19 @@ public struct DashboardView: View {
                 cwd: command.cwd
             )
             isRerunningValidation = false
+        }
+    }
+
+    private func refreshContext(_ command: DashboardContextRefreshCommand) {
+        guard command.canSubmit, !isRefreshingContext else { return }
+        isRefreshingContext = true
+        Task {
+            await daemonController.refreshContextSnapshots(
+                taskID: command.taskID,
+                agentID: command.agentID,
+                limit: command.limit
+            )
+            isRefreshingContext = false
         }
     }
 

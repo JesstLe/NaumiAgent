@@ -25,6 +25,7 @@ struct AppStringsDashboardTests {
         #expect(AppStrings.Dashboard.rerunValidationButton(.zhCN) == "重新运行验证")
         #expect(AppStrings.Dashboard.refreshContextButton(.zhCN) == "刷新上下文")
         #expect(AppStrings.Dashboard.runningValidationLabel(.zhCN) == "验证中…")
+        #expect(AppStrings.Dashboard.refreshingContextLabel(.zhCN) == "刷新中…")
     }
 
     @Test func newDashboardStringsEnUS() {
@@ -49,6 +50,7 @@ struct AppStringsDashboardTests {
         #expect(AppStrings.Dashboard.rerunValidationButton(.enUS) == "Re-run Validation")
         #expect(AppStrings.Dashboard.refreshContextButton(.enUS) == "Refresh Context")
         #expect(AppStrings.Dashboard.runningValidationLabel(.enUS) == "Running…")
+        #expect(AppStrings.Dashboard.refreshingContextLabel(.enUS) == "Refreshing…")
     }
 
     @Test func allNewDashboardStringsAreNonEmpty() {
@@ -80,6 +82,7 @@ struct AppStringsDashboardTests {
             AppStrings.Dashboard.rerunValidationButton,
             AppStrings.Dashboard.refreshContextButton,
             AppStrings.Dashboard.runningValidationLabel,
+            AppStrings.Dashboard.refreshingContextLabel,
         ]
 
         for string in strings {
