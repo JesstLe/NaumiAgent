@@ -771,6 +771,14 @@ public enum AppStrings {
         public static func processingLabel(_ locale: AppLocale) -> String {
             locale == .zhCN ? "处理中…" : "Processing…"
         }
+
+        public static func convertToProposalButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "转为提案" : "Convert to Proposal"
+        }
+
+        public static func convertingToProposalLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "正在转为提案…" : "Converting…"
+        }
     }
 
     // MARK: - Timeline
