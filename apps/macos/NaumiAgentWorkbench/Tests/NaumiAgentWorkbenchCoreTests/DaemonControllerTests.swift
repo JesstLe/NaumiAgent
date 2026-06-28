@@ -1097,6 +1097,32 @@ final class DaemonControllerTests {
         await controller.stopEventStream()
     }
 
+    @Test @MainActor func hasActiveEventStreamReflectsStreamLifecycle() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-events"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+
+        #expect(controller.hasActiveEventStream == false)
+
+        await controller.startEventStream()
+        await waitUntil {
+            controller.hasActiveEventStream
+        }
+
+        #expect(controller.hasActiveEventStream == true)
+
+        await controller.stopEventStream()
+
+        #expect(controller.hasActiveEventStream == false)
+    }
+
     @Test @MainActor func pingEventStreamFailureMarksConnectionStaleAndRecordsError() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-events"
@@ -1147,6 +1173,7 @@ final class DaemonControllerTests {
         }
 
         #expect(appState.lastError == .networkFailure("lost websocket"))
+        #expect(controller.hasActiveEventStream == false)
 
         await controller.stopEventStream()
     }

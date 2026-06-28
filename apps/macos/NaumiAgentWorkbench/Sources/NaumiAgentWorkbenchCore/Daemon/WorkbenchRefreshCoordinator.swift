@@ -6,6 +6,8 @@ public enum WorkbenchRefreshOutcome: Sendable, Equatable {
     case refreshed
     /// Another refresh was already running, so this tick was skipped.
     case skippedInProgress
+    /// The requested refresh target is not currently available.
+    case skippedUnavailable
 }
 
 /// Coordinates periodic auto-refresh of the daemon/session snapshot data.
@@ -21,6 +23,7 @@ public final class WorkbenchRefreshCoordinator: Sendable {
 
     private let daemonController: DaemonController?
     private let refreshOperation: @MainActor () async -> Void
+    private let eventStreamHealthProbeIsAvailable: @MainActor () -> Bool
     private let eventStreamHealthProbeOperation: @MainActor () async -> Void
     private var isRefreshing = false
     private var isProbingEventStream = false
@@ -35,6 +38,7 @@ public final class WorkbenchRefreshCoordinator: Sendable {
         self.refreshInterval = refreshInterval
         self.eventStreamHealthProbeInterval = eventStreamHealthProbeInterval
         self.refreshOperation = { await daemonController.refreshConnection() }
+        self.eventStreamHealthProbeIsAvailable = { daemonController.hasActiveEventStream }
         self.eventStreamHealthProbeOperation = { await daemonController.pingEventStream() }
     }
 
@@ -50,6 +54,7 @@ public final class WorkbenchRefreshCoordinator: Sendable {
         self.refreshInterval = refreshInterval
         self.eventStreamHealthProbeInterval = eventStreamHealthProbeInterval
         self.refreshOperation = refreshOperation
+        self.eventStreamHealthProbeIsAvailable = { true }
         self.eventStreamHealthProbeOperation = {}
     }
 
@@ -66,6 +71,7 @@ public final class WorkbenchRefreshCoordinator: Sendable {
         self.refreshInterval = refreshInterval
         self.eventStreamHealthProbeInterval = eventStreamHealthProbeInterval
         self.refreshOperation = refreshOperation
+        self.eventStreamHealthProbeIsAvailable = { true }
         self.eventStreamHealthProbeOperation = eventStreamHealthProbeOperation
     }
 
@@ -93,6 +99,9 @@ public final class WorkbenchRefreshCoordinator: Sendable {
     public func probeEventStreamOnce() async -> WorkbenchRefreshOutcome {
         guard !isProbingEventStream else {
             return .skippedInProgress
+        }
+        guard eventStreamHealthProbeIsAvailable() else {
+            return .skippedUnavailable
         }
 
         isProbingEventStream = true
