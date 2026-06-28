@@ -449,6 +449,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchIntentLock(
+        sessionID: String,
+        missionID: String,
+        lockID: String
+    ) async throws(APIError) -> IntentLockDTO {
+        try await get(
+            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "intent-locks", lockID)
+        )
+    }
+
     public func createIntentLock(
         sessionID: String,
         missionID: String,
