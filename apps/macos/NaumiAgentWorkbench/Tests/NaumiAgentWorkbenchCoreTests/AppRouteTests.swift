@@ -39,6 +39,15 @@ struct AppRouteTests {
         ])
     }
 
+    @Test func topNavigationRoutesShareWorkbenchDesignViewport() {
+        for route in AppRoute.topNavigationRoutes {
+            let layout = route.workbenchPageLayout
+
+            #expect(layout.baseWidth == 1440)
+            #expect(layout.baseHeight == 858)
+        }
+    }
+
     @Test func routePlaceholderStrings() {
         #expect(AppStrings.Navigation.pageUnderConstruction(.zhCN) == "页面建设中")
         #expect(AppStrings.Navigation.pageUnderConstruction(.enUS) == "Page under construction")

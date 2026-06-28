@@ -34,7 +34,11 @@ public struct WorkbenchScaledPageLayout: Equatable, Sendable {
     public let baseHeight: Double
 
     public static let dashboard = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 858)
+    public static let taskMarket = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 858)
+    public static let worktrees = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 858)
     public static let reviews = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 858)
+    public static let timeline = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 858)
+    public static let settings = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 858)
 
     public init(baseWidth: Double, baseHeight: Double) {
         self.baseWidth = baseWidth
