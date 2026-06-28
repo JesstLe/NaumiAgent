@@ -35,6 +35,7 @@ from naumi_agent.api.routes.workbench import (
     expire_workbench_leases,
     get_agent_profiles,
     get_approvals,
+    get_context_snapshot,
     get_context_snapshots,
     get_daemon_status,
     get_decisions,
@@ -131,6 +132,7 @@ class _FakeWorkbenchService:
         self._list_validation_runs_error: Exception | None = None
         self._get_validation_run_error: Exception | None = None
         self._list_context_snapshots_error: Exception | None = None
+        self._get_context_snapshot_error: Exception | None = None
 
     def set_run_validation_error(self, error: Exception) -> None:
         self._run_validation_error = error
@@ -170,6 +172,9 @@ class _FakeWorkbenchService:
 
     def set_list_context_snapshots_error(self, error: Exception) -> None:
         self._list_context_snapshots_error = error
+
+    def set_get_context_snapshot_error(self, error: Exception) -> None:
+        self._get_context_snapshot_error = error
 
     async def dashboard_snapshot(self, session_id: str):
         if self._dashboard_snapshot_error is not None:
@@ -616,6 +621,8 @@ class _FakeWorkbenchService:
         self.requested_context_snapshots.append(
             {"session_id": session_id, "snapshot_id": snapshot_id}
         )
+        if self._get_context_snapshot_error is not None:
+            raise self._get_context_snapshot_error
         if snapshot_id == "missing-snapshot":
             return None
         return {
@@ -1979,6 +1986,46 @@ async def test_get_context_snapshot_endpoint_returns_404_for_missing_snapshot() 
 
     assert response.status_code == 404
     assert response.json()["detail"] == "上下文快照不存在"
+
+
+@pytest.mark.asyncio
+async def test_get_context_snapshot_endpoint_reports_unavailable_context_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_context_snapshot_error(
+        RuntimeError("context snapshot store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_context_snapshot(
+            "sess-1", "snap-2", _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_context_snapshots == [
+        {"session_id": "sess-1", "snapshot_id": "snap-2"}
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "context snapshot store unavailable"
+
+
+@pytest.mark.asyncio
+async def test_get_context_snapshot_endpoint_reports_invalid_context_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_context_snapshot_error(
+        ValueError("context snapshot id is invalid")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_context_snapshot(
+            "sess-1", "snap-2", _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_context_snapshots == [
+        {"session_id": "sess-1", "snapshot_id": "snap-2"}
+    ]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "context snapshot id is invalid"
 
 
 @pytest.mark.asyncio
