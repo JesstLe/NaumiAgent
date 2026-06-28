@@ -48,4 +48,27 @@ struct WorkbenchShellPresentationTests {
         #expect(abs(scale - pageScale) < 0.001)
         #expect(scale < presentation.navigationScale(for: windowWidth))
     }
+
+    @Test func shellViewportScalesNavigationAndPageTogether() {
+        let presentation = WorkbenchShellPresentation()
+        let pageLayout = WorkbenchScaledPageLayout.dashboard
+
+        let compact = presentation.shellViewport(
+            for: CGSize(width: 1180, height: 760),
+            pageLayout: pageLayout
+        )
+        let shortWide = presentation.shellViewport(
+            for: CGSize(width: 2048, height: 900),
+            pageLayout: pageLayout
+        )
+
+        #expect(compact.scaledSize.width <= compact.containerSize.width)
+        #expect(compact.scaledSize.height <= compact.containerSize.height)
+        #expect(abs(compact.navigationHeight - presentation.topNavigationHeight * compact.scale) < 0.001)
+        #expect(abs(compact.pageHeight - pageLayout.baseHeight * compact.scale) < 0.001)
+        #expect(abs(compact.scaledSize.height - (compact.navigationHeight + compact.pageHeight)) < 0.001)
+        #expect(shortWide.scaledSize.width < shortWide.containerSize.width)
+        #expect(shortWide.scaledSize.height <= shortWide.containerSize.height)
+        #expect(shortWide.scale < presentation.navigationScale(for: 2048))
+    }
 }

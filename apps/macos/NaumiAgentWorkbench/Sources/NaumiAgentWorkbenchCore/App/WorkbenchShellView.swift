@@ -15,30 +15,45 @@ public struct WorkbenchShellView: View {
 
         GeometryReader { proxy in
             let routeLayout = scaledLayout(for: appState.currentRoute)
-            let navigationScale = CGFloat(
-                shellPresentation.navigationScale(
-                    for: proxy.size,
-                    pageLayout: routeLayout
-                )
+            let viewport = shellPresentation.shellViewport(
+                for: proxy.size,
+                pageLayout: routeLayout
             )
-            let navigationHeight = CGFloat(shellPresentation.topNavigationHeight) * navigationScale
+            let shellScale = CGFloat(viewport.scale)
 
             VStack(spacing: 0) {
-                ScaledTopNavigationBar(
+                TopNavigationBar(
                     appState: environment.appState,
                     daemonController: environment.daemonController,
-                    isPresentingMissionComposer: $isPresentingMissionComposer,
-                    scale: navigationScale
+                    isPresentingMissionComposer: $isPresentingMissionComposer
                 )
-                .frame(height: navigationHeight)
-
-                Divider()
+                .frame(
+                    width: shellPresentation.designCanvasWidth,
+                    height: shellPresentation.topNavigationHeight,
+                    alignment: .topLeading
+                )
 
                 routeView(for: appState.currentRoute)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(
+                        width: routeLayout.baseWidth,
+                        height: routeLayout.baseHeight,
+                        alignment: .topLeading
+                    )
                     .clipped()
             }
+            .frame(
+                width: shellPresentation.designCanvasWidth,
+                height: shellPresentation.topNavigationHeight + routeLayout.baseHeight,
+                alignment: .topLeading
+            )
+            .scaleEffect(shellScale, anchor: .topLeading)
+            .frame(
+                width: viewport.scaledSize.width,
+                height: viewport.scaledSize.height,
+                alignment: .topLeading
+            )
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+            .clipped()
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .frame(
@@ -93,36 +108,6 @@ public struct WorkbenchShellView: View {
         switch route {
         case .dashboard, .taskMarket, .worktrees, .reviews, .timeline, .settings:
             return WorkbenchScaledPageLayout.dashboard
-        }
-    }
-}
-
-private struct ScaledTopNavigationBar: View {
-    let appState: AppState
-    let daemonController: DaemonController
-    @Binding var isPresentingMissionComposer: Bool
-    let scale: CGFloat
-    private let shellPresentation = WorkbenchShellPresentation()
-
-    var body: some View {
-        GeometryReader { proxy in
-            TopNavigationBar(
-                appState: appState,
-                daemonController: daemonController,
-                isPresentingMissionComposer: $isPresentingMissionComposer
-            )
-            .frame(
-                width: shellPresentation.designCanvasWidth,
-                height: shellPresentation.topNavigationHeight,
-                alignment: .topLeading
-            )
-            .scaleEffect(scale, anchor: .topLeading)
-            .frame(
-                width: proxy.size.width,
-                height: proxy.size.height,
-                alignment: .topLeading
-            )
-            .clipped()
         }
     }
 }

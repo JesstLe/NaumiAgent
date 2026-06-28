@@ -70,4 +70,32 @@ public struct WorkbenchShellPresentation: Equatable, Sendable {
             pageLayout: pageLayout
         )
     }
+
+    public func shellViewport(
+        for availableSize: CGSize,
+        pageLayout: WorkbenchScaledPageLayout
+    ) -> WorkbenchShellViewport {
+        let scale = navigationScale(for: availableSize, pageLayout: pageLayout)
+        let navigationHeight = topNavigationHeight * scale
+        let pageHeight = pageLayout.baseHeight * scale
+
+        return WorkbenchShellViewport(
+            scale: scale,
+            navigationHeight: navigationHeight,
+            pageHeight: pageHeight,
+            scaledSize: CGSize(
+                width: designCanvasWidth * scale,
+                height: navigationHeight + pageHeight
+            ),
+            containerSize: availableSize
+        )
+    }
+}
+
+public struct WorkbenchShellViewport: Equatable, Sendable {
+    public let scale: Double
+    public let navigationHeight: Double
+    public let pageHeight: Double
+    public let scaledSize: CGSize
+    public let containerSize: CGSize
 }
