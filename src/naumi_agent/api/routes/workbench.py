@@ -196,6 +196,11 @@ class WorktreeRemovalResponse(BaseModel):
     message: str
 
 
+class WorktreeRemovalSnapshotResponse(BaseModel):
+    removal: WorktreeRemovalResponse
+    snapshot: dict[str, Any]
+
+
 class MissionsResponse(BaseModel):
     missions: list[dict[str, Any]]
     status: str | None
@@ -1554,13 +1559,14 @@ async def get_worktree(
 
 @router.delete(
     "/workbench/sessions/{session_id}/worktrees/{name:path}",
-    response_model=WorktreeRemovalResponse,
+    response_model=WorktreeRemovalResponse | WorktreeRemovalSnapshotResponse,
 )
 async def delete_worktree(
     session_id: str,
     name: str,
     request: Request,
     discard_changes: bool = Query(default=False),
+    include_snapshot: Annotated[bool, Query()] = False,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -1593,11 +1599,21 @@ async def delete_worktree(
             subject_id=name,
             payload={"discard_changes": discard_changes},
         )
-    return WorktreeRemovalResponse(
+    removal = WorktreeRemovalResponse(
         name=name,
         discard_changes=discard_changes,
         message=message,
     )
+    if not include_snapshot:
+        return removal
+
+    try:
+        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return WorktreeRemovalSnapshotResponse(removal=removal, snapshot=snapshot)
 
 
 @router.get(
