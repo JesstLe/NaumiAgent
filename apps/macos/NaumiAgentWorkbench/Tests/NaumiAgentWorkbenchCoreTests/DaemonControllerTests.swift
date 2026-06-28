@@ -564,6 +564,10 @@ actor FakeWorkbenchEventProvider: WorkbenchEventProviding {
     func setPingResult(_ result: Result<Void, APIError>) async {
         await streamRecorder.setPingResult(result)
     }
+
+    func setRefreshResult(_ result: Result<Void, APIError>) async {
+        await streamRecorder.setRefreshResult(result)
+    }
 }
 
 struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
@@ -590,7 +594,7 @@ struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
         actor: String?,
         limit: Int
     ) async throws(APIError) {
-        await recorder.recordRefreshRequest(
+        try await recorder.recordRefreshRequest(
             eventType: eventType,
             subjectID: subjectID,
             actor: actor,
@@ -616,19 +620,21 @@ actor FakeWorkbenchEventStreamRecorder {
     private(set) var refreshRequests: [FakeWorkbenchEventRefreshRequest] = []
     private(set) var pingCount = 0
     private var pingResult: Result<Void, APIError> = .success(())
+    private var refreshResult: Result<Void, APIError> = .success(())
 
     func recordRefreshRequest(
         eventType: String?,
         subjectID: String?,
         actor: String?,
         limit: Int
-    ) {
+    ) throws(APIError) {
         refreshRequests.append(FakeWorkbenchEventRefreshRequest(
             eventType: eventType,
             subjectID: subjectID,
             actor: actor,
             limit: limit
         ))
+        try refreshResult.get()
     }
 
     func recordPing() throws(APIError) {
@@ -638,6 +644,10 @@ actor FakeWorkbenchEventStreamRecorder {
 
     func setPingResult(_ result: Result<Void, APIError>) {
         pingResult = result
+    }
+
+    func setRefreshResult(_ result: Result<Void, APIError>) {
+        refreshResult = result
     }
 }
 
@@ -1065,6 +1075,41 @@ final class DaemonControllerTests {
         }
 
         #expect(appState.lastError == nil)
+
+        await controller.stopEventStream()
+    }
+
+    @Test @MainActor func requestEventStreamRefreshFailureMarksConnectionStaleAndClearsActiveStream() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-events"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        await eventProvider.setRefreshResult(.failure(.networkFailure("refresh send failed")))
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+
+        await controller.startEventStream()
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-events"]
+        }
+
+        await controller.requestEventStreamRefresh(limit: 10)
+
+        #expect(await eventProvider.recordedRefreshRequests() == [
+            FakeWorkbenchEventRefreshRequest(
+                eventType: nil,
+                subjectID: nil,
+                actor: nil,
+                limit: 10
+            ),
+        ])
+        #expect(appState.connectionState == .stale)
+        #expect(appState.lastError == .networkFailure("refresh send failed"))
+        #expect(controller.hasActiveEventStream == false)
 
         await controller.stopEventStream()
     }
