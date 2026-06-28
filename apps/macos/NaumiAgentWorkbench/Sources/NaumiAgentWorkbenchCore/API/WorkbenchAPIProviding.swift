@@ -101,6 +101,9 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> LeasesDTO
 
+    /// Fetches one lease by id for task-market detail views.
+    func fetchLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO
+
     /// Fetches worktrees for the given session, optionally filtered by task or status.
     func fetchWorktrees(
         sessionID: String,

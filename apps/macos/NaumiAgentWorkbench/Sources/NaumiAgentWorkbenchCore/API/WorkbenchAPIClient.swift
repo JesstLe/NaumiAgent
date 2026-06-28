@@ -243,6 +243,10 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
+        try await get(path: encodePath("workbench", "sessions", sessionID, "leases", leaseID))
+    }
+
     public func fetchWorktrees(
         sessionID: String,
         taskID: String?,
