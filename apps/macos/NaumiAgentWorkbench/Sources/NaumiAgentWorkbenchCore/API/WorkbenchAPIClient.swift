@@ -106,6 +106,10 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchValidationRun(sessionID: String, runID: String) async throws(APIError) -> ValidationRunDTO {
+        try await get(path: encodePath("workbench", "sessions", sessionID, "validation-runs", runID))
+    }
+
     public func fetchContextSnapshots(
         sessionID: String,
         taskID: String?,

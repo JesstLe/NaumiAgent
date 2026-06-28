@@ -35,6 +35,9 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> ValidationRunsDTO
 
+    /// Fetches one validation run by id for detailed output views.
+    func fetchValidationRun(sessionID: String, runID: String) async throws(APIError) -> ValidationRunDTO
+
     /// Fetches context health snapshots for the given session.
     func fetchContextSnapshots(
         sessionID: String,

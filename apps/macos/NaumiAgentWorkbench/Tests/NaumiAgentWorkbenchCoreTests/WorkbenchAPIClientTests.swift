@@ -467,6 +467,46 @@ final class WorkbenchAPIClientTests {
         #expect(response.validationRuns.isEmpty)
     }
 
+    @Test func fetchValidationRunEncodesPathComponentsAndDecodesOutput() async throws {
+        let sessionID = "sess/中文"
+        let runID = "run/验证 001"
+        let json = Data(
+            """
+            {"id":"run/验证 001","session_id":"sess/中文","task_id":"task/审查","actor":"ValidationRunner","command":["pytest","tests/unit/test_workbench_market.py","-q"],"cwd":"/Users/lv/Workspace/NaumiAgent","status":"failed","exit_code":1,"output":"2 failed, 3 passed","started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:03"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%2F%E4%B8%AD%E6%96%87/validation-runs/run%2F%E9%AA%8C%E8%AF%81%20001" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let run = try await client.fetchValidationRun(sessionID: sessionID, runID: runID)
+
+        #expect(run.id == runID)
+        #expect(run.sessionID == sessionID)
+        #expect(run.taskID == "task/审查")
+        #expect(run.actor == "ValidationRunner")
+        #expect(run.command == ["pytest", "tests/unit/test_workbench_market.py", "-q"])
+        #expect(run.cwd == "/Users/lv/Workspace/NaumiAgent")
+        #expect(run.status == "failed")
+        #expect(run.exitCode == 1)
+        #expect(run.output == "2 failed, 3 passed")
+        #expect(run.completedAt == "2026-06-27T06:00:03")
+    }
+
     @Test func fetchContextSnapshotsWithTaskIDAndAgentID() async throws {
         let taskID = "task 001/审查"
         let agentID = "agent 001/测试"
