@@ -67,6 +67,9 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> ApprovalsDTO
 
+    /// Fetches one approval request by id for human-governance detail views.
+    func fetchApproval(sessionID: String, approvalID: String) async throws(APIError) -> ApprovalDTO
+
     /// Fetches failure cards for the given session, optionally filtered by task or status.
     func fetchFailures(
         sessionID: String,

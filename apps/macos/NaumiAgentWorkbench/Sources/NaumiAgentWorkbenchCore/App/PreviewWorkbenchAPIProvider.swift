@@ -166,7 +166,15 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         state: String?,
         limit: Int
     ) async throws(APIError) -> ApprovalsDTO {
-        ApprovalsDTO(approvals: [], state: state, limit: limit)
+        ApprovalsDTO(
+            approvals: [makeApproval(sessionID: sessionID, approvalID: "preview-approval", state: state ?? "waiting")],
+            state: state,
+            limit: limit
+        )
+    }
+
+    func fetchApproval(sessionID: String, approvalID: String) async throws(APIError) -> ApprovalDTO {
+        makeApproval(sessionID: sessionID, approvalID: approvalID, state: "waiting")
     }
 
     func fetchFailures(
@@ -455,19 +463,12 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         state: String,
         decisionNote: String
     ) async throws(APIError) -> ApprovalDTO {
-        ApprovalDTO(
-            id: approvalID,
+        makeApproval(
             sessionID: sessionID,
-            missionID: "preview-mission",
-            taskID: "preview-task",
+            approvalID: approvalID,
             state: state,
-            title: "预览审批",
-            detail: "本地预览审批记录",
-            requester: "Planner-Agent",
             reviewer: actor,
-            decisionNote: decisionNote,
-            createdAt: now,
-            updatedAt: now
+            decisionNote: decisionNote
         )
     }
 
@@ -479,6 +480,29 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         cwd: String?
     ) async throws(APIError) -> ValidationResultDTO {
         ValidationResultDTO(id: "preview-run", status: "passed", exitCode: 0, output: argv.joined(separator: " "))
+    }
+
+    private func makeApproval(
+        sessionID: String,
+        approvalID: String,
+        state: String,
+        reviewer: String = "",
+        decisionNote: String = ""
+    ) -> ApprovalDTO {
+        ApprovalDTO(
+            id: approvalID,
+            sessionID: sessionID,
+            missionID: "preview-mission",
+            taskID: "preview-task",
+            state: state,
+            title: "预览审批",
+            detail: "本地预览审批记录",
+            requester: "Planner-Agent",
+            reviewer: reviewer,
+            decisionNote: decisionNote,
+            createdAt: now,
+            updatedAt: now
+        )
     }
 
     private func makeSession(id: String, title: String, model: String = "preview") -> SessionDTO {
