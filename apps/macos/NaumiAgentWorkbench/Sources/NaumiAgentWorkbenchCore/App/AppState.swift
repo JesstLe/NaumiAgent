@@ -27,6 +27,7 @@ public final class AppState: Sendable {
     public var selectedValidationRun: ValidationRunDTO? = nil
     public var selectedContextSnapshot: ContextSnapshotDTO? = nil
     public var selectedFailure: FailureDTO? = nil
+    public var selectedIssue: IssueDTO? = nil
     public var selectedDecision: DecisionDTO? = nil
     public var selectedIntentLock: IntentLockDTO? = nil
     public var selectedApproval: ApprovalDTO? = nil

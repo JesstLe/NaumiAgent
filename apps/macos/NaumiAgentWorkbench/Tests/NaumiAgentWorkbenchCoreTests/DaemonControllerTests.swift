@@ -2971,6 +2971,50 @@ final class DaemonControllerTests {
         #expect(appState.selectedFailure == oldFailure)
     }
 
+    @Test @MainActor func loadIssueSuccessStoresSelectedIssue() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let issue = makeIssue(taskID: "task-001", missionID: "mission-001")
+        await api.setIssueResult(.success(issue))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadIssue(taskID: "task-001")
+
+        #expect(appState.selectedIssue == issue)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadIssueWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        let oldIssue = makeIssue(taskID: "task-old", missionID: "mission-001")
+        appState.selectedIssue = oldIssue
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadIssue(taskID: "task-001")
+
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.selectedIssue == oldIssue)
+    }
+
+    @Test @MainActor func loadIssueFailurePreservesOldSelectedIssue() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let oldIssue = makeIssue(taskID: "task-old", missionID: "mission-001")
+        appState.selectedIssue = oldIssue
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setIssueResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadIssue(taskID: "task-001")
+
+        #expect(appState.lastError == .httpStatus(500))
+        #expect(appState.selectedIssue == oldIssue)
+    }
+
     @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotApprovalsAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -3248,6 +3292,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setIssuesResult(_ result: Result<IssuesDTO, APIError>) {
         issuesResult = result
+    }
+
+    fileprivate func setIssueResult(_ result: Result<IssueDTO, APIError>) {
+        issueResult = result
     }
 
     fileprivate func setLeasesResult(_ result: Result<LeasesDTO, APIError>) {

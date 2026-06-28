@@ -457,6 +457,27 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Loads one issue into the selected detail state.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the previous selected issue is preserved.
+    public func loadIssue(taskID: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            appState.selectedIssue = try await apiProvider.fetchIssue(
+                sessionID: sessionID,
+                taskID: taskID
+            )
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Fetches leases for the currently selected session.
     ///
     /// Requires `appState.selectedSessionID` to be set. On success the leases
