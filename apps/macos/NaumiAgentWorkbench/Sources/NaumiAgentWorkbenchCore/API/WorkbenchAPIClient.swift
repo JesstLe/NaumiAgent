@@ -328,6 +328,10 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchAgentProfile(sessionID: String, agentID: String) async throws(APIError) -> AgentProfileDTO {
+        try await get(path: encodePath("workbench", "sessions", sessionID, "agents", agentID))
+    }
+
     public func registerAgentProfile(
         sessionID: String,
         agentID: String,
