@@ -824,6 +824,18 @@ public final class DaemonController: Sendable {
         appState.worktrees = []
         appState.missions = []
         appState.agentProfiles = []
+        appState.selectedEvent = nil
+        appState.selectedValidationRun = nil
+        appState.selectedContextSnapshot = nil
+        appState.selectedFailure = nil
+        appState.selectedIssue = nil
+        appState.selectedLease = nil
+        appState.selectedWorktree = nil
+        appState.selectedMission = nil
+        appState.selectedAgentProfile = nil
+        appState.selectedDecision = nil
+        appState.selectedIntentLock = nil
+        appState.selectedApproval = nil
     }
 
     /// Refreshes the snapshot for the currently selected session.

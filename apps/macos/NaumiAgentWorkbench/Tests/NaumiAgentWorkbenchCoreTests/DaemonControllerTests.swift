@@ -1047,6 +1047,7 @@ final class DaemonControllerTests {
         appState.leases = [makeLease(id: "lease-old", taskID: "task-old", state: "active")]
         appState.missions = [makeMission(id: "mission-old", sessionID: "sess-old")]
         appState.agentProfiles = [makeAgentProfile(id: "agent-old", sessionID: "sess-old", status: "idle")]
+        seedSelectedDetails(appState)
 
         let api = FakeWorkbenchAPIProvider()
         let snapshot = makeSnapshot(sessionID: "sess-new", missions: [])
@@ -1095,6 +1096,7 @@ final class DaemonControllerTests {
         appState.leases = [makeLease(id: "lease-old", taskID: "task-old", state: "active")]
         appState.missions = [makeMission(id: "mission-old", sessionID: "sess-old")]
         appState.agentProfiles = [makeAgentProfile(id: "agent-old", sessionID: "sess-old", status: "idle")]
+        seedSelectedDetails(appState)
 
         let api = FakeWorkbenchAPIProvider()
         await api.setSnapshotResult(.failure(.httpStatus(500)))
@@ -1106,6 +1108,18 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == nil)
         #expect(appState.lastError == .httpStatus(500))
         expectWorkbenchListsEmpty(appState)
+        #expect(appState.selectedEvent == nil)
+        #expect(appState.selectedValidationRun == nil)
+        #expect(appState.selectedContextSnapshot == nil)
+        #expect(appState.selectedApproval == nil)
+        #expect(appState.selectedFailure == nil)
+        #expect(appState.selectedIssue == nil)
+        #expect(appState.selectedLease == nil)
+        #expect(appState.selectedWorktree == nil)
+        #expect(appState.selectedMission == nil)
+        #expect(appState.selectedAgentProfile == nil)
+        #expect(appState.selectedDecision == nil)
+        #expect(appState.selectedIntentLock == nil)
     }
 
     @Test @MainActor func claimIssueSuccessRefreshesSnapshotIssuesLeasesAndEvents() async throws {
@@ -3914,6 +3928,22 @@ private func makeFailure(id: String, taskID: String, status: String) -> FailureD
         status: status,
         createdAt: "2026-06-27T06:00:00"
     )
+}
+
+@MainActor
+private func seedSelectedDetails(_ appState: AppState) {
+    appState.selectedEvent = makeEvent(id: "evt-selected-old", type: "old.event", subjectID: "old")
+    appState.selectedValidationRun = makeValidationRun(id: "run-selected-old", taskID: "task-old", status: "passed")
+    appState.selectedContextSnapshot = makeContextSnapshot(id: "ctx-selected-old", taskID: "task-old", health: "good")
+    appState.selectedApproval = makeApproval(id: "approval-selected-old", missionID: "mission-old", state: "waiting")
+    appState.selectedFailure = makeFailure(id: "failure-selected-old", taskID: "task-old", status: "open")
+    appState.selectedIssue = makeIssue(taskID: "task-selected-old", missionID: "mission-old")
+    appState.selectedLease = makeLease(id: "lease-selected-old", taskID: "task-old", state: "active")
+    appState.selectedWorktree = makeWorktree(name: "wt-selected-old", taskID: "task-old", status: "active")
+    appState.selectedMission = makeMission(id: "mission-selected-old", sessionID: "sess-old")
+    appState.selectedAgentProfile = makeAgentProfile(id: "agent-selected-old", sessionID: "sess-old", status: "idle")
+    appState.selectedDecision = makeDecision(id: "decision-selected-old", missionID: "mission-old")
+    appState.selectedIntentLock = makeIntentLock(id: "lock-selected-old", missionID: "mission-old")
 }
 
 private func makeSession(id: String, title: String) -> SessionDTO {
