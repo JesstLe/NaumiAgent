@@ -999,6 +999,31 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Loads one intent lock into the selected detail state.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the previous selected intent lock is preserved.
+    public func loadIntentLock(
+        missionID: String,
+        lockID: String
+    ) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            appState.selectedIntentLock = try await apiProvider.fetchIntentLock(
+                sessionID: sessionID,
+                missionID: missionID,
+                lockID: lockID
+            )
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Resolves an approval request as approved or rejected and refreshes the
     /// timeline events, waiting approvals list, and snapshot on success.
     ///
