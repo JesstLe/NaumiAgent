@@ -36,4 +36,27 @@ struct WorkbenchPageLayoutTests {
         #expect(abs(narrow.width - 900) < 0.001)
         #expect(narrow.height <= 620)
     }
+
+    @Test func scaledViewportNeverRequiresHorizontalScrolling() {
+        let layout = WorkbenchScaledPageLayout.dashboard
+
+        let compact = layout.viewport(for: CGSize(width: 1180, height: 760))
+        let wide = layout.viewport(for: CGSize(width: 2048, height: 1152))
+
+        #expect(abs(compact.scaledSize.width - compact.containerSize.width) < 0.001)
+        #expect(abs(wide.scaledSize.width - wide.containerSize.width) < 0.001)
+        #expect(compact.showsVerticalScroll == false)
+        #expect(wide.showsVerticalScroll == false)
+    }
+
+    @Test func scaledViewportSwitchesToVerticalScrollOnlyWhenHeightOverflows() {
+        let layout = WorkbenchScaledPageLayout.dashboard
+
+        let short = layout.viewport(for: CGSize(width: 2048, height: 900))
+
+        #expect(abs(short.scaledSize.width - short.containerSize.width) < 0.001)
+        #expect(short.scaledSize.height > 900)
+        #expect(short.containerSize.height == short.scaledSize.height)
+        #expect(short.showsVerticalScroll == true)
+    }
 }
