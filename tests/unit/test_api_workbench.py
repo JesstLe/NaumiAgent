@@ -124,6 +124,7 @@ class _FakeWorkbenchService:
         self._resolve_approval_error: Exception | None = None
         self._resolve_approval_result: dict | None = None
         self._dashboard_snapshot_error: Exception | None = None
+        self._list_events_error: Exception | None = None
 
     def set_run_validation_error(self, error: Exception) -> None:
         self._run_validation_error = error
@@ -148,6 +149,9 @@ class _FakeWorkbenchService:
 
     def set_dashboard_snapshot_error(self, error: Exception) -> None:
         self._dashboard_snapshot_error = error
+
+    def set_list_events_error(self, error: Exception) -> None:
+        self._list_events_error = error
 
     async def dashboard_snapshot(self, session_id: str):
         if self._dashboard_snapshot_error is not None:
@@ -438,6 +442,8 @@ class _FakeWorkbenchService:
         actor: str | None = None,
         limit: int = 50,
     ):
+        if self._list_events_error is not None:
+            raise self._list_events_error
         self.listed_events.append(
             {
                 "session_id": session_id,
@@ -1457,6 +1463,28 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
         },
     }
     assert complete_message == {"type": "refresh_complete", "count": 1}
+
+
+def test_workbench_event_stream_reports_refresh_errors_without_abrupt_close() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_events_error(
+        RuntimeError("event store unavailable")
+    )
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    with client.websocket_connect("/workbench/sessions/sess-1/events/stream") as websocket:
+        assert websocket.receive_json() == {"type": "connected", "session_id": "sess-1"}
+        assert websocket.receive_json() == {
+            "type": "error",
+            "message": "event store unavailable",
+        }
+
+        websocket.send_json({"type": "ping"})
+
+        assert websocket.receive_json() == {"type": "pong"}
 
 
 @pytest.mark.asyncio
