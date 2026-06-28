@@ -765,7 +765,10 @@ final class DaemonControllerTests {
 
     @Test @MainActor func refreshConnectionRejectsUnsupportedProtocolVersion() async throws {
         let appState = AppState()
+        appState.selectedSessionID = "sess-events"
+        appState.connectionState = .connected
         let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
 
         await api.setStatusResult(.success(makeStatus()))
         await api.setCapabilitiesResult(.success(CapabilitiesDTO(
@@ -777,13 +780,23 @@ final class DaemonControllerTests {
             protocolVersion: 999
         )))
 
-        let controller = DaemonController(appState: appState, apiProvider: api)
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.startEventStream()
+        await waitUntil {
+            controller.hasActiveEventStream
+        }
+
         await controller.refreshConnection()
 
         #expect(appState.connectionState == .disconnected)
         #expect(appState.daemonStatus == nil)
         #expect(appState.capabilities == nil)
         #expect(appState.lastError == .protocolVersionMismatch(expected: 1, actual: 999))
+        #expect(controller.hasActiveEventStream == false)
     }
 
     @Test @MainActor func refreshConnectionClearsPreviousError() async throws {
