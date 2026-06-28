@@ -631,6 +631,27 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func createDecisionWithSnapshot(
+        sessionID: String,
+        missionID: String,
+        kind: String,
+        title: String,
+        content: String,
+        actor: String
+    ) async throws(APIError) -> DecisionSnapshotDTO {
+        DecisionSnapshotDTO(
+            decision: try await createDecision(
+                sessionID: sessionID,
+                missionID: missionID,
+                kind: kind,
+                title: title,
+                content: content,
+                actor: actor
+            ),
+            snapshot: try await fetchSnapshot(sessionID: sessionID)
+        )
+    }
+
     func resolveApproval(
         sessionID: String,
         approvalID: String,

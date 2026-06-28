@@ -638,6 +638,26 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func createDecisionWithSnapshot(
+        sessionID: String,
+        missionID: String,
+        kind: String,
+        title: String,
+        content: String,
+        actor: String
+    ) async throws(APIError) -> DecisionSnapshotDTO {
+        let body = CreateDecisionRequest(
+            actor: actor,
+            kind: kind,
+            title: title,
+            content: content
+        )
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "decisions") + "?include_snapshot=true",
+            body: body
+        )
+    }
+
     public func resolveApproval(
         sessionID: String,
         approvalID: String,

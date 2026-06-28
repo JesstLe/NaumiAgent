@@ -42,3 +42,13 @@ public struct DecisionDTO: Decodable, Equatable, Sendable {
         self.createdAt = createdAt
     }
 }
+
+public struct DecisionSnapshotDTO: Decodable, Equatable, Sendable {
+    public let decision: DecisionDTO
+    public let snapshot: WorkbenchSnapshotDTO
+
+    public init(decision: DecisionDTO, snapshot: WorkbenchSnapshotDTO) {
+        self.decision = decision
+        self.snapshot = snapshot
+    }
+}
