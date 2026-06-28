@@ -77,6 +77,27 @@ final class WorkbenchRefreshCoordinatorTests {
         await controller.stopEventStream()
     }
 
+    @Test @MainActor func eventStreamHealthProbeSkipsWhenControllerHasNoActiveEventStream() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-health"
+        appState.connectionState = .connected
+        appState.lastError = .httpStatus(502)
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        let coordinator = WorkbenchRefreshCoordinator(daemonController: controller)
+
+        let result = await coordinator.probeEventStreamOnce()
+
+        #expect(result == .skippedUnavailable)
+        #expect(await eventProvider.recordedPingCount() == 0)
+        #expect(appState.lastError == .httpStatus(502))
+    }
+
     @Test @MainActor func eventStreamHealthProbeSkipsWhenAnotherProbeIsInProgress() async throws {
         let stream = AsyncStream<Void>.makeStream()
         var startedCount = 0

@@ -16,6 +16,11 @@ public final class DaemonController: Sendable {
     private var eventStreamTask: Task<Void, Never>?
     private var activeEventStream: (any WorkbenchEventStreaming)?
 
+    /// Whether a Workbench event stream is currently connected and probeable.
+    public var hasActiveEventStream: Bool {
+        activeEventStream != nil
+    }
+
     public init(
         appState: AppState,
         apiProvider: WorkbenchAPIProviding,
@@ -181,6 +186,7 @@ public final class DaemonController: Sendable {
             guard !Task.isCancelled else {
                 return
             }
+            activeEventStream = nil
             appState.connectionState = .stale
             appState.lastError = error
         }
