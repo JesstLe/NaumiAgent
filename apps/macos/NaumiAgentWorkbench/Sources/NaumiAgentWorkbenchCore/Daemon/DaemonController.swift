@@ -408,6 +408,27 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Loads one failure card into the selected detail state.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the previous selected failure is preserved.
+    public func loadFailure(failureID: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            appState.selectedFailure = try await apiProvider.fetchFailure(
+                sessionID: sessionID,
+                failureID: failureID
+            )
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Fetches issues for the currently selected session.
     ///
     /// Requires `appState.selectedSessionID` to be set. On success the issues
