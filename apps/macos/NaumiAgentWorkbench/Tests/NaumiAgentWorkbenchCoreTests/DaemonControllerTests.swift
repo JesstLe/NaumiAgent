@@ -20,6 +20,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var failuresResult: Result<FailuresDTO, APIError>?
     var failureResult: Result<FailureDTO, APIError>?
     var issuesResult: Result<IssuesDTO, APIError>?
+    var issueResult: Result<IssueDTO, APIError>?
     var leasesResult: Result<LeasesDTO, APIError>?
     var worktreesResult: Result<WorktreesDTO, APIError>?
     var worktreeResult: Result<WorktreeDTO, APIError>?
@@ -218,6 +219,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> IssuesDTO {
         guard let result = issuesResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchIssue(sessionID: String, taskID: String) async throws(APIError) -> IssueDTO {
+        guard let result = issueResult else {
             throw .invalidResponse
         }
         return try result.get()
