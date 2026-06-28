@@ -4582,6 +4582,35 @@ async def test_upsert_agent_profile_endpoint_registers_profile() -> None:
 
 
 @pytest.mark.asyncio
+async def test_upsert_agent_profile_endpoint_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    body = AgentProfileUpsert(
+        name="Backend Agent",
+        role="coder",
+        capabilities=["code"],
+        permissions=["read"],
+        max_parallel_tasks=2,
+        status="busy",
+        actor="Human",
+    )
+
+    response = await upsert_agent_profile(
+        "sess-1",
+        "agent-1",
+        body,
+        _fake_request(engine),
+        include_snapshot=True,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert response["agent_profile"]["id"] == "agent-1"
+    assert response["agent_profile"]["status"] == "busy"
+    assert response["snapshot"]["version"] == 1
+    assert response["snapshot"]["session_id"] == "sess-1"
+
+
+@pytest.mark.asyncio
 async def test_upsert_agent_profile_endpoint_maps_value_error_to_400() -> None:
     engine = _FakeEngine(exists=True)
     engine.workbench_service.set_agent_profile_error(ValueError("Agent 名称不能为空"))
@@ -4662,6 +4691,35 @@ def test_upsert_agent_profile_route_accepts_json_body() -> None:
         }
     ]
     assert response.json()["status"] == "busy"
+
+
+def test_upsert_agent_profile_route_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/agents/agent-1",
+        params={"include_snapshot": "true"},
+        json={
+            "name": "Backend Agent",
+            "role": "coder",
+            "capabilities": ["code"],
+            "permissions": ["read"],
+            "max_parallel_tasks": 2,
+            "status": "busy",
+            "actor": "Human",
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["agent_profile"]["id"] == "agent-1"
+    assert body["agent_profile"]["status"] == "busy"
+    assert body["snapshot"]["version"] == 1
+    assert body["snapshot"]["session_id"] == "sess-1"
 
 
 def test_get_agent_profile_route_returns_single_profile() -> None:
