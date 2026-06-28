@@ -242,6 +242,21 @@ def _worktree_to_dict(record) -> dict[str, Any]:
     return data
 
 
+async def _build_workbench_snapshot(engine, session_id: str) -> dict[str, Any]:
+    snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    manager = getattr(engine, "worktree_manager", None)
+    if manager is None:
+        return {**snapshot, "worktrees": []}
+
+    records = await manager.status()
+    if not isinstance(records, list):
+        records = [records]
+    return {
+        **snapshot,
+        "worktrees": [_worktree_to_dict(record) for record in records],
+    }
+
+
 async def _count_workspaces(engine) -> int:
     session_store = getattr(engine, "session_store", None)
     if session_store is None:
@@ -348,7 +363,7 @@ async def create_workbench_session(
         raise HTTPException(status_code=503, detail="会话创建后无法加载")
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -389,9 +404,7 @@ async def get_workbench_bootstrap(
         if not await engine.load_session(candidate_session_id):
             continue
         try:
-            snapshot = await engine.workbench_service.dashboard_snapshot(
-                candidate_session_id
-            )
+            snapshot = await _build_workbench_snapshot(engine, candidate_session_id)
         except (RuntimeError, ValueError):
             logger.exception(
                 "Workbench bootstrap snapshot failed for session %s",
@@ -420,7 +433,7 @@ async def get_workbench_snapshot(session_id: str, request: Request, auth: str = 
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        return await engine.workbench_service.dashboard_snapshot(session_id)
+        return await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -570,7 +583,7 @@ async def _send_workbench_snapshot(
     session_id: str,
 ) -> None:
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except (RuntimeError, ValueError) as exc:
         logger.warning(
             "Workbench event stream snapshot failed for session %s",
@@ -777,7 +790,7 @@ async def create_context_health_snapshot(
         return context_snapshot
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -923,7 +936,7 @@ async def create_workbench_mission(
         return mission_payload
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -978,7 +991,7 @@ async def attach_workbench_issue(
         return issue
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -1020,7 +1033,7 @@ async def create_intent_lock(
         return lock
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -1061,7 +1074,7 @@ async def create_decision(
         return decision
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -1205,7 +1218,7 @@ async def claim_workbench_issue(
         return lease_payload
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -1239,7 +1252,7 @@ async def release_workbench_lease(
         return lease_payload
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -1270,7 +1283,7 @@ async def expire_workbench_leases(
         return response
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -1427,7 +1440,7 @@ async def upsert_agent_profile(
         return profile
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -1520,7 +1533,7 @@ async def keep_worktree(
         return worktree
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -1608,7 +1621,7 @@ async def delete_worktree(
         return removal
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -1765,7 +1778,7 @@ async def resolve_approval(
         return approval
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -1812,7 +1825,7 @@ async def create_validation_run(
         return validation_run
 
     try:
-        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+        snapshot = await _build_workbench_snapshot(engine, session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:

@@ -1410,6 +1410,48 @@ async def test_workbench_snapshot_endpoint_returns_service_snapshot() -> None:
 
 
 @pytest.mark.asyncio
+async def test_workbench_snapshot_endpoint_includes_worktree_statuses() -> None:
+    worktree_manager = FakeWorktreeManager(
+        [
+            WorktreeRecord(
+                name="wt-api",
+                path="/repo/.naumi/worktrees/wt-api",
+                branch="naumi/worktree-wt-api",
+                base_ref="abc123",
+                status=WorktreeStatus.DIRTY,
+                task_id="task-1",
+                dirty_files=2,
+                commits_ahead=1,
+                created_at="2024-01-01T00:00:00",
+                updated_at="2024-01-01T00:04:00",
+            )
+        ]
+    )
+    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+
+    response = await get_workbench_snapshot("sess-1", _fake_request(engine), auth="test")
+
+    assert worktree_manager.status_calls == [""]
+    assert response["worktrees"] == [
+        {
+            "name": "wt-api",
+            "path": "/repo/.naumi/worktrees/wt-api",
+            "branch": "naumi/worktree-wt-api",
+            "base_ref": "abc123",
+            "status": "dirty",
+            "task_id": "task-1",
+            "dirty_files": 2,
+            "commits_ahead": 1,
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:04:00",
+            "kept_reason": "",
+            "metadata": {},
+            "removable": False,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_workbench_snapshot_endpoint_reports_unavailable_snapshot_service() -> None:
     engine = _FakeEngine(exists=True)
     engine.workbench_service.set_dashboard_snapshot_error(
@@ -1827,6 +1869,7 @@ async def test_workbench_event_stream_can_send_initial_snapshot_on_connect() -> 
             "leases": [],
             "failures": [],
             "events": [],
+            "worktrees": [],
         },
     }
     assert websocket.sent_json[-1] == {"type": "refresh_complete", "count": 1}
