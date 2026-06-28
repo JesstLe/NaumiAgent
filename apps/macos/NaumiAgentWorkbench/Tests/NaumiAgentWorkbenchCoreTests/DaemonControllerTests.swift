@@ -18,6 +18,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var recordContextHealthResult: Result<ContextSnapshotDTO, APIError>?
     var approvalsResult: Result<ApprovalsDTO, APIError>?
     var failuresResult: Result<FailuresDTO, APIError>?
+    var failureResult: Result<FailureDTO, APIError>?
     var issuesResult: Result<IssuesDTO, APIError>?
     var leasesResult: Result<LeasesDTO, APIError>?
     var worktreesResult: Result<WorktreesDTO, APIError>?
@@ -198,6 +199,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> FailuresDTO {
         guard let result = failuresResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchFailure(sessionID: String, failureID: String) async throws(APIError) -> FailureDTO {
+        guard let result = failureResult else {
             throw .invalidResponse
         }
         return try result.get()

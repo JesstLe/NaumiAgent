@@ -826,6 +826,45 @@ final class WorkbenchAPIClientTests {
         #expect(response.failures.isEmpty)
     }
 
+    @Test func fetchFailureEncodesPathComponentsAndDecodesDiagnostics() async throws {
+        let sessionID = "sess 中文"
+        let failureID = "failure/测试 001"
+        let json = Data(
+            """
+            {"id":"failure/测试 001","session_id":"sess 中文","task_id":"task-001","kind":"test_failed","title":"DTO 解码测试失败","detail":"pytest tests/unit/test_dto.py -q failed with 2 failures","source_id":"run-001","status":"open","created_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/failures/failure%2F%E6%B5%8B%E8%AF%95%20001" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let failure = try await client.fetchFailure(sessionID: sessionID, failureID: failureID)
+
+        #expect(failure.id == failureID)
+        #expect(failure.sessionID == sessionID)
+        #expect(failure.taskID == "task-001")
+        #expect(failure.kind == "test_failed")
+        #expect(failure.title == "DTO 解码测试失败")
+        #expect(failure.detail == "pytest tests/unit/test_dto.py -q failed with 2 failures")
+        #expect(failure.sourceID == "run-001")
+        #expect(failure.status == "open")
+        #expect(failure.createdAt == "2026-06-27T06:00:00")
+    }
+
     @Test func fetchIssuesWithFilters() async throws {
         let sessionID = "sess 中文"
         let missionID = "mission 中文"
