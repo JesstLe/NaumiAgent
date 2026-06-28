@@ -69,7 +69,7 @@ public final class DaemonController: Sendable {
                 appState.selectedSessionID = bootstrap.selectedSessionID
                 appState.snapshot = bootstrap.snapshot
             } else {
-                await refreshSnapshot()
+                await refreshSnapshot(clearSessionScopedStateOnFailure: true)
             }
             await refreshWorkbenchListsAfterConnection()
             await startEventStreamIfAvailable()
@@ -724,6 +724,57 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Fetches human-governance decisions for the selected session and mission.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success the decisions
+    /// are written to `appState.decisions`; on failure `appState.lastError` is
+    /// set. Missing session clears the local decision list to avoid showing
+    /// stale governance records from another session. API failures leave the
+    /// local list unchanged.
+    public func refreshDecisions(missionID: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.decisions = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchDecisions(
+                sessionID: sessionID,
+                missionID: missionID
+            )
+            appState.decisions = response.decisions
+        } catch {
+            appState.lastError = error
+        }
+    }
+
+    /// Fetches intent locks for the selected session and mission.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. On success the locks are
+    /// written to `appState.intentLocks`; on failure `appState.lastError` is set.
+    /// Missing session clears the local lock list to avoid showing stale policy
+    /// records from another session. API failures leave the local list unchanged.
+    public func refreshIntentLocks(missionID: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.intentLocks = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchIntentLocks(
+                sessionID: sessionID,
+                missionID: missionID
+            )
+            appState.intentLocks = response.intentLocks
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Registers or updates an agent capability profile in the selected session.
     ///
     /// Requires `appState.selectedSessionID` to be set. On success the profile
@@ -824,6 +875,8 @@ public final class DaemonController: Sendable {
         appState.worktrees = []
         appState.missions = []
         appState.agentProfiles = []
+        appState.decisions = []
+        appState.intentLocks = []
         appState.selectedEvent = nil
         appState.selectedValidationRun = nil
         appState.selectedContextSnapshot = nil
@@ -844,7 +897,7 @@ public final class DaemonController: Sendable {
     /// is chosen automatically and the fetched session list is also written to
     /// `appState.sessions`. Failures are written to `appState.lastError` and the
     /// snapshot is cleared to avoid showing stale data.
-    func refreshSnapshot() async {
+    func refreshSnapshot(clearSessionScopedStateOnFailure: Bool = false) async {
         let sessionID: String
         if let existingID = appState.selectedSessionID {
             sessionID = existingID
@@ -870,7 +923,10 @@ public final class DaemonController: Sendable {
             appState.snapshot = snapshot
         } catch {
             appState.lastError = error
-            clearSessionScopedState()
+            appState.snapshot = nil
+            if clearSessionScopedStateOnFailure {
+                clearSessionScopedState()
+            }
         }
     }
 

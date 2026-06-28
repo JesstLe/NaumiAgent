@@ -23,6 +23,8 @@ public final class AppState: Sendable {
     public var worktrees: [WorktreeDTO] = []
     public var missions: [MissionDTO] = []
     public var agentProfiles: [AgentProfileDTO] = []
+    public var decisions: [DecisionDTO] = []
+    public var intentLocks: [IntentLockDTO] = []
     public var selectedEvent: EventDTO? = nil
     public var selectedValidationRun: ValidationRunDTO? = nil
     public var selectedContextSnapshot: ContextSnapshotDTO? = nil

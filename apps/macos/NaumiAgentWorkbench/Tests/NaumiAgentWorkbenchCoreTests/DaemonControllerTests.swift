@@ -2611,6 +2611,53 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
+    @Test @MainActor func refreshIntentLocksSuccessWritesToAppState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let lock = makeIntentLock(id: "lock-001", missionID: "mission-001")
+        await api.setFetchIntentLocksResult(.success(
+            IntentLocksDTO(intentLocks: [lock], missionID: "mission-001")
+        ))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshIntentLocks(missionID: "mission-001")
+
+        #expect(appState.intentLocks == [lock])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshIntentLocksWithoutSelectedSessionClearsListAndRecordsError() async throws {
+        let appState = AppState()
+        let staleLock = makeIntentLock(id: "lock-stale", missionID: "mission-old")
+        appState.intentLocks = [staleLock]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshIntentLocks(missionID: "mission-001")
+
+        #expect(appState.intentLocks.isEmpty)
+        #expect(appState.lastError == .missingSelectedSession)
+    }
+
+    @Test @MainActor func refreshIntentLocksFailurePreservesOldList() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleLock = makeIntentLock(id: "lock-stale", missionID: "mission-001")
+        appState.intentLocks = [staleLock]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setFetchIntentLocksResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshIntentLocks(missionID: "mission-001")
+
+        #expect(appState.intentLocks == [staleLock])
+        #expect(appState.lastError == .httpStatus(500))
+    }
+
     @Test @MainActor func createDecisionSuccessRefreshesSnapshotAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -2677,6 +2724,53 @@ final class DaemonControllerTests {
         )
 
         #expect(appState.snapshot == staleSnapshot)
+        #expect(appState.lastError == .httpStatus(500))
+    }
+
+    @Test @MainActor func refreshDecisionsSuccessWritesToAppState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let decision = makeDecision(id: "decision-001", missionID: "mission-001")
+        await api.setFetchDecisionsResult(.success(
+            DecisionsDTO(decisions: [decision], missionID: "mission-001")
+        ))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshDecisions(missionID: "mission-001")
+
+        #expect(appState.decisions == [decision])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshDecisionsWithoutSelectedSessionClearsListAndRecordsError() async throws {
+        let appState = AppState()
+        let staleDecision = makeDecision(id: "decision-stale", missionID: "mission-old")
+        appState.decisions = [staleDecision]
+        #expect(appState.selectedSessionID == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshDecisions(missionID: "mission-001")
+
+        #expect(appState.decisions.isEmpty)
+        #expect(appState.lastError == .missingSelectedSession)
+    }
+
+    @Test @MainActor func refreshDecisionsFailurePreservesOldList() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleDecision = makeDecision(id: "decision-stale", missionID: "mission-001")
+        appState.decisions = [staleDecision]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setFetchDecisionsResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshDecisions(missionID: "mission-001")
+
+        #expect(appState.decisions == [staleDecision])
         #expect(appState.lastError == .httpStatus(500))
     }
 
@@ -3563,12 +3657,20 @@ extension FakeWorkbenchAPIProvider {
         createIntentLockResult = result
     }
 
+    fileprivate func setFetchIntentLocksResult(_ result: Result<IntentLocksDTO, APIError>) {
+        fetchIntentLocksResult = result
+    }
+
     fileprivate func setFetchIntentLockResult(_ result: Result<IntentLockDTO, APIError>) {
         fetchIntentLockResult = result
     }
 
     fileprivate func setCreateDecisionResult(_ result: Result<DecisionDTO, APIError>) {
         createDecisionResult = result
+    }
+
+    fileprivate func setFetchDecisionsResult(_ result: Result<DecisionsDTO, APIError>) {
+        fetchDecisionsResult = result
     }
 
     fileprivate func setFetchDecisionResult(_ result: Result<DecisionDTO, APIError>) {
