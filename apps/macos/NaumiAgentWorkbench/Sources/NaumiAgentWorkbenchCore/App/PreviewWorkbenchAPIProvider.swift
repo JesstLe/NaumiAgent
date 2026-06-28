@@ -668,6 +668,25 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func resolveApprovalWithSnapshot(
+        sessionID: String,
+        approvalID: String,
+        actor: String,
+        state: String,
+        decisionNote: String
+    ) async throws(APIError) -> ApprovalSnapshotDTO {
+        ApprovalSnapshotDTO(
+            approval: try await resolveApproval(
+                sessionID: sessionID,
+                approvalID: approvalID,
+                actor: actor,
+                state: state,
+                decisionNote: decisionNote
+            ),
+            snapshot: try await fetchSnapshot(sessionID: sessionID)
+        )
+    }
+
     func runValidation(
         sessionID: String,
         taskID: String,

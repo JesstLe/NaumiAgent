@@ -1424,11 +1424,11 @@ public final class DaemonController: Sendable {
     }
 
     /// Resolves an approval request as approved or rejected and refreshes the
-    /// timeline events, waiting approvals list, and snapshot on success.
+    /// timeline events and waiting approvals list on success.
     ///
-    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot and approvals are never mutated
-    /// directly.
+    /// Requires `appState.selectedSessionID` to be set. The mutation response
+    /// supplies the authoritative snapshot; follow-up refresh failures are
+    /// preserved without mutating the local approvals list directly.
     public func resolveApproval(
         approvalID: String,
         actor: String,
@@ -1442,16 +1442,20 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            _ = try await apiProvider.resolveApproval(
+            let response = try await apiProvider.resolveApprovalWithSnapshot(
                 sessionID: sessionID,
                 approvalID: approvalID,
                 actor: actor,
                 state: state,
                 decisionNote: decisionNote
             )
+            appState.snapshot = response.snapshot
+            var refreshError: APIError?
             await refreshEvents(limit: 50)
+            refreshError = refreshError ?? appState.lastError
             await refreshApprovals(state: "waiting")
-            await refreshSnapshot()
+            refreshError = refreshError ?? appState.lastError
+            appState.lastError = refreshError
         } catch {
             appState.lastError = error
         }

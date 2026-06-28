@@ -332,6 +332,15 @@ public protocol WorkbenchAPIProviding: Sendable {
         decisionNote: String
     ) async throws(APIError) -> ApprovalDTO
 
+    /// Resolves an approval and returns the backend's fresh authoritative snapshot.
+    func resolveApprovalWithSnapshot(
+        sessionID: String,
+        approvalID: String,
+        actor: String,
+        state: String,
+        decisionNote: String
+    ) async throws(APIError) -> ApprovalSnapshotDTO
+
     /// Runs a validation command in the given session and returns its result.
     func runValidation(
         sessionID: String,

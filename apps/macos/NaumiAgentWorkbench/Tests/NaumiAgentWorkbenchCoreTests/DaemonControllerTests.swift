@@ -54,6 +54,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var fetchDecisionsResult: Result<DecisionsDTO, APIError>?
     var fetchDecisionResult: Result<DecisionDTO, APIError>?
     var resolveApprovalResult: Result<ApprovalDTO, APIError>?
+    var resolveApprovalWithSnapshotResult: Result<ApprovalSnapshotDTO, APIError>?
     var runValidationResult: Result<ValidationResultDTO, APIError>?
     var runValidationWithSnapshotResult: Result<ValidationResultSnapshotDTO, APIError>?
     var bootstrapCallCount: Int = 0
@@ -69,6 +70,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var createIssueWithSnapshotCallCount: Int = 0
     var createIntentLockWithSnapshotCallCount: Int = 0
     var createDecisionWithSnapshotCallCount: Int = 0
+    var resolveApprovalWithSnapshotCallCount: Int = 0
     var runValidationCallCount: Int = 0
     var runValidationWithSnapshotCallCount: Int = 0
     var createdSessions: [[String: String?]] = []
@@ -648,6 +650,20 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         decisionNote: String
     ) async throws(APIError) -> ApprovalDTO {
         guard let result = resolveApprovalResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func resolveApprovalWithSnapshot(
+        sessionID: String,
+        approvalID: String,
+        actor: String,
+        state: String,
+        decisionNote: String
+    ) async throws(APIError) -> ApprovalSnapshotDTO {
+        resolveApprovalWithSnapshotCallCount += 1
+        guard let result = resolveApprovalWithSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -4128,7 +4144,7 @@ final class DaemonControllerTests {
         #expect(appState.selectedAgentProfile == oldProfile)
     }
 
-    @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotApprovalsAndEvents() async throws {
+    @Test @MainActor func resolveApprovalSuccessUsesIncludedSnapshotAndRefreshesLists() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -4140,8 +4156,9 @@ final class DaemonControllerTests {
         let event = makeEvent(id: "evt-001", type: "approval.resolved", subjectID: "approval-001")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
-        await api.setResolveApprovalResult(.success(resolvedApproval))
-        await api.setSnapshotResult(.success(snapshot))
+        await api.setResolveApprovalWithSnapshotResult(.success(
+            ApprovalSnapshotDTO(approval: resolvedApproval, snapshot: snapshot)
+        ))
         await api.setApprovalsResult(.success(approvals))
         await api.setEventsResult(.success(events))
 
@@ -4157,6 +4174,8 @@ final class DaemonControllerTests {
         #expect(appState.approvals == [waitingApproval])
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
+        #expect(await api.resolveApprovalWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func resolveApprovalWithoutSelectedSessionRecordsError() async throws {
@@ -4186,7 +4205,7 @@ final class DaemonControllerTests {
         appState.approvals = [staleApproval]
 
         let api = FakeWorkbenchAPIProvider()
-        await api.setResolveApprovalResult(.failure(.httpStatus(500)))
+        await api.setResolveApprovalWithSnapshotResult(.failure(.httpStatus(500)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.resolveApproval(
@@ -4537,6 +4556,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setResolveApprovalResult(_ result: Result<ApprovalDTO, APIError>) {
         resolveApprovalResult = result
+    }
+
+    fileprivate func setResolveApprovalWithSnapshotResult(_ result: Result<ApprovalSnapshotDTO, APIError>) {
+        resolveApprovalWithSnapshotResult = result
     }
 
     fileprivate func setRunValidationResult(_ result: Result<ValidationResultDTO, APIError>) {

@@ -58,3 +58,13 @@ public struct ApprovalDTO: Decodable, Equatable, Sendable {
         self.updatedAt = updatedAt
     }
 }
+
+public struct ApprovalSnapshotDTO: Decodable, Equatable, Sendable {
+    public let approval: ApprovalDTO
+    public let snapshot: WorkbenchSnapshotDTO
+
+    public init(approval: ApprovalDTO, snapshot: WorkbenchSnapshotDTO) {
+        self.approval = approval
+        self.snapshot = snapshot
+    }
+}
