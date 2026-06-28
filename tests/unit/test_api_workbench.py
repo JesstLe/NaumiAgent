@@ -140,6 +140,7 @@ class _FakeWorkbenchService:
         self._list_intent_locks_error: Exception | None = None
         self._get_intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
+        self._list_decisions_error: Exception | None = None
         self._agent_profile_error: Exception | None = None
         self._get_agent_profile_error: Exception | None = None
         self._list_failures_error: Exception | None = None
@@ -170,6 +171,9 @@ class _FakeWorkbenchService:
 
     def set_decision_error(self, error: Exception) -> None:
         self._decision_error = error
+
+    def set_list_decisions_error(self, error: Exception) -> None:
+        self._list_decisions_error = error
 
     def set_agent_profile_error(self, error: Exception) -> None:
         self._agent_profile_error = error
@@ -1064,6 +1068,8 @@ class _FakeWorkbenchService:
         }
 
     async def list_decisions(self, session_id: str, mission_id: str):
+        if self._list_decisions_error is not None:
+            raise self._list_decisions_error
         self.listed_decisions.append(
             {"session_id": session_id, "mission_id": mission_id}
         )
@@ -5128,6 +5134,38 @@ async def test_get_decisions_endpoint_returns_decisions_and_mission_id() -> None
         ],
         "mission_id": "mission-2",
     }
+
+
+@pytest.mark.asyncio
+async def test_get_decisions_endpoint_maps_value_error_to_400() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_decisions_error(
+        ValueError("决策查询参数无效")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_decisions("sess-1", "mission-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_decisions == []
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "决策查询参数无效"
+
+
+@pytest.mark.asyncio
+async def test_get_decisions_endpoint_maps_runtime_error_to_503() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_decisions_error(
+        RuntimeError("决策日志暂不可用")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_decisions("sess-1", "mission-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_decisions == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "决策日志暂不可用"
 
 
 def test_get_intent_locks_route_accepts_path_and_returns_array() -> None:
