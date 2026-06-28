@@ -2883,6 +2883,50 @@ final class DaemonControllerTests {
         #expect(appState.selectedValidationRun == oldRun)
     }
 
+    @Test @MainActor func loadContextSnapshotSuccessStoresSelectedContextSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let snapshot = makeContextSnapshot(id: "context-001", taskID: "task-001", health: "stale")
+        await api.setContextSnapshotResult(.success(snapshot))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadContextSnapshot(snapshotID: "context-001")
+
+        #expect(appState.selectedContextSnapshot == snapshot)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadContextSnapshotWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        let oldSnapshot = makeContextSnapshot(id: "context-old", taskID: "task-001", health: "good")
+        appState.selectedContextSnapshot = oldSnapshot
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadContextSnapshot(snapshotID: "context-001")
+
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.selectedContextSnapshot == oldSnapshot)
+    }
+
+    @Test @MainActor func loadContextSnapshotFailurePreservesOldSelectedContextSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let oldSnapshot = makeContextSnapshot(id: "context-old", taskID: "task-001", health: "good")
+        appState.selectedContextSnapshot = oldSnapshot
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setContextSnapshotResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadContextSnapshot(snapshotID: "context-001")
+
+        #expect(appState.lastError == .httpStatus(500))
+        #expect(appState.selectedContextSnapshot == oldSnapshot)
+    }
+
     @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotApprovalsAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -3132,6 +3176,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setContextSnapshotsResult(_ result: Result<ContextSnapshotsDTO, APIError>) {
         contextSnapshotsResult = result
+    }
+
+    fileprivate func setContextSnapshotResult(_ result: Result<ContextSnapshotDTO, APIError>) {
+        contextSnapshotResult = result
     }
 
     fileprivate func setRecordContextHealthResult(_ result: Result<ContextSnapshotDTO, APIError>) {
@@ -3530,6 +3578,18 @@ private func makeValidationRun(id: String, taskID: String, status: String) -> Va
         output: status == "passed" ? "passed" : "failed",
         startedAt: "2026-06-27T06:00:00",
         completedAt: "2026-06-27T06:00:10"
+    )
+}
+
+private func makeContextSnapshot(id: String, taskID: String, health: String) -> ContextSnapshotDTO {
+    ContextSnapshotDTO(
+        id: id,
+        sessionID: "sess-001",
+        agentID: "agent-001",
+        taskID: taskID,
+        health: health,
+        reasons: health == "good" ? ["上下文健康"] : ["引用文件已过期"],
+        createdAt: "2026-06-27T06:00:00"
     )
 }
 
