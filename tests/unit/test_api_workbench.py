@@ -3850,6 +3850,65 @@ async def test_run_validation_endpoint_returns_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_validation_endpoint_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    body = ValidationRunCreate(
+        task_id="task-1",
+        actor="Human",
+        argv=["pytest", "test.py"],
+        cwd="/workspace",
+    )
+
+    response = await create_validation_run(
+        "sess-1",
+        body,
+        _fake_request(engine),
+        include_snapshot=True,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert response["validation_run"] == {
+        "id": "run-1",
+        "status": "passed",
+        "exit_code": 0,
+        "output": "ok",
+    }
+    assert response["snapshot"]["version"] == 1
+    assert response["snapshot"]["session_id"] == "sess-1"
+
+
+def test_run_validation_route_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/validation-runs",
+        params={"include_snapshot": "true"},
+        json={
+            "task_id": "task-1",
+            "actor": "Human",
+            "argv": ["pytest", "test.py"],
+            "cwd": "/workspace",
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["validation_run"] == {
+        "id": "run-1",
+        "status": "passed",
+        "exit_code": 0,
+        "output": "ok",
+    }
+    assert body["snapshot"]["version"] == 1
+    assert body["snapshot"]["session_id"] == "sess-1"
+
+
+@pytest.mark.asyncio
 async def test_run_validation_endpoint_maps_value_error_to_400() -> None:
     engine = _FakeEngine(exists=True)
     engine.workbench_service.set_run_validation_error(
