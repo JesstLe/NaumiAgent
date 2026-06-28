@@ -71,4 +71,18 @@ struct WorkbenchShellPresentationTests {
         #expect(shortWide.scaledSize.height <= shortWide.containerSize.height)
         #expect(shortWide.scale < presentation.navigationScale(for: 2048))
     }
+
+    @Test func shellViewportFillsReferencePreviewHeightWithoutBottomVoid() {
+        let presentation = WorkbenchShellPresentation()
+        let pageLayout = WorkbenchScaledPageLayout.dashboard
+
+        let viewport = presentation.shellViewport(
+            for: CGSize(width: 1440, height: 900),
+            pageLayout: pageLayout
+        )
+
+        #expect(abs(viewport.scale - 1) < 0.001)
+        #expect(abs(viewport.scaledSize.width - 1440) < 0.001)
+        #expect(abs(viewport.scaledSize.height - 900) < 0.001)
+    }
 }

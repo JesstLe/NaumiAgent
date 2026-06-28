@@ -33,8 +33,8 @@ public struct WorkbenchScaledPageLayout: Equatable, Sendable {
     public let baseWidth: Double
     public let baseHeight: Double
 
-    public static let dashboard = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 760)
-    public static let reviews = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 760)
+    public static let dashboard = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 858)
+    public static let reviews = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 858)
 
     public init(baseWidth: Double, baseHeight: Double) {
         self.baseWidth = baseWidth
