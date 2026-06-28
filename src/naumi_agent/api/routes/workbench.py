@@ -924,6 +924,7 @@ async def attach_workbench_issue(
     mission_id: str,
     body: IssueAttach,
     request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -957,7 +958,16 @@ async def attach_workbench_issue(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return issue
+    if not include_snapshot:
+        return issue
+
+    try:
+        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"issue": issue, "snapshot": snapshot}
 
 
 @router.post(

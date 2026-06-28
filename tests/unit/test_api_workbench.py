@@ -4450,6 +4450,29 @@ def test_create_issue_route_accepts_json_body_without_existing_task_id() -> None
     assert response.json()["risk_level"] == "high"
 
 
+def test_create_issue_route_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/missions/mission-1/issues",
+        params={"include_snapshot": "true"},
+        json={
+            "title": "实现 Issue 创建 API",
+            "acceptance_criteria": ["dashboard 刷新后可见"],
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["issue"]["task_id"] == "task-9"
+    assert body["snapshot"]["version"] == 1
+    assert body["snapshot"]["session_id"] == "sess-1"
+
+
 def test_get_issue_route_returns_single_issue_detail() -> None:
     engine = _FakeEngine(exists=True)
     app = FastAPI()
