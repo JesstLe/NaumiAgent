@@ -138,6 +138,7 @@ class _FakeWorkbenchService:
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
         self._list_intent_locks_error: Exception | None = None
+        self._get_intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
         self._agent_profile_error: Exception | None = None
         self._get_agent_profile_error: Exception | None = None
@@ -163,6 +164,9 @@ class _FakeWorkbenchService:
 
     def set_list_intent_locks_error(self, error: Exception) -> None:
         self._list_intent_locks_error = error
+
+    def set_get_intent_lock_error(self, error: Exception) -> None:
+        self._get_intent_lock_error = error
 
     def set_decision_error(self, error: Exception) -> None:
         self._decision_error = error
@@ -1043,6 +1047,8 @@ class _FakeWorkbenchService:
                 "lock_id": lock_id,
             }
         )
+        if self._get_intent_lock_error is not None:
+            raise self._get_intent_lock_error
         if lock_id == "missing-lock":
             return None
         return {
@@ -5028,6 +5034,62 @@ async def test_get_intent_lock_endpoint_returns_404_when_missing() -> None:
             "lock_id": "missing-lock",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_intent_lock_endpoint_maps_value_error_to_400() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_intent_lock_error(
+        ValueError("意图锁标识无效")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_intent_lock(
+            "sess-1",
+            "mission-2",
+            "bad-lock",
+            _fake_request(engine),
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_intent_locks == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-2",
+            "lock_id": "bad-lock",
+        }
+    ]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "意图锁标识无效"
+
+
+@pytest.mark.asyncio
+async def test_get_intent_lock_endpoint_maps_runtime_error_to_503() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_intent_lock_error(
+        RuntimeError("意图锁详情暂不可用")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_intent_lock(
+            "sess-1",
+            "mission-2",
+            "lock-2",
+            _fake_request(engine),
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_intent_locks == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-2",
+            "lock_id": "lock-2",
+        }
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "意图锁详情暂不可用"
 
 
 @pytest.mark.asyncio
