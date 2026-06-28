@@ -4230,6 +4230,60 @@ async def test_create_intent_lock_endpoint_returns_created_lock() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_intent_lock_endpoint_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    body = IntentLockCreate(
+        actor="Planner-Agent",
+        rule="高风险文件需要人工审批",
+        blocked_paths=["src/core"],
+        allowed_paths=["src/core/README.md"],
+        require_proposal_for_risk=RiskLevel.HIGH,
+    )
+
+    response = await create_intent_lock(
+        "sess-1",
+        "mission-1",
+        body,
+        _fake_request(engine),
+        include_snapshot=True,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert response["intent_lock"]["id"] == "lock-1"
+    assert response["intent_lock"]["require_proposal_for_risk"] == "high"
+    assert response["snapshot"]["version"] == 1
+    assert response["snapshot"]["session_id"] == "sess-1"
+
+
+def test_create_intent_lock_route_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/missions/mission-1/intent-locks",
+        params={"include_snapshot": "true"},
+        json={
+            "actor": "Planner-Agent",
+            "rule": "高风险文件需要人工审批",
+            "blocked_paths": ["src/core"],
+            "allowed_paths": ["src/core/README.md"],
+            "require_proposal_for_risk": "high",
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["intent_lock"]["id"] == "lock-1"
+    assert body["intent_lock"]["require_proposal_for_risk"] == "high"
+    assert body["snapshot"]["version"] == 1
+    assert body["snapshot"]["session_id"] == "sess-1"
+
+
+@pytest.mark.asyncio
 async def test_create_intent_lock_endpoint_maps_value_error_to_400() -> None:
     engine = _FakeEngine(exists=True)
     engine.workbench_service.set_intent_lock_error(ValueError("意图锁规则不能为空"))
