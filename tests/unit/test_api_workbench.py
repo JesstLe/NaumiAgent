@@ -297,6 +297,7 @@ class _FakeWorkbenchService:
         if self._dashboard_snapshot_error is not None:
             raise self._dashboard_snapshot_error
         return {
+            "version": 1,
             "session_id": session_id,
             "missions": [],
             "tasks": [],
@@ -1799,6 +1800,36 @@ async def test_workbench_event_stream_sends_initial_audit_events_on_connect() ->
         },
         {"type": "refresh_complete", "count": 1},
     ]
+
+
+@pytest.mark.asyncio
+async def test_workbench_event_stream_can_send_initial_snapshot_on_connect() -> None:
+    engine = _FakeEngine(exists=True)
+    websocket = _RecordingWorkbenchWebSocket(
+        engine,
+        query_params={"include_snapshot": "true"},
+    )
+
+    await websocket_workbench_events(websocket, "sess-1")
+
+    assert websocket.accepted is True
+    assert engine.loaded == ["sess-1"]
+    assert websocket.sent_json[0] == {"type": "connected", "session_id": "sess-1"}
+    assert websocket.sent_json[1] == {
+        "type": "workbench/snapshot",
+        "version": 1,
+        "payload": {
+            "version": 1,
+            "session_id": "sess-1",
+            "missions": [],
+            "tasks": [],
+            "issues": [],
+            "leases": [],
+            "failures": [],
+            "events": [],
+        },
+    }
+    assert websocket.sent_json[-1] == {"type": "refresh_complete", "count": 1}
 
 
 @pytest.mark.asyncio
