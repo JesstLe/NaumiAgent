@@ -1347,6 +1347,43 @@ final class WorkbenchAPIClientTests {
         #expect(response.missions.isEmpty)
     }
 
+    @Test func fetchMissionEncodesPathComponentsAndDecodesGoal() async throws {
+        let sessionID = "sess 中文"
+        let missionID = "mission/总览 001"
+        let json = Data(
+            """
+            {"id":"mission/总览 001","session_id":"sess 中文","title":"Mac 工作台","goal":"补齐 Mission 详情 API","status":"planning","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/missions/mission%2F%E6%80%BB%E8%A7%88%20001" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let mission = try await client.fetchMission(sessionID: sessionID, missionID: missionID)
+
+        #expect(mission.id == missionID)
+        #expect(mission.sessionID == sessionID)
+        #expect(mission.title == "Mac 工作台")
+        #expect(mission.goal == "补齐 Mission 详情 API")
+        #expect(mission.status == "planning")
+        #expect(mission.createdAt == "2026-06-27T06:00:00")
+        #expect(mission.updatedAt == "2026-06-27T06:10:00")
+    }
+
     @Test func fetchAgentProfilesWithStatus() async throws {
         let sessionID = "sess 中文"
         let status = "busy"

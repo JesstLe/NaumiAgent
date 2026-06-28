@@ -33,6 +33,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
     var createMissionResult: Result<MissionDTO, APIError>?
+    var missionResult: Result<MissionDTO, APIError>?
     var attachIssueResult: Result<IssueDTO, APIError>?
     var createIssueResult: Result<IssueDTO, APIError>?
     var createIntentLockResult: Result<IntentLockDTO, APIError>?
@@ -292,6 +293,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> MissionsDTO {
         guard let result = missionsResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchMission(sessionID: String, missionID: String) async throws(APIError) -> MissionDTO {
+        guard let result = missionResult else {
             throw .invalidResponse
         }
         return try result.get()

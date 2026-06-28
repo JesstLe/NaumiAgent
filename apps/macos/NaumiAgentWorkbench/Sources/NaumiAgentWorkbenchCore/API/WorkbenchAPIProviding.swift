@@ -128,6 +128,9 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> MissionsDTO
 
+    /// Fetches one mission by id for detail drill-downs.
+    func fetchMission(sessionID: String, missionID: String) async throws(APIError) -> MissionDTO
+
     /// Fetches agent capability profiles for the given session, optionally filtered by status.
     func fetchAgentProfiles(
         sessionID: String,
