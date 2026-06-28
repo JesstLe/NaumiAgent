@@ -1061,6 +1061,7 @@ class FakeTaskMarket:
         self._expired: list[Lease] = []
         self._claim_error: Exception | None = None
         self._release_error: Exception | None = None
+        self._expire_error: Exception | None = None
 
     def set_lease(self, lease: Lease | None) -> None:
         self._lease = lease
@@ -1073,6 +1074,9 @@ class FakeTaskMarket:
 
     def set_release_error(self, error: Exception) -> None:
         self._release_error = error
+
+    def set_expire_error(self, error: Exception) -> None:
+        self._expire_error = error
 
     async def claim(
         self,
@@ -1105,6 +1109,8 @@ class FakeTaskMarket:
     async def expire_overdue_leases(self, *, session_id: str, now=None) -> list[Lease]:
         self.expired_calls += 1
         self.expired_sessions.append(session_id)
+        if self._expire_error is not None:
+            raise self._expire_error
         return list(self._expired)
 
 
@@ -3133,6 +3139,22 @@ async def test_expire_leases_endpoint_returns_expired_list() -> None:
     assert market.expired_calls == 1
     assert market.expired_sessions == ["sess-1"]
     assert response == {"expired": [asdict(lease)]}
+
+
+@pytest.mark.asyncio
+async def test_expire_leases_endpoint_reports_unavailable_task_market() -> None:
+    market = FakeTaskMarket()
+    market.set_expire_error(RuntimeError("task market unavailable"))
+    engine = _FakeEngine(exists=True, workbench_market=market)
+
+    with pytest.raises(HTTPException) as exc:
+        await expire_workbench_leases("sess-1", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert market.expired_calls == 1
+    assert market.expired_sessions == ["sess-1"]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "task market unavailable"
 
 
 @pytest.mark.asyncio
