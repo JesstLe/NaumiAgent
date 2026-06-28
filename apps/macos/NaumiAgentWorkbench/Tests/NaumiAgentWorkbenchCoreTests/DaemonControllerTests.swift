@@ -55,6 +55,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var sessionsCallCount: Int = 0
     var snapshotCallCount: Int = 0
     var runValidationCallCount: Int = 0
+    var createdSessions: [[String: String?]] = []
 
     func fetchBootstrap(pageSize: Int) async throws(APIError) -> WorkbenchBootstrapDTO {
         bootstrapCallCount += 1
@@ -120,6 +121,11 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         model: String?,
         systemPrompt: String?
     ) async throws(APIError) -> SessionDTO {
+        createdSessions.append([
+            "title": title,
+            "model": model,
+            "systemPrompt": systemPrompt,
+        ])
         guard let result = createSessionResult else {
             throw .invalidResponse
         }
@@ -1319,6 +1325,70 @@ final class DaemonControllerTests {
 
         #expect(appState.sessions == [oldSession])
         #expect(appState.lastError == .httpStatus(500))
+    }
+
+    @Test @MainActor func createSessionSuccessSelectsSessionAndPreWarmsWorkbenchLists() async throws {
+        let appState = AppState()
+        let existingSession = makeSession(id: "sess-old", title: "Old Session")
+        let createdSession = makeSession(id: "sess-new", title: "Mac 工作台")
+        let snapshot = makeSnapshot(sessionID: "sess-new", missions: [])
+        appState.sessions = [existingSession]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateSessionResult(.success(createdSession))
+        await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-new")
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createSession(
+            title: "Mac 工作台",
+            model: "gpt-5",
+            systemPrompt: "默认中文治理工作台"
+        )
+
+        #expect(await api.createdSessions == [[
+            "title": "Mac 工作台",
+            "model": "gpt-5",
+            "systemPrompt": "默认中文治理工作台",
+        ]])
+        #expect(appState.sessions == [createdSession, existingSession])
+        #expect(appState.selectedSessionID == "sess-new")
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == nil)
+        expectWorkbenchListsPopulated(appState)
+    }
+
+    @Test @MainActor func createSessionFailurePreservesWorkbenchStateAndRecordsError() async throws {
+        let appState = AppState()
+        let existingSession = makeSession(id: "sess-old", title: "Old Session")
+        let snapshot = makeSnapshot(sessionID: "sess-old", missions: [makeMission(id: "mission-1", sessionID: "sess-old")])
+        let issue = makeIssue(taskID: "task-existing", missionID: "mission-1")
+        appState.sessions = [existingSession]
+        appState.selectedSessionID = "sess-old"
+        appState.snapshot = snapshot
+        appState.issues = [issue]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateSessionResult(.failure(.httpStatus(503)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createSession(
+            title: "Mac 工作台",
+            model: "gpt-5",
+            systemPrompt: "默认中文治理工作台"
+        )
+
+        #expect(await api.createdSessions == [[
+            "title": "Mac 工作台",
+            "model": "gpt-5",
+            "systemPrompt": "默认中文治理工作台",
+        ]])
+        #expect(await api.snapshotCallCount == 0)
+        #expect(appState.sessions == [existingSession])
+        #expect(appState.selectedSessionID == "sess-old")
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.issues == [issue])
+        #expect(appState.lastError == .httpStatus(503))
     }
 
     @Test @MainActor func selectSessionSuccessClearsStaleListsSelectsAndPreWarms() async throws {
@@ -3841,6 +3911,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setSessionsResult(_ result: Result<SessionListDTO, APIError>) {
         sessionsResult = result
+    }
+
+    fileprivate func setCreateSessionResult(_ result: Result<SessionDTO, APIError>) {
+        createSessionResult = result
     }
 
     fileprivate func setEventsResult(_ result: Result<WorkbenchEventsDTO, APIError>) {
