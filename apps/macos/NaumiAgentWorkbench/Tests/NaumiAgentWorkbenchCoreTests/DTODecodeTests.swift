@@ -78,6 +78,39 @@ struct DTODecodeTests {
         #expect(agent.status == "busy")
     }
 
+    @Test func decodeSnapshotSummary() throws {
+        let data = Data(
+            """
+            {
+              "session_id": "sess-summary",
+              "summary": {
+                "current_mission_title": "实现 SwiftUI 工作台骨架",
+                "active_agents": 4,
+                "open_issues": 12,
+                "blocked_issues": 2,
+                "pending_approvals": 3,
+                "failed_validations": 1
+              },
+              "missions": [],
+              "tasks": [],
+              "issues": [],
+              "failures": [],
+              "events": []
+            }
+            """.utf8
+        )
+
+        let snapshot = try JSONDecoder().decode(WorkbenchSnapshotDTO.self, from: data)
+        let summary = try #require(snapshot.summary)
+
+        #expect(summary.currentMissionTitle == "实现 SwiftUI 工作台骨架")
+        #expect(summary.activeAgents == 4)
+        #expect(summary.openIssues == 12)
+        #expect(summary.blockedIssues == 2)
+        #expect(summary.pendingApprovals == 3)
+        #expect(summary.failedValidations == 1)
+    }
+
     @Test func decodeValidationRuns() throws {
         let data = Data(
             """
