@@ -494,13 +494,23 @@ async def _send_workbench_event_refresh(
     actor: str | None,
     limit: int,
 ) -> None:
-    result = await engine.workbench_service.list_events(
-        session_id,
-        event_type=event_type,
-        subject_id=subject_id,
-        actor=actor,
-        limit=limit,
-    )
+    try:
+        result = await engine.workbench_service.list_events(
+            session_id,
+            event_type=event_type,
+            subject_id=subject_id,
+            actor=actor,
+            limit=limit,
+        )
+    except (RuntimeError, ValueError) as exc:
+        logger.warning(
+            "Workbench event stream refresh failed for session %s",
+            session_id,
+            exc_info=True,
+        )
+        await websocket.send_json({"type": "error", "message": str(exc)})
+        return
+
     events = result["events"]
     for event in events:
         await websocket.send_json({"type": "workbench.event", "event": event})
