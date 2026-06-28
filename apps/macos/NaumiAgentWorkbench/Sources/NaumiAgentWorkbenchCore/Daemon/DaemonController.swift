@@ -1071,12 +1071,11 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Releases a lease and refreshes the leases, timeline events, and
-    /// snapshot lists on success.
+    /// Releases a lease and refreshes the leases and timeline events on success.
     ///
-    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot and leases are never mutated
-    /// directly.
+    /// Requires `appState.selectedSessionID` to be set. The mutation response
+    /// supplies the authoritative snapshot; follow-up refresh failures are
+    /// preserved without mutating the local leases list directly.
     public func releaseLease(leaseID: String) async {
         guard let sessionID = appState.selectedSessionID else {
             appState.lastError = .missingSelectedSession
@@ -1085,13 +1084,17 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            _ = try await apiProvider.releaseLease(
+            let response = try await apiProvider.releaseLeaseWithSnapshot(
                 sessionID: sessionID,
                 leaseID: leaseID
             )
+            appState.snapshot = response.snapshot
+            var refreshError: APIError?
             await refreshLeases()
+            refreshError = refreshError ?? appState.lastError
             await refreshEvents(limit: 50)
-            await refreshSnapshot()
+            refreshError = refreshError ?? appState.lastError
+            appState.lastError = refreshError
         } catch {
             appState.lastError = error
         }
