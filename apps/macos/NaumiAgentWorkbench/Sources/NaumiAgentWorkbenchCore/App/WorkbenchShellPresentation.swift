@@ -11,6 +11,7 @@ public struct WorkbenchShellPresentation: Equatable, Sendable {
     public let minimumWindowWidth: Double
     public let minimumWindowHeight: Double
     public let navigationRoutes: [AppRoute]
+    public let nativeWindowTitle: String
 
     public init(
         showsSyntheticWindowControls: Bool = false,
@@ -20,7 +21,8 @@ public struct WorkbenchShellPresentation: Equatable, Sendable {
         globalStatusHeight: Double = 0,
         minimumWindowWidth: Double = 1180,
         minimumWindowHeight: Double = 760,
-        navigationRoutes: [AppRoute] = AppRoute.topNavigationRoutes
+        navigationRoutes: [AppRoute] = AppRoute.topNavigationRoutes,
+        nativeWindowTitle: String = ""
     ) {
         self.showsSyntheticWindowControls = showsSyntheticWindowControls
         self.placesNavigationBelowTitleBar = placesNavigationBelowTitleBar
@@ -30,5 +32,6 @@ public struct WorkbenchShellPresentation: Equatable, Sendable {
         self.minimumWindowWidth = minimumWindowWidth
         self.minimumWindowHeight = minimumWindowHeight
         self.navigationRoutes = navigationRoutes
+        self.nativeWindowTitle = nativeWindowTitle
     }
 }

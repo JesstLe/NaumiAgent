@@ -22,7 +22,7 @@ struct WorkbenchPageLayoutTests {
         #expect(size.height < layout.baseHeight)
     }
 
-    @Test func scaledLayoutUsesWindowWidthSoThreeColumnsStayVisible() {
+    @Test func scaledLayoutUsesAvailableSizeSoThreeColumnsStayVisible() {
         let layout = WorkbenchScaledPageLayout.dashboard
 
         let native = layout.scaledSize(for: CGSize(width: 1360, height: 720))
@@ -32,12 +32,12 @@ struct WorkbenchPageLayoutTests {
         #expect(abs(native.width - layout.baseWidth) < 0.001)
         #expect(abs(native.height - layout.baseHeight) < 0.001)
         #expect(wideButShort.width <= 2048)
-        #expect(wideButShort.height > 900)
+        #expect(wideButShort.height <= 900)
         #expect(abs(narrow.width - 900) < 0.001)
         #expect(narrow.height < 620)
     }
 
-    @Test func scaledViewportKeepsWidthFittedAndScrollsOnlyVertically() {
+    @Test func scaledViewportKeepsTheFullWorkbenchFitted() {
         let layout = WorkbenchScaledPageLayout.dashboard
 
         let compact = layout.viewport(for: CGSize(width: 1180, height: 760))
@@ -50,7 +50,7 @@ struct WorkbenchPageLayoutTests {
         #expect(compact.showsVerticalScroll == false)
         #expect(wide.showsVerticalScroll == false)
         #expect(wideButShort.scaledSize.width <= wideButShort.containerSize.width)
-        #expect(wideButShort.scaledSize.height > wideButShort.containerSize.height)
-        #expect(wideButShort.showsVerticalScroll == true)
+        #expect(wideButShort.scaledSize.height <= wideButShort.containerSize.height)
+        #expect(wideButShort.showsVerticalScroll == false)
     }
 }

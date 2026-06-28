@@ -14,5 +14,6 @@ struct WorkbenchShellPresentationTests {
         #expect(presentation.minimumWindowWidth == 1180)
         #expect(presentation.minimumWindowHeight == 760)
         #expect(presentation.navigationRoutes == AppRoute.topNavigationRoutes)
+        #expect(presentation.nativeWindowTitle.isEmpty)
     }
 }
