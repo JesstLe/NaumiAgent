@@ -1059,7 +1059,7 @@ class FakeTaskMarket:
         self.expired_sessions: list[str] = []
         self._lease: Lease | None = None
         self._expired: list[Lease] = []
-        self._claim_error: ValueError | None = None
+        self._claim_error: Exception | None = None
 
     def set_lease(self, lease: Lease | None) -> None:
         self._lease = lease
@@ -1067,7 +1067,7 @@ class FakeTaskMarket:
     def set_expired(self, leases: list[Lease]) -> None:
         self._expired = leases
 
-    def set_claim_error(self, error: ValueError) -> None:
+    def set_claim_error(self, error: Exception) -> None:
         self._claim_error = error
 
     async def claim(
@@ -2601,6 +2601,24 @@ async def test_claim_issue_endpoint_maps_value_error_to_400() -> None:
         await claim_workbench_issue("sess-1", "task-1", body, _fake_request(engine), auth="test")
 
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_claim_issue_endpoint_reports_unavailable_task_market() -> None:
+    market = FakeTaskMarket()
+    market.set_claim_error(RuntimeError("task market unavailable"))
+    engine = _FakeEngine(exists=True, workbench_market=market)
+    body = ClaimIssue(agent_id="Agent-1", duration_minutes=30, worktree_name="wt-1")
+
+    with pytest.raises(HTTPException) as exc:
+        await claim_workbench_issue(
+            "sess-1", "task-1", body, _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert market.claimed == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "task market unavailable"
 
 
 @pytest.mark.asyncio
