@@ -1740,6 +1740,43 @@ final class WorkbenchAPIClientTests {
         #expect(lease.worktreeName == "wt-001")
     }
 
+    @Test func claimIssueWithSnapshotRequestsFreshSnapshot() async throws {
+        let responseJSON = Data(
+            """
+            {"lease":{"id":"lease-001","session_id":"sess-001","task_id":"task-001","agent_id":"agent-001","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"},"snapshot":{"session_id":"sess-001","summary":{"current_mission_title":"认领后刷新","active_agents":1,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/issues/task-001/claim?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient()
+        let response = try await client.claimIssueWithSnapshot(
+            sessionID: "sess-001",
+            taskID: "task-001",
+            agentID: "agent-001",
+            durationMinutes: 60,
+            worktreeName: "wt-001"
+        )
+
+        #expect(response.lease.id == "lease-001")
+        #expect(response.snapshot.sessionID == "sess-001")
+        #expect(response.snapshot.summary?.currentMissionTitle == "认领后刷新")
+    }
+
     @Test func releaseLease() async throws {
         let leaseJSON = Data(
             """

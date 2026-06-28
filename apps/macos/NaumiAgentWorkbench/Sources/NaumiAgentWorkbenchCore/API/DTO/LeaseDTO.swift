@@ -24,3 +24,9 @@ public struct LeaseDTO: Decodable, Equatable, Sendable {
         case updatedAt = "updated_at"
     }
 }
+
+/// Response returned when a lease mutation asks the backend for a fresh snapshot.
+public struct LeaseSnapshotDTO: Decodable, Equatable, Sendable {
+    public let lease: LeaseDTO
+    public let snapshot: WorkbenchSnapshotDTO
+}
