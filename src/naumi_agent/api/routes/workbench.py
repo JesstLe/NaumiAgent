@@ -1454,6 +1454,8 @@ async def resolve_approval(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if approval is None:
         raise HTTPException(status_code=404, detail="审批请求不存在")
     return approval
