@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -17,6 +18,7 @@ from naumi_agent.workbench.models import ApprovalState, DecisionKind, ParallelMo
 
 router = APIRouter(tags=["workbench"])
 LOCAL_DAEMON_BIND_HOST = "127.0.0.1"
+logger = logging.getLogger(__name__)
 
 
 class DaemonStatusResponse(BaseModel):
@@ -328,10 +330,17 @@ async def get_workbench_bootstrap(
     if candidate_session_id is not None and await engine.load_session(
         candidate_session_id
     ):
-        selected_session_id = candidate_session_id
-        snapshot = await engine.workbench_service.dashboard_snapshot(
-            selected_session_id
-        )
+        try:
+            snapshot = await engine.workbench_service.dashboard_snapshot(
+                candidate_session_id
+            )
+        except (RuntimeError, ValueError):
+            logger.exception(
+                "Workbench bootstrap snapshot failed for session %s",
+                candidate_session_id,
+            )
+        else:
+            selected_session_id = candidate_session_id
 
     return WorkbenchBootstrapResponse(
         daemon_status=await _build_daemon_status(request),

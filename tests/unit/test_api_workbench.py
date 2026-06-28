@@ -123,6 +123,7 @@ class _FakeWorkbenchService:
         self._context_health_error: Exception | None = None
         self._resolve_approval_error: Exception | None = None
         self._resolve_approval_result: dict | None = None
+        self._dashboard_snapshot_error: Exception | None = None
 
     def set_run_validation_error(self, error: Exception) -> None:
         self._run_validation_error = error
@@ -145,7 +146,12 @@ class _FakeWorkbenchService:
     def set_resolve_approval_result(self, result: dict | None) -> None:
         self._resolve_approval_result = result
 
+    def set_dashboard_snapshot_error(self, error: Exception) -> None:
+        self._dashboard_snapshot_error = error
+
     async def dashboard_snapshot(self, session_id: str):
+        if self._dashboard_snapshot_error is not None:
+            raise self._dashboard_snapshot_error
         return {
             "session_id": session_id,
             "missions": [],
@@ -2582,6 +2588,35 @@ async def test_workbench_bootstrap_does_not_select_unloadable_latest_session() -
     assert response.snapshot is None
     assert response.daemon_status.status == "running"
     assert engine.loaded == ["sess-broken"]
+
+
+@pytest.mark.asyncio
+async def test_workbench_bootstrap_keeps_daemon_ready_when_snapshot_fails() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_dashboard_snapshot_error(
+        RuntimeError("snapshot backend unavailable")
+    )
+    latest_session = SimpleNamespace(
+        id="sess-snapshot-fails",
+        title="快照失败会话",
+        model="gpt-5",
+        created_at=datetime(2026, 6, 27, 8, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 27, 9, 0, tzinfo=UTC),
+        messages=[],
+        total_tokens=0,
+        total_cost_usd=0.0,
+        status="active",
+    )
+    engine.session_store = _FakeSessionStoreWithLatest([latest_session])
+    request = _fake_status_request(engine)
+
+    response = await get_workbench_bootstrap(request, auth="test")
+
+    assert response.sessions[0]["id"] == "sess-snapshot-fails"
+    assert response.selected_session_id is None
+    assert response.snapshot is None
+    assert response.daemon_status.status == "running"
+    assert engine.loaded == ["sess-snapshot-fails"]
 
 
 @pytest.mark.asyncio
