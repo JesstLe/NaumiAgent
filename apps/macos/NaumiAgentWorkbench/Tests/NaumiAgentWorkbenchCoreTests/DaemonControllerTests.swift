@@ -24,6 +24,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var issuesResult: Result<IssuesDTO, APIError>?
     var issueResult: Result<IssueDTO, APIError>?
     var leasesResult: Result<LeasesDTO, APIError>?
+    var leaseResult: Result<LeaseDTO, APIError>?
     var worktreesResult: Result<WorktreesDTO, APIError>?
     var worktreeResult: Result<WorktreeDTO, APIError>?
     var keepWorktreeResult: Result<WorktreeDTO, APIError>?
@@ -256,6 +257,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> LeasesDTO {
         guard let result = leasesResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
+        guard let result = leaseResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -2912,6 +2920,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setClaimIssueResult(_ result: Result<LeaseDTO, APIError>) {
         claimIssueResult = result
+    }
+
+    fileprivate func setLeaseResult(_ result: Result<LeaseDTO, APIError>) {
+        leaseResult = result
     }
 
     fileprivate func setReleaseLeaseResult(_ result: Result<LeaseDTO, APIError>) {

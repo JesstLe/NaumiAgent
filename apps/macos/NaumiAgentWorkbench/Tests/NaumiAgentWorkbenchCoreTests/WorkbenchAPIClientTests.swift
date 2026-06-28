@@ -1171,6 +1171,45 @@ final class WorkbenchAPIClientTests {
         #expect(response.leases.isEmpty)
     }
 
+    @Test func fetchLeaseEncodesPathComponentsAndDecodesWorktreeBinding() async throws {
+        let sessionID = "sess 中文"
+        let leaseID = "lease/任务 001"
+        let json = Data(
+            """
+            {"id":"lease/任务 001","session_id":"sess 中文","task_id":"task-001","agent_id":"agent-001","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-task-market","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/leases/lease%2F%E4%BB%BB%E5%8A%A1%20001" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let lease = try await client.fetchLease(sessionID: sessionID, leaseID: leaseID)
+
+        #expect(lease.id == leaseID)
+        #expect(lease.sessionID == sessionID)
+        #expect(lease.taskID == "task-001")
+        #expect(lease.agentID == "agent-001")
+        #expect(lease.state == "active")
+        #expect(lease.expiresAt == "2026-06-27T08:00:00")
+        #expect(lease.worktreeName == "wt-task-market")
+        #expect(lease.createdAt == "2026-06-27T06:00:00")
+        #expect(lease.updatedAt == "2026-06-27T06:10:00")
+    }
+
     @Test func fetchWorktreesWithFilters() async throws {
         let sessionID = "sess 中文"
         let taskID = "task 001/审查"

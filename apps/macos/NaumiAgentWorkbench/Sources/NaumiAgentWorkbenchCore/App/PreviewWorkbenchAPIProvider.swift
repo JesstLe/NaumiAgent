@@ -230,6 +230,10 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         LeasesDTO(leases: [], state: state, taskID: taskID, agentID: agentID, limit: limit)
     }
 
+    func fetchLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
+        makeLease(sessionID: sessionID, leaseID: leaseID, taskID: "preview-task")
+    }
+
     func fetchWorktrees(
         sessionID: String,
         taskID: String?,
