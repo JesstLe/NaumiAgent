@@ -5571,6 +5571,44 @@ def test_keep_worktree_route_marks_worktree_kept_and_records_audit_event() -> No
     ]
 
 
+def test_keep_worktree_route_can_return_fresh_snapshot() -> None:
+    worktree_manager = FakeWorktreeManager(
+        [
+            WorktreeRecord(
+                name="wt-api",
+                path="/repo/.naumi/worktrees/wt-api",
+                branch="naumi/worktree-wt-api",
+                base_ref="abc123",
+                status=WorktreeStatus.DIRTY,
+                task_id="task-1",
+                dirty_files=2,
+                commits_ahead=1,
+                created_at="2024-01-01T00:00:00",
+                updated_at="2024-01-01T00:04:00",
+            )
+        ]
+    )
+    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/worktrees/wt-api/keep",
+        params={"include_snapshot": "true"},
+        json={"actor": "Reviewer-Agent", "reason": "等待人工审查"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["worktree"]["name"] == "wt-api"
+    assert body["worktree"]["status"] == "kept"
+    assert body["worktree"]["kept_reason"] == "等待人工审查"
+    assert body["snapshot"]["version"] == 1
+    assert body["snapshot"]["session_id"] == "sess-1"
+
+
 def test_keep_worktree_route_returns_404_for_missing_worktree() -> None:
     engine = _FakeEngine(exists=True, worktree_manager=FakeWorktreeManager())
     app = FastAPI()

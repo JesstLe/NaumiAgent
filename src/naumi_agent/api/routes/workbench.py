@@ -1476,6 +1476,7 @@ async def keep_worktree(
     name: str,
     body: WorktreeKeep,
     request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -1509,7 +1510,17 @@ async def keep_worktree(
             subject_id=name,
             payload={"reason": reason},
         )
-    return _worktree_to_dict(record)
+    worktree = _worktree_to_dict(record)
+    if not include_snapshot:
+        return worktree
+
+    try:
+        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"worktree": worktree, "snapshot": snapshot}
 
 
 @router.get("/workbench/sessions/{session_id}/worktrees/{name:path}")
