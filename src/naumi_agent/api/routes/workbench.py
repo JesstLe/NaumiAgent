@@ -1193,6 +1193,7 @@ async def release_workbench_lease(
     session_id: str,
     lease_id: str,
     request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -1208,7 +1209,17 @@ async def release_workbench_lease(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if lease is None:
         raise HTTPException(status_code=404, detail="租约不存在")
-    return asdict(lease)
+    lease_payload = asdict(lease)
+    if not include_snapshot:
+        return lease_payload
+
+    try:
+        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"lease": lease_payload, "snapshot": snapshot}
 
 
 @router.post("/workbench/sessions/{session_id}/leases/expire")
