@@ -127,6 +127,7 @@ class _FakeWorkbenchService:
         self._dashboard_snapshot_error: Exception | None = None
         self._list_events_error: Exception | None = None
         self._get_event_error: Exception | None = None
+        self._list_validation_runs_error: Exception | None = None
 
     def set_run_validation_error(self, error: Exception) -> None:
         self._run_validation_error = error
@@ -157,6 +158,9 @@ class _FakeWorkbenchService:
 
     def set_get_event_error(self, error: Exception) -> None:
         self._get_event_error = error
+
+    def set_list_validation_runs_error(self, error: Exception) -> None:
+        self._list_validation_runs_error = error
 
     async def dashboard_snapshot(self, session_id: str):
         if self._dashboard_snapshot_error is not None:
@@ -527,6 +531,8 @@ class _FakeWorkbenchService:
     async def list_validation_runs(
         self, session_id: str, task_id: str | None = None, limit: int = 50
     ):
+        if self._list_validation_runs_error is not None:
+            raise self._list_validation_runs_error
         self.listed_validation_runs.append(
             {"session_id": session_id, "task_id": task_id, "limit": limit}
         )
@@ -1688,6 +1694,40 @@ async def test_get_validation_runs_endpoint_returns_runs_and_params() -> None:
         "task_id": "task-2",
         "limit": 25,
     }
+
+
+@pytest.mark.asyncio
+async def test_get_validation_runs_endpoint_reports_unavailable_validation_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_validation_runs_error(
+        RuntimeError("validation store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_validation_runs(
+            "sess-1", _fake_request(engine), task_id="task-2", limit=25, auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "validation store unavailable"
+
+
+@pytest.mark.asyncio
+async def test_get_validation_runs_endpoint_reports_invalid_validation_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_validation_runs_error(
+        ValueError("validation filter is invalid")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_validation_runs(
+            "sess-1", _fake_request(engine), task_id="task-2", limit=25, auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "validation filter is invalid"
 
 
 @pytest.mark.asyncio
