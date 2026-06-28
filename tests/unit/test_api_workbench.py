@@ -1072,16 +1072,20 @@ class _FakeEngine:
         exists: bool,
         workbench_market=None,
         worktree_manager: FakeWorktreeManager | None = None,
+        load_session_result: bool | None = None,
     ) -> None:
         self.session_store = _FakeSessionStore(exists)
         self.workbench_service = _FakeWorkbenchService()
         self.workbench_store = FakeWorkbenchStore()
         self.workbench_market = workbench_market
         self.worktree_manager = worktree_manager or FakeWorktreeManager()
+        self.load_session_result = load_session_result
         self.loaded: list[str] = []
 
     async def load_session(self, session_id: str) -> bool:
         self.loaded.append(session_id)
+        if self.load_session_result is not None:
+            return self.load_session_result
         exists = getattr(self.session_store, "exists", None)
         if exists is not None:
             return bool(exists)
@@ -2552,6 +2556,32 @@ async def test_workbench_bootstrap_returns_latest_session_and_snapshot() -> None
     assert response.capabilities.protocol_version == 1
     assert engine.session_store.loaded == ["sess-latest"]
     assert engine.loaded == ["sess-latest"]
+
+
+@pytest.mark.asyncio
+async def test_workbench_bootstrap_does_not_select_unloadable_latest_session() -> None:
+    engine = _FakeEngine(exists=True, load_session_result=False)
+    latest_session = SimpleNamespace(
+        id="sess-broken",
+        title="损坏会话",
+        model="gpt-5",
+        created_at=datetime(2026, 6, 27, 8, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 27, 9, 0, tzinfo=UTC),
+        messages=[],
+        total_tokens=0,
+        total_cost_usd=0.0,
+        status="active",
+    )
+    engine.session_store = _FakeSessionStoreWithLatest([latest_session])
+    request = _fake_status_request(engine)
+
+    response = await get_workbench_bootstrap(request, auth="test")
+
+    assert response.sessions[0]["id"] == "sess-broken"
+    assert response.selected_session_id is None
+    assert response.snapshot is None
+    assert response.daemon_status.status == "running"
+    assert engine.loaded == ["sess-broken"]
 
 
 @pytest.mark.asyncio
