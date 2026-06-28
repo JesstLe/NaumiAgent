@@ -83,6 +83,9 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> IssuesDTO
 
+    /// Fetches one issue metadata record by task id for detail drill-downs.
+    func fetchIssue(sessionID: String, taskID: String) async throws(APIError) -> IssueDTO
+
     /// Fetches leases for the given session, optionally filtered by state, task, or agent.
     func fetchLeases(
         sessionID: String,

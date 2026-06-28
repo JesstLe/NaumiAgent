@@ -954,6 +954,49 @@ final class WorkbenchAPIClientTests {
         #expect(response.issues.isEmpty)
     }
 
+    @Test func fetchIssueEncodesPathComponentsAndDecodesGovernanceMetadata() async throws {
+        let sessionID = "sess 中文"
+        let taskID = "task/市场 001"
+        let json = Data(
+            """
+            {"session_id":"sess 中文","task_id":"task/市场 001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["通过验证","更新审查说明"],"expected_artifacts":["src/naumi_agent/workbench/market.py"],"related_branch":"issue/task-market","related_worktree":"wt-task-market","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/issues/task%2F%E5%B8%82%E5%9C%BA%20001" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let issue = try await client.fetchIssue(sessionID: sessionID, taskID: taskID)
+
+        #expect(issue.sessionID == sessionID)
+        #expect(issue.taskID == taskID)
+        #expect(issue.missionID == "mission-001")
+        #expect(issue.parallelMode == "exclusive")
+        #expect(issue.riskLevel == "high")
+        #expect(issue.requiresHumanApproval == true)
+        #expect(issue.acceptanceCriteria == ["通过验证", "更新审查说明"])
+        #expect(issue.expectedArtifacts == ["src/naumi_agent/workbench/market.py"])
+        #expect(issue.relatedBranch == "issue/task-market")
+        #expect(issue.relatedWorktree == "wt-task-market")
+        #expect(issue.relatedPR == "")
+        #expect(issue.createdAt == "2026-06-27T06:00:00")
+        #expect(issue.updatedAt == "2026-06-27T06:10:00")
+    }
+
     @Test func fetchLeasesWithFilters() async throws {
         let sessionID = "sess 中文"
         let taskID = "task 001/审查"
