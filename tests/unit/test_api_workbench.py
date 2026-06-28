@@ -137,6 +137,7 @@ class _FakeWorkbenchService:
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
         self._agent_profile_error: Exception | None = None
+        self._list_failures_error: Exception | None = None
         self._context_health_error: Exception | None = None
         self._resolve_approval_error: Exception | None = None
         self._resolve_approval_result: dict | None = None
@@ -213,6 +214,9 @@ class _FakeWorkbenchService:
 
     def set_get_lease_error(self, error: Exception) -> None:
         self._get_lease_error = error
+
+    def set_list_failures_error(self, error: Exception) -> None:
+        self._list_failures_error = error
 
     def set_list_approvals_error(self, error: Exception) -> None:
         self._list_approvals_error = error
@@ -777,6 +781,8 @@ class _FakeWorkbenchService:
         status: str | None = None,
         limit: int = 50,
     ):
+        if self._list_failures_error is not None:
+            raise self._list_failures_error
         self.listed_failures.append(
             {
                 "session_id": session_id,
@@ -2914,6 +2920,52 @@ async def test_get_failures_endpoint_without_filters() -> None:
     assert response.model_dump()["status"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["failures"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_failures_endpoint_reports_invalid_failure_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_failures_error(
+        ValueError("failure filter is invalid")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_failures(
+            "sess-1",
+            _fake_request(engine),
+            task_id=None,
+            status="invalid",
+            limit=10,
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_failures == []
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "failure filter is invalid"
+
+
+@pytest.mark.asyncio
+async def test_get_failures_endpoint_reports_unavailable_failure_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_failures_error(
+        RuntimeError("failure store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_failures(
+            "sess-1",
+            _fake_request(engine),
+            task_id=None,
+            status=None,
+            limit=10,
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_failures == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "failure store unavailable"
 
 
 @pytest.mark.asyncio
