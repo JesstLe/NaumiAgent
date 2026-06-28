@@ -80,6 +80,7 @@ public final class DaemonController: Sendable {
             await refreshWorkbenchListsAfterConnection()
             await startEventStreamIfAvailable()
         } catch {
+            await stopEventStream()
             appState.lastError = error
             appState.connectionState = .disconnected
         }
