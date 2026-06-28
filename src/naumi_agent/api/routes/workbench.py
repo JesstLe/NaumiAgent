@@ -745,6 +745,7 @@ async def create_context_health_snapshot(
     task_id: str,
     body: ContextHealthRecord,
     request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -754,7 +755,7 @@ async def create_context_health_snapshot(
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        return await engine.workbench_service.record_context_health(
+        context_snapshot = await engine.workbench_service.record_context_health(
             session_id=session_id,
             task_id=task_id,
             agent_id=body.agent_id,
@@ -767,6 +768,16 @@ async def create_context_health_snapshot(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not include_snapshot:
+        return context_snapshot
+
+    try:
+        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"context_snapshot": context_snapshot, "snapshot": snapshot}
 
 
 @router.get(
