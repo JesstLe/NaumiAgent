@@ -676,6 +676,24 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func resolveApprovalWithSnapshot(
+        sessionID: String,
+        approvalID: String,
+        actor: String,
+        state: String,
+        decisionNote: String
+    ) async throws(APIError) -> ApprovalSnapshotDTO {
+        let body = ResolveApprovalRequest(
+            actor: actor,
+            state: state,
+            decisionNote: decisionNote
+        )
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "approvals", approvalID, "resolve") + "?include_snapshot=true",
+            body: body
+        )
+    }
+
     public func runValidation(
         sessionID: String,
         taskID: String,

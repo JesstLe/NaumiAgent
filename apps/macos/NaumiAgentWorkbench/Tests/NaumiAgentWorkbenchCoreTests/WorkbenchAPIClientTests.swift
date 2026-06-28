@@ -2679,6 +2679,56 @@ final class WorkbenchAPIClientTests {
         #expect(approval.updatedAt == "2026-06-27T06:00:01")
     }
 
+    @Test func resolveApprovalWithSnapshotRequestsFreshSnapshot() async throws {
+        let sessionID = "sess 中文"
+        let approvalID = "approval 001 审批"
+        let responseJSON = Data(
+            """
+            {"approval":{"id":"approval 001 审批","session_id":"sess 中文","mission_id":"mission-001","task_id":"task-001","state":"approved","title":"允许重构","detail":"保持测试通过","requester":"Agent-A","reviewer":"Human","decision_note":"同意","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:01"},"snapshot":{"session_id":"sess 中文","summary":{"current_mission_title":"审批已更新","active_agents":0,"open_issues":0,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/approvals/approval%20001%20%E5%AE%A1%E6%89%B9/resolve?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["actor"] as? String == "Human",
+                  json?["state"] as? String == "approved",
+                  json?["decision_note"] as? String == "同意" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient()
+        let response = try await client.resolveApprovalWithSnapshot(
+            sessionID: sessionID,
+            approvalID: approvalID,
+            actor: "Human",
+            state: "approved",
+            decisionNote: "同意"
+        )
+
+        #expect(response.approval.id == approvalID)
+        #expect(response.approval.state == "approved")
+        #expect(response.snapshot.sessionID == sessionID)
+        #expect(response.snapshot.summary?.currentMissionTitle == "审批已更新")
+    }
+
     @Test func fetchSnapshotEncodesSlashInSessionID() async throws {
         let sessionID = "sess/中文"
         let snapshotJSON = Data(
