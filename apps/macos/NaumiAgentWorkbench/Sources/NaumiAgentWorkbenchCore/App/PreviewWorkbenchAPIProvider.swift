@@ -498,6 +498,31 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func createIssueWithSnapshot(
+        sessionID: String,
+        missionID: String,
+        title: String,
+        description: String,
+        blockedBy: [String],
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async throws(APIError) -> IssueSnapshotDTO {
+        IssueSnapshotDTO(
+            issue: try await createIssue(
+                sessionID: sessionID,
+                missionID: missionID,
+                title: title,
+                description: description,
+                blockedBy: blockedBy,
+                acceptanceCriteria: acceptanceCriteria,
+                parallelMode: parallelMode,
+                riskLevel: riskLevel
+            ),
+            snapshot: try await fetchSnapshot(sessionID: sessionID)
+        )
+    }
+
     func fetchIntentLocks(sessionID: String, missionID: String) async throws(APIError) -> IntentLocksDTO {
         IntentLocksDTO(intentLocks: [], missionID: missionID)
     }

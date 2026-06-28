@@ -44,6 +44,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var attachIssueResult: Result<IssueDTO, APIError>?
     var attachIssueWithSnapshotResult: Result<IssueSnapshotDTO, APIError>?
     var createIssueResult: Result<IssueDTO, APIError>?
+    var createIssueWithSnapshotResult: Result<IssueSnapshotDTO, APIError>?
     var createIntentLockResult: Result<IntentLockDTO, APIError>?
     var fetchIntentLocksResult: Result<IntentLocksDTO, APIError>?
     var fetchIntentLockResult: Result<IntentLockDTO, APIError>?
@@ -63,6 +64,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var claimIssueWithSnapshotCallCount: Int = 0
     var createMissionWithSnapshotCallCount: Int = 0
     var attachIssueWithSnapshotCallCount: Int = 0
+    var createIssueWithSnapshotCallCount: Int = 0
     var runValidationCallCount: Int = 0
     var runValidationWithSnapshotCallCount: Int = 0
     var createdSessions: [[String: String?]] = []
@@ -516,6 +518,23 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         riskLevel: String
     ) async throws(APIError) -> IssueDTO {
         guard let result = createIssueResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func createIssueWithSnapshot(
+        sessionID: String,
+        missionID: String,
+        title: String,
+        description: String,
+        blockedBy: [String],
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async throws(APIError) -> IssueSnapshotDTO {
+        createIssueWithSnapshotCallCount += 1
+        guard let result = createIssueWithSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -2148,7 +2167,7 @@ final class DaemonControllerTests {
         #expect(await api.snapshotCallCount == 0)
     }
 
-    @Test @MainActor func createIssueSuccessRefreshesSnapshotMissionIssuesAndEvents() async throws {
+    @Test @MainActor func createIssueSuccessUsesIncludedSnapshotAndRefreshesLists() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -2159,8 +2178,7 @@ final class DaemonControllerTests {
         let event = makeEvent(id: "evt-009", type: "issue.created", subjectID: "task-009")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
-        await api.setCreateIssueResult(.success(issue))
-        await api.setSnapshotResult(.success(snapshot))
+        await api.setCreateIssueWithSnapshotResult(.success(IssueSnapshotDTO(issue: issue, snapshot: snapshot)))
         await api.setIssuesResult(.success(issues))
         await api.setEventsResult(.success(events))
 
@@ -2179,6 +2197,8 @@ final class DaemonControllerTests {
         #expect(appState.issues == [issue])
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
+        #expect(await api.createIssueWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func createIssueWithoutSelectedSessionRecordsError() async throws {
@@ -4436,6 +4456,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setCreateIssueResult(_ result: Result<IssueDTO, APIError>) {
         createIssueResult = result
+    }
+
+    fileprivate func setCreateIssueWithSnapshotResult(_ result: Result<IssueSnapshotDTO, APIError>) {
+        createIssueWithSnapshotResult = result
     }
 
     fileprivate func setCreateIntentLockResult(_ result: Result<IntentLockDTO, APIError>) {
