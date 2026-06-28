@@ -4,9 +4,10 @@ import NaumiAgentWorkbenchCore
 @main
 struct NaumiAgentWorkbenchApp: App {
     @State private var environment = AppEnvironment()
+    private let shellPresentation = WorkbenchShellPresentation()
 
     var body: some Scene {
-        WindowGroup("NaumiAgent Workbench") {
+        WindowGroup(shellPresentation.nativeWindowTitle) {
             WorkbenchShellView(environment: environment)
                 .task {
                     switch WorkbenchPreviewLoader.requestedMode(from: CommandLine.arguments) {
