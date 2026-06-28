@@ -422,7 +422,13 @@ async def get_workbench_event(
         raise HTTPException(status_code=404, detail="Session not found")
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    event = await engine.workbench_service.get_event(session_id, event_id)
+    try:
+        event = await engine.workbench_service.get_event(session_id, event_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     if event is None:
         raise HTTPException(status_code=404, detail="审计事件不存在")
     return event

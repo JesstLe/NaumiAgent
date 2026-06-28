@@ -47,6 +47,7 @@ from naumi_agent.api.routes.workbench import (
     get_validation_runs,
     get_workbench_bootstrap,
     get_workbench_capabilities,
+    get_workbench_event,
     get_workbench_events,
     get_workbench_snapshot,
     get_worktree,
@@ -125,6 +126,7 @@ class _FakeWorkbenchService:
         self._resolve_approval_result: dict | None = None
         self._dashboard_snapshot_error: Exception | None = None
         self._list_events_error: Exception | None = None
+        self._get_event_error: Exception | None = None
 
     def set_run_validation_error(self, error: Exception) -> None:
         self._run_validation_error = error
@@ -152,6 +154,9 @@ class _FakeWorkbenchService:
 
     def set_list_events_error(self, error: Exception) -> None:
         self._list_events_error = error
+
+    def set_get_event_error(self, error: Exception) -> None:
+        self._get_event_error = error
 
     async def dashboard_snapshot(self, session_id: str):
         if self._dashboard_snapshot_error is not None:
@@ -478,6 +483,8 @@ class _FakeWorkbenchService:
                 "event_id": event_id,
             }
         )
+        if self._get_event_error is not None:
+            raise self._get_event_error
         if event_id == "missing-event":
             return None
         return {
@@ -1421,6 +1428,50 @@ def test_get_event_route_returns_chinese_404_for_missing_event() -> None:
 
     assert response.status_code == 404
     assert response.json() == {"detail": "审计事件不存在"}
+
+
+@pytest.mark.asyncio
+async def test_get_event_endpoint_reports_unavailable_event_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_event_error(
+        RuntimeError("event detail store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_workbench_event(
+            "sess-1",
+            "event-2",
+            _fake_request(engine),
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_events == [
+        {"session_id": "sess-1", "event_id": "event-2"}
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "event detail store unavailable"
+
+
+@pytest.mark.asyncio
+async def test_get_event_endpoint_reports_invalid_event_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_event_error(ValueError("event id is invalid"))
+
+    with pytest.raises(HTTPException) as exc:
+        await get_workbench_event(
+            "sess-1",
+            "event-2",
+            _fake_request(engine),
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_events == [
+        {"session_id": "sess-1", "event_id": "event-2"}
+    ]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "event id is invalid"
 
 
 def test_workbench_event_stream_rejects_missing_session() -> None:
