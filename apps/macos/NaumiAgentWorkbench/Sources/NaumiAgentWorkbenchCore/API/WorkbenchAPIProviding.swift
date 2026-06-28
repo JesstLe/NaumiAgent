@@ -278,4 +278,13 @@ public protocol WorkbenchAPIProviding: Sendable {
         argv: [String],
         cwd: String?
     ) async throws(APIError) -> ValidationResultDTO
+
+    /// Runs a validation command and returns the backend's fresh authoritative snapshot.
+    func runValidationWithSnapshot(
+        sessionID: String,
+        taskID: String,
+        actor: String,
+        argv: [String],
+        cwd: String?
+    ) async throws(APIError) -> ValidationResultSnapshotDTO
 }

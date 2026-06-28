@@ -1450,11 +1450,12 @@ public final class DaemonController: Sendable {
     }
 
     /// Runs a validation command and refreshes validation runs, failures,
-    /// timeline events, and snapshot on success.
+    /// timeline events, and the backend-provided snapshot on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. On success,
-    /// `validationRuns`, `failures`, `timelineEvents`, and `snapshot` are
-    /// refreshed from the backend; on failure `lastError` is set and the
+    /// `snapshot` uses the mutation response, while `validationRuns`,
+    /// `failures`, and `timelineEvents` are refreshed from the backend;
+    /// on failure `lastError` is set and the
     /// existing local state is preserved.
     public func runValidation(
         taskID: String,
@@ -1474,17 +1475,17 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            _ = try await apiProvider.runValidation(
+            let response = try await apiProvider.runValidationWithSnapshot(
                 sessionID: sessionID,
                 taskID: taskID,
                 actor: actor,
                 argv: argv,
                 cwd: cwd
             )
+            appState.snapshot = response.snapshot
             await refreshValidationRuns(taskID: taskID)
             await refreshFailures(taskID: taskID)
             await refreshEvents(limit: 50)
-            await refreshSnapshot()
         } catch {
             appState.lastError = error
         }
