@@ -703,6 +703,27 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Loads one agent profile into the selected detail state.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the previous selected agent profile is preserved.
+    public func loadAgentProfile(agentID: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            appState.selectedAgentProfile = try await apiProvider.fetchAgentProfile(
+                sessionID: sessionID,
+                agentID: agentID
+            )
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Registers or updates an agent capability profile in the selected session.
     ///
     /// Requires `appState.selectedSessionID` to be set. On success the profile

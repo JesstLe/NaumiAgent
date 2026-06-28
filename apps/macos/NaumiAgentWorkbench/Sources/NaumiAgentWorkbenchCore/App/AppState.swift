@@ -31,6 +31,7 @@ public final class AppState: Sendable {
     public var selectedLease: LeaseDTO? = nil
     public var selectedWorktree: WorktreeDTO? = nil
     public var selectedMission: MissionDTO? = nil
+    public var selectedAgentProfile: AgentProfileDTO? = nil
     public var selectedDecision: DecisionDTO? = nil
     public var selectedIntentLock: IntentLockDTO? = nil
     public var selectedApproval: ApprovalDTO? = nil

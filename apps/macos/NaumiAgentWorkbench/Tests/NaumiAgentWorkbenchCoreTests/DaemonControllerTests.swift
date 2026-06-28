@@ -3147,6 +3147,50 @@ final class DaemonControllerTests {
         #expect(appState.selectedMission == oldMission)
     }
 
+    @Test @MainActor func loadAgentProfileSuccessStoresSelectedAgentProfile() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let profile = makeAgentProfile(id: "agent-001", sessionID: "sess-001", status: "busy")
+        await api.setAgentProfileResult(.success(profile))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadAgentProfile(agentID: "agent-001")
+
+        #expect(appState.selectedAgentProfile == profile)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadAgentProfileWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        let oldProfile = makeAgentProfile(id: "agent-old", sessionID: "sess-001", status: "idle")
+        appState.selectedAgentProfile = oldProfile
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadAgentProfile(agentID: "agent-001")
+
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.selectedAgentProfile == oldProfile)
+    }
+
+    @Test @MainActor func loadAgentProfileFailurePreservesOldSelectedAgentProfile() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let oldProfile = makeAgentProfile(id: "agent-old", sessionID: "sess-001", status: "idle")
+        appState.selectedAgentProfile = oldProfile
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setAgentProfileResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadAgentProfile(agentID: "agent-001")
+
+        #expect(appState.lastError == .httpStatus(500))
+        #expect(appState.selectedAgentProfile == oldProfile)
+    }
+
     @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotApprovalsAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
