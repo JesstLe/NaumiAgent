@@ -147,6 +147,9 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> AgentProfilesDTO
 
+    /// Fetches one agent capability profile by id for task-market detail views.
+    func fetchAgentProfile(sessionID: String, agentID: String) async throws(APIError) -> AgentProfileDTO
+
     /// Registers or updates an agent capability profile.
     func registerAgentProfile(
         sessionID: String,

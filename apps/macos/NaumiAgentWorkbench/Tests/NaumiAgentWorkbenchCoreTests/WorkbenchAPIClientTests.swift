@@ -1586,6 +1586,46 @@ final class WorkbenchAPIClientTests {
         #expect(response.agentProfiles.isEmpty)
     }
 
+    @Test func fetchAgentProfileEncodesPathComponentsAndDecodesCapabilities() async throws {
+        let sessionID = "sess/中文"
+        let agentID = "agent/后端"
+        let json = Data(
+            """
+            {"id":"agent/后端","session_id":"sess/中文","name":"后端智能体","role":"coder","capabilities":["api","swift-client"],"permissions":["read","write"],"max_parallel_tasks":2,"status":"busy","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%2F%E4%B8%AD%E6%96%87/agents/agent%2F%E5%90%8E%E7%AB%AF" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let profile = try await client.fetchAgentProfile(sessionID: sessionID, agentID: agentID)
+
+        #expect(profile.id == agentID)
+        #expect(profile.sessionID == sessionID)
+        #expect(profile.name == "后端智能体")
+        #expect(profile.role == "coder")
+        #expect(profile.capabilities == ["api", "swift-client"])
+        #expect(profile.permissions == ["read", "write"])
+        #expect(profile.maxParallelTasks == 2)
+        #expect(profile.status == "busy")
+        #expect(profile.createdAt == "2026-06-27T06:00:00")
+        #expect(profile.updatedAt == "2026-06-27T06:10:00")
+    }
+
     @Test func registerAgentProfileUsesPOSTAndEncodesPathAndBody() async throws {
         let sessionID = "sess/中文"
         let agentID = "agent/后端"

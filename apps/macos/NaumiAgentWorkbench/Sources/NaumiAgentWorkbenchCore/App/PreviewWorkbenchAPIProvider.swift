@@ -303,6 +303,21 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         AgentProfilesDTO(agentProfiles: [], status: status, limit: limit)
     }
 
+    func fetchAgentProfile(sessionID: String, agentID: String) async throws(APIError) -> AgentProfileDTO {
+        AgentProfileDTO(
+            id: agentID,
+            sessionID: sessionID,
+            name: "Preview Agent",
+            role: "ui-preview",
+            capabilities: ["preview"],
+            permissions: ["read"],
+            maxParallelTasks: 1,
+            status: "idle",
+            createdAt: now,
+            updatedAt: now
+        )
+    }
+
     func registerAgentProfile(
         sessionID: String,
         agentID: String,

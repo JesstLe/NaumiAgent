@@ -31,6 +31,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var removeWorktreeResult: Result<WorktreeRemovalDTO, APIError>?
     var missionsResult: Result<MissionsDTO, APIError>?
     var agentProfilesResult: Result<AgentProfilesDTO, APIError>?
+    var agentProfileResult: Result<AgentProfileDTO, APIError>?
     var registerAgentProfileResult: Result<AgentProfileDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
@@ -335,6 +336,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> AgentProfilesDTO {
         guard let result = agentProfilesResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchAgentProfile(sessionID: String, agentID: String) async throws(APIError) -> AgentProfileDTO {
+        guard let result = agentProfileResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -2912,6 +2920,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setAgentProfilesResult(_ result: Result<AgentProfilesDTO, APIError>) {
         agentProfilesResult = result
+    }
+
+    fileprivate func setAgentProfileResult(_ result: Result<AgentProfileDTO, APIError>) {
+        agentProfileResult = result
     }
 
     fileprivate func setRegisterAgentProfileResult(_ result: Result<AgentProfileDTO, APIError>) {
