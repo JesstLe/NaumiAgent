@@ -28,7 +28,7 @@ public struct WorkbenchPageLayout: Equatable, Sendable {
     }
 }
 
-/// Scales a fixed visual design into the current window without clipping columns.
+/// Scales a fixed visual design into the current window while keeping all columns visible.
 public struct WorkbenchScaledPageLayout: Equatable, Sendable {
     public let baseWidth: Double
     public let baseHeight: Double
@@ -47,10 +47,7 @@ public struct WorkbenchScaledPageLayout: Equatable, Sendable {
     }
 
     public func scale(for availableSize: CGSize) -> Double {
-        guard baseWidth > 0, baseHeight > 0 else { return 1 }
-        let widthScale = availableSize.width / baseWidth
-        let heightScale = availableSize.height / baseHeight
-        return max(0.1, min(widthScale, heightScale))
+        scale(for: availableSize.width)
     }
 
     public func scaledSize(for availableWidth: Double) -> CGSize {

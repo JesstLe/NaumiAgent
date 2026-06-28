@@ -22,7 +22,7 @@ struct WorkbenchPageLayoutTests {
         #expect(size.height < layout.baseHeight)
     }
 
-    @Test func scaledLayoutFitsBothWidthAndHeightSoColumnsRemainVisible() {
+    @Test func scaledLayoutFillsAvailableWidthSoThreeColumnsStayVisible() {
         let layout = WorkbenchScaledPageLayout.dashboard
 
         let native = layout.scaledSize(for: CGSize(width: 1360, height: 720))
@@ -31,10 +31,9 @@ struct WorkbenchPageLayoutTests {
 
         #expect(abs(native.width - layout.baseWidth) < 0.001)
         #expect(abs(native.height - layout.baseHeight) < 0.001)
-        #expect(wideButShort.width <= 2048)
-        #expect(wideButShort.height <= 1048)
-        #expect(wideButShort.width < 2048)
-        #expect(narrow.width <= 900)
+        #expect(abs(wideButShort.width - 2048) < 0.001)
+        #expect(wideButShort.height > 1048)
+        #expect(abs(narrow.width - 900) < 0.001)
         #expect(narrow.height <= 620)
     }
 }

@@ -62,18 +62,24 @@ public struct DashboardView: View {
             let scale = CGFloat(layout.scale(for: proxy.size))
             let scaledSize = layout.scaledSize(for: proxy.size)
 
-            ZStack(alignment: .topLeading) {
-                workbenchLayoutContent(presentation: presentation, market: market)
-                    .frame(
-                        width: layout.baseWidth,
-                        height: layout.baseHeight,
-                        alignment: .topLeading
-                    )
-                    .scaleEffect(scale, anchor: .topLeading)
-                    .frame(width: scaledSize.width, height: scaledSize.height, alignment: .topLeading)
+            ScrollView(.vertical, showsIndicators: scaledSize.height > proxy.size.height) {
+                ZStack(alignment: .topLeading) {
+                    workbenchLayoutContent(presentation: presentation, market: market)
+                        .frame(
+                            width: layout.baseWidth,
+                            height: layout.baseHeight,
+                            alignment: .topLeading
+                        )
+                        .scaleEffect(scale, anchor: .topLeading)
+                        .frame(width: scaledSize.width, height: scaledSize.height, alignment: .topLeading)
+                }
+                .frame(
+                    width: proxy.size.width,
+                    height: max(proxy.size.height, scaledSize.height),
+                    alignment: .topLeading
+                )
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
-            .clipped()
         }
     }
 
