@@ -960,6 +960,8 @@ final class DaemonControllerTests {
             failures: [],
             events: []
         )
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
 
         let api = FakeWorkbenchAPIProvider()
         await api.setStatusResult(.success(makeStatus()))
@@ -975,6 +977,7 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == nil)
         #expect(appState.lastError == .httpStatus(500))
         expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
     }
 
     @Test @MainActor func refreshSessionsSuccessWritesSessionsAndClearsStaleError() async throws {
@@ -3673,6 +3676,39 @@ private func expectWorkbenchListsEmpty(
     #expect(appState.validationRuns.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.contextSnapshots.isEmpty, sourceLocation: sourceLocation)
     #expect(appState.agentProfiles.isEmpty, sourceLocation: sourceLocation)
+}
+
+@MainActor
+private func expectSelectedDetailsEmpty(
+    _ appState: AppState,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    #expect(appState.selectedEvent == nil, sourceLocation: sourceLocation)
+    #expect(appState.selectedValidationRun == nil, sourceLocation: sourceLocation)
+    #expect(appState.selectedContextSnapshot == nil, sourceLocation: sourceLocation)
+    #expect(appState.selectedApproval == nil, sourceLocation: sourceLocation)
+    #expect(appState.selectedFailure == nil, sourceLocation: sourceLocation)
+    #expect(appState.selectedIssue == nil, sourceLocation: sourceLocation)
+    #expect(appState.selectedLease == nil, sourceLocation: sourceLocation)
+    #expect(appState.selectedWorktree == nil, sourceLocation: sourceLocation)
+    #expect(appState.selectedMission == nil, sourceLocation: sourceLocation)
+    #expect(appState.selectedAgentProfile == nil, sourceLocation: sourceLocation)
+    #expect(appState.selectedDecision == nil, sourceLocation: sourceLocation)
+    #expect(appState.selectedIntentLock == nil, sourceLocation: sourceLocation)
+}
+
+@MainActor
+private func seedWorkbenchLists(_ appState: AppState) {
+    appState.timelineEvents = [makeEvent(id: "evt-stale", type: "old.event", subjectID: "old")]
+    appState.validationRuns = [makeValidationRun(id: "run-stale", taskID: "task-old", status: "passed")]
+    appState.contextSnapshots = [makeContextSnapshot(id: "ctx-stale", taskID: "task-old", health: "good")]
+    appState.approvals = [makeApproval(id: "approval-stale", missionID: "mission-old", state: "waiting")]
+    appState.failures = [makeFailure(id: "failure-stale", taskID: "task-old", status: "open")]
+    appState.issues = [makeIssue(taskID: "task-old", missionID: "mission-old")]
+    appState.leases = [makeLease(id: "lease-stale", taskID: "task-old", state: "active")]
+    appState.worktrees = [makeWorktree(name: "wt-stale", taskID: "task-old", status: "active")]
+    appState.missions = [makeMission(id: "mission-stale", sessionID: "sess-stale")]
+    appState.agentProfiles = [makeAgentProfile(id: "agent-stale", sessionID: "sess-stale", status: "idle")]
 }
 
 private func makeAgentProfile(id: String, sessionID: String, status: String) -> AgentProfileDTO {
