@@ -115,6 +115,7 @@ final class WorkbenchRefreshCoordinatorTests {
         }
 
         #expect(coordinator.refreshInterval == .seconds(5))
+        #expect(coordinator.eventStreamHealthProbeInterval == .seconds(15))
     }
 
     @Test @MainActor func startPeriodicRefreshPollsOnIntervalUntilCancelled() async throws {
@@ -148,6 +149,41 @@ final class WorkbenchRefreshCoordinatorTests {
         _ = await task.value
 
         #expect(callCount >= 2)
+    }
+
+    @Test @MainActor func startPeriodicEventStreamHealthProbesPollsOnIntervalUntilCancelled() async throws {
+        let stream = AsyncStream<Void>.makeStream()
+        var probeCount = 0
+
+        let coordinator = WorkbenchRefreshCoordinator(
+            refreshInterval: .seconds(5),
+            eventStreamHealthProbeInterval: .milliseconds(100),
+            eventStreamHealthProbeOperation: {
+                probeCount += 1
+                if probeCount == 1 {
+                    for await _ in stream.stream {
+                        break
+                    }
+                }
+            },
+            refreshOperation: {}
+        )
+
+        let task = Task { @MainActor in
+            await coordinator.startPeriodicEventStreamHealthProbes()
+        }
+
+        while probeCount == 0 {
+            await Task.yield()
+        }
+
+        stream.continuation.yield(())
+        try? await Task.sleep(for: .milliseconds(300))
+
+        task.cancel()
+        _ = await task.value
+
+        #expect(probeCount >= 2)
     }
 }
 

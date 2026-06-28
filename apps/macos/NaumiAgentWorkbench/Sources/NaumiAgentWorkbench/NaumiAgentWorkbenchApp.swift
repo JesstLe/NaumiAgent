@@ -14,7 +14,14 @@ struct NaumiAgentWorkbenchApp: App {
                 .task {
                     switch WorkbenchPreviewLoader.requestedMode(from: CommandLine.arguments) {
                     case .disabled:
-                        await environment.refreshCoordinator.startPeriodicRefresh()
+                        await withTaskGroup(of: Void.self) { group in
+                            group.addTask {
+                                await environment.refreshCoordinator.startPeriodicRefresh()
+                            }
+                            group.addTask {
+                                await environment.refreshCoordinator.startPeriodicEventStreamHealthProbes()
+                            }
+                        }
                     case .enabled(let locale):
                         do {
                             try WorkbenchPreviewLoader.applyPreviewState(
