@@ -119,6 +119,7 @@ class _FakeWorkbenchService:
         self.requested_intent_locks: list[dict] = []
         self.listed_decisions: list[dict] = []
         self.requested_decisions: list[dict] = []
+        self._list_approvals_error: Exception | None = None
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
@@ -175,6 +176,9 @@ class _FakeWorkbenchService:
 
     def set_get_context_snapshot_error(self, error: Exception) -> None:
         self._get_context_snapshot_error = error
+
+    def set_list_approvals_error(self, error: Exception) -> None:
+        self._list_approvals_error = error
 
     async def dashboard_snapshot(self, session_id: str):
         if self._dashboard_snapshot_error is not None:
@@ -675,6 +679,8 @@ class _FakeWorkbenchService:
         state: ApprovalState | None = None,
         limit: int = 50,
     ):
+        if self._list_approvals_error is not None:
+            raise self._list_approvals_error
         self.listed_approvals.append(
             {"session_id": session_id, "state": state, "limit": limit}
         )
@@ -2440,6 +2446,48 @@ async def test_get_approvals_endpoint_without_state_filter() -> None:
     assert response.model_dump()["state"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["approvals"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_approvals_endpoint_reports_unavailable_approval_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_approvals_error(
+        RuntimeError("approval store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_approvals(
+            "sess-1",
+            _fake_request(engine),
+            state=ApprovalState.WAITING,
+            limit=25,
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "approval store unavailable"
+
+
+@pytest.mark.asyncio
+async def test_get_approvals_endpoint_reports_invalid_approval_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_approvals_error(
+        ValueError("approval filter is invalid")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_approvals(
+            "sess-1",
+            _fake_request(engine),
+            state=ApprovalState.WAITING,
+            limit=25,
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "approval filter is invalid"
 
 
 def test_get_approval_route_returns_single_approval() -> None:
