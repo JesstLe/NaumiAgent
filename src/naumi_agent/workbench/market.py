@@ -30,6 +30,9 @@ class TaskMarket:
         task = await self._task_store.get_task(task_id)
         if task is None:
             raise ValueError(f"任务 #{task_id} 不存在")
+        issue = await self._workbench_store.get_issue(self._task_store.session_id, task_id)
+        if issue is None:
+            raise ValueError(f"任务 #{task_id} 不是 Workbench Issue，不能通过任务市场认领")
         if task.status == TaskStatus.COMPLETED:
             raise ValueError(f"任务 #{task_id} 已完成，不能认领")
 
