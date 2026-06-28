@@ -23,6 +23,7 @@ public final class AppState: Sendable {
     public var worktrees: [WorktreeDTO] = []
     public var missions: [MissionDTO] = []
     public var agentProfiles: [AgentProfileDTO] = []
+    public var selectedDecision: DecisionDTO? = nil
     public var lastError: APIError? = nil
     public var locale: AppLocale = .default
     public var isPreviewFixture: Bool = false

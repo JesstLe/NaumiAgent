@@ -2663,6 +2663,50 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
+    @Test @MainActor func loadDecisionSuccessStoresSelectedDecision() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let decision = makeDecision(id: "decision-001", missionID: "mission-001")
+        await api.setFetchDecisionResult(.success(decision))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadDecision(missionID: "mission-001", decisionID: "decision-001")
+
+        #expect(appState.selectedDecision == decision)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadDecisionWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        let oldDecision = makeDecision(id: "decision-old", missionID: "mission-001")
+        appState.selectedDecision = oldDecision
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadDecision(missionID: "mission-001", decisionID: "decision-001")
+
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.selectedDecision == oldDecision)
+    }
+
+    @Test @MainActor func loadDecisionFailurePreservesOldSelectedDecision() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let oldDecision = makeDecision(id: "decision-old", missionID: "mission-001")
+        appState.selectedDecision = oldDecision
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setFetchDecisionResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadDecision(missionID: "mission-001", decisionID: "decision-001")
+
+        #expect(appState.lastError == .httpStatus(500))
+        #expect(appState.selectedDecision == oldDecision)
+    }
+
     @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotApprovalsAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
