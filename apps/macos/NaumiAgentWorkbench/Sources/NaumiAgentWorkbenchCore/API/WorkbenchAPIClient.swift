@@ -468,6 +468,26 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func attachIssueWithSnapshot(
+        sessionID: String,
+        missionID: String,
+        taskID: String,
+        acceptanceCriteria: [String],
+        parallelMode: String,
+        riskLevel: String
+    ) async throws(APIError) -> IssueSnapshotDTO {
+        let body = AttachIssueRequest(
+            taskID: taskID,
+            acceptanceCriteria: acceptanceCriteria,
+            parallelMode: parallelMode,
+            riskLevel: riskLevel
+        )
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "issues") + "?include_snapshot=true",
+            body: body
+        )
+    }
+
     public func createIssue(
         sessionID: String,
         missionID: String,

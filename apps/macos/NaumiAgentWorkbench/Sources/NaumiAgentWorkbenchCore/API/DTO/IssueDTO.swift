@@ -62,3 +62,14 @@ public struct IssueDTO: Decodable, Equatable, Sendable {
         self.updatedAt = updatedAt
     }
 }
+
+/// Response returned when issue attachment asks the backend for a fresh snapshot.
+public struct IssueSnapshotDTO: Decodable, Equatable, Sendable {
+    public let issue: IssueDTO
+    public let snapshot: WorkbenchSnapshotDTO
+
+    public init(issue: IssueDTO, snapshot: WorkbenchSnapshotDTO) {
+        self.issue = issue
+        self.snapshot = snapshot
+    }
+}

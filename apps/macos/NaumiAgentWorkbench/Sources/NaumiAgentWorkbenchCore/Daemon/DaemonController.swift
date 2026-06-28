@@ -1163,12 +1163,14 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Attaches an issue to a mission and refreshes the filtered issues list,
-    /// timeline events, and snapshot for that mission on success.
+    /// Attaches an issue to a mission and refreshes the filtered issues list
+    /// and timeline events on success. The global snapshot is taken from the
+    /// mutation response so the dashboard can update without an extra snapshot
+    /// fetch.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot and issues are never mutated
-    /// directly.
+    /// `appState.lastError`, including the first follow-up list refresh failure;
+    /// the local issues list is never mutated directly.
     public func attachIssue(
         missionID: String,
         taskID: String,
@@ -1183,7 +1185,7 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            _ = try await apiProvider.attachIssue(
+            let response = try await apiProvider.attachIssueWithSnapshot(
                 sessionID: sessionID,
                 missionID: missionID,
                 taskID: taskID,
@@ -1191,9 +1193,13 @@ public final class DaemonController: Sendable {
                 parallelMode: parallelMode,
                 riskLevel: riskLevel
             )
+            appState.snapshot = response.snapshot
+            var refreshError: APIError?
             await refreshIssues(missionID: missionID)
+            refreshError = refreshError ?? appState.lastError
             await refreshEvents(limit: 50)
-            await refreshSnapshot()
+            refreshError = refreshError ?? appState.lastError
+            appState.lastError = refreshError
         } catch {
             appState.lastError = error
         }
