@@ -33,8 +33,8 @@ public struct WorkbenchScaledPageLayout: Equatable, Sendable {
     public let baseWidth: Double
     public let baseHeight: Double
 
-    public static let dashboard = WorkbenchScaledPageLayout(baseWidth: 1360, baseHeight: 720)
-    public static let reviews = WorkbenchScaledPageLayout(baseWidth: 1360, baseHeight: 720)
+    public static let dashboard = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 760)
+    public static let reviews = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 760)
 
     public init(baseWidth: Double, baseHeight: Double) {
         self.baseWidth = baseWidth
@@ -47,10 +47,7 @@ public struct WorkbenchScaledPageLayout: Equatable, Sendable {
     }
 
     public func scale(for availableSize: CGSize) -> Double {
-        guard baseWidth > 0, baseHeight > 0 else { return 1 }
-        let widthScale = availableSize.width / baseWidth
-        let heightScale = availableSize.height / baseHeight
-        return max(0.1, min(widthScale, heightScale))
+        scale(for: availableSize.width)
     }
 
     public func scaledSize(for availableWidth: Double) -> CGSize {
@@ -72,7 +69,7 @@ public struct WorkbenchScaledPageLayout: Equatable, Sendable {
             scaledSize: scaledSize,
             containerSize: CGSize(
                 width: availableSize.width,
-                height: max(availableSize.height, scaledSize.height)
+                height: availableSize.height
             ),
             showsVerticalScroll: scaledSize.height > availableSize.height
         )

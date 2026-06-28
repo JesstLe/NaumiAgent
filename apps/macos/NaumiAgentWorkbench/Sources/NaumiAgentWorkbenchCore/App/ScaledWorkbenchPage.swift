@@ -20,24 +20,21 @@ public struct ScaledWorkbenchPage<Content: View>: View {
             let scale = CGFloat(viewport.scale)
 
             ScrollView(.vertical, showsIndicators: viewport.showsVerticalScroll) {
-                ZStack(alignment: .top) {
-                    content
-                        .frame(
-                            width: layout.baseWidth,
-                            height: layout.baseHeight,
-                            alignment: .topLeading
-                        )
-                        .scaleEffect(scale, anchor: .topLeading)
-                        .frame(
-                            width: viewport.scaledSize.width,
-                            height: viewport.scaledSize.height,
-                            alignment: .topLeading
-                        )
-                }
+                content
+                    .frame(
+                        width: layout.baseWidth,
+                        height: layout.baseHeight,
+                        alignment: .topLeading
+                    )
+                    .scaleEffect(scale, anchor: .topLeading)
+                    .frame(
+                        width: viewport.scaledSize.width,
+                        height: viewport.scaledSize.height,
+                        alignment: .topLeading
+                    )
                 .frame(
                     width: viewport.containerSize.width,
-                    height: viewport.containerSize.height,
-                    alignment: .top
+                    alignment: .topLeading
                 )
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
