@@ -20,6 +20,11 @@ struct AppStringsDashboardTests {
         #expect(AppStrings.Dashboard.emptyTasks(.zhCN) == "暂无任务")
         #expect(AppStrings.Dashboard.emptyFailures(.zhCN) == "暂无失败")
         #expect(AppStrings.Dashboard.emptyEvents(.zhCN) == "暂无事件")
+        #expect(AppStrings.Dashboard.validationStateTitle(.zhCN) == "验证状态")
+        #expect(AppStrings.Dashboard.contextHealthTitle(.zhCN) == "上下文健康")
+        #expect(AppStrings.Dashboard.rerunValidationButton(.zhCN) == "重新运行验证")
+        #expect(AppStrings.Dashboard.refreshContextButton(.zhCN) == "刷新上下文")
+        #expect(AppStrings.Dashboard.runningValidationLabel(.zhCN) == "验证中…")
     }
 
     @Test func newDashboardStringsEnUS() {
@@ -39,6 +44,11 @@ struct AppStringsDashboardTests {
         #expect(AppStrings.Dashboard.emptyTasks(.enUS) == "No tasks")
         #expect(AppStrings.Dashboard.emptyFailures(.enUS) == "No failures")
         #expect(AppStrings.Dashboard.emptyEvents(.enUS) == "No events")
+        #expect(AppStrings.Dashboard.validationStateTitle(.enUS) == "Validation State")
+        #expect(AppStrings.Dashboard.contextHealthTitle(.enUS) == "Context Health")
+        #expect(AppStrings.Dashboard.rerunValidationButton(.enUS) == "Re-run Validation")
+        #expect(AppStrings.Dashboard.refreshContextButton(.enUS) == "Refresh Context")
+        #expect(AppStrings.Dashboard.runningValidationLabel(.enUS) == "Running…")
     }
 
     @Test func allNewDashboardStringsAreNonEmpty() {
@@ -65,6 +75,11 @@ struct AppStringsDashboardTests {
             AppStrings.Dashboard.emptyTasks,
             AppStrings.Dashboard.emptyFailures,
             AppStrings.Dashboard.emptyEvents,
+            AppStrings.Dashboard.validationStateTitle,
+            AppStrings.Dashboard.contextHealthTitle,
+            AppStrings.Dashboard.rerunValidationButton,
+            AppStrings.Dashboard.refreshContextButton,
+            AppStrings.Dashboard.runningValidationLabel,
         ]
 
         for string in strings {

@@ -4,10 +4,13 @@ import SwiftUI
 /// Displays connection state, daemon/version, counts and the current snapshot content.
 public struct DashboardView: View {
     @Bindable public var appState: AppState
+    public let daemonController: DaemonController
     @State private var searchText = ""
+    @State private var isRerunningValidation = false
 
-    public init(appState: AppState) {
+    public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
+        self.daemonController = daemonController
     }
 
     private var canvasFilterLabels: [String] {
@@ -610,24 +613,37 @@ public struct DashboardView: View {
                 daemonCompact(status: status)
             }
 
+            let validationCommand = presentation.validationRerunCommand(validationRuns: appState.validationRuns)
             inspectorStateCard(
-                title: appState.locale == .zhCN ? "验证状态" : "Validation State",
+                title: AppStrings.Dashboard.validationStateTitle(appState.locale),
                 tone: .red,
                 lines: [
                     appState.locale == .zhCN ? "最近运行：#23 (09:36)" : "Latest Run: #23 (09:36)",
                     appState.locale == .zhCN ? "结果：pytest failed" : "Result: pytest failed",
                     appState.locale == .zhCN ? "测试：12 失败，3 通过" : "Tests: 12 failed, 3 passed"
-                ]
+                ],
+                buttonTitle: isRerunningValidation
+                    ? AppStrings.Dashboard.runningValidationLabel(appState.locale)
+                    : AppStrings.Dashboard.rerunValidationButton(appState.locale),
+                isDisabled: isRerunningValidation || validationCommand?.canSubmit != true,
+                action: {
+                    if let validationCommand {
+                        rerunValidation(validationCommand)
+                    }
+                }
             )
 
             inspectorStateCard(
-                title: appState.locale == .zhCN ? "上下文健康" : "Context Health",
+                title: AppStrings.Dashboard.contextHealthTitle(appState.locale),
                 tone: .orange,
                 lines: [
                     appState.locale == .zhCN ? "整体：过期" : "Overall: Stale",
                     appState.locale == .zhCN ? "已分析文件：18" : "Files Analyzed: 18",
                     appState.locale == .zhCN ? "更新：18 分钟前" : "Last Updated: 18m ago"
-                ]
+                ],
+                buttonTitle: AppStrings.Dashboard.refreshContextButton(appState.locale),
+                isDisabled: true,
+                action: {}
             )
 
             Spacer(minLength: 0)
@@ -636,7 +652,14 @@ public struct DashboardView: View {
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    private func inspectorStateCard(title: String, tone: Color, lines: [String]) -> some View {
+    private func inspectorStateCard(
+        title: String,
+        tone: Color,
+        lines: [String],
+        buttonTitle: String,
+        isDisabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title)
                 .font(.caption)
@@ -647,10 +670,13 @@ public struct DashboardView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            Button(title.contains("验证") || title.contains("Validation") ? "Re-run Validation" : "Refresh Context") {}
+            Button(action: action) {
+                Text(buttonTitle)
+            }
                 .font(.caption)
                 .buttonStyle(.bordered)
                 .frame(maxWidth: .infinity)
+                .disabled(isDisabled)
         }
         .padding(12)
         .background(tone.opacity(0.07))
@@ -659,6 +685,20 @@ public struct DashboardView: View {
                 .stroke(tone.opacity(0.25), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func rerunValidation(_ command: DashboardValidationRerunCommand) {
+        guard command.canSubmit, !isRerunningValidation else { return }
+        isRerunningValidation = true
+        Task {
+            await daemonController.runValidation(
+                taskID: command.taskID,
+                actor: command.actor,
+                argv: command.command,
+                cwd: command.cwd
+            )
+            isRerunningValidation = false
+        }
     }
 
     private func inspectorDetail(_ label: String, _ value: String) -> some View {
@@ -1272,7 +1312,8 @@ struct DashboardView_Previews: PreviewProvider {
             startedAt: "2026-06-27T06:00:00",
             workspaceCount: 3
         )
-        return DashboardView(appState: state)
+        let controller = DaemonController(appState: state, apiProvider: WorkbenchAPIClient())
+        return DashboardView(appState: state, daemonController: controller)
             .frame(minWidth: 640, minHeight: 420)
     }
 }
