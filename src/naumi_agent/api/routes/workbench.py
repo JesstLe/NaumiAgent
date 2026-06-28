@@ -1032,6 +1032,7 @@ async def create_decision(
     mission_id: str,
     body: DecisionCreate,
     request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -1051,7 +1052,16 @@ async def create_decision(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return decision
+    if not include_snapshot:
+        return decision
+
+    try:
+        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"decision": decision, "snapshot": snapshot}
 
 
 @router.get(
