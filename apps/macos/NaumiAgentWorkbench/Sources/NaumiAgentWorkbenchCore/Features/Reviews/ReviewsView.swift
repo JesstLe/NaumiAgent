@@ -13,6 +13,7 @@ public struct ReviewsView: View {
     @State private var isRunningValidation = false
     @State private var approvalDraft = ApprovalResolveDraft()
     @State private var isResolvingApproval = false
+    @State private var isConvertingToProposal = false
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -576,8 +577,19 @@ public struct ReviewsView: View {
                 .tint(.orange)
                 .disabled(!approvalDraft.canResolve || isResolvingApproval)
 
-                Button(appState.locale == .zhCN ? "转为提案" : "Convert to Proposal") {}
+                Button {
+                    convertToProposal(selected)
+                } label: {
+                    Label(
+                        isConvertingToProposal
+                            ? AppStrings.Reviews.convertingToProposalLabel(appState.locale)
+                            : AppStrings.Reviews.convertToProposalButton(appState.locale),
+                        systemImage: "doc.badge.plus"
+                    )
+                        .frame(maxWidth: .infinity)
+                }
                     .buttonStyle(.bordered)
+                    .disabled(proposalConversionCommand(for: selected) == nil || isConvertingToProposal)
                 Button(appState.locale == .zhCN ? "保留工作区" : "Keep Worktree") {}
                     .buttonStyle(.bordered)
             }
@@ -659,6 +671,34 @@ public struct ReviewsView: View {
                 approvalDraft.decisionNote = ""
             }
         }
+    }
+
+    private func convertToProposal(_ selected: ReviewDesignItem) {
+        guard let command = proposalConversionCommand(for: selected), !isConvertingToProposal else {
+            return
+        }
+
+        isConvertingToProposal = true
+        Task {
+            await daemonController.createDecision(
+                missionID: command.missionID,
+                actor: command.actor,
+                kind: command.kind,
+                title: command.title,
+                content: command.content
+            )
+            isConvertingToProposal = false
+        }
+    }
+
+    private func proposalConversionCommand(for selected: ReviewDesignItem) -> ReviewProposalConversionCommand? {
+        ReviewProposalConversionCommand(
+            review: selected,
+            missionID: appState.snapshot?.missions.first?.id ?? "",
+            actor: approvalDraft.trimmedActor,
+            decisionNote: approvalDraft.trimmedDecisionNote,
+            locale: appState.locale
+        )
     }
 
     private func inspectorCard<Content: View>(
