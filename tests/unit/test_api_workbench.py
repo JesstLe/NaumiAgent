@@ -125,6 +125,7 @@ class _FakeWorkbenchService:
         self._list_missions_error: Exception | None = None
         self._get_mission_error: Exception | None = None
         self._issue_error: Exception | None = None
+        self._list_issues_error: Exception | None = None
         self._list_approvals_error: Exception | None = None
         self._get_approval_error: Exception | None = None
         self._run_validation_error: Exception | None = None
@@ -195,6 +196,9 @@ class _FakeWorkbenchService:
 
     def set_issue_error(self, error: Exception) -> None:
         self._issue_error = error
+
+    def set_list_issues_error(self, error: Exception) -> None:
+        self._list_issues_error = error
 
     def set_list_approvals_error(self, error: Exception) -> None:
         self._list_approvals_error = error
@@ -814,6 +818,8 @@ class _FakeWorkbenchService:
                 "limit": limit,
             }
         )
+        if self._list_issues_error is not None:
+            raise self._list_issues_error
         return {
             "issues": [
                 {
@@ -3570,6 +3576,61 @@ async def test_get_issues_endpoint_without_filters() -> None:
     assert response.model_dump()["risk_level"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["issues"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_issues_endpoint_reports_invalid_issue_filter() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_issues_error(
+        ValueError("issue risk filter is invalid")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_issues(
+            "sess-1",
+            _fake_request(engine),
+            mission_id="mission-2",
+            risk_level="bad-risk",
+            limit=25,
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_issues == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-2",
+            "risk_level": "bad-risk",
+            "limit": 25,
+        }
+    ]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "issue risk filter is invalid"
+
+
+@pytest.mark.asyncio
+async def test_get_issues_endpoint_reports_unavailable_issue_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_issues_error(
+        RuntimeError("issue store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_issues(
+            "sess-1",
+            _fake_request(engine),
+            mission_id=None,
+            risk_level=None,
+            limit=25,
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_issues == [
+        {"session_id": "sess-1", "mission_id": None, "risk_level": None, "limit": 25}
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "issue store unavailable"
 
 
 @pytest.mark.asyncio
