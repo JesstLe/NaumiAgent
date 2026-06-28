@@ -35,6 +35,8 @@ struct AppStringsReviewsTests {
         #expect(AppStrings.Reviews.processingLabel(.zhCN) == "处理中…")
         #expect(AppStrings.Reviews.convertToProposalButton(.zhCN) == "转为提案")
         #expect(AppStrings.Reviews.convertingToProposalLabel(.zhCN) == "正在转为提案…")
+        #expect(AppStrings.Reviews.keepWorktreeButton(.zhCN) == "保留工作区")
+        #expect(AppStrings.Reviews.keepingWorktreeLabel(.zhCN) == "正在保留工作区…")
     }
 
     @Test func reviewsStringsEnUS() {
@@ -69,6 +71,8 @@ struct AppStringsReviewsTests {
         #expect(AppStrings.Reviews.processingLabel(.enUS) == "Processing…")
         #expect(AppStrings.Reviews.convertToProposalButton(.enUS) == "Convert to Proposal")
         #expect(AppStrings.Reviews.convertingToProposalLabel(.enUS) == "Converting…")
+        #expect(AppStrings.Reviews.keepWorktreeButton(.enUS) == "Keep Worktree")
+        #expect(AppStrings.Reviews.keepingWorktreeLabel(.enUS) == "Keeping…")
     }
 
     @Test func allReviewsStringsAreNonEmpty() {
@@ -104,6 +108,8 @@ struct AppStringsReviewsTests {
             AppStrings.Reviews.processingLabel,
             AppStrings.Reviews.convertToProposalButton,
             AppStrings.Reviews.convertingToProposalLabel,
+            AppStrings.Reviews.keepWorktreeButton,
+            AppStrings.Reviews.keepingWorktreeLabel,
         ]
 
         for string in strings {
