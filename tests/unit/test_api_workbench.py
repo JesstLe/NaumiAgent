@@ -1247,6 +1247,7 @@ class _FakeEngine:
         workbench_market=None,
         worktree_manager: FakeWorktreeManager | None = None,
         load_session_result: bool | None = None,
+        load_session_results: dict[str, bool] | None = None,
     ) -> None:
         self.session_store = _FakeSessionStore(exists)
         self.workbench_service = _FakeWorkbenchService()
@@ -1254,10 +1255,13 @@ class _FakeEngine:
         self.workbench_market = workbench_market
         self.worktree_manager = worktree_manager or FakeWorktreeManager()
         self.load_session_result = load_session_result
+        self.load_session_results = load_session_results or {}
         self.loaded: list[str] = []
 
     async def load_session(self, session_id: str) -> bool:
         self.loaded.append(session_id)
+        if session_id in self.load_session_results:
+            return self.load_session_results[session_id]
         if self.load_session_result is not None:
             return self.load_session_result
         exists = getattr(self.session_store, "exists", None)
@@ -3446,6 +3450,52 @@ async def test_workbench_bootstrap_does_not_select_unloadable_latest_session() -
     assert response.snapshot is None
     assert response.daemon_status.status == "running"
     assert engine.loaded == ["sess-broken"]
+
+
+@pytest.mark.asyncio
+async def test_workbench_bootstrap_selects_next_loadable_session() -> None:
+    engine = _FakeEngine(
+        exists=True,
+        load_session_results={
+            "sess-broken": False,
+            "sess-ready": True,
+        },
+    )
+    broken_session = SimpleNamespace(
+        id="sess-broken",
+        title="损坏会话",
+        model="gpt-5",
+        created_at=datetime(2026, 6, 27, 8, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 27, 9, 0, tzinfo=UTC),
+        messages=[],
+        total_tokens=0,
+        total_cost_usd=0.0,
+        status="active",
+    )
+    ready_session = SimpleNamespace(
+        id="sess-ready",
+        title="可用会话",
+        model="gpt-5",
+        created_at=datetime(2026, 6, 27, 7, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 27, 8, 30, tzinfo=UTC),
+        messages=[{"role": "user"}],
+        total_tokens=64,
+        total_cost_usd=0.006,
+        status="active",
+    )
+    engine.session_store = _FakeSessionStoreWithLatest([broken_session, ready_session])
+    request = _fake_status_request(engine)
+
+    response = await get_workbench_bootstrap(request, page_size=2, auth="test")
+
+    assert [session["id"] for session in response.sessions] == [
+        "sess-broken",
+        "sess-ready",
+    ]
+    assert response.selected_session_id == "sess-ready"
+    assert response.snapshot is not None
+    assert response.snapshot["session_id"] == "sess-ready"
+    assert engine.loaded == ["sess-broken", "sess-ready"]
 
 
 @pytest.mark.asyncio
