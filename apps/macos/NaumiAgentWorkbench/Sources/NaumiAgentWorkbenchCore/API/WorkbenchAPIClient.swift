@@ -305,6 +305,19 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func keepWorktreeWithSnapshot(
+        sessionID: String,
+        name: String,
+        actor: String,
+        reason: String
+    ) async throws(APIError) -> WorktreeSnapshotDTO {
+        let body = KeepWorktreeRequest(actor: actor, reason: reason)
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "worktrees", name, "keep") + "?include_snapshot=true",
+            body: body
+        )
+    }
+
     public func removeWorktree(
         sessionID: String,
         name: String,

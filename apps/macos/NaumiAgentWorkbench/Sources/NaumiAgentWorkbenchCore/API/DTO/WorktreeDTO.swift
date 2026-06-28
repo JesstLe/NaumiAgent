@@ -60,3 +60,19 @@ public struct WorktreeRemovalDTO: Decodable, Equatable, Sendable {
         case message
     }
 }
+
+/// Result returned by `POST /workbench/sessions/{id}/worktrees/{name}/keep?include_snapshot=true`.
+public struct WorktreeSnapshotDTO: Decodable, Equatable, Sendable {
+    public let worktree: WorktreeDTO
+    public let snapshot: WorkbenchSnapshotDTO
+
+    public enum CodingKeys: String, CodingKey {
+        case worktree
+        case snapshot
+    }
+
+    public init(worktree: WorktreeDTO, snapshot: WorkbenchSnapshotDTO) {
+        self.worktree = worktree
+        self.snapshot = snapshot
+    }
+}
