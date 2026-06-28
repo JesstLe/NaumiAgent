@@ -121,6 +121,7 @@ class _FakeWorkbenchService:
         self.listed_decisions: list[dict] = []
         self.requested_decisions: list[dict] = []
         self._create_mission_error: Exception | None = None
+        self._issue_error: Exception | None = None
         self._list_approvals_error: Exception | None = None
         self._get_approval_error: Exception | None = None
         self._run_validation_error: Exception | None = None
@@ -183,6 +184,9 @@ class _FakeWorkbenchService:
     def set_create_mission_error(self, error: Exception) -> None:
         self._create_mission_error = error
 
+    def set_issue_error(self, error: Exception) -> None:
+        self._issue_error = error
+
     def set_list_approvals_error(self, error: Exception) -> None:
         self._list_approvals_error = error
 
@@ -239,6 +243,8 @@ class _FakeWorkbenchService:
                 "risk_level": risk_level,
             }
         )
+        if self._issue_error is not None:
+            raise self._issue_error
         return {
             "session_id": session_id,
             "task_id": "task-9",
@@ -275,6 +281,8 @@ class _FakeWorkbenchService:
                 "risk_level": risk_level,
             }
         )
+        if self._issue_error is not None:
+            raise self._issue_error
         return {
             "session_id": session_id,
             "task_id": task_id,
@@ -2398,6 +2406,37 @@ async def test_attach_issue_endpoint_returns_attached_issue() -> None:
     assert response["acceptance_criteria"] == ["AC1", "AC2"]
     assert response["parallel_mode"] == ParallelMode.COOPERATIVE
     assert response["risk_level"] == RiskLevel.HIGH
+
+
+@pytest.mark.asyncio
+async def test_attach_issue_endpoint_reports_unavailable_issue_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_issue_error(RuntimeError("issue store unavailable"))
+    body = IssueAttach(
+        task_id="task-1",
+        acceptance_criteria=["AC1"],
+        parallel_mode=ParallelMode.EXCLUSIVE,
+        risk_level=RiskLevel.MEDIUM,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await attach_workbench_issue(
+            "sess-1", "mission-1", body, _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.attached_issues == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-1",
+            "task_id": "task-1",
+            "acceptance_criteria": ["AC1"],
+            "parallel_mode": ParallelMode.EXCLUSIVE,
+            "risk_level": RiskLevel.MEDIUM,
+        }
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "issue store unavailable"
 
 
 @pytest.mark.asyncio
