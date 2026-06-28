@@ -34,6 +34,7 @@ from naumi_agent.api.routes.workbench import (
     create_workbench_mission,
     expire_workbench_leases,
     get_agent_profiles,
+    get_approval,
     get_approvals,
     get_context_snapshot,
     get_context_snapshots,
@@ -120,6 +121,7 @@ class _FakeWorkbenchService:
         self.listed_decisions: list[dict] = []
         self.requested_decisions: list[dict] = []
         self._list_approvals_error: Exception | None = None
+        self._get_approval_error: Exception | None = None
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
         self._decision_error: Exception | None = None
@@ -179,6 +181,9 @@ class _FakeWorkbenchService:
 
     def set_list_approvals_error(self, error: Exception) -> None:
         self._list_approvals_error = error
+
+    def set_get_approval_error(self, error: Exception) -> None:
+        self._get_approval_error = error
 
     async def dashboard_snapshot(self, session_id: str):
         if self._dashboard_snapshot_error is not None:
@@ -705,6 +710,8 @@ class _FakeWorkbenchService:
         self.requested_approvals.append(
             {"session_id": session_id, "approval_id": approval_id}
         )
+        if self._get_approval_error is not None:
+            raise self._get_approval_error
         if approval_id == "missing-approval":
             return None
         return {
@@ -2534,6 +2541,42 @@ def test_get_approval_route_returns_404_for_missing_approval() -> None:
     assert engine.workbench_service.requested_approvals == [
         {"session_id": "sess-1", "approval_id": "missing-approval"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_approval_endpoint_reports_unavailable_approval_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_approval_error(
+        RuntimeError("approval store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_approval("sess-1", "approval-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_approvals == [
+        {"session_id": "sess-1", "approval_id": "approval-2"}
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "approval store unavailable"
+
+
+@pytest.mark.asyncio
+async def test_get_approval_endpoint_reports_invalid_approval_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_approval_error(
+        ValueError("approval id is invalid")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_approval("sess-1", "approval-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_approvals == [
+        {"session_id": "sess-1", "approval_id": "approval-2"}
+    ]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "approval id is invalid"
 
 
 @pytest.mark.asyncio
