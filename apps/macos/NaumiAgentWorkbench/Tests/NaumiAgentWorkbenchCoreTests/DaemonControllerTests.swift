@@ -3103,6 +3103,50 @@ final class DaemonControllerTests {
         #expect(appState.selectedWorktree == oldWorktree)
     }
 
+    @Test @MainActor func loadMissionSuccessStoresSelectedMission() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let mission = makeMission(id: "mission-001", sessionID: "sess-001")
+        await api.setMissionResult(.success(mission))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadMission(missionID: "mission-001")
+
+        #expect(appState.selectedMission == mission)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadMissionWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        let oldMission = makeMission(id: "mission-old", sessionID: "sess-001")
+        appState.selectedMission = oldMission
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadMission(missionID: "mission-001")
+
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.selectedMission == oldMission)
+    }
+
+    @Test @MainActor func loadMissionFailurePreservesOldSelectedMission() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let oldMission = makeMission(id: "mission-old", sessionID: "sess-001")
+        appState.selectedMission = oldMission
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setMissionResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadMission(missionID: "mission-001")
+
+        #expect(appState.lastError == .httpStatus(500))
+        #expect(appState.selectedMission == oldMission)
+    }
+
     @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotApprovalsAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -3408,6 +3452,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setMissionsResult(_ result: Result<MissionsDTO, APIError>) {
         missionsResult = result
+    }
+
+    fileprivate func setMissionResult(_ result: Result<MissionDTO, APIError>) {
+        missionResult = result
     }
 
     fileprivate func setAgentProfilesResult(_ result: Result<AgentProfilesDTO, APIError>) {
