@@ -25,6 +25,48 @@ struct WorkbenchGlobalStatusPresentationTests {
         #expect(presentation.items.map(\.value) == ["实现 SwiftUI 工作台骨架", "2", "2", "1", "1", "2"])
     }
 
+    @Test func prefersBackendSummaryWhenSnapshotProvidesIt() {
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "session-1",
+            summary: WorkbenchSnapshotSummaryDTO(
+                currentMissionTitle: "后端状态条 Mission",
+                activeAgents: 4,
+                openIssues: 12,
+                blockedIssues: 2,
+                pendingApprovals: 3,
+                failedValidations: 1
+            ),
+            missions: [
+                MissionDTO(
+                    id: "mission-1",
+                    sessionID: "session-1",
+                    title: "本地不应推断",
+                    goal: "后端 summary 是真相",
+                    status: "active",
+                    createdAt: "2026-06-27T09:00:00",
+                    updatedAt: "2026-06-27T09:10:00"
+                )
+            ],
+            agentProfiles: [],
+            tasks: [],
+            issues: [],
+            leases: [],
+            failures: [],
+            events: []
+        )
+
+        let presentation = WorkbenchGlobalStatusPresentation(
+            snapshot: snapshot,
+            approvals: [],
+            validationRuns: [],
+            failures: [],
+            locale: .zhCN
+        )
+
+        #expect(presentation.missionTitle == "后端状态条 Mission")
+        #expect(presentation.items.map(\.value) == ["后端状态条 Mission", "4", "12", "2", "3", "1"])
+    }
+
     @Test func fallsBackToEmptyMissionWhenSnapshotIsMissing() {
         let presentation = WorkbenchGlobalStatusPresentation(
             snapshot: nil,

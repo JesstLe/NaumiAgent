@@ -12,7 +12,8 @@ public struct WorkbenchGlobalStatusPresentation: Equatable, Sendable {
         failures: [FailureDTO],
         locale: AppLocale
     ) {
-        let missionTitle = snapshot?.missions.first?.title
+        let missionTitle = snapshot?.summary?.currentMissionTitle
+            ?? snapshot?.missions.first?.title
             ?? AppStrings.GlobalStatus.noMission(locale)
         let taskByID = Dictionary(uniqueKeysWithValues: (snapshot?.tasks ?? []).map { ($0.id, $0) })
         let issues = snapshot?.issues ?? []
@@ -28,6 +29,11 @@ public struct WorkbenchGlobalStatusPresentation: Equatable, Sendable {
         let pendingApprovalCount = approvals.filter { $0.state == "waiting" || $0.state == "pending" }.count
         let failedValidationCount = validationRuns.filter { $0.status == "failed" }.count
             + failures.filter { $0.status != "resolved" && $0.status != "closed" }.count
+        let activeAgentsValue = snapshot?.summary?.activeAgents ?? snapshot?.agentProfiles.count ?? 0
+        let openIssuesValue = snapshot?.summary?.openIssues ?? openIssueCount
+        let blockedIssuesValue = snapshot?.summary?.blockedIssues ?? blockedIssueCount
+        let pendingApprovalsValue = snapshot?.summary?.pendingApprovals ?? pendingApprovalCount
+        let failedValidationsValue = snapshot?.summary?.failedValidations ?? failedValidationCount
 
         self.missionTitle = missionTitle
         self.items = [
@@ -39,33 +45,33 @@ public struct WorkbenchGlobalStatusPresentation: Equatable, Sendable {
             ),
             WorkbenchGlobalStatusItem(
                 label: AppStrings.GlobalStatus.activeAgents(locale),
-                value: "\(snapshot?.agentProfiles.count ?? 0)",
+                value: "\(activeAgentsValue)",
                 systemImage: "person.2",
                 tone: .purple
             ),
             WorkbenchGlobalStatusItem(
                 label: AppStrings.GlobalStatus.openIssues(locale),
-                value: "\(openIssueCount)",
+                value: "\(openIssuesValue)",
                 systemImage: "list.bullet.rectangle",
                 tone: .blue
             ),
             WorkbenchGlobalStatusItem(
                 label: AppStrings.GlobalStatus.blocked(locale),
-                value: "\(blockedIssueCount)",
+                value: "\(blockedIssuesValue)",
                 systemImage: "exclamationmark.triangle",
-                tone: blockedIssueCount > 0 ? .orange : .secondary
+                tone: blockedIssuesValue > 0 ? .orange : .secondary
             ),
             WorkbenchGlobalStatusItem(
                 label: AppStrings.GlobalStatus.pendingApproval(locale),
-                value: "\(pendingApprovalCount)",
+                value: "\(pendingApprovalsValue)",
                 systemImage: "hand.raised",
-                tone: pendingApprovalCount > 0 ? .pink : .secondary
+                tone: pendingApprovalsValue > 0 ? .pink : .secondary
             ),
             WorkbenchGlobalStatusItem(
                 label: AppStrings.GlobalStatus.failedValidations(locale),
-                value: "\(failedValidationCount)",
+                value: "\(failedValidationsValue)",
                 systemImage: "xmark.octagon",
-                tone: failedValidationCount > 0 ? .red : .secondary
+                tone: failedValidationsValue > 0 ? .red : .secondary
             ),
         ]
     }
