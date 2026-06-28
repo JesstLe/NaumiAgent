@@ -45,6 +45,7 @@ from naumi_agent.api.routes.workbench import (
     get_intent_locks,
     get_issue,
     get_issues,
+    get_lease,
     get_leases,
     get_mission,
     get_missions,
@@ -129,6 +130,7 @@ class _FakeWorkbenchService:
         self._list_issues_error: Exception | None = None
         self._get_issue_error: Exception | None = None
         self._list_leases_error: Exception | None = None
+        self._get_lease_error: Exception | None = None
         self._list_approvals_error: Exception | None = None
         self._get_approval_error: Exception | None = None
         self._run_validation_error: Exception | None = None
@@ -208,6 +210,9 @@ class _FakeWorkbenchService:
 
     def set_list_leases_error(self, error: Exception) -> None:
         self._list_leases_error = error
+
+    def set_get_lease_error(self, error: Exception) -> None:
+        self._get_lease_error = error
 
     def set_list_approvals_error(self, error: Exception) -> None:
         self._list_approvals_error = error
@@ -915,6 +920,8 @@ class _FakeWorkbenchService:
 
     async def get_lease(self, session_id: str, lease_id: str):
         self.requested_leases.append({"session_id": session_id, "lease_id": lease_id})
+        if self._get_lease_error is not None:
+            raise self._get_lease_error
         if lease_id == "missing-lease":
             return None
         return {
@@ -4187,6 +4194,40 @@ def test_get_lease_route_returns_404_for_missing_lease() -> None:
     assert engine.workbench_service.requested_leases == [
         {"session_id": "sess-1", "lease_id": "missing-lease"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_lease_endpoint_reports_invalid_lease_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_lease_error(ValueError("lease id is invalid"))
+
+    with pytest.raises(HTTPException) as exc:
+        await get_lease("sess-1", "lease-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_leases == [
+        {"session_id": "sess-1", "lease_id": "lease-2"}
+    ]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "lease id is invalid"
+
+
+@pytest.mark.asyncio
+async def test_get_lease_endpoint_reports_unavailable_lease_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_lease_error(
+        RuntimeError("lease detail store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_lease("sess-1", "lease-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_leases == [
+        {"session_id": "sess-1", "lease_id": "lease-2"}
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "lease detail store unavailable"
 
 
 @pytest.mark.asyncio
