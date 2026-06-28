@@ -43,6 +43,7 @@ from naumi_agent.api.routes.workbench import (
     get_failures,
     get_intent_lock,
     get_intent_locks,
+    get_issue,
     get_issues,
     get_leases,
     get_mission,
@@ -126,6 +127,7 @@ class _FakeWorkbenchService:
         self._get_mission_error: Exception | None = None
         self._issue_error: Exception | None = None
         self._list_issues_error: Exception | None = None
+        self._get_issue_error: Exception | None = None
         self._list_approvals_error: Exception | None = None
         self._get_approval_error: Exception | None = None
         self._run_validation_error: Exception | None = None
@@ -199,6 +201,9 @@ class _FakeWorkbenchService:
 
     def set_list_issues_error(self, error: Exception) -> None:
         self._list_issues_error = error
+
+    def set_get_issue_error(self, error: Exception) -> None:
+        self._get_issue_error = error
 
     def set_list_approvals_error(self, error: Exception) -> None:
         self._list_approvals_error = error
@@ -845,6 +850,8 @@ class _FakeWorkbenchService:
 
     async def get_issue(self, session_id: str, task_id: str):
         self.requested_issues.append({"session_id": session_id, "task_id": task_id})
+        if self._get_issue_error is not None:
+            raise self._get_issue_error
         if task_id == "missing-task":
             return None
         return {
@@ -3891,6 +3898,40 @@ def test_get_issue_route_returns_404_for_missing_issue() -> None:
     assert engine.workbench_service.requested_issues == [
         {"session_id": "sess-1", "task_id": "missing-task"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_issue_endpoint_reports_invalid_issue_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_issue_error(ValueError("issue id is invalid"))
+
+    with pytest.raises(HTTPException) as exc:
+        await get_issue("sess-1", "task-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_issues == [
+        {"session_id": "sess-1", "task_id": "task-2"}
+    ]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "issue id is invalid"
+
+
+@pytest.mark.asyncio
+async def test_get_issue_endpoint_reports_unavailable_issue_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_issue_error(
+        RuntimeError("issue store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_issue("sess-1", "task-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_issues == [
+        {"session_id": "sess-1", "task_id": "task-2"}
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "issue store unavailable"
 
 
 @pytest.mark.asyncio
