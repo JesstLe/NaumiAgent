@@ -192,6 +192,31 @@ async def test_attach_issue_rejects_missing_mission(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_attach_issue_rejects_missing_task_without_metadata_or_event(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+    mission = await service.create_mission(
+        session_id="s",
+        title="Mac 工作台",
+        goal="拒绝不存在任务的 Issue 挂载",
+    )
+
+    with pytest.raises(ValueError, match="任务 #missing-task 不存在"):
+        await service.attach_issue(
+            session_id="s",
+            mission_id=mission.id,
+            task_id="missing-task",
+            acceptance_criteria=["不能生成孤儿 issue"],
+        )
+
+    assert await workbench_store.get_issue("s", "missing-task") is None
+    events = await service.list_events("s", event_type="issue.created")
+    assert events["events"] == []
+
+
+@pytest.mark.asyncio
 async def test_create_issue_rejects_missing_mission_without_creating_task(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")

@@ -248,6 +248,10 @@ class WorkbenchService:
         risk_level: RiskLevel = RiskLevel.MEDIUM,
     ) -> dict[str, Any]:
         mission_id = await self._require_mission(session_id, mission_id)
+        task = await self._task_store.get_task(task_id)
+        if task is None:
+            raise ValueError(f"任务 #{task_id} 不存在")
+
         issue = await self._workbench_store.upsert_issue(
             session_id=session_id,
             task_id=task_id,
