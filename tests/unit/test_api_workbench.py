@@ -40,6 +40,7 @@ from naumi_agent.api.routes.workbench import (
     get_context_snapshots,
     get_daemon_status,
     get_decisions,
+    get_failure,
     get_failures,
     get_intent_lock,
     get_intent_locks,
@@ -138,6 +139,7 @@ class _FakeWorkbenchService:
         self._decision_error: Exception | None = None
         self._agent_profile_error: Exception | None = None
         self._list_failures_error: Exception | None = None
+        self._get_failure_error: Exception | None = None
         self._context_health_error: Exception | None = None
         self._resolve_approval_error: Exception | None = None
         self._resolve_approval_result: dict | None = None
@@ -217,6 +219,9 @@ class _FakeWorkbenchService:
 
     def set_list_failures_error(self, error: Exception) -> None:
         self._list_failures_error = error
+
+    def set_get_failure_error(self, error: Exception) -> None:
+        self._get_failure_error = error
 
     def set_list_approvals_error(self, error: Exception) -> None:
         self._list_approvals_error = error
@@ -809,6 +814,8 @@ class _FakeWorkbenchService:
         self.requested_failures.append(
             {"session_id": session_id, "failure_id": failure_id}
         )
+        if self._get_failure_error is not None:
+            raise self._get_failure_error
         if failure_id == "missing-failure":
             return None
         return {
@@ -3016,6 +3023,40 @@ async def test_get_failure_endpoint_returns_404_for_missing_failure() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == "失败卡片不存在"
+
+
+@pytest.mark.asyncio
+async def test_get_failure_endpoint_reports_invalid_failure_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_failure_error(ValueError("failure id is invalid"))
+
+    with pytest.raises(HTTPException) as exc:
+        await get_failure("sess-1", "failure-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_failures == [
+        {"session_id": "sess-1", "failure_id": "failure-2"}
+    ]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "failure id is invalid"
+
+
+@pytest.mark.asyncio
+async def test_get_failure_endpoint_reports_unavailable_failure_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_failure_error(
+        RuntimeError("failure detail store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_failure("sess-1", "failure-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_failures == [
+        {"session_id": "sess-1", "failure_id": "failure-2"}
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "failure detail store unavailable"
 
 
 @pytest.mark.asyncio
