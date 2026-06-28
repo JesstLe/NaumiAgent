@@ -5673,6 +5673,45 @@ def test_delete_worktree_route_removes_worktree_and_records_audit_event() -> Non
     ]
 
 
+def test_delete_worktree_route_can_return_fresh_snapshot() -> None:
+    worktree_manager = FakeWorktreeManager(
+        [
+            WorktreeRecord(
+                name="wt-clean",
+                path="/repo/.naumi/worktrees/wt-clean",
+                branch="naumi/worktree-wt-clean",
+                base_ref="abc123",
+                status=WorktreeStatus.CLEAN,
+                task_id="task-1",
+                dirty_files=0,
+                commits_ahead=0,
+                created_at="2024-01-01T00:00:00",
+                updated_at="2024-01-01T00:04:00",
+            )
+        ]
+    )
+    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.delete(
+        "/workbench/sessions/sess-1/worktrees/wt-clean",
+        params={"include_snapshot": "true"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["removal"] == {
+        "name": "wt-clean",
+        "discard_changes": False,
+        "message": "已删除 worktree：wt-clean",
+    }
+    assert body["snapshot"]["version"] == 1
+    assert body["snapshot"]["session_id"] == "sess-1"
+
+
 def test_delete_worktree_route_rejects_dirty_without_discard_changes() -> None:
     worktree_manager = FakeWorktreeManager(
         [
