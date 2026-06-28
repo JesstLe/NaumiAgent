@@ -185,6 +185,10 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchFailure(sessionID: String, failureID: String) async throws(APIError) -> FailureDTO {
+        try await get(path: encodePath("workbench", "sessions", sessionID, "failures", failureID))
+    }
+
     public func fetchIssues(
         sessionID: String,
         missionID: String?,

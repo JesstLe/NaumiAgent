@@ -72,6 +72,9 @@ public protocol WorkbenchAPIProviding: Sendable {
         limit: Int
     ) async throws(APIError) -> FailuresDTO
 
+    /// Fetches one failure card by id for detailed diagnostics.
+    func fetchFailure(sessionID: String, failureID: String) async throws(APIError) -> FailureDTO
+
     /// Fetches issues for the given session, optionally filtered by mission or risk level.
     func fetchIssues(
         sessionID: String,

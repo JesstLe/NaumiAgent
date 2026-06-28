@@ -14,7 +14,7 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
             tasks: [makeTask(sessionID: session.id, taskID: "preview-task")],
             issues: [makeIssue(sessionID: session.id, missionID: "preview-mission", taskID: "preview-task")],
             leases: [makeLease(sessionID: session.id, leaseID: "preview-lease", taskID: "preview-task")],
-            failures: [],
+            failures: [makeFailure(sessionID: session.id, failureID: "preview-failure", taskID: "preview-task")],
             events: []
         )
         return WorkbenchBootstrapDTO(
@@ -58,7 +58,7 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
             tasks: [makeTask(sessionID: sessionID, taskID: "preview-task")],
             issues: [makeIssue(sessionID: sessionID, missionID: "preview-mission", taskID: "preview-task")],
             leases: [makeLease(sessionID: sessionID, leaseID: "preview-lease", taskID: "preview-task")],
-            failures: [],
+            failures: [makeFailure(sessionID: sessionID, failureID: "preview-failure", taskID: "preview-task")],
             events: []
         )
     }
@@ -155,7 +155,16 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         status: String?,
         limit: Int
     ) async throws(APIError) -> FailuresDTO {
-        FailuresDTO(failures: [], taskID: taskID, status: status, limit: limit)
+        FailuresDTO(
+            failures: [makeFailure(sessionID: sessionID, failureID: "preview-failure", taskID: taskID ?? "preview-task")],
+            taskID: taskID,
+            status: status,
+            limit: limit
+        )
+    }
+
+    func fetchFailure(sessionID: String, failureID: String) async throws(APIError) -> FailureDTO {
+        makeFailure(sessionID: sessionID, failureID: failureID, taskID: "preview-task")
     }
 
     func fetchIssues(
@@ -539,6 +548,20 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
             output: "preview validation passed",
             startedAt: now,
             completedAt: now
+        )
+    }
+
+    private func makeFailure(sessionID: String, failureID: String, taskID: String) -> FailureDTO {
+        FailureDTO(
+            id: failureID,
+            sessionID: sessionID,
+            taskID: taskID,
+            kind: "test_failed",
+            title: "DTO 解码测试失败",
+            detail: "pytest tests/unit/test_dto.py -q failed with 2 failures",
+            sourceID: "preview-run",
+            status: "open",
+            createdAt: now
         )
     }
 
