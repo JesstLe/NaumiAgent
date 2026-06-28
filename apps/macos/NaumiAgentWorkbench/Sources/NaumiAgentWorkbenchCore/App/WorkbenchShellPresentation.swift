@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Presentation constants for the macOS workbench shell.
 /// The app relies on native macOS window controls instead of drawing fake ones.
@@ -43,7 +44,30 @@ public struct WorkbenchShellPresentation: Equatable, Sendable {
         return max(0.1, availableWidth / designCanvasWidth)
     }
 
+    public func navigationScale(
+        for availableSize: CGSize,
+        pageLayout: WorkbenchScaledPageLayout
+    ) -> Double {
+        guard designCanvasWidth > 0, pageLayout.baseHeight > 0 else {
+            return 1
+        }
+
+        let widthScale = Double(availableSize.width) / designCanvasWidth
+        let heightScale = Double(availableSize.height) / (topNavigationHeight + pageLayout.baseHeight)
+        return max(0.1, min(widthScale, heightScale))
+    }
+
     public func scaledTopNavigationHeight(for availableWidth: Double) -> Double {
         topNavigationHeight * navigationScale(for: availableWidth)
+    }
+
+    public func scaledTopNavigationHeight(
+        for availableSize: CGSize,
+        pageLayout: WorkbenchScaledPageLayout
+    ) -> Double {
+        topNavigationHeight * navigationScale(
+            for: availableSize,
+            pageLayout: pageLayout
+        )
     }
 }

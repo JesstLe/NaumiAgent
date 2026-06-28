@@ -351,11 +351,6 @@ public struct DashboardView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(AppStrings.Dashboard.sharedCanvasSection(appState.locale))
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-                    .layoutPriority(2)
-                Spacer(minLength: 12)
                 Text(appState.locale == .zhCN ? "显示：" : "Show:")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -365,6 +360,7 @@ public struct DashboardView: View {
                         .font(.caption)
                         .fixedSize(horizontal: true, vertical: false)
                 }
+                Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)

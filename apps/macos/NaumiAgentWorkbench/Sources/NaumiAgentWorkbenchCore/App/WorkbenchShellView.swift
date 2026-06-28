@@ -14,15 +14,21 @@ public struct WorkbenchShellView: View {
         @Bindable var appState = environment.appState
 
         GeometryReader { proxy in
-            let navigationHeight = CGFloat(
-                shellPresentation.scaledTopNavigationHeight(for: Double(proxy.size.width))
+            let routeLayout = scaledLayout(for: appState.currentRoute)
+            let navigationScale = CGFloat(
+                shellPresentation.navigationScale(
+                    for: proxy.size,
+                    pageLayout: routeLayout
+                )
             )
+            let navigationHeight = CGFloat(shellPresentation.topNavigationHeight) * navigationScale
 
             VStack(spacing: 0) {
                 ScaledTopNavigationBar(
                     appState: environment.appState,
                     daemonController: environment.daemonController,
-                    isPresentingMissionComposer: $isPresentingMissionComposer
+                    isPresentingMissionComposer: $isPresentingMissionComposer,
+                    scale: navigationScale
                 )
                 .frame(height: navigationHeight)
 
@@ -34,6 +40,7 @@ public struct WorkbenchShellView: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
         }
+        .background(Color(nsColor: .windowBackgroundColor))
         .frame(
             minWidth: shellPresentation.minimumWindowWidth,
             minHeight: shellPresentation.minimumWindowHeight
@@ -81,20 +88,24 @@ public struct WorkbenchShellView: View {
             )
         }
     }
+
+    private func scaledLayout(for route: AppRoute) -> WorkbenchScaledPageLayout {
+        switch route {
+        case .dashboard, .taskMarket, .worktrees, .reviews, .timeline, .settings:
+            return WorkbenchScaledPageLayout.dashboard
+        }
+    }
 }
 
 private struct ScaledTopNavigationBar: View {
     let appState: AppState
     let daemonController: DaemonController
     @Binding var isPresentingMissionComposer: Bool
+    let scale: CGFloat
     private let shellPresentation = WorkbenchShellPresentation()
 
     var body: some View {
         GeometryReader { proxy in
-            let scale = CGFloat(
-                shellPresentation.navigationScale(for: Double(proxy.size.width))
-            )
-
             TopNavigationBar(
                 appState: appState,
                 daemonController: daemonController,
