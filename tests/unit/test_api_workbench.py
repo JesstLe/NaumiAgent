@@ -137,6 +137,7 @@ class _FakeWorkbenchService:
         self._get_approval_error: Exception | None = None
         self._run_validation_error: Exception | None = None
         self._intent_lock_error: Exception | None = None
+        self._list_intent_locks_error: Exception | None = None
         self._decision_error: Exception | None = None
         self._agent_profile_error: Exception | None = None
         self._get_agent_profile_error: Exception | None = None
@@ -159,6 +160,9 @@ class _FakeWorkbenchService:
 
     def set_intent_lock_error(self, error: Exception) -> None:
         self._intent_lock_error = error
+
+    def set_list_intent_locks_error(self, error: Exception) -> None:
+        self._list_intent_locks_error = error
 
     def set_decision_error(self, error: Exception) -> None:
         self._decision_error = error
@@ -1012,6 +1016,8 @@ class _FakeWorkbenchService:
         }
 
     async def list_intent_locks(self, session_id: str, mission_id: str):
+        if self._list_intent_locks_error is not None:
+            raise self._list_intent_locks_error
         self.listed_intent_locks.append(
             {"session_id": session_id, "mission_id": mission_id}
         )
@@ -4916,6 +4922,38 @@ async def test_get_intent_locks_endpoint_returns_locks_and_mission_id() -> None:
         ],
         "mission_id": "mission-2",
     }
+
+
+@pytest.mark.asyncio
+async def test_get_intent_locks_endpoint_maps_value_error_to_400() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_intent_locks_error(
+        ValueError("意图锁查询参数无效")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_intent_locks("sess-1", "mission-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_intent_locks == []
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "意图锁查询参数无效"
+
+
+@pytest.mark.asyncio
+async def test_get_intent_locks_endpoint_maps_runtime_error_to_503() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_intent_locks_error(
+        RuntimeError("意图锁存储暂不可用")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_intent_locks("sess-1", "mission-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_intent_locks == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "意图锁存储暂不可用"
 
 
 @pytest.mark.asyncio

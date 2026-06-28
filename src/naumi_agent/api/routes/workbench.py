@@ -940,7 +940,12 @@ async def get_intent_locks(
         raise HTTPException(status_code=404, detail="Session not found")
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    locks = await engine.workbench_service.list_intent_locks(session_id, mission_id)
+    try:
+        locks = await engine.workbench_service.list_intent_locks(session_id, mission_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return IntentLocksResponse(intent_locks=locks, mission_id=mission_id)
 
 
