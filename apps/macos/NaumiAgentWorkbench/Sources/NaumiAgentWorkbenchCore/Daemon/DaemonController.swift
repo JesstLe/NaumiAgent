@@ -9,6 +9,7 @@ import Observation
 @MainActor
 public final class DaemonController: Sendable {
     public static let supportedProtocolVersion = 1
+    public static let bootstrapSessionCandidateCount = 5
 
     public let appState: AppState
     public let apiProvider: WorkbenchAPIProviding
@@ -52,7 +53,9 @@ public final class DaemonController: Sendable {
         appState.lastError = nil
 
         do {
-            let bootstrap = try await apiProvider.fetchBootstrap(pageSize: 1)
+            let bootstrap = try await apiProvider.fetchBootstrap(
+                pageSize: Self.bootstrapSessionCandidateCount
+            )
             let capabilities = bootstrap.capabilities
             guard capabilities.protocolVersion == Self.supportedProtocolVersion else {
                 await stopEventStream()
