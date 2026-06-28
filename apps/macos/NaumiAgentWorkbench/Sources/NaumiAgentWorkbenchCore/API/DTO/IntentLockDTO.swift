@@ -46,3 +46,18 @@ public struct IntentLockDTO: Decodable, Equatable, Sendable {
         self.createdAt = createdAt
     }
 }
+
+public struct IntentLockSnapshotDTO: Decodable, Equatable, Sendable {
+    public let intentLock: IntentLockDTO
+    public let snapshot: WorkbenchSnapshotDTO
+
+    public enum CodingKeys: String, CodingKey {
+        case intentLock = "intent_lock"
+        case snapshot
+    }
+
+    public init(intentLock: IntentLockDTO, snapshot: WorkbenchSnapshotDTO) {
+        self.intentLock = intentLock
+        self.snapshot = snapshot
+    }
+}

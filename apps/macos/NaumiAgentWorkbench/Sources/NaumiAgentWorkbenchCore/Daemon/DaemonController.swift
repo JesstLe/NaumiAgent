@@ -1249,11 +1249,12 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Creates an intent lock for a mission and refreshes the intent-lock list,
-    /// timeline events, and snapshot on success.
+    /// Creates an intent lock for a mission and refreshes the intent-lock list
+    /// and timeline events on success.
     ///
-    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
-    /// `appState.lastError`; the local snapshot is never mutated directly.
+    /// Requires `appState.selectedSessionID` to be set. The mutation response
+    /// supplies the authoritative snapshot; follow-up refresh failures are
+    /// preserved without mutating the local intent-lock list directly.
     public func createIntentLock(
         missionID: String,
         actor: String,
@@ -1269,7 +1270,7 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            _ = try await apiProvider.createIntentLock(
+            let response = try await apiProvider.createIntentLockWithSnapshot(
                 sessionID: sessionID,
                 missionID: missionID,
                 actor: actor,
@@ -1278,9 +1279,13 @@ public final class DaemonController: Sendable {
                 allowedPaths: allowedPaths,
                 requireProposalForRisk: requireProposalForRisk
             )
+            appState.snapshot = response.snapshot
+            var refreshError: APIError?
             await refreshIntentLocks(missionID: missionID)
+            refreshError = refreshError ?? appState.lastError
             await refreshEvents(limit: 50)
-            await refreshSnapshot()
+            refreshError = refreshError ?? appState.lastError
+            appState.lastError = refreshError
         } catch {
             appState.lastError = error
         }
