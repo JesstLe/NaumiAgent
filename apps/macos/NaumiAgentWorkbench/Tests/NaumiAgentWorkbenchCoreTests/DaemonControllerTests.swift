@@ -2751,6 +2751,50 @@ final class DaemonControllerTests {
         #expect(appState.selectedIntentLock == oldLock)
     }
 
+    @Test @MainActor func loadApprovalSuccessStoresSelectedApproval() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let approval = makeApproval(id: "approval-001", missionID: "mission-001", state: "waiting")
+        await api.setApprovalResult(.success(approval))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadApproval(approvalID: "approval-001")
+
+        #expect(appState.selectedApproval == approval)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadApprovalWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        let oldApproval = makeApproval(id: "approval-old", missionID: "mission-001", state: "waiting")
+        appState.selectedApproval = oldApproval
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadApproval(approvalID: "approval-001")
+
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.selectedApproval == oldApproval)
+    }
+
+    @Test @MainActor func loadApprovalFailurePreservesOldSelectedApproval() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let oldApproval = makeApproval(id: "approval-old", missionID: "mission-001", state: "waiting")
+        appState.selectedApproval = oldApproval
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setApprovalResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadApproval(approvalID: "approval-001")
+
+        #expect(appState.lastError == .httpStatus(500))
+        #expect(appState.selectedApproval == oldApproval)
+    }
+
     @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotApprovalsAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -3000,6 +3044,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setApprovalsResult(_ result: Result<ApprovalsDTO, APIError>) {
         approvalsResult = result
+    }
+
+    fileprivate func setApprovalResult(_ result: Result<ApprovalDTO, APIError>) {
+        approvalResult = result
     }
 
     fileprivate func setFailuresResult(_ result: Result<FailuresDTO, APIError>) {
