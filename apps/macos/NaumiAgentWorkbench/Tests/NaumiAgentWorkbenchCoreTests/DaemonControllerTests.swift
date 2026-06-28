@@ -556,6 +556,14 @@ actor FakeWorkbenchEventProvider: WorkbenchEventProviding {
     func recordedRefreshRequests() async -> [FakeWorkbenchEventRefreshRequest] {
         await streamRecorder.refreshRequests
     }
+
+    func recordedPingCount() async -> Int {
+        await streamRecorder.pingCount
+    }
+
+    func setPingResult(_ result: Result<Void, APIError>) async {
+        await streamRecorder.setPingResult(result)
+    }
 }
 
 struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
@@ -590,7 +598,9 @@ struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
         )
     }
 
-    func sendPing() async throws(APIError) {}
+    func sendPing() async throws(APIError) {
+        try await recorder.recordPing()
+    }
 
     func cancel() async {}
 }
@@ -604,6 +614,8 @@ struct FakeWorkbenchEventRefreshRequest: Equatable, Sendable {
 
 actor FakeWorkbenchEventStreamRecorder {
     private(set) var refreshRequests: [FakeWorkbenchEventRefreshRequest] = []
+    private(set) var pingCount = 0
+    private var pingResult: Result<Void, APIError> = .success(())
 
     func recordRefreshRequest(
         eventType: String?,
@@ -617,6 +629,15 @@ actor FakeWorkbenchEventStreamRecorder {
             actor: actor,
             limit: limit
         ))
+    }
+
+    func recordPing() throws(APIError) {
+        pingCount += 1
+        try pingResult.get()
+    }
+
+    func setPingResult(_ result: Result<Void, APIError>) {
+        pingResult = result
     }
 }
 
@@ -1044,6 +1065,61 @@ final class DaemonControllerTests {
         }
 
         #expect(appState.lastError == nil)
+
+        await controller.stopEventStream()
+    }
+
+    @Test @MainActor func pingEventStreamForwardsPingToActiveStream() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-events"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+
+        await controller.startEventStream()
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-events"]
+        }
+
+        await controller.pingEventStream()
+
+        await waitUntil {
+            await eventProvider.recordedPingCount() == 1
+        }
+
+        #expect(appState.lastError == nil)
+
+        await controller.stopEventStream()
+    }
+
+    @Test @MainActor func pingEventStreamFailureMarksConnectionStaleAndRecordsError() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-events"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        await eventProvider.setPingResult(.failure(.networkFailure("ping timeout")))
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+
+        await controller.startEventStream()
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-events"]
+        }
+
+        await controller.pingEventStream()
+
+        #expect(await eventProvider.recordedPingCount() == 1)
+        #expect(appState.connectionState == .stale)
+        #expect(appState.lastError == .networkFailure("ping timeout"))
 
         await controller.stopEventStream()
     }
