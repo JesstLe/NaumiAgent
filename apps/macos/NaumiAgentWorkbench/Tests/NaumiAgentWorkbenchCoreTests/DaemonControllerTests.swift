@@ -2707,6 +2707,50 @@ final class DaemonControllerTests {
         #expect(appState.selectedDecision == oldDecision)
     }
 
+    @Test @MainActor func loadIntentLockSuccessStoresSelectedIntentLock() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let lock = makeIntentLock(id: "lock-001", missionID: "mission-001")
+        await api.setFetchIntentLockResult(.success(lock))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadIntentLock(missionID: "mission-001", lockID: "lock-001")
+
+        #expect(appState.selectedIntentLock == lock)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadIntentLockWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        let oldLock = makeIntentLock(id: "lock-old", missionID: "mission-001")
+        appState.selectedIntentLock = oldLock
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadIntentLock(missionID: "mission-001", lockID: "lock-001")
+
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.selectedIntentLock == oldLock)
+    }
+
+    @Test @MainActor func loadIntentLockFailurePreservesOldSelectedIntentLock() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let oldLock = makeIntentLock(id: "lock-old", missionID: "mission-001")
+        appState.selectedIntentLock = oldLock
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setFetchIntentLockResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadIntentLock(missionID: "mission-001", lockID: "lock-001")
+
+        #expect(appState.lastError == .httpStatus(500))
+        #expect(appState.selectedIntentLock == oldLock)
+    }
+
     @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotApprovalsAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
