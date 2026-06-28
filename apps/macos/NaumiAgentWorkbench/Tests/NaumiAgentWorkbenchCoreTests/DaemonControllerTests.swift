@@ -530,6 +530,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
 
 actor FakeWorkbenchEventProvider: WorkbenchEventProviding {
     private var continuation: AsyncThrowingStream<WorkbenchEventStreamMessage, Error>.Continuation?
+    private let streamRecorder = FakeWorkbenchEventStreamRecorder()
     private(set) var connectedSessionIDs: [String] = []
 
     func connect(sessionID: String) async throws(APIError) -> any WorkbenchEventStreaming {
@@ -537,7 +538,7 @@ actor FakeWorkbenchEventProvider: WorkbenchEventProviding {
         let stream = AsyncThrowingStream<WorkbenchEventStreamMessage, Error> { continuation in
             self.continuation = continuation
         }
-        return FakeWorkbenchEventStream(stream: stream)
+        return FakeWorkbenchEventStream(stream: stream, recorder: streamRecorder)
     }
 
     func emit(_ message: WorkbenchEventStreamMessage) {
@@ -551,10 +552,15 @@ actor FakeWorkbenchEventProvider: WorkbenchEventProviding {
     func finish() {
         continuation?.finish()
     }
+
+    func recordedRefreshRequests() async -> [FakeWorkbenchEventRefreshRequest] {
+        await streamRecorder.refreshRequests
+    }
 }
 
 struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
     let stream: AsyncThrowingStream<WorkbenchEventStreamMessage, Error>
+    let recorder: FakeWorkbenchEventStreamRecorder
 
     func next() async throws(APIError) -> WorkbenchEventStreamMessage {
         do {
@@ -575,11 +581,43 @@ struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
         subjectID: String?,
         actor: String?,
         limit: Int
-    ) async throws(APIError) {}
+    ) async throws(APIError) {
+        await recorder.recordRefreshRequest(
+            eventType: eventType,
+            subjectID: subjectID,
+            actor: actor,
+            limit: limit
+        )
+    }
 
     func sendPing() async throws(APIError) {}
 
     func cancel() async {}
+}
+
+struct FakeWorkbenchEventRefreshRequest: Equatable, Sendable {
+    let eventType: String?
+    let subjectID: String?
+    let actor: String?
+    let limit: Int
+}
+
+actor FakeWorkbenchEventStreamRecorder {
+    private(set) var refreshRequests: [FakeWorkbenchEventRefreshRequest] = []
+
+    func recordRefreshRequest(
+        eventType: String?,
+        subjectID: String?,
+        actor: String?,
+        limit: Int
+    ) {
+        refreshRequests.append(FakeWorkbenchEventRefreshRequest(
+            eventType: eventType,
+            subjectID: subjectID,
+            actor: actor,
+            limit: limit
+        ))
+    }
 }
 
 @Suite
@@ -965,6 +1003,46 @@ final class DaemonControllerTests {
         #expect(appState.connectionState == .connected)
         #expect(appState.snapshot == snapshot)
         expectWorkbenchListsPopulated(appState)
+        #expect(appState.lastError == nil)
+
+        await controller.stopEventStream()
+    }
+
+    @Test @MainActor func requestEventStreamRefreshForwardsFiltersToActiveStream() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-events"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+
+        await controller.startEventStream()
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-events"]
+        }
+
+        await controller.requestEventStreamRefresh(
+            eventType: "validation.passed",
+            subjectID: "task-001",
+            actor: "Backend-Agent",
+            limit: 25
+        )
+
+        await waitUntil {
+            await eventProvider.recordedRefreshRequests() == [
+                FakeWorkbenchEventRefreshRequest(
+                    eventType: "validation.passed",
+                    subjectID: "task-001",
+                    actor: "Backend-Agent",
+                    limit: 25
+                )
+            ]
+        }
+
         #expect(appState.lastError == nil)
 
         await controller.stopEventStream()

@@ -112,6 +112,37 @@ public final class DaemonController: Sendable {
         activeEventStream = nil
     }
 
+    /// Requests a filtered replay from the active Workbench event stream.
+    ///
+    /// This does not mutate local business state directly. The backend will emit
+    /// matching `workbench.event` messages followed by `refresh_complete`, and
+    /// existing event handling will refresh the authoritative snapshot when
+    /// events arrive.
+    public func requestEventStreamRefresh(
+        eventType: String? = nil,
+        subjectID: String? = nil,
+        actor: String? = nil,
+        limit: Int = 50
+    ) async {
+        guard let activeEventStream else {
+            appState.lastError = .networkFailure("事件流尚未连接")
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            try await activeEventStream.requestRefresh(
+                eventType: eventType,
+                subjectID: subjectID,
+                actor: actor,
+                limit: limit
+            )
+        } catch {
+            appState.connectionState = .stale
+            appState.lastError = error
+        }
+    }
+
     private func startEventStreamIfAvailable() async {
         guard eventProvider != nil, appState.selectedSessionID != nil else {
             return
