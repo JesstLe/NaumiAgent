@@ -20,7 +20,9 @@ public final class WorkbenchRefreshCoordinator: Sendable {
 
     private let daemonController: DaemonController?
     private let refreshOperation: @MainActor () async -> Void
+    private let eventStreamHealthProbeOperation: @MainActor () async -> Void
     private var isRefreshing = false
+    private var isProbingEventStream = false
 
     /// Creates a coordinator that refreshes through the given daemon controller.
     public init(
@@ -30,6 +32,7 @@ public final class WorkbenchRefreshCoordinator: Sendable {
         self.daemonController = daemonController
         self.refreshInterval = refreshInterval
         self.refreshOperation = { await daemonController.refreshConnection() }
+        self.eventStreamHealthProbeOperation = { await daemonController.pingEventStream() }
     }
 
     /// Creates a coordinator with a custom refresh operation.
@@ -42,6 +45,21 @@ public final class WorkbenchRefreshCoordinator: Sendable {
         self.daemonController = nil
         self.refreshInterval = refreshInterval
         self.refreshOperation = refreshOperation
+        self.eventStreamHealthProbeOperation = {}
+    }
+
+    /// Creates a coordinator with custom refresh and event-stream probe operations.
+    ///
+    /// Used by tests to inject independently controllable closures.
+    internal init(
+        refreshInterval: Duration = .seconds(5),
+        eventStreamHealthProbeOperation: @escaping @MainActor () async -> Void,
+        refreshOperation: @escaping @MainActor () async -> Void
+    ) {
+        self.daemonController = nil
+        self.refreshInterval = refreshInterval
+        self.refreshOperation = refreshOperation
+        self.eventStreamHealthProbeOperation = eventStreamHealthProbeOperation
     }
 
     /// Runs one refresh if no refresh is currently running.
@@ -57,6 +75,23 @@ public final class WorkbenchRefreshCoordinator: Sendable {
         defer { isRefreshing = false }
 
         await refreshOperation()
+        return .refreshed
+    }
+
+    /// Sends one event-stream liveness probe if no probe is already running.
+    ///
+    /// This lets SwiftUI schedule health checks without directly touching the
+    /// WebSocket stream. A failed probe is handled by `DaemonController`, which
+    /// marks the connection stale and records a user-visible error.
+    public func probeEventStreamOnce() async -> WorkbenchRefreshOutcome {
+        guard !isProbingEventStream else {
+            return .skippedInProgress
+        }
+
+        isProbingEventStream = true
+        defer { isProbingEventStream = false }
+
+        await eventStreamHealthProbeOperation()
         return .refreshed
     }
 

@@ -48,6 +48,67 @@ final class WorkbenchRefreshCoordinatorTests {
         #expect(startedCount == 1)
     }
 
+    @Test @MainActor func eventStreamHealthProbePingsControllerEventStream() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-health"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        let coordinator = WorkbenchRefreshCoordinator(daemonController: controller)
+
+        await controller.startEventStream()
+        await waitForCoordinatorCondition {
+            await eventProvider.connectedSessionIDs == ["sess-health"]
+        }
+
+        let result = await coordinator.probeEventStreamOnce()
+
+        await waitForCoordinatorCondition {
+            await eventProvider.recordedPingCount() == 1
+        }
+        #expect(result == .refreshed)
+        #expect(appState.lastError == nil)
+
+        await controller.stopEventStream()
+    }
+
+    @Test @MainActor func eventStreamHealthProbeSkipsWhenAnotherProbeIsInProgress() async throws {
+        let stream = AsyncStream<Void>.makeStream()
+        var startedCount = 0
+
+        let coordinator = WorkbenchRefreshCoordinator(
+            refreshInterval: .seconds(5),
+            eventStreamHealthProbeOperation: {
+                startedCount += 1
+                for await _ in stream.stream {
+                    break
+                }
+            },
+            refreshOperation: {}
+        )
+
+        let firstTask = Task { @MainActor in
+            await coordinator.probeEventStreamOnce()
+        }
+
+        while startedCount == 0 {
+            await Task.yield()
+        }
+
+        let secondResult = await coordinator.probeEventStreamOnce()
+        #expect(secondResult == .skippedInProgress)
+
+        stream.continuation.yield(())
+        let firstResult = await firstTask.value
+        #expect(firstResult == .refreshed)
+        #expect(startedCount == 1)
+    }
+
     @Test @MainActor func defaultRefreshIntervalIsFiveSeconds() async throws {
         let coordinator = WorkbenchRefreshCoordinator {
             // no-op
@@ -87,5 +148,18 @@ final class WorkbenchRefreshCoordinatorTests {
         _ = await task.value
 
         #expect(callCount >= 2)
+    }
+}
+
+@MainActor
+private func waitForCoordinatorCondition(
+    timeoutTicks: Int = 100,
+    condition: @escaping @MainActor () async -> Bool
+) async {
+    for _ in 0..<timeoutTicks {
+        if await condition() {
+            return
+        }
+        await Task.yield()
     }
 }
