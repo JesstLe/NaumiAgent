@@ -55,6 +55,7 @@ public final class DaemonController: Sendable {
             let bootstrap = try await apiProvider.fetchBootstrap(pageSize: 1)
             let capabilities = bootstrap.capabilities
             guard capabilities.protocolVersion == Self.supportedProtocolVersion else {
+                await stopEventStream()
                 appState.daemonStatus = nil
                 appState.capabilities = nil
                 appState.lastError = .protocolVersionMismatch(
