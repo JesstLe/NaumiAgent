@@ -1226,6 +1226,7 @@ async def release_workbench_lease(
 async def expire_workbench_leases(
     session_id: str,
     request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -1239,7 +1240,17 @@ async def expire_workbench_leases(
         expired = await market.expire_overdue_leases(session_id=session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return {"expired": [asdict(lease) for lease in expired]}
+    response = {"expired": [asdict(lease) for lease in expired]}
+    if not include_snapshot:
+        return response
+
+    try:
+        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {**response, "snapshot": snapshot}
 
 
 @router.get(

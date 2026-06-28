@@ -3619,6 +3619,63 @@ async def test_expire_leases_endpoint_returns_expired_list() -> None:
 
 
 @pytest.mark.asyncio
+async def test_expire_leases_endpoint_can_return_fresh_snapshot() -> None:
+    market = FakeTaskMarket()
+    lease = Lease(
+        id="lease-3",
+        session_id="sess-1",
+        task_id="task-3",
+        agent_id="Agent-3",
+        state=LeaseState.EXPIRED,
+        expires_at="2024-01-01T00:00:00",
+    )
+    market.set_expired([lease])
+    engine = _FakeEngine(exists=True, workbench_market=market)
+
+    response = await expire_workbench_leases(
+        "sess-1",
+        _fake_request(engine),
+        include_snapshot=True,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert response["expired"] == [asdict(lease)]
+    assert response["snapshot"]["version"] == 1
+    assert response["snapshot"]["session_id"] == "sess-1"
+
+
+def test_expire_leases_route_can_return_fresh_snapshot() -> None:
+    market = FakeTaskMarket()
+    lease = Lease(
+        id="lease-3",
+        session_id="sess-1",
+        task_id="task-3",
+        agent_id="Agent-3",
+        state=LeaseState.EXPIRED,
+        expires_at="2024-01-01T00:00:00",
+    )
+    market.set_expired([lease])
+    engine = _FakeEngine(exists=True, workbench_market=market)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/leases/expire",
+        params={"include_snapshot": "true"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["expired"][0]["id"] == "lease-3"
+    assert body["expired"][0]["state"] == "expired"
+    assert body["snapshot"]["version"] == 1
+    assert body["snapshot"]["session_id"] == "sess-1"
+
+
+@pytest.mark.asyncio
 async def test_expire_leases_endpoint_reports_unavailable_task_market() -> None:
     market = FakeTaskMarket()
     market.set_expire_error(RuntimeError("task market unavailable"))
