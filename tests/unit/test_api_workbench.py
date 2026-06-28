@@ -24,6 +24,7 @@ from naumi_agent.api.routes.workbench import (
     IssueAttach,
     MissionCreate,
     ValidationRunCreate,
+    WorkbenchSessionCreate,
     WorktreeKeep,
     attach_workbench_issue,
     claim_workbench_issue,
@@ -32,6 +33,7 @@ from naumi_agent.api.routes.workbench import (
     create_intent_lock,
     create_validation_run,
     create_workbench_mission,
+    create_workbench_session,
     expire_workbench_leases,
     get_agent_profile,
     get_agent_profiles,
@@ -87,11 +89,37 @@ class _FakeSessionStore:
     def __init__(self, exists: bool) -> None:
         self.exists = exists
         self.list_sessions_error: Exception | None = None
+        self.create_session_error: Exception | None = None
+        self.created_sessions: list[dict[str, str | None]] = []
 
     async def load(self, session_id: str):
         if not self.exists:
             return None
         return SimpleNamespace(id=session_id)
+
+    async def create_session(
+        self,
+        title: str | None = None,
+        model: str | None = None,
+        system_prompt: str | None = None,
+    ):
+        if self.create_session_error is not None:
+            raise self.create_session_error
+        self.exists = True
+        self.created_sessions.append(
+            {"title": title, "model": model, "system_prompt": system_prompt}
+        )
+        return SimpleNamespace(
+            id="sess-created",
+            title=title or "Mac 工作台",
+            model=model or "kimi-for-coding",
+            created_at=datetime(2026, 6, 27, 8, 0, tzinfo=UTC),
+            updated_at=datetime(2026, 6, 27, 8, 0, tzinfo=UTC),
+            messages=[],
+            total_tokens=0,
+            total_cost_usd=0.0,
+            status="active",
+        )
 
     async def list_sessions(
         self, page: int = 1, page_size: int = 20, query: str = ""
@@ -3568,6 +3596,111 @@ async def test_workbench_bootstrap_keeps_daemon_ready_when_no_sessions_exist() -
     assert response.snapshot is None
     assert response.daemon_status.status == "running"
     assert response.capabilities.supported_locales == ["zh-CN", "en-US"]
+
+
+@pytest.mark.asyncio
+async def test_create_workbench_session_returns_selected_bootstrap_snapshot() -> None:
+    engine = _FakeEngine(exists=False)
+    request = _fake_status_request(engine)
+    body = WorkbenchSessionCreate(
+        title="Mac 工作台",
+        model="kimi-for-coding",
+        system_prompt="中文优先",
+    )
+
+    response = await create_workbench_session(body, request, auth="test")
+
+    assert engine.session_store.created_sessions == [
+        {
+            "title": "Mac 工作台",
+            "model": "kimi-for-coding",
+            "system_prompt": "中文优先",
+        }
+    ]
+    assert response.selected_session_id == "sess-created"
+    assert response.total_sessions == 1
+    assert response.sessions[0]["id"] == "sess-created"
+    assert response.snapshot is not None
+    assert response.snapshot["session_id"] == "sess-created"
+    assert response.capabilities.supported_locales == ["zh-CN", "en-US"]
+    assert engine.loaded == ["sess-created"]
+
+
+@pytest.mark.asyncio
+async def test_create_workbench_session_reports_session_store_failure() -> None:
+    engine = _FakeEngine(exists=False)
+    engine.session_store.create_session_error = RuntimeError("session store unavailable")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_workbench_session(
+            WorkbenchSessionCreate(title="Mac 工作台"),
+            _fake_status_request(engine),
+            auth="test",
+        )
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "session store unavailable"
+    assert engine.loaded == []
+
+
+@pytest.mark.asyncio
+async def test_create_workbench_session_reports_unloadable_created_session() -> None:
+    engine = _FakeEngine(exists=False, load_session_result=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await create_workbench_session(
+            WorkbenchSessionCreate(title="Mac 工作台"),
+            _fake_status_request(engine),
+            auth="test",
+        )
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "会话创建后无法加载"
+    assert engine.loaded == ["sess-created"]
+
+
+@pytest.mark.asyncio
+async def test_create_workbench_session_defaults_blank_title() -> None:
+    engine = _FakeEngine(exists=False)
+
+    await create_workbench_session(
+        WorkbenchSessionCreate(title="   "),
+        _fake_status_request(engine),
+        auth="test",
+    )
+
+    assert engine.session_store.created_sessions[0]["title"] == "Mac 工作台"
+
+
+def test_create_workbench_session_route_accepts_json_body() -> None:
+    engine = _FakeEngine(exists=False)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions",
+        json={
+            "title": "Mac 工作台",
+            "model": "kimi-for-coding",
+            "system_prompt": "中文优先",
+        },
+    )
+
+    assert response.status_code == 201
+    assert engine.session_store.created_sessions == [
+        {
+            "title": "Mac 工作台",
+            "model": "kimi-for-coding",
+            "system_prompt": "中文优先",
+        }
+    ]
+    body = response.json()
+    assert body["selected_session_id"] == "sess-created"
+    assert body["sessions"][0]["id"] == "sess-created"
+    assert body["snapshot"]["session_id"] == "sess-created"
+    assert body["capabilities"]["supported_locales"] == ["zh-CN", "en-US"]
 
 
 @pytest.mark.asyncio
