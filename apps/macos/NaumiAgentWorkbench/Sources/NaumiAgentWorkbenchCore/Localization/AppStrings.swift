@@ -332,6 +332,26 @@ public enum AppStrings {
         public static func emptyEvents(_ locale: AppLocale) -> String {
             locale == .zhCN ? "暂无事件" : "No events"
         }
+
+        public static func validationStateTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "验证状态" : "Validation State"
+        }
+
+        public static func contextHealthTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "上下文健康" : "Context Health"
+        }
+
+        public static func rerunValidationButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "重新运行验证" : "Re-run Validation"
+        }
+
+        public static func refreshContextButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "刷新上下文" : "Refresh Context"
+        }
+
+        public static func runningValidationLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "验证中…" : "Running…"
+        }
     }
 
     // MARK: - Task Market

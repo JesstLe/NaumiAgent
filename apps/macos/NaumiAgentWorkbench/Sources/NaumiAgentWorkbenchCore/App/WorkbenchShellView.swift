@@ -39,7 +39,10 @@ public struct WorkbenchShellView: View {
     private func routeView(for route: AppRoute) -> some View {
         switch route {
         case .dashboard:
-            DashboardView(appState: environment.appState)
+            DashboardView(
+                appState: environment.appState,
+                daemonController: environment.daemonController
+            )
         case .taskMarket:
             TaskMarketView(
                 appState: environment.appState,

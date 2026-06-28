@@ -88,6 +88,41 @@ public struct DashboardSnapshotPresentation: Equatable, Sendable {
             taskByID: taskByID
         )
     }
+
+    public func validationRerunCommand(validationRuns: [ValidationRunDTO]) -> DashboardValidationRerunCommand? {
+        let targetTaskID = failureRows.first?.taskID ?? taskRows.first?.id
+        guard let targetTaskID, !targetTaskID.isEmpty else { return nil }
+
+        let matchingRun = validationRuns.last {
+            $0.taskID == targetTaskID && $0.status.lowercased() == "failed"
+        } ?? validationRuns.last {
+            $0.taskID == targetTaskID
+        } ?? validationRuns.last {
+            $0.status.lowercased() == "failed"
+        } ?? validationRuns.last
+
+        let actor = matchingRun?.actor.trimmingCharacters(in: .whitespacesAndNewlines)
+        let command = matchingRun?.command.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let cwd = matchingRun?.cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return DashboardValidationRerunCommand(
+            taskID: targetTaskID,
+            actor: actor.flatMap { $0.isEmpty ? nil : $0 } ?? "Dashboard",
+            command: command.flatMap { $0.isEmpty ? nil : $0 } ?? ["pytest", "tests/unit", "-q"],
+            cwd: cwd?.isEmpty == false ? cwd : nil
+        )
+    }
+}
+
+public struct DashboardValidationRerunCommand: Equatable, Sendable {
+    public let taskID: String
+    public let actor: String
+    public let command: [String]
+    public let cwd: String?
+
+    public var canSubmit: Bool {
+        !taskID.isEmpty && !actor.isEmpty && !command.isEmpty
+    }
 }
 
 public struct DashboardWorkbenchPresentation: Equatable, Sendable {

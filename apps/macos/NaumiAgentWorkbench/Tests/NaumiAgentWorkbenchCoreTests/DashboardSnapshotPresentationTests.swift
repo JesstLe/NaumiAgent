@@ -130,6 +130,50 @@ struct DashboardSnapshotPresentationTests {
         ])
     }
 
+    @Test func validationRerunCommandReusesLatestMatchingValidationRun() throws {
+        let snapshot = try loadZHSnapshot()
+        let presentation = DashboardSnapshotPresentation(snapshot: snapshot)
+        let runs = [
+            validationRun(
+                id: "run-old",
+                taskID: "1",
+                actor: "Lint-Agent",
+                command: ["ruff", "check", "src/"],
+                cwd: "/repo",
+                status: "passed"
+            ),
+            validationRun(
+                id: "run-failed",
+                taskID: "2",
+                actor: "Test-Agent",
+                command: ["pytest", "tests/unit/test_api_workbench.py", "-q"],
+                cwd: "/repo",
+                status: "failed"
+            )
+        ]
+
+        let command = try #require(presentation.validationRerunCommand(validationRuns: runs))
+
+        #expect(command.taskID == "2")
+        #expect(command.actor == "Test-Agent")
+        #expect(command.command == ["pytest", "tests/unit/test_api_workbench.py", "-q"])
+        #expect(command.cwd == "/repo")
+        #expect(command.canSubmit)
+    }
+
+    @Test func validationRerunCommandUsesFailureTaskAndTargetedFallbackWithoutHistory() throws {
+        let snapshot = try loadZHSnapshot()
+        let presentation = DashboardSnapshotPresentation(snapshot: snapshot)
+
+        let command = try #require(presentation.validationRerunCommand(validationRuns: []))
+
+        #expect(command.taskID == "2")
+        #expect(command.actor == "Dashboard")
+        #expect(command.command == ["pytest", "tests/unit", "-q"])
+        #expect(command.cwd == nil)
+        #expect(command.canSubmit)
+    }
+
     @Test func recentEventRowsLimitToFive() throws {
         let snapshot = WorkbenchSnapshotDTO(
             sessionID: "sess-limit",
@@ -232,5 +276,28 @@ struct DashboardSnapshotPresentationTests {
             .deletingLastPathComponent()
             .appendingPathComponent("Fixtures/\(named).json")
         return try Data(contentsOf: fixturesURL)
+    }
+
+    private func validationRun(
+        id: String,
+        taskID: String,
+        actor: String,
+        command: [String],
+        cwd: String,
+        status: String
+    ) -> ValidationRunDTO {
+        ValidationRunDTO(
+            id: id,
+            sessionID: "sess-zh-001",
+            taskID: taskID,
+            actor: actor,
+            command: command,
+            cwd: cwd,
+            status: status,
+            exitCode: status == "passed" ? 0 : 1,
+            output: "",
+            startedAt: "2026-06-27T09:00:00",
+            completedAt: "2026-06-27T09:01:00"
+        )
     }
 }
