@@ -4,6 +4,7 @@ import Foundation
 public enum WorkbenchEventStreamMessage: Equatable, Sendable {
     case connected(sessionID: String)
     case event(EventDTO)
+    case refreshComplete(count: Int)
     case error(message: String)
     case ignored(type: String)
 }
@@ -235,12 +236,14 @@ private struct WorkbenchEventEnvelope: Decodable {
     let sessionID: String?
     let event: EventDTO?
     let message: String?
+    let count: Int?
 
     private enum CodingKeys: String, CodingKey {
         case type
         case sessionID = "session_id"
         case event
         case message
+        case count
     }
 
     func streamMessage() throws(APIError) -> WorkbenchEventStreamMessage {
@@ -252,6 +255,8 @@ private struct WorkbenchEventEnvelope: Decodable {
                 throw APIError.decodingFailed("workbench.event missing event payload")
             }
             return .event(event)
+        case "refresh_complete":
+            return .refreshComplete(count: count ?? 0)
         case "error":
             return .error(message: message ?? "")
         default:

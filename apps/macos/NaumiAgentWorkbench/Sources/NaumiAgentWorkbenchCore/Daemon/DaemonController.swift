@@ -157,6 +157,8 @@ public final class DaemonController: Sendable {
         case .error(let message):
             appState.connectionState = .stale
             appState.lastError = .networkFailure(message)
+        case .refreshComplete:
+            break
         case .ignored:
             break
         }
