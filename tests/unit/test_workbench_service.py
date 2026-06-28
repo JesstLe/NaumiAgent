@@ -42,6 +42,7 @@ async def test_dashboard_snapshot_contains_core_cards(tmp_path) -> None:
 
     snapshot = await service.dashboard_snapshot("s")
 
+    assert snapshot["version"] == 1
     assert snapshot["missions"][0]["title"] == "Mac 工作台"
     assert snapshot["issues"][0]["task_id"] == task.id
     assert snapshot["tasks"][0]["subject"] == "实现任务市场"
