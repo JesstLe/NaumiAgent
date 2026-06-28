@@ -44,6 +44,7 @@ from naumi_agent.api.routes.workbench import (
     get_issues,
     get_leases,
     get_missions,
+    get_validation_run,
     get_validation_runs,
     get_workbench_bootstrap,
     get_workbench_capabilities,
@@ -128,6 +129,7 @@ class _FakeWorkbenchService:
         self._list_events_error: Exception | None = None
         self._get_event_error: Exception | None = None
         self._list_validation_runs_error: Exception | None = None
+        self._get_validation_run_error: Exception | None = None
 
     def set_run_validation_error(self, error: Exception) -> None:
         self._run_validation_error = error
@@ -161,6 +163,9 @@ class _FakeWorkbenchService:
 
     def set_list_validation_runs_error(self, error: Exception) -> None:
         self._list_validation_runs_error = error
+
+    def set_get_validation_run_error(self, error: Exception) -> None:
+        self._get_validation_run_error = error
 
     async def dashboard_snapshot(self, session_id: str):
         if self._dashboard_snapshot_error is not None:
@@ -556,6 +561,8 @@ class _FakeWorkbenchService:
         self.requested_validation_runs.append(
             {"session_id": session_id, "run_id": run_id}
         )
+        if self._get_validation_run_error is not None:
+            raise self._get_validation_run_error
         if run_id == "missing-run":
             return None
         return {
@@ -1780,6 +1787,42 @@ async def test_get_validation_run_endpoint_returns_404_for_missing_run() -> None
 
     assert response.status_code == 404
     assert response.json()["detail"] == "验证运行不存在"
+
+
+@pytest.mark.asyncio
+async def test_get_validation_run_endpoint_reports_unavailable_validation_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_validation_run_error(
+        RuntimeError("validation run store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_validation_run("sess-1", "run-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_validation_runs == [
+        {"session_id": "sess-1", "run_id": "run-2"}
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "validation run store unavailable"
+
+
+@pytest.mark.asyncio
+async def test_get_validation_run_endpoint_reports_invalid_validation_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_get_validation_run_error(
+        ValueError("validation run id is invalid")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_validation_run("sess-1", "run-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_validation_runs == [
+        {"session_id": "sess-1", "run_id": "run-2"}
+    ]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "validation run id is invalid"
 
 
 @pytest.mark.asyncio
