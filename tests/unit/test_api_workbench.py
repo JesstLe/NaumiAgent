@@ -1283,6 +1283,36 @@ async def test_get_events_endpoint_returns_events_and_limit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_events_endpoint_reports_unavailable_event_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_events_error(
+        RuntimeError("event store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_workbench_events("sess-1", _fake_request(engine), limit=10, auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "event store unavailable"
+
+
+@pytest.mark.asyncio
+async def test_get_events_endpoint_reports_invalid_event_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_events_error(
+        ValueError("event filter is invalid")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_workbench_events("sess-1", _fake_request(engine), limit=10, auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "event filter is invalid"
+
+
+@pytest.mark.asyncio
 async def test_get_events_endpoint_forwards_filters_and_returns_them() -> None:
     engine = _FakeEngine(exists=True)
 
