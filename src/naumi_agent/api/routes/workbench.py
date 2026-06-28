@@ -510,6 +510,8 @@ async def websocket_workbench_events(websocket: WebSocket, session_id: str):
         return
 
     await websocket.send_json({"type": "connected", "session_id": session_id})
+    if _truthy_query_param(websocket, "include_snapshot"):
+        await _send_workbench_snapshot(websocket, engine, session_id)
     await _send_workbench_event_refresh(
         websocket,
         engine,
@@ -548,6 +550,38 @@ async def websocket_workbench_events(websocket: WebSocket, session_id: str):
             )
     except WebSocketDisconnect:
         pass
+
+
+def _truthy_query_param(websocket: WebSocket, key: str) -> bool:
+    value = websocket.query_params.get(key)
+    if value is None:
+        return False
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+async def _send_workbench_snapshot(
+    websocket: WebSocket,
+    engine: Any,
+    session_id: str,
+) -> None:
+    try:
+        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    except (RuntimeError, ValueError) as exc:
+        logger.warning(
+            "Workbench event stream snapshot failed for session %s",
+            session_id,
+            exc_info=True,
+        )
+        await websocket.send_json({"type": "error", "message": str(exc)})
+        return
+
+    await websocket.send_json(
+        {
+            "type": "workbench/snapshot",
+            "version": 1,
+            "payload": snapshot,
+        }
+    )
 
 
 async def _send_workbench_event_refresh(
