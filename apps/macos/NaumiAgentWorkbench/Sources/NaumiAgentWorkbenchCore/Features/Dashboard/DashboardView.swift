@@ -79,7 +79,7 @@ public struct DashboardView: View {
                 Divider()
 
                 sharedCanvas(presentation: presentation, market: market)
-                    .frame(minWidth: 620, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .frame(width: 716, height: mainHeight, alignment: .top)
 
                 Divider()
 
@@ -357,6 +357,7 @@ public struct DashboardView: View {
                     Toggle(item, isOn: .constant(true))
                         .toggleStyle(.checkbox)
                         .font(.caption)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
             }
             .padding(.horizontal, 16)
