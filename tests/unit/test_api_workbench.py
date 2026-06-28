@@ -120,6 +120,7 @@ class _FakeWorkbenchService:
         self.requested_intent_locks: list[dict] = []
         self.listed_decisions: list[dict] = []
         self.requested_decisions: list[dict] = []
+        self._create_mission_error: Exception | None = None
         self._list_approvals_error: Exception | None = None
         self._get_approval_error: Exception | None = None
         self._run_validation_error: Exception | None = None
@@ -179,6 +180,9 @@ class _FakeWorkbenchService:
     def set_get_context_snapshot_error(self, error: Exception) -> None:
         self._get_context_snapshot_error = error
 
+    def set_create_mission_error(self, error: Exception) -> None:
+        self._create_mission_error = error
+
     def set_list_approvals_error(self, error: Exception) -> None:
         self._list_approvals_error = error
 
@@ -202,6 +206,8 @@ class _FakeWorkbenchService:
         self.created_missions.append(
             {"session_id": session_id, "title": title, "goal": goal}
         )
+        if self._create_mission_error is not None:
+            raise self._create_mission_error
         return Mission(
             id="mission-1",
             session_id=session_id,
@@ -2212,6 +2218,42 @@ async def test_create_mission_endpoint_returns_created_mission() -> None:
     assert response["goal"] == "可视化治理多 Agent 研发"
     assert "id" in response
     assert response["status"] == "planning"
+
+
+@pytest.mark.asyncio
+async def test_create_mission_endpoint_maps_value_error_to_400() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_create_mission_error(ValueError("Mission 标题不能为空"))
+    body = MissionCreate(title="Mac 工作台", goal="可视化治理多 Agent 研发")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_workbench_mission("sess-1", body, _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.created_missions == [
+        {"session_id": "sess-1", "title": "Mac 工作台", "goal": "可视化治理多 Agent 研发"}
+    ]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Mission 标题不能为空"
+
+
+@pytest.mark.asyncio
+async def test_create_mission_endpoint_reports_unavailable_mission_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_create_mission_error(
+        RuntimeError("mission store unavailable")
+    )
+    body = MissionCreate(title="Mac 工作台", goal="可视化治理多 Agent 研发")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_workbench_mission("sess-1", body, _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.created_missions == [
+        {"session_id": "sess-1", "title": "Mac 工作台", "goal": "可视化治理多 Agent 研发"}
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "mission store unavailable"
 
 
 @pytest.mark.asyncio
