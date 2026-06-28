@@ -5,6 +5,7 @@ public enum WorkbenchEventStreamMessage: Equatable, Sendable {
     case connected(sessionID: String)
     case event(EventDTO)
     case refreshComplete(count: Int)
+    case pong
     case error(message: String)
     case ignored(type: String)
 }
@@ -12,6 +13,7 @@ public enum WorkbenchEventStreamMessage: Equatable, Sendable {
 /// Event stream returned by `WorkbenchEventProviding`.
 public protocol WorkbenchEventStreaming: Sendable {
     func next() async throws(APIError) -> WorkbenchEventStreamMessage
+    func sendPing() async throws(APIError)
     func requestRefresh(
         eventType: String?,
         subjectID: String?,
@@ -184,6 +186,26 @@ public struct WorkbenchEventStream: Sendable, WorkbenchEventStreaming {
         await task.cancelStream(with: .goingAway, reason: nil)
     }
 
+    public func sendPing() async throws(APIError) {
+        let request = WorkbenchEventPingRequest()
+        let data: Data
+        do {
+            data = try encoder.encode(request)
+        } catch {
+            throw .decodingFailed(String(describing: error))
+        }
+
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw .decodingFailed("ping request is not UTF-8 JSON")
+        }
+
+        do {
+            try await task.sendMessage(.string(text))
+        } catch {
+            throw .networkFailure(String(describing: error))
+        }
+    }
+
     public func requestRefresh(
         eventType: String? = nil,
         subjectID: String? = nil,
@@ -213,6 +235,10 @@ public struct WorkbenchEventStream: Sendable, WorkbenchEventStreaming {
             throw .networkFailure(String(describing: error))
         }
     }
+}
+
+private struct WorkbenchEventPingRequest: Encodable {
+    let type = "ping"
 }
 
 private struct WorkbenchEventRefreshRequest: Encodable {
@@ -257,6 +283,8 @@ private struct WorkbenchEventEnvelope: Decodable {
             return .event(event)
         case "refresh_complete":
             return .refreshComplete(count: count ?? 0)
+        case "pong":
+            return .pong
         case "error":
             return .error(message: message ?? "")
         default:

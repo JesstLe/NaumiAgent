@@ -86,6 +86,45 @@ final class WorkbenchEventClientTests {
         #expect(message == .refreshComplete(count: 12))
     }
 
+    @Test func nextDecodesPongEnvelope() async throws {
+        let transport = RecordingWorkbenchWebSocketTransport(messages: [
+            .string(#"{"type":"pong"}"#),
+        ])
+        let client = WorkbenchEventClient(
+            baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
+            transport: transport
+        )
+
+        let stream = try await client.connect(sessionID: "sess-001")
+        let message = try await stream.next()
+
+        #expect(message == .pong)
+    }
+
+    @Test func sendPingSendsPingMessage() async throws {
+        let transport = RecordingWorkbenchWebSocketTransport(messages: [])
+        let client = WorkbenchEventClient(
+            baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
+            transport: transport
+        )
+
+        let stream = try await client.connect(sessionID: "sess-001")
+        try await stream.sendPing()
+
+        let sentMessages = await transport.task.sentMessages
+        #expect(sentMessages.count == 1)
+
+        guard case .string(let text) = try #require(sentMessages.first) else {
+            Issue.record("Expected ping message to be sent as text JSON")
+            return
+        }
+        let payload = try #require(text.data(using: .utf8))
+        let json = try #require(
+            try JSONSerialization.jsonObject(with: payload) as? [String: Any]
+        )
+        #expect(json["type"] as? String == "ping")
+    }
+
     @Test func requestRefreshSendsFilteredRefreshMessage() async throws {
         let transport = RecordingWorkbenchWebSocketTransport(messages: [])
         let client = WorkbenchEventClient(

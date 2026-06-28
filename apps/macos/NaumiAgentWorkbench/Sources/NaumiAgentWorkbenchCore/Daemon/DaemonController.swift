@@ -159,6 +159,8 @@ public final class DaemonController: Sendable {
             appState.lastError = .networkFailure(message)
         case .refreshComplete:
             break
+        case .pong:
+            break
         case .ignored:
             break
         }
