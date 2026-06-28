@@ -853,14 +853,14 @@ public final class DaemonController: Sendable {
                 let list = try await apiProvider.fetchSessions(page: 1, pageSize: 1)
                 appState.sessions = list.sessions
                 guard let firstSession = list.sessions.first else {
-                    appState.snapshot = nil
+                    clearSessionScopedState()
                     return
                 }
                 sessionID = firstSession.id
                 appState.selectedSessionID = sessionID
             } catch {
                 appState.lastError = error
-                appState.snapshot = nil
+                clearSessionScopedState()
                 return
             }
         }
@@ -870,7 +870,7 @@ public final class DaemonController: Sendable {
             appState.snapshot = snapshot
         } catch {
             appState.lastError = error
-            appState.snapshot = nil
+            clearSessionScopedState()
         }
     }
 
