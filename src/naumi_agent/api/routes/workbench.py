@@ -1380,9 +1380,14 @@ async def get_leases(
         raise HTTPException(status_code=404, detail="Session not found")
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
-    leases = await engine.workbench_service.list_leases(
-        session_id, state=state, task_id=task_id, agent_id=agent_id, limit=limit
-    )
+    try:
+        leases = await engine.workbench_service.list_leases(
+            session_id, state=state, task_id=task_id, agent_id=agent_id, limit=limit
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return LeasesResponse(
         leases=leases["leases"],
         state=state,
