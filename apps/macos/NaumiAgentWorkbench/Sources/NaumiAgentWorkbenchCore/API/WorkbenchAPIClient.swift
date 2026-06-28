@@ -87,6 +87,10 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchEvent(sessionID: String, eventID: String) async throws(APIError) -> EventDTO {
+        try await get(path: encodePath("workbench", "sessions", sessionID, "events", eventID))
+    }
+
     public func fetchValidationRuns(
         sessionID: String,
         taskID: String?,
