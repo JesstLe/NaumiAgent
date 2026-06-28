@@ -2548,8 +2548,10 @@ final class DaemonControllerTests {
         let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
         let event = makeEvent(id: "evt-001", type: "intent_lock.created", subjectID: "lock-001")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
+        let locks = IntentLocksDTO(intentLocks: [lock], missionID: "mission-001")
 
         await api.setCreateIntentLockResult(.success(lock))
+        await api.setFetchIntentLocksResult(.success(locks))
         await api.setSnapshotResult(.success(snapshot))
         await api.setEventsResult(.success(events))
 
@@ -2564,6 +2566,7 @@ final class DaemonControllerTests {
         )
 
         #expect(appState.snapshot == snapshot)
+        #expect(appState.intentLocks == [lock])
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
     }
@@ -2667,8 +2670,10 @@ final class DaemonControllerTests {
         let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
         let event = makeEvent(id: "evt-001", type: "decision.created", subjectID: "decision-001")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
+        let decisions = DecisionsDTO(decisions: [decision], missionID: "mission-001")
 
         await api.setCreateDecisionResult(.success(decision))
+        await api.setFetchDecisionsResult(.success(decisions))
         await api.setSnapshotResult(.success(snapshot))
         await api.setEventsResult(.success(events))
 
@@ -2682,6 +2687,7 @@ final class DaemonControllerTests {
         )
 
         #expect(appState.snapshot == snapshot)
+        #expect(appState.decisions == [decision])
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
     }
