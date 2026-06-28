@@ -1674,13 +1674,13 @@ async def resolve_approval(
 
 @router.post(
     "/workbench/sessions/{session_id}/validation-runs",
-    response_model=ValidationRunResultResponse,
     status_code=201,
 )
 async def create_validation_run(
     session_id: str,
     body: ValidationRunCreate,
     request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -1701,9 +1701,19 @@ async def create_validation_run(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return ValidationRunResultResponse(
+    validation_run = ValidationRunResultResponse(
         id=result["id"],
         status=result["status"],
         exit_code=result["exit_code"],
         output=result["output"],
     )
+    if not include_snapshot:
+        return validation_run
+
+    try:
+        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"validation_run": validation_run.model_dump(), "snapshot": snapshot}
