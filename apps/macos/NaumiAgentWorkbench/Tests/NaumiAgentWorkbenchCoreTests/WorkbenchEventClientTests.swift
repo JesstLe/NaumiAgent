@@ -71,6 +71,21 @@ final class WorkbenchEventClientTests {
         #expect(event.payload["lease_id"] == .string("lease-001"))
     }
 
+    @Test func nextDecodesRefreshCompleteEnvelope() async throws {
+        let transport = RecordingWorkbenchWebSocketTransport(messages: [
+            .string(#"{"type":"refresh_complete","count":12}"#),
+        ])
+        let client = WorkbenchEventClient(
+            baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
+            transport: transport
+        )
+
+        let stream = try await client.connect(sessionID: "sess-001")
+        let message = try await stream.next()
+
+        #expect(message == .refreshComplete(count: 12))
+    }
+
     @Test func requestRefreshSendsFilteredRefreshMessage() async throws {
         let transport = RecordingWorkbenchWebSocketTransport(messages: [])
         let client = WorkbenchEventClient(
