@@ -655,6 +655,27 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Loads one mission into the selected detail state.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the previous selected mission is preserved.
+    public func loadMission(missionID: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            appState.selectedMission = try await apiProvider.fetchMission(
+                sessionID: sessionID,
+                missionID: missionID
+            )
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Fetches agent capability profiles for the currently selected session.
     ///
     /// Requires `appState.selectedSessionID` to be set. On success the agent
