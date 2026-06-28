@@ -38,6 +38,28 @@ async def test_claim_marks_task_in_progress_and_creates_lease(stores) -> None:
 
 
 @pytest.mark.asyncio
+async def test_claim_rejects_task_that_is_not_attached_as_issue(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    task = await task_store.create_task("普通任务不能被任务市场直接认领")
+    market = TaskMarket(task_store=task_store, workbench_store=workbench_store)
+
+    with pytest.raises(ValueError, match="不是 Workbench Issue"):
+        await market.claim(
+            task_id=task.id,
+            agent_id="Backend-Agent",
+            duration_minutes=45,
+        )
+
+    refreshed = await task_store.get_task(task.id)
+    assert refreshed is not None
+    assert refreshed.status == TaskStatus.PENDING
+    assert refreshed.owner is None
+    assert await workbench_store.list_leases("s", state=LeaseState.ACTIVE) == []
+
+
+@pytest.mark.asyncio
 async def test_exclusive_issue_rejects_second_active_claim(stores) -> None:
     task_store, workbench_store, task = stores
     market = TaskMarket(task_store=task_store, workbench_store=workbench_store)
