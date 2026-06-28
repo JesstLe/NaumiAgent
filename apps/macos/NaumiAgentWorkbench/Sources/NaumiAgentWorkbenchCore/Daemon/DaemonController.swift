@@ -1119,8 +1119,8 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Creates an intent lock for a mission and refreshes the timeline events
-    /// and snapshot on success.
+    /// Creates an intent lock for a mission and refreshes the intent-lock list,
+    /// timeline events, and snapshot on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
     /// `appState.lastError`; the local snapshot is never mutated directly.
@@ -1148,6 +1148,7 @@ public final class DaemonController: Sendable {
                 allowedPaths: allowedPaths,
                 requireProposalForRisk: requireProposalForRisk
             )
+            await refreshIntentLocks(missionID: missionID)
             await refreshEvents(limit: 50)
             await refreshSnapshot()
         } catch {
@@ -1155,8 +1156,8 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Creates a decision for a mission and refreshes the timeline events and
-    /// snapshot on success.
+    /// Creates a decision for a mission and refreshes the decision list, timeline
+    /// events, and snapshot on success.
     ///
     /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
     /// `appState.lastError`; the local snapshot is never mutated directly.
@@ -1182,6 +1183,7 @@ public final class DaemonController: Sendable {
                 content: content,
                 actor: actor
             )
+            await refreshDecisions(missionID: missionID)
             await refreshEvents(limit: 50)
             await refreshSnapshot()
         } catch {
