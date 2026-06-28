@@ -49,6 +49,65 @@ async def test_dashboard_snapshot_contains_core_cards(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_dashboard_snapshot_includes_governance_records(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    mission = await service.create_mission(
+        session_id="s",
+        title="Mac 工作台",
+        goal="让审查页展示治理上下文",
+    )
+    other_mission = await service.create_mission(
+        session_id="other",
+        title="其他工作台",
+        goal="不应进入当前 session snapshot",
+    )
+    lock = await service.create_intent_lock(
+        session_id="s",
+        mission_id=mission.id,
+        actor="Planner-Agent",
+        rule="高风险文件需要人工审批",
+        blocked_paths=["src/core"],
+        allowed_paths=["src/core/README.md"],
+        require_proposal_for_risk=RiskLevel.HIGH,
+    )
+    decision = await service.create_decision(
+        session_id="s",
+        mission_id=mission.id,
+        actor="Reviewer-Agent",
+        kind=DecisionKind.POLICY,
+        title="采用人工审批闸门",
+        content="高风险变更必须进入审批队列",
+    )
+    await service.create_intent_lock(
+        session_id="other",
+        mission_id=other_mission.id,
+        actor="Planner-Agent",
+        rule="其他 session 规则",
+    )
+    await service.create_decision(
+        session_id="other",
+        mission_id=other_mission.id,
+        actor="Reviewer-Agent",
+        kind=DecisionKind.ARCHITECTURE,
+        title="其他 session 决策",
+        content="不应进入当前 session snapshot",
+    )
+
+    snapshot = await service.dashboard_snapshot("s")
+
+    assert [item["id"] for item in snapshot["intent_locks"]] == [lock["id"]]
+    assert snapshot["intent_locks"][0]["mission_id"] == mission.id
+    assert snapshot["intent_locks"][0]["require_proposal_for_risk"] == "high"
+    assert [item["id"] for item in snapshot["decisions"]] == [decision["id"]]
+    assert snapshot["decisions"][0]["mission_id"] == mission.id
+    assert snapshot["decisions"][0]["kind"] == "policy"
+
+
+@pytest.mark.asyncio
 async def test_create_issue_creates_backing_task_and_issue_metadata(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")
