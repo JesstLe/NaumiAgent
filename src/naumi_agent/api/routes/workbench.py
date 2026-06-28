@@ -1143,6 +1143,7 @@ async def claim_workbench_issue(
     task_id: str,
     body: ClaimIssue,
     request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -1163,7 +1164,17 @@ async def claim_workbench_issue(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return asdict(lease)
+    lease_payload = asdict(lease)
+    if not include_snapshot:
+        return lease_payload
+
+    try:
+        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"lease": lease_payload, "snapshot": snapshot}
 
 
 @router.post("/workbench/sessions/{session_id}/leases/{lease_id}/release")
