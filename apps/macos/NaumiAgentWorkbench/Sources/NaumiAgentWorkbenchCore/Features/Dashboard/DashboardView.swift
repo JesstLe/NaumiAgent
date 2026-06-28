@@ -70,21 +70,27 @@ public struct DashboardView: View {
         let auditTrailHeight: CGFloat = 112
         let dividerHeight: CGFloat = 1
         let mainHeight = CGFloat(WorkbenchScaledPageLayout.dashboard.baseHeight) - auditTrailHeight - dividerHeight
+        let leftRailWidth: CGFloat = 312
+        let inspectorWidth: CGFloat = 340
+        let sharedCanvasWidth = CGFloat(WorkbenchScaledPageLayout.dashboard.baseWidth)
+            - leftRailWidth
+            - inspectorWidth
+            - (dividerHeight * 2)
 
         return VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
                 workbenchLeftRail(presentation: presentation, market: market)
-                    .frame(width: 302)
+                    .frame(width: leftRailWidth)
 
                 Divider()
 
                 sharedCanvas(presentation: presentation, market: market)
-                    .frame(width: 716, height: mainHeight, alignment: .top)
+                    .frame(width: sharedCanvasWidth, height: mainHeight, alignment: .top)
 
                 Divider()
 
                 inspectorPanel(presentation: presentation)
-                    .frame(width: 340, alignment: .top)
+                    .frame(width: inspectorWidth, alignment: .top)
             }
             .frame(height: mainHeight, alignment: .top)
             .clipped()
@@ -361,7 +367,8 @@ public struct DashboardView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .frame(height: 44, alignment: .center)
+            .padding(.top, 8)
+            .frame(height: 54, alignment: .center)
 
             ZStack {
                 dottedCanvasBackground
