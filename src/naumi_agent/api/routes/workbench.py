@@ -1039,7 +1039,10 @@ async def release_workbench_lease(
     if not await engine.load_session(session_id):
         raise HTTPException(status_code=404, detail="Session not found")
     market = _get_task_market(engine)
-    lease = await market.release(session_id, lease_id)
+    try:
+        lease = await market.release(session_id, lease_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if lease is None:
         raise HTTPException(status_code=404, detail="租约不存在")
     return asdict(lease)

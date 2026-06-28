@@ -1060,6 +1060,7 @@ class FakeTaskMarket:
         self._lease: Lease | None = None
         self._expired: list[Lease] = []
         self._claim_error: Exception | None = None
+        self._release_error: Exception | None = None
 
     def set_lease(self, lease: Lease | None) -> None:
         self._lease = lease
@@ -1069,6 +1070,9 @@ class FakeTaskMarket:
 
     def set_claim_error(self, error: Exception) -> None:
         self._claim_error = error
+
+    def set_release_error(self, error: Exception) -> None:
+        self._release_error = error
 
     async def claim(
         self,
@@ -1094,6 +1098,8 @@ class FakeTaskMarket:
 
     async def release(self, session_id: str, lease_id: str) -> Lease | None:
         self.released.append({"session_id": session_id, "lease_id": lease_id})
+        if self._release_error is not None:
+            raise self._release_error
         return self._lease
 
     async def expire_overdue_leases(self, *, session_id: str, now=None) -> list[Lease]:
@@ -3088,6 +3094,23 @@ async def test_release_lease_endpoint_returns_released_lease() -> None:
     assert market.released == [{"session_id": "sess-1", "lease_id": "lease-2"}]
     assert response["id"] == "lease-2"
     assert response["state"] == LeaseState.RELEASED
+
+
+@pytest.mark.asyncio
+async def test_release_lease_endpoint_reports_unavailable_task_market() -> None:
+    market = FakeTaskMarket()
+    market.set_release_error(RuntimeError("task market unavailable"))
+    engine = _FakeEngine(exists=True, workbench_market=market)
+
+    with pytest.raises(HTTPException) as exc:
+        await release_workbench_lease(
+            "sess-1", "lease-2", _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert market.released == [{"session_id": "sess-1", "lease_id": "lease-2"}]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "task market unavailable"
 
 
 @pytest.mark.asyncio
