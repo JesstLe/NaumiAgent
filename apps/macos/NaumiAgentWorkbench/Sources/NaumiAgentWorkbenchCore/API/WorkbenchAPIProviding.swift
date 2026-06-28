@@ -195,6 +195,9 @@ public protocol WorkbenchAPIProviding: Sendable {
     /// Releases an existing lease, returning the updated lease record.
     func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO
 
+    /// Releases an existing lease and returns the backend's fresh authoritative snapshot.
+    func releaseLeaseWithSnapshot(sessionID: String, leaseID: String) async throws(APIError) -> LeaseSnapshotDTO
+
     /// Expires overdue leases in the given session, returning the leases that were expired.
     func expireLeases(sessionID: String) async throws(APIError) -> ExpiredLeasesDTO
 

@@ -408,6 +408,12 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         makeLease(sessionID: sessionID, leaseID: leaseID, taskID: "preview-task", state: "released")
     }
 
+    func releaseLeaseWithSnapshot(sessionID: String, leaseID: String) async throws(APIError) -> LeaseSnapshotDTO {
+        let lease = try await releaseLease(sessionID: sessionID, leaseID: leaseID)
+        let snapshot = try await fetchSnapshot(sessionID: sessionID)
+        return LeaseSnapshotDTO(lease: lease, snapshot: snapshot)
+    }
+
     func expireLeases(sessionID: String) async throws(APIError) -> ExpiredLeasesDTO {
         ExpiredLeasesDTO(expired: [])
     }

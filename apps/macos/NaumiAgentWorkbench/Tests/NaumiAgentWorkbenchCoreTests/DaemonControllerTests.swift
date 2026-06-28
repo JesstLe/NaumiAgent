@@ -37,6 +37,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var claimIssueWithSnapshotResult: Result<LeaseSnapshotDTO, APIError>?
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
+    var releaseLeaseWithSnapshotResult: Result<LeaseSnapshotDTO, APIError>?
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
     var createMissionResult: Result<MissionDTO, APIError>?
     var createMissionWithSnapshotResult: Result<MissionSnapshotDTO, APIError>?
@@ -65,6 +66,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var snapshotCallCount: Int = 0
     var recordContextHealthWithSnapshotCallCount: Int = 0
     var claimIssueWithSnapshotCallCount: Int = 0
+    var releaseLeaseWithSnapshotCallCount: Int = 0
     var createMissionWithSnapshotCallCount: Int = 0
     var attachIssueWithSnapshotCallCount: Int = 0
     var createIssueWithSnapshotCallCount: Int = 0
@@ -439,6 +441,14 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
 
     func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
         guard let result = releaseLeaseResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func releaseLeaseWithSnapshot(sessionID: String, leaseID: String) async throws(APIError) -> LeaseSnapshotDTO {
+        releaseLeaseWithSnapshotCallCount += 1
+        guard let result = releaseLeaseWithSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -1778,7 +1788,7 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == nil)
     }
 
-    @Test @MainActor func releaseLeaseSuccessRefreshesSnapshotLeasesAndEvents() async throws {
+    @Test @MainActor func releaseLeaseSuccessUsesIncludedSnapshotAndRefreshesLists() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
 
@@ -1789,8 +1799,9 @@ final class DaemonControllerTests {
         let event = makeEvent(id: "evt-001", type: "lease.released", subjectID: "lease-001")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
-        await api.setReleaseLeaseResult(.success(lease))
-        await api.setSnapshotResult(.success(snapshot))
+        await api.setReleaseLeaseWithSnapshotResult(.success(
+            LeaseSnapshotDTO(lease: lease, snapshot: snapshot)
+        ))
         await api.setLeasesResult(.success(leases))
         await api.setEventsResult(.success(events))
 
@@ -1801,6 +1812,8 @@ final class DaemonControllerTests {
         #expect(appState.leases == [lease])
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
+        #expect(await api.releaseLeaseWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func expireLeasesSuccessRefreshesSnapshotLeasesAndEvents() async throws {
@@ -4500,6 +4513,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setReleaseLeaseResult(_ result: Result<LeaseDTO, APIError>) {
         releaseLeaseResult = result
+    }
+
+    fileprivate func setReleaseLeaseWithSnapshotResult(_ result: Result<LeaseSnapshotDTO, APIError>) {
+        releaseLeaseWithSnapshotResult = result
     }
 
     fileprivate func setExpireLeasesResult(_ result: Result<ExpiredLeasesDTO, APIError>) {
