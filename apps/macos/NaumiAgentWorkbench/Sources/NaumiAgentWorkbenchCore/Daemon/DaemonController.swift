@@ -974,6 +974,31 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Loads one governance decision into the selected detail state.
+    ///
+    /// Requires `appState.selectedSessionID` to be set. Failures are recorded in
+    /// `appState.lastError`; the previous selected decision is preserved.
+    public func loadDecision(
+        missionID: String,
+        decisionID: String
+    ) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            appState.selectedDecision = try await apiProvider.fetchDecision(
+                sessionID: sessionID,
+                missionID: missionID,
+                decisionID: decisionID
+            )
+        } catch {
+            appState.lastError = error
+        }
+    }
+
     /// Resolves an approval request as approved or rejected and refreshes the
     /// timeline events, waiting approvals list, and snapshot on success.
     ///
