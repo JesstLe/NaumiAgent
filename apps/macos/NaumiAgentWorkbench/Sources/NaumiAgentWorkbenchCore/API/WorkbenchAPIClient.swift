@@ -170,6 +170,10 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchApproval(sessionID: String, approvalID: String) async throws(APIError) -> ApprovalDTO {
+        try await get(path: encodePath("workbench", "sessions", sessionID, "approvals", approvalID))
+    }
+
     public func fetchFailures(
         sessionID: String,
         taskID: String?,

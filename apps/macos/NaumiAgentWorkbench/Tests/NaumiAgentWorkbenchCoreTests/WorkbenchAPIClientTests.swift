@@ -771,6 +771,48 @@ final class WorkbenchAPIClientTests {
         #expect(response.approvals.isEmpty)
     }
 
+    @Test func fetchApprovalEncodesPathComponentsAndDecodesDecisionContext() async throws {
+        let sessionID = "sess 中文"
+        let approvalID = "approval/审查 001"
+        let json = Data(
+            """
+            {"id":"approval/审查 001","session_id":"sess 中文","mission_id":"mission-001","task_id":"task-001","state":"waiting","title":"请求审批","detail":"高风险变更需要人工确认","requester":"Backend-Agent","reviewer":"","decision_note":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/approvals/approval%2F%E5%AE%A1%E6%9F%A5%20001" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let approval = try await client.fetchApproval(sessionID: sessionID, approvalID: approvalID)
+
+        #expect(approval.id == approvalID)
+        #expect(approval.sessionID == sessionID)
+        #expect(approval.missionID == "mission-001")
+        #expect(approval.taskID == "task-001")
+        #expect(approval.state == "waiting")
+        #expect(approval.title == "请求审批")
+        #expect(approval.detail == "高风险变更需要人工确认")
+        #expect(approval.requester == "Backend-Agent")
+        #expect(approval.reviewer == "")
+        #expect(approval.decisionNote == "")
+        #expect(approval.createdAt == "2026-06-27T06:00:00")
+        #expect(approval.updatedAt == "2026-06-27T06:10:00")
+    }
+
     @Test func fetchFailuresWithFilters() async throws {
         let sessionID = "sess 中文"
         let taskID = "task 001/审查"
