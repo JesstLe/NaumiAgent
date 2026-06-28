@@ -470,6 +470,14 @@ class WorkbenchService:
         return {
             "version": 1,
             "session_id": session_id,
+            "summary": self._snapshot_summary(
+                missions=missions,
+                agent_profiles=agent_profiles,
+                tasks=tasks,
+                issues=issues,
+                failures=failures,
+                approvals=approvals,
+            ),
             "missions": missions,
             "agent_profiles": [
                 self._agent_profile_to_dict(profile) for profile in agent_profiles
@@ -484,6 +492,39 @@ class WorkbenchService:
             "validation_runs": validation_runs,
             "context_snapshots": context_snapshots,
             "approvals": [self._approval_to_dict(approval) for approval in approvals],
+        }
+
+    @staticmethod
+    def _snapshot_summary(
+        *,
+        missions: list[dict[str, Any]],
+        agent_profiles: list[AgentProfile],
+        tasks: list[Any],
+        issues: list[dict[str, Any]],
+        failures: list[dict[str, Any]],
+        approvals: list[Approval],
+    ) -> dict[str, Any]:
+        task_status_by_id = {task.id: task.status for task in tasks}
+        issue_task_ids = {issue["task_id"] for issue in issues}
+        return {
+            "current_mission_title": missions[0]["title"] if missions else "",
+            "active_agents": sum(
+                1 for profile in agent_profiles if profile.status != "idle"
+            ),
+            "open_issues": sum(
+                1
+                for task_id in issue_task_ids
+                if str(task_status_by_id.get(task_id, "")) != "completed"
+            ),
+            "blocked_issues": sum(
+                1
+                for task_id in issue_task_ids
+                if str(task_status_by_id.get(task_id, "")) == "blocked"
+            ),
+            "pending_approvals": len(approvals),
+            "failed_validations": sum(
+                1 for failure in failures if failure.get("status") == "open"
+            ),
         }
 
     @staticmethod
