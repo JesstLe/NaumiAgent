@@ -490,6 +490,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchDecision(
+        sessionID: String,
+        missionID: String,
+        decisionID: String
+    ) async throws(APIError) -> DecisionDTO {
+        try await get(
+            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "decisions", decisionID)
+        )
+    }
+
     public func createDecision(
         sessionID: String,
         missionID: String,

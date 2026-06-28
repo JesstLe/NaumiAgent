@@ -2648,6 +2648,49 @@ final class WorkbenchAPIClientTests {
         #expect(decision.createdAt == "2026-06-27T06:00:00")
     }
 
+    @Test func fetchDecisionEncodesPathComponentsAndDecodesGovernanceRecord() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/审查"
+        let decisionID = "decision/架构 001"
+        let json = Data(
+            """
+            {"id":"decision/架构 001","session_id":"sess/中文","mission_id":"mission/审查","kind":"architecture","title":"采用本地 REST API","content":"SwiftUI 只通过 Workbench API 读取治理状态","actor":"Planner-Agent","created_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%2F%E4%B8%AD%E6%96%87/missions/mission%2F%E5%AE%A1%E6%9F%A5/decisions/decision%2F%E6%9E%B6%E6%9E%84%20001" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let decision = try await client.fetchDecision(
+            sessionID: sessionID,
+            missionID: missionID,
+            decisionID: decisionID
+        )
+
+        #expect(decision.id == decisionID)
+        #expect(decision.sessionID == sessionID)
+        #expect(decision.missionID == missionID)
+        #expect(decision.kind == "architecture")
+        #expect(decision.title == "采用本地 REST API")
+        #expect(decision.content == "SwiftUI 只通过 Workbench API 读取治理状态")
+        #expect(decision.actor == "Planner-Agent")
+        #expect(decision.createdAt == "2026-06-27T06:00:00")
+    }
+
     @Test func fetchIntentLocksEncodesSlashInPathComponents() async throws {
         let sessionID = "sess/中文"
         let missionID = "mission/审查"
