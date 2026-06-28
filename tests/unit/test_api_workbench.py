@@ -1199,6 +1199,36 @@ async def test_workbench_snapshot_endpoint_returns_service_snapshot() -> None:
 
 
 @pytest.mark.asyncio
+async def test_workbench_snapshot_endpoint_reports_unavailable_snapshot_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_dashboard_snapshot_error(
+        RuntimeError("snapshot backend unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_workbench_snapshot("sess-1", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "snapshot backend unavailable"
+
+
+@pytest.mark.asyncio
+async def test_workbench_snapshot_endpoint_reports_invalid_snapshot_request() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_dashboard_snapshot_error(
+        ValueError("snapshot session state is invalid")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_workbench_snapshot("sess-1", _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "snapshot session state is invalid"
+
+
+@pytest.mark.asyncio
 async def test_get_events_endpoint_requires_existing_session() -> None:
     engine = _FakeEngine(exists=False)
 
