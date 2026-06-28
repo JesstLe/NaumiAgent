@@ -143,6 +143,22 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Sends a lightweight liveness probe over the active Workbench event stream.
+    public func pingEventStream() async {
+        guard let activeEventStream else {
+            appState.lastError = .networkFailure("事件流尚未连接")
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            try await activeEventStream.sendPing()
+        } catch {
+            appState.connectionState = .stale
+            appState.lastError = error
+        }
+    }
+
     private func startEventStreamIfAvailable() async {
         guard eventProvider != nil, appState.selectedSessionID != nil else {
             return
