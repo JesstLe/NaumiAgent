@@ -3015,6 +3015,50 @@ final class DaemonControllerTests {
         #expect(appState.selectedIssue == oldIssue)
     }
 
+    @Test @MainActor func loadLeaseSuccessStoresSelectedLease() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let lease = makeLease(id: "lease-001", taskID: "task-001", state: "active")
+        await api.setLeaseResult(.success(lease))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadLease(leaseID: "lease-001")
+
+        #expect(appState.selectedLease == lease)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadLeaseWithoutSelectedSessionRecordsError() async throws {
+        let appState = AppState()
+        let oldLease = makeLease(id: "lease-old", taskID: "task-001", state: "active")
+        appState.selectedLease = oldLease
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadLease(leaseID: "lease-001")
+
+        #expect(appState.lastError == .missingSelectedSession)
+        #expect(appState.selectedLease == oldLease)
+    }
+
+    @Test @MainActor func loadLeaseFailurePreservesOldSelectedLease() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let oldLease = makeLease(id: "lease-old", taskID: "task-001", state: "active")
+        appState.selectedLease = oldLease
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setLeaseResult(.failure(.httpStatus(500)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadLease(leaseID: "lease-001")
+
+        #expect(appState.lastError == .httpStatus(500))
+        #expect(appState.selectedLease == oldLease)
+    }
+
     @Test @MainActor func resolveApprovalSuccessRefreshesSnapshotApprovalsAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
