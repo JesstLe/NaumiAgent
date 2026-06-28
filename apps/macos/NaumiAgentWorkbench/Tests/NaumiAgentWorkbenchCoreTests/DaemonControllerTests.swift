@@ -15,6 +15,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var validationRunsResult: Result<ValidationRunsDTO, APIError>?
     var validationRunResult: Result<ValidationRunDTO, APIError>?
     var contextSnapshotsResult: Result<ContextSnapshotsDTO, APIError>?
+    var contextSnapshotResult: Result<ContextSnapshotDTO, APIError>?
     var recordContextHealthResult: Result<ContextSnapshotDTO, APIError>?
     var approvalsResult: Result<ApprovalsDTO, APIError>?
     var failuresResult: Result<FailuresDTO, APIError>?
@@ -163,6 +164,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         limit: Int
     ) async throws(APIError) -> ContextSnapshotsDTO {
         guard let result = contextSnapshotsResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func fetchContextSnapshot(sessionID: String, snapshotID: String) async throws(APIError) -> ContextSnapshotDTO {
+        guard let result = contextSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
