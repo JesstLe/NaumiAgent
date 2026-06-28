@@ -1082,7 +1082,10 @@ class _FakeEngine:
 
     async def load_session(self, session_id: str) -> bool:
         self.loaded.append(session_id)
-        return self.session_store.exists
+        exists = getattr(self.session_store, "exists", None)
+        if exists is not None:
+            return bool(exists)
+        return await self.session_store.load(session_id) is not None
 
 
 def _fake_request(engine: _FakeEngine):
@@ -2548,6 +2551,7 @@ async def test_workbench_bootstrap_returns_latest_session_and_snapshot() -> None
     assert response.daemon_status.host == "127.0.0.1"
     assert response.capabilities.protocol_version == 1
     assert engine.session_store.loaded == ["sess-latest"]
+    assert engine.loaded == ["sess-latest"]
 
 
 @pytest.mark.asyncio
