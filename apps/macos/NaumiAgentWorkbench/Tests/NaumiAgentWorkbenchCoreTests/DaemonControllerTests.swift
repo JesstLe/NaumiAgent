@@ -1146,6 +1146,7 @@ final class DaemonControllerTests {
         #expect(await eventProvider.recordedPingCount() == 1)
         #expect(appState.connectionState == .stale)
         #expect(appState.lastError == .networkFailure("ping timeout"))
+        #expect(controller.hasActiveEventStream == false)
 
         await controller.stopEventStream()
     }
