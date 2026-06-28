@@ -22,20 +22,23 @@ struct WorkbenchPageLayoutTests {
         #expect(size.height < layout.baseHeight)
     }
 
-    @Test func scaledLayoutUsesWindowWidthSoHeightDoesNotChangeColumnScale() {
+    @Test func scaledLayoutUsesBothWidthAndHeightToKeepColumnsVisible() {
         let layout = WorkbenchScaledPageLayout.dashboard
 
         let native = layout.scaledSize(for: CGSize(width: layout.baseWidth, height: layout.baseHeight))
         let sameWidthTall = layout.scaledSize(for: CGSize(width: 1180, height: 900))
         let sameWidthShort = layout.scaledSize(for: CGSize(width: 1180, height: 620))
         let narrow = layout.scaledSize(for: CGSize(width: 900, height: 620))
+        let wideButShort = layout.scaledSize(for: CGSize(width: 2048, height: 680))
 
         #expect(abs(native.width - layout.baseWidth) < 0.001)
         #expect(abs(native.height - layout.baseHeight) < 0.001)
-        #expect(abs(sameWidthTall.width - sameWidthShort.width) < 0.001)
-        #expect(abs(sameWidthTall.height - sameWidthShort.height) < 0.001)
+        #expect(sameWidthShort.width < sameWidthTall.width)
+        #expect(sameWidthShort.height < sameWidthTall.height)
         #expect(abs(narrow.width - 900) < 0.001)
         #expect(narrow.height < 620)
+        #expect(wideButShort.width < 2048)
+        #expect(wideButShort.height <= 680)
     }
 
     @Test func scaledViewportKeepsTheFullWorkbenchFitted() {
@@ -47,11 +50,12 @@ struct WorkbenchPageLayoutTests {
 
         #expect(compact.scaledSize.width <= compact.containerSize.width)
         #expect(compact.scaledSize.height <= compact.containerSize.height)
-        #expect(abs(wide.scaledSize.width - wide.containerSize.width) < 0.001)
+        #expect(wide.scaledSize.width <= wide.containerSize.width)
+        #expect(wide.scaledSize.height <= wide.containerSize.height)
         #expect(compact.showsVerticalScroll == false)
         #expect(wide.showsVerticalScroll == false)
         #expect(wideButShort.scaledSize.width <= wideButShort.containerSize.width)
-        #expect(wideButShort.scaledSize.height > wideButShort.containerSize.height)
-        #expect(wideButShort.showsVerticalScroll == true)
+        #expect(wideButShort.scaledSize.height <= wideButShort.containerSize.height)
+        #expect(wideButShort.showsVerticalScroll == false)
     }
 }
