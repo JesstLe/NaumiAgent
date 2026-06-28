@@ -121,6 +121,7 @@ class _FakeWorkbenchService:
         self.listed_decisions: list[dict] = []
         self.requested_decisions: list[dict] = []
         self._create_mission_error: Exception | None = None
+        self._list_missions_error: Exception | None = None
         self._issue_error: Exception | None = None
         self._list_approvals_error: Exception | None = None
         self._get_approval_error: Exception | None = None
@@ -183,6 +184,9 @@ class _FakeWorkbenchService:
 
     def set_create_mission_error(self, error: Exception) -> None:
         self._create_mission_error = error
+
+    def set_list_missions_error(self, error: Exception) -> None:
+        self._list_missions_error = error
 
     def set_issue_error(self, error: Exception) -> None:
         self._issue_error = error
@@ -914,6 +918,8 @@ class _FakeWorkbenchService:
                 "limit": limit,
             }
         )
+        if self._list_missions_error is not None:
+            raise self._list_missions_error
         return {
             "missions": [
                 {
@@ -2319,6 +2325,46 @@ async def test_get_missions_endpoint_without_status_filter() -> None:
     assert response.model_dump()["status"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["missions"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_missions_endpoint_reports_invalid_filter() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_missions_error(
+        ValueError("mission status filter is invalid")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_missions(
+            "sess-1", _fake_request(engine), status="bad-status", limit=25, auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_missions == [
+        {"session_id": "sess-1", "status": "bad-status", "limit": 25}
+    ]
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "mission status filter is invalid"
+
+
+@pytest.mark.asyncio
+async def test_get_missions_endpoint_reports_unavailable_mission_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_list_missions_error(
+        RuntimeError("mission store unavailable")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_missions(
+            "sess-1", _fake_request(engine), status=None, limit=25, auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_missions == [
+        {"session_id": "sess-1", "status": None, "limit": 25}
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "mission store unavailable"
 
 
 def test_get_mission_route_returns_single_mission_detail() -> None:
