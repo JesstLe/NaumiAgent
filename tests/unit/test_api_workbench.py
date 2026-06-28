@@ -3954,6 +3954,37 @@ async def test_upsert_agent_profile_endpoint_maps_value_error_to_400() -> None:
     assert exc.value.detail == "Agent 名称不能为空"
 
 
+@pytest.mark.asyncio
+async def test_upsert_agent_profile_endpoint_reports_unavailable_profile_service() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_agent_profile_error(
+        RuntimeError("agent profile store unavailable")
+    )
+    body = AgentProfileUpsert(name="Backend Agent", role="coder")
+
+    with pytest.raises(HTTPException) as exc:
+        await upsert_agent_profile(
+            "sess-1", "agent-1", body, _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.registered_agent_profiles == [
+        {
+            "session_id": "sess-1",
+            "agent_id": "agent-1",
+            "name": "Backend Agent",
+            "role": "coder",
+            "capabilities": [],
+            "permissions": [],
+            "max_parallel_tasks": 1,
+            "status": "idle",
+            "actor": "Human",
+        }
+    ]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "agent profile store unavailable"
+
+
 def test_upsert_agent_profile_route_accepts_json_body() -> None:
     engine = _FakeEngine(exists=True)
     app = FastAPI()
