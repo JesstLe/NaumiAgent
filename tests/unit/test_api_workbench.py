@@ -2404,6 +2404,47 @@ async def test_create_mission_endpoint_returns_created_mission() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_mission_endpoint_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    body = MissionCreate(title="Mac 工作台", goal="可视化治理多 Agent 研发")
+
+    response = await create_workbench_mission(
+        "sess-1",
+        body,
+        _fake_request(engine),
+        include_snapshot=True,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert response["mission"]["session_id"] == "sess-1"
+    assert response["mission"]["title"] == "Mac 工作台"
+    assert response["snapshot"]["version"] == 1
+    assert response["snapshot"]["session_id"] == "sess-1"
+
+
+def test_create_mission_route_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/workbench/sessions/sess-1/missions",
+        params={"include_snapshot": "true"},
+        json={"title": "Mac 工作台", "goal": "可视化治理多 Agent 研发"},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["mission"]["session_id"] == "sess-1"
+    assert body["mission"]["title"] == "Mac 工作台"
+    assert body["snapshot"]["version"] == 1
+    assert body["snapshot"]["session_id"] == "sess-1"
+
+
+@pytest.mark.asyncio
 async def test_create_mission_endpoint_maps_value_error_to_400() -> None:
     engine = _FakeEngine(exists=True)
     engine.workbench_service.set_create_mission_error(ValueError("Mission 标题不能为空"))

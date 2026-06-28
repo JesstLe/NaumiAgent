@@ -883,6 +883,7 @@ async def create_workbench_mission(
     session_id: str,
     body: MissionCreate,
     request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -901,7 +902,17 @@ async def create_workbench_mission(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return asdict(mission)
+    mission_payload = asdict(mission)
+    if not include_snapshot:
+        return mission_payload
+
+    try:
+        snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"mission": mission_payload, "snapshot": snapshot}
 
 
 @router.post(
