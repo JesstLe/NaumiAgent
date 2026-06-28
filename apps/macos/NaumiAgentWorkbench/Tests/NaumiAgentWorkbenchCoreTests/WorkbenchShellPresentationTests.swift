@@ -1,3 +1,4 @@
+import CoreGraphics
 import Testing
 @testable import NaumiAgentWorkbenchCore
 
@@ -25,5 +26,26 @@ struct WorkbenchShellPresentationTests {
         #expect(abs(presentation.navigationScale(for: 1180) - (1180.0 / 1440.0)) < 0.001)
         #expect(abs(presentation.scaledTopNavigationHeight(for: 1180) - 34.416) < 0.01)
         #expect(abs(presentation.scaledTopNavigationHeight(for: 2048) - 59.733) < 0.01)
+    }
+
+    @Test func shellNavigationUsesSameScaleAsPageWhenWindowHeightLimitsPreview() {
+        let presentation = WorkbenchShellPresentation()
+        let pageLayout = WorkbenchScaledPageLayout.dashboard
+        let windowWidth = 2048.0
+        let windowHeight = 900.0
+        let scale = presentation.navigationScale(
+            for: CGSize(width: windowWidth, height: windowHeight),
+            pageLayout: pageLayout
+        )
+        let routeHeight = windowHeight - presentation.scaledTopNavigationHeight(
+            for: CGSize(width: windowWidth, height: windowHeight),
+            pageLayout: pageLayout
+        )
+        let pageScale = pageLayout.scale(
+            for: CGSize(width: windowWidth, height: routeHeight)
+        )
+
+        #expect(abs(scale - pageScale) < 0.001)
+        #expect(scale < presentation.navigationScale(for: windowWidth))
     }
 }

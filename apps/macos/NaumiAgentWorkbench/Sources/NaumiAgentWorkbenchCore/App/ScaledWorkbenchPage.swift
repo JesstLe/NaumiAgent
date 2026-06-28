@@ -37,7 +37,9 @@ public struct ScaledWorkbenchPage<Content: View>: View {
                     alignment: .topLeading
                 )
             }
+            .background(Color(nsColor: .windowBackgroundColor))
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
         }
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }

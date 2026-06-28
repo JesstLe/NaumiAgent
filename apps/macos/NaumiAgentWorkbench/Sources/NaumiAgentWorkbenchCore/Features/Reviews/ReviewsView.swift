@@ -81,12 +81,15 @@ public struct ReviewsView: View {
             HStack(spacing: 10) {
                 Text(AppStrings.Reviews.title(appState.locale))
                     .font(.system(size: 17, weight: .semibold))
+                    .lineLimit(1)
                 Spacer()
                 Image(systemName: "magnifyingglass")
                 Image(systemName: "line.3.horizontal.decrease")
                 Image(systemName: "square.and.pencil")
             }
             .foregroundStyle(.primary)
+            .frame(height: 34, alignment: .center)
+            .padding(.top, 6)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
