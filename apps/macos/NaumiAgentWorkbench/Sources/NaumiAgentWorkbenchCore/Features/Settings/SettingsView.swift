@@ -44,6 +44,7 @@ public struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         runtimePanel(presentation: presentation)
                         capabilitiesPanel
+                        selectedIntentLockPanel
                         readinessGrid(presentation: presentation)
                     }
                     .padding(16)
@@ -176,7 +177,10 @@ public struct SettingsView: View {
 
     private func contentGrid(presentation: SettingsDashboardPresentation) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            intentLockPanel
+            VStack(alignment: .leading, spacing: 14) {
+                intentLockPanel
+                intentLockRecordsPanel(presentation: presentation)
+            }
                 .frame(minWidth: 420, maxWidth: .infinity, alignment: .top)
 
             languagePanel(presentation: presentation)
@@ -316,6 +320,117 @@ public struct SettingsView: View {
                 }
                 .padding(.top, 2)
             }
+        }
+    }
+
+    private func intentLockRecordsPanel(presentation: SettingsDashboardPresentation) -> some View {
+        panel(title: appState.locale == .zhCN ? "意图锁记录" : "Intent Lock Records") {
+            if presentation.intentLocks.isEmpty {
+                Text(appState.locale == .zhCN ? "暂无意图锁记录" : "No intent locks yet")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(presentation.intentLocks) { row in
+                        Button {
+                            guard let command = SettingsIntentLockSelectionCommand(row: row) else {
+                                return
+                            }
+                            Task {
+                                await daemonController.loadIntentLock(
+                                    missionID: command.missionID,
+                                    lockID: command.lockID
+                                )
+                            }
+                        } label: {
+                            intentLockRecordRow(row)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private func intentLockRecordRow(_ row: SettingsIntentLockRow) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: row.isActive ? "lock.fill" : "lock.slash")
+                .foregroundStyle(row.isActive ? .orange : .secondary)
+                .frame(width: 24, height: 24)
+                .background((row.isActive ? Color.orange : Color.secondary).opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(row.rule)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer()
+                    Text(row.riskLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+
+                HStack(spacing: 10) {
+                    Text(row.scopeSummary)
+                    Text(row.createdAt)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(row.id == appState.selectedIntentLock?.id ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(row.id == appState.selectedIntentLock?.id ? Color.accentColor : Color.clear, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private var selectedIntentLockPanel: some View {
+        if let lock = appState.selectedIntentLock {
+            panel(title: appState.locale == .zhCN ? "已选意图锁" : "Selected Intent Lock") {
+                VStack(alignment: .leading, spacing: 10) {
+                    settingsRow(label: "ID", value: lock.id)
+                    settingsRow(label: "Mission", value: lock.missionID)
+                    settingsRow(
+                        label: appState.locale == .zhCN ? "状态" : "Status",
+                        value: lock.active ? (appState.locale == .zhCN ? "生效中" : "Active") : (appState.locale == .zhCN ? "已停用" : "Inactive")
+                    )
+                    settingsRow(label: appState.locale == .zhCN ? "需提案风险" : "Proposal Risk", value: lock.requireProposalForRisk)
+                    Text(lock.rule)
+                        .font(.system(size: 13, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    pathSummary(title: appState.locale == .zhCN ? "阻塞路径" : "Blocked Paths", values: lock.blockedPaths)
+                    pathSummary(title: appState.locale == .zhCN ? "允许路径" : "Allowed Paths", values: lock.allowedPaths)
+                }
+            }
+        }
+    }
+
+    private func pathSummary(title: String, values: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(values.isEmpty ? "-" : values.joined(separator: "\n"))
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .lineLimit(4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
         }
     }
 
