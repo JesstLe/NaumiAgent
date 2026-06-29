@@ -2098,6 +2098,32 @@ final class DaemonControllerTests {
         #expect(await api.snapshotCallCount == 0)
     }
 
+    @Test @MainActor func claimIssueSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setClaimIssueWithSnapshotResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.claimIssue(
+            taskID: "task-001",
+            agentID: "local-agent",
+            durationMinutes: 30,
+            worktreeName: "wt-001"
+        )
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+        #expect(await api.snapshotCallCount == 0)
+    }
+
     @Test @MainActor func claimIssueWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         #expect(appState.selectedSessionID == nil)
