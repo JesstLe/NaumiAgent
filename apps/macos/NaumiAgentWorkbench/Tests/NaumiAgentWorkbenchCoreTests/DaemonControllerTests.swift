@@ -5406,6 +5406,28 @@ final class DaemonControllerTests {
         #expect(appState.agentProfiles == [staleProfile])
         #expect(appState.lastError == .httpStatus(500))
     }
+
+    @Test @MainActor func refreshAgentProfilesSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [
+            makeMission(id: "mission-stale", sessionID: "sess-missing")
+        ])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setAgentProfilesResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshAgentProfiles(limit: 50)
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+    }
 }
 
 extension FakeWorkbenchAPIProvider {
