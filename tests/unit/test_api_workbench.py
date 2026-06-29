@@ -4447,6 +4447,19 @@ async def test_create_intent_lock_endpoint_maps_value_error_to_400() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_intent_lock_endpoint_maps_runtime_error_to_503() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_intent_lock_error(RuntimeError("意图锁存储暂不可用"))
+    body = IntentLockCreate(rule="高风险改动需要人工审批")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_intent_lock("sess-1", "mission-1", body, _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "意图锁存储暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_create_decision_endpoint_requires_existing_session() -> None:
     engine = _FakeEngine(exists=False)
     body = DecisionCreate(title="采用 FastAPI", content="使用 FastAPI 承载 Workbench API")
@@ -4581,6 +4594,19 @@ async def test_create_decision_endpoint_maps_value_error_to_400() -> None:
 
     assert exc.value.status_code == 400
     assert exc.value.detail == "决策标题不能为空"
+
+
+@pytest.mark.asyncio
+async def test_create_decision_endpoint_maps_runtime_error_to_503() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service.set_decision_error(RuntimeError("决策日志暂不可用"))
+    body = DecisionCreate(title="采用 FastAPI", content="使用 FastAPI 承载 Workbench API")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_decision("sess-1", "mission-1", body, _fake_request(engine), auth="test")
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "决策日志暂不可用"
 
 
 @pytest.mark.asyncio
