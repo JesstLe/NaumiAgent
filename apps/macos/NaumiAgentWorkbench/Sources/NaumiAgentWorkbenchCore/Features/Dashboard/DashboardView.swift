@@ -9,6 +9,7 @@ public struct DashboardView: View {
     @State private var selectedMissionID: String?
     @State private var selectedAgentID: String?
     @State private var selectedIssueTaskID: String?
+    @State private var selectedWorktreeName: String?
     @State private var selectedFailureID: String?
     @State private var selectedEventID: String?
     @State private var isRerunningValidation = false
@@ -434,7 +435,13 @@ public struct DashboardView: View {
 
                         VStack(spacing: 8) {
                             ForEach(presentation.workbench.canvasNodes.filter { $0.kind == .worktrees || $0.kind == .validation || $0.kind == .failure || $0.kind == .approval }, id: \.id) { node in
-                                canvasNodeView(node: node)
+                                canvasNodeView(node: node, isSelected: node.kind == .worktrees && node.title == selectedWorktreeName)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        if node.kind == .worktrees {
+                                            selectWorktreeNode(node)
+                                        }
+                                    }
                             }
                         }
                         .frame(width: 240)
@@ -564,6 +571,15 @@ public struct DashboardView: View {
         return issuePresentations(rows: rows).first { $0.taskID == selectedIssueTaskID }
     }
 
+    private func selectedWorktreePresentation() -> WorktreeDTO? {
+        guard let selectedWorktree = appState.selectedWorktree,
+              selectedWorktree.name == selectedWorktreeName else {
+            return nil
+        }
+
+        return selectedWorktree
+    }
+
     private func issuePresentation(
         issue: IssueDTO,
         fallback: TaskMarketDesignIssue
@@ -590,6 +606,7 @@ public struct DashboardView: View {
         selectedMissionID = mission.id
         selectedAgentID = nil
         selectedIssueTaskID = nil
+        selectedWorktreeName = nil
         guard !appState.isPreviewFixture,
               let command = DashboardMissionSelectionCommand(mission: mission) else {
             return
@@ -608,6 +625,7 @@ public struct DashboardView: View {
 
         selectedIssueTaskID = command.taskID
         selectedAgentID = nil
+        selectedWorktreeName = nil
         guard !appState.isPreviewFixture else {
             return
         }
@@ -625,12 +643,31 @@ public struct DashboardView: View {
 
         selectedAgentID = command.agentID
         selectedIssueTaskID = nil
+        selectedWorktreeName = nil
         guard !appState.isPreviewFixture else {
             return
         }
 
         Task {
             await daemonController.loadAgentProfile(agentID: command.agentID)
+        }
+    }
+
+    private func selectWorktreeNode(_ node: DashboardCanvasNode) {
+        guard let command = DashboardWorktreeSelectionCommand(node: node) else {
+            selectedWorktreeName = nil
+            return
+        }
+
+        selectedWorktreeName = command.name
+        selectedAgentID = nil
+        selectedIssueTaskID = nil
+        guard !appState.isPreviewFixture else {
+            return
+        }
+
+        Task {
+            await daemonController.loadWorktree(name: command.name)
         }
     }
 
@@ -696,7 +733,7 @@ public struct DashboardView: View {
         .allowsHitTesting(false)
     }
 
-    private func canvasNodeView(node: DashboardCanvasNode) -> some View {
+    private func canvasNodeView(node: DashboardCanvasNode, isSelected: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Image(systemName: iconName(for: node.kind))
@@ -732,7 +769,7 @@ public struct DashboardView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(color(for: node.kind).opacity(0.28), lineWidth: 1)
+                .stroke(isSelected ? Color.accentColor : color(for: node.kind).opacity(0.28), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .shadow(color: .black.opacity(0.05), radius: 10, y: 4)
@@ -744,6 +781,7 @@ public struct DashboardView: View {
     ) -> some View {
         let selectedAgent = selectedAgentPresentation(rows: presentation.agentRows)
         let selectedIssue = selectedIssuePresentation(rows: market.rows)
+        let selectedWorktree = selectedWorktreePresentation()
 
         return VStack(alignment: .leading, spacing: 14) {
             Text(AppStrings.Dashboard.inspectorSection(appState.locale))
@@ -763,6 +801,8 @@ public struct DashboardView: View {
                         agentInspectorCard(selectedAgent)
                     } else if let selectedIssue {
                         issueInspectorCard(selectedIssue)
+                    } else if let selectedWorktree {
+                        worktreeInspectorCard(selectedWorktree)
                     } else if let inspector = presentation.workbench.inspector {
                         VStack(alignment: .leading, spacing: 10) {
                             Text(inspector.title)
@@ -842,6 +882,31 @@ public struct DashboardView: View {
         }
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func worktreeInspectorCard(_ worktree: WorktreeDTO) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(worktree.name)
+                .font(.system(size: 15, weight: .semibold))
+                .lineLimit(2)
+
+            StatusBadge(text: worktree.status, color: statusColor(for: worktree.status))
+
+            inspectorDetail(appState.locale == .zhCN ? "分支" : "Branch", worktree.branch)
+            inspectorDetail(appState.locale == .zhCN ? "基线" : "Base", worktree.baseRef)
+            inspectorDetail(AppStrings.Dashboard.tasksLabel(appState.locale), worktree.taskID)
+            inspectorDetail(
+                appState.locale == .zhCN ? "未提交文件" : "Dirty Files",
+                "\(worktree.dirtyFiles)"
+            )
+            inspectorDetail(
+                appState.locale == .zhCN ? "领先提交" : "Commits Ahead",
+                "\(worktree.commitsAhead)"
+            )
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func issueInspectorCard(_ issue: TaskMarketDesignIssue) -> some View {
@@ -1468,6 +1533,7 @@ public struct DashboardView: View {
         selectedFailureID = failure.id
         selectedAgentID = nil
         selectedIssueTaskID = nil
+        selectedWorktreeName = nil
         guard !appState.isPreviewFixture,
               let command = DashboardFailureSelectionCommand(failure: failure) else {
             return
@@ -1557,6 +1623,7 @@ public struct DashboardView: View {
         selectedEventID = event.id
         selectedAgentID = nil
         selectedIssueTaskID = nil
+        selectedWorktreeName = nil
         guard !appState.isPreviewFixture,
               let command = DashboardEventSelectionCommand(event: event) else {
             return
