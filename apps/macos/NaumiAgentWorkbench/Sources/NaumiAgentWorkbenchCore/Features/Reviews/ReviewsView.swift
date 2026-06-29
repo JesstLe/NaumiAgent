@@ -70,10 +70,34 @@ public struct ReviewsView: View {
     }
 
     private func selectedReview(_ presentation: ReviewsDesignPresentation) -> ReviewDesignItem {
-        presentation.reviewQueues
+        let selected = presentation.reviewQueues
             .flatMap(\.items)
             .first { $0.id == selectedReviewID }
             ?? presentation.selectedReview
+
+        guard let loadedApproval = appState.selectedApproval,
+              loadedApproval.id == selected.id else {
+            return selected
+        }
+
+        return selectedReviewPresentation(approval: loadedApproval, fallback: selected)
+    }
+
+    private func selectedReviewPresentation(
+        approval: ApprovalDTO,
+        fallback: ReviewDesignItem
+    ) -> ReviewDesignItem {
+        ReviewDesignItem(
+            id: approval.id,
+            taskID: approval.taskID.isEmpty ? fallback.taskID : approval.taskID,
+            title: approval.title.isEmpty ? fallback.title : approval.title,
+            number: fallback.number,
+            agent: approval.requester.isEmpty ? fallback.agent : approval.requester,
+            worktree: fallback.worktree,
+            time: approval.updatedAt.isEmpty ? fallback.time : String(approval.updatedAt.suffix(5)),
+            risk: fallback.risk,
+            tone: reviewTone(forApprovalState: approval.state, fallback: fallback.tone)
+        )
     }
 
     private func reviewQueueRail(_ presentation: ReviewsDesignPresentation) -> some View {
@@ -114,8 +138,7 @@ public struct ReviewsView: View {
                                 reviewQueueCard(item)
                                     .contentShape(Rectangle())
                                     .onTapGesture {
-                                        selectedReviewID = item.id
-                                        validationDraft = presentation.defaultValidationDraft(for: item)
+                                        selectReview(item, presentation: presentation)
                                     }
                             }
                         }
@@ -172,6 +195,22 @@ public struct ReviewsView: View {
                 .stroke(item.id == selectedReviewID ? Color.accentColor : Color.secondary.opacity(0.12), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func selectReview(
+        _ review: ReviewDesignItem,
+        presentation: ReviewsDesignPresentation
+    ) {
+        selectedReviewID = review.id
+        validationDraft = presentation.defaultValidationDraft(for: review)
+        guard !appState.isPreviewFixture,
+              let command = ReviewSelectionCommand(review: review) else {
+            return
+        }
+
+        Task {
+            await daemonController.loadApproval(approvalID: command.approvalID)
+        }
     }
 
     private func reviewMain(presentation: ReviewsDesignPresentation, selected: ReviewDesignItem) -> some View {
@@ -781,6 +820,19 @@ public struct ReviewsView: View {
             return Color.red.opacity(0.07)
         default:
             return Color.clear
+        }
+    }
+
+    private func reviewTone(forApprovalState state: String, fallback: String) -> String {
+        switch state.lowercased() {
+        case "approved":
+            return "green"
+        case "rejected":
+            return "orange"
+        case "waiting":
+            return fallback
+        default:
+            return fallback
         }
     }
 
