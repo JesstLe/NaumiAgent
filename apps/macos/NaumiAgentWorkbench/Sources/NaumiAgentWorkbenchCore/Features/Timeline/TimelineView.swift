@@ -15,7 +15,11 @@ public struct TimelineView: View {
 
     public var body: some View {
         let presentation = TimelineDashboardPresentation(events: appState.timelineEvents)
-        let selectedEvent = presentation.events.first { $0.id == selectedEventID }
+        let loadedSelectedEvent = appState.selectedEvent
+            .map(TimelineEventPresentation.init)
+            .flatMap { $0.id == selectedEventID ? $0 : nil }
+        let selectedEvent = loadedSelectedEvent
+            ?? presentation.events.first { $0.id == selectedEventID }
             ?? presentation.latestEvent
 
         VStack(spacing: 0) {
@@ -141,7 +145,7 @@ public struct TimelineView: View {
                             )
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    selectedEventID = event.id
+                                    selectEvent(event)
                                 }
                         }
                     }
@@ -218,6 +222,18 @@ public struct TimelineView: View {
             limit: 50
         )
         isRefreshingEvents = false
+    }
+
+    private func selectEvent(_ event: TimelineEventPresentation) {
+        selectedEventID = event.id
+        guard !appState.isPreviewFixture,
+              let command = TimelineEventSelectionCommand(event: event) else {
+            return
+        }
+
+        Task {
+            await daemonController.loadEvent(eventID: command.eventID)
+        }
     }
 
     private func summaryStrip(presentation: TimelineDashboardPresentation) -> some View {
