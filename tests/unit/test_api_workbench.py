@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+import naumi_agent.api.routes.workbench as workbench_routes
 from naumi_agent import __version__
 from naumi_agent.api.routes.workbench import (
     AgentProfileUpsert,
@@ -3798,6 +3799,35 @@ async def test_daemon_status_uses_current_time_when_started_at_missing() -> None
     parsed = datetime.fromisoformat(response.started_at)
     assert parsed.tzinfo is not None
     assert before <= parsed <= after
+
+
+@pytest.mark.asyncio
+async def test_daemon_status_persists_generated_started_at(monkeypatch) -> None:
+    class FakeDateTime:
+        calls = 0
+
+        @classmethod
+        def now(cls, tz):
+            cls.calls += 1
+            seconds = 10 + cls.calls
+            return datetime(2026, 6, 27, 10, 0, seconds, tzinfo=tz)
+
+    monkeypatch.setattr(workbench_routes, "datetime", FakeDateTime)
+    engine = _FakeEngine(exists=True)
+    engine.session_store = _FakeSessionStoreWithCount(total=0)
+    state = SimpleNamespace(engine=engine)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=state),
+        url=SimpleNamespace(hostname="127.0.0.1", port=8765),
+    )
+
+    first = await get_daemon_status(request, auth="test")
+    second = await get_daemon_status(request, auth="test")
+
+    assert first.started_at == "2026-06-27T10:00:11+00:00"
+    assert second.started_at == first.started_at
+    assert state.started_at == first.started_at
+    assert FakeDateTime.calls == 1
 
 
 @pytest.mark.asyncio
