@@ -4582,6 +4582,28 @@ final class DaemonControllerTests {
         #expect(appState.selectedValidationRun == oldRun)
     }
 
+    @Test @MainActor func loadValidationRunSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [
+            makeMission(id: "mission-stale", sessionID: "sess-missing")
+        ])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setValidationRunResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadValidationRun(runID: "run-001")
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+    }
+
     @Test @MainActor func loadContextSnapshotSuccessStoresSelectedContextSnapshot() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
