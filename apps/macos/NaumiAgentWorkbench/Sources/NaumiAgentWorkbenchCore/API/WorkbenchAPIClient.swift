@@ -937,6 +937,9 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         }
 
         guard (200..<300).contains(httpResponse.statusCode) else {
+            if let error = apiError(statusCode: httpResponse.statusCode, data: data) {
+                throw error
+            }
             throw .httpStatus(httpResponse.statusCode)
         }
 
@@ -954,6 +957,19 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         let title: String?
         let systemPrompt: String?
         let model: String?
+    }
+
+    private struct ErrorDetailResponse: Decodable {
+        let detail: String?
+    }
+
+    private func apiError(statusCode: Int, data: Data) -> APIError? {
+        guard statusCode == 404,
+              let response = try? JSONDecoder().decode(ErrorDetailResponse.self, from: data),
+              response.detail == "Session not found" else {
+            return nil
+        }
+        return .sessionUnavailable
     }
 
     /// Payload for `POST /workbench/sessions/{session_id}/issues/{task_id}/claim`.
