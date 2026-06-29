@@ -396,6 +396,32 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func registerAgentProfileWithSnapshot(
+        sessionID: String,
+        agentID: String,
+        name: String,
+        role: String,
+        capabilities: [String],
+        permissions: [String],
+        maxParallelTasks: Int,
+        status: String,
+        actor: String
+    ) async throws(APIError) -> AgentProfileSnapshotDTO {
+        let agentProfile = try await registerAgentProfile(
+            sessionID: sessionID,
+            agentID: agentID,
+            name: name,
+            role: role,
+            capabilities: capabilities,
+            permissions: permissions,
+            maxParallelTasks: maxParallelTasks,
+            status: status,
+            actor: actor
+        )
+        let snapshot = try await fetchSnapshot(sessionID: sessionID)
+        return AgentProfileSnapshotDTO(agentProfile: agentProfile, snapshot: snapshot)
+    }
+
     func claimIssue(
         sessionID: String,
         taskID: String,

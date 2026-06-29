@@ -26,3 +26,19 @@ public struct AgentProfileDTO: Decodable, Equatable, Sendable {
         case updatedAt = "updated_at"
     }
 }
+
+/// Result returned by `POST /workbench/sessions/{id}/agents/{agent_id}?include_snapshot=true`.
+public struct AgentProfileSnapshotDTO: Decodable, Equatable, Sendable {
+    public let agentProfile: AgentProfileDTO
+    public let snapshot: WorkbenchSnapshotDTO
+
+    public enum CodingKeys: String, CodingKey {
+        case agentProfile = "agent_profile"
+        case snapshot
+    }
+
+    public init(agentProfile: AgentProfileDTO, snapshot: WorkbenchSnapshotDTO) {
+        self.agentProfile = agentProfile
+        self.snapshot = snapshot
+    }
+}

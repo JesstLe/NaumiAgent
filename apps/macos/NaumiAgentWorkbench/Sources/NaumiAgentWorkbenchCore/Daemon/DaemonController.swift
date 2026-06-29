@@ -869,8 +869,9 @@ public final class DaemonController: Sendable {
     ///
     /// Requires `appState.selectedSessionID` to be set. On success the profile
     /// is registered with the API, then `agentProfiles`, timeline events, and
-    /// snapshot are refreshed; on failure `appState.lastError` is set and the
-    /// existing local `agentProfiles` and snapshot are preserved.
+    /// snapshot are refreshed from authoritative backend responses; on failure
+    /// `appState.lastError` is set and the existing local `agentProfiles` and
+    /// snapshot are preserved.
     public func registerAgentProfile(
         agentID: String,
         name: String,
@@ -889,7 +890,7 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            _ = try await apiProvider.registerAgentProfile(
+            let response = try await apiProvider.registerAgentProfileWithSnapshot(
                 sessionID: sessionID,
                 agentID: agentID,
                 name: name,
@@ -900,9 +901,13 @@ public final class DaemonController: Sendable {
                 status: status,
                 actor: actor
             )
+            appState.snapshot = response.snapshot
+            var refreshError: APIError?
             await refreshAgentProfiles()
+            refreshError = refreshError ?? appState.lastError
             await refreshEvents(limit: 50)
-            await refreshSnapshot()
+            refreshError = refreshError ?? appState.lastError
+            appState.lastError = refreshError
         } catch {
             appState.lastError = error
         }

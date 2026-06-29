@@ -407,6 +407,32 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func registerAgentProfileWithSnapshot(
+        sessionID: String,
+        agentID: String,
+        name: String,
+        role: String,
+        capabilities: [String],
+        permissions: [String],
+        maxParallelTasks: Int,
+        status: String,
+        actor: String
+    ) async throws(APIError) -> AgentProfileSnapshotDTO {
+        let body = RegisterAgentProfileRequest(
+            name: name,
+            role: role,
+            capabilities: capabilities,
+            permissions: permissions,
+            maxParallelTasks: maxParallelTasks,
+            status: status,
+            actor: actor
+        )
+        return try await post(
+            path: encodePath("workbench", "sessions", sessionID, "agents", agentID) + "?include_snapshot=true",
+            body: body
+        )
+    }
+
     public func claimIssue(
         sessionID: String,
         taskID: String,
