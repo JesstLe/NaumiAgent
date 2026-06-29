@@ -4142,6 +4142,20 @@ def test_list_workbench_sessions_route_returns_session_registry() -> None:
     }
 
 
+def test_list_workbench_sessions_route_reports_registry_failure() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store.list_sessions_error = RuntimeError("session registry unavailable")
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions?page=1&page_size=20")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "session registry unavailable"}
+
+
 @pytest.mark.asyncio
 async def test_run_validation_endpoint_requires_existing_session() -> None:
     engine = _FakeEngine(exists=False)
