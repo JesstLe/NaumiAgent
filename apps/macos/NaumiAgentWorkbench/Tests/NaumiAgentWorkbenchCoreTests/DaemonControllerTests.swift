@@ -1120,6 +1120,49 @@ final class DaemonControllerTests {
         #expect(controller.hasActiveEventStream == false)
     }
 
+    @Test @MainActor func refreshConnectionProtocolMismatchClearsStaleSessionState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-stale"
+        appState.connectionState = .connected
+        appState.snapshot = makeSnapshot(
+            sessionID: "sess-stale",
+            missions: [makeMission(id: "mission-stale", sessionID: "sess-stale")]
+        )
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        let bootstrap = WorkbenchBootstrapDTO(
+            daemonStatus: makeStatus(),
+            capabilities: CapabilitiesDTO(
+                supportsDaemonManagement: false,
+                supportsWorkspaceRegistry: true,
+                supportsValidationRunner: true,
+                supportsCloudSync: false,
+                supportedLocales: ["zh-CN", "en-US"],
+                protocolVersion: 999
+            ),
+            sessions: [makeSession(id: "sess-new", title: "Unsupported Session")],
+            totalSessions: 1,
+            selectedSessionID: "sess-new",
+            snapshot: makeSnapshot(
+                sessionID: "sess-new",
+                missions: [makeMission(id: "mission-new", sessionID: "sess-new")]
+            )
+        )
+        await api.setBootstrapResult(.success(bootstrap))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .disconnected)
+        #expect(appState.lastError == .protocolVersionMismatch(expected: 1, actual: 999))
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+    }
+
     @Test @MainActor func refreshConnectionClearsPreviousError() async throws {
         let appState = AppState()
         appState.lastError = .httpStatus(500)

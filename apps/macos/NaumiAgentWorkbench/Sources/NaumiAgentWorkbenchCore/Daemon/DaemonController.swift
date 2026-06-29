@@ -61,6 +61,7 @@ public final class DaemonController: Sendable {
                 await stopEventStream()
                 appState.daemonStatus = nil
                 appState.capabilities = nil
+                clearUnavailableSelectedSession()
                 appState.lastError = .protocolVersionMismatch(
                     expected: Self.supportedProtocolVersion,
                     actual: capabilities.protocolVersion
