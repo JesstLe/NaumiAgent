@@ -64,6 +64,19 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         return try await post(path: "sessions", body: body)
     }
 
+    public func createWorkbenchSession(
+        title: String?,
+        model: String?,
+        systemPrompt: String?
+    ) async throws(APIError) -> WorkbenchBootstrapDTO {
+        let body = CreateSessionRequest(
+            title: title,
+            systemPrompt: systemPrompt,
+            model: model
+        )
+        return try await post(path: "workbench/sessions", body: body)
+    }
+
     public func fetchEvents(
         sessionID: String,
         eventType: String? = nil,

@@ -76,6 +76,26 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         makeSession(id: "preview-session", title: title ?? "新建预览会话", model: model ?? "preview")
     }
 
+    func createWorkbenchSession(
+        title: String?,
+        model: String?,
+        systemPrompt: String?
+    ) async throws(APIError) -> WorkbenchBootstrapDTO {
+        let session = makeSession(
+            id: "preview-session",
+            title: title ?? "新建预览会话",
+            model: model ?? "preview"
+        )
+        return WorkbenchBootstrapDTO(
+            daemonStatus: try await fetchDaemonStatus(),
+            capabilities: try await fetchCapabilities(),
+            sessions: [session],
+            totalSessions: 1,
+            selectedSessionID: session.id,
+            snapshot: try await fetchSnapshot(sessionID: session.id)
+        )
+    }
+
     func fetchEvents(
         sessionID: String,
         eventType: String?,

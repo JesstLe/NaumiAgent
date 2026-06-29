@@ -928,9 +928,8 @@ public final class DaemonController: Sendable {
         }
     }
 
-    /// Creates a new backend session, inserts it into the local session list,
-    /// then selects it using the same snapshot/list pre-warm path as manual
-    /// session switching.
+    /// Creates a new backend Workbench session and applies the returned
+    /// bootstrap snapshot as the authoritative first UI state.
     ///
     /// This action is intentionally available without an existing selected
     /// session so the Mac app can recover from an empty bootstrap state.
@@ -942,14 +941,41 @@ public final class DaemonController: Sendable {
         appState.lastError = nil
 
         do {
-            let session = try await apiProvider.createSession(
+            let bootstrap = try await apiProvider.createWorkbenchSession(
                 title: title,
                 model: model,
                 systemPrompt: systemPrompt
             )
-            appState.sessions.removeAll { $0.id == session.id }
-            appState.sessions.insert(session, at: 0)
-            await selectSession(session.id)
+            let capabilities = bootstrap.capabilities
+            guard capabilities.protocolVersion == Self.supportedProtocolVersion else {
+                await stopEventStream()
+                appState.daemonStatus = nil
+                appState.capabilities = nil
+                appState.lastError = .protocolVersionMismatch(
+                    expected: Self.supportedProtocolVersion,
+                    actual: capabilities.protocolVersion
+                )
+                appState.connectionState = .disconnected
+                return
+            }
+
+            await stopEventStream()
+            appState.daemonStatus = bootstrap.daemonStatus
+            appState.capabilities = capabilities
+            for session in bootstrap.sessions.reversed() {
+                appState.sessions.removeAll { $0.id == session.id }
+                appState.sessions.insert(session, at: 0)
+            }
+            appState.selectedSessionID = bootstrap.selectedSessionID ?? bootstrap.sessions.first?.id
+            clearSessionScopedState()
+            appState.snapshot = bootstrap.snapshot
+
+            guard appState.snapshot != nil else {
+                return
+            }
+
+            await refreshWorkbenchListsAfterConnection()
+            await startEventStreamIfAvailable()
         } catch {
             appState.lastError = error
         }
