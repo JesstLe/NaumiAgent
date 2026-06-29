@@ -7,6 +7,7 @@ public struct DashboardView: View {
     public let daemonController: DaemonController
     @State private var searchText = ""
     @State private var selectedMissionID: String?
+    @State private var selectedAgentID: String?
     @State private var selectedFailureID: String?
     @State private var selectedEventID: String?
     @State private var isRerunningValidation = false
@@ -360,6 +361,7 @@ public struct DashboardView: View {
         market: TaskMarketDesignPresentation
     ) -> some View {
         let selectedMission = missionPresentation(presentation.currentMission)
+        let agentRows = agentPresentations(rows: presentation.agentRows)
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -414,8 +416,12 @@ public struct DashboardView: View {
                             ForEach(presentation.workbench.canvasNodes.filter { $0.kind == .agents }, id: \.id) { node in
                                 canvasNodeView(node: node)
                             }
-                            ForEach(["Planner-Agent", "Backend-Agent", "Test-Agent", "Reviewer-Agent"], id: \.self) { agent in
+                            ForEach(Array(agentRows.prefix(4)), id: \.id) { agent in
                                 compactCanvasPill(agent, color: .purple)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        selectAgent(agent)
+                                    }
                             }
                         }
                         .frame(width: 160)
@@ -504,8 +510,40 @@ public struct DashboardView: View {
         )
     }
 
+    private func agentPresentations(rows: [DashboardAgentRow]) -> [DashboardAgentRow] {
+        guard let selectedProfile = appState.selectedAgentProfile,
+              selectedProfile.id == selectedAgentID else {
+            return rows
+        }
+
+        return rows.map { row in
+            guard row.id == selectedProfile.id else { return row }
+            return agentPresentation(profile: selectedProfile, fallback: row)
+        }
+    }
+
+    private func selectedAgentPresentation(rows: [DashboardAgentRow]) -> DashboardAgentRow? {
+        guard let selectedAgentID else { return nil }
+        return agentPresentations(rows: rows).first { $0.id == selectedAgentID }
+    }
+
+    private func agentPresentation(
+        profile: AgentProfileDTO,
+        fallback: DashboardAgentRow
+    ) -> DashboardAgentRow {
+        DashboardAgentRow(
+            id: profile.id,
+            name: profile.name.isEmpty ? fallback.name : profile.name,
+            role: profile.role.isEmpty ? fallback.role : profile.role,
+            status: profile.status.isEmpty ? fallback.status : profile.status,
+            capabilityCount: profile.capabilities.count,
+            maxParallelTasks: profile.maxParallelTasks
+        )
+    }
+
     private func selectMission(_ mission: DashboardMissionSummary) {
         selectedMissionID = mission.id
+        selectedAgentID = nil
         guard !appState.isPreviewFixture,
               let command = DashboardMissionSelectionCommand(mission: mission) else {
             return
@@ -516,28 +554,48 @@ public struct DashboardView: View {
         }
     }
 
-    private func compactCanvasPill(_ title: String, color: Color) -> some View {
-        HStack {
+    private func selectAgent(_ agent: DashboardAgentRow) {
+        guard let command = DashboardAgentSelectionCommand(agent: agent) else {
+            selectedAgentID = nil
+            return
+        }
+
+        selectedAgentID = command.agentID
+        guard !appState.isPreviewFixture else {
+            return
+        }
+
+        Task {
+            await daemonController.loadAgentProfile(agentID: command.agentID)
+        }
+    }
+
+    private func compactCanvasPill(_ agent: DashboardAgentRow, color: Color) -> some View {
+        let isSelected = agent.id == selectedAgentID
+
+        return HStack {
             Image(systemName: "person.fill")
                 .foregroundStyle(color)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text(agent.name)
                     .font(.caption)
                     .fontWeight(.medium)
-                Text(title.contains("Backend") ? "Working on 2 issues" : "Idle")
+                    .lineLimit(1)
+                Text(agent.status.isEmpty ? agent.role : agent.status)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             Spacer()
             Circle()
-                .fill(title.contains("Backend") ? .blue : .green)
+                .fill(statusColor(for: agent.status))
                 .frame(width: 7, height: 7)
         }
         .padding(8)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(isSelected ? Color.accentColor.opacity(0.10) : Color(nsColor: .windowBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 7)
-                .stroke(color.opacity(0.35), lineWidth: 1)
+                .stroke(isSelected ? Color.accentColor : color.opacity(0.35), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 7))
     }
@@ -617,7 +675,9 @@ public struct DashboardView: View {
     }
 
     private func inspectorPanel(presentation: DashboardSnapshotPresentation) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let selectedAgent = selectedAgentPresentation(rows: presentation.agentRows)
+
+        return VStack(alignment: .leading, spacing: 14) {
             Text(AppStrings.Dashboard.inspectorSection(appState.locale))
                 .font(.system(size: 14, weight: .semibold))
             Picker("", selection: .constant("Context")) {
@@ -631,7 +691,9 @@ public struct DashboardView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    if let inspector = presentation.workbench.inspector {
+                    if let selectedAgent {
+                        agentInspectorCard(selectedAgent)
+                    } else if let inspector = presentation.workbench.inspector {
                         VStack(alignment: .leading, spacing: 10) {
                             Text(inspector.title)
                                 .font(.system(size: 15, weight: .semibold))
@@ -710,6 +772,29 @@ public struct DashboardView: View {
         }
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func agentInspectorCard(_ agent: DashboardAgentRow) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(agent.name)
+                .font(.system(size: 15, weight: .semibold))
+                .lineLimit(2)
+
+            StatusBadge(text: agent.status, color: statusColor(for: agent.status))
+
+            inspectorDetail(AppStrings.Dashboard.roleLabel(appState.locale), agent.role)
+            inspectorDetail(
+                AppStrings.Dashboard.capabilitiesLabel(appState.locale),
+                "\(agent.capabilityCount)"
+            )
+            inspectorDetail(
+                AppStrings.Dashboard.maxParallelTasksLabel(appState.locale),
+                "\(agent.maxParallelTasks)"
+            )
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func inspectorStateCard(
@@ -1287,6 +1372,7 @@ public struct DashboardView: View {
 
     private func selectFailure(_ failure: DashboardFailureRow) {
         selectedFailureID = failure.id
+        selectedAgentID = nil
         guard !appState.isPreviewFixture,
               let command = DashboardFailureSelectionCommand(failure: failure) else {
             return
@@ -1374,6 +1460,7 @@ public struct DashboardView: View {
 
     private func selectEvent(_ event: DashboardEventRow) {
         selectedEventID = event.id
+        selectedAgentID = nil
         guard !appState.isPreviewFixture,
               let command = DashboardEventSelectionCommand(event: event) else {
             return
