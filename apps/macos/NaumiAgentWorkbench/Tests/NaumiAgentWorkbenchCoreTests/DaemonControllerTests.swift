@@ -4604,6 +4604,28 @@ final class DaemonControllerTests {
         #expect(appState.selectedContextSnapshot == oldSnapshot)
     }
 
+    @Test @MainActor func loadContextSnapshotSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [
+            makeMission(id: "mission-stale", sessionID: "sess-missing")
+        ])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setContextSnapshotResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadContextSnapshot(snapshotID: "context-001")
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+    }
+
     @Test @MainActor func loadFailureSuccessStoresSelectedFailure() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
