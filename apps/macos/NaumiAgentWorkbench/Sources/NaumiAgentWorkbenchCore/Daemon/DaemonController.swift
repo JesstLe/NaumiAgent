@@ -366,6 +366,9 @@ public final class DaemonController: Sendable {
             appState.validationRuns = response.validationRuns
         } catch {
             appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
         }
     }
 
