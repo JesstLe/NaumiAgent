@@ -9,6 +9,7 @@ public enum APIError: Error, Equatable, Sendable {
     case missingSelectedSession
     case capabilityUnavailable(String)
     case protocolVersionMismatch(expected: Int, actual: Int)
+    case serverError(statusCode: Int, detail: String)
     case httpStatus(Int)
     case decodingFailed(String)
     case networkFailure(String)
@@ -33,6 +34,8 @@ public enum APIError: Error, Equatable, Sendable {
                 expected: expected,
                 actual: actual
             )
+        case .serverError(let statusCode, let detail):
+            return AppStrings.Error.serverError(locale, statusCode: statusCode, detail: detail)
         case .httpStatus(let code):
             return AppStrings.Error.httpStatus(locale, code: code)
         case .decodingFailed:
@@ -58,6 +61,8 @@ public enum APIError: Error, Equatable, Sendable {
             return "capabilityUnavailable(\(capability))"
         case .protocolVersionMismatch(let expected, let actual):
             return "protocolVersionMismatch(expected:\(expected),actual:\(actual))"
+        case .serverError(let statusCode, let detail):
+            return "serverError(statusCode:\(statusCode),detail:\(detail))"
         case .httpStatus(let code):
             return "httpStatus(\(code))"
         case .decodingFailed(let detail):

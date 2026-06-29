@@ -964,12 +964,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     }
 
     private func apiError(statusCode: Int, data: Data) -> APIError? {
-        guard statusCode == 404,
-              let response = try? JSONDecoder().decode(ErrorDetailResponse.self, from: data),
-              response.detail == "Session not found" else {
+        guard let response = try? JSONDecoder().decode(ErrorDetailResponse.self, from: data),
+              let detail = response.detail?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !detail.isEmpty else {
             return nil
         }
-        return .sessionUnavailable
+        if statusCode == 404, detail == "Session not found" {
+            return .sessionUnavailable
+        }
+        return .serverError(statusCode: statusCode, detail: detail)
     }
 
     /// Payload for `POST /workbench/sessions/{session_id}/issues/{task_id}/claim`.

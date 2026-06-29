@@ -167,6 +167,24 @@ final class WorkbenchAPIClientTests {
         }
     }
 
+    @Test func serverHTTPDetailThrowsServerError() async {
+        let json = Data(#"{"detail":"session registry unavailable"}"#.utf8)
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 503,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        await #expect(throws: APIError.serverError(statusCode: 503, detail: "session registry unavailable")) {
+            try await client.fetchSessions(page: 1, pageSize: 20)
+        }
+    }
+
     @Test func unauthorizedHTTPStatusThrowsAuthFailed() async {
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
