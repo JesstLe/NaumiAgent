@@ -1153,6 +1153,9 @@ public final class DaemonController: Sendable {
             await refreshEvents(limit: 50)
         } catch {
             appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
         }
     }
 
