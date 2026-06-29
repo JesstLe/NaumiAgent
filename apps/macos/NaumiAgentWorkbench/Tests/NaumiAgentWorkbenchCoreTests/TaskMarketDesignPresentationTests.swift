@@ -42,6 +42,58 @@ struct TaskMarketDesignPresentationTests {
         #expect(leasedIssue?.claimDisabledReason(locale: .enUS) == "An active lease must be released or reassigned first")
     }
 
+    @Test func refreshedLeasesOverrideSnapshotAndFixtures() throws {
+        let snapshot = try loadZHSnapshot()
+        let refreshedLease = makeLease(
+            id: "lease-refreshed",
+            taskID: "2",
+            agentID: "refresh-agent",
+            state: "active",
+            expiresAt: "2026-06-27T09:15:00",
+            worktreeName: "wt-refreshed-api"
+        )
+
+        let presentation = TaskMarketDesignPresentation(
+            snapshot: snapshot,
+            refreshedLeases: [refreshedLease]
+        )
+
+        #expect(presentation.activeLeases.map(\.leaseID) == ["lease-refreshed"])
+        #expect(presentation.activeLeases[0].number == 1)
+        #expect(presentation.activeLeases[0].title == "实现 API Client")
+        #expect(presentation.activeLeases[0].worktree == "wt-refreshed-api")
+        #expect(presentation.activeLeases[0].owner == "refresh-agent")
+        #expect(presentation.activeLeases[0].status == "Active")
+        #expect(presentation.activeLeases[0].tone == "green")
+    }
+
+    @Test func refreshedLeasesIgnoreNonActiveRowsForActiveLeaseStrip() throws {
+        let snapshot = try loadZHSnapshot()
+        let activeLease = makeLease(
+            id: "lease-active",
+            taskID: "2",
+            agentID: "agent-active",
+            state: "active",
+            expiresAt: "2026-06-27T09:15:00",
+            worktreeName: "wt-active"
+        )
+        let releasedLease = makeLease(
+            id: "lease-released",
+            taskID: "2",
+            agentID: "agent-released",
+            state: "released",
+            expiresAt: "2026-06-27T08:45:00",
+            worktreeName: "wt-released"
+        )
+
+        let presentation = TaskMarketDesignPresentation(
+            snapshot: snapshot,
+            refreshedLeases: [releasedLease, activeLease]
+        )
+
+        #expect(presentation.activeLeases.map(\.leaseID) == ["lease-active"])
+    }
+
     private func loadZHSnapshot() throws -> WorkbenchSnapshotDTO {
         let data = try loadFixture(named: "workbench_snapshot_zh")
         return try JSONDecoder().decode(WorkbenchSnapshotDTO.self, from: data)
@@ -54,5 +106,26 @@ struct TaskMarketDesignPresentationTests {
             .deletingLastPathComponent()
             .appendingPathComponent("Fixtures/\(named).json")
         return try Data(contentsOf: fixturesURL)
+    }
+
+    private func makeLease(
+        id: String,
+        taskID: String,
+        agentID: String,
+        state: String,
+        expiresAt: String,
+        worktreeName: String
+    ) -> LeaseDTO {
+        LeaseDTO(
+            id: id,
+            sessionID: "sess-001",
+            taskID: taskID,
+            agentID: agentID,
+            state: state,
+            expiresAt: expiresAt,
+            worktreeName: worktreeName,
+            createdAt: "2026-06-27T08:00:00",
+            updatedAt: "2026-06-27T08:05:00"
+        )
     }
 }
