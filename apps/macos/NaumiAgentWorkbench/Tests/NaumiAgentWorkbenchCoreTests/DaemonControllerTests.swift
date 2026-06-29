@@ -87,6 +87,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var runValidationWithSnapshotCallCount: Int = 0
     var createdSessions: [[String: String?]] = []
     var createdMissions: [[String: String]] = []
+    var fetchedEvents: [FakeWorkbenchEventRefreshRequest] = []
 
     func fetchBootstrap(pageSize: Int) async throws(APIError) -> WorkbenchBootstrapDTO {
         bootstrapCallCount += 1
@@ -188,6 +189,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         since: String?,
         limit: Int
     ) async throws(APIError) -> WorkbenchEventsDTO {
+        fetchedEvents.append(FakeWorkbenchEventRefreshRequest(
+            eventType: eventType,
+            subjectID: subjectID,
+            actor: actor,
+            since: since,
+            limit: limit
+        ))
         guard let result = eventsResult else {
             throw .invalidResponse
         }
@@ -2904,15 +2912,30 @@ final class DaemonControllerTests {
             payload: ["title": .string("Mac Workbench")],
             timestamp: "2026-06-27T06:00:00"
         )
-        let events = WorkbenchEventsDTO(events: [event], limit: 50)
+        let events = WorkbenchEventsDTO(events: [event], since: "2026-06-27T05:00:00", limit: 25)
 
         await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
-        await controller.refreshEvents(limit: 50)
+        await controller.refreshEvents(
+            eventType: "validation.passed",
+            subjectID: "task-001",
+            actor: "Backend-Agent",
+            since: "2026-06-27T05:00:00",
+            limit: 25
+        )
 
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
+        #expect(await api.fetchedEvents == [
+            FakeWorkbenchEventRefreshRequest(
+                eventType: "validation.passed",
+                subjectID: "task-001",
+                actor: "Backend-Agent",
+                since: "2026-06-27T05:00:00",
+                limit: 25
+            )
+        ])
     }
 
     @Test @MainActor func refreshEventsWithoutSelectedSessionRecordsError() async throws {
