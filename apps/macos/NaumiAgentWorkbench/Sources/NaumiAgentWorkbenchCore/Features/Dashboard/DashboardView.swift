@@ -6,6 +6,7 @@ public struct DashboardView: View {
     @Bindable public var appState: AppState
     public let daemonController: DaemonController
     @State private var searchText = ""
+    @State private var selectedFailureID: String?
     @State private var isRerunningValidation = false
     @State private var isRefreshingContext = false
 
@@ -1155,14 +1156,20 @@ public struct DashboardView: View {
     }
 
     private func failuresSection(rows: [DashboardFailureRow]) -> some View {
-        sectionCard(title: AppStrings.Dashboard.failuresSection(appState.locale)) {
+        let presentedRows = failurePresentations(rows: rows)
+
+        return sectionCard(title: AppStrings.Dashboard.failuresSection(appState.locale)) {
             VStack(alignment: .leading, spacing: 12) {
-                if rows.isEmpty {
+                if presentedRows.isEmpty {
                     emptyListLabel(AppStrings.Dashboard.emptyFailures(appState.locale))
                 } else {
-                    ForEach(rows, id: \.id) { row in
-                        failureRowView(row: row)
-                        if row.id != rows.last?.id {
+                    ForEach(presentedRows, id: \.id) { row in
+                        failureRowView(row: row, isSelected: selectedFailureID == row.id)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectFailure(row)
+                            }
+                        if row.id != presentedRows.last?.id {
                             Divider()
                         }
                     }
@@ -1171,7 +1178,28 @@ public struct DashboardView: View {
         }
     }
 
-    private func failureRowView(row: DashboardFailureRow) -> some View {
+    private func failurePresentations(rows: [DashboardFailureRow]) -> [DashboardFailureRow] {
+        guard let selectedFailure = appState.selectedFailure,
+              selectedFailure.id == selectedFailureID else {
+            return rows
+        }
+
+        return rows.map { row in
+            guard row.id == selectedFailure.id else {
+                return row
+            }
+
+            return DashboardFailureRow(
+                id: selectedFailure.id,
+                title: selectedFailure.title.isEmpty ? row.title : selectedFailure.title,
+                kind: selectedFailure.kind.isEmpty ? row.kind : selectedFailure.kind,
+                status: selectedFailure.status.isEmpty ? row.status : selectedFailure.status,
+                taskID: selectedFailure.taskID.isEmpty ? row.taskID : selectedFailure.taskID
+            )
+        }
+    }
+
+    private func failureRowView(row: DashboardFailureRow, isSelected: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
                 Text(row.title)
@@ -1190,6 +1218,25 @@ public struct DashboardView: View {
                     value: row.taskID
                 )
             }
+        }
+        .padding(8)
+        .background(isSelected ? Color.accentColor.opacity(0.10) : Color.clear)
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func selectFailure(_ failure: DashboardFailureRow) {
+        selectedFailureID = failure.id
+        guard !appState.isPreviewFixture,
+              let command = DashboardFailureSelectionCommand(failure: failure) else {
+            return
+        }
+
+        Task {
+            await daemonController.loadFailure(failureID: command.failureID)
         }
     }
 
