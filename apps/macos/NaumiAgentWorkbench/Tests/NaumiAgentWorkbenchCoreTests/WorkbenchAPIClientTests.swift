@@ -227,7 +227,7 @@ final class WorkbenchAPIClientTests {
         )
 
         MockURLProtocol.requestHandler = { request in
-            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/sessions?page=1&page_size=1" else {
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions?page=1&page_size=1" else {
                 fatalError("Unexpected URL: \(String(describing: request.url))")
             }
             let response = HTTPURLResponse(

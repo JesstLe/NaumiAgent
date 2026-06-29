@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from naumi_agent import __version__
 from naumi_agent.api.deps import AuthDep, extract_api_key_from_connection
+from naumi_agent.api.schemas import SessionListResponse
 from naumi_agent.workbench.market import TaskMarket
 from naumi_agent.workbench.models import ApprovalState, DecisionKind, ParallelMode, RiskLevel
 
@@ -335,6 +336,30 @@ async def get_daemon_status(request: Request, auth: str = AuthDep):
 @router.get("/workbench/capabilities", response_model=WorkbenchCapabilitiesResponse)
 async def get_workbench_capabilities(request: Request, auth: str = AuthDep):
     return _build_capabilities()
+
+
+@router.get("/workbench/sessions", response_model=SessionListResponse)
+async def list_workbench_sessions(
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    try:
+        sessions, total = await engine.session_store.list_sessions(
+            page=page,
+            page_size=page_size,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return SessionListResponse(
+        sessions=[_session_to_bootstrap_dict(session) for session in sessions],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.post(

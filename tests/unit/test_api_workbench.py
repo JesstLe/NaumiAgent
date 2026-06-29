@@ -1356,6 +1356,7 @@ class _FakeSessionStoreWithLatest:
     def __init__(self, sessions: list[SimpleNamespace]) -> None:
         self.sessions = sessions
         self.loaded: list[str] = []
+        self.list_requests: list[dict[str, int | str]] = []
 
     async def load(self, session_id: str):
         self.loaded.append(session_id)
@@ -1367,6 +1368,7 @@ class _FakeSessionStoreWithLatest:
     async def list_sessions(
         self, page: int = 1, page_size: int = 20, query: str = ""
     ) -> tuple[list[SimpleNamespace], int]:
+        self.list_requests.append({"page": page, "page_size": page_size, "query": query})
         return (self.sessions[:page_size], len(self.sessions))
 
 
@@ -4092,6 +4094,52 @@ def test_create_workbench_session_route_accepts_json_body() -> None:
     assert body["sessions"][0]["id"] == "sess-created"
     assert body["snapshot"]["session_id"] == "sess-created"
     assert body["capabilities"]["supported_locales"] == ["zh-CN", "en-US"]
+
+
+def test_list_workbench_sessions_route_returns_session_registry() -> None:
+    session = SimpleNamespace(
+        id="sess-workbench",
+        title="Mac 工作台",
+        model="gpt-5",
+        created_at=datetime(2026, 6, 27, 8, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 27, 9, 0, tzinfo=UTC),
+        messages=[{"role": "user"}, {"role": "assistant"}],
+        total_tokens=128,
+        total_cost_usd=0.012,
+        status="active",
+    )
+    engine = _FakeEngine(exists=True)
+    engine.session_store = _FakeSessionStoreWithLatest([session])
+    app = FastAPI()
+    app.state.engine = engine
+    app.include_router(workbench_router)
+    client = TestClient(app)
+
+    response = client.get("/workbench/sessions?page=1&page_size=1")
+
+    assert response.status_code == 200
+    assert engine.session_store.list_requests == [
+        {"page": 1, "page_size": 1, "query": ""}
+    ]
+    body = response.json()
+    assert body == {
+        "sessions": [
+            {
+                "id": "sess-workbench",
+                "title": "Mac 工作台",
+                "model": "gpt-5",
+                "created_at": "2026-06-27T08:00:00+00:00",
+                "updated_at": "2026-06-27T09:00:00+00:00",
+                "message_count": 2,
+                "total_tokens": 128,
+                "total_cost_usd": 0.012,
+                "status": "active",
+            }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 1,
+    }
 
 
 @pytest.mark.asyncio

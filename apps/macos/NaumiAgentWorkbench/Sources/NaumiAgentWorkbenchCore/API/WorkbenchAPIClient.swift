@@ -48,7 +48,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     }
 
     public func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO {
-        try await get(path: "sessions?page=\(page)&page_size=\(pageSize)")
+        try await get(path: "workbench/sessions?page=\(page)&page_size=\(pageSize)")
     }
 
     public func createSession(
