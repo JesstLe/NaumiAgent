@@ -789,10 +789,12 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
 actor FakeWorkbenchEventProvider: WorkbenchEventProviding {
     private var continuation: AsyncThrowingStream<WorkbenchEventStreamMessage, Error>.Continuation?
     private let streamRecorder = FakeWorkbenchEventStreamRecorder()
+    private var connectResult: Result<Void, APIError> = .success(())
     private(set) var connectedSessionIDs: [String] = []
 
     func connect(sessionID: String) async throws(APIError) -> any WorkbenchEventStreaming {
         connectedSessionIDs.append(sessionID)
+        try connectResult.get()
         let stream = AsyncThrowingStream<WorkbenchEventStreamMessage, Error> { continuation in
             self.continuation = continuation
         }
@@ -809,6 +811,10 @@ actor FakeWorkbenchEventProvider: WorkbenchEventProviding {
 
     func finish() {
         continuation?.finish()
+    }
+
+    func setConnectResult(_ result: Result<Void, APIError>) {
+        connectResult = result
     }
 
     func recordedRefreshRequests() async -> [FakeWorkbenchEventRefreshRequest] {
@@ -1541,6 +1547,39 @@ final class DaemonControllerTests {
         }
 
         #expect(appState.lastError == .networkFailure("lost websocket"))
+        #expect(controller.hasActiveEventStream == false)
+
+        await controller.stopEventStream()
+    }
+
+    @Test @MainActor func eventStreamConnectSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+        appState.connectionState = .connected
+
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        await eventProvider.setConnectResult(.failure(.sessionUnavailable))
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+
+        await controller.startEventStream()
+
+        await waitUntil {
+            appState.connectionState == .stale
+        }
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
         #expect(controller.hasActiveEventStream == false)
 
         await controller.stopEventStream()

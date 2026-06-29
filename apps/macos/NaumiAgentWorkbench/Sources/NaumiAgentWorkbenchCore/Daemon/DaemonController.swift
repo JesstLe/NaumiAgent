@@ -196,6 +196,9 @@ public final class DaemonController: Sendable {
             activeEventStream = nil
             appState.connectionState = .stale
             appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
         }
     }
 
