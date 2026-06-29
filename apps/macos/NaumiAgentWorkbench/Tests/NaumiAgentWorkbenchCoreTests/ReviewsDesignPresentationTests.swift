@@ -49,4 +49,31 @@ struct ReviewsDesignPresentationTests {
         #expect(draft.commandLine == "pytest tests/unit/test_workbench_market.py -q")
         #expect(draft.canSubmit)
     }
+
+    @Test func validationChecksKeepBackendRunID() throws {
+        let run = ValidationRunDTO(
+            id: "run-001",
+            sessionID: "sess-1",
+            taskID: "task-market-lease",
+            actor: "Backend-Agent",
+            command: ["pytest", "tests/unit/test_workbench_market.py", "-q"],
+            cwd: ".",
+            status: "passed",
+            exitCode: 0,
+            output: "passed",
+            startedAt: "2026-06-27T09:28:00",
+            completedAt: "2026-06-27T09:29:00"
+        )
+
+        let presentation = ReviewsDesignPresentation(
+            approvals: [],
+            validationRuns: [run],
+            snapshot: nil
+        )
+
+        let firstCheck = try #require(presentation.validationChecks.first)
+        #expect(firstCheck.id == "run-001")
+        #expect(firstCheck.runID == "run-001")
+        #expect(firstCheck.name == "pytest tests/unit/test_workbench_market.py -q")
+    }
 }

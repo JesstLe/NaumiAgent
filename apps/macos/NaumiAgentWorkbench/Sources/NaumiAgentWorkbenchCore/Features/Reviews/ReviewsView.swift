@@ -6,6 +6,7 @@ public struct ReviewsView: View {
     public let daemonController: DaemonController
 
     @State private var selectedReviewID: String?
+    @State private var selectedValidationRunID: String?
     @State private var selectedTab = "Details"
     @State private var validationDraft = ValidationRunDraft(
         commandLine: "pytest tests/unit/test_workbench_market.py -q"
@@ -97,6 +98,30 @@ public struct ReviewsView: View {
             time: approval.updatedAt.isEmpty ? fallback.time : String(approval.updatedAt.suffix(5)),
             risk: fallback.risk,
             tone: reviewTone(forApprovalState: approval.state, fallback: fallback.tone)
+        )
+    }
+
+    private func selectedValidationChecks(_ checks: [ReviewDesignCheck]) -> [ReviewDesignCheck] {
+        guard let selectedRun = appState.selectedValidationRun,
+              selectedRun.id == selectedValidationRunID else {
+            return checks
+        }
+
+        return checks.map { check in
+            guard check.id == selectedRun.id else { return check }
+            return validationCheckPresentation(run: selectedRun, fallback: check)
+        }
+    }
+
+    private func validationCheckPresentation(
+        run: ValidationRunDTO,
+        fallback: ReviewDesignCheck
+    ) -> ReviewDesignCheck {
+        ReviewDesignCheck(
+            runID: run.id,
+            name: run.command.isEmpty ? fallback.name : run.command.joined(separator: " "),
+            status: run.status.isEmpty ? fallback.status : run.status,
+            time: run.completedAt.isEmpty ? fallback.time : String(run.completedAt.suffix(5))
         )
     }
 
@@ -202,6 +227,7 @@ public struct ReviewsView: View {
         presentation: ReviewsDesignPresentation
     ) {
         selectedReviewID = review.id
+        selectedValidationRunID = nil
         validationDraft = presentation.defaultValidationDraft(for: review)
         guard !appState.isPreviewFixture,
               let command = ReviewSelectionCommand(review: review) else {
@@ -214,9 +240,11 @@ public struct ReviewsView: View {
     }
 
     private func reviewMain(presentation: ReviewsDesignPresentation, selected: ReviewDesignItem) -> some View {
-        VStack(spacing: 0) {
+        let validationChecks = selectedValidationChecks(presentation.validationChecks)
+
+        return VStack(spacing: 0) {
             metaStrip(selected)
-            validationSummary(presentation.validationChecks)
+            validationSummary(validationChecks)
                 .padding(14)
             HStack(spacing: 0) {
                 filesChanged(presentation.fileChanges)
@@ -480,7 +508,9 @@ public struct ReviewsView: View {
     }
 
     private func reviewInspector(presentation: ReviewsDesignPresentation, selected: ReviewDesignItem) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let validationChecks = selectedValidationChecks(presentation.validationChecks)
+
+        return VStack(alignment: .leading, spacing: 14) {
             Picker("", selection: $selectedTab) {
                 Text(appState.locale == .zhCN ? "详情" : "Details").tag("Details")
                 Text(appState.locale == .zhCN ? "检查" : "Checks").tag("Checks")
@@ -522,22 +552,12 @@ public struct ReviewsView: View {
                     }
 
                     inspectorCard(title: appState.locale == .zhCN ? "验证运行" : "Validation Runs") {
-                        ForEach(presentation.validationChecks) { check in
-                            HStack {
-                                Circle()
-                                    .fill(check.status == "passed" ? .green : .secondary)
-                                    .frame(width: 7, height: 7)
-                                Text(check.name)
-                                    .font(.caption)
-                                    .lineLimit(1)
-                                Spacer()
-                                Text(check.status)
-                                    .font(.caption2)
-                                    .foregroundStyle(check.status == "passed" ? .green : .secondary)
-                                Text(check.time)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
+                        ForEach(validationChecks) { check in
+                            validationRunRow(check)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectValidationRun(check)
+                                }
                         }
                         Text(appState.locale == .zhCN ? "查看完整验证报告 ->" : "View full validation report ->")
                             .font(.caption)
@@ -644,6 +664,50 @@ public struct ReviewsView: View {
         }
         .padding(14)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func validationRunRow(_ check: ReviewDesignCheck) -> some View {
+        let isSelected = check.id == selectedValidationRunID
+
+        return HStack {
+            Circle()
+                .fill(check.status == "passed" ? .green : .secondary)
+                .frame(width: 7, height: 7)
+            Text(check.name)
+                .font(.caption)
+                .lineLimit(1)
+            Spacer()
+            Text(check.status)
+                .font(.caption2)
+                .foregroundStyle(check.status == "passed" ? .green : .secondary)
+            Text(check.time)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 6)
+        .background(isSelected ? Color.accentColor.opacity(0.10) : Color.clear)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(isSelected ? Color.accentColor.opacity(0.55) : Color.clear, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func selectValidationRun(_ check: ReviewDesignCheck) {
+        guard let command = ReviewValidationSelectionCommand(check: check) else {
+            selectedValidationRunID = nil
+            return
+        }
+
+        selectedValidationRunID = command.runID
+        guard !appState.isPreviewFixture else {
+            return
+        }
+
+        Task {
+            await daemonController.loadValidationRun(runID: command.runID)
+        }
     }
 
     private func validationCommandPanel(selected: ReviewDesignItem) -> some View {
