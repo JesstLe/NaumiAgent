@@ -240,6 +240,7 @@ public final class DaemonController: Sendable {
                 await refreshWorkbenchListsAfterConnection()
             }
         case .error(let message):
+            activeEventStream = nil
             appState.connectionState = .stale
             let error = apiError(forEventStreamError: message)
             appState.lastError = error
