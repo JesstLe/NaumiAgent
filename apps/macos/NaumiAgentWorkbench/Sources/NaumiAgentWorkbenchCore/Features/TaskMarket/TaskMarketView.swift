@@ -167,7 +167,10 @@ public struct TaskMarketView: View {
             .buttonStyle(.bordered)
 
             Menu(appState.locale == .zhCN ? "目标" : "Mission") {
-                Button(currentMissionTitle) {}
+                Button(currentMissionTitle) {
+                    selectCurrentMission()
+                }
+                .disabled(currentMissionID.isEmpty)
             }
         }
         .padding(.horizontal, 18)
@@ -547,6 +550,17 @@ public struct TaskMarketView: View {
 
         Task {
             await daemonController.loadIssue(taskID: command.taskID)
+        }
+    }
+
+    private func selectCurrentMission() {
+        guard !appState.isPreviewFixture,
+              let command = TaskMarketMissionSelectionCommand(missionID: currentMissionID) else {
+            return
+        }
+
+        Task {
+            await daemonController.loadMission(missionID: command.missionID)
         }
     }
 
