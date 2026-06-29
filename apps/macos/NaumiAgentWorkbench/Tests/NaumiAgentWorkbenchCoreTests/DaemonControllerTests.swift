@@ -4362,6 +4362,28 @@ final class DaemonControllerTests {
         #expect(appState.selectedDecision == oldDecision)
     }
 
+    @Test @MainActor func loadDecisionSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [
+            makeMission(id: "mission-stale", sessionID: "sess-missing")
+        ])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setFetchDecisionResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadDecision(missionID: "mission-001", decisionID: "decision-001")
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+    }
+
     @Test @MainActor func loadIntentLockSuccessStoresSelectedIntentLock() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
