@@ -4174,6 +4174,61 @@ final class DaemonControllerTests {
         #expect(await api.snapshotCallCount == 0)
     }
 
+    @Test @MainActor func runValidationSuccessPreservesRefreshFailureAfterLaterRefreshesSucceed() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let staleRun = ValidationRunDTO(
+            id: "run-stale",
+            sessionID: "sess-001",
+            taskID: "task-001",
+            actor: "ValidationRunner",
+            command: ["pytest"],
+            cwd: "/workspace",
+            status: "failed",
+            exitCode: 1,
+            output: "old failure",
+            startedAt: "2026-06-27T05:00:00",
+            completedAt: "2026-06-27T05:00:01"
+        )
+        appState.validationRuns = [staleRun]
+
+        let api = FakeWorkbenchAPIProvider()
+        let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        let failure = makeFailure(id: "failure-001", taskID: "task-001", status: "open")
+        let failures = FailuresDTO(failures: [failure], taskID: "task-001", status: nil, limit: 50)
+        let event = makeEvent(id: "evt-001", type: "validation.ran", subjectID: "run-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
+
+        await api.setRunValidationWithSnapshotResult(.success(
+            ValidationResultSnapshotDTO(
+                validationRun: ValidationResultDTO(
+                    id: "run-001",
+                    status: "passed",
+                    exitCode: 0,
+                    output: "ok"
+                ),
+                snapshot: snapshot
+            )
+        ))
+        await api.setValidationRunsResult(.failure(.httpStatus(502)))
+        await api.setFailuresResult(.success(failures))
+        await api.setEventsResult(.success(events))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.runValidation(
+            taskID: "task-001",
+            actor: "Human",
+            argv: ["pytest"],
+            cwd: "/workspace"
+        )
+
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.validationRuns == [staleRun])
+        #expect(appState.failures == [failure])
+        #expect(appState.timelineEvents == [event])
+        #expect(appState.lastError == .httpStatus(502))
+    }
+
     @Test @MainActor func runValidationWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         appState.validationRuns = [

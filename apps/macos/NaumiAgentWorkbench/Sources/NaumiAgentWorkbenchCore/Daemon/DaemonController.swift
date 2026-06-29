@@ -1850,9 +1850,14 @@ public final class DaemonController: Sendable {
                 cwd: cwd
             )
             appState.snapshot = response.snapshot
+            var refreshError: APIError?
             await refreshValidationRuns(taskID: taskID)
+            refreshError = refreshError ?? appState.lastError
             await refreshFailures(taskID: taskID)
+            refreshError = refreshError ?? appState.lastError
             await refreshEvents(limit: 50)
+            refreshError = refreshError ?? appState.lastError
+            appState.lastError = refreshError
         } catch {
             appState.lastError = error
             if error == .sessionUnavailable {
