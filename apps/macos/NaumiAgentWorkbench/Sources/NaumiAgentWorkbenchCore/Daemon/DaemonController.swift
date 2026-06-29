@@ -628,6 +628,9 @@ public final class DaemonController: Sendable {
             appState.leases = response.leases
         } catch {
             appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
         }
     }
 
