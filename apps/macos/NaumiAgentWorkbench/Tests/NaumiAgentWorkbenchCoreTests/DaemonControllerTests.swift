@@ -2742,6 +2742,36 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == nil)
     }
 
+    @Test @MainActor func createIssueSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateIssueWithSnapshotResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createIssue(
+            missionID: "mission-001",
+            title: "实现 Issue 创建 API",
+            description: "创建 backing task",
+            blockedBy: ["1"],
+            acceptanceCriteria: ["可被 Agent claim"],
+            parallelMode: "cooperative",
+            riskLevel: "high"
+        )
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+        #expect(await api.createIssueWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
+    }
+
     @Test @MainActor func refreshEventsSuccessWritesToAppState() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
