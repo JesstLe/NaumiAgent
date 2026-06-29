@@ -27,8 +27,9 @@ public struct TaskMarketView: View {
 
     public var body: some View {
         let presentation = TaskMarketDesignPresentation(snapshot: appState.snapshot)
-        let selected = presentation.rows.first { $0.taskID == selectedTaskID }
+        let selectedRow = presentation.rows.first { $0.taskID == selectedTaskID }
             ?? presentation.selectedIssue
+        let selected = selectedIssuePresentation(row: selectedRow)
 
         VStack(spacing: 0) {
             pageHeader(selected: selected)
@@ -306,8 +307,7 @@ public struct TaskMarketView: View {
                         designIssueRow(row)
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                selectedTaskID = row.taskID
-                                claimWorktreeName = row.defaultClaimWorktreeName
+                                selectIssue(row)
                             }
                             .background(selectedTaskID == row.taskID ? Color.accentColor.opacity(0.10) : Color.clear)
                         Divider()
@@ -524,6 +524,63 @@ public struct TaskMarketView: View {
                 worktreeName: worktreeName.isEmpty ? issue.defaultClaimWorktreeName : worktreeName
             )
             isClaimingIssue = false
+        }
+    }
+
+    private func selectIssue(_ issue: TaskMarketDesignIssue) {
+        selectedTaskID = issue.taskID
+        claimWorktreeName = issue.defaultClaimWorktreeName
+        guard !appState.isPreviewFixture,
+              let command = TaskMarketIssueSelectionCommand(issue: issue) else {
+            return
+        }
+
+        Task {
+            await daemonController.loadIssue(taskID: command.taskID)
+        }
+    }
+
+    private func selectedIssuePresentation(row: TaskMarketDesignIssue?) -> TaskMarketDesignIssue? {
+        guard let row else { return nil }
+        guard let loadedIssue = appState.selectedIssue,
+              loadedIssue.taskID == row.taskID else {
+            return row
+        }
+
+        let criteriaSummary = loadedIssue.acceptanceCriteria
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: appState.locale == .zhCN ? "；" : "; ")
+        return TaskMarketDesignIssue(
+            number: row.number,
+            taskID: row.taskID,
+            title: row.title,
+            detail: criteriaSummary.isEmpty ? row.detail : criteriaSummary,
+            parallelMode: loadedIssue.parallelMode,
+            risk: normalizedRiskLabel(loadedIssue.riskLevel),
+            dependency: row.dependency,
+            bids: row.bids,
+            lease: row.lease,
+            worktree: loadedIssue.relatedWorktree.isEmpty ? row.worktree : loadedIssue.relatedWorktree,
+            status: loadedIssue.requiresHumanApproval
+                ? (appState.locale == .zhCN ? "需要人工审批" : "Requires approval")
+                : row.status,
+            tag: row.tag
+        )
+    }
+
+    private func normalizedRiskLabel(_ risk: String) -> String {
+        switch risk.lowercased() {
+        case "critical":
+            return "Critical"
+        case "high":
+            return "High"
+        case "medium":
+            return "Medium"
+        case "low":
+            return "Low"
+        default:
+            return risk
         }
     }
 
