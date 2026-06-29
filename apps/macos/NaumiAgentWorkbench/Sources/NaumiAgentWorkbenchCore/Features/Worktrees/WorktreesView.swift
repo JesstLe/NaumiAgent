@@ -30,7 +30,11 @@ public struct WorktreesView: View {
             snapshots: appState.contextSnapshots,
             worktrees: appState.worktrees
         )
-        let selectedSnapshot = presentation.snapshots.first { $0.id == selectedSnapshotID }
+        let loadedSelectedSnapshot = appState.selectedContextSnapshot
+            .map(ContextSnapshotPresentation.init)
+            .flatMap { $0.id == selectedSnapshotID ? $0 : nil }
+        let selectedSnapshot = loadedSelectedSnapshot
+            ?? presentation.snapshots.first { $0.id == selectedSnapshotID }
             ?? presentation.selectedSnapshot
         let selectedWorktree = presentation.selectedWorktree(id: selectedWorktreeID)
 
@@ -121,6 +125,18 @@ public struct WorktreesView: View {
     private func refreshWorktreesPage() async {
         await daemonController.refreshWorktrees(limit: 50)
         await daemonController.refreshContextSnapshots(limit: 50)
+    }
+
+    private func selectSnapshot(_ snapshot: ContextSnapshotPresentation) {
+        selectedSnapshotID = snapshot.id
+        guard !appState.isPreviewFixture,
+              let command = ContextSnapshotSelectionCommand(snapshot: snapshot) else {
+            return
+        }
+
+        Task {
+            await daemonController.loadContextSnapshot(snapshotID: command.snapshotID)
+        }
     }
 
     private func keepWorktree(_ worktree: WorktreeManagementRow) {
@@ -268,7 +284,7 @@ public struct WorktreesView: View {
                             snapshotRow(snapshot: snapshot, isSelected: snapshot.id == selectedSnapshotID)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    selectedSnapshotID = snapshot.id
+                                    selectSnapshot(snapshot)
                                 }
                         }
                     }
