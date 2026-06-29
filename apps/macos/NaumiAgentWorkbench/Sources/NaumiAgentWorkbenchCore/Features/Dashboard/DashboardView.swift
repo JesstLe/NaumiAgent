@@ -7,6 +7,7 @@ public struct DashboardView: View {
     public let daemonController: DaemonController
     @State private var searchText = ""
     @State private var selectedFailureID: String?
+    @State private var selectedEventID: String?
     @State private var isRerunningValidation = false
     @State private var isRefreshingContext = false
 
@@ -1241,14 +1242,20 @@ public struct DashboardView: View {
     }
 
     private func eventsSection(rows: [DashboardEventRow]) -> some View {
-        sectionCard(title: AppStrings.Dashboard.eventsSection(appState.locale)) {
+        let presentedRows = eventPresentations(rows: rows)
+
+        return sectionCard(title: AppStrings.Dashboard.eventsSection(appState.locale)) {
             VStack(alignment: .leading, spacing: 12) {
-                if rows.isEmpty {
+                if presentedRows.isEmpty {
                     emptyListLabel(AppStrings.Dashboard.emptyEvents(appState.locale))
                 } else {
-                    ForEach(rows, id: \.id) { row in
-                        eventRowView(row: row)
-                        if row.id != rows.last?.id {
+                    ForEach(presentedRows, id: \.id) { row in
+                        eventRowView(row: row, isSelected: selectedEventID == row.id)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectEvent(row)
+                            }
+                        if row.id != presentedRows.last?.id {
                             Divider()
                         }
                     }
@@ -1257,7 +1264,28 @@ public struct DashboardView: View {
         }
     }
 
-    private func eventRowView(row: DashboardEventRow) -> some View {
+    private func eventPresentations(rows: [DashboardEventRow]) -> [DashboardEventRow] {
+        guard let selectedEvent = appState.selectedEvent,
+              selectedEvent.id == selectedEventID else {
+            return rows
+        }
+
+        return rows.map { row in
+            guard row.id == selectedEvent.id else {
+                return row
+            }
+
+            return DashboardEventRow(
+                id: selectedEvent.id,
+                type: selectedEvent.type.isEmpty ? row.type : selectedEvent.type,
+                actor: selectedEvent.actor.isEmpty ? row.actor : selectedEvent.actor,
+                subjectID: selectedEvent.subjectID.isEmpty ? row.subjectID : selectedEvent.subjectID,
+                timestamp: selectedEvent.timestamp.isEmpty ? row.timestamp : selectedEvent.timestamp
+            )
+        }
+    }
+
+    private func eventRowView(row: DashboardEventRow, isSelected: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
                 Text(row.type)
@@ -1278,6 +1306,25 @@ public struct DashboardView: View {
                     value: row.subjectID
                 )
             }
+        }
+        .padding(8)
+        .background(isSelected ? Color.accentColor.opacity(0.10) : Color.clear)
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func selectEvent(_ event: DashboardEventRow) {
+        selectedEventID = event.id
+        guard !appState.isPreviewFixture,
+              let command = DashboardEventSelectionCommand(event: event) else {
+            return
+        }
+
+        Task {
+            await daemonController.loadEvent(eventID: command.eventID)
         }
     }
 
