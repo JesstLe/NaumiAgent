@@ -339,6 +339,9 @@ public final class DaemonController: Sendable {
             appState.timelineEvents = response.events
         } catch {
             appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
         }
     }
 
