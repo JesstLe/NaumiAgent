@@ -851,6 +851,9 @@ public final class DaemonController: Sendable {
             appState.agentProfiles = response.agentProfiles
         } catch {
             appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
         }
     }
 
