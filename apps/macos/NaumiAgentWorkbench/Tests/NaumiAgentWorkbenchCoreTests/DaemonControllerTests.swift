@@ -1847,6 +1847,34 @@ final class DaemonControllerTests {
         await controller.stopEventStream()
     }
 
+    @Test @MainActor func eventStreamServerErrorClearsActiveStream() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-events"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+
+        await controller.startEventStream()
+        await waitUntil {
+            controller.hasActiveEventStream
+        }
+        await eventProvider.emit(.error(message: "daemon restarted"))
+
+        await waitUntil {
+            appState.connectionState == .stale
+        }
+
+        #expect(appState.lastError == .networkFailure("daemon restarted"))
+        #expect(controller.hasActiveEventStream == false)
+
+        await controller.stopEventStream()
+    }
+
     @Test @MainActor func eventStreamSessionNotFoundRecordsSessionUnavailable() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-missing"
