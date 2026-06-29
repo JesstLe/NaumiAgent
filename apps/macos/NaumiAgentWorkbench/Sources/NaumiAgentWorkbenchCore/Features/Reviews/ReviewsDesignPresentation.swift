@@ -40,6 +40,7 @@ public struct ReviewsDesignPresentation: Equatable, Sendable {
 
         let liveChecks = validationRuns.prefix(2).map {
             ReviewDesignCheck(
+                runID: $0.id,
                 name: $0.command.joined(separator: " "),
                 status: $0.status,
                 time: String($0.completedAt.suffix(5))
@@ -138,10 +139,22 @@ public struct ReviewDesignItem: Equatable, Sendable, Identifiable {
 }
 
 public struct ReviewDesignCheck: Equatable, Sendable, Identifiable {
-    public var id: String { name }
+    public var id: String {
+        let trimmedRunID = runID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmedRunID.isEmpty ? name : trimmedRunID
+    }
+
+    public let runID: String?
     public let name: String
     public let status: String
     public let time: String
+
+    public init(runID: String? = nil, name: String, status: String, time: String) {
+        self.runID = runID
+        self.name = name
+        self.status = status
+        self.time = time
+    }
 }
 
 public struct ReviewDesignFile: Equatable, Sendable, Identifiable {
