@@ -932,6 +932,10 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
             throw .invalidResponse
         }
 
+        if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+            throw .authFailed
+        }
+
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw .httpStatus(httpResponse.statusCode)
         }

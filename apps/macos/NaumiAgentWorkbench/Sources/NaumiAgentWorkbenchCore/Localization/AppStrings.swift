@@ -842,6 +842,12 @@ public enum AppStrings {
             locale == .zhCN ? "接口返回异常" : "Invalid response"
         }
 
+        public static func authFailed(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "本地 daemon 认证失败，请检查访问令牌或重新连接"
+                : "Local daemon authentication failed. Check the access token or reconnect."
+        }
+
         public static func missingSelectedSession(_ locale: AppLocale) -> String {
             locale == .zhCN ? "请先选择一个会话" : "Select a session first"
         }
