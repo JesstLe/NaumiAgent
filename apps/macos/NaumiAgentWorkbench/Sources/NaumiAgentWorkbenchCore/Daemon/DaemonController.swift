@@ -1065,7 +1065,8 @@ public final class DaemonController: Sendable {
     /// When no session is selected, the most recent session from `GET /sessions`
     /// is chosen automatically and the fetched session list is also written to
     /// `appState.sessions`. Failures are written to `appState.lastError` and the
-    /// snapshot is cleared to avoid showing stale data.
+    /// snapshot is cleared to avoid showing stale data. If the backend reports
+    /// that the selected session no longer exists, the selection is cleared too.
     func refreshSnapshot(clearSessionScopedStateOnFailure: Bool = false) async {
         let sessionID: String
         if let existingID = appState.selectedSessionID {
@@ -1090,6 +1091,10 @@ public final class DaemonController: Sendable {
         do {
             let snapshot = try await apiProvider.fetchSnapshot(sessionID: sessionID)
             appState.snapshot = snapshot
+        } catch APIError.sessionUnavailable {
+            appState.lastError = APIError.sessionUnavailable
+            appState.selectedSessionID = nil
+            clearSessionScopedState()
         } catch {
             appState.lastError = error
             appState.snapshot = nil
