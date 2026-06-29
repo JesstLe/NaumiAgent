@@ -189,6 +189,19 @@ public protocol WorkbenchAPIProviding: Sendable {
         actor: String
     ) async throws(APIError) -> AgentProfileDTO
 
+    /// Registers or updates an agent capability profile and returns the backend's fresh authoritative snapshot.
+    func registerAgentProfileWithSnapshot(
+        sessionID: String,
+        agentID: String,
+        name: String,
+        role: String,
+        capabilities: [String],
+        permissions: [String],
+        maxParallelTasks: Int,
+        status: String,
+        actor: String
+    ) async throws(APIError) -> AgentProfileSnapshotDTO
+
     /// Claims an open issue for the given agent, creating a new lease.
     func claimIssue(
         sessionID: String,

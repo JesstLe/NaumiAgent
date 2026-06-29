@@ -36,6 +36,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var agentProfilesResult: Result<AgentProfilesDTO, APIError>?
     var agentProfileResult: Result<AgentProfileDTO, APIError>?
     var registerAgentProfileResult: Result<AgentProfileDTO, APIError>?
+    var registerAgentProfileWithSnapshotResult: Result<AgentProfileSnapshotDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var claimIssueWithSnapshotResult: Result<LeaseSnapshotDTO, APIError>?
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
@@ -70,6 +71,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var keepWorktreeWithSnapshotCallCount: Int = 0
     var removeWorktreeWithSnapshotCallCount: Int = 0
     var recordContextHealthWithSnapshotCallCount: Int = 0
+    var registerAgentProfileWithSnapshotCallCount: Int = 0
     var claimIssueWithSnapshotCallCount: Int = 0
     var releaseLeaseWithSnapshotCallCount: Int = 0
     var expireLeasesWithSnapshotCallCount: Int = 0
@@ -438,6 +440,24 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         actor: String
     ) async throws(APIError) -> AgentProfileDTO {
         guard let result = registerAgentProfileResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func registerAgentProfileWithSnapshot(
+        sessionID: String,
+        agentID: String,
+        name: String,
+        role: String,
+        capabilities: [String],
+        permissions: [String],
+        maxParallelTasks: Int,
+        status: String,
+        actor: String
+    ) async throws(APIError) -> AgentProfileSnapshotDTO {
+        registerAgentProfileWithSnapshotCallCount += 1
+        guard let result = registerAgentProfileWithSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -4311,20 +4331,32 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func registerAgentProfileSuccessRefreshesAgentProfilesEventsAndSnapshot() async throws {
+    @Test @MainActor func registerAgentProfileSuccessUsesIncludedSnapshotAndRefreshesLists() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
+        appState.snapshot = makeSnapshot(sessionID: "sess-001", missions: [
+            makeMission(id: "mission-stale", sessionID: "sess-001")
+        ])
 
         let api = FakeWorkbenchAPIProvider()
         let profile = makeAgentProfile(id: "agent-001", sessionID: "sess-001", status: "idle")
         let profiles = AgentProfilesDTO(agentProfiles: [profile], status: nil, limit: 50)
-        let snapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-001",
+            missions: [],
+            agentProfiles: [profile],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
         let event = makeEvent(id: "evt-001", type: "agent.registered", subjectID: "agent-001")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
-        await api.setRegisterAgentProfileResult(.success(profile))
+        await api.setRegisterAgentProfileWithSnapshotResult(.success(
+            AgentProfileSnapshotDTO(agentProfile: profile, snapshot: snapshot)
+        ))
         await api.setAgentProfilesResult(.success(profiles))
-        await api.setSnapshotResult(.success(snapshot))
         await api.setEventsResult(.success(events))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
@@ -4343,6 +4375,8 @@ final class DaemonControllerTests {
         #expect(appState.timelineEvents == [event])
         #expect(appState.snapshot == snapshot)
         #expect(appState.lastError == nil)
+        #expect(await api.registerAgentProfileWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func registerAgentProfileWithoutSelectedSessionRecordsError() async throws {
@@ -4379,7 +4413,7 @@ final class DaemonControllerTests {
         appState.snapshot = staleSnapshot
 
         let api = FakeWorkbenchAPIProvider()
-        await api.setRegisterAgentProfileResult(.failure(.httpStatus(500)))
+        await api.setRegisterAgentProfileWithSnapshotResult(.failure(.httpStatus(500)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.registerAgentProfile(
@@ -4583,6 +4617,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setRegisterAgentProfileResult(_ result: Result<AgentProfileDTO, APIError>) {
         registerAgentProfileResult = result
+    }
+
+    fileprivate func setRegisterAgentProfileWithSnapshotResult(_ result: Result<AgentProfileSnapshotDTO, APIError>) {
+        registerAgentProfileWithSnapshotResult = result
     }
 
     fileprivate func setClaimIssueResult(_ result: Result<LeaseDTO, APIError>) {
