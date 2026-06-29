@@ -8,6 +8,7 @@ public struct DashboardView: View {
     @State private var searchText = ""
     @State private var selectedMissionID: String?
     @State private var selectedAgentID: String?
+    @State private var selectedIssueTaskID: String?
     @State private var selectedFailureID: String?
     @State private var selectedEventID: String?
     @State private var isRerunningValidation = false
@@ -93,7 +94,7 @@ public struct DashboardView: View {
 
                 Divider()
 
-                inspectorPanel(presentation: presentation)
+                inspectorPanel(presentation: presentation, market: market)
                     .frame(width: inspectorWidth, alignment: .top)
             }
             .frame(height: mainHeight, alignment: .top)
@@ -362,6 +363,7 @@ public struct DashboardView: View {
     ) -> some View {
         let selectedMission = missionPresentation(presentation.currentMission)
         let agentRows = agentPresentations(rows: presentation.agentRows)
+        let issueRows = issuePresentations(rows: Array(market.rows.prefix(4)))
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -406,8 +408,12 @@ public struct DashboardView: View {
                                 .font(.caption)
                                 .fontWeight(.semibold)
                                 .foregroundStyle(.secondary)
-                            ForEach(Array(market.rows.prefix(4))) { row in
-                                canvasIssueCard(row)
+                            ForEach(issueRows) { row in
+                                canvasIssueCard(row, isSelected: selectedIssueTaskID == row.taskID)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        selectIssue(row)
+                                    }
                             }
                         }
                         .frame(width: 220)
@@ -445,7 +451,7 @@ public struct DashboardView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private func canvasIssueCard(_ row: TaskMarketDesignIssue) -> some View {
+    private func canvasIssueCard(_ row: TaskMarketDesignIssue, isSelected: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("\(row.number)")
@@ -474,10 +480,10 @@ public struct DashboardView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(8)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(isSelected ? Color.accentColor.opacity(0.10) : Color(nsColor: .windowBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 7)
-                .stroke(row.number == 3 ? Color.accentColor : Color.secondary.opacity(0.22), lineWidth: 1)
+                .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.22), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 7))
     }
@@ -541,9 +547,49 @@ public struct DashboardView: View {
         )
     }
 
+    private func issuePresentations(rows: [TaskMarketDesignIssue]) -> [TaskMarketDesignIssue] {
+        guard let selectedIssue = appState.selectedIssue,
+              selectedIssue.taskID == selectedIssueTaskID else {
+            return rows
+        }
+
+        return rows.map { row in
+            guard row.taskID == selectedIssue.taskID else { return row }
+            return issuePresentation(issue: selectedIssue, fallback: row)
+        }
+    }
+
+    private func selectedIssuePresentation(rows: [TaskMarketDesignIssue]) -> TaskMarketDesignIssue? {
+        guard let selectedIssueTaskID else { return nil }
+        return issuePresentations(rows: rows).first { $0.taskID == selectedIssueTaskID }
+    }
+
+    private func issuePresentation(
+        issue: IssueDTO,
+        fallback: TaskMarketDesignIssue
+    ) -> TaskMarketDesignIssue {
+        TaskMarketDesignIssue(
+            number: fallback.number,
+            taskID: issue.taskID,
+            title: fallback.title,
+            detail: issue.acceptanceCriteria.first ?? fallback.detail,
+            parallelMode: issue.parallelMode.isEmpty ? fallback.parallelMode : issue.parallelMode,
+            risk: issue.riskLevel.isEmpty ? fallback.risk : issue.riskLevel,
+            dependency: fallback.dependency,
+            bids: fallback.bids,
+            lease: issue.requiresHumanApproval
+                ? (appState.locale == .zhCN ? "需要人工审批" : "Requires approval")
+                : fallback.lease,
+            worktree: issue.relatedWorktree.isEmpty ? fallback.worktree : issue.relatedWorktree,
+            status: fallback.status,
+            tag: fallback.tag
+        )
+    }
+
     private func selectMission(_ mission: DashboardMissionSummary) {
         selectedMissionID = mission.id
         selectedAgentID = nil
+        selectedIssueTaskID = nil
         guard !appState.isPreviewFixture,
               let command = DashboardMissionSelectionCommand(mission: mission) else {
             return
@@ -554,6 +600,23 @@ public struct DashboardView: View {
         }
     }
 
+    private func selectIssue(_ issue: TaskMarketDesignIssue) {
+        guard let command = DashboardIssueSelectionCommand(issue: issue) else {
+            selectedIssueTaskID = nil
+            return
+        }
+
+        selectedIssueTaskID = command.taskID
+        selectedAgentID = nil
+        guard !appState.isPreviewFixture else {
+            return
+        }
+
+        Task {
+            await daemonController.loadIssue(taskID: command.taskID)
+        }
+    }
+
     private func selectAgent(_ agent: DashboardAgentRow) {
         guard let command = DashboardAgentSelectionCommand(agent: agent) else {
             selectedAgentID = nil
@@ -561,6 +624,7 @@ public struct DashboardView: View {
         }
 
         selectedAgentID = command.agentID
+        selectedIssueTaskID = nil
         guard !appState.isPreviewFixture else {
             return
         }
@@ -674,8 +738,12 @@ public struct DashboardView: View {
         .shadow(color: .black.opacity(0.05), radius: 10, y: 4)
     }
 
-    private func inspectorPanel(presentation: DashboardSnapshotPresentation) -> some View {
+    private func inspectorPanel(
+        presentation: DashboardSnapshotPresentation,
+        market: TaskMarketDesignPresentation
+    ) -> some View {
         let selectedAgent = selectedAgentPresentation(rows: presentation.agentRows)
+        let selectedIssue = selectedIssuePresentation(rows: market.rows)
 
         return VStack(alignment: .leading, spacing: 14) {
             Text(AppStrings.Dashboard.inspectorSection(appState.locale))
@@ -693,6 +761,8 @@ public struct DashboardView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     if let selectedAgent {
                         agentInspectorCard(selectedAgent)
+                    } else if let selectedIssue {
+                        issueInspectorCard(selectedIssue)
                     } else if let inspector = presentation.workbench.inspector {
                         VStack(alignment: .leading, spacing: 10) {
                             Text(inspector.title)
@@ -772,6 +842,30 @@ public struct DashboardView: View {
         }
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func issueInspectorCard(_ issue: TaskMarketDesignIssue) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(issue.title)
+                .font(.system(size: 15, weight: .semibold))
+                .lineLimit(2)
+
+            StatusBadge(text: issue.status, color: statusDotColor(issue.status))
+
+            inspectorDetail(AppStrings.Dashboard.riskLabel(appState.locale), issue.risk)
+            inspectorDetail(AppStrings.Dashboard.parallelModeLabel(appState.locale), issue.parallelMode)
+            inspectorDetail(
+                AppStrings.Dashboard.humanApprovalLabel(appState.locale),
+                issue.lease
+            )
+            inspectorDetail(
+                appState.locale == .zhCN ? "工作区" : "Worktree",
+                issue.worktree.isEmpty ? "-" : issue.worktree
+            )
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func agentInspectorCard(_ agent: DashboardAgentRow) -> some View {
@@ -1373,6 +1467,7 @@ public struct DashboardView: View {
     private func selectFailure(_ failure: DashboardFailureRow) {
         selectedFailureID = failure.id
         selectedAgentID = nil
+        selectedIssueTaskID = nil
         guard !appState.isPreviewFixture,
               let command = DashboardFailureSelectionCommand(failure: failure) else {
             return
@@ -1461,6 +1556,7 @@ public struct DashboardView: View {
     private func selectEvent(_ event: DashboardEventRow) {
         selectedEventID = event.id
         selectedAgentID = nil
+        selectedIssueTaskID = nil
         guard !appState.isPreviewFixture,
               let command = DashboardEventSelectionCommand(event: event) else {
             return
