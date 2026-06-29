@@ -606,6 +606,10 @@ public final class DaemonController: Sendable {
             var snapshots = appState.contextSnapshots
             snapshots.removeAll { $0.id == response.contextSnapshot.id }
             appState.contextSnapshots = [response.contextSnapshot] + snapshots
+            var refreshError: APIError?
+            await refreshEvents(limit: 50)
+            refreshError = refreshError ?? appState.lastError
+            appState.lastError = refreshError
         } catch {
             appState.lastError = error
             if error == .sessionUnavailable {

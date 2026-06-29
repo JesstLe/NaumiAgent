@@ -3273,6 +3273,7 @@ final class DaemonControllerTests {
                 snapshot: makeSnapshot(sessionID: "sess-001", missions: [])
             )
         ))
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [], limit: 50)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.recordContextHealth(
@@ -3324,6 +3325,7 @@ final class DaemonControllerTests {
                 snapshot: freshWorkbenchSnapshot
             )
         ))
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [], limit: 50)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.recordContextHealth(
@@ -3340,6 +3342,50 @@ final class DaemonControllerTests {
         #expect(appState.snapshot != staleWorkbenchSnapshot)
         #expect(appState.lastError == nil)
         #expect(await api.recordContextHealthWithSnapshotCallCount == 1)
+    }
+
+    @Test @MainActor func recordContextHealthSuccessRefreshesTimelineEvents() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let contextSnapshot = ContextSnapshotDTO(
+            id: "snap-001",
+            sessionID: "sess-001",
+            agentID: "agent-001",
+            taskID: "task-001",
+            health: "good",
+            reasons: ["上下文健康"],
+            createdAt: "2026-06-27T06:01:00"
+        )
+        let workbenchSnapshot = makeSnapshot(sessionID: "sess-001", missions: [])
+        let event = makeEvent(
+            id: "evt-context",
+            type: "context_health.recorded",
+            subjectID: "snap-001"
+        )
+        await api.setRecordContextHealthWithSnapshotResult(.success(
+            ContextHealthSnapshotDTO(
+                contextSnapshot: contextSnapshot,
+                snapshot: workbenchSnapshot
+            )
+        ))
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [event], limit: 50)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.recordContextHealth(
+            taskID: "task-001",
+            agentID: "agent-001",
+            minutesSinceSync: 5,
+            tokenLoadRatio: 0.75,
+            policyConflict: false,
+            actor: "Human"
+        )
+
+        #expect(appState.contextSnapshots == [contextSnapshot])
+        #expect(appState.snapshot == workbenchSnapshot)
+        #expect(appState.timelineEvents == [event])
+        #expect(appState.lastError == nil)
     }
 
     @Test @MainActor func recordContextHealthSuccessReplacesDuplicateSnapshot() async throws {
@@ -3381,6 +3427,7 @@ final class DaemonControllerTests {
                 snapshot: makeSnapshot(sessionID: "sess-001", missions: [])
             )
         ))
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [], limit: 50)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.recordContextHealth(
