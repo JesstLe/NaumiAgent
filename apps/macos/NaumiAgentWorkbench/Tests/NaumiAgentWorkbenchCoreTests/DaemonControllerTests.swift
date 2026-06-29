@@ -1041,6 +1041,24 @@ final class DaemonControllerTests {
         #expect(controller.hasActiveEventStream == false)
     }
 
+    @Test @MainActor func refreshConnectionFailureClearsStaleDaemonMetadata() async throws {
+        let appState = AppState()
+        appState.connectionState = .connected
+        appState.daemonStatus = makeStatus()
+        appState.capabilities = makeCapabilities()
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setBootstrapResult(.failure(.networkFailure("daemon unavailable")))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .disconnected)
+        #expect(appState.daemonStatus == nil)
+        #expect(appState.capabilities == nil)
+        #expect(appState.lastError == .networkFailure("daemon unavailable"))
+    }
+
     @Test @MainActor func refreshConnectionRejectsUnsupportedProtocolVersion() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-events"
