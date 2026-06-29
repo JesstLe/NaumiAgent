@@ -6,6 +6,7 @@ public struct DashboardView: View {
     @Bindable public var appState: AppState
     public let daemonController: DaemonController
     @State private var searchText = ""
+    @State private var selectedMissionID: String?
     @State private var selectedFailureID: String?
     @State private var selectedEventID: String?
     @State private var isRerunningValidation = false
@@ -110,11 +111,12 @@ public struct DashboardView: View {
     }
 
     private func workbenchHeader(presentation: DashboardSnapshotPresentation) -> some View {
-        HStack(spacing: 14) {
+        let mission = missionPresentation(presentation.currentMission)
+        return HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(AppStrings.Dashboard.title(appState.locale))
                     .font(.system(size: 18, weight: .semibold))
-                Text(presentation.workbench.leftMissionTitle ?? AppStrings.Dashboard.title(appState.locale))
+                Text(mission?.title ?? presentation.workbench.leftMissionTitle ?? AppStrings.Dashboard.title(appState.locale))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -160,20 +162,26 @@ public struct DashboardView: View {
         presentation: DashboardSnapshotPresentation,
         market: TaskMarketDesignPresentation
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let selectedMission = missionPresentation(presentation.currentMission)
+
+        return VStack(alignment: .leading, spacing: 12) {
             TextField(AppStrings.Dashboard.searchPlaceholder(appState.locale), text: $searchText)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 12))
 
             VStack(alignment: .leading, spacing: 8) {
                 railSectionTitle(AppStrings.Dashboard.missionSection(appState.locale))
-                if let mission = presentation.currentMission {
+                if let mission = selectedMission {
                     railRow(
                         icon: "scope",
                         title: mission.title,
-                        subtitle: appState.locale == .zhCN ? "进行中" : "In Progress",
+                        subtitle: mission.status,
                         color: .indigo
                     )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        selectMission(mission)
+                    }
                 }
                 railRow(
                     icon: "square.grid.2x2",
@@ -351,7 +359,9 @@ public struct DashboardView: View {
         presentation: DashboardSnapshotPresentation,
         market: TaskMarketDesignPresentation
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let selectedMission = missionPresentation(presentation.currentMission)
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(appState.locale == .zhCN ? "显示：" : "Show:")
                     .font(.caption)
@@ -375,8 +385,14 @@ public struct DashboardView: View {
                 VStack(spacing: 12) {
                     HStack {
                         Spacer()
-                        if let mission = presentation.workbench.canvasNodes.first(where: { $0.kind == .mission }) {
+                        if let mission = missionCanvasNode(presentation: presentation) {
                             canvasNodeView(node: mission)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    if let summary = selectedMission {
+                                        selectMission(summary)
+                                    }
+                                }
                                 .frame(width: 260)
                         }
                         Spacer()
@@ -458,6 +474,46 @@ public struct DashboardView: View {
                 .stroke(row.number == 3 ? Color.accentColor : Color.secondary.opacity(0.22), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func missionPresentation(_ mission: DashboardMissionSummary?) -> DashboardMissionSummary? {
+        guard let mission else { return nil }
+        guard let selectedMission = appState.selectedMission,
+              selectedMission.id == selectedMissionID else {
+            return mission
+        }
+
+        return DashboardMissionSummary(
+            id: selectedMission.id,
+            title: selectedMission.title.isEmpty ? mission.title : selectedMission.title,
+            status: selectedMission.status.isEmpty ? mission.status : selectedMission.status
+        )
+    }
+
+    private func missionCanvasNode(presentation: DashboardSnapshotPresentation) -> DashboardCanvasNode? {
+        guard let mission = missionPresentation(presentation.currentMission) else {
+            return presentation.workbench.canvasNodes.first(where: { $0.kind == .mission })
+        }
+
+        return DashboardCanvasNode(
+            id: mission.id,
+            kind: .mission,
+            title: mission.title,
+            subtitle: "Mission",
+            status: mission.status
+        )
+    }
+
+    private func selectMission(_ mission: DashboardMissionSummary) {
+        selectedMissionID = mission.id
+        guard !appState.isPreviewFixture,
+              let command = DashboardMissionSelectionCommand(mission: mission) else {
+            return
+        }
+
+        Task {
+            await daemonController.loadMission(missionID: command.missionID)
+        }
     }
 
     private func compactCanvasPill(_ title: String, color: Color) -> some View {
