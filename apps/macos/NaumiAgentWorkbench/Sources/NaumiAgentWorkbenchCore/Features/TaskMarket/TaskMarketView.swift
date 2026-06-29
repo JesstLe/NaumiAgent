@@ -20,6 +20,7 @@ public struct TaskMarketView: View {
     @State private var attachmentDraft = IssueAttachmentDraft()
     @State private var isAttachingIssue = false
     @State private var releasingLeaseID: String?
+    @State private var requestingProposalBidID: String?
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -446,7 +447,7 @@ public struct TaskMarketView: View {
                 ScrollView {
                     VStack(spacing: 10) {
                         ForEach(bids) { bid in
-                            bidCard(bid)
+                            bidCard(issue: issue, bid: bid)
                         }
                     }
                 }
@@ -663,7 +664,7 @@ public struct TaskMarketView: View {
             .foregroundStyle(.secondary)
     }
 
-    private func bidCard(_ bid: TaskMarketDesignBid) -> some View {
+    private func bidCard(issue: TaskMarketDesignIssue, bid: TaskMarketDesignBid) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 Image(systemName: "person.crop.square")
@@ -698,8 +699,19 @@ public struct TaskMarketView: View {
             HStack {
                 Button(appState.locale == .zhCN ? "分配" : "Assign") {}
                     .buttonStyle(.borderedProminent)
-                Button(appState.locale == .zhCN ? "请求方案" : "Request Proposal") {}
+                Button {
+                    requestProposal(issue: issue, bid: bid)
+                } label: {
+                    Text(requestingProposalBidID == bid.id
+                        ? (appState.locale == .zhCN ? "请求中" : "Requesting")
+                        : (appState.locale == .zhCN ? "请求方案" : "Request Proposal")
+                    )
+                }
                     .buttonStyle(.bordered)
+                    .disabled(
+                        requestingProposalBidID != nil
+                            || proposalRequestCommand(issue: issue, bid: bid) == nil
+                    )
                 Button(appState.locale == .zhCN ? "拒绝竞标" : "Reject Bid") {}
                     .buttonStyle(.bordered)
                     .foregroundStyle(.red)
@@ -714,6 +726,40 @@ public struct TaskMarketView: View {
                 .stroke(Color.purple.opacity(0.35), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func proposalRequestCommand(
+        issue: TaskMarketDesignIssue,
+        bid: TaskMarketDesignBid
+    ) -> TaskMarketProposalRequestCommand? {
+        TaskMarketProposalRequestCommand(
+            issue: issue,
+            bid: bid,
+            missionID: currentMissionID,
+            locale: appState.locale
+        )
+    }
+
+    private func requestProposal(issue: TaskMarketDesignIssue, bid: TaskMarketDesignBid) {
+        guard requestingProposalBidID == nil,
+              let command = proposalRequestCommand(issue: issue, bid: bid) else {
+            return
+        }
+        guard !appState.isPreviewFixture else {
+            return
+        }
+
+        requestingProposalBidID = bid.id
+        Task {
+            await daemonController.createDecision(
+                missionID: command.missionID,
+                actor: command.actor,
+                kind: command.kind,
+                title: command.title,
+                content: command.content
+            )
+            requestingProposalBidID = nil
+        }
     }
 
     private func activeLeasesStrip(_ leases: [TaskMarketDesignLease]) -> some View {
