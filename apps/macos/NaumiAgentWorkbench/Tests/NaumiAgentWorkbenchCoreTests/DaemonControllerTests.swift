@@ -2346,7 +2346,14 @@ final class DaemonControllerTests {
         let event = makeEvent(id: "evt-001", type: "mission.created", subjectID: "mission-001")
         let events = WorkbenchEventsDTO(events: [event], limit: 50)
 
-        await api.setCreateSessionResult(.success(session))
+        await api.setCreateWorkbenchSessionResult(.success(WorkbenchBootstrapDTO(
+            daemonStatus: makeStatus(),
+            capabilities: makeCapabilities(),
+            sessions: [session],
+            totalSessions: 1,
+            selectedSessionID: "sess-new",
+            snapshot: makeSnapshot(sessionID: "sess-new", missions: [])
+        )))
         await api.setCreateMissionWithSnapshotResult(.success(
             MissionSnapshotDTO(mission: mission, snapshot: snapshot)
         ))
@@ -2375,7 +2382,8 @@ final class DaemonControllerTests {
         #expect(appState.issues.isEmpty)
         #expect(appState.timelineEvents == [event])
         #expect(appState.lastError == nil)
-        #expect(await api.snapshotCallCount == 1)
+        #expect(await api.createWorkbenchSessionCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
         #expect(await api.createMissionWithSnapshotCallCount == 1)
     }
 
@@ -2384,15 +2392,38 @@ final class DaemonControllerTests {
         #expect(appState.selectedSessionID == nil)
 
         let api = FakeWorkbenchAPIProvider()
-        await api.setCreateSessionResult(.failure(.httpStatus(503)))
+        await api.setCreateWorkbenchSessionResult(.failure(.httpStatus(503)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createMission(title: "Title", goal: "Goal")
 
         #expect(await api.createdMissions.isEmpty)
+        #expect(await api.createWorkbenchSessionCallCount == 1)
         #expect(appState.lastError == .httpStatus(503))
         #expect(appState.selectedSessionID == nil)
         #expect(appState.snapshot == nil)
+    }
+
+    @Test @MainActor func createMissionSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateMissionWithSnapshotResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createMission(title: "Mac 工作台", goal: "补齐 API 调用面")
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+        #expect(await api.createMissionWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func createMissionFailurePreservesOldSnapshot() async throws {
