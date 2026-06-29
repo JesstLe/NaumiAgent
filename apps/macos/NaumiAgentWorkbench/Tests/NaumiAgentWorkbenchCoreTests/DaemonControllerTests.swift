@@ -1631,6 +1631,29 @@ final class DaemonControllerTests {
         expectSelectedDetailsEmpty(appState)
     }
 
+    @Test @MainActor func refreshConnectionSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setStatusResult(.success(makeStatus()))
+        await api.setCapabilitiesResult(.success(makeCapabilities()))
+        await api.setSnapshotResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        #expect(appState.lastError == .sessionUnavailable)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+    }
+
     @Test @MainActor func refreshSessionsSuccessWritesSessionsAndClearsStaleError() async throws {
         let appState = AppState()
         appState.lastError = .httpStatus(500)
