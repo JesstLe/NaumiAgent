@@ -697,8 +697,23 @@ public struct TaskMarketView: View {
                 .foregroundStyle(.secondary)
 
             HStack {
-                Button(appState.locale == .zhCN ? "分配" : "Assign") {}
+                Button {
+                    assignBid(issue: issue, bid: bid)
+                } label: {
+                    Text(isClaimingIssue
+                        ? AppStrings.TaskMarket.processingLabel(appState.locale)
+                        : (appState.locale == .zhCN ? "分配" : "Assign")
+                    )
+                }
                     .buttonStyle(.borderedProminent)
+                    .disabled(
+                        isClaimingIssue
+                            || TaskMarketBidAssignmentCommand(
+                                issue: issue,
+                                bid: bid,
+                                durationMinutes: claimDurationMinutes
+                            ) == nil
+                    )
                 Button {
                     requestProposal(issue: issue, bid: bid)
                 } label: {
@@ -726,6 +741,30 @@ public struct TaskMarketView: View {
                 .stroke(Color.purple.opacity(0.35), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func assignBid(issue: TaskMarketDesignIssue, bid: TaskMarketDesignBid) {
+        guard !isClaimingIssue,
+              let command = TaskMarketBidAssignmentCommand(
+                issue: issue,
+                bid: bid,
+                durationMinutes: claimDurationMinutes
+              ) else {
+            return
+        }
+
+        isClaimingIssue = true
+        Task {
+            await daemonController.claimIssue(
+                taskID: command.taskID,
+                agentID: command.agentID,
+                durationMinutes: command.durationMinutes,
+                worktreeName: command.worktreeName
+            )
+            claimAgentID = command.agentID
+            claimWorktreeName = command.worktreeName
+            isClaimingIssue = false
+        }
     }
 
     private func proposalRequestCommand(
