@@ -398,6 +398,9 @@ public final class DaemonController: Sendable {
             appState.contextSnapshots = response.contextSnapshots
         } catch {
             appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
         }
     }
 
