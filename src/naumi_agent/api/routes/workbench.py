@@ -296,6 +296,7 @@ async def _build_daemon_status(request: Request) -> DaemonStatusResponse:
     started_at = getattr(request.app.state, "started_at", None)
     if started_at is None:
         started_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+        request.app.state.started_at = started_at
     return DaemonStatusResponse(
         status="running",
         version=__version__,
