@@ -524,6 +524,9 @@ public final class DaemonController: Sendable {
             appState.failures = response.failures
         } catch {
             appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
         }
     }
 
