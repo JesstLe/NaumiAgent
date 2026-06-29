@@ -1634,6 +1634,9 @@ public final class DaemonController: Sendable {
             )
         } catch {
             appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
         }
     }
 
