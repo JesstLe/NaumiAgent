@@ -338,6 +338,7 @@ public final class DaemonController: Sendable {
                 eventType: eventType,
                 subjectID: subjectID,
                 actor: actor,
+                since: nil,
                 limit: limit
             )
             appState.timelineEvents = response.events

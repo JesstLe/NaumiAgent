@@ -418,9 +418,10 @@ final class WorkbenchAPIClientTests {
         let eventType = "issue.claimed"
         let subjectID = "task/审查"
         let actor = "后端智能体"
+        let since = "2026-06-27T10:00:00+00:00"
         let json = Data(
             """
-            {"events":[{"id":"evt-002","session_id":"sess/中文","type":"issue.claimed","actor":"后端智能体","subject_id":"task/审查","payload":{"lease_id":"lease-001"},"timestamp":"2026-06-27T06:10:00"}],"event_type":"issue.claimed","subject_id":"task/审查","actor":"后端智能体","limit":25}
+            {"events":[{"id":"evt-002","session_id":"sess/中文","type":"issue.claimed","actor":"后端智能体","subject_id":"task/审查","payload":{"lease_id":"lease-001"},"timestamp":"2026-06-27T10:10:00"}],"event_type":"issue.claimed","subject_id":"task/审查","actor":"后端智能体","since":"2026-06-27T10:00:00+00:00","limit":25}
             """.utf8
         )
 
@@ -433,7 +434,8 @@ final class WorkbenchAPIClientTests {
                   query["limit"] == "25",
                   query["type"] == eventType,
                   query["subject_id"] == subjectID,
-                  query["actor"] == actor else {
+                  query["actor"] == actor,
+                  query["since"] == since else {
                 fatalError("Unexpected URL: \(String(describing: request.url))")
             }
             guard request.httpMethod == "GET" else {
@@ -454,12 +456,14 @@ final class WorkbenchAPIClientTests {
             eventType: eventType,
             subjectID: subjectID,
             actor: actor,
+            since: since,
             limit: 25
         )
 
         #expect(response.eventType == eventType)
         #expect(response.subjectID == subjectID)
         #expect(response.actor == actor)
+        #expect(response.since == since)
         #expect(response.limit == 25)
 
         let event = try #require(response.events.first)

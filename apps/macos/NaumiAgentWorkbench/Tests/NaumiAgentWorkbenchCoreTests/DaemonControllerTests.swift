@@ -185,6 +185,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         eventType: String?,
         subjectID: String?,
         actor: String?,
+        since: String?,
         limit: Int
     ) async throws(APIError) -> WorkbenchEventsDTO {
         guard let result = eventsResult else {

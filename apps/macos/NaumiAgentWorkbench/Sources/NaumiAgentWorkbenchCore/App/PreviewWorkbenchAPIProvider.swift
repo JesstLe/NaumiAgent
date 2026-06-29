@@ -101,6 +101,7 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         eventType: String?,
         subjectID: String?,
         actor: String?,
+        since: String?,
         limit: Int
     ) async throws(APIError) -> WorkbenchEventsDTO {
         WorkbenchEventsDTO(
@@ -108,6 +109,7 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
             eventType: eventType,
             subjectID: subjectID,
             actor: actor,
+            since: since,
             limit: limit
         )
     }

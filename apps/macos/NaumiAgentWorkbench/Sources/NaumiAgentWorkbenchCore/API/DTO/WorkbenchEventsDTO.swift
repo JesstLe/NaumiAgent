@@ -6,6 +6,7 @@ public struct WorkbenchEventsDTO: Decodable, Equatable, Sendable {
     public let eventType: String?
     public let subjectID: String?
     public let actor: String?
+    public let since: String?
     public let limit: Int
 
     public enum CodingKeys: String, CodingKey {
@@ -13,6 +14,7 @@ public struct WorkbenchEventsDTO: Decodable, Equatable, Sendable {
         case eventType = "event_type"
         case subjectID = "subject_id"
         case actor
+        case since
         case limit
     }
 
@@ -21,12 +23,14 @@ public struct WorkbenchEventsDTO: Decodable, Equatable, Sendable {
         eventType: String? = nil,
         subjectID: String? = nil,
         actor: String? = nil,
+        since: String? = nil,
         limit: Int
     ) {
         self.events = events
         self.eventType = eventType
         self.subjectID = subjectID
         self.actor = actor
+        self.since = since
         self.limit = limit
     }
 }

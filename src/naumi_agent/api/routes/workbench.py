@@ -132,6 +132,7 @@ class WorkbenchEventsResponse(BaseModel):
     event_type: str | None
     subject_id: str | None
     actor: str | None
+    since: str | None
     limit: int
 
 
@@ -477,6 +478,7 @@ async def get_workbench_events(
     event_type: Annotated[str | None, Query(alias="type")] = None,
     subject_id: Annotated[str | None, Query()] = None,
     actor: Annotated[str | None, Query()] = None,
+    since: Annotated[str | None, Query()] = None,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -491,6 +493,7 @@ async def get_workbench_events(
             event_type=event_type,
             subject_id=subject_id,
             actor=actor,
+            since=since,
             limit=limit,
         )
     except ValueError as exc:
@@ -503,6 +506,7 @@ async def get_workbench_events(
         event_type=result["event_type"],
         subject_id=result["subject_id"],
         actor=result["actor"],
+        since=result["since"],
         limit=result["limit"],
     )
 
