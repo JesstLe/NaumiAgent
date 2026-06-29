@@ -36,6 +36,19 @@ struct SettingsDashboardPresentationTests {
                 updatedAt: "2026-06-27T09:10:00"
             )
         ]
+        state.intentLocks = [
+            IntentLockDTO(
+                id: " lock-001 ",
+                sessionID: "sess-1",
+                missionID: " mission-1 ",
+                rule: "禁止直接改动认证模块",
+                blockedPaths: ["src/auth/**"],
+                allowedPaths: ["docs/**"],
+                requireProposalForRisk: "high",
+                active: true,
+                createdAt: "2026-06-27T09:12:00"
+            )
+        ]
 
         let presentation = SettingsDashboardPresentation(appState: state)
 
@@ -58,6 +71,13 @@ struct SettingsDashboardPresentationTests {
             .workbenchWritePath,
             .intentLockReady,
         ])
+        #expect(presentation.intentLocks.count == 1)
+        #expect(presentation.intentLocks.first?.id == " lock-001 ")
+        #expect(presentation.intentLocks.first?.missionID == " mission-1 ")
+        #expect(presentation.intentLocks.first?.rule == "禁止直接改动认证模块")
+        #expect(presentation.intentLocks.first?.scopeSummary == "阻塞 1 / 允许 1")
+        #expect(presentation.intentLocks.first?.riskLabel == "high")
+        #expect(presentation.intentLocks.first?.isActive == true)
     }
 
     @Test func disconnectedRuntimeUsesPlaceholderEndpoint() {
@@ -71,5 +91,6 @@ struct SettingsDashboardPresentationTests {
             .blocked,
             .blocked,
         ])
+        #expect(presentation.intentLocks == [])
     }
 }

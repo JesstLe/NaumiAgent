@@ -11,6 +11,7 @@ public struct SettingsDashboardPresentation: Equatable {
     public let supportedLocales: [String]
     public let runtimeChecklist: [SettingsChecklistItem]
     public let governanceChecklist: [SettingsChecklistItem]
+    public let intentLocks: [SettingsIntentLockRow]
 
     public init(appState: AppState) {
         if let daemonStatus = appState.daemonStatus {
@@ -31,6 +32,17 @@ public struct SettingsDashboardPresentation: Equatable {
         self.governanceChecklist = SettingsDashboardPresentation.governanceChecklist(
             appState: appState
         )
+        self.intentLocks = appState.intentLocks.map {
+            SettingsIntentLockRow(
+                id: $0.id,
+                missionID: $0.missionID,
+                rule: $0.rule,
+                scopeSummary: SettingsDashboardPresentation.scopeSummary(for: $0, locale: appState.locale),
+                riskLabel: $0.requireProposalForRisk,
+                isActive: $0.active,
+                createdAt: $0.createdAt
+            )
+        }
     }
 
     private static func enabledCapabilityCount(capabilities: CapabilitiesDTO?) -> Int {
@@ -71,6 +83,13 @@ public struct SettingsDashboardPresentation: Equatable {
                 state: appState.connectionState == .connected ? .passed : .warning
             ),
         ]
+    }
+
+    private static func scopeSummary(for lock: IntentLockDTO, locale: AppLocale) -> String {
+        if locale == .zhCN {
+            return "阻塞 \(lock.blockedPaths.count) / 允许 \(lock.allowedPaths.count)"
+        }
+        return "Blocked \(lock.blockedPaths.count) / Allowed \(lock.allowedPaths.count)"
     }
 }
 
@@ -131,5 +150,33 @@ public struct SettingsChecklistItem: Equatable, Sendable, Identifiable {
         case .blocked:
             return "xmark.octagon.fill"
         }
+    }
+}
+
+public struct SettingsIntentLockRow: Equatable, Sendable, Identifiable {
+    public let id: String
+    public let missionID: String
+    public let rule: String
+    public let scopeSummary: String
+    public let riskLabel: String
+    public let isActive: Bool
+    public let createdAt: String
+
+    public init(
+        id: String,
+        missionID: String,
+        rule: String,
+        scopeSummary: String,
+        riskLabel: String,
+        isActive: Bool,
+        createdAt: String
+    ) {
+        self.id = id
+        self.missionID = missionID
+        self.rule = rule
+        self.scopeSummary = scopeSummary
+        self.riskLabel = riskLabel
+        self.isActive = isActive
+        self.createdAt = createdAt
     }
 }
