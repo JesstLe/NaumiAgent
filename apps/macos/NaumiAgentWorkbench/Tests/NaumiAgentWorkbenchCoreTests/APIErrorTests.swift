@@ -42,4 +42,12 @@ struct APIErrorTests {
         #expect(error.localizedMessage(locale: .enUS) == "The current session is unavailable. Refresh or select another session.")
         #expect(error.technicalDetail == "sessionUnavailable")
     }
+
+    @Test func serverErrorIncludesHTTPStatusAndBackendDetail() {
+        let error = APIError.serverError(statusCode: 503, detail: "session registry unavailable")
+
+        #expect(error.localizedMessage(locale: .zhCN) == "本地服务返回错误 503：session registry unavailable")
+        #expect(error.localizedMessage(locale: .enUS) == "Local service returned error 503: session registry unavailable")
+        #expect(error.technicalDetail == "serverError(statusCode:503,detail:session registry unavailable)")
+    }
 }

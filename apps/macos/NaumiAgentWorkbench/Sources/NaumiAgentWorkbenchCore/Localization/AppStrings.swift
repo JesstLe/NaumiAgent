@@ -864,6 +864,12 @@ public enum AppStrings {
                 : "HTTP error \(code)"
         }
 
+        public static func serverError(_ locale: AppLocale, statusCode: Int, detail: String) -> String {
+            locale == .zhCN
+                ? "本地服务返回错误 \(statusCode)：\(detail)"
+                : "Local service returned error \(statusCode): \(detail)"
+        }
+
         public static func decodingFailed(_ locale: AppLocale) -> String {
             locale == .zhCN ? "数据解析失败" : "Failed to decode response"
         }
