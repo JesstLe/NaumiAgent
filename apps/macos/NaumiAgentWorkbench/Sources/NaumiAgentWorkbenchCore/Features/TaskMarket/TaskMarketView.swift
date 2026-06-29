@@ -21,6 +21,7 @@ public struct TaskMarketView: View {
     @State private var isAttachingIssue = false
     @State private var releasingLeaseID: String?
     @State private var requestingProposalBidID: String?
+    @State private var rejectingBidID: String?
     @State private var isRefreshingLeases = false
 
     public init(appState: AppState, daemonController: DaemonController) {
@@ -743,11 +744,24 @@ public struct TaskMarketView: View {
                     .buttonStyle(.bordered)
                     .disabled(
                         requestingProposalBidID != nil
+                            || rejectingBidID != nil
                             || proposalRequestCommand(issue: issue, bid: bid) == nil
                     )
-                Button(appState.locale == .zhCN ? "拒绝竞标" : "Reject Bid") {}
+                Button {
+                    rejectBid(issue: issue, bid: bid)
+                } label: {
+                    Text(rejectingBidID == bid.id
+                        ? (appState.locale == .zhCN ? "拒绝中" : "Rejecting")
+                        : (appState.locale == .zhCN ? "拒绝竞标" : "Reject Bid")
+                    )
+                }
                     .buttonStyle(.bordered)
                     .foregroundStyle(.red)
+                    .disabled(
+                        rejectingBidID != nil
+                            || requestingProposalBidID != nil
+                            || bidRejectionCommand(issue: issue, bid: bid) == nil
+                    )
             }
             .font(.caption)
             .controlSize(.small)
@@ -816,6 +830,40 @@ public struct TaskMarketView: View {
                 content: command.content
             )
             requestingProposalBidID = nil
+        }
+    }
+
+    private func bidRejectionCommand(
+        issue: TaskMarketDesignIssue,
+        bid: TaskMarketDesignBid
+    ) -> TaskMarketBidRejectionCommand? {
+        TaskMarketBidRejectionCommand(
+            issue: issue,
+            bid: bid,
+            missionID: currentMissionID,
+            locale: appState.locale
+        )
+    }
+
+    private func rejectBid(issue: TaskMarketDesignIssue, bid: TaskMarketDesignBid) {
+        guard rejectingBidID == nil,
+              let command = bidRejectionCommand(issue: issue, bid: bid) else {
+            return
+        }
+        guard !appState.isPreviewFixture else {
+            return
+        }
+
+        rejectingBidID = bid.id
+        Task {
+            await daemonController.createDecision(
+                missionID: command.missionID,
+                actor: command.actor,
+                kind: command.kind,
+                title: command.title,
+                content: command.content
+            )
+            rejectingBidID = nil
         }
     }
 
