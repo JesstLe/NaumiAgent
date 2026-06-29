@@ -3797,6 +3797,33 @@ final class DaemonControllerTests {
         #expect(await api.runValidationWithSnapshotCallCount == 1)
     }
 
+    @Test @MainActor func runValidationSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setRunValidationWithSnapshotResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.runValidation(
+            taskID: "task-001",
+            actor: "Human",
+            argv: ["pytest"],
+            cwd: "/workspace"
+        )
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+        #expect(await api.runValidationWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
+    }
+
     @Test @MainActor func runValidationBlockedWhenCapabilitiesLackValidationRunner() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
