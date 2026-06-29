@@ -49,6 +49,18 @@ struct SettingsDashboardPresentationTests {
                 createdAt: "2026-06-27T09:12:00"
             )
         ]
+        state.decisions = [
+            DecisionDTO(
+                id: " decision-001 ",
+                sessionID: "sess-1",
+                missionID: " mission-1 ",
+                kind: "architecture",
+                title: "采用本地 daemon 桥接",
+                content: "SwiftUI 只通过 Workbench API 访问本地服务。",
+                actor: "Planner-Agent",
+                createdAt: "2026-06-27T09:18:00"
+            )
+        ]
 
         let presentation = SettingsDashboardPresentation(appState: state)
 
@@ -78,6 +90,13 @@ struct SettingsDashboardPresentationTests {
         #expect(presentation.intentLocks.first?.scopeSummary == "阻塞 1 / 允许 1")
         #expect(presentation.intentLocks.first?.riskLabel == "high")
         #expect(presentation.intentLocks.first?.isActive == true)
+        #expect(presentation.decisions.count == 1)
+        #expect(presentation.decisions.first?.id == " decision-001 ")
+        #expect(presentation.decisions.first?.missionID == " mission-1 ")
+        #expect(presentation.decisions.first?.title == "采用本地 daemon 桥接")
+        #expect(presentation.decisions.first?.kind == "architecture")
+        #expect(presentation.decisions.first?.actor == "Planner-Agent")
+        #expect(presentation.decisions.first?.createdAt == "2026-06-27T09:18:00")
     }
 
     @Test func disconnectedRuntimeUsesPlaceholderEndpoint() {
@@ -92,5 +111,6 @@ struct SettingsDashboardPresentationTests {
             .blocked,
         ])
         #expect(presentation.intentLocks == [])
+        #expect(presentation.decisions == [])
     }
 }

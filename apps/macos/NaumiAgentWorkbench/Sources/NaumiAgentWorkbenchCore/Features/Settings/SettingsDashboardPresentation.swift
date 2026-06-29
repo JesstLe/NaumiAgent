@@ -12,6 +12,7 @@ public struct SettingsDashboardPresentation: Equatable {
     public let runtimeChecklist: [SettingsChecklistItem]
     public let governanceChecklist: [SettingsChecklistItem]
     public let intentLocks: [SettingsIntentLockRow]
+    public let decisions: [SettingsDecisionRow]
 
     public init(appState: AppState) {
         if let daemonStatus = appState.daemonStatus {
@@ -40,6 +41,16 @@ public struct SettingsDashboardPresentation: Equatable {
                 scopeSummary: SettingsDashboardPresentation.scopeSummary(for: $0, locale: appState.locale),
                 riskLabel: $0.requireProposalForRisk,
                 isActive: $0.active,
+                createdAt: $0.createdAt
+            )
+        }
+        self.decisions = appState.decisions.map {
+            SettingsDecisionRow(
+                id: $0.id,
+                missionID: $0.missionID,
+                kind: $0.kind,
+                title: $0.title,
+                actor: $0.actor,
                 createdAt: $0.createdAt
             )
         }
@@ -177,6 +188,31 @@ public struct SettingsIntentLockRow: Equatable, Sendable, Identifiable {
         self.scopeSummary = scopeSummary
         self.riskLabel = riskLabel
         self.isActive = isActive
+        self.createdAt = createdAt
+    }
+}
+
+public struct SettingsDecisionRow: Equatable, Sendable, Identifiable {
+    public let id: String
+    public let missionID: String
+    public let kind: String
+    public let title: String
+    public let actor: String
+    public let createdAt: String
+
+    public init(
+        id: String,
+        missionID: String,
+        kind: String,
+        title: String,
+        actor: String,
+        createdAt: String
+    ) {
+        self.id = id
+        self.missionID = missionID
+        self.kind = kind
+        self.title = title
+        self.actor = actor
         self.createdAt = createdAt
     }
 }

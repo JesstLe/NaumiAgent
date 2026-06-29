@@ -44,6 +44,7 @@ public struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         runtimePanel(presentation: presentation)
                         capabilitiesPanel
+                        selectedDecisionPanel
                         selectedIntentLockPanel
                         readinessGrid(presentation: presentation)
                     }
@@ -179,6 +180,7 @@ public struct SettingsView: View {
         HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 14) {
                 intentLockPanel
+                decisionRecordsPanel(presentation: presentation)
                 intentLockRecordsPanel(presentation: presentation)
             }
                 .frame(minWidth: 420, maxWidth: .infinity, alignment: .top)
@@ -356,6 +358,80 @@ public struct SettingsView: View {
         }
     }
 
+    private func decisionRecordsPanel(presentation: SettingsDashboardPresentation) -> some View {
+        panel(title: appState.locale == .zhCN ? "决策记录" : "Decision Records") {
+            if presentation.decisions.isEmpty {
+                Text(appState.locale == .zhCN ? "暂无决策记录" : "No decisions yet")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(presentation.decisions) { row in
+                        Button {
+                            guard let command = SettingsDecisionSelectionCommand(row: row) else {
+                                return
+                            }
+                            Task {
+                                await daemonController.loadDecision(
+                                    missionID: command.missionID,
+                                    decisionID: command.decisionID
+                                )
+                            }
+                        } label: {
+                            decisionRecordRow(row)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private func decisionRecordRow(_ row: SettingsDecisionRow) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "checkmark.seal.fill")
+                .foregroundStyle(.green)
+                .frame(width: 24, height: 24)
+                .background(Color.green.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(row.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer()
+                    Text(row.kind)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.green.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+
+                HStack(spacing: 10) {
+                    Text(row.actor)
+                    Text(row.createdAt)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(row.id == appState.selectedDecision?.id ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(row.id == appState.selectedDecision?.id ? Color.accentColor : Color.clear, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
     private func intentLockRecordRow(_ row: SettingsIntentLockRow) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: row.isActive ? "lock.fill" : "lock.slash")
@@ -414,6 +490,31 @@ public struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     pathSummary(title: appState.locale == .zhCN ? "阻塞路径" : "Blocked Paths", values: lock.blockedPaths)
                     pathSummary(title: appState.locale == .zhCN ? "允许路径" : "Allowed Paths", values: lock.allowedPaths)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var selectedDecisionPanel: some View {
+        if let decision = appState.selectedDecision {
+            panel(title: appState.locale == .zhCN ? "已选决策" : "Selected Decision") {
+                VStack(alignment: .leading, spacing: 10) {
+                    settingsRow(label: "ID", value: decision.id)
+                    settingsRow(label: "Mission", value: decision.missionID)
+                    settingsRow(label: appState.locale == .zhCN ? "类型" : "Kind", value: decision.kind)
+                    settingsRow(label: appState.locale == .zhCN ? "执行者" : "Actor", value: decision.actor)
+                    Text(decision.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(decision.content)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
             }
         }
