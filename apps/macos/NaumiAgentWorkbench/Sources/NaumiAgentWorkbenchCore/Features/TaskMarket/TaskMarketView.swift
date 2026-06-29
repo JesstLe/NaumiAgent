@@ -21,6 +21,7 @@ public struct TaskMarketView: View {
     @State private var isAttachingIssue = false
     @State private var releasingLeaseID: String?
     @State private var requestingProposalBidID: String?
+    @State private var isRefreshingLeases = false
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -28,7 +29,10 @@ public struct TaskMarketView: View {
     }
 
     public var body: some View {
-        let presentation = TaskMarketDesignPresentation(snapshot: appState.snapshot)
+        let presentation = TaskMarketDesignPresentation(
+            snapshot: appState.snapshot,
+            refreshedLeases: appState.leases
+        )
         let selectedRow = presentation.rows.first { $0.taskID == selectedTaskID }
             ?? presentation.selectedIssue
         let selected = selectedIssuePresentation(row: selectedRow)
@@ -806,8 +810,11 @@ public struct TaskMarketView: View {
             HStack {
                 Text(AppStrings.TaskMarket.activeLeasesTitle(appState.locale, count: leases.count))
                     .font(.headline)
-                Button(AppStrings.TaskMarket.viewAllLeasesButton(appState.locale)) {}
+                Button(AppStrings.TaskMarket.viewAllLeasesButton(appState.locale)) {
+                    refreshActiveLeases()
+                }
                     .buttonStyle(.bordered)
+                    .disabled(appState.selectedSessionID == nil || isRefreshingLeases)
                 Spacer()
                 Image(systemName: "xmark")
                     .foregroundStyle(.secondary)
@@ -854,7 +861,7 @@ public struct TaskMarketView: View {
                     .font(.caption2)
                 Spacer()
                 Button {
-                    if lease.tone == "red" {
+                    if !canReleaseLease(lease) {
                         return
                     }
                     releaseLease(lease)
@@ -862,7 +869,7 @@ public struct TaskMarketView: View {
                     Text(leaseActionTitle(for: lease))
                 }
                     .font(.caption2)
-                    .disabled(releasingLeaseID != nil || lease.tone == "red")
+                    .disabled(releasingLeaseID != nil || !canReleaseLease(lease))
             }
         }
         .padding(9)
@@ -901,6 +908,10 @@ public struct TaskMarketView: View {
             return AppStrings.TaskMarket.releaseButton(appState.locale)
         }
         return AppStrings.TaskMarket.openWorktreeButton(appState.locale)
+    }
+
+    private func canReleaseLease(_ lease: TaskMarketDesignLease) -> Bool {
+        lease.status.lowercased() == "active" || lease.tone == "orange"
     }
 
     private func leaseStatusTitle(for lease: TaskMarketDesignLease) -> String {
@@ -945,11 +956,20 @@ public struct TaskMarketView: View {
     }
 
     private func releaseLease(_ lease: TaskMarketDesignLease) {
-        guard releasingLeaseID == nil, lease.tone != "red" else { return }
+        guard releasingLeaseID == nil, canReleaseLease(lease) else { return }
         releasingLeaseID = lease.leaseID
         Task {
             await daemonController.releaseLease(leaseID: lease.leaseID)
             releasingLeaseID = nil
+        }
+    }
+
+    private func refreshActiveLeases() {
+        guard !isRefreshingLeases else { return }
+        isRefreshingLeases = true
+        Task {
+            await daemonController.refreshLeases(state: "active", limit: 50)
+            isRefreshingLeases = false
         }
     }
 

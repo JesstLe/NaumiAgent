@@ -11,7 +11,7 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
 
     public var selectedIssue: TaskMarketDesignIssue? { rows.first }
 
-    public init(snapshot: WorkbenchSnapshotDTO?) {
+    public init(snapshot: WorkbenchSnapshotDTO?, refreshedLeases: [LeaseDTO] = []) {
         let liveRows = snapshot.map { TaskMarketSnapshotPresentation(snapshot: $0).rows } ?? []
         let mappedLiveRows = liveRows.enumerated().map { index, row in
             TaskMarketDesignIssue(
@@ -43,14 +43,19 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
         }
         filters = TaskMarketDesignFilters.reference
         bids = Self.fixtureBids
-        let liveLeases = Self.liveLeases(from: snapshot)
-        var filledLeases = liveLeases
-        for fixture in Self.fixtureLeases where filledLeases.count < 4 {
-            if !filledLeases.contains(where: { $0.leaseID == fixture.leaseID || $0.worktree == fixture.worktree }) {
-                filledLeases.append(fixture)
+        let tasksByID = Dictionary(uniqueKeysWithValues: snapshot?.tasks.map { ($0.id, $0) } ?? [])
+        if refreshedLeases.isEmpty {
+            let liveLeases = Self.activeLeases(from: snapshot?.leases ?? [], tasksByID: tasksByID)
+            var filledLeases = liveLeases
+            for fixture in Self.fixtureLeases where filledLeases.count < 4 {
+                if !filledLeases.contains(where: { $0.leaseID == fixture.leaseID || $0.worktree == fixture.worktree }) {
+                    filledLeases.append(fixture)
+                }
             }
+            activeLeases = Array(filledLeases.prefix(4))
+        } else {
+            activeLeases = Array(Self.activeLeases(from: refreshedLeases, tasksByID: tasksByID).prefix(4))
         }
-        activeLeases = Array(filledLeases.prefix(4))
     }
 
     private static func normalizedRisk(_ risk: String) -> String {
@@ -94,10 +99,8 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
         return "core"
     }
 
-    private static func liveLeases(from snapshot: WorkbenchSnapshotDTO?) -> [TaskMarketDesignLease] {
-        guard let snapshot else { return [] }
-        let tasksByID = Dictionary(uniqueKeysWithValues: snapshot.tasks.map { ($0.id, $0) })
-        return snapshot.leases
+    private static func activeLeases(from leases: [LeaseDTO], tasksByID: [String: TaskDTO]) -> [TaskMarketDesignLease] {
+        return leases
             .filter { $0.state.lowercased() == "active" }
             .enumerated()
             .map { index, lease in
