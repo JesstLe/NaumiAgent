@@ -88,6 +88,17 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var createdSessions: [[String: String?]] = []
     var createdMissions: [[String: String]] = []
     var fetchedEvents: [FakeWorkbenchEventRefreshRequest] = []
+    var preWarmDelayNanoseconds: UInt64?
+    var preWarmInFlightCallCount: Int = 0
+    var maxPreWarmInFlightCallCount: Int = 0
+
+    private func recordPreWarmRequest() async {
+        guard let preWarmDelayNanoseconds else { return }
+        preWarmInFlightCallCount += 1
+        maxPreWarmInFlightCallCount = max(maxPreWarmInFlightCallCount, preWarmInFlightCallCount)
+        try? await Task.sleep(nanoseconds: preWarmDelayNanoseconds)
+        preWarmInFlightCallCount -= 1
+    }
 
     func fetchBootstrap(pageSize: Int) async throws(APIError) -> WorkbenchBootstrapDTO {
         bootstrapCallCount += 1
@@ -189,6 +200,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         since: String?,
         limit: Int
     ) async throws(APIError) -> WorkbenchEventsDTO {
+        await recordPreWarmRequest()
         fetchedEvents.append(FakeWorkbenchEventRefreshRequest(
             eventType: eventType,
             subjectID: subjectID,
@@ -214,6 +226,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         taskID: String?,
         limit: Int
     ) async throws(APIError) -> ValidationRunsDTO {
+        await recordPreWarmRequest()
         guard let result = validationRunsResult else {
             throw .invalidResponse
         }
@@ -233,6 +246,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         agentID: String?,
         limit: Int
     ) async throws(APIError) -> ContextSnapshotsDTO {
+        await recordPreWarmRequest()
         guard let result = contextSnapshotsResult else {
             throw .invalidResponse
         }
@@ -282,6 +296,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         state: String?,
         limit: Int
     ) async throws(APIError) -> ApprovalsDTO {
+        await recordPreWarmRequest()
         guard let result = approvalsResult else {
             throw .invalidResponse
         }
@@ -301,6 +316,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         status: String?,
         limit: Int
     ) async throws(APIError) -> FailuresDTO {
+        await recordPreWarmRequest()
         guard let result = failuresResult else {
             throw .invalidResponse
         }
@@ -320,6 +336,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         riskLevel: String?,
         limit: Int
     ) async throws(APIError) -> IssuesDTO {
+        await recordPreWarmRequest()
         guard let result = issuesResult else {
             throw .invalidResponse
         }
@@ -340,6 +357,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         agentID: String?,
         limit: Int
     ) async throws(APIError) -> LeasesDTO {
+        await recordPreWarmRequest()
         guard let result = leasesResult else {
             throw .invalidResponse
         }
@@ -359,6 +377,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         status: String?,
         limit: Int
     ) async throws(APIError) -> WorktreesDTO {
+        await recordPreWarmRequest()
         guard let result = worktreesResult else {
             throw .invalidResponse
         }
@@ -425,6 +444,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         status: String?,
         limit: Int
     ) async throws(APIError) -> MissionsDTO {
+        await recordPreWarmRequest()
         guard let result = missionsResult else {
             throw .invalidResponse
         }
@@ -443,6 +463,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         status: String?,
         limit: Int
     ) async throws(APIError) -> AgentProfilesDTO {
+        await recordPreWarmRequest()
         guard let result = agentProfilesResult else {
             throw .invalidResponse
         }
@@ -644,6 +665,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     }
 
     func fetchIntentLocks(sessionID: String, missionID: String) async throws(APIError) -> IntentLocksDTO {
+        await recordPreWarmRequest()
         guard let result = fetchIntentLocksResult else {
             throw .invalidResponse
         }
@@ -693,6 +715,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     }
 
     func fetchDecisions(sessionID: String, missionID: String) async throws(APIError) -> DecisionsDTO {
+        await recordPreWarmRequest()
         guard let result = fetchDecisionsResult else {
             throw .invalidResponse
         }
@@ -1326,6 +1349,35 @@ final class DaemonControllerTests {
         #expect(appState.approvals.count == 1)
         #expect(appState.validationRuns.count == 1)
         #expect(appState.contextSnapshots.count == 1)
+    }
+
+    @Test @MainActor func refreshConnectionPreWarmsIndependentListsConcurrently() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-existing"
+
+        let api = FakeWorkbenchAPIProvider()
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-existing",
+            missions: [],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+
+        await api.setStatusResult(.success(makeStatus()))
+        await api.setCapabilitiesResult(.success(makeCapabilities()))
+        await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-existing")
+        await api.setPreWarmDelayNanoseconds(30_000_000)
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.lastError == nil)
+        #expect(await api.maxPreWarmConcurrency() > 1)
+        expectWorkbenchListsPopulated(appState)
     }
 
     @Test @MainActor func refreshConnectionKeepsConnectedWhenSessionsEmpty() async throws {
@@ -5982,6 +6034,14 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setRunValidationWithSnapshotResult(_ result: Result<ValidationResultSnapshotDTO, APIError>) {
         runValidationWithSnapshotResult = result
+    }
+
+    fileprivate func setPreWarmDelayNanoseconds(_ delay: UInt64?) {
+        preWarmDelayNanoseconds = delay
+    }
+
+    fileprivate func maxPreWarmConcurrency() -> Int {
+        maxPreWarmInFlightCallCount
     }
 }
 

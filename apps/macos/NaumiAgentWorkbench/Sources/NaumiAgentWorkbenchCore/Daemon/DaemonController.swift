@@ -269,48 +269,174 @@ public final class DaemonController: Sendable {
     /// Pre-warms lightweight first-screen list states after a successful connection.
     ///
     /// Called after `refreshSnapshot()` when a session is selected and its snapshot
-    /// is available. Each refresh uses the existing `refreshX` method semantics:
-    /// successes write to `appState`, failures preserve existing local data, and
-    /// the first pre-warm failure remains visible in `lastError`. Connection state
-    /// is never mutated here.
+    /// is available. Independent list reads are fetched concurrently to keep the
+    /// Mac first screen responsive; results are then applied in a fixed order so
+    /// UI state remains deterministic. Successes write to `appState`, failures
+    /// preserve existing local data, and the first pre-warm failure remains
+    /// visible in `lastError`. Connection state is never mutated here.
     private func refreshWorkbenchListsAfterConnection() async {
-        guard appState.selectedSessionID != nil, appState.snapshot != nil else {
+        guard let sessionID = appState.selectedSessionID, appState.snapshot != nil else {
             return
         }
 
         var preWarmError: APIError?
-        await refreshMissions()
-        preWarmError = preWarmError ?? appState.lastError
-        await refreshAgentProfiles()
-        preWarmError = preWarmError ?? appState.lastError
-        await refreshIssues()
-        preWarmError = preWarmError ?? appState.lastError
-        await refreshLeases()
-        preWarmError = preWarmError ?? appState.lastError
-        await refreshWorktrees()
-        preWarmError = preWarmError ?? appState.lastError
-        await refreshFailures()
-        preWarmError = preWarmError ?? appState.lastError
-        await refreshEvents(limit: 50)
-        preWarmError = preWarmError ?? appState.lastError
-        await refreshApprovals(state: "waiting")
-        preWarmError = preWarmError ?? appState.lastError
-        if let missionID = appState.snapshot?.missions.first?.id ?? appState.missions.first?.id {
-            await refreshDecisions(missionID: missionID)
-            preWarmError = preWarmError ?? appState.lastError
-            await refreshIntentLocks(missionID: missionID)
-            preWarmError = preWarmError ?? appState.lastError
+        var sessionUnavailableDuringPreWarm: APIError?
+
+        func recordPreWarmFailure(_ error: APIError) {
+            preWarmError = preWarmError ?? error
+            if error == .sessionUnavailable {
+                sessionUnavailableDuringPreWarm = error
+            }
+        }
+
+        let initialMissionID = appState.snapshot?.missions.first?.id ?? appState.missions.first?.id
+
+        async let missionsResult = capturePreWarmResult {
+            try await self.apiProvider.fetchMissions(sessionID: sessionID, status: nil, limit: 50)
+        }
+        async let agentProfilesResult = capturePreWarmResult {
+            try await self.apiProvider.fetchAgentProfiles(sessionID: sessionID, status: nil, limit: 50)
+        }
+        async let issuesResult = capturePreWarmResult {
+            try await self.apiProvider.fetchIssues(sessionID: sessionID, missionID: nil, riskLevel: nil, limit: 50)
+        }
+        async let leasesResult = capturePreWarmResult {
+            try await self.apiProvider.fetchLeases(sessionID: sessionID, state: nil, taskID: nil, agentID: nil, limit: 50)
+        }
+        async let worktreesResult = capturePreWarmResult {
+            try await self.apiProvider.fetchWorktrees(sessionID: sessionID, taskID: nil, status: nil, limit: 50)
+        }
+        async let failuresResult = capturePreWarmResult {
+            try await self.apiProvider.fetchFailures(sessionID: sessionID, taskID: nil, status: nil, limit: 50)
+        }
+        async let eventsResult = capturePreWarmResult {
+            try await self.apiProvider.fetchEvents(
+                sessionID: sessionID,
+                eventType: nil,
+                subjectID: nil,
+                actor: nil,
+                since: nil,
+                limit: 50
+            )
+        }
+        async let approvalsResult = capturePreWarmResult {
+            try await self.apiProvider.fetchApprovals(sessionID: sessionID, state: "waiting", limit: 50)
+        }
+        async let validationRunsResult = capturePreWarmResult {
+            try await self.apiProvider.fetchValidationRuns(sessionID: sessionID, taskID: nil, limit: 50)
+        }
+        async let contextSnapshotsResult = capturePreWarmResult {
+            try await self.apiProvider.fetchContextSnapshots(
+                sessionID: sessionID,
+                taskID: nil,
+                agentID: nil,
+                limit: 50
+            )
+        }
+
+        switch await missionsResult {
+        case .success(let missions):
+            appState.missions = missions.missions
+        case .failure(let error):
+            recordPreWarmFailure(error)
+        }
+        switch await agentProfilesResult {
+        case .success(let profiles):
+            appState.agentProfiles = profiles.agentProfiles
+        case .failure(let error):
+            recordPreWarmFailure(error)
+        }
+        switch await issuesResult {
+        case .success(let issues):
+            appState.issues = issues.issues
+        case .failure(let error):
+            recordPreWarmFailure(error)
+        }
+        switch await leasesResult {
+        case .success(let leases):
+            appState.leases = leases.leases
+        case .failure(let error):
+            recordPreWarmFailure(error)
+        }
+        switch await worktreesResult {
+        case .success(let worktrees):
+            appState.worktrees = worktrees.worktrees
+        case .failure(let error):
+            recordPreWarmFailure(error)
+        }
+        switch await failuresResult {
+        case .success(let failures):
+            appState.failures = failures.failures
+        case .failure(let error):
+            recordPreWarmFailure(error)
+        }
+        switch await eventsResult {
+        case .success(let events):
+            appState.timelineEvents = events.events
+        case .failure(let error):
+            recordPreWarmFailure(error)
+        }
+        switch await approvalsResult {
+        case .success(let approvals):
+            appState.approvals = approvals.approvals
+        case .failure(let error):
+            recordPreWarmFailure(error)
+        }
+        switch await validationRunsResult {
+        case .success(let runs):
+            appState.validationRuns = runs.validationRuns
+        case .failure(let error):
+            recordPreWarmFailure(error)
+        }
+        switch await contextSnapshotsResult {
+        case .success(let snapshots):
+            appState.contextSnapshots = snapshots.contextSnapshots
+        case .failure(let error):
+            recordPreWarmFailure(error)
+        }
+
+        if let missionID = initialMissionID ?? appState.missions.first?.id {
+            async let decisionsResult = capturePreWarmResult {
+                try await self.apiProvider.fetchDecisions(sessionID: sessionID, missionID: missionID)
+            }
+            async let intentLocksResult = capturePreWarmResult {
+                try await self.apiProvider.fetchIntentLocks(sessionID: sessionID, missionID: missionID)
+            }
+
+            switch await decisionsResult {
+            case .success(let decisions):
+                appState.decisions = decisions.decisions
+            case .failure(let error):
+                recordPreWarmFailure(error)
+            }
+            switch await intentLocksResult {
+            case .success(let intentLocks):
+                appState.intentLocks = intentLocks.intentLocks
+            case .failure(let error):
+                recordPreWarmFailure(error)
+            }
         } else {
             appState.decisions = []
             appState.intentLocks = []
         }
-        await refreshValidationRuns()
-        preWarmError = preWarmError ?? appState.lastError
-        await refreshContextSnapshots()
-        preWarmError = preWarmError ?? appState.lastError
 
         if let preWarmError {
             appState.lastError = preWarmError
+        }
+        if sessionUnavailableDuringPreWarm != nil {
+            clearUnavailableSelectedSession()
+        }
+    }
+
+    private func capturePreWarmResult<Value: Sendable>(
+        _ operation: @escaping @Sendable () async throws -> Value
+    ) async -> Result<Value, APIError> {
+        do {
+            return .success(try await operation())
+        } catch let error as APIError {
+            return .failure(error)
+        } catch {
+            return .failure(.networkFailure(error.localizedDescription))
         }
     }
 
