@@ -1762,6 +1762,7 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
                 "event_type": "issue.created",
                 "subject_id": "task-2",
                 "actor": "Planner-Agent",
+                "since": "2026-06-27T10:00:00+00:00",
             }
         )
 
@@ -1783,7 +1784,7 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
             "event_type": "issue.created",
             "subject_id": "task-2",
             "actor": "Planner-Agent",
-            "since": None,
+            "since": "2026-06-27T10:00:00+00:00",
             "limit": 7,
         }
     ]

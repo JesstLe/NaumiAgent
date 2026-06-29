@@ -567,6 +567,7 @@ async def websocket_workbench_events(websocket: WebSocket, session_id: str):
         event_type=None,
         subject_id=None,
         actor=None,
+        since=None,
         limit=50,
     )
 
@@ -594,6 +595,7 @@ async def websocket_workbench_events(websocket: WebSocket, session_id: str):
                 event_type=data.get("event_type"),
                 subject_id=data.get("subject_id"),
                 actor=data.get("actor"),
+                since=data.get("since"),
                 limit=limit,
             )
     except WebSocketDisconnect:
@@ -640,6 +642,7 @@ async def _send_workbench_event_refresh(
     event_type: str | None,
     subject_id: str | None,
     actor: str | None,
+    since: str | None,
     limit: int,
 ) -> None:
     try:
@@ -648,6 +651,7 @@ async def _send_workbench_event_refresh(
             event_type=event_type,
             subject_id=subject_id,
             actor=actor,
+            since=since,
             limit=limit,
         )
     except (RuntimeError, ValueError) as exc:

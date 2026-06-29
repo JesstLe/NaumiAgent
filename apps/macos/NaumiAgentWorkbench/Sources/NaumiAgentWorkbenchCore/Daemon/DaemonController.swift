@@ -136,6 +136,7 @@ public final class DaemonController: Sendable {
         eventType: String? = nil,
         subjectID: String? = nil,
         actor: String? = nil,
+        since: String? = nil,
         limit: Int = 50
     ) async {
         guard let activeEventStream else {
@@ -149,6 +150,7 @@ public final class DaemonController: Sendable {
                 eventType: eventType,
                 subjectID: subjectID,
                 actor: actor,
+                since: since,
                 limit: limit
             )
         } catch {
