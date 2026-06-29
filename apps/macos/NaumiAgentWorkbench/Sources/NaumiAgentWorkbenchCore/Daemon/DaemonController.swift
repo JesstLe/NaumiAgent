@@ -226,7 +226,7 @@ public final class DaemonController: Sendable {
             }
         case .error(let message):
             appState.connectionState = .stale
-            appState.lastError = .networkFailure(message)
+            appState.lastError = apiError(forEventStreamError: message)
         case .refreshComplete:
             break
         case .pong:
@@ -234,6 +234,14 @@ public final class DaemonController: Sendable {
         case .ignored:
             break
         }
+    }
+
+    private func apiError(forEventStreamError message: String) -> APIError {
+        let normalizedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalizedMessage == "invalid api key" || normalizedMessage == "unauthorized" {
+            return .authFailed
+        }
+        return .networkFailure(message)
     }
 
     /// Pre-warms lightweight first-screen list states after a successful connection.

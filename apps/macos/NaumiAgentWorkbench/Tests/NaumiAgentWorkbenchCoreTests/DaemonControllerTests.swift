@@ -1546,6 +1546,33 @@ final class DaemonControllerTests {
         await controller.stopEventStream()
     }
 
+    @Test @MainActor func eventStreamInvalidAPIKeyRecordsAuthFailed() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-events"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+
+        await controller.startEventStream()
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-events"]
+        }
+        await eventProvider.emit(.error(message: "Invalid API key"))
+
+        await waitUntil {
+            appState.connectionState == .stale
+        }
+
+        #expect(appState.lastError == .authFailed)
+
+        await controller.stopEventStream()
+    }
+
     @Test @MainActor func refreshConnectionSnapshotFailureSkipsPreWarmingAndKeepsSnapshotError() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-existing"
