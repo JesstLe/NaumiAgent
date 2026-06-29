@@ -680,6 +680,9 @@ public final class DaemonController: Sendable {
             appState.worktrees = response.worktrees
         } catch {
             appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
         }
     }
 
