@@ -19,6 +19,7 @@ public protocol WorkbenchEventStreaming: Sendable {
         eventType: String?,
         subjectID: String?,
         actor: String?,
+        since: String?,
         limit: Int
     ) async throws(APIError)
     func cancel() async
@@ -222,12 +223,14 @@ public struct WorkbenchEventStream: Sendable, WorkbenchEventStreaming {
         eventType: String? = nil,
         subjectID: String? = nil,
         actor: String? = nil,
+        since: String? = nil,
         limit: Int
     ) async throws(APIError) {
         let request = WorkbenchEventRefreshRequest(
             eventType: eventType,
             subjectID: subjectID,
             actor: actor,
+            since: since,
             limit: limit
         )
         let data: Data
@@ -258,6 +261,7 @@ private struct WorkbenchEventRefreshRequest: Encodable {
     let eventType: String?
     let subjectID: String?
     let actor: String?
+    let since: String?
     let limit: Int
 
     private enum CodingKeys: String, CodingKey {
@@ -265,6 +269,7 @@ private struct WorkbenchEventRefreshRequest: Encodable {
         case eventType = "event_type"
         case subjectID = "subject_id"
         case actor
+        case since
         case limit
     }
 }

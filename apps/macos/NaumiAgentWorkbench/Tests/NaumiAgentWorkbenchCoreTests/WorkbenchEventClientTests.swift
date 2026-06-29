@@ -177,6 +177,7 @@ final class WorkbenchEventClientTests {
             eventType: "validation.passed",
             subjectID: "task-001",
             actor: "Backend-Agent",
+            since: "2026-06-27T10:00:00+00:00",
             limit: 25
         )
 
@@ -195,6 +196,7 @@ final class WorkbenchEventClientTests {
         #expect(json["event_type"] as? String == "validation.passed")
         #expect(json["subject_id"] as? String == "task-001")
         #expect(json["actor"] as? String == "Backend-Agent")
+        #expect(json["since"] as? String == "2026-06-27T10:00:00+00:00")
         #expect(json["limit"] as? Int == 25)
     }
 

@@ -857,12 +857,14 @@ struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
         eventType: String?,
         subjectID: String?,
         actor: String?,
+        since: String?,
         limit: Int
     ) async throws(APIError) {
         try await recorder.recordRefreshRequest(
             eventType: eventType,
             subjectID: subjectID,
             actor: actor,
+            since: since,
             limit: limit
         )
     }
@@ -878,6 +880,7 @@ struct FakeWorkbenchEventRefreshRequest: Equatable, Sendable {
     let eventType: String?
     let subjectID: String?
     let actor: String?
+    let since: String?
     let limit: Int
 }
 
@@ -891,12 +894,14 @@ actor FakeWorkbenchEventStreamRecorder {
         eventType: String?,
         subjectID: String?,
         actor: String?,
+        since: String?,
         limit: Int
     ) throws(APIError) {
         refreshRequests.append(FakeWorkbenchEventRefreshRequest(
             eventType: eventType,
             subjectID: subjectID,
             actor: actor,
+            since: since,
             limit: limit
         ))
         try refreshResult.get()
@@ -1475,6 +1480,7 @@ final class DaemonControllerTests {
             eventType: "validation.passed",
             subjectID: "task-001",
             actor: "Backend-Agent",
+            since: "2026-06-27T10:00:00+00:00",
             limit: 25
         )
 
@@ -1484,6 +1490,7 @@ final class DaemonControllerTests {
                     eventType: "validation.passed",
                     subjectID: "task-001",
                     actor: "Backend-Agent",
+                    since: "2026-06-27T10:00:00+00:00",
                     limit: 25
                 )
             ]
@@ -1519,6 +1526,7 @@ final class DaemonControllerTests {
                 eventType: nil,
                 subjectID: nil,
                 actor: nil,
+                since: nil,
                 limit: 10
             ),
         ])
@@ -1558,6 +1566,7 @@ final class DaemonControllerTests {
                 eventType: nil,
                 subjectID: nil,
                 actor: nil,
+                since: nil,
                 limit: 10
             ),
         ])
