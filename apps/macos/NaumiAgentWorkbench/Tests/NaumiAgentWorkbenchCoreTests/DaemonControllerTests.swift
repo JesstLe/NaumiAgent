@@ -31,6 +31,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var keepWorktreeResult: Result<WorktreeDTO, APIError>?
     var keepWorktreeWithSnapshotResult: Result<WorktreeSnapshotDTO, APIError>?
     var removeWorktreeResult: Result<WorktreeRemovalDTO, APIError>?
+    var removeWorktreeWithSnapshotResult: Result<WorktreeRemovalSnapshotDTO, APIError>?
     var missionsResult: Result<MissionsDTO, APIError>?
     var agentProfilesResult: Result<AgentProfilesDTO, APIError>?
     var agentProfileResult: Result<AgentProfileDTO, APIError>?
@@ -67,6 +68,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var sessionsCallCount: Int = 0
     var snapshotCallCount: Int = 0
     var keepWorktreeWithSnapshotCallCount: Int = 0
+    var removeWorktreeWithSnapshotCallCount: Int = 0
     var recordContextHealthWithSnapshotCallCount: Int = 0
     var claimIssueWithSnapshotCallCount: Int = 0
     var releaseLeaseWithSnapshotCallCount: Int = 0
@@ -371,6 +373,18 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         discardChanges: Bool
     ) async throws(APIError) -> WorktreeRemovalDTO {
         guard let result = removeWorktreeResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func removeWorktreeWithSnapshot(
+        sessionID: String,
+        name: String,
+        discardChanges: Bool
+    ) async throws(APIError) -> WorktreeRemovalSnapshotDTO {
+        removeWorktreeWithSnapshotCallCount += 1
+        guard let result = removeWorktreeWithSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -3071,10 +3085,13 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
-    @Test @MainActor func removeWorktreeSuccessRefreshesWorktreesAndEvents() async throws {
+    @Test @MainActor func removeWorktreeSuccessUsesIncludedSnapshotAndRefreshesLists() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
         let removedWorktree = makeWorktree(name: "wt-remove", taskID: "task-001", status: "clean")
+        appState.snapshot = makeSnapshot(sessionID: "sess-001", missions: [
+            makeMission(id: "mission-stale", sessionID: "sess-001")
+        ])
         appState.worktrees = [removedWorktree]
 
         let api = FakeWorkbenchAPIProvider()
@@ -3082,8 +3099,18 @@ final class DaemonControllerTests {
             events: [makeEvent(id: "evt-remove", type: "worktree.removed", subjectID: "wt-remove")],
             limit: 50
         )
-        await api.setRemoveWorktreeResult(.success(
-            WorktreeRemovalDTO(name: "wt-remove", discardChanges: false, message: "已删除 worktree：wt-remove")
+        let snapshot = makeSnapshot(sessionID: "sess-001", missions: [
+            makeMission(id: "mission-removed", sessionID: "sess-001")
+        ])
+        await api.setRemoveWorktreeWithSnapshotResult(.success(
+            WorktreeRemovalSnapshotDTO(
+                removal: WorktreeRemovalDTO(
+                    name: "wt-remove",
+                    discardChanges: false,
+                    message: "已删除 worktree：wt-remove"
+                ),
+                snapshot: snapshot
+            )
         ))
         await api.setWorktreesResult(.success(WorktreesDTO(worktrees: [], taskID: nil, status: nil, limit: 50)))
         await api.setEventsResult(.success(events))
@@ -3093,7 +3120,10 @@ final class DaemonControllerTests {
 
         #expect(appState.worktrees.isEmpty)
         #expect(appState.timelineEvents == events.events)
+        #expect(appState.snapshot == snapshot)
         #expect(appState.lastError == nil)
+        #expect(await api.removeWorktreeWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
     }
 
     @Test @MainActor func removeWorktreeWithoutSelectedSessionRecordsError() async throws {
@@ -3114,15 +3144,20 @@ final class DaemonControllerTests {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
         let staleWorktree = makeWorktree(name: "wt-stale", taskID: "task-001", status: "dirty")
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [
+            makeMission(id: "mission-stale", sessionID: "sess-001")
+        ])
         appState.worktrees = [staleWorktree]
+        appState.snapshot = staleSnapshot
 
         let api = FakeWorkbenchAPIProvider()
-        await api.setRemoveWorktreeResult(.failure(.httpStatus(409)))
+        await api.setRemoveWorktreeWithSnapshotResult(.failure(.httpStatus(409)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.removeWorktree(name: "wt-stale", discardChanges: false)
 
         #expect(appState.worktrees == [staleWorktree])
+        #expect(appState.snapshot == staleSnapshot)
         #expect(appState.lastError == .httpStatus(409))
     }
 
@@ -4516,6 +4551,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setRemoveWorktreeResult(_ result: Result<WorktreeRemovalDTO, APIError>) {
         removeWorktreeResult = result
+    }
+
+    fileprivate func setRemoveWorktreeWithSnapshotResult(_ result: Result<WorktreeRemovalSnapshotDTO, APIError>) {
+        removeWorktreeWithSnapshotResult = result
     }
 
     fileprivate func setMissionsResult(_ result: Result<MissionsDTO, APIError>) {
