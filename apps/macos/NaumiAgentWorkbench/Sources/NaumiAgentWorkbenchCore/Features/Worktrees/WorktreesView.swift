@@ -36,7 +36,11 @@ public struct WorktreesView: View {
         let selectedSnapshot = loadedSelectedSnapshot
             ?? presentation.snapshots.first { $0.id == selectedSnapshotID }
             ?? presentation.selectedSnapshot
-        let selectedWorktree = presentation.selectedWorktree(id: selectedWorktreeID)
+        let loadedSelectedWorktree = appState.selectedWorktree
+            .map(WorktreeManagementRow.init)
+            .flatMap { $0.id == selectedWorktreeID ? $0 : nil }
+        let selectedWorktree = loadedSelectedWorktree
+            ?? presentation.selectedWorktree(id: selectedWorktreeID)
 
         VStack(spacing: 0) {
             header(
@@ -136,6 +140,18 @@ public struct WorktreesView: View {
 
         Task {
             await daemonController.loadContextSnapshot(snapshotID: command.snapshotID)
+        }
+    }
+
+    private func selectWorktree(_ worktree: WorktreeManagementRow) {
+        selectedWorktreeID = worktree.id
+        guard !appState.isPreviewFixture,
+              let command = WorktreeSelectionCommand(worktree: worktree) else {
+            return
+        }
+
+        Task {
+            await daemonController.loadWorktree(name: command.name)
         }
     }
 
@@ -336,7 +352,7 @@ public struct WorktreesView: View {
                             worktreeDataRow(row, isSelected: row.id == effectiveSelectedWorktreeID)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    selectedWorktreeID = row.id
+                                    selectWorktree(row)
                                 }
                             if row.id != presentation.worktreeRows.last?.id {
                                 Divider()
