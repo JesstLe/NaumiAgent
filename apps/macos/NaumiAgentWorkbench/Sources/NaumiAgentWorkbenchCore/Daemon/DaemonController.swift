@@ -325,6 +325,7 @@ public final class DaemonController: Sendable {
         eventType: String? = nil,
         subjectID: String? = nil,
         actor: String? = nil,
+        since: String? = nil,
         limit: Int
     ) async {
         guard let sessionID = appState.selectedSessionID else {
@@ -340,7 +341,7 @@ public final class DaemonController: Sendable {
                 eventType: eventType,
                 subjectID: subjectID,
                 actor: actor,
-                since: nil,
+                since: since,
                 limit: limit
             )
             appState.timelineEvents = response.events
