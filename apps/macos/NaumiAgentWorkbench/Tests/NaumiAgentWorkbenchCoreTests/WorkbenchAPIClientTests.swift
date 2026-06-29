@@ -149,6 +149,24 @@ final class WorkbenchAPIClientTests {
         }
     }
 
+    @Test func sessionNotFoundHTTPDetailThrowsSessionUnavailable() async {
+        let json = Data(#"{"detail":"Session not found"}"#.utf8)
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 404,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        await #expect(throws: APIError.sessionUnavailable) {
+            try await client.fetchSnapshot(sessionID: "missing-session")
+        }
+    }
+
     @Test func unauthorizedHTTPStatusThrowsAuthFailed() async {
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
