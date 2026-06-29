@@ -329,6 +329,20 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func removeWorktreeWithSnapshot(
+        sessionID: String,
+        name: String,
+        discardChanges: Bool
+    ) async throws(APIError) -> WorktreeRemovalSnapshotDTO {
+        try await delete(
+            path: encodePath("workbench", "sessions", sessionID, "worktrees", name),
+            queryItems: [
+                URLQueryItem(name: "discard_changes", value: discardChanges ? "true" : "false"),
+                URLQueryItem(name: "include_snapshot", value: "true"),
+            ]
+        )
+    }
+
     public func fetchMissions(
         sessionID: String,
         status: String?,

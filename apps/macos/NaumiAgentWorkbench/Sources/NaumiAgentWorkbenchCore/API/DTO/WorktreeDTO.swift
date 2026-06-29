@@ -76,3 +76,19 @@ public struct WorktreeSnapshotDTO: Decodable, Equatable, Sendable {
         self.snapshot = snapshot
     }
 }
+
+/// Result returned by `DELETE /workbench/sessions/{id}/worktrees/{name}?include_snapshot=true`.
+public struct WorktreeRemovalSnapshotDTO: Decodable, Equatable, Sendable {
+    public let removal: WorktreeRemovalDTO
+    public let snapshot: WorkbenchSnapshotDTO
+
+    public enum CodingKeys: String, CodingKey {
+        case removal
+        case snapshot
+    }
+
+    public init(removal: WorktreeRemovalDTO, snapshot: WorkbenchSnapshotDTO) {
+        self.removal = removal
+        self.snapshot = snapshot
+    }
+}

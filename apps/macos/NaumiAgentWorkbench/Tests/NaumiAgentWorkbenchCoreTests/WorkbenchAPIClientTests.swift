@@ -1490,6 +1490,48 @@ final class WorkbenchAPIClientTests {
         #expect(result.message == "已删除 worktree：wt-dirty")
     }
 
+    @Test func removeWorktreeWithSnapshotRequestsFreshSnapshot() async throws {
+        let responseJSON = Data(
+            """
+            {"removal":{"name":"wt-dirty","discard_changes":true,"message":"已删除 worktree：wt-dirty"},"snapshot":{"session_id":"sess/001","summary":{"current_mission_title":"删除工作区后刷新","active_agents":0,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%2F001/worktrees/wt-dirty",
+                  query["discard_changes"] == "true",
+                  query["include_snapshot"] == "true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "DELETE" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient()
+        let response = try await client.removeWorktreeWithSnapshot(
+            sessionID: "sess/001",
+            name: "wt-dirty",
+            discardChanges: true
+        )
+
+        #expect(response.removal.name == "wt-dirty")
+        #expect(response.removal.discardChanges)
+        #expect(response.snapshot.sessionID == "sess/001")
+        #expect(response.snapshot.summary?.currentMissionTitle == "删除工作区后刷新")
+    }
+
     @Test func fetchMissionsWithStatus() async throws {
         let json = Data(
             """

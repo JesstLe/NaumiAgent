@@ -149,6 +149,13 @@ public protocol WorkbenchAPIProviding: Sendable {
         discardChanges: Bool
     ) async throws(APIError) -> WorktreeRemovalDTO
 
+    /// Removes a tracked worktree and returns the backend's fresh authoritative snapshot.
+    func removeWorktreeWithSnapshot(
+        sessionID: String,
+        name: String,
+        discardChanges: Bool
+    ) async throws(APIError) -> WorktreeRemovalSnapshotDTO
+
     /// Fetches missions for the given session, optionally filtered by status.
     func fetchMissions(
         sessionID: String,
