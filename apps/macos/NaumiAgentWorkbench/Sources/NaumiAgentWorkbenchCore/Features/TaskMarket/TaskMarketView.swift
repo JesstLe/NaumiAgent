@@ -6,6 +6,7 @@ public struct TaskMarketView: View {
     public let daemonController: DaemonController
 
     @State private var selectedTaskID: String?
+    @State private var selectedLeaseID: String?
     @State private var searchText = ""
     @State private var autoRefresh = true
     @State private var claimAgentID = "Backend-Agent"
@@ -30,6 +31,10 @@ public struct TaskMarketView: View {
         let selectedRow = presentation.rows.first { $0.taskID == selectedTaskID }
             ?? presentation.selectedIssue
         let selected = selectedIssuePresentation(row: selectedRow)
+        let activeLeases = activeLeasePresentations(
+            leases: presentation.activeLeases,
+            rows: presentation.rows
+        )
 
         VStack(spacing: 0) {
             pageHeader(selected: selected)
@@ -46,7 +51,7 @@ public struct TaskMarketView: View {
                 VStack(spacing: 0) {
                     marketTable(presentation: presentation)
                     Divider()
-                    activeLeasesStrip(presentation.activeLeases)
+                    activeLeasesStrip(activeLeases)
                         .frame(height: 150)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -569,6 +574,46 @@ public struct TaskMarketView: View {
         )
     }
 
+    private func activeLeasePresentations(
+        leases: [TaskMarketDesignLease],
+        rows: [TaskMarketDesignIssue]
+    ) -> [TaskMarketDesignLease] {
+        guard let selectedLease = appState.selectedLease,
+              selectedLease.id == selectedLeaseID else {
+            return leases
+        }
+
+        return leases.map { lease in
+            guard lease.leaseID == selectedLease.id else {
+                return lease
+            }
+
+            return selectedLeasePresentation(
+                lease: selectedLease,
+                fallback: lease,
+                rows: rows
+            )
+        }
+    }
+
+    private func selectedLeasePresentation(
+        lease: LeaseDTO,
+        fallback: TaskMarketDesignLease,
+        rows: [TaskMarketDesignIssue]
+    ) -> TaskMarketDesignLease {
+        let title = rows.first { $0.taskID == lease.taskID }?.title ?? fallback.title
+        return TaskMarketDesignLease(
+            leaseID: lease.id,
+            number: fallback.number,
+            title: title,
+            worktree: lease.worktreeName.isEmpty ? fallback.worktree : lease.worktreeName,
+            owner: lease.agentID.isEmpty ? fallback.owner : lease.agentID,
+            status: normalizedLeaseStatus(lease.state),
+            time: lease.expiresAt.isEmpty ? fallback.time : lease.expiresAt,
+            tone: leaseTone(for: lease.state, fallback: fallback.tone)
+        )
+    }
+
     private func normalizedRiskLabel(_ risk: String) -> String {
         switch risk.lowercased() {
         case "critical":
@@ -686,7 +731,11 @@ public struct TaskMarketView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(leases) { lease in
-                        leaseCard(lease)
+                        leaseCard(lease, isSelected: selectedLeaseID == lease.leaseID)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectLease(lease)
+                            }
                     }
                 }
             }
@@ -696,7 +745,7 @@ public struct TaskMarketView: View {
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    private func leaseCard(_ lease: TaskMarketDesignLease) -> some View {
+    private func leaseCard(_ lease: TaskMarketDesignLease, isSelected: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("#\(lease.number) \(lease.title)")
@@ -736,9 +785,24 @@ public struct TaskMarketView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 7)
-                .stroke(color(forTone: lease.tone).opacity(0.55), lineWidth: 1)
+                .stroke(
+                    isSelected ? Color.accentColor : color(forTone: lease.tone).opacity(0.55),
+                    lineWidth: isSelected ? 2 : 1
+                )
         )
         .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func selectLease(_ lease: TaskMarketDesignLease) {
+        selectedLeaseID = lease.leaseID
+        guard !appState.isPreviewFixture,
+              let command = TaskMarketLeaseSelectionCommand(lease: lease) else {
+            return
+        }
+
+        Task {
+            await daemonController.loadLease(leaseID: command.leaseID)
+        }
     }
 
     private func leaseActionTitle(for lease: TaskMarketDesignLease) -> String {
@@ -758,12 +822,40 @@ public struct TaskMarketView: View {
         switch lease.status.lowercased() {
         case "active":
             return appState.locale == .zhCN ? "活跃" : "Active"
+        case "released":
+            return appState.locale == .zhCN ? "已释放" : "Released"
         case "expiring soon":
             return appState.locale == .zhCN ? "即将过期" : "Expiring Soon"
         case "expired":
             return appState.locale == .zhCN ? "已过期" : "Expired"
         default:
             return lease.status
+        }
+    }
+
+    private func normalizedLeaseStatus(_ state: String) -> String {
+        switch state.lowercased() {
+        case "active":
+            return "Active"
+        case "released":
+            return "Released"
+        case "expired":
+            return "Expired"
+        default:
+            return state
+        }
+    }
+
+    private func leaseTone(for state: String, fallback: String) -> String {
+        switch state.lowercased() {
+        case "active":
+            return "green"
+        case "expired":
+            return "red"
+        case "released":
+            return "gray"
+        default:
+            return fallback
         }
     }
 
