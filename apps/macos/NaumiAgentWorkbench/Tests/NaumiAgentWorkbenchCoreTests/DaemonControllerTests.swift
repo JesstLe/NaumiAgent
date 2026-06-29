@@ -1285,6 +1285,43 @@ final class DaemonControllerTests {
         await controller.stopEventStream()
     }
 
+    @Test @MainActor func eventStreamSnapshotAppliesSnapshotWithoutRESTRefresh() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-events"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let mission = makeMission(id: "mission-stream", sessionID: "sess-events")
+        let snapshot = makeSnapshot(sessionID: "sess-events", missions: [mission])
+
+        await configureWorkbenchListResults(for: api, sessionID: "sess-events")
+
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.startEventStream()
+
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-events"]
+        }
+
+        await eventProvider.emit(.snapshot(snapshot))
+
+        await waitUntil {
+            appState.snapshot == snapshot
+        }
+
+        #expect(await api.snapshotCallCount == 0)
+        #expect(appState.connectionState == .connected)
+        #expect(appState.snapshot == snapshot)
+        expectWorkbenchListsPopulated(appState)
+        #expect(appState.lastError == nil)
+
+        await controller.stopEventStream()
+    }
+
     @Test @MainActor func eventStreamConnectedAfterStaleRefreshesSnapshotAndWorkbenchLists() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-reconnect"

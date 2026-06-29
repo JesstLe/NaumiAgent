@@ -209,6 +209,16 @@ public final class DaemonController: Sendable {
                     await refreshWorkbenchListsAfterConnection()
                 }
             }
+        case .snapshot(let snapshot):
+            if let selectedSessionID = appState.selectedSessionID,
+               selectedSessionID != snapshot.sessionID {
+                return
+            }
+            appState.selectedSessionID = snapshot.sessionID
+            appState.snapshot = snapshot
+            appState.connectionState = .connected
+            appState.lastError = nil
+            await refreshWorkbenchListsAfterConnection()
         case .event:
             await refreshSnapshot()
             if appState.snapshot != nil {

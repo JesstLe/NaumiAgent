@@ -3,6 +3,7 @@ import Foundation
 /// Typed messages emitted by the Workbench event WebSocket.
 public enum WorkbenchEventStreamMessage: Equatable, Sendable {
     case connected(sessionID: String)
+    case snapshot(WorkbenchSnapshotDTO)
     case event(EventDTO)
     case refreshComplete(count: Int)
     case pong
@@ -67,8 +68,8 @@ extension URLSession: WorkbenchWebSocketTransporting {
 
 /// WebSocket client for Workbench audit/event updates.
 ///
-/// Snapshot remains the source of truth. This client only gives SwiftUI a typed
-/// event channel so higher layers can treat incoming events as refresh hints.
+/// Snapshot remains the source of truth. The stream asks the daemon for an
+/// initial snapshot, then carries event hints for lightweight follow-up refreshes.
 public actor WorkbenchEventClient: Sendable, WorkbenchEventProviding {
     public let baseURL: URL
     private let transport: WorkbenchWebSocketTransporting
@@ -89,7 +90,11 @@ public actor WorkbenchEventClient: Sendable, WorkbenchEventProviding {
         self.bearerToken = bearerToken
     }
 
-    public static func eventStreamURL(baseURL: URL, sessionID: String) throws(APIError) -> URL {
+    public static func eventStreamURL(
+        baseURL: URL,
+        sessionID: String,
+        includeSnapshot: Bool = false
+    ) throws(APIError) -> URL {
         var components = URLComponents(url: normalizedBaseURL(baseURL), resolvingAgainstBaseURL: false)
         switch components?.scheme {
         case "http":
@@ -106,6 +111,9 @@ public actor WorkbenchEventClient: Sendable, WorkbenchEventProviding {
             .filter { !$0.isEmpty }
             .joined(separator: "/")
         components?.percentEncodedPath = "/" + streamPath
+        if includeSnapshot {
+            components?.queryItems = [URLQueryItem(name: "include_snapshot", value: "true")]
+        }
 
         guard let url = components?.url else {
             throw .invalidURL
@@ -114,7 +122,11 @@ public actor WorkbenchEventClient: Sendable, WorkbenchEventProviding {
     }
 
     public func connect(sessionID: String) async throws(APIError) -> any WorkbenchEventStreaming {
-        let url = try Self.eventStreamURL(baseURL: baseURL, sessionID: sessionID)
+        let url = try Self.eventStreamURL(
+            baseURL: baseURL,
+            sessionID: sessionID,
+            includeSnapshot: true
+        )
         var request = URLRequest(url: url)
         if let bearerToken, !bearerToken.isEmpty {
             request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
@@ -261,6 +273,7 @@ private struct WorkbenchEventEnvelope: Decodable {
     let type: String
     let sessionID: String?
     let event: EventDTO?
+    let payload: WorkbenchSnapshotDTO?
     let message: String?
     let count: Int?
 
@@ -268,6 +281,7 @@ private struct WorkbenchEventEnvelope: Decodable {
         case type
         case sessionID = "session_id"
         case event
+        case payload
         case message
         case count
     }
@@ -276,6 +290,11 @@ private struct WorkbenchEventEnvelope: Decodable {
         switch type {
         case "connected":
             return .connected(sessionID: sessionID ?? "")
+        case "workbench/snapshot":
+            guard let payload else {
+                throw APIError.decodingFailed("workbench/snapshot missing payload")
+            }
+            return .snapshot(payload)
         case "workbench.event":
             guard let event else {
                 throw APIError.decodingFailed("workbench.event missing event payload")

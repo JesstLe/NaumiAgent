@@ -25,6 +25,19 @@ final class WorkbenchEventClientTests {
         #expect(url.absoluteString == "wss://localhost:9000/api/v1/workbench/sessions/sess-001/events/stream")
     }
 
+    @Test func eventStreamURLCanRequestInitialSnapshot() throws {
+        let url = try WorkbenchEventClient.eventStreamURL(
+            baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
+            sessionID: "sess-001",
+            includeSnapshot: true
+        )
+
+        #expect(
+            url.absoluteString
+                == "ws://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/events/stream?include_snapshot=true"
+        )
+    }
+
     @Test func connectStartsTaskAndAddsBearerToken() async throws {
         let transport = RecordingWorkbenchWebSocketTransport(messages: [
             .string(#"{"type":"connected","session_id":"sess-001"}"#),
@@ -38,7 +51,10 @@ final class WorkbenchEventClientTests {
         let stream = try await client.connect(sessionID: "sess-001")
         let request = try #require(await transport.requests.first)
 
-        #expect(request.url?.absoluteString == "ws://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/events/stream")
+        #expect(
+            request.url?.absoluteString
+                == "ws://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/events/stream?include_snapshot=true"
+        )
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer local-token")
         #expect(await transport.task.resumeCallCount == 1)
 
@@ -69,6 +85,30 @@ final class WorkbenchEventClientTests {
         #expect(event.id == "evt-001")
         #expect(event.type == "issue.claimed")
         #expect(event.payload["lease_id"] == .string("lease-001"))
+    }
+
+    @Test func nextDecodesWorkbenchSnapshotEnvelope() async throws {
+        let transport = RecordingWorkbenchWebSocketTransport(messages: [
+            .string(
+                """
+                {"type":"workbench/snapshot","version":1,"payload":{"session_id":"sess-001","missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+                """
+            ),
+        ])
+        let client = WorkbenchEventClient(
+            baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
+            transport: transport
+        )
+
+        let stream = try await client.connect(sessionID: "sess-001")
+        let message = try await stream.next()
+
+        guard case .snapshot(let snapshot) = message else {
+            Issue.record("Expected workbench snapshot, got \(message)")
+            return
+        }
+        #expect(snapshot.sessionID == "sess-001")
+        #expect(snapshot.missions.isEmpty)
     }
 
     @Test func nextDecodesRefreshCompleteEnvelope() async throws {
