@@ -149,6 +149,40 @@ final class WorkbenchAPIClientTests {
         }
     }
 
+    @Test func unauthorizedHTTPStatusThrowsAuthFailed() async {
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 401,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        let client = makeClient()
+        await #expect(throws: APIError.authFailed) {
+            try await client.fetchCapabilities()
+        }
+    }
+
+    @Test func forbiddenHTTPStatusThrowsAuthFailed() async {
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 403,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        let client = makeClient()
+        await #expect(throws: APIError.authFailed) {
+            try await client.fetchCapabilities()
+        }
+    }
+
     @Test func cannotConnectToHostThrowsNetworkFailure() async {
         MockURLProtocol.requestHandler = { _ in
             throw URLError(.cannotConnectToHost)

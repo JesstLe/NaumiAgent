@@ -26,4 +26,12 @@ struct APIErrorTests {
         #expect(error.technicalDetail.contains(originalDetail))
         #expect(error.technicalDetail.contains("networkFailure"))
     }
+
+    @Test func authFailedHasActionableLocalizedMessages() {
+        let error = APIError.authFailed
+
+        #expect(error.localizedMessage(locale: .zhCN) == "本地 daemon 认证失败，请检查访问令牌或重新连接")
+        #expect(error.localizedMessage(locale: .enUS) == "Local daemon authentication failed. Check the access token or reconnect.")
+        #expect(error.technicalDetail == "authFailed")
+    }
 }

@@ -4,6 +4,7 @@ import Foundation
 public enum APIError: Error, Equatable, Sendable {
     case invalidURL
     case invalidResponse
+    case authFailed
     case missingSelectedSession
     case capabilityUnavailable(String)
     case protocolVersionMismatch(expected: Int, actual: Int)
@@ -17,6 +18,8 @@ public enum APIError: Error, Equatable, Sendable {
             return AppStrings.Error.invalidURL(locale)
         case .invalidResponse:
             return AppStrings.Error.invalidResponse(locale)
+        case .authFailed:
+            return AppStrings.Error.authFailed(locale)
         case .missingSelectedSession:
             return AppStrings.Error.missingSelectedSession(locale)
         case .capabilityUnavailable(let capability):
@@ -42,6 +45,8 @@ public enum APIError: Error, Equatable, Sendable {
             return "invalidURL"
         case .invalidResponse:
             return "invalidResponse"
+        case .authFailed:
+            return "authFailed"
         case .missingSelectedSession:
             return "missingSelectedSession"
         case .capabilityUnavailable(let capability):
