@@ -429,3 +429,114 @@ def test_mac_workbench_http_flow_refreshes_dashboard_snapshot(tmp_path: Path) ->
             assert event_detail["payload"]["lease_id"] == claimed_lease["id"]
     finally:
         asyncio.run(engine.close())
+
+
+def test_mac_workbench_mutations_return_fresh_snapshots(tmp_path: Path) -> None:
+    """Exercise the SwiftUI WithSnapshot write path through real HTTP routes."""
+
+    async def _prepare_engine() -> tuple[_SmokeEngine, str]:
+        engine = _SmokeEngine(
+            db_path=tmp_path / "workbench-with-snapshot.db",
+            workspace_root=tmp_path,
+        )
+        session = await engine.session_store.create_session(
+            title="Mac Workbench WithSnapshot Smoke"
+        )
+        engine.task_store.set_session(session.id)
+        return engine, session.id
+
+    engine, session_id = asyncio.run(_prepare_engine())
+    app = FastAPI()
+    app.state.engine = engine
+    app.state.config = AppConfig(
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "workbench-with-snapshot.db"),
+            vector_db_path=str(tmp_path / "chroma"),
+        )
+    )
+    app.state.started_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+    app.include_router(workbench_router, prefix="/api/v1")
+
+    try:
+        with TestClient(app) as client:
+            mission_response = client.post(
+                f"/api/v1/workbench/sessions/{session_id}/missions",
+                params={"include_snapshot": "true"},
+                json={
+                    "title": "端到端快照刷新",
+                    "goal": "每次写操作后立即返回权威 snapshot",
+                },
+            )
+            assert mission_response.status_code == 201
+            mission_body = mission_response.json()
+            mission_id = mission_body["mission"]["id"]
+            assert mission_body["snapshot"]["session_id"] == session_id
+            assert [mission["id"] for mission in mission_body["snapshot"]["missions"]] == [
+                mission_id
+            ]
+
+            issue_response = client.post(
+                f"/api/v1/workbench/sessions/{session_id}/missions/{mission_id}/issues",
+                params={"include_snapshot": "true"},
+                json={
+                    "title": "实现 WithSnapshot smoke",
+                    "description": "验证 Mac App 写操作刷新 dashboard",
+                    "blocked_by": [],
+                    "acceptance_criteria": ["写操作返回 fresh snapshot"],
+                    "parallel_mode": "exclusive",
+                    "risk_level": "medium",
+                },
+            )
+            assert issue_response.status_code == 201
+            issue_body = issue_response.json()
+            task_id = issue_body["issue"]["task_id"]
+            assert [issue["task_id"] for issue in issue_body["snapshot"]["issues"]] == [
+                task_id
+            ]
+            assert [task["subject"] for task in issue_body["snapshot"]["tasks"]] == [
+                "实现 WithSnapshot smoke"
+            ]
+
+            claim_response = client.post(
+                f"/api/v1/workbench/sessions/{session_id}/issues/{task_id}/claim",
+                params={"include_snapshot": "true"},
+                json={
+                    "agent_id": "Backend-Agent",
+                    "duration_minutes": 30,
+                    "worktree_name": "wt-with-snapshot",
+                },
+            )
+            assert claim_response.status_code == 201
+            claim_body = claim_response.json()
+            lease_id = claim_body["lease"]["id"]
+            assert [lease["id"] for lease in claim_body["snapshot"]["leases"]] == [
+                lease_id
+            ]
+            assert claim_body["snapshot"]["issues"][0]["related_worktree"] == (
+                "wt-with-snapshot"
+            )
+
+            validation_response = client.post(
+                f"/api/v1/workbench/sessions/{session_id}/validation-runs",
+                params={"include_snapshot": "true"},
+                json={
+                    "task_id": task_id,
+                    "actor": "Backend-Agent",
+                    "argv": [sys.executable, "-c", "print('with snapshot ok')"],
+                    "cwd": str(tmp_path),
+                },
+            )
+            assert validation_response.status_code == 201
+            validation_body = validation_response.json()
+            assert validation_body["validation_run"]["status"] == "passed"
+            assert [
+                run["id"] for run in validation_body["snapshot"]["validation_runs"]
+            ] == [validation_body["validation_run"]["id"]]
+            assert [event["type"] for event in validation_body["snapshot"]["events"]] == [
+                "validation.completed",
+                "issue.claimed",
+                "issue.created",
+                "mission.created",
+            ]
+    finally:
+        asyncio.run(engine.close())
