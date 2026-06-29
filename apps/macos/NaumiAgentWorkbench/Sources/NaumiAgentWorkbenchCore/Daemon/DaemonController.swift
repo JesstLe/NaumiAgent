@@ -84,6 +84,8 @@ public final class DaemonController: Sendable {
             await startEventStreamIfAvailable()
         } catch {
             await stopEventStream()
+            appState.daemonStatus = nil
+            appState.capabilities = nil
             appState.lastError = error
             appState.connectionState = .disconnected
         }
