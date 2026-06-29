@@ -3560,6 +3560,34 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
+    @Test @MainActor func keepWorktreeSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [
+            makeMission(id: "mission-stale", sessionID: "sess-missing")
+        ])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setKeepWorktreeWithSnapshotResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.keepWorktree(
+            name: "wt-stale",
+            actor: "Reviewer-Agent",
+            reason: "等待人工审查"
+        )
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+        #expect(await api.keepWorktreeWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
+    }
+
     @Test @MainActor func removeWorktreeSuccessUsesIncludedSnapshotAndRefreshesLists() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
