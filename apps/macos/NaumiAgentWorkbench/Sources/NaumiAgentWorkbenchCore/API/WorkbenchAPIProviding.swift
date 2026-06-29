@@ -16,6 +16,14 @@ public protocol WorkbenchAPIProviding: Sendable {
         systemPrompt: String?
     ) async throws(APIError) -> SessionDTO
 
+    /// Creates a Workbench session and returns the backend's startup payload,
+    /// including daemon metadata, capabilities, session registry, and snapshot.
+    func createWorkbenchSession(
+        title: String?,
+        model: String?,
+        systemPrompt: String?
+    ) async throws(APIError) -> WorkbenchBootstrapDTO
+
     /// Fetches audit events for the given session, optionally filtered by event fields.
     func fetchEvents(
         sessionID: String,

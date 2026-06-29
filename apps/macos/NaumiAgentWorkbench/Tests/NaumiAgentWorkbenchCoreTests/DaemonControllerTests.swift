@@ -10,6 +10,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var snapshotResult: Result<WorkbenchSnapshotDTO, APIError>?
     var sessionsResult: Result<SessionListDTO, APIError>?
     var createSessionResult: Result<SessionDTO, APIError>?
+    var createWorkbenchSessionResult: Result<WorkbenchBootstrapDTO, APIError>?
     var eventsResult: Result<WorkbenchEventsDTO, APIError>?
     var eventResult: Result<EventDTO, APIError>?
     var validationRunsResult: Result<ValidationRunsDTO, APIError>?
@@ -64,6 +65,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var runValidationWithSnapshotResult: Result<ValidationResultSnapshotDTO, APIError>?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
+    var createWorkbenchSessionCallCount: Int = 0
     var statusCallCount: Int = 0
     var capabilitiesCallCount: Int = 0
     var sessionsCallCount: Int = 0
@@ -156,6 +158,23 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
             "systemPrompt": systemPrompt,
         ])
         guard let result = createSessionResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func createWorkbenchSession(
+        title: String?,
+        model: String?,
+        systemPrompt: String?
+    ) async throws(APIError) -> WorkbenchBootstrapDTO {
+        createWorkbenchSessionCallCount += 1
+        createdSessions.append([
+            "title": title,
+            "model": model,
+            "systemPrompt": systemPrompt,
+        ])
+        guard let result = createWorkbenchSessionResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -1566,8 +1585,14 @@ final class DaemonControllerTests {
         appState.sessions = [existingSession]
 
         let api = FakeWorkbenchAPIProvider()
-        await api.setCreateSessionResult(.success(createdSession))
-        await api.setSnapshotResult(.success(snapshot))
+        await api.setCreateWorkbenchSessionResult(.success(WorkbenchBootstrapDTO(
+            daemonStatus: makeStatus(),
+            capabilities: makeCapabilities(),
+            sessions: [createdSession],
+            totalSessions: 2,
+            selectedSessionID: "sess-new",
+            snapshot: snapshot
+        )))
         await configureWorkbenchListResults(for: api, sessionID: "sess-new")
 
         let controller = DaemonController(appState: appState, apiProvider: api)
@@ -1582,9 +1607,13 @@ final class DaemonControllerTests {
             "model": "gpt-5",
             "systemPrompt": "默认中文治理工作台",
         ]])
+        #expect(await api.createWorkbenchSessionCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
         #expect(appState.sessions == [createdSession, existingSession])
         #expect(appState.selectedSessionID == "sess-new")
         #expect(appState.snapshot == snapshot)
+        #expect(appState.daemonStatus == makeStatus())
+        #expect(appState.capabilities == makeCapabilities())
         #expect(appState.lastError == nil)
         expectWorkbenchListsPopulated(appState)
     }
@@ -1600,7 +1629,7 @@ final class DaemonControllerTests {
         appState.issues = [issue]
 
         let api = FakeWorkbenchAPIProvider()
-        await api.setCreateSessionResult(.failure(.httpStatus(503)))
+        await api.setCreateWorkbenchSessionResult(.failure(.httpStatus(503)))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createSession(
@@ -1614,6 +1643,7 @@ final class DaemonControllerTests {
             "model": "gpt-5",
             "systemPrompt": "默认中文治理工作台",
         ]])
+        #expect(await api.createWorkbenchSessionCallCount == 1)
         #expect(await api.snapshotCallCount == 0)
         #expect(appState.sessions == [existingSession])
         #expect(appState.selectedSessionID == "sess-old")
@@ -4505,6 +4535,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setCreateSessionResult(_ result: Result<SessionDTO, APIError>) {
         createSessionResult = result
+    }
+
+    fileprivate func setCreateWorkbenchSessionResult(_ result: Result<WorkbenchBootstrapDTO, APIError>) {
+        createWorkbenchSessionResult = result
     }
 
     fileprivate func setEventsResult(_ result: Result<WorkbenchEventsDTO, APIError>) {
