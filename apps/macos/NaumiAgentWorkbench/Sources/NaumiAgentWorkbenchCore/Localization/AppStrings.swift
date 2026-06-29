@@ -848,6 +848,12 @@ public enum AppStrings {
                 : "Local daemon authentication failed. Check the access token or reconnect."
         }
 
+        public static func sessionUnavailable(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "当前会话不可用，请刷新或选择另一个会话"
+                : "The current session is unavailable. Refresh or select another session."
+        }
+
         public static func missingSelectedSession(_ locale: AppLocale) -> String {
             locale == .zhCN ? "请先选择一个会话" : "Select a session first"
         }

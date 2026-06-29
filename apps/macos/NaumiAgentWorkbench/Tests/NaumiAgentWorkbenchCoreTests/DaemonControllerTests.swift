@@ -1573,6 +1573,33 @@ final class DaemonControllerTests {
         await controller.stopEventStream()
     }
 
+    @Test @MainActor func eventStreamSessionNotFoundRecordsSessionUnavailable() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+
+        await controller.startEventStream()
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-missing"]
+        }
+        await eventProvider.emit(.error(message: "Session not found"))
+
+        await waitUntil {
+            appState.connectionState == .stale
+        }
+
+        #expect(appState.lastError == .sessionUnavailable)
+
+        await controller.stopEventStream()
+    }
+
     @Test @MainActor func refreshConnectionSnapshotFailureSkipsPreWarmingAndKeepsSnapshotError() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-existing"
