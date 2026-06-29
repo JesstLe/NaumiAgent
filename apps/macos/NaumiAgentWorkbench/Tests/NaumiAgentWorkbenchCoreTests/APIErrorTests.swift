@@ -34,4 +34,12 @@ struct APIErrorTests {
         #expect(error.localizedMessage(locale: .enUS) == "Local daemon authentication failed. Check the access token or reconnect.")
         #expect(error.technicalDetail == "authFailed")
     }
+
+    @Test func sessionUnavailableHasActionableLocalizedMessages() {
+        let error = APIError.sessionUnavailable
+
+        #expect(error.localizedMessage(locale: .zhCN) == "当前会话不可用，请刷新或选择另一个会话")
+        #expect(error.localizedMessage(locale: .enUS) == "The current session is unavailable. Refresh or select another session.")
+        #expect(error.technicalDetail == "sessionUnavailable")
+    }
 }

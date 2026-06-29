@@ -241,6 +241,9 @@ public final class DaemonController: Sendable {
         if normalizedMessage == "invalid api key" || normalizedMessage == "unauthorized" {
             return .authFailed
         }
+        if normalizedMessage == "session not found" {
+            return .sessionUnavailable
+        }
         return .networkFailure(message)
     }
 
