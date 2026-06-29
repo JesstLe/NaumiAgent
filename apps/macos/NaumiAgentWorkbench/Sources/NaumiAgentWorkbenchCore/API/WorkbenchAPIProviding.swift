@@ -30,6 +30,7 @@ public protocol WorkbenchAPIProviding: Sendable {
         eventType: String?,
         subjectID: String?,
         actor: String?,
+        since: String?,
         limit: Int
     ) async throws(APIError) -> WorkbenchEventsDTO
 

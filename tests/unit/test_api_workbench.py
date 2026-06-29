@@ -592,6 +592,7 @@ class _FakeWorkbenchService:
         event_type: str | None = None,
         subject_id: str | None = None,
         actor: str | None = None,
+        since: str | None = None,
         limit: int = 50,
     ):
         if self._list_events_error is not None:
@@ -602,6 +603,7 @@ class _FakeWorkbenchService:
                 "event_type": event_type,
                 "subject_id": subject_id,
                 "actor": actor,
+                "since": since,
                 "limit": limit,
             }
         )
@@ -620,6 +622,7 @@ class _FakeWorkbenchService:
             "event_type": event_type,
             "subject_id": subject_id,
             "actor": actor,
+            "since": since,
             "limit": limit,
         }
 
@@ -1510,6 +1513,7 @@ async def test_get_events_endpoint_returns_events_and_limit() -> None:
             "event_type": None,
             "subject_id": None,
             "actor": None,
+            "since": None,
             "limit": 25,
         }
     ]
@@ -1528,6 +1532,7 @@ async def test_get_events_endpoint_returns_events_and_limit() -> None:
         "event_type": None,
         "subject_id": None,
         "actor": None,
+        "since": None,
         "limit": 25,
     }
 
@@ -1573,6 +1578,7 @@ async def test_get_events_endpoint_forwards_filters_and_returns_them() -> None:
         event_type="issue.created",
         subject_id="task-2",
         actor="Planner-Agent",
+        since="2026-06-27T10:00:00+00:00",
         auth="test",
     )
 
@@ -1583,6 +1589,7 @@ async def test_get_events_endpoint_forwards_filters_and_returns_them() -> None:
             "event_type": "issue.created",
             "subject_id": "task-2",
             "actor": "Planner-Agent",
+            "since": "2026-06-27T10:00:00+00:00",
             "limit": 25,
         }
     ]
@@ -1601,6 +1608,7 @@ async def test_get_events_endpoint_forwards_filters_and_returns_them() -> None:
         "event_type": "issue.created",
         "subject_id": "task-2",
         "actor": "Planner-Agent",
+        "since": "2026-06-27T10:00:00+00:00",
         "limit": 25,
     }
 
@@ -1618,6 +1626,7 @@ def test_get_events_route_accepts_type_query_alias() -> None:
             "type": "issue.created",
             "subject_id": "task-2",
             "actor": "Planner-Agent",
+            "since": "2026-06-27T10:00:00+00:00",
             "limit": "7",
         },
     )
@@ -1629,10 +1638,12 @@ def test_get_events_route_accepts_type_query_alias() -> None:
             "event_type": "issue.created",
             "subject_id": "task-2",
             "actor": "Planner-Agent",
+            "since": "2026-06-27T10:00:00+00:00",
             "limit": 7,
         }
     ]
     assert response.json()["event_type"] == "issue.created"
+    assert response.json()["since"] == "2026-06-27T10:00:00+00:00"
 
 
 def test_get_event_route_returns_single_event() -> None:
@@ -1764,6 +1775,7 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
             "event_type": None,
             "subject_id": None,
             "actor": None,
+            "since": None,
             "limit": 50,
         },
         {
@@ -1771,6 +1783,7 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
             "event_type": "issue.created",
             "subject_id": "task-2",
             "actor": "Planner-Agent",
+            "since": None,
             "limit": 7,
         }
     ]
@@ -1826,6 +1839,7 @@ async def test_workbench_event_stream_sends_initial_audit_events_on_connect() ->
             "event_type": None,
             "subject_id": None,
             "actor": None,
+            "since": None,
             "limit": 50,
         }
     ]

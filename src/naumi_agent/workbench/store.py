@@ -626,6 +626,7 @@ class WorkbenchStore:
         event_type: str | None = None,
         subject_id: str | None = None,
         actor: str | None = None,
+        since: str | None = None,
     ) -> list[WorkbenchEvent]:
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
@@ -641,6 +642,9 @@ class WorkbenchStore:
             if actor is not None:
                 filters.append("actor = ?")
                 params.append(actor)
+            if since is not None:
+                filters.append("timestamp > ?")
+                params.append(since)
             params.append(limit)
             where_clause = " AND ".join(filters)
             cursor = await db.execute(

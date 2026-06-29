@@ -82,6 +82,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         eventType: String? = nil,
         subjectID: String? = nil,
         actor: String? = nil,
+        since: String? = nil,
         limit: Int
     ) async throws(APIError) -> WorkbenchEventsDTO {
         var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
@@ -93,6 +94,9 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         }
         if let actor, !actor.isEmpty {
             queryItems.append(URLQueryItem(name: "actor", value: actor))
+        }
+        if let since, !since.isEmpty {
+            queryItems.append(URLQueryItem(name: "since", value: since))
         }
         return try await get(
             path: encodePath("workbench", "sessions", sessionID, "events"),

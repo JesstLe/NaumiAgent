@@ -540,6 +540,7 @@ class WorkbenchService:
         event_type: str | None = None,
         subject_id: str | None = None,
         actor: str | None = None,
+        since: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
         events = await self._workbench_store.list_events(
@@ -547,6 +548,7 @@ class WorkbenchService:
             event_type=event_type,
             subject_id=subject_id,
             actor=actor,
+            since=since,
             limit=limit,
         )
         return {
@@ -554,6 +556,7 @@ class WorkbenchService:
             "event_type": event_type,
             "subject_id": subject_id,
             "actor": actor,
+            "since": since,
             "limit": limit,
         }
 

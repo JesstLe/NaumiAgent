@@ -1062,3 +1062,47 @@ async def test_list_events_filters_by_type_subject_id_actor_and_returns_newest_f
         "s2", event_type="mission.created", limit=50
     )
     assert [e.id for e in other_session] == [event_other.id]
+
+
+@pytest.mark.asyncio
+async def test_list_events_filters_by_since_timestamp(store: WorkbenchStore) -> None:
+    event_a = await store.append_event(
+        session_id="s",
+        type="mission.created",
+        actor="Human",
+        subject_id="mission-1",
+        payload={"title": "A"},
+    )
+    event_b = await store.append_event(
+        session_id="s",
+        type="issue.created",
+        actor="Planner-Agent",
+        subject_id="task-1",
+        payload={"detail": "B"},
+    )
+    event_c = await store.append_event(
+        session_id="s",
+        type="validation.passed",
+        actor="Test-Agent",
+        subject_id="task-1",
+        payload={"detail": "C"},
+    )
+    async with aiosqlite.connect(store._db_path) as db:
+        await db.executemany(
+            "UPDATE workbench_audit_events SET timestamp = ? WHERE id = ?",
+            [
+                ("2026-06-27T10:00:00+00:00", event_a.id),
+                ("2026-06-27T10:01:00+00:00", event_b.id),
+                ("2026-06-27T10:02:00+00:00", event_c.id),
+            ],
+        )
+        await db.commit()
+
+    newer = await store.list_events(
+        "s",
+        event_type="issue.created",
+        since="2026-06-27T10:00:00+00:00",
+        limit=50,
+    )
+
+    assert [event.id for event in newer] == [event_b.id]
