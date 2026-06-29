@@ -3168,6 +3168,35 @@ final class DaemonControllerTests {
         #expect(appState.contextSnapshots.isEmpty)
     }
 
+    @Test @MainActor func recordContextHealthSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setRecordContextHealthWithSnapshotResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.recordContextHealth(
+            taskID: "task-001",
+            agentID: "agent-001",
+            minutesSinceSync: 5,
+            tokenLoadRatio: 0.75,
+            policyConflict: false,
+            actor: "Human"
+        )
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+        #expect(await api.recordContextHealthWithSnapshotCallCount == 1)
+        #expect(await api.snapshotCallCount == 0)
+    }
+
     @Test @MainActor func recordContextHealthFailurePreservesOldList() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
