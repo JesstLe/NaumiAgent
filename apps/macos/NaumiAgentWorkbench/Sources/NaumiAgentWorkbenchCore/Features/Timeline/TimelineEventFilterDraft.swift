@@ -5,15 +5,18 @@ public struct TimelineEventFilterDraft: Equatable, Sendable {
     public var eventType: String
     public var actor: String
     public var subjectID: String
+    public var since: String
 
     public init(
         eventType: String = "",
         actor: String = "",
-        subjectID: String = ""
+        subjectID: String = "",
+        since: String = ""
     ) {
         self.eventType = eventType
         self.actor = actor
         self.subjectID = subjectID
+        self.since = since
     }
 
     public var trimmedEventType: String {
@@ -28,6 +31,10 @@ public struct TimelineEventFilterDraft: Equatable, Sendable {
         subjectID.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    public var trimmedSince: String {
+        since.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     public var eventTypeQueryValue: String? {
         trimmedEventType.isEmpty ? nil : trimmedEventType
     }
@@ -40,7 +47,14 @@ public struct TimelineEventFilterDraft: Equatable, Sendable {
         trimmedSubjectID.isEmpty ? nil : trimmedSubjectID
     }
 
+    public var sinceQueryValue: String? {
+        trimmedSince.isEmpty ? nil : trimmedSince
+    }
+
     public var hasFilters: Bool {
-        eventTypeQueryValue != nil || actorQueryValue != nil || subjectIDQueryValue != nil
+        eventTypeQueryValue != nil
+            || actorQueryValue != nil
+            || subjectIDQueryValue != nil
+            || sinceQueryValue != nil
     }
 }

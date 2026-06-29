@@ -9,6 +9,7 @@ struct AppStringsTimelineTests {
         #expect(AppStrings.Timeline.actorLabel(.zhCN) == "执行者")
         #expect(AppStrings.Timeline.subjectLabel(.zhCN) == "对象")
         #expect(AppStrings.Timeline.eventTypeLabel(.zhCN) == "事件类型")
+        #expect(AppStrings.Timeline.sinceLabel(.zhCN) == "起始时间")
         #expect(AppStrings.Timeline.applyFilterButton(.zhCN) == "应用筛选")
         #expect(AppStrings.Timeline.clearFilterButton(.zhCN) == "清除")
         #expect(AppStrings.Timeline.refreshButton(.zhCN) == "刷新")
@@ -21,6 +22,7 @@ struct AppStringsTimelineTests {
         #expect(AppStrings.Timeline.actorLabel(.enUS) == "Actor")
         #expect(AppStrings.Timeline.subjectLabel(.enUS) == "Subject")
         #expect(AppStrings.Timeline.eventTypeLabel(.enUS) == "Event Type")
+        #expect(AppStrings.Timeline.sinceLabel(.enUS) == "Since")
         #expect(AppStrings.Timeline.applyFilterButton(.enUS) == "Apply Filter")
         #expect(AppStrings.Timeline.clearFilterButton(.enUS) == "Clear")
         #expect(AppStrings.Timeline.refreshButton(.enUS) == "Refresh")
@@ -34,6 +36,7 @@ struct AppStringsTimelineTests {
             AppStrings.Timeline.actorLabel,
             AppStrings.Timeline.subjectLabel,
             AppStrings.Timeline.eventTypeLabel,
+            AppStrings.Timeline.sinceLabel,
             AppStrings.Timeline.applyFilterButton,
             AppStrings.Timeline.clearFilterButton,
             AppStrings.Timeline.refreshButton,

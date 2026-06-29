@@ -811,6 +811,10 @@ public enum AppStrings {
             locale == .zhCN ? "事件类型" : "Event Type"
         }
 
+        public static func sinceLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "起始时间" : "Since"
+        }
+
         public static func applyFilterButton(_ locale: AppLocale) -> String {
             locale == .zhCN ? "应用筛选" : "Apply Filter"
         }

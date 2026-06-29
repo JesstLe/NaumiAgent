@@ -168,6 +168,9 @@ public struct TimelineView: View {
             TextField(AppStrings.Timeline.subjectLabel(appState.locale), text: $filterDraft.subjectID)
                 .textFieldStyle(.roundedBorder)
 
+            TextField(AppStrings.Timeline.sinceLabel(appState.locale), text: $filterDraft.since)
+                .textFieldStyle(.roundedBorder)
+
             HStack(spacing: 8) {
                 Button {
                     Task {
@@ -211,6 +214,7 @@ public struct TimelineView: View {
             eventType: draft.eventTypeQueryValue,
             subjectID: draft.subjectIDQueryValue,
             actor: draft.actorQueryValue,
+            since: draft.sinceQueryValue,
             limit: 50
         )
         isRefreshingEvents = false
