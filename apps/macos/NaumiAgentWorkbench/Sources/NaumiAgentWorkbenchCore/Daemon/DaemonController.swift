@@ -226,7 +226,11 @@ public final class DaemonController: Sendable {
             }
         case .error(let message):
             appState.connectionState = .stale
-            appState.lastError = apiError(forEventStreamError: message)
+            let error = apiError(forEventStreamError: message)
+            appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
         case .refreshComplete:
             break
         case .pong:
@@ -1060,6 +1064,11 @@ public final class DaemonController: Sendable {
         appState.selectedApproval = nil
     }
 
+    private func clearUnavailableSelectedSession() {
+        appState.selectedSessionID = nil
+        clearSessionScopedState()
+    }
+
     /// Refreshes the snapshot for the currently selected session.
     ///
     /// When no session is selected, the most recent session from `GET /sessions`
@@ -1093,8 +1102,7 @@ public final class DaemonController: Sendable {
             appState.snapshot = snapshot
         } catch APIError.sessionUnavailable {
             appState.lastError = APIError.sessionUnavailable
-            appState.selectedSessionID = nil
-            clearSessionScopedState()
+            clearUnavailableSelectedSession()
         } catch {
             appState.lastError = error
             appState.snapshot = nil

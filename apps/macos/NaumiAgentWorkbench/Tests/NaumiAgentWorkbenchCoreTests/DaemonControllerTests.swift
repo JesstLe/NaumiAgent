@@ -1576,6 +1576,9 @@ final class DaemonControllerTests {
     @Test @MainActor func eventStreamSessionNotFoundRecordsSessionUnavailable() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
         appState.connectionState = .connected
         let api = FakeWorkbenchAPIProvider()
         let eventProvider = FakeWorkbenchEventProvider()
@@ -1596,6 +1599,10 @@ final class DaemonControllerTests {
         }
 
         #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
 
         await controller.stopEventStream()
     }
