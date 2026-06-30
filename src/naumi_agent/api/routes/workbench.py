@@ -1268,7 +1268,10 @@ async def get_decision(
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
-    session = await engine.session_store.load(session_id)
+    try:
+        session = await engine.session_store.load(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     if not await engine.load_session(session_id):
