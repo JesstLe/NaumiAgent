@@ -1294,6 +1294,7 @@ class _FakeEngine:
         worktree_manager: FakeWorktreeManager | None = None,
         load_session_result: bool | None = None,
         load_session_results: dict[str, bool] | None = None,
+        load_session_error: Exception | None = None,
     ) -> None:
         self.session_store = _FakeSessionStore(exists)
         self.workbench_service = _FakeWorkbenchService()
@@ -1302,10 +1303,13 @@ class _FakeEngine:
         self.worktree_manager = worktree_manager or FakeWorktreeManager()
         self.load_session_result = load_session_result
         self.load_session_results = load_session_results or {}
+        self.load_session_error = load_session_error
         self.loaded: list[str] = []
 
     async def load_session(self, session_id: str) -> bool:
         self.loaded.append(session_id)
+        if self.load_session_error is not None:
+            raise self.load_session_error
         if session_id in self.load_session_results:
             return self.load_session_results[session_id]
         if self.load_session_result is not None:
@@ -1976,6 +1980,25 @@ async def test_workbench_event_stream_reports_unavailable_session_store() -> Non
     assert engine.workbench_service.listed_events == []
     assert websocket.sent_json == [
         {"type": "error", "message": "会话存储暂不可用"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_workbench_event_stream_reports_unavailable_runtime_session() -> None:
+    engine = _FakeEngine(
+        exists=True,
+        load_session_error=RuntimeError("运行态会话暂不可用"),
+    )
+    websocket = _RecordingWorkbenchWebSocket(engine)
+
+    await websocket_workbench_events(websocket, "sess-1")
+
+    assert websocket.accepted is True
+    assert websocket.closed is True
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_events == []
+    assert websocket.sent_json == [
+        {"type": "error", "message": "运行态会话暂不可用"},
     ]
 
 

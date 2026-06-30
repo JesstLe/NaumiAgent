@@ -566,7 +566,13 @@ async def websocket_workbench_events(websocket: WebSocket, session_id: str):
         await websocket.send_json({"type": "error", "message": "Session not found"})
         await websocket.close()
         return
-    if not await engine.load_session(session_id):
+    try:
+        session_loaded = await engine.load_session(session_id)
+    except RuntimeError as exc:
+        await websocket.send_json({"type": "error", "message": str(exc)})
+        await websocket.close()
+        return
+    if not session_loaded:
         await websocket.send_json({"type": "error", "message": "Session not found"})
         await websocket.close()
         return
