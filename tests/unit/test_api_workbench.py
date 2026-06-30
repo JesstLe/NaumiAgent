@@ -89,11 +89,14 @@ from naumi_agent.worktree.models import WorktreeRecord, WorktreeStatus
 class _FakeSessionStore:
     def __init__(self, exists: bool) -> None:
         self.exists = exists
+        self.load_error: Exception | None = None
         self.list_sessions_error: Exception | None = None
         self.create_session_error: Exception | None = None
         self.created_sessions: list[dict[str, str | None]] = []
 
     async def load(self, session_id: str):
+        if self.load_error is not None:
+            raise self.load_error
         if not self.exists:
             return None
         return SimpleNamespace(id=session_id)
@@ -1399,6 +1402,19 @@ async def test_workbench_snapshot_endpoint_requires_existing_session() -> None:
 
     assert exc.value.status_code == 404
     assert exc.value.detail == "Session not found"
+
+
+@pytest.mark.asyncio
+async def test_workbench_snapshot_endpoint_reports_unavailable_session_store() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store.load_error = RuntimeError("会话存储暂不可用")
+
+    with pytest.raises(HTTPException) as exc:
+        await get_workbench_snapshot("sess-1", _fake_request(engine), auth="test")
+
+    assert engine.loaded == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "会话存储暂不可用"
 
 
 @pytest.mark.asyncio
