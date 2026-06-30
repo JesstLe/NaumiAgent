@@ -5989,6 +5989,28 @@ async def test_get_worktrees_endpoint_requires_existing_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_worktrees_endpoint_reports_unavailable_session_store() -> None:
+    worktree_manager = FakeWorktreeManager()
+    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    engine.session_store.load_error = RuntimeError("会话存储暂不可用")
+
+    with pytest.raises(HTTPException) as exc:
+        await get_worktrees(
+            "sess-1",
+            _fake_request(engine),
+            task_id=None,
+            status=None,
+            limit=10,
+            auth="test",
+        )
+
+    assert engine.loaded == []
+    assert worktree_manager.status_calls == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "会话存储暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_get_worktree_endpoint_requires_existing_session() -> None:
     engine = _FakeEngine(exists=False)
 
