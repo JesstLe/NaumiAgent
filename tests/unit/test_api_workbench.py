@@ -2465,6 +2465,27 @@ async def test_create_context_health_endpoint_requires_existing_session() -> Non
 
 
 @pytest.mark.asyncio
+async def test_create_context_health_endpoint_reports_unavailable_session_store() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store.load_error = RuntimeError("会话存储暂不可用")
+    body = ContextHealthRecord(
+        agent_id="Agent-A",
+        minutes_since_sync=75,
+        token_load_ratio=0.2,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_context_health_snapshot(
+            "sess-1", "task-2", body, _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == []
+    assert engine.workbench_service.recorded_context_health == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "会话存储暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_create_context_health_endpoint_records_snapshot() -> None:
     engine = _FakeEngine(exists=True)
     body = ContextHealthRecord(
