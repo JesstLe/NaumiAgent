@@ -3004,6 +3004,24 @@ async def test_attach_issue_endpoint_requires_existing_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_attach_issue_endpoint_reports_unavailable_session_store() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store.load_error = RuntimeError("会话存储暂不可用")
+    body = IssueAttach(task_id="task-1", acceptance_criteria=["认领冲突必须被拒绝"])
+
+    with pytest.raises(HTTPException) as exc:
+        await attach_workbench_issue(
+            "sess-1", "mission-1", body, _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == []
+    assert engine.workbench_service.attached_issues == []
+    assert engine.workbench_service.created_issues == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "会话存储暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_attach_issue_endpoint_returns_attached_issue() -> None:
     engine = _FakeEngine(exists=True)
     body = IssueAttach(
