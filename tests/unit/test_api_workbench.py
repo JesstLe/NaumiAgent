@@ -1547,6 +1547,21 @@ async def test_get_events_endpoint_reports_unavailable_session_store() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_events_endpoint_reports_runtime_session_load_failure() -> None:
+    engine = _FakeEngine(
+        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_workbench_events("sess-1", _fake_request(engine), limit=10, auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_events == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "运行态会话暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_get_events_endpoint_returns_events_and_limit() -> None:
     engine = _FakeEngine(exists=True)
 
