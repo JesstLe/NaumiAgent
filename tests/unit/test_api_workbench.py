@@ -3522,6 +3522,20 @@ async def test_get_failure_endpoint_returns_404_for_missing_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_failure_endpoint_reports_unavailable_session_store() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store.load_error = RuntimeError("会话存储暂不可用")
+
+    with pytest.raises(HTTPException) as exc:
+        await get_failure("sess-1", "failure-2", _fake_request(engine), auth="test")
+
+    assert engine.loaded == []
+    assert engine.workbench_service.requested_failures == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "会话存储暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_get_failure_endpoint_reports_invalid_failure_request() -> None:
     engine = _FakeEngine(exists=True)
     engine.workbench_service.set_get_failure_error(ValueError("failure id is invalid"))
