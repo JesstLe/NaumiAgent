@@ -4859,6 +4859,21 @@ async def test_create_decision_endpoint_requires_existing_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_decision_endpoint_reports_unavailable_session_store() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store.load_error = RuntimeError("会话存储暂不可用")
+    body = DecisionCreate(title="采用 SwiftUI 原生壳", content="保持 Mac 体验")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_decision("sess-1", "mission-1", body, _fake_request(engine), auth="test")
+
+    assert engine.loaded == []
+    assert engine.workbench_service.created_decisions == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "会话存储暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_create_decision_endpoint_returns_created_decision() -> None:
     engine = _FakeEngine(exists=True)
     body = DecisionCreate(
