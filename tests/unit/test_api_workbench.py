@@ -2783,6 +2783,22 @@ async def test_get_missions_endpoint_requires_existing_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_missions_endpoint_reports_unavailable_session_store() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store.load_error = RuntimeError("会话存储暂不可用")
+
+    with pytest.raises(HTTPException) as exc:
+        await get_missions(
+            "sess-1", _fake_request(engine), status=None, limit=10, auth="test"
+        )
+
+    assert engine.loaded == []
+    assert engine.workbench_service.listed_missions == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "会话存储暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_get_missions_endpoint_returns_missions_and_params() -> None:
     engine = _FakeEngine(exists=True)
 
