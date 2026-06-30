@@ -1963,6 +1963,23 @@ async def test_workbench_event_stream_rejects_invalid_api_key_when_configured() 
 
 
 @pytest.mark.asyncio
+async def test_workbench_event_stream_reports_unavailable_session_store() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store.load_error = RuntimeError("会话存储暂不可用")
+    websocket = _RecordingWorkbenchWebSocket(engine)
+
+    await websocket_workbench_events(websocket, "sess-1")
+
+    assert websocket.accepted is True
+    assert websocket.closed is True
+    assert engine.loaded == []
+    assert engine.workbench_service.listed_events == []
+    assert websocket.sent_json == [
+        {"type": "error", "message": "会话存储暂不可用"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_workbench_event_stream_accepts_valid_api_key_when_configured() -> None:
     engine = _FakeEngine(exists=True)
     config = SimpleNamespace(api=SimpleNamespace(api_keys=["local-token"]))
