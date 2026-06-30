@@ -3694,6 +3694,21 @@ async def test_resolve_approval_endpoint_requires_existing_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolve_approval_endpoint_reports_unavailable_session_store() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.session_store.load_error = RuntimeError("会话存储暂不可用")
+    body = ApprovalResolve(actor="Human", state=ApprovalState.APPROVED)
+
+    with pytest.raises(HTTPException) as exc:
+        await resolve_approval("sess-1", "approval-1", body, _fake_request(engine), auth="test")
+
+    assert engine.loaded == []
+    assert engine.workbench_service.resolved_approvals == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "会话存储暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_resolve_approval_endpoint_returns_resolved_approval() -> None:
     engine = _FakeEngine(exists=True)
     engine.workbench_service.set_resolve_approval_result(
