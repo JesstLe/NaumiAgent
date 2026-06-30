@@ -35,6 +35,7 @@ from naumi_agent.api.routes.workbench import (
     create_validation_run,
     create_workbench_mission,
     create_workbench_session,
+    delete_worktree,
     expire_workbench_leases,
     get_agent_profile,
     get_agent_profiles,
@@ -6383,6 +6384,28 @@ def test_keep_worktree_route_returns_404_for_missing_worktree() -> None:
     assert engine.worktree_manager.keep_calls == [
         {"name": "missing-worktree", "reason": "等待人工审查"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_delete_worktree_endpoint_reports_unavailable_session_store() -> None:
+    worktree_manager = FakeWorktreeManager()
+    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    engine.session_store.load_error = RuntimeError("会话存储暂不可用")
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_worktree(
+            "sess-1",
+            "wt-clean",
+            _fake_request(engine),
+            discard_changes=False,
+            auth="test",
+        )
+
+    assert engine.loaded == []
+    assert worktree_manager.remove_calls == []
+    assert worktree_manager.status_calls == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "会话存储暂不可用"
 
 
 def test_delete_worktree_route_removes_worktree_and_records_audit_event() -> None:
