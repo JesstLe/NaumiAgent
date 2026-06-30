@@ -4019,6 +4019,22 @@ async def test_expire_leases_endpoint_returns_expired_list() -> None:
 
 
 @pytest.mark.asyncio
+async def test_expire_leases_endpoint_reports_unavailable_session_store() -> None:
+    market = FakeTaskMarket()
+    engine = _FakeEngine(exists=True, workbench_market=market)
+    engine.session_store.load_error = RuntimeError("会话存储暂不可用")
+
+    with pytest.raises(HTTPException) as exc:
+        await expire_workbench_leases("sess-1", _fake_request(engine), auth="test")
+
+    assert engine.loaded == []
+    assert market.expired_calls == 0
+    assert market.expired_sessions == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "会话存储暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_expire_leases_endpoint_can_return_fresh_snapshot() -> None:
     market = FakeTaskMarket()
     lease = Lease(
