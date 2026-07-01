@@ -215,6 +215,7 @@ GET /api/v1/workbench/capabilities
   "supports_daemon_management": false,
   "supports_workspace_registry": false,
   "supports_validation_runner": true,
+  "supports_event_stream": true,
   "supports_cloud_sync": false,
   "supported_locales": ["zh-CN", "en-US"],
   "default_locale": "zh-CN",

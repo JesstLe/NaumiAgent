@@ -1042,6 +1042,46 @@ final class DaemonControllerTests {
         #expect(await api.snapshotCallCount == 0)
     }
 
+    @Test @MainActor func refreshConnectionSkipsEventStreamWhenCapabilityDisabled() async throws {
+        let appState = AppState()
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let session = makeSession(id: "sess-no-stream", title: "No Stream Session")
+        let snapshot = makeSnapshot(sessionID: "sess-no-stream", missions: [])
+        let bootstrap = WorkbenchBootstrapDTO(
+            daemonStatus: makeStatus(),
+            capabilities: CapabilitiesDTO(
+                supportsDaemonManagement: false,
+                supportsWorkspaceRegistry: true,
+                supportsValidationRunner: true,
+                supportsEventStream: false,
+                supportsCloudSync: false,
+                supportedLocales: ["zh-CN", "en-US"],
+                protocolVersion: 1
+            ),
+            sessions: [session],
+            totalSessions: 1,
+            selectedSessionID: "sess-no-stream",
+            snapshot: snapshot
+        )
+
+        await api.setBootstrapResult(.success(bootstrap))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-no-stream")
+
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.selectedSessionID == "sess-no-stream")
+        #expect(appState.snapshot == snapshot)
+        #expect(controller.hasActiveEventStream == false)
+        #expect(await eventProvider.connectedSessionIDs == [])
+    }
+
     @Test @MainActor func refreshConnectionFailure() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-events"

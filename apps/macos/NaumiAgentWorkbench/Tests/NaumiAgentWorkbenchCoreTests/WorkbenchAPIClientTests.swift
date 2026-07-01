@@ -40,7 +40,7 @@ final class WorkbenchAPIClientTests {
     @Test func fetchCapabilities() async throws {
         let json = Data(
             """
-            {"supports_daemon_management":false,"supports_workspace_registry":false,"supports_validation_runner":true,"supports_cloud_sync":false,"supported_locales":["zh-CN","en-US"],"default_locale":"zh-CN","protocol_version":1}
+            {"supports_daemon_management":false,"supports_workspace_registry":false,"supports_validation_runner":true,"supports_event_stream":true,"supports_cloud_sync":false,"supported_locales":["zh-CN","en-US"],"default_locale":"zh-CN","protocol_version":1}
             """.utf8
         )
 
@@ -62,6 +62,7 @@ final class WorkbenchAPIClientTests {
 
         #expect(capabilities.protocolVersion == 1)
         #expect(capabilities.supportsValidationRunner)
+        #expect(capabilities.supportsEventStream)
         #expect(!capabilities.supportsDaemonManagement)
         #expect(!capabilities.supportsCloudSync)
         #expect(capabilities.supportedLocales == ["zh-CN", "en-US"])
@@ -92,6 +93,7 @@ final class WorkbenchAPIClientTests {
         let capabilities = try await client.fetchCapabilities()
 
         #expect(capabilities.defaultLocale == "zh-CN")
+        #expect(capabilities.supportsEventStream)
     }
 
     @Test func fetchDaemonStatus() async throws {

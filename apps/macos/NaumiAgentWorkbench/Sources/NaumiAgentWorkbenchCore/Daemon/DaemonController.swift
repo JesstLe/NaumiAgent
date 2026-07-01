@@ -187,6 +187,9 @@ public final class DaemonController: Sendable {
         guard eventProvider != nil, appState.selectedSessionID != nil else {
             return
         }
+        guard appState.capabilities?.supportsEventStream != false else {
+            return
+        }
         await startEventStream()
     }
 
