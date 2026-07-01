@@ -644,11 +644,19 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
 
     public func fetchIntentLocks(
         sessionID: String,
-        missionID: String
+        missionID: String,
+        active: Bool?
     ) async throws(APIError) -> IntentLocksDTO {
-        try await get(
-            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "intent-locks")
-        )
+        let path = encodePath("workbench", "sessions", sessionID, "missions", missionID, "intent-locks")
+        if let active {
+            let response: IntentLocksDTO = try await get(
+                path: path,
+                queryItems: [URLQueryItem(name: "active", value: active ? "true" : "false")]
+            )
+            return response
+        }
+        let response: IntentLocksDTO = try await get(path: path)
+        return response
     }
 
     public func fetchIntentLock(

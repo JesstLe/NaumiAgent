@@ -689,6 +689,7 @@ class WorkbenchStore:
         blocked_paths: list[str] | None = None,
         allowed_paths: list[str] | None = None,
         require_proposal_for_risk: RiskLevel = RiskLevel.HIGH,
+        active: bool = True,
     ) -> IntentLock:
         lock = IntentLock(
             id=uuid.uuid4().hex[:12],
@@ -698,6 +699,7 @@ class WorkbenchStore:
             blocked_paths=list(blocked_paths or []),
             allowed_paths=list(allowed_paths or []),
             require_proposal_for_risk=require_proposal_for_risk,
+            active=active,
         )
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
@@ -721,15 +723,26 @@ class WorkbenchStore:
             await db.commit()
         return lock
 
-    async def list_intent_locks(self, session_id: str, mission_id: str) -> list[IntentLock]:
+    async def list_intent_locks(
+        self,
+        session_id: str,
+        mission_id: str,
+        active: bool | None = None,
+    ) -> list[IntentLock]:
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
             db.row_factory = aiosqlite.Row
+            params: list[Any] = [session_id, mission_id]
+            filters = ["session_id = ?", "mission_id = ?"]
+            if active is not None:
+                filters.append("active = ?")
+                params.append(1 if active else 0)
+            where_clause = " AND ".join(filters)
             cursor = await db.execute(
-                """SELECT * FROM workbench_intent_locks
-                   WHERE session_id = ? AND mission_id = ?
+                f"""SELECT * FROM workbench_intent_locks
+                   WHERE {where_clause}
                    ORDER BY created_at""",
-                (session_id, mission_id),
+                params,
             )
             rows = await cursor.fetchall()
         return [_row_to_intent_lock(dict(row)) for row in rows]

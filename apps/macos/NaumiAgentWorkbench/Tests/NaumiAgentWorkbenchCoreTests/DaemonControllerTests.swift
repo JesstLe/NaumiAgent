@@ -685,7 +685,11 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         return try result.get()
     }
 
-    func fetchIntentLocks(sessionID: String, missionID: String) async throws(APIError) -> IntentLocksDTO {
+    func fetchIntentLocks(
+        sessionID: String,
+        missionID: String,
+        active: Bool?
+    ) async throws(APIError) -> IntentLocksDTO {
         await recordPreWarmRequest()
         guard let result = fetchIntentLocksResult else {
             throw .invalidResponse

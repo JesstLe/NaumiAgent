@@ -361,6 +361,27 @@ kind?: principle | architecture | policy | temporary | experiment
 - `kind=architecture` 用于展示架构取舍和 daemon / SwiftUI / API 合同层面的长期决策。
 - decision detail 仍通过 `/decisions/{decision_id}` 按需加载完整决策正文。
 
+## 9.7 Intent Lock Query API
+
+Settings 治理策略入口、Reviews 页和 Inspector 意图锁面板使用：
+
+```text
+GET /api/v1/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks
+```
+
+查询参数：
+
+```text
+active?: true | false
+```
+
+约束：
+
+- 不传 `active` 时返回当前 Mission 下的全部意图锁。
+- `active=true` 用于 Settings 展示当前生效治理策略。
+- `active=false` 用于审计历史或排查旧规则影响。
+- intent lock detail 仍通过 `/intent-locks/{lock_id}` 按需加载完整规则。
+
 ## 10. 日志
 
 Phase 2 起，SwiftUI 收集 daemon 日志。

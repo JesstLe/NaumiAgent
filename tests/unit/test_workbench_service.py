@@ -1835,15 +1835,26 @@ async def test_list_intent_locks_returns_json_friendly_strings(tmp_path) -> None
         allowed_paths=["src/secret/README.md"],
         require_proposal_for_risk=RiskLevel.HIGH,
     )
+    inactive_lock = await workbench_store.add_intent_lock(
+        session_id="s",
+        mission_id="mission-1",
+        rule="旧规则",
+        active=False,
+    )
 
     locks = await service.list_intent_locks("s", "mission-1")
-    assert [item["id"] for item in locks] == [lock["id"]]
+    assert [item["id"] for item in locks] == [lock["id"], inactive_lock.id]
     assert all(isinstance(item["require_proposal_for_risk"], str) for item in locks)
     assert locks[0]["require_proposal_for_risk"] == "high"
     assert locks[0]["rule"] == "禁止修改 src/secret 下文件"
     assert locks[0]["blocked_paths"] == ["src/secret"]
     assert locks[0]["allowed_paths"] == ["src/secret/README.md"]
     assert locks[0]["active"] is True
+
+    active_only = await service.list_intent_locks("s", "mission-1", active=True)
+    assert [item["id"] for item in active_only] == [lock["id"]]
+    inactive_only = await service.list_intent_locks("s", "mission-1", active=False)
+    assert [item["id"] for item in inactive_only] == [inactive_lock.id]
 
 
 @pytest.mark.asyncio
