@@ -111,11 +111,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     public func fetchValidationRuns(
         sessionID: String,
         taskID: String?,
+        status: String?,
         limit: Int
     ) async throws(APIError) -> ValidationRunsDTO {
         var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
         if let taskID, !taskID.isEmpty {
             queryItems.append(URLQueryItem(name: "task_id", value: taskID))
+        }
+        if let status, !status.isEmpty {
+            queryItems.append(URLQueryItem(name: "status", value: status))
         }
         return try await get(
             path: encodePath("workbench", "sessions", sessionID, "validation-runs"),

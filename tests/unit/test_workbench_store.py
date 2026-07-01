@@ -356,6 +356,14 @@ async def test_list_validation_runs_filters_and_orders(store: WorkbenchStore) ->
     task_b_runs = await store.list_validation_runs("s", task_id="task-b", limit=50)
     assert [run["id"] for run in task_b_runs] == [run_b["id"]]
 
+    failed_runs = await store.list_validation_runs("s", status="failed", limit=50)
+    assert [run["id"] for run in failed_runs] == [run_b["id"]]
+
+    task_a_passed_runs = await store.list_validation_runs(
+        "s", task_id="task-a", status="passed", limit=50
+    )
+    assert [run["id"] for run in task_a_passed_runs] == [run_a["id"], run_c["id"]]
+
     limited = await store.list_validation_runs("s", limit=1)
     assert [run["id"] for run in limited] == [run_c["id"]]
 

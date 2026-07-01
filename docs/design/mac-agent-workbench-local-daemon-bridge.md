@@ -248,6 +248,28 @@ limit?: 1..200
 - `mission_id` / `risk_level` 过滤 workbench metadata。
 - SwiftUI 可以用该接口实现 All / Active / Blocked / Done 队列筛选；snapshot 仍然是真相源。
 
+## 9.2 Validation Run Query API
+
+审查页、失败诊断页和 Inspector 测试 tab 使用：
+
+```text
+GET /api/v1/workbench/sessions/{session_id}/validation-runs
+```
+
+查询参数：
+
+```text
+task_id?: string
+status?: passed | failed | running
+limit?: 1..200
+```
+
+约束：
+
+- `task_id` 定位单个 Issue / Task 的验证记录。
+- `status` 过滤验证结果状态，用于快速展示 failed validations 或 passed evidence。
+- run detail 仍通过 `/validation-runs/{run_id}` 按需加载完整输出。
+
 ## 10. 日志
 
 Phase 2 起，SwiftUI 收集 daemon 日志。

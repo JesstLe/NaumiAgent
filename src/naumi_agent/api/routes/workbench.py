@@ -141,6 +141,7 @@ class WorkbenchEventsResponse(BaseModel):
 class ValidationRunsResponse(BaseModel):
     validation_runs: list[dict[str, Any]]
     task_id: str | None
+    status: str | None
     limit: int
 
 
@@ -740,6 +741,7 @@ async def get_validation_runs(
     session_id: str,
     request: Request,
     task_id: str | None = Query(default=None),
+    status: Annotated[str | None, Query()] = None,
     limit: int = Query(default=50, ge=1, le=200),
     auth: str = AuthDep,
 ):
@@ -758,14 +760,19 @@ async def get_validation_runs(
         raise HTTPException(status_code=404, detail="Session not found")
     try:
         runs = await engine.workbench_service.list_validation_runs(
-            session_id, task_id=task_id, limit=limit
+            session_id, task_id=task_id, status=status, limit=limit
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    return ValidationRunsResponse(validation_runs=runs, task_id=task_id, limit=limit)
+    return ValidationRunsResponse(
+        validation_runs=runs,
+        task_id=task_id,
+        status=status,
+        limit=limit,
+    )
 
 
 @router.get("/workbench/sessions/{session_id}/validation-runs/{run_id}")

@@ -759,6 +759,9 @@ async def test_list_validation_runs_returns_runs_and_respects_limit(tmp_path) ->
     filtered = await service.list_validation_runs("s", task_id="task-b", limit=50)
     assert [run["id"] for run in filtered] == [run_b["id"]]
 
+    failed = await service.list_validation_runs("s", status="failed", limit=50)
+    assert [run["id"] for run in failed] == [run_b["id"]]
+
     limited = await service.list_validation_runs("s", limit=1)
     assert [run["id"] for run in limited] == [run_b["id"]]
 

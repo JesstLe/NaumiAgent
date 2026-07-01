@@ -88,6 +88,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var createdSessions: [[String: String?]] = []
     var createdMissions: [[String: String]] = []
     var issueRequests: [[String: String?]] = []
+    var validationRunRequests: [[String: String?]] = []
     var fetchedEvents: [FakeWorkbenchEventRefreshRequest] = []
     var preWarmDelayNanoseconds: UInt64?
     var preWarmInFlightCallCount: Int = 0
@@ -225,8 +226,15 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     func fetchValidationRuns(
         sessionID: String,
         taskID: String?,
+        status: String?,
         limit: Int
     ) async throws(APIError) -> ValidationRunsDTO {
+        validationRunRequests.append([
+            "session_id": sessionID,
+            "task_id": taskID,
+            "status": status,
+            "limit": String(limit),
+        ])
         await recordPreWarmRequest()
         guard let result = validationRunsResult else {
             throw .invalidResponse
@@ -3131,15 +3139,26 @@ final class DaemonControllerTests {
             startedAt: "2026-06-27T06:00:00",
             completedAt: "2026-06-27T06:00:01"
         )
-        let runs = ValidationRunsDTO(validationRuns: [run], taskID: "task-001", limit: 25)
+        let runs = ValidationRunsDTO(
+            validationRuns: [run],
+            taskID: "task-001",
+            status: "failed",
+            limit: 25
+        )
 
         await api.setValidationRunsResult(.success(runs))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
-        await controller.refreshValidationRuns(taskID: "task-001", limit: 25)
+        await controller.refreshValidationRuns(taskID: "task-001", status: "failed", limit: 25)
 
         #expect(appState.validationRuns == [run])
         #expect(appState.lastError == nil)
+        #expect(await api.validationRunRequests == [[
+            "session_id": "sess-001",
+            "task_id": "task-001",
+            "status": "failed",
+            "limit": "25",
+        ]])
     }
 
     @Test @MainActor func refreshValidationRunsWithoutSelectedSessionRecordsError() async throws {

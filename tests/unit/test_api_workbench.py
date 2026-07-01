@@ -679,12 +679,21 @@ class _FakeWorkbenchService:
         }
 
     async def list_validation_runs(
-        self, session_id: str, task_id: str | None = None, limit: int = 50
+        self,
+        session_id: str,
+        task_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
     ):
         if self._list_validation_runs_error is not None:
             raise self._list_validation_runs_error
         self.listed_validation_runs.append(
-            {"session_id": session_id, "task_id": task_id, "limit": limit}
+            {
+                "session_id": session_id,
+                "task_id": task_id,
+                "status": status,
+                "limit": limit,
+            }
         )
         return [
             {
@@ -694,7 +703,7 @@ class _FakeWorkbenchService:
                 "actor": "ValidationRunner",
                 "command": ["pytest", "test.py"],
                 "cwd": "/workspace",
-                "status": "passed",
+                "status": status or "passed",
                 "exit_code": 0,
                 "output": "ok",
                 "started_at": "2024-01-01T00:00:00",
@@ -2127,12 +2136,22 @@ async def test_get_validation_runs_endpoint_returns_runs_and_params() -> None:
     engine = _FakeEngine(exists=True)
 
     response = await get_validation_runs(
-        "sess-1", _fake_request(engine), task_id="task-2", limit=25, auth="test"
+        "sess-1",
+        _fake_request(engine),
+        task_id="task-2",
+        status="failed",
+        limit=25,
+        auth="test",
     )
 
     assert engine.loaded == ["sess-1"]
     assert engine.workbench_service.listed_validation_runs == [
-        {"session_id": "sess-1", "task_id": "task-2", "limit": 25}
+        {
+            "session_id": "sess-1",
+            "task_id": "task-2",
+            "status": "failed",
+            "limit": 25,
+        }
     ]
     assert response.model_dump() == {
         "validation_runs": [
@@ -2143,7 +2162,7 @@ async def test_get_validation_runs_endpoint_returns_runs_and_params() -> None:
                 "actor": "ValidationRunner",
                 "command": ["pytest", "test.py"],
                 "cwd": "/workspace",
-                "status": "passed",
+                "status": "failed",
                 "exit_code": 0,
                 "output": "ok",
                 "started_at": "2024-01-01T00:00:00",
@@ -2151,6 +2170,7 @@ async def test_get_validation_runs_endpoint_returns_runs_and_params() -> None:
             }
         ],
         "task_id": "task-2",
+        "status": "failed",
         "limit": 25,
     }
 
@@ -2164,7 +2184,12 @@ async def test_get_validation_runs_endpoint_reports_unavailable_validation_servi
 
     with pytest.raises(HTTPException) as exc:
         await get_validation_runs(
-            "sess-1", _fake_request(engine), task_id="task-2", limit=25, auth="test"
+            "sess-1",
+            _fake_request(engine),
+            task_id="task-2",
+            status=None,
+            limit=25,
+            auth="test",
         )
 
     assert engine.loaded == ["sess-1"]
@@ -2181,7 +2206,12 @@ async def test_get_validation_runs_endpoint_reports_invalid_validation_request()
 
     with pytest.raises(HTTPException) as exc:
         await get_validation_runs(
-            "sess-1", _fake_request(engine), task_id="task-2", limit=25, auth="test"
+            "sess-1",
+            _fake_request(engine),
+            task_id="task-2",
+            status=None,
+            limit=25,
+            auth="test",
         )
 
     assert engine.loaded == ["sess-1"]

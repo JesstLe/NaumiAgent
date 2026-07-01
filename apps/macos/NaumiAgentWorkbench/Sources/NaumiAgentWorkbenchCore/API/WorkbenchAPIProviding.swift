@@ -41,6 +41,7 @@ public protocol WorkbenchAPIProviding: Sendable {
     func fetchValidationRuns(
         sessionID: String,
         taskID: String?,
+        status: String?,
         limit: Int
     ) async throws(APIError) -> ValidationRunsDTO
 
