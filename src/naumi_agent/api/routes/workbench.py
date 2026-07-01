@@ -38,6 +38,7 @@ class WorkbenchCapabilitiesResponse(BaseModel):
     supports_validation_runner: bool
     supports_cloud_sync: bool
     supported_locales: list[str]
+    default_locale: str
     protocol_version: int
 
 
@@ -316,6 +317,7 @@ def _build_capabilities() -> WorkbenchCapabilitiesResponse:
         supports_validation_runner=True,
         supports_cloud_sync=False,
         supported_locales=["zh-CN", "en-US"],
+        default_locale="zh-CN",
         protocol_version=1,
     )
 

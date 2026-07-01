@@ -4598,6 +4598,7 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
     assert response.supports_validation_runner is True
     assert response.supports_cloud_sync is False
     assert response.supported_locales == ["zh-CN", "en-US"]
+    assert response.default_locale == "zh-CN"
     assert response.protocol_version == 1
 
 
