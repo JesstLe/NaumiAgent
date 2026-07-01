@@ -557,15 +557,26 @@ class WorkbenchStore:
             await db.commit()
         return decision
 
-    async def list_decisions(self, session_id: str, mission_id: str) -> list[Decision]:
+    async def list_decisions(
+        self,
+        session_id: str,
+        mission_id: str,
+        kind: DecisionKind | str | None = None,
+    ) -> list[Decision]:
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
             db.row_factory = aiosqlite.Row
+            filters = ["session_id = ?", "mission_id = ?"]
+            params: list[Any] = [session_id, mission_id]
+            if kind is not None:
+                filters.append("kind = ?")
+                params.append(kind.value if isinstance(kind, DecisionKind) else kind)
+            where_clause = " AND ".join(filters)
             cursor = await db.execute(
-                """SELECT * FROM workbench_decisions
-                   WHERE session_id = ? AND mission_id = ?
+                f"""SELECT * FROM workbench_decisions
+                   WHERE {where_clause}
                    ORDER BY created_at""",
-                (session_id, mission_id),
+                params,
             )
             rows = await cursor.fetchall()
         return [_row_to_decision(dict(row)) for row in rows]

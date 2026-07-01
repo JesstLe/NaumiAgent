@@ -3472,14 +3472,20 @@ final class WorkbenchAPIClientTests {
     @Test func fetchDecisionsEncodesPathAndDecodesResponse() async throws {
         let sessionID = "sess 中文"
         let missionID = "mission 中文"
+        let kind = "policy"
         let json = Data(
             """
-            {"decisions":[{"id":"decision-001","session_id":"sess 中文","mission_id":"mission 中文","kind":"architecture","title":"采用 FastAPI","content":"使用 FastAPI 承载 Workbench API","actor":"Planner-Agent","created_at":"2026-06-27T06:00:00"}],"mission_id":"mission 中文"}
+            {"decisions":[{"id":"decision-001","session_id":"sess 中文","mission_id":"mission 中文","kind":"policy","title":"采用 FastAPI","content":"使用 FastAPI 承载 Workbench API","actor":"Planner-Agent","created_at":"2026-06-27T06:00:00"}],"mission_id":"mission 中文","kind":"policy"}
             """.utf8
         )
 
         MockURLProtocol.requestHandler = { request in
-            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/missions/mission%20%E4%B8%AD%E6%96%87/decisions" else {
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/missions/mission%20%E4%B8%AD%E6%96%87/decisions",
+                  query["kind"] == kind else {
                 fatalError("Unexpected URL: \(String(describing: request.url))")
             }
             guard request.httpMethod == "GET" else {
@@ -3495,16 +3501,21 @@ final class WorkbenchAPIClientTests {
         }
 
         let client = makeClient()
-        let response = try await client.fetchDecisions(sessionID: sessionID, missionID: missionID)
+        let response = try await client.fetchDecisions(
+            sessionID: sessionID,
+            missionID: missionID,
+            kind: kind
+        )
 
         #expect(response.missionID == missionID)
+        #expect(response.kind == kind)
         #expect(response.decisions.count == 1)
 
         let decision = try #require(response.decisions.first)
         #expect(decision.id == "decision-001")
         #expect(decision.sessionID == sessionID)
         #expect(decision.missionID == missionID)
-        #expect(decision.kind == "architecture")
+        #expect(decision.kind == "policy")
         #expect(decision.title == "采用 FastAPI")
         #expect(decision.content == "使用 FastAPI 承载 Workbench API")
         #expect(decision.actor == "Planner-Agent")
@@ -3612,7 +3623,11 @@ final class WorkbenchAPIClientTests {
         }
 
         let client = makeClient()
-        let response = try await client.fetchDecisions(sessionID: sessionID, missionID: missionID)
+        let response = try await client.fetchDecisions(
+            sessionID: sessionID,
+            missionID: missionID,
+            kind: nil
+        )
 
         #expect(response.missionID == missionID)
         #expect(response.decisions.isEmpty)

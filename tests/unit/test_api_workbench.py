@@ -1143,18 +1143,23 @@ class _FakeWorkbenchService:
             "created_at": "2024-01-01T00:00:00",
         }
 
-    async def list_decisions(self, session_id: str, mission_id: str):
+    async def list_decisions(
+        self,
+        session_id: str,
+        mission_id: str,
+        kind: DecisionKind | None = None,
+    ):
         if self._list_decisions_error is not None:
             raise self._list_decisions_error
         self.listed_decisions.append(
-            {"session_id": session_id, "mission_id": mission_id}
+            {"session_id": session_id, "mission_id": mission_id, "kind": kind}
         )
         return [
             {
                 "id": "decision-1",
                 "session_id": session_id,
                 "mission_id": mission_id,
-                "kind": "architecture",
+                "kind": kind.value if kind is not None else "architecture",
                 "title": "采用 FastAPI",
                 "content": "使用 FastAPI 承载 Workbench API",
                 "actor": "Planner-Agent",
@@ -7711,11 +7716,21 @@ async def test_get_decisions_endpoint_reports_runtime_session_load_failure() -> 
 async def test_get_decisions_endpoint_returns_decisions_and_mission_id() -> None:
     engine = _FakeEngine(exists=True)
 
-    response = await get_decisions("sess-1", "mission-2", _fake_request(engine), auth="test")
+    response = await get_decisions(
+        "sess-1",
+        "mission-2",
+        _fake_request(engine),
+        kind=DecisionKind.POLICY,
+        auth="test",
+    )
 
     assert engine.loaded == ["sess-1"]
     assert engine.workbench_service.listed_decisions == [
-        {"session_id": "sess-1", "mission_id": "mission-2"}
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-2",
+            "kind": DecisionKind.POLICY,
+        }
     ]
     assert response.model_dump() == {
         "decisions": [
@@ -7723,7 +7738,7 @@ async def test_get_decisions_endpoint_returns_decisions_and_mission_id() -> None
                 "id": "decision-1",
                 "session_id": "sess-1",
                 "mission_id": "mission-2",
-                "kind": "architecture",
+                "kind": "policy",
                 "title": "采用 FastAPI",
                 "content": "使用 FastAPI 承载 Workbench API",
                 "actor": "Planner-Agent",
@@ -7731,6 +7746,7 @@ async def test_get_decisions_endpoint_returns_decisions_and_mission_id() -> None
             }
         ],
         "mission_id": "mission-2",
+        "kind": "policy",
     }
 
 

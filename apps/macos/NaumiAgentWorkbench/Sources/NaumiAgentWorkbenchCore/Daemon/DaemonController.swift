@@ -413,7 +413,7 @@ public final class DaemonController: Sendable {
 
         if let missionID = initialMissionID ?? appState.missions.first?.id {
             async let decisionsResult = capturePreWarmResult {
-                try await self.apiProvider.fetchDecisions(sessionID: sessionID, missionID: missionID)
+                try await self.apiProvider.fetchDecisions(sessionID: sessionID, missionID: missionID, kind: nil)
             }
             async let intentLocksResult = capturePreWarmResult {
                 try await self.apiProvider.fetchIntentLocks(sessionID: sessionID, missionID: missionID)
@@ -1090,7 +1090,7 @@ public final class DaemonController: Sendable {
     /// set. Missing session clears the local decision list to avoid showing
     /// stale governance records from another session. API failures leave the
     /// local list unchanged.
-    public func refreshDecisions(missionID: String) async {
+    public func refreshDecisions(missionID: String, kind: String? = nil) async {
         guard let sessionID = appState.selectedSessionID else {
             appState.decisions = []
             appState.lastError = .missingSelectedSession
@@ -1101,7 +1101,8 @@ public final class DaemonController: Sendable {
         do {
             let response = try await apiProvider.fetchDecisions(
                 sessionID: sessionID,
-                missionID: missionID
+                missionID: missionID,
+                kind: kind
             )
             appState.decisions = response.decisions
         } catch {

@@ -735,7 +735,11 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         return try result.get()
     }
 
-    func fetchDecisions(sessionID: String, missionID: String) async throws(APIError) -> DecisionsDTO {
+    func fetchDecisions(
+        sessionID: String,
+        missionID: String,
+        kind: String?
+    ) async throws(APIError) -> DecisionsDTO {
         await recordPreWarmRequest()
         guard let result = fetchDecisionsResult else {
             throw .invalidResponse

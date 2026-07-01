@@ -231,6 +231,7 @@ class IntentLocksResponse(BaseModel):
 class DecisionsResponse(BaseModel):
     decisions: list[dict[str, Any]]
     mission_id: str
+    kind: str | None = None
 
 
 def _get_task_market(engine) -> TaskMarket:
@@ -1352,11 +1353,13 @@ async def get_intent_lock(
 @router.get(
     "/workbench/sessions/{session_id}/missions/{mission_id}/decisions",
     response_model=DecisionsResponse,
+    response_model_exclude_none=True,
 )
 async def get_decisions(
     session_id: str,
     mission_id: str,
     request: Request,
+    kind: Annotated[DecisionKind | None, Query()] = None,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -1373,12 +1376,20 @@ async def get_decisions(
     if not session_loaded:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        decisions = await engine.workbench_service.list_decisions(session_id, mission_id)
+        decisions = await engine.workbench_service.list_decisions(
+            session_id,
+            mission_id,
+            kind=kind,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return DecisionsResponse(decisions=decisions, mission_id=mission_id)
+    return DecisionsResponse(
+        decisions=decisions,
+        mission_id=mission_id,
+        kind=kind.value if kind is not None else None,
+    )
 
 
 @router.get("/workbench/sessions/{session_id}/missions/{mission_id}/decisions/{decision_id}")
