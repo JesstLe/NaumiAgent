@@ -4826,6 +4826,32 @@ async def test_create_workbench_session_reports_unloadable_created_session() -> 
 
 
 @pytest.mark.asyncio
+async def test_create_workbench_session_reports_runtime_session_load_failure() -> None:
+    engine = _FakeEngine(
+        exists=False,
+        load_session_error=RuntimeError("运行态会话暂不可用"),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_workbench_session(
+            WorkbenchSessionCreate(title="Mac 工作台"),
+            _fake_status_request(engine),
+            auth="test",
+        )
+
+    assert engine.session_store.created_sessions == [
+        {
+            "title": "Mac 工作台",
+            "model": None,
+            "system_prompt": None,
+        }
+    ]
+    assert engine.loaded == ["sess-created"]
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "运行态会话暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_create_workbench_session_defaults_blank_title() -> None:
     engine = _FakeEngine(exists=False)
 
