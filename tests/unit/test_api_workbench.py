@@ -4180,6 +4180,26 @@ async def test_release_lease_endpoint_reports_unavailable_session_store() -> Non
 
 
 @pytest.mark.asyncio
+async def test_release_lease_endpoint_reports_runtime_session_load_failure() -> None:
+    market = FakeTaskMarket()
+    engine = _FakeEngine(
+        exists=True,
+        workbench_market=market,
+        load_session_error=RuntimeError("运行态会话暂不可用"),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await release_workbench_lease(
+            "sess-1", "lease-2", _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert market.released == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "运行态会话暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_release_lease_endpoint_returns_released_lease() -> None:
     market = FakeTaskMarket()
     lease = Lease(
