@@ -66,7 +66,7 @@ final class WorkbenchEventClientTests {
         let transport = RecordingWorkbenchWebSocketTransport(messages: [
             .string(
                 """
-                {"type":"workbench.event","event":{"id":"evt-001","session_id":"sess-001","type":"issue.claimed","actor":"Backend-Agent","subject_id":"task-001","payload":{"lease_id":"lease-001"},"timestamp":"2026-06-27T06:00:00"}}
+                {"type":"workbench/event","version":1,"payload":{"id":"evt-001","session_id":"sess-001","type":"issue.claimed","actor":"Backend-Agent","subject_id":"task-001","payload":{"lease_id":"lease-001"},"timestamp":"2026-06-27T06:00:00"}}
                 """
             ),
         ])
@@ -85,6 +85,30 @@ final class WorkbenchEventClientTests {
         #expect(event.id == "evt-001")
         #expect(event.type == "issue.claimed")
         #expect(event.payload["lease_id"] == .string("lease-001"))
+    }
+
+    @Test func nextDecodesLegacyWorkbenchEventEnvelope() async throws {
+        let transport = RecordingWorkbenchWebSocketTransport(messages: [
+            .string(
+                """
+                {"type":"workbench.event","event":{"id":"evt-legacy","session_id":"sess-001","type":"issue.claimed","actor":"Backend-Agent","subject_id":"task-001","payload":{"lease_id":"lease-legacy"},"timestamp":"2026-06-27T06:00:00"}}
+                """
+            ),
+        ])
+        let client = WorkbenchEventClient(
+            baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
+            transport: transport
+        )
+
+        let stream = try await client.connect(sessionID: "sess-001")
+        let message = try await stream.next()
+
+        guard case .event(let event) = message else {
+            Issue.record("Expected legacy workbench event, got \(message)")
+            return
+        }
+        #expect(event.id == "evt-legacy")
+        #expect(event.payload["lease_id"] == .string("lease-legacy"))
     }
 
     @Test func nextDecodesWorkbenchSnapshotEnvelope() async throws {
@@ -202,7 +226,7 @@ final class WorkbenchEventClientTests {
 
     @Test func nextRejectsMalformedEventEnvelope() async throws {
         let transport = RecordingWorkbenchWebSocketTransport(messages: [
-            .string(#"{"type":"workbench.event"}"#),
+            .string(#"{"type":"workbench/event"}"#),
         ])
         let client = WorkbenchEventClient(
             baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
@@ -210,7 +234,7 @@ final class WorkbenchEventClientTests {
         )
 
         let stream = try await client.connect(sessionID: "sess-001")
-        await #expect(throws: APIError.decodingFailed("workbench.event missing event payload")) {
+        await #expect(throws: APIError.decodingFailed("workbench/event missing event payload")) {
             _ = try await stream.next()
         }
     }

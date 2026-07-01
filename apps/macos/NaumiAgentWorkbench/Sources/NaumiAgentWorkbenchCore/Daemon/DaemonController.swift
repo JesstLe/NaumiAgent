@@ -95,7 +95,7 @@ public final class DaemonController: Sendable {
 
     /// Starts listening to Workbench event hints for the selected session.
     ///
-    /// Incoming `workbench.event` messages never mutate business state directly:
+    /// Incoming `workbench/event` messages never mutate business state directly:
     /// they trigger a fresh snapshot/list refresh because the backend remains
     /// the source of truth. Stream failures mark the connection stale so the UI
     /// can prompt the user to refresh instead of trusting old incremental data.
@@ -129,7 +129,7 @@ public final class DaemonController: Sendable {
     /// Requests a filtered replay from the active Workbench event stream.
     ///
     /// This does not mutate local business state directly. The backend will emit
-    /// matching `workbench.event` messages followed by `refresh_complete`, and
+    /// matching `workbench/event` messages followed by `refresh_complete`, and
     /// existing event handling will refresh the authoritative snapshot when
     /// events arrive.
     public func requestEventStreamRefresh(

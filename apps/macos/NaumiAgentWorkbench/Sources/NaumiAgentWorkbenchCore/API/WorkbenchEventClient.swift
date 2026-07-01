@@ -278,7 +278,8 @@ private struct WorkbenchEventEnvelope: Decodable {
     let type: String
     let sessionID: String?
     let event: EventDTO?
-    let payload: WorkbenchSnapshotDTO?
+    let eventPayload: EventDTO?
+    let snapshotPayload: WorkbenchSnapshotDTO?
     let message: String?
     let count: Int?
 
@@ -291,15 +292,43 @@ private struct WorkbenchEventEnvelope: Decodable {
         case count
     }
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
+        event = try container.decodeIfPresent(EventDTO.self, forKey: .event)
+        message = try container.decodeIfPresent(String.self, forKey: .message)
+        count = try container.decodeIfPresent(Int.self, forKey: .count)
+
+        if type == "workbench/snapshot" {
+            snapshotPayload = try container.decodeIfPresent(
+                WorkbenchSnapshotDTO.self,
+                forKey: .payload
+            )
+            eventPayload = nil
+        } else if type == "workbench/event" {
+            eventPayload = try container.decodeIfPresent(EventDTO.self, forKey: .payload)
+            snapshotPayload = nil
+        } else {
+            eventPayload = nil
+            snapshotPayload = nil
+        }
+    }
+
     func streamMessage() throws(APIError) -> WorkbenchEventStreamMessage {
         switch type {
         case "connected":
             return .connected(sessionID: sessionID ?? "")
         case "workbench/snapshot":
-            guard let payload else {
+            guard let snapshotPayload else {
                 throw APIError.decodingFailed("workbench/snapshot missing payload")
             }
-            return .snapshot(payload)
+            return .snapshot(snapshotPayload)
+        case "workbench/event":
+            guard let eventPayload else {
+                throw APIError.decodingFailed("workbench/event missing event payload")
+            }
+            return .event(eventPayload)
         case "workbench.event":
             guard let event else {
                 throw APIError.decodingFailed("workbench.event missing event payload")

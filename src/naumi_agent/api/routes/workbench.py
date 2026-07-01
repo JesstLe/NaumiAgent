@@ -709,7 +709,13 @@ async def _send_workbench_event_refresh(
 
     events = result["events"]
     for event in events:
-        await websocket.send_json({"type": "workbench.event", "event": event})
+        await websocket.send_json(
+            {
+                "type": "workbench/event",
+                "version": 1,
+                "payload": event,
+            }
+        )
     await websocket.send_json({"type": "refresh_complete", "count": len(events)})
 
 
