@@ -4596,6 +4596,7 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
     assert response.supports_daemon_management is False
     assert response.supports_workspace_registry is False
     assert response.supports_validation_runner is True
+    assert response.supports_event_stream is True
     assert response.supports_cloud_sync is False
     assert response.supported_locales == ["zh-CN", "en-US"]
     assert response.default_locale == "zh-CN"

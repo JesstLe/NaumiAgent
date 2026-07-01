@@ -36,6 +36,7 @@ class WorkbenchCapabilitiesResponse(BaseModel):
     supports_daemon_management: bool
     supports_workspace_registry: bool
     supports_validation_runner: bool
+    supports_event_stream: bool
     supports_cloud_sync: bool
     supported_locales: list[str]
     default_locale: str
@@ -315,6 +316,7 @@ def _build_capabilities() -> WorkbenchCapabilitiesResponse:
         supports_daemon_management=False,
         supports_workspace_registry=False,
         supports_validation_runner=True,
+        supports_event_stream=True,
         supports_cloud_sync=False,
         supported_locales=["zh-CN", "en-US"],
         default_locale="zh-CN",

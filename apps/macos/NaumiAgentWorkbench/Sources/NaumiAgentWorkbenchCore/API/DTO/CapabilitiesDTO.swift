@@ -5,6 +5,7 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
     public let supportsDaemonManagement: Bool
     public let supportsWorkspaceRegistry: Bool
     public let supportsValidationRunner: Bool
+    public let supportsEventStream: Bool
     public let supportsCloudSync: Bool
     public let supportedLocales: [String]
     public let defaultLocale: String
@@ -14,6 +15,7 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
         case supportsDaemonManagement = "supports_daemon_management"
         case supportsWorkspaceRegistry = "supports_workspace_registry"
         case supportsValidationRunner = "supports_validation_runner"
+        case supportsEventStream = "supports_event_stream"
         case supportsCloudSync = "supports_cloud_sync"
         case supportedLocales = "supported_locales"
         case defaultLocale = "default_locale"
@@ -24,6 +26,7 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
         supportsDaemonManagement: Bool,
         supportsWorkspaceRegistry: Bool,
         supportsValidationRunner: Bool,
+        supportsEventStream: Bool = true,
         supportsCloudSync: Bool,
         supportedLocales: [String],
         defaultLocale: String = "zh-CN",
@@ -32,6 +35,7 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
         self.supportsDaemonManagement = supportsDaemonManagement
         self.supportsWorkspaceRegistry = supportsWorkspaceRegistry
         self.supportsValidationRunner = supportsValidationRunner
+        self.supportsEventStream = supportsEventStream
         self.supportsCloudSync = supportsCloudSync
         self.supportedLocales = supportedLocales
         self.defaultLocale = defaultLocale
@@ -52,6 +56,10 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
             Bool.self,
             forKey: .supportsValidationRunner
         )
+        supportsEventStream = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .supportsEventStream
+        ) ?? true
         supportsCloudSync = try container.decode(Bool.self, forKey: .supportsCloudSync)
         supportedLocales = try container.decode([String].self, forKey: .supportedLocales)
         defaultLocale = try container.decodeIfPresent(
