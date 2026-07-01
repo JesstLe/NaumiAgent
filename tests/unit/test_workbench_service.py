@@ -1135,6 +1135,9 @@ async def test_list_failures_returns_store_rows_and_respects_filters(tmp_path) -
     filtered_status = await service.list_failures("s", status="open", limit=50)
     assert [f["id"] for f in filtered_status] == [failure_open["id"]]
 
+    filtered_kind = await service.list_failures("s", kind="test_failed", limit=50)
+    assert [f["id"] for f in filtered_kind] == [failure_open["id"]]
+
     limited = await service.list_failures("s", limit=1)
     assert len(limited) == 1
 

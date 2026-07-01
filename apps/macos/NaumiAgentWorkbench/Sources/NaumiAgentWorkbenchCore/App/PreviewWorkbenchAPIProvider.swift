@@ -230,12 +230,14 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         sessionID: String,
         taskID: String?,
         status: String?,
+        kind: String?,
         limit: Int
     ) async throws(APIError) -> FailuresDTO {
         FailuresDTO(
             failures: [makeFailure(sessionID: sessionID, failureID: "preview-failure", taskID: taskID ?? "preview-task")],
             taskID: taskID,
             status: status,
+            kind: kind,
             limit: limit
         )
     }

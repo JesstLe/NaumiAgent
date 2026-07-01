@@ -97,6 +97,7 @@ public protocol WorkbenchAPIProviding: Sendable {
         sessionID: String,
         taskID: String?,
         status: String?,
+        kind: String?,
         limit: Int
     ) async throws(APIError) -> FailuresDTO
 

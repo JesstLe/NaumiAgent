@@ -293,6 +293,29 @@ limit?: 1..200
 - `task_id` 与 `agent_id` 可以和 `health` 组合使用，支撑单个 Issue 或单个 Agent 的上下文诊断。
 - snapshot detail 仍通过 `/context-snapshots/{snapshot_id}` 按需加载完整原因列表。
 
+## 9.4 Failure Diagnostics Query API
+
+时间线页、失败诊断页和 Inspector 风险卡片使用：
+
+```text
+GET /api/v1/workbench/sessions/{session_id}/failures
+```
+
+查询参数：
+
+```text
+task_id?: string
+status?: open | resolved
+kind?: test_failed | merge_conflict | context_stale | lease_expired | agent_timeout | scope_violation | budget_exceeded | permission_denied | worktree_dirty | review_rejected
+limit?: 1..200
+```
+
+约束：
+
+- `kind` 来自 failure card 的类型字段，用于把测试失败、合并冲突、上下文陈旧等诊断流分开展示。
+- `task_id` / `status` / `kind` 可以组合使用，支撑单个 Issue 的 open test failures 或全部 unresolved merge conflicts。
+- failure detail 仍通过 `/failures/{failure_id}` 按需加载完整诊断内容。
+
 ## 10. 日志
 
 Phase 2 起，SwiftUI 收集 daemon 日志。

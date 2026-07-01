@@ -317,7 +317,7 @@ public final class DaemonController: Sendable {
             try await self.apiProvider.fetchWorktrees(sessionID: sessionID, taskID: nil, status: nil, limit: 50)
         }
         async let failuresResult = capturePreWarmResult {
-            try await self.apiProvider.fetchFailures(sessionID: sessionID, taskID: nil, status: nil, limit: 50)
+            try await self.apiProvider.fetchFailures(sessionID: sessionID, taskID: nil, status: nil, kind: nil, limit: 50)
         }
         async let eventsResult = capturePreWarmResult {
             try await self.apiProvider.fetchEvents(
@@ -679,7 +679,7 @@ public final class DaemonController: Sendable {
     /// set. Missing session clears the local failures list to avoid showing
     /// stale data from another session. API failures leave the local list
     /// unchanged.
-    public func refreshFailures(taskID: String? = nil, status: String? = nil, limit: Int = 50) async {
+    public func refreshFailures(taskID: String? = nil, status: String? = nil, kind: String? = nil, limit: Int = 50) async {
         guard let sessionID = appState.selectedSessionID else {
             appState.failures = []
             appState.lastError = .missingSelectedSession
@@ -692,6 +692,7 @@ public final class DaemonController: Sendable {
                 sessionID: sessionID,
                 taskID: taskID,
                 status: status,
+                kind: kind,
                 limit: limit
             )
             appState.failures = response.failures

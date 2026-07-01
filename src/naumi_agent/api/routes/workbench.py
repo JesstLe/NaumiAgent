@@ -171,6 +171,7 @@ class FailuresResponse(BaseModel):
     failures: list[dict[str, Any]]
     task_id: str | None
     status: str | None
+    kind: str | None
     limit: int
 
 
@@ -942,8 +943,9 @@ async def create_context_health_snapshot(
 async def get_failures(
     session_id: str,
     request: Request,
-    task_id: str | None = Query(default=None),
-    status: str | None = Query(default=None),
+    task_id: Annotated[str | None, Query()] = None,
+    status: Annotated[str | None, Query()] = None,
+    kind: Annotated[str | None, Query()] = None,
     limit: int = Query(default=50, ge=1, le=200),
     auth: str = AuthDep,
 ):
@@ -962,14 +964,14 @@ async def get_failures(
         raise HTTPException(status_code=404, detail="Session not found")
     try:
         failures = await engine.workbench_service.list_failures(
-            session_id, task_id=task_id, status=status, limit=limit
+            session_id, task_id=task_id, status=status, kind=kind, limit=limit
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return FailuresResponse(
-        failures=failures, task_id=task_id, status=status, limit=limit
+        failures=failures, task_id=task_id, status=status, kind=kind, limit=limit
     )
 
 

@@ -225,6 +225,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         sessionID: String,
         taskID: String?,
         status: String?,
+        kind: String?,
         limit: Int
     ) async throws(APIError) -> FailuresDTO {
         var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
@@ -233,6 +234,9 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         }
         if let status, !status.isEmpty {
             queryItems.append(URLQueryItem(name: "status", value: status))
+        }
+        if let kind, !kind.isEmpty {
+            queryItems.append(URLQueryItem(name: "kind", value: kind))
         }
         return try await get(
             path: encodePath("workbench", "sessions", sessionID, "failures"),
