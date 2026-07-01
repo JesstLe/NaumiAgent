@@ -1046,27 +1046,29 @@ class WorkbenchStore:
         self,
         session_id: str,
         task_id: str | None = None,
+        status: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
             db.row_factory = aiosqlite.Row
-            if task_id is None:
-                cursor = await db.execute(
-                    """SELECT * FROM workbench_validation_runs
-                       WHERE session_id = ?
-                       ORDER BY completed_at DESC
-                       LIMIT ?""",
-                    (session_id, limit),
-                )
-            else:
-                cursor = await db.execute(
-                    """SELECT * FROM workbench_validation_runs
-                       WHERE session_id = ? AND task_id = ?
-                       ORDER BY completed_at DESC
-                       LIMIT ?""",
-                    (session_id, task_id, limit),
-                )
+            filters = ["session_id = ?"]
+            params: list[Any] = [session_id]
+            if task_id is not None:
+                filters.append("task_id = ?")
+                params.append(task_id)
+            if status is not None:
+                filters.append("status = ?")
+                params.append(status)
+            params.append(limit)
+            where_clause = " AND ".join(filters)
+            cursor = await db.execute(
+                f"""SELECT * FROM workbench_validation_runs
+                   WHERE {where_clause}
+                   ORDER BY completed_at DESC
+                   LIMIT ?""",
+                params,
+            )
             rows = await cursor.fetchall()
         runs: list[dict[str, Any]] = []
         for row in reversed(rows):

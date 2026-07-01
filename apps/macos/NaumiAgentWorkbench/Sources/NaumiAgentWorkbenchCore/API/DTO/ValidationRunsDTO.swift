@@ -4,17 +4,25 @@ import Foundation
 public struct ValidationRunsDTO: Decodable, Equatable, Sendable {
     public let validationRuns: [ValidationRunDTO]
     public let taskID: String?
+    public let status: String?
     public let limit: Int
 
     public enum CodingKeys: String, CodingKey {
         case validationRuns = "validation_runs"
         case taskID = "task_id"
+        case status
         case limit
     }
 
-    public init(validationRuns: [ValidationRunDTO], taskID: String?, limit: Int) {
+    public init(
+        validationRuns: [ValidationRunDTO],
+        taskID: String?,
+        status: String? = nil,
+        limit: Int
+    ) {
         self.validationRuns = validationRuns
         self.taskID = taskID
+        self.status = status
         self.limit = limit
     }
 }

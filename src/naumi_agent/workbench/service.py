@@ -589,10 +589,11 @@ class WorkbenchService:
         self,
         session_id: str,
         task_id: str | None = None,
+        status: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         return await self._workbench_store.list_validation_runs(
-            session_id, task_id=task_id, limit=limit
+            session_id, task_id=task_id, status=status, limit=limit
         )
 
     async def get_validation_run(

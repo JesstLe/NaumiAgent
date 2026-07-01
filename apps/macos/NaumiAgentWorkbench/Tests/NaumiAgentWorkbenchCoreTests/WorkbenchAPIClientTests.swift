@@ -541,9 +541,10 @@ final class WorkbenchAPIClientTests {
 
     @Test func fetchValidationRunsWithTaskID() async throws {
         let taskID = "task 001/审查"
+        let status = "failed"
         let json = Data(
             """
-            {"validation_runs":[{"id":"run-001","session_id":"sess-001","task_id":"task 001/审查","actor":"ValidationRunner","command":["pytest","test.py"],"cwd":"/workspace","status":"passed","exit_code":0,"output":"ok","started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:01"}],"task_id":"task 001/审查","limit":25}
+            {"validation_runs":[{"id":"run-001","session_id":"sess-001","task_id":"task 001/审查","actor":"ValidationRunner","command":["pytest","test.py"],"cwd":"/workspace","status":"failed","exit_code":1,"output":"failed","started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:01"}],"task_id":"task 001/审查","status":"failed","limit":25}
             """.utf8
         )
 
@@ -554,7 +555,8 @@ final class WorkbenchAPIClientTests {
             )
             guard components?.path == "/api/v1/workbench/sessions/sess-001/validation-runs",
                   query["limit"] == "25",
-                  query["task_id"] == taskID else {
+                  query["task_id"] == taskID,
+                  query["status"] == status else {
                 fatalError("Unexpected URL: \(String(describing: request.url))")
             }
             guard request.httpMethod == "GET" else {
@@ -570,9 +572,15 @@ final class WorkbenchAPIClientTests {
         }
 
         let client = makeClient()
-        let response = try await client.fetchValidationRuns(sessionID: "sess-001", taskID: taskID, limit: 25)
+        let response = try await client.fetchValidationRuns(
+            sessionID: "sess-001",
+            taskID: taskID,
+            status: status,
+            limit: 25
+        )
 
         #expect(response.taskID == taskID)
+        #expect(response.status == status)
         #expect(response.limit == 25)
         #expect(response.validationRuns.count == 1)
 
@@ -583,9 +591,9 @@ final class WorkbenchAPIClientTests {
         #expect(run.actor == "ValidationRunner")
         #expect(run.command == ["pytest", "test.py"])
         #expect(run.cwd == "/workspace")
-        #expect(run.status == "passed")
-        #expect(run.exitCode == 0)
-        #expect(run.output == "ok")
+        #expect(run.status == "failed")
+        #expect(run.exitCode == 1)
+        #expect(run.output == "failed")
         #expect(run.startedAt == "2026-06-27T06:00:00")
         #expect(run.completedAt == "2026-06-27T06:00:01")
     }
@@ -611,9 +619,15 @@ final class WorkbenchAPIClientTests {
         }
 
         let client = makeClient()
-        let response = try await client.fetchValidationRuns(sessionID: "sess-001", taskID: nil, limit: 50)
+        let response = try await client.fetchValidationRuns(
+            sessionID: "sess-001",
+            taskID: nil,
+            status: nil,
+            limit: 50
+        )
 
         #expect(response.taskID == nil)
+        #expect(response.status == nil)
         #expect(response.limit == 50)
         #expect(response.validationRuns.isEmpty)
     }

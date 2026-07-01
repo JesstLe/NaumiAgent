@@ -121,11 +121,13 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
     func fetchValidationRuns(
         sessionID: String,
         taskID: String?,
+        status: String?,
         limit: Int
     ) async throws(APIError) -> ValidationRunsDTO {
         ValidationRunsDTO(
             validationRuns: [makeValidationRun(sessionID: sessionID, runID: "preview-run", taskID: taskID ?? "preview-task")],
             taskID: taskID,
+            status: status,
             limit: limit
         )
     }
