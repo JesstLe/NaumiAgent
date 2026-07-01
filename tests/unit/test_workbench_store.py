@@ -664,8 +664,11 @@ async def test_list_context_snapshots_filters_and_returns_reasons(store: Workben
     agent_2_snaps = await store.list_context_snapshots("s", agent_id="agent-2", limit=50)
     assert {snap["id"] for snap in agent_2_snaps} == {snap_b["id"]}
 
+    stale_snaps = await store.list_context_snapshots("s", health="stale", limit=50)
+    assert {snap["id"] for snap in stale_snaps} == {snap_b["id"]}
+
     combined_snaps = await store.list_context_snapshots(
-        "s", task_id="task-b", agent_id="agent-1", limit=50
+        "s", task_id="task-b", agent_id="agent-1", health="missing", limit=50
     )
     assert {snap["id"] for snap in combined_snaps} == {snap_c["id"]}
     assert combined_snaps[0]["reasons"] == ["缺少 mission 目标", "缺少验收标准"]

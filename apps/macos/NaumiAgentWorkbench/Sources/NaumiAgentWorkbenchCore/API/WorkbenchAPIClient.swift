@@ -135,6 +135,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         sessionID: String,
         taskID: String?,
         agentID: String?,
+        health: String?,
         limit: Int
     ) async throws(APIError) -> ContextSnapshotsDTO {
         var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
@@ -143,6 +144,9 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         }
         if let agentID, !agentID.isEmpty {
             queryItems.append(URLQueryItem(name: "agent_id", value: agentID))
+        }
+        if let health, !health.isEmpty {
+            queryItems.append(URLQueryItem(name: "health", value: health))
         }
         return try await get(
             path: encodePath("workbench", "sessions", sessionID, "context-snapshots"),

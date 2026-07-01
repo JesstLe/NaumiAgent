@@ -140,6 +140,7 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         sessionID: String,
         taskID: String?,
         agentID: String?,
+        health: String?,
         limit: Int
     ) async throws(APIError) -> ContextSnapshotsDTO {
         ContextSnapshotsDTO(
@@ -153,6 +154,7 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
             ],
             taskID: taskID,
             agentID: agentID,
+            health: health,
             limit: limit
         )
     }

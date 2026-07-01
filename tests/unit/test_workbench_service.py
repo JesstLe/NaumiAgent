@@ -846,6 +846,9 @@ async def test_list_context_snapshots_returns_store_snapshots_and_respects_limit
     assert [snap["id"] for snap in filtered] == [snap_b["id"]]
     assert filtered[0]["reasons"] == ["超过 60 分钟未同步上下文"]
 
+    health_filtered = await service.list_context_snapshots("s", health="stale", limit=50)
+    assert [snap["id"] for snap in health_filtered] == [snap_b["id"]]
+
     limited = await service.list_context_snapshots("s", limit=1)
     assert len(limited) == 1
     assert limited[0]["id"] in {snap_a["id"], snap_b["id"]}

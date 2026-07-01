@@ -608,10 +608,11 @@ class WorkbenchService:
         session_id: str,
         task_id: str | None = None,
         agent_id: str | None = None,
+        health: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         return await self._workbench_store.list_context_snapshots(
-            session_id, task_id=task_id, agent_id=agent_id, limit=limit
+            session_id, task_id=task_id, agent_id=agent_id, health=health, limit=limit
         )
 
     async def get_context_snapshot(

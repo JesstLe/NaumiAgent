@@ -270,6 +270,29 @@ limit?: 1..200
 - `status` 过滤验证结果状态，用于快速展示 failed validations 或 passed evidence。
 - run detail 仍通过 `/validation-runs/{run_id}` 按需加载完整输出。
 
+## 9.3 Context Health Query API
+
+总览页、Worktrees 页和 Inspector 上下文健康卡片使用：
+
+```text
+GET /api/v1/workbench/sessions/{session_id}/context-snapshots
+```
+
+查询参数：
+
+```text
+task_id?: string
+agent_id?: string
+health?: good | stale | overloaded | missing | conflicted
+limit?: 1..200
+```
+
+约束：
+
+- `health` 直接来自 context snapshot 的健康状态，用于筛出 stale / missing / conflicted 等需要人工关注的上下文。
+- `task_id` 与 `agent_id` 可以和 `health` 组合使用，支撑单个 Issue 或单个 Agent 的上下文诊断。
+- snapshot detail 仍通过 `/context-snapshots/{snapshot_id}` 按需加载完整原因列表。
+
 ## 10. 日志
 
 Phase 2 起，SwiftUI 收集 daemon 日志。

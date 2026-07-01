@@ -675,9 +675,10 @@ final class WorkbenchAPIClientTests {
     @Test func fetchContextSnapshotsWithTaskIDAndAgentID() async throws {
         let taskID = "task 001/审查"
         let agentID = "agent 001/测试"
+        let health = "stale"
         let json = Data(
             """
-            {"context_snapshots":[{"id":"snap-001","session_id":"sess-001","agent_id":"agent 001/测试","task_id":"task 001/审查","health":"good","reasons":["上下文健康"],"created_at":"2026-06-27T06:00:00"}],"task_id":"task 001/审查","agent_id":"agent 001/测试","limit":25}
+            {"context_snapshots":[{"id":"snap-001","session_id":"sess-001","agent_id":"agent 001/测试","task_id":"task 001/审查","health":"good","reasons":["上下文健康"],"created_at":"2026-06-27T06:00:00"}],"task_id":"task 001/审查","agent_id":"agent 001/测试","health":"stale","limit":25}
             """.utf8
         )
 
@@ -689,7 +690,8 @@ final class WorkbenchAPIClientTests {
             guard components?.path == "/api/v1/workbench/sessions/sess-001/context-snapshots",
                   query["limit"] == "25",
                   query["task_id"] == taskID,
-                  query["agent_id"] == agentID else {
+                  query["agent_id"] == agentID,
+                  query["health"] == health else {
                 fatalError("Unexpected URL: \(String(describing: request.url))")
             }
             guard request.httpMethod == "GET" else {
@@ -709,11 +711,13 @@ final class WorkbenchAPIClientTests {
             sessionID: "sess-001",
             taskID: taskID,
             agentID: agentID,
+            health: health,
             limit: 25
         )
 
         #expect(response.taskID == taskID)
         #expect(response.agentID == agentID)
+        #expect(response.health == health)
         #expect(response.limit == 25)
         #expect(response.contextSnapshots.count == 1)
 
@@ -730,7 +734,7 @@ final class WorkbenchAPIClientTests {
     @Test func fetchContextSnapshotsWithoutOptionalFilters() async throws {
         let json = Data(
             """
-            {"context_snapshots":[],"task_id":null,"agent_id":null,"limit":50}
+            {"context_snapshots":[],"task_id":null,"agent_id":null,"health":null,"limit":50}
             """.utf8
         )
 
@@ -752,11 +756,13 @@ final class WorkbenchAPIClientTests {
             sessionID: "sess-001",
             taskID: nil,
             agentID: nil,
+            health: nil,
             limit: 50
         )
 
         #expect(response.taskID == nil)
         #expect(response.agentID == nil)
+        #expect(response.health == nil)
         #expect(response.limit == 50)
         #expect(response.contextSnapshots.isEmpty)
     }

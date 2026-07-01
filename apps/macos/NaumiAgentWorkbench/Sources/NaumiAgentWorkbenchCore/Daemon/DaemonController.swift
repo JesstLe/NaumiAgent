@@ -345,6 +345,7 @@ public final class DaemonController: Sendable {
                 sessionID: sessionID,
                 taskID: nil,
                 agentID: nil,
+                health: nil,
                 limit: 50
             )
         }
@@ -539,6 +540,7 @@ public final class DaemonController: Sendable {
     public func refreshContextSnapshots(
         taskID: String? = nil,
         agentID: String? = nil,
+        health: String? = nil,
         limit: Int = 50
     ) async {
         guard let sessionID = appState.selectedSessionID else {
@@ -553,6 +555,7 @@ public final class DaemonController: Sendable {
                 sessionID: sessionID,
                 taskID: taskID,
                 agentID: agentID,
+                health: health,
                 limit: limit
             )
             appState.contextSnapshots = response.contextSnapshots
