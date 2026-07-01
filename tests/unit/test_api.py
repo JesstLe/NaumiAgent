@@ -59,6 +59,11 @@ class _FakeEngine:
         self.session_store = _FakeSessionStore()
         self.loaded: list[str] = []
         self.ran: list[str] = []
+        self.workbench_service = SimpleNamespace(
+            create_issue=self._create_issue,
+            dashboard_snapshot=self._dashboard_snapshot,
+        )
+        self.created_issues: list[dict] = []
 
     async def load_session(self, session_id: str) -> bool:
         self.loaded.append(session_id)
@@ -74,6 +79,43 @@ class _FakeEngine:
         await on_event("token", {"content": "你"})
         usage = SimpleNamespace(turns=1, total_cost_usd=0.01)
         return SimpleNamespace(status="completed", response="你", usage=usage)
+
+    async def _create_issue(self, **kwargs):
+        self.created_issues.append(
+            {
+                **kwargs,
+                "parallel_mode": kwargs["parallel_mode"].value,
+                "risk_level": kwargs["risk_level"].value,
+            }
+        )
+        return {
+            "session_id": kwargs["session_id"],
+            "mission_id": kwargs["mission_id"],
+            "task_id": "task-chat-1",
+            "parallel_mode": kwargs["parallel_mode"].value,
+            "risk_level": kwargs["risk_level"].value,
+            "requires_human_approval": True,
+            "acceptance_criteria": kwargs["acceptance_criteria"],
+            "expected_artifacts": [],
+            "related_branch": "",
+            "related_worktree": "",
+            "related_pr": "",
+            "created_at": "2026-07-02T08:00:00",
+            "updated_at": "2026-07-02T08:00:00",
+        }
+
+    async def _dashboard_snapshot(self, session_id: str):
+        return {
+            "session_id": session_id,
+            "summary": {"current_mission_title": "日常对话联动"},
+            "missions": [],
+            "agent_profiles": [],
+            "tasks": [],
+            "issues": [],
+            "leases": [],
+            "failures": [],
+            "events": [],
+        }
 
 
 def _fake_request(engine: _FakeEngine):
@@ -97,6 +139,70 @@ class TestMessageRoutes:
         assert engine.loaded == ["sess_1"]
         assert engine.ran == ["hello"]
         assert response.content == "ok"
+
+    @pytest.mark.asyncio
+    async def test_send_message_can_create_workbench_issue_from_chat(self) -> None:
+        engine = _FakeEngine()
+        request = _fake_request(engine)
+
+        response = await send_message(
+            "sess_1",
+            MessageCreate(
+                content="把登录失败问题记录成任务",
+                stream=False,
+                workbench_issue={
+                    "mission_id": "mission-1",
+                    "title": "修复登录失败",
+                    "description": "用户在输入正确密码后仍然失败。",
+                    "acceptance_criteria": ["正确密码可以登录"],
+                    "parallel_mode": "exclusive",
+                    "risk_level": "high",
+                },
+            ),
+            request,
+            auth="test",
+        )
+
+        assert engine.loaded == ["sess_1"]
+        assert engine.ran == ["把登录失败问题记录成任务"]
+        assert engine.created_issues == [
+            {
+                "session_id": "sess_1",
+                "mission_id": "mission-1",
+                "title": "修复登录失败",
+                "description": "用户在输入正确密码后仍然失败。",
+                "blocked_by": [],
+                "acceptance_criteria": ["正确密码可以登录"],
+                "parallel_mode": "exclusive",
+                "risk_level": "high",
+            }
+        ]
+        assert response.metadata["workbench_issue"]["task_id"] == "task-chat-1"
+        assert response.metadata["workbench_snapshot"]["session_id"] == "sess_1"
+
+    @pytest.mark.asyncio
+    async def test_streaming_message_rejects_synchronous_issue_creation(self) -> None:
+        engine = _FakeEngine()
+        request = _fake_request(engine)
+
+        with pytest.raises(Exception) as exc:
+            await send_message(
+                "sess_1",
+                MessageCreate(
+                    content="把这句变成任务",
+                    workbench_issue={
+                        "mission_id": "mission-1",
+                        "title": "补齐聊天联动",
+                    },
+                ),
+                request,
+                auth="test",
+            )
+
+        assert exc.value.status_code == 400
+        assert exc.value.detail == "流式对话暂不支持同步创建 Issue"
+        assert engine.ran == []
+        assert engine.created_issues == []
 
     @pytest.mark.asyncio
     async def test_stream_response_uses_run_streaming_events(self) -> None:

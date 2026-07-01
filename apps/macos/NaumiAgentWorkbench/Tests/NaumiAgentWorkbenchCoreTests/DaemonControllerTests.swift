@@ -11,6 +11,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var sessionsResult: Result<SessionListDTO, APIError>?
     var createSessionResult: Result<SessionDTO, APIError>?
     var createWorkbenchSessionResult: Result<WorkbenchBootstrapDTO, APIError>?
+    var sendMessageResult: Result<ChatMessageDTO, APIError>?
     var eventsResult: Result<WorkbenchEventsDTO, APIError>?
     var eventResult: Result<EventDTO, APIError>?
     var validationRunsResult: Result<ValidationRunsDTO, APIError>?
@@ -189,6 +190,17 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
             "systemPrompt": systemPrompt,
         ])
         guard let result = createWorkbenchSessionResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func sendMessage(
+        sessionID: String,
+        content: String,
+        workbenchIssue: ChatIssueDraftDTO?
+    ) async throws(APIError) -> ChatMessageDTO {
+        guard let result = sendMessageResult else {
             throw .invalidResponse
         }
         return try result.get()

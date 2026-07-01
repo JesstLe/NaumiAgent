@@ -403,6 +403,66 @@ final class WorkbenchAPIClientTests {
         #expect(bootstrap.snapshot?.sessionID == "sess-new")
     }
 
+    @Test func sendMessageCanIncludeWorkbenchIssueDraft() async throws {
+        let json = Data(
+            """
+            {"id":"msg-001","role":"assistant","content":"已记录，并创建 Issue。","timestamp":"2026-07-02T08:00:00","metadata":{"workbench_issue":{"task_id":"task-chat-1"},"workbench_snapshot":{"session_id":"sess 中文"}}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/sessions/sess%20%E4%B8%AD%E6%96%87/messages" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard request.value(forHTTPHeaderField: "Content-Type") == "application/json" else {
+                fatalError("Missing JSON content type")
+            }
+            guard let bodyData = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Missing body")
+            }
+            let body = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
+            let issue = body?["workbench_issue"] as? [String: Any]
+            guard body?["content"] as? String == "把登录失败问题记录成任务",
+                  body?["stream"] as? Bool == false,
+                  issue?["mission_id"] as? String == "mission-1",
+                  issue?["title"] as? String == "修复登录失败",
+                  issue?["description"] as? String == "用户输入正确密码后仍然失败。",
+                  issue?["acceptance_criteria"] as? [String] == ["正确密码可以登录"],
+                  issue?["parallel_mode"] as? String == "exclusive",
+                  issue?["risk_level"] as? String == "high" else {
+                fatalError("Unexpected body: \(String(describing: body))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let message = try await client.sendMessage(
+            sessionID: "sess 中文",
+            content: "把登录失败问题记录成任务",
+            workbenchIssue: ChatIssueDraftDTO(
+                missionID: "mission-1",
+                title: "修复登录失败",
+                description: "用户输入正确密码后仍然失败。",
+                acceptanceCriteria: ["正确密码可以登录"],
+                riskLevel: "high"
+            )
+        )
+
+        #expect(message.id == "msg-001")
+        #expect(message.role == "assistant")
+        #expect(message.content == "已记录，并创建 Issue。")
+        #expect(message.metadata["workbench_issue"] == .object(["task_id": .string("task-chat-1")]))
+    }
+
     @Test func fetchEvents() async throws {
         let json = Data(
             """

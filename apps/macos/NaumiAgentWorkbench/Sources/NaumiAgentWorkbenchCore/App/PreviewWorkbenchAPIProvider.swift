@@ -96,6 +96,20 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func sendMessage(
+        sessionID: String,
+        content: String,
+        workbenchIssue: ChatIssueDraftDTO?
+    ) async throws(APIError) -> ChatMessageDTO {
+        ChatMessageDTO(
+            id: "preview-message",
+            role: "assistant",
+            content: "预览模式已记录这条对话。",
+            timestamp: "2026-07-02T08:00:00",
+            metadata: workbenchIssue == nil ? [:] : ["workbench_issue": .object([:])]
+        )
+    }
+
     func fetchEvents(
         sessionID: String,
         eventType: String?,

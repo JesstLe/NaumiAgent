@@ -3,6 +3,7 @@ import Foundation
 /// Main navigation routes for the workbench shell.
 public enum AppRoute: String, CaseIterable, Identifiable, Hashable, Sendable {
     case dashboard
+    case chat
     case taskMarket
     case worktrees
     case reviews
@@ -13,6 +14,7 @@ public enum AppRoute: String, CaseIterable, Identifiable, Hashable, Sendable {
 
     public static let topNavigationRoutes: [AppRoute] = [
         .dashboard,
+        .chat,
         .taskMarket,
         .worktrees,
         .reviews,
@@ -25,6 +27,8 @@ public enum AppRoute: String, CaseIterable, Identifiable, Hashable, Sendable {
         switch self {
         case .dashboard:
             return AppStrings.Navigation.dashboard(locale)
+        case .chat:
+            return AppStrings.Navigation.chat(locale)
         case .taskMarket:
             return AppStrings.Navigation.taskMarket(locale)
         case .worktrees:
@@ -42,6 +46,8 @@ public enum AppRoute: String, CaseIterable, Identifiable, Hashable, Sendable {
         switch self {
         case .dashboard:
             return "square.grid.2x2"
+        case .chat:
+            return "bubble.left.and.bubble.right"
         case .taskMarket:
             return "cart"
         case .worktrees:
@@ -59,6 +65,8 @@ public enum AppRoute: String, CaseIterable, Identifiable, Hashable, Sendable {
         switch self {
         case .dashboard:
             return .dashboard
+        case .chat:
+            return .chat
         case .taskMarket:
             return .taskMarket
         case .worktrees:

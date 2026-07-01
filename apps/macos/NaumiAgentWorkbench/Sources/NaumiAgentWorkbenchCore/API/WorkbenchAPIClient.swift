@@ -77,6 +77,22 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         return try await post(path: "workbench/sessions", body: body)
     }
 
+    public func sendMessage(
+        sessionID: String,
+        content: String,
+        workbenchIssue: ChatIssueDraftDTO?
+    ) async throws(APIError) -> ChatMessageDTO {
+        let body = SendMessageRequest(
+            content: content,
+            stream: false,
+            workbenchIssue: workbenchIssue
+        )
+        return try await post(
+            path: encodePath("sessions", sessionID, "messages"),
+            body: body
+        )
+    }
+
     public func fetchEvents(
         sessionID: String,
         eventType: String? = nil,
@@ -1002,6 +1018,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         let title: String?
         let systemPrompt: String?
         let model: String?
+    }
+
+    /// Payload for `POST /sessions/{session_id}/messages`.
+    private struct SendMessageRequest: Encodable, Sendable {
+        let content: String
+        let stream: Bool
+        let workbenchIssue: ChatIssueDraftDTO?
     }
 
     private struct ErrorDetailResponse: Decodable {

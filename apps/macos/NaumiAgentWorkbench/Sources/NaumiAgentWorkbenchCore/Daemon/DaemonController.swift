@@ -32,6 +32,10 @@ public final class DaemonController: Sendable {
         self.eventProvider = eventProvider
     }
 
+    private static func nowISO8601() -> String {
+        ISO8601DateFormatter().string(from: Date())
+    }
+
     /// Refreshes the daemon connection by fetching the bootstrap payload.
     ///
     /// - Sets `connectionState` to `.connecting` and clears `lastError`.
@@ -1290,6 +1294,7 @@ public final class DaemonController: Sendable {
     /// `selectedSessionID` are intentionally preserved.
     private func clearSessionScopedState() {
         appState.snapshot = nil
+        appState.chatMessages = []
         appState.timelineEvents = []
         appState.validationRuns = []
         appState.contextSnapshots = []
@@ -1319,6 +1324,64 @@ public final class DaemonController: Sendable {
     private func clearUnavailableSelectedSession() {
         appState.selectedSessionID = nil
         clearSessionScopedState()
+    }
+
+    /// Sends a daily chat message through the selected session. When an issue
+    /// draft is provided, the backend creates the Workbench issue atomically
+    /// with the non-streaming message response.
+    ///
+    /// If no session is selected, a lightweight chat session is created first so
+    /// first-run users can talk to the app before creating a Mission.
+    public func sendDailyMessage(content: String, issueDraft: ChatIssueDraftDTO?) async {
+        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedContent.isEmpty else {
+            return
+        }
+
+        if appState.selectedSessionID == nil {
+            await createSession(
+                title: AppStrings.Chat.title(appState.locale),
+                model: nil,
+                systemPrompt: nil
+            )
+        }
+
+        guard let sessionID = appState.selectedSessionID else {
+            if appState.lastError == nil {
+                appState.lastError = .missingSelectedSession
+            }
+            return
+        }
+
+        appState.lastError = nil
+        let localUserMessage = ChatMessageDTO(
+            id: "local-\(UUID().uuidString)",
+            role: "user",
+            content: trimmedContent,
+            timestamp: Self.nowISO8601(),
+            metadata: [:]
+        )
+
+        do {
+            let response = try await apiProvider.sendMessage(
+                sessionID: sessionID,
+                content: trimmedContent,
+                workbenchIssue: issueDraft
+            )
+            appState.chatMessages.append(localUserMessage)
+            appState.chatMessages.append(response)
+
+            if issueDraft != nil {
+                await refreshSnapshot()
+                await refreshIssues(missionID: issueDraft?.missionID)
+                await refreshEvents(limit: 50)
+            }
+        } catch {
+            appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
+        }
     }
 
     /// Refreshes the snapshot for the currently selected session.

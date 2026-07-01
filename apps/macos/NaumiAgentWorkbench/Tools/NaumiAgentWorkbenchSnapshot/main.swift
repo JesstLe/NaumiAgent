@@ -85,16 +85,18 @@ struct WorkbenchSnapshotTool {
         switch route {
         case .dashboard:
             return "01-dashboard"
+        case .chat:
+            return "02-chat"
         case .taskMarket:
-            return "02-task-market"
+            return "03-task-market"
         case .worktrees:
-            return "03-worktrees"
+            return "04-worktrees"
         case .reviews:
-            return "04-reviews"
+            return "05-reviews"
         case .timeline:
-            return "05-timeline"
+            return "06-timeline"
         case .settings:
-            return "06-settings"
+            return "07-settings"
         }
     }
 }
