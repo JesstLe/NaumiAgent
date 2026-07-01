@@ -432,7 +432,15 @@ async def get_workbench_bootstrap(
 
     for session_dict in session_dicts:
         candidate_session_id = session_dict["id"]
-        if not await engine.load_session(candidate_session_id):
+        try:
+            session_loaded = await engine.load_session(candidate_session_id)
+        except RuntimeError:
+            logger.exception(
+                "Workbench bootstrap could not load session %s",
+                candidate_session_id,
+            )
+            continue
+        if not session_loaded:
             continue
         try:
             snapshot = await _build_workbench_snapshot(engine, candidate_session_id)
