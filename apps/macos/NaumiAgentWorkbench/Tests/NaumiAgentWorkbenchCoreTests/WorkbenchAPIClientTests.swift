@@ -40,7 +40,7 @@ final class WorkbenchAPIClientTests {
     @Test func fetchCapabilities() async throws {
         let json = Data(
             """
-            {"supports_daemon_management":false,"supports_workspace_registry":false,"supports_validation_runner":true,"supports_cloud_sync":false,"supported_locales":["zh-CN","en-US"],"protocol_version":1}
+            {"supports_daemon_management":false,"supports_workspace_registry":false,"supports_validation_runner":true,"supports_cloud_sync":false,"supported_locales":["zh-CN","en-US"],"default_locale":"zh-CN","protocol_version":1}
             """.utf8
         )
 
@@ -65,6 +65,33 @@ final class WorkbenchAPIClientTests {
         #expect(!capabilities.supportsDaemonManagement)
         #expect(!capabilities.supportsCloudSync)
         #expect(capabilities.supportedLocales == ["zh-CN", "en-US"])
+        #expect(capabilities.defaultLocale == "zh-CN")
+    }
+
+    @Test func fetchCapabilitiesDefaultsToChineseForLegacyDaemon() async throws {
+        let json = Data(
+            """
+            {"supports_daemon_management":false,"supports_workspace_registry":false,"supports_validation_runner":true,"supports_cloud_sync":false,"supported_locales":["zh-CN","en-US"],"protocol_version":1}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/capabilities" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let capabilities = try await client.fetchCapabilities()
+
+        #expect(capabilities.defaultLocale == "zh-CN")
     }
 
     @Test func fetchDaemonStatus() async throws {

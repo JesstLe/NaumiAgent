@@ -217,6 +217,7 @@ GET /api/v1/workbench/capabilities
   "supports_validation_runner": true,
   "supports_cloud_sync": false,
   "supported_locales": ["zh-CN", "en-US"],
+  "default_locale": "zh-CN",
   "protocol_version": 1
 }
 ```
