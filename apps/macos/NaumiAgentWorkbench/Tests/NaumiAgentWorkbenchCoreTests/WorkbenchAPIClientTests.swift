@@ -3389,14 +3389,20 @@ final class WorkbenchAPIClientTests {
     @Test func fetchIntentLocksEncodesPathAndDecodesResponse() async throws {
         let sessionID = "sess 中文"
         let missionID = "mission 中文"
+        let active = true
         let json = Data(
             """
-            {"intent_locks":[{"id":"lock-001","session_id":"sess 中文","mission_id":"mission 中文","rule":"禁止修改 core 模块","blocked_paths":["src/secret"],"allowed_paths":["src/secret/README.md"],"require_proposal_for_risk":"high","active":true,"created_at":"2026-06-27T06:00:00"}],"mission_id":"mission 中文"}
+            {"intent_locks":[{"id":"lock-001","session_id":"sess 中文","mission_id":"mission 中文","rule":"禁止修改 core 模块","blocked_paths":["src/secret"],"allowed_paths":["src/secret/README.md"],"require_proposal_for_risk":"high","active":true,"created_at":"2026-06-27T06:00:00"}],"mission_id":"mission 中文","active":true}
             """.utf8
         )
 
         MockURLProtocol.requestHandler = { request in
-            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/missions/mission%20%E4%B8%AD%E6%96%87/intent-locks" else {
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/missions/mission%20%E4%B8%AD%E6%96%87/intent-locks",
+                  query["active"] == "true" else {
                 fatalError("Unexpected URL: \(String(describing: request.url))")
             }
             guard request.httpMethod == "GET" else {
@@ -3412,9 +3418,14 @@ final class WorkbenchAPIClientTests {
         }
 
         let client = makeClient()
-        let response = try await client.fetchIntentLocks(sessionID: sessionID, missionID: missionID)
+        let response = try await client.fetchIntentLocks(
+            sessionID: sessionID,
+            missionID: missionID,
+            active: active
+        )
 
         #expect(response.missionID == missionID)
+        #expect(response.active == active)
         #expect(response.intentLocks.count == 1)
 
         let lock = try #require(response.intentLocks.first)
@@ -3591,7 +3602,11 @@ final class WorkbenchAPIClientTests {
         }
 
         let client = makeClient()
-        let response = try await client.fetchIntentLocks(sessionID: sessionID, missionID: missionID)
+        let response = try await client.fetchIntentLocks(
+            sessionID: sessionID,
+            missionID: missionID,
+            active: nil
+        )
 
         #expect(response.missionID == missionID)
         #expect(response.intentLocks.isEmpty)

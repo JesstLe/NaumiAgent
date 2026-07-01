@@ -307,7 +307,8 @@ public protocol WorkbenchAPIProviding: Sendable {
     /// Fetches intent locks for the given session and mission.
     func fetchIntentLocks(
         sessionID: String,
-        missionID: String
+        missionID: String,
+        active: Bool?
     ) async throws(APIError) -> IntentLocksDTO
 
     /// Fetches one intent lock by id for human-governance detail views.

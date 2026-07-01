@@ -1099,11 +1099,13 @@ class _FakeWorkbenchService:
             "updated_at": "2024-01-01T00:00:00",
         }
 
-    async def list_intent_locks(self, session_id: str, mission_id: str):
+    async def list_intent_locks(
+        self, session_id: str, mission_id: str, active: bool | None = None
+    ):
         if self._list_intent_locks_error is not None:
             raise self._list_intent_locks_error
         self.listed_intent_locks.append(
-            {"session_id": session_id, "mission_id": mission_id}
+            {"session_id": session_id, "mission_id": mission_id, "active": active}
         )
         return [
             {
@@ -1114,7 +1116,7 @@ class _FakeWorkbenchService:
                 "blocked_paths": ["src/secret"],
                 "allowed_paths": ["src/secret/README.md"],
                 "require_proposal_for_risk": "high",
-                "active": True,
+                "active": True if active is None else active,
                 "created_at": "2024-01-01T00:00:00",
             }
         ]
@@ -7443,11 +7445,17 @@ async def test_get_intent_locks_endpoint_reports_runtime_session_load_failure() 
 async def test_get_intent_locks_endpoint_returns_locks_and_mission_id() -> None:
     engine = _FakeEngine(exists=True)
 
-    response = await get_intent_locks("sess-1", "mission-2", _fake_request(engine), auth="test")
+    response = await get_intent_locks(
+        "sess-1",
+        "mission-2",
+        _fake_request(engine),
+        active=True,
+        auth="test",
+    )
 
     assert engine.loaded == ["sess-1"]
     assert engine.workbench_service.listed_intent_locks == [
-        {"session_id": "sess-1", "mission_id": "mission-2"}
+        {"session_id": "sess-1", "mission_id": "mission-2", "active": True}
     ]
     assert response.model_dump() == {
         "intent_locks": [
@@ -7464,6 +7472,7 @@ async def test_get_intent_locks_endpoint_returns_locks_and_mission_id() -> None:
             }
         ],
         "mission_id": "mission-2",
+        "active": True,
     }
 
 

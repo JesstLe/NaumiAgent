@@ -625,8 +625,12 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
-    func fetchIntentLocks(sessionID: String, missionID: String) async throws(APIError) -> IntentLocksDTO {
-        IntentLocksDTO(intentLocks: [], missionID: missionID)
+    func fetchIntentLocks(
+        sessionID: String,
+        missionID: String,
+        active: Bool?
+    ) async throws(APIError) -> IntentLocksDTO {
+        IntentLocksDTO(intentLocks: [], missionID: missionID, active: active)
     }
 
     func fetchIntentLock(

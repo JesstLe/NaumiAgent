@@ -416,7 +416,7 @@ public final class DaemonController: Sendable {
                 try await self.apiProvider.fetchDecisions(sessionID: sessionID, missionID: missionID, kind: nil)
             }
             async let intentLocksResult = capturePreWarmResult {
-                try await self.apiProvider.fetchIntentLocks(sessionID: sessionID, missionID: missionID)
+                try await self.apiProvider.fetchIntentLocks(sessionID: sessionID, missionID: missionID, active: nil)
             }
 
             switch await decisionsResult {
@@ -1130,7 +1130,8 @@ public final class DaemonController: Sendable {
         do {
             let response = try await apiProvider.fetchIntentLocks(
                 sessionID: sessionID,
-                missionID: missionID
+                missionID: missionID,
+                active: nil
             )
             appState.intentLocks = response.intentLocks
         } catch {

@@ -102,9 +102,14 @@ class WorkbenchService:
         return data
 
     async def list_intent_locks(
-        self, session_id: str, mission_id: str
+        self,
+        session_id: str,
+        mission_id: str,
+        active: bool | None = None,
     ) -> list[dict[str, Any]]:
-        locks = await self._workbench_store.list_intent_locks(session_id, mission_id)
+        locks = await self._workbench_store.list_intent_locks(
+            session_id, mission_id, active=active
+        )
         return [self._intent_lock_to_dict(lock) for lock in locks]
 
     async def get_intent_lock(

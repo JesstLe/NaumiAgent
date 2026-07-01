@@ -280,9 +280,19 @@ async def test_intent_locks_round_trip(store: WorkbenchStore) -> None:
         blocked_paths=["frontend/"],
         require_proposal_for_risk=RiskLevel.MEDIUM,
     )
+    inactive_lock = await store.add_intent_lock(
+        session_id="s",
+        mission_id=mission.id,
+        rule="旧规则",
+        active=False,
+    )
 
     locks = await store.list_intent_locks("s", mission.id)
-    assert locks == [lock]
+    assert locks == [lock, inactive_lock]
+    assert await store.list_intent_locks("s", mission.id, active=True) == [lock]
+    assert await store.list_intent_locks("s", mission.id, active=False) == [
+        inactive_lock
+    ]
 
 
 @pytest.mark.asyncio

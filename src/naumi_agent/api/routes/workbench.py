@@ -226,6 +226,7 @@ class AgentProfilesResponse(BaseModel):
 class IntentLocksResponse(BaseModel):
     intent_locks: list[dict[str, Any]]
     mission_id: str
+    active: bool | None = None
 
 
 class DecisionsResponse(BaseModel):
@@ -1287,11 +1288,13 @@ async def create_decision(
 @router.get(
     "/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks",
     response_model=IntentLocksResponse,
+    response_model_exclude_none=True,
 )
 async def get_intent_locks(
     session_id: str,
     mission_id: str,
     request: Request,
+    active: Annotated[bool | None, Query()] = None,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -1308,12 +1311,20 @@ async def get_intent_locks(
     if not session_loaded:
         raise HTTPException(status_code=404, detail="Session not found")
     try:
-        locks = await engine.workbench_service.list_intent_locks(session_id, mission_id)
+        locks = await engine.workbench_service.list_intent_locks(
+            session_id,
+            mission_id,
+            active=active,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return IntentLocksResponse(intent_locks=locks, mission_id=mission_id)
+    return IntentLocksResponse(
+        intent_locks=locks,
+        mission_id=mission_id,
+        active=active,
+    )
 
 
 @router.get("/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks/{lock_id}")
