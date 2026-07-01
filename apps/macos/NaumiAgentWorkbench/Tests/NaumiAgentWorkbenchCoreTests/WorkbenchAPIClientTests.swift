@@ -919,9 +919,11 @@ final class WorkbenchAPIClientTests {
     @Test func fetchApprovalsWithState() async throws {
         let sessionID = "sess 中文"
         let state = "waiting"
+        let missionID = "mission 001/审查"
+        let taskID = "task 001/审批"
         let json = Data(
             """
-            {"approvals":[{"id":"approval-001","session_id":"sess 中文","mission_id":"mission-001","task_id":"task-001","state":"waiting","title":"允许重构","detail":"保持测试通过","requester":"Agent-A","reviewer":"","decision_note":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"state":"waiting","limit":25}
+            {"approvals":[{"id":"approval-001","session_id":"sess 中文","mission_id":"mission 001/审查","task_id":"task 001/审批","state":"waiting","title":"允许重构","detail":"保持测试通过","requester":"Agent-A","reviewer":"","decision_note":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"state":"waiting","mission_id":"mission 001/审查","task_id":"task 001/审批","limit":25}
             """.utf8
         )
 
@@ -932,7 +934,9 @@ final class WorkbenchAPIClientTests {
             )
             guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/approvals",
                   query["limit"] == "25",
-                  query["state"] == state else {
+                  query["state"] == state,
+                  query["mission_id"] == missionID,
+                  query["task_id"] == taskID else {
                 fatalError("Unexpected URL: \(String(describing: request.url))")
             }
             guard request.httpMethod == "GET" else {
@@ -951,16 +955,22 @@ final class WorkbenchAPIClientTests {
         let response = try await client.fetchApprovals(
             sessionID: sessionID,
             state: state,
+            missionID: missionID,
+            taskID: taskID,
             limit: 25
         )
 
         #expect(response.state == state)
+        #expect(response.missionID == missionID)
+        #expect(response.taskID == taskID)
         #expect(response.limit == 25)
         #expect(response.approvals.count == 1)
 
         let approval = try #require(response.approvals.first)
         #expect(approval.id == "approval-001")
         #expect(approval.sessionID == sessionID)
+        #expect(approval.missionID == missionID)
+        #expect(approval.taskID == taskID)
         #expect(approval.state == "waiting")
         #expect(approval.title == "允许重构")
     }
@@ -968,7 +978,7 @@ final class WorkbenchAPIClientTests {
     @Test func fetchApprovalsWithoutState() async throws {
         let json = Data(
             """
-            {"approvals":[],"state":null,"limit":50}
+            {"approvals":[],"state":null,"mission_id":null,"task_id":null,"limit":50}
             """.utf8
         )
 
@@ -989,10 +999,14 @@ final class WorkbenchAPIClientTests {
         let response = try await client.fetchApprovals(
             sessionID: "sess-001",
             state: nil,
+            missionID: nil,
+            taskID: nil,
             limit: 50
         )
 
         #expect(response.state == nil)
+        #expect(response.missionID == nil)
+        #expect(response.taskID == nil)
         #expect(response.limit == 50)
         #expect(response.approvals.isEmpty)
     }

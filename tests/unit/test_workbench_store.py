@@ -623,6 +623,17 @@ async def test_list_approvals_filters_by_session_state_and_orders_newest_first(
     approved_only = await store.list_approvals("s", state=ApprovalState.APPROVED, limit=50)
     assert [a.id for a in approved_only] == [approved_s.id]
 
+    mission_1 = await store.list_approvals("s", mission_id="mission-1", limit=50)
+    assert [a.id for a in mission_1] == [approved_s.id, waiting_s.id]
+
+    task_1 = await store.list_approvals("s", task_id="task-1", limit=50)
+    assert [a.id for a in task_1] == [waiting_s.id]
+
+    mission_1_waiting = await store.list_approvals(
+        "s", state=ApprovalState.WAITING, mission_id="mission-1", limit=50
+    )
+    assert [a.id for a in mission_1_waiting] == [waiting_s.id]
+
     other_session = await store.list_approvals("s2", state=ApprovalState.WAITING, limit=50)
     assert len(other_session) == 1
     assert other_session[0].session_id == "s2"

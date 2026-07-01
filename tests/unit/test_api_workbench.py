@@ -820,12 +820,20 @@ class _FakeWorkbenchService:
         self,
         session_id: str,
         state: ApprovalState | None = None,
+        mission_id: str | None = None,
+        task_id: str | None = None,
         limit: int = 50,
     ):
         if self._list_approvals_error is not None:
             raise self._list_approvals_error
         self.listed_approvals.append(
-            {"session_id": session_id, "state": state, "limit": limit}
+            {
+                "session_id": session_id,
+                "state": state,
+                "mission_id": mission_id,
+                "task_id": task_id,
+                "limit": limit,
+            }
         )
         return [
             {
@@ -3543,13 +3551,21 @@ async def test_get_approvals_endpoint_returns_approvals_and_params() -> None:
         "sess-1",
         _fake_request(engine),
         state=ApprovalState.WAITING,
+        mission_id="mission-1",
+        task_id="task-1",
         limit=25,
         auth="test",
     )
 
     assert engine.loaded == ["sess-1"]
     assert engine.workbench_service.listed_approvals == [
-        {"session_id": "sess-1", "state": ApprovalState.WAITING, "limit": 25}
+        {
+            "session_id": "sess-1",
+            "state": ApprovalState.WAITING,
+            "mission_id": "mission-1",
+            "task_id": "task-1",
+            "limit": 25,
+        }
     ]
     assert response.model_dump() == {
         "approvals": [
@@ -3569,6 +3585,8 @@ async def test_get_approvals_endpoint_returns_approvals_and_params() -> None:
             }
         ],
         "state": "waiting",
+        "mission_id": "mission-1",
+        "task_id": "task-1",
         "limit": 25,
     }
 
@@ -3578,14 +3596,28 @@ async def test_get_approvals_endpoint_without_state_filter() -> None:
     engine = _FakeEngine(exists=True)
 
     response = await get_approvals(
-        "sess-1", _fake_request(engine), state=None, limit=50, auth="test"
+        "sess-1",
+        _fake_request(engine),
+        state=None,
+        mission_id=None,
+        task_id=None,
+        limit=50,
+        auth="test",
     )
 
     assert engine.loaded == ["sess-1"]
     assert engine.workbench_service.listed_approvals == [
-        {"session_id": "sess-1", "state": None, "limit": 50}
+        {
+            "session_id": "sess-1",
+            "state": None,
+            "mission_id": None,
+            "task_id": None,
+            "limit": 50,
+        }
     ]
     assert response.model_dump()["state"] is None
+    assert response.model_dump()["mission_id"] is None
+    assert response.model_dump()["task_id"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["approvals"]) == 1
 

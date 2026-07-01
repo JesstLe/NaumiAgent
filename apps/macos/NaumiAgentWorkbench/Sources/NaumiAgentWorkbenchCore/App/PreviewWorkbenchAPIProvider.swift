@@ -213,11 +213,15 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
     func fetchApprovals(
         sessionID: String,
         state: String?,
+        missionID: String?,
+        taskID: String?,
         limit: Int
     ) async throws(APIError) -> ApprovalsDTO {
         ApprovalsDTO(
             approvals: [makeApproval(sessionID: sessionID, approvalID: "preview-approval", state: state ?? "waiting")],
             state: state,
+            missionID: missionID,
+            taskID: taskID,
             limit: limit
         )
     }

@@ -221,11 +221,15 @@ class WorkbenchService:
         self,
         session_id: str,
         state: ApprovalState | None = None,
+        mission_id: str | None = None,
+        task_id: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         approvals = await self._workbench_store.list_approvals(
             session_id=session_id,
             state=state,
+            mission_id=mission_id,
+            task_id=task_id,
             limit=limit,
         )
         return [self._approval_to_dict(approval) for approval in approvals]
