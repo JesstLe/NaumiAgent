@@ -912,6 +912,7 @@ class _FakeWorkbenchService:
         session_id: str,
         mission_id: str | None = None,
         risk_level: str | None = None,
+        status: str | None = None,
         limit: int = 50,
     ):
         self.listed_issues.append(
@@ -919,6 +920,7 @@ class _FakeWorkbenchService:
                 "session_id": session_id,
                 "mission_id": mission_id,
                 "risk_level": risk_level,
+                "status": status,
                 "limit": limit,
             }
         )
@@ -944,6 +946,7 @@ class _FakeWorkbenchService:
             ],
             "mission_id": mission_id,
             "risk_level": risk_level,
+            "status": status,
             "limit": limit,
         }
 
@@ -5579,13 +5582,20 @@ async def test_get_issues_endpoint_returns_issues_and_params() -> None:
         _fake_request(engine),
         mission_id="mission-2",
         risk_level="high",
+        status="blocked",
         limit=25,
         auth="test",
     )
 
     assert engine.loaded == ["sess-1"]
     assert engine.workbench_service.listed_issues == [
-        {"session_id": "sess-1", "mission_id": "mission-2", "risk_level": "high", "limit": 25}
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-2",
+            "risk_level": "high",
+            "status": "blocked",
+            "limit": 25,
+        }
     ]
     assert response.model_dump() == {
         "issues": [
@@ -5607,6 +5617,7 @@ async def test_get_issues_endpoint_returns_issues_and_params() -> None:
         ],
         "mission_id": "mission-2",
         "risk_level": "high",
+        "status": "blocked",
         "limit": 25,
     }
 
@@ -5620,13 +5631,20 @@ async def test_get_issues_endpoint_without_filters() -> None:
         _fake_request(engine),
         mission_id=None,
         risk_level=None,
+        status=None,
         limit=50,
         auth="test",
     )
 
     assert engine.loaded == ["sess-1"]
     assert engine.workbench_service.listed_issues == [
-        {"session_id": "sess-1", "mission_id": None, "risk_level": None, "limit": 50}
+        {
+            "session_id": "sess-1",
+            "mission_id": None,
+            "risk_level": None,
+            "status": None,
+            "limit": 50,
+        }
     ]
     assert response.model_dump()["mission_id"] is None
     assert response.model_dump()["risk_level"] is None
@@ -5647,6 +5665,7 @@ async def test_get_issues_endpoint_reports_invalid_issue_filter() -> None:
             _fake_request(engine),
             mission_id="mission-2",
             risk_level="bad-risk",
+            status=None,
             limit=25,
             auth="test",
         )
@@ -5657,6 +5676,7 @@ async def test_get_issues_endpoint_reports_invalid_issue_filter() -> None:
             "session_id": "sess-1",
             "mission_id": "mission-2",
             "risk_level": "bad-risk",
+            "status": None,
             "limit": 25,
         }
     ]
@@ -5683,7 +5703,13 @@ async def test_get_issues_endpoint_reports_unavailable_issue_service() -> None:
 
     assert engine.loaded == ["sess-1"]
     assert engine.workbench_service.listed_issues == [
-        {"session_id": "sess-1", "mission_id": None, "risk_level": None, "limit": 25}
+        {
+            "session_id": "sess-1",
+            "mission_id": None,
+            "risk_level": None,
+            "status": None,
+            "limit": 25,
+        }
     ]
     assert exc.value.status_code == 503
     assert exc.value.detail == "issue store unavailable"

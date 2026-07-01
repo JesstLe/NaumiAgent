@@ -1595,6 +1595,34 @@ async def test_list_issues_returns_json_friendly_strings_and_respects_filters(
     assert limited["limit"] == 2
 
 
+@pytest.mark.asyncio
+async def test_list_issues_can_filter_by_authoritative_task_status(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    pending_task = await task_store.create_task("待处理 Issue")
+    blocked_task = await task_store.create_task("阻塞 Issue")
+    completed_task = await task_store.create_task("完成 Issue")
+    await task_store.update_task(blocked_task.id, status=TaskStatus.BLOCKED)
+    await task_store.update_task(completed_task.id, status=TaskStatus.COMPLETED)
+    for task in [pending_task, blocked_task, completed_task]:
+        await workbench_store.upsert_issue(
+            session_id="s",
+            task_id=task.id,
+            mission_id="mission-1",
+        )
+
+    blocked = await service.list_issues("s", status="blocked", limit=50)
+
+    assert [issue["task_id"] for issue in blocked["issues"]] == [blocked_task.id]
+    assert blocked["status"] == "blocked"
+    assert blocked["mission_id"] is None
+    assert blocked["risk_level"] is None
+    assert blocked["limit"] == 50
+
+
 
 @pytest.mark.asyncio
 async def test_list_missions_returns_wrapper_and_json_friendly_fields(tmp_path) -> None:

@@ -225,6 +225,29 @@ GET /api/v1/workbench/capabilities
 
 SwiftUI 根据 capabilities 启用/禁用功能，不硬猜后端能力。
 
+## 9.1 Issue Query API
+
+任务市场和左侧问题队列使用：
+
+```text
+GET /api/v1/workbench/sessions/{session_id}/issues
+```
+
+查询参数：
+
+```text
+mission_id?: string
+risk_level?: low | medium | high | critical
+status?: pending | in_progress | blocked | completed
+limit?: 1..200
+```
+
+约束：
+
+- `status` 来自 `TaskStore.tasks.status`，不是 `workbench_issues` 的重复字段。
+- `mission_id` / `risk_level` 过滤 workbench metadata。
+- SwiftUI 可以用该接口实现 All / Active / Blocked / Done 队列筛选；snapshot 仍然是真相源。
+
 ## 10. 日志
 
 Phase 2 起，SwiftUI 收集 daemon 日志。

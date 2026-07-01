@@ -244,6 +244,7 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         sessionID: String,
         missionID: String?,
         riskLevel: String?,
+        status: String?,
         limit: Int
     ) async throws(APIError) -> IssuesDTO {
         IssuesDTO(
@@ -257,6 +258,7 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
             ],
             missionID: missionID,
             riskLevel: riskLevel,
+            status: status,
             limit: limit
         )
     }

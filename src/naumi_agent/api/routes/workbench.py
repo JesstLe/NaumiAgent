@@ -176,6 +176,7 @@ class IssuesResponse(BaseModel):
     issues: list[dict[str, Any]]
     mission_id: str | None
     risk_level: str | None
+    status: str | None
     limit: int
 
 
@@ -1532,6 +1533,7 @@ async def get_issues(
     request: Request,
     mission_id: str | None = Query(default=None),
     risk_level: str | None = Query(default=None),
+    status: Annotated[str | None, Query()] = None,
     limit: int = Query(default=50, ge=1, le=200),
     auth: str = AuthDep,
 ):
@@ -1550,7 +1552,11 @@ async def get_issues(
         raise HTTPException(status_code=404, detail="Session not found")
     try:
         issues = await engine.workbench_service.list_issues(
-            session_id, mission_id=mission_id, risk_level=risk_level, limit=limit
+            session_id,
+            mission_id=mission_id,
+            risk_level=risk_level,
+            status=status,
+            limit=limit,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1560,6 +1566,7 @@ async def get_issues(
         issues=issues["issues"],
         mission_id=mission_id,
         risk_level=risk_level,
+        status=issues["status"],
         limit=limit,
     )
 

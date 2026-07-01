@@ -1154,9 +1154,10 @@ final class WorkbenchAPIClientTests {
         let sessionID = "sess 中文"
         let missionID = "mission 中文"
         let riskLevel = "high"
+        let status = "blocked"
         let json = Data(
             """
-            {"issues":[{"session_id":"sess 中文","task_id":"task-001","mission_id":"mission 中文","parallel_mode":"exclusive","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["通过测试"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"mission_id":"mission 中文","risk_level":"high","limit":25}
+            {"issues":[{"session_id":"sess 中文","task_id":"task-001","mission_id":"mission 中文","parallel_mode":"exclusive","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["通过测试"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"mission_id":"mission 中文","risk_level":"high","status":"blocked","limit":25}
             """.utf8
         )
 
@@ -1168,7 +1169,8 @@ final class WorkbenchAPIClientTests {
             guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/issues",
                   query["limit"] == "25",
                   query["mission_id"] == missionID,
-                  query["risk_level"] == riskLevel else {
+                  query["risk_level"] == riskLevel,
+                  query["status"] == status else {
                 fatalError("Unexpected URL: \(String(describing: request.url))")
             }
             guard request.httpMethod == "GET" else {
@@ -1188,11 +1190,13 @@ final class WorkbenchAPIClientTests {
             sessionID: sessionID,
             missionID: missionID,
             riskLevel: riskLevel,
+            status: status,
             limit: 25
         )
 
         #expect(response.missionID == missionID)
         #expect(response.riskLevel == riskLevel)
+        #expect(response.status == status)
         #expect(response.limit == 25)
         #expect(response.issues.count == 1)
 
@@ -1230,11 +1234,13 @@ final class WorkbenchAPIClientTests {
             sessionID: "sess-001",
             missionID: nil,
             riskLevel: nil,
+            status: nil,
             limit: 50
         )
 
         #expect(response.missionID == nil)
         #expect(response.riskLevel == nil)
+        #expect(response.status == nil)
         #expect(response.limit == 50)
         #expect(response.issues.isEmpty)
     }

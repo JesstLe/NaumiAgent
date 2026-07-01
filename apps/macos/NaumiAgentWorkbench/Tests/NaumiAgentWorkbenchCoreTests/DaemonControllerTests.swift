@@ -87,6 +87,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var runValidationWithSnapshotCallCount: Int = 0
     var createdSessions: [[String: String?]] = []
     var createdMissions: [[String: String]] = []
+    var issueRequests: [[String: String?]] = []
     var fetchedEvents: [FakeWorkbenchEventRefreshRequest] = []
     var preWarmDelayNanoseconds: UInt64?
     var preWarmInFlightCallCount: Int = 0
@@ -334,8 +335,16 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         sessionID: String,
         missionID: String?,
         riskLevel: String?,
+        status: String?,
         limit: Int
     ) async throws(APIError) -> IssuesDTO {
+        issueRequests.append([
+            "session_id": sessionID,
+            "mission_id": missionID,
+            "risk_level": riskLevel,
+            "status": status,
+            "limit": String(limit),
+        ])
         await recordPreWarmRequest()
         guard let result = issuesResult else {
             throw .invalidResponse
@@ -3750,15 +3759,33 @@ final class DaemonControllerTests {
 
         let api = FakeWorkbenchAPIProvider()
         let issue = makeIssue(taskID: "task-001", missionID: "mission-001")
-        let issues = IssuesDTO(issues: [issue], missionID: "mission-001", riskLevel: "medium", limit: 25)
+        let issues = IssuesDTO(
+            issues: [issue],
+            missionID: "mission-001",
+            riskLevel: "medium",
+            status: "blocked",
+            limit: 25
+        )
 
         await api.setIssuesResult(.success(issues))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
-        await controller.refreshIssues(missionID: "mission-001", riskLevel: "medium", limit: 25)
+        await controller.refreshIssues(
+            missionID: "mission-001",
+            riskLevel: "medium",
+            status: "blocked",
+            limit: 25
+        )
 
         #expect(appState.issues == [issue])
         #expect(appState.lastError == nil)
+        #expect(await api.issueRequests == [[
+            "session_id": "sess-001",
+            "mission_id": "mission-001",
+            "risk_level": "medium",
+            "status": "blocked",
+            "limit": "25",
+        ]])
     }
 
     @Test @MainActor func refreshIssuesWithoutSelectedSessionRecordsError() async throws {
