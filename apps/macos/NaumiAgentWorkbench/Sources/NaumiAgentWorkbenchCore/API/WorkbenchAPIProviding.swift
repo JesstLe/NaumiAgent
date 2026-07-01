@@ -53,6 +53,7 @@ public protocol WorkbenchAPIProviding: Sendable {
         sessionID: String,
         taskID: String?,
         agentID: String?,
+        health: String?,
         limit: Int
     ) async throws(APIError) -> ContextSnapshotsDTO
 

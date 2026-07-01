@@ -149,6 +149,7 @@ class ContextSnapshotsResponse(BaseModel):
     context_snapshots: list[dict[str, Any]]
     task_id: str | None
     agent_id: str | None
+    health: str | None
     limit: int
 
 
@@ -813,8 +814,9 @@ async def get_validation_run(
 async def get_context_snapshots(
     session_id: str,
     request: Request,
-    task_id: str | None = Query(default=None),
-    agent_id: str | None = Query(default=None),
+    task_id: Annotated[str | None, Query()] = None,
+    agent_id: Annotated[str | None, Query()] = None,
+    health: Annotated[str | None, Query()] = None,
     limit: int = Query(default=50, ge=1, le=200),
     auth: str = AuthDep,
 ):
@@ -833,14 +835,18 @@ async def get_context_snapshots(
         raise HTTPException(status_code=404, detail="Session not found")
     try:
         snapshots = await engine.workbench_service.list_context_snapshots(
-            session_id, task_id=task_id, agent_id=agent_id, limit=limit
+            session_id, task_id=task_id, agent_id=agent_id, health=health, limit=limit
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return ContextSnapshotsResponse(
-        context_snapshots=snapshots, task_id=task_id, agent_id=agent_id, limit=limit
+        context_snapshots=snapshots,
+        task_id=task_id,
+        agent_id=agent_id,
+        health=health,
+        limit=limit,
     )
 
 

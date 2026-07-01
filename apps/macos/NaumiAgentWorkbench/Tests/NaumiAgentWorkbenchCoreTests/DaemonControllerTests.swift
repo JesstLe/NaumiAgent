@@ -253,6 +253,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
         sessionID: String,
         taskID: String?,
         agentID: String?,
+        health: String?,
         limit: Int
     ) async throws(APIError) -> ContextSnapshotsDTO {
         await recordPreWarmRequest()
@@ -3257,6 +3258,7 @@ final class DaemonControllerTests {
             contextSnapshots: [snapshot],
             taskID: "task-001",
             agentID: "agent-001",
+            health: nil,
             limit: 25
         )
 
@@ -6305,7 +6307,7 @@ private func configureWorkbenchListResults(for api: FakeWorkbenchAPIProvider, se
     await api.setFetchDecisionsResult(.success(DecisionsDTO(decisions: [decision], missionID: mission.id)))
     await api.setFetchIntentLocksResult(.success(IntentLocksDTO(intentLocks: [intentLock], missionID: mission.id)))
     await api.setValidationRunsResult(.success(ValidationRunsDTO(validationRuns: [run], taskID: nil, limit: 50)))
-    await api.setContextSnapshotsResult(.success(ContextSnapshotsDTO(contextSnapshots: [contextSnapshot], taskID: nil, agentID: nil, limit: 50)))
+    await api.setContextSnapshotsResult(.success(ContextSnapshotsDTO(contextSnapshots: [contextSnapshot], taskID: nil, agentID: nil, health: nil, limit: 50)))
     await api.setAgentProfilesResult(.success(AgentProfilesDTO(agentProfiles: [agentProfile], status: nil, limit: 50)))
 }
 

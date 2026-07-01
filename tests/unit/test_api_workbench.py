@@ -738,6 +738,7 @@ class _FakeWorkbenchService:
         session_id: str,
         task_id: str | None = None,
         agent_id: str | None = None,
+        health: str | None = None,
         limit: int = 50,
     ):
         if self._list_context_snapshots_error is not None:
@@ -747,6 +748,7 @@ class _FakeWorkbenchService:
                 "session_id": session_id,
                 "task_id": task_id,
                 "agent_id": agent_id,
+                "health": health,
                 "limit": limit,
             }
         )
@@ -2406,6 +2408,7 @@ async def test_get_context_snapshots_endpoint_returns_snapshots_and_params() -> 
         _fake_request(engine),
         task_id="task-2",
         agent_id="agent-2",
+        health="stale",
         limit=25,
         auth="test",
     )
@@ -2416,6 +2419,7 @@ async def test_get_context_snapshots_endpoint_returns_snapshots_and_params() -> 
             "session_id": "sess-1",
             "task_id": "task-2",
             "agent_id": "agent-2",
+            "health": "stale",
             "limit": 25,
         }
     ]
@@ -2433,6 +2437,7 @@ async def test_get_context_snapshots_endpoint_returns_snapshots_and_params() -> 
         ],
         "task_id": "task-2",
         "agent_id": "agent-2",
+        "health": "stale",
         "limit": 25,
     }
 

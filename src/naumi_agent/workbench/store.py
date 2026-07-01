@@ -936,6 +936,7 @@ class WorkbenchStore:
         session_id: str,
         task_id: str | None = None,
         agent_id: str | None = None,
+        health: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         async with aiosqlite.connect(self._db_path) as db:
@@ -949,6 +950,9 @@ class WorkbenchStore:
             if agent_id is not None:
                 filters.append("agent_id = ?")
                 params.append(agent_id)
+            if health is not None:
+                filters.append("health = ?")
+                params.append(health)
             params.append(limit)
             where_clause = " AND ".join(filters)
             cursor = await db.execute(
