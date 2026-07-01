@@ -5119,6 +5119,31 @@ async def test_create_intent_lock_endpoint_reports_unavailable_session_store() -
 
 
 @pytest.mark.asyncio
+async def test_create_intent_lock_endpoint_reports_runtime_session_load_failure() -> None:
+    engine = _FakeEngine(
+        exists=True,
+        load_session_error=RuntimeError("运行态会话暂不可用"),
+    )
+    body = IntentLockCreate(
+        actor="Planner-Agent",
+        rule="禁止修改 src/secret 下文件",
+        blocked_paths=["src/secret"],
+        allowed_paths=["src/secret/README.md"],
+        require_proposal_for_risk=RiskLevel.HIGH,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_intent_lock(
+            "sess-1", "mission-1", body, _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.created_intent_locks == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "运行态会话暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_create_intent_lock_endpoint_returns_created_lock() -> None:
     engine = _FakeEngine(exists=True)
     body = IntentLockCreate(
