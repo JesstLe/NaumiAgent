@@ -302,7 +302,13 @@ public final class DaemonController: Sendable {
             try await self.apiProvider.fetchAgentProfiles(sessionID: sessionID, status: nil, limit: 50)
         }
         async let issuesResult = capturePreWarmResult {
-            try await self.apiProvider.fetchIssues(sessionID: sessionID, missionID: nil, riskLevel: nil, limit: 50)
+            try await self.apiProvider.fetchIssues(
+                sessionID: sessionID,
+                missionID: nil,
+                riskLevel: nil,
+                status: nil,
+                limit: 50
+            )
         }
         async let leasesResult = capturePreWarmResult {
             try await self.apiProvider.fetchLeases(sessionID: sessionID, state: nil, taskID: nil, agentID: nil, limit: 50)
@@ -715,7 +721,12 @@ public final class DaemonController: Sendable {
     /// set. Missing session clears the local issues list to avoid showing
     /// stale data from another session. API failures leave the local list
     /// unchanged.
-    public func refreshIssues(missionID: String? = nil, riskLevel: String? = nil, limit: Int = 50) async {
+    public func refreshIssues(
+        missionID: String? = nil,
+        riskLevel: String? = nil,
+        status: String? = nil,
+        limit: Int = 50
+    ) async {
         guard let sessionID = appState.selectedSessionID else {
             appState.issues = []
             appState.lastError = .missingSelectedSession
@@ -728,6 +739,7 @@ public final class DaemonController: Sendable {
                 sessionID: sessionID,
                 missionID: missionID,
                 riskLevel: riskLevel,
+                status: status,
                 limit: limit
             )
             appState.issues = response.issues

@@ -106,6 +106,7 @@ public protocol WorkbenchAPIProviding: Sendable {
         sessionID: String,
         missionID: String?,
         riskLevel: String?,
+        status: String?,
         limit: Int
     ) async throws(APIError) -> IssuesDTO
 

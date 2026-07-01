@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.workbench.context_health import (
     ContextHealthInput,
@@ -329,18 +330,36 @@ class WorkbenchService:
         session_id: str,
         mission_id: str | None = None,
         risk_level: str | None = None,
+        status: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
+        normalized_status: str | None = None
+        task_status: TaskStatus | None = None
+        if status is not None:
+            normalized_status = status.strip().lower()
+            try:
+                task_status = TaskStatus(normalized_status)
+            except ValueError as exc:
+                raise ValueError(f"任务状态无效: {status}") from exc
         issues = await self._workbench_store.list_issues(
             session_id=session_id,
             mission_id=mission_id,
             risk_level=risk_level,
             limit=limit,
         )
+        if task_status is not None:
+            tasks = await self._task_store.list_tasks()
+            matching_task_ids = {
+                task.id for task in tasks if task.status == task_status
+            }
+            issues = [
+                issue for issue in issues if issue.task_id in matching_task_ids
+            ]
         return {
             "issues": [self._issue_to_dict(issue) for issue in issues],
             "mission_id": mission_id,
             "risk_level": risk_level,
+            "status": normalized_status,
             "limit": limit,
         }
 
