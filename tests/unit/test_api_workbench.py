@@ -6571,6 +6571,26 @@ async def test_keep_worktree_endpoint_reports_unavailable_session_store() -> Non
 
 
 @pytest.mark.asyncio
+async def test_keep_worktree_endpoint_reports_runtime_session_load_failure() -> None:
+    worktree_manager = FakeWorktreeManager()
+    engine = _FakeEngine(
+        exists=True,
+        worktree_manager=worktree_manager,
+        load_session_error=RuntimeError("运行态会话暂不可用"),
+    )
+    body = WorktreeKeep(actor="Human", reason="等待人工审查")
+
+    with pytest.raises(HTTPException) as exc:
+        await keep_worktree("sess-1", "wt-api", body, _fake_request(engine), auth="test")
+
+    assert engine.loaded == ["sess-1"]
+    assert worktree_manager.keep_calls == []
+    assert worktree_manager.status_calls == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "运行态会话暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_get_worktrees_endpoint_filters_and_returns_json_ready_records() -> None:
     worktree_manager = FakeWorktreeManager(
         [
