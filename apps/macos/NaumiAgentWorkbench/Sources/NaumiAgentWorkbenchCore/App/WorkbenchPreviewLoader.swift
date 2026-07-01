@@ -60,6 +60,8 @@ public enum WorkbenchPreviewLoader {
         switch argument.lowercased() {
         case "dashboard", "overview":
             return .dashboard
+        case "chat", "conversation", "daily-chat":
+            return .chat
         case "taskmarket", "task-market", "market":
             return .taskMarket
         case "worktrees", "worktree", "workspaces":
@@ -98,6 +100,7 @@ public enum WorkbenchPreviewLoader {
         appState.isPreviewFixture = true
 
         appState.sessions = [previewSession(from: snapshot, locale: locale)]
+        appState.chatMessages = previewChatMessages(locale: locale)
         appState.missions = snapshot.missions
         appState.agentProfiles = snapshot.agentProfiles
         appState.validationRuns = previewValidationRuns(from: snapshot, locale: locale)
@@ -126,6 +129,28 @@ public enum WorkbenchPreviewLoader {
             supportedLocales: [AppLocale.zhCN.rawValue, AppLocale.enUS.rawValue],
             protocolVersion: 1
         )
+    }
+
+    private static func previewChatMessages(locale: AppLocale) -> [ChatMessageDTO] {
+        [
+            ChatMessageDTO(
+                id: "preview-chat-user-1",
+                role: "user",
+                content: locale == .zhCN
+                    ? "把登录失败的排查记录成一个任务，并先看风险。"
+                    : "Record the login failure investigation as an issue and check the risk first.",
+                timestamp: "2026-07-02T08:00:00"
+            ),
+            ChatMessageDTO(
+                id: "preview-chat-assistant-1",
+                role: "assistant",
+                content: locale == .zhCN
+                    ? "已创建关联任务，并刷新任务市场。"
+                    : "Created the linked issue and refreshed the task market.",
+                timestamp: "2026-07-02T08:00:03",
+                metadata: ["workbench_issue": .object(["task_id": .string("preview-task")])]
+            )
+        ]
     }
 
     private static func resolveFixtureURL(

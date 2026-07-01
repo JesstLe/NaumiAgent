@@ -76,6 +76,11 @@ public struct WorkbenchShellView: View {
                 appState: environment.appState,
                 daemonController: environment.daemonController
             )
+        case .chat:
+            ChatView(
+                appState: environment.appState,
+                daemonController: environment.daemonController
+            )
         case .taskMarket:
             TaskMarketView(
                 appState: environment.appState,
@@ -196,7 +201,7 @@ private struct TopNavigationBar: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(minWidth: 360, idealWidth: 520, maxWidth: 620)
+            .frame(minWidth: 460, idealWidth: 620, maxWidth: 740)
             .layoutPriority(2)
 
             Spacer(minLength: 12)

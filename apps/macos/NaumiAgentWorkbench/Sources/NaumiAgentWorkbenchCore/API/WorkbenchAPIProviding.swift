@@ -24,6 +24,13 @@ public protocol WorkbenchAPIProviding: Sendable {
         systemPrompt: String?
     ) async throws(APIError) -> WorkbenchBootstrapDTO
 
+    /// Sends a daily chat message, optionally linking it to a new Workbench issue.
+    func sendMessage(
+        sessionID: String,
+        content: String,
+        workbenchIssue: ChatIssueDraftDTO?
+    ) async throws(APIError) -> ChatMessageDTO
+
     /// Fetches audit events for the given session, optionally filtered by event fields.
     func fetchEvents(
         sessionID: String,

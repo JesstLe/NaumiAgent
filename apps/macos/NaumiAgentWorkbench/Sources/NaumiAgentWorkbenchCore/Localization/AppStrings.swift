@@ -55,6 +55,10 @@ public enum AppStrings {
             locale == .zhCN ? "总览" : "Dashboard"
         }
 
+        public static func chat(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "对话" : "Chat"
+        }
+
         public static func taskMarket(_ locale: AppLocale) -> String {
             locale == .zhCN ? "任务市场" : "Task Market"
         }
@@ -77,6 +81,69 @@ public enum AppStrings {
 
         public static func pageUnderConstruction(_ locale: AppLocale) -> String {
             locale == .zhCN ? "页面建设中" : "Page under construction"
+        }
+    }
+
+    // MARK: - Chat
+    public enum Chat {
+        public static func title(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "日常对话" : "Daily Chat"
+        }
+
+        public static func sessionSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "当前会话" : "Current Session"
+        }
+
+        public static func missionSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "关联 Mission" : "Linked Mission"
+        }
+
+        public static func messagePlaceholder(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "输入消息" : "Message"
+        }
+
+        public static func emptyMessages(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "还没有对话" : "No messages yet"
+        }
+
+        public static func createIssueToggle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "同时创建任务" : "Create issue too"
+        }
+
+        public static func issueTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "任务标题" : "Issue Title"
+        }
+
+        public static func issueDescription(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "任务描述" : "Issue Description"
+        }
+
+        public static func acceptanceCriteria(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "验收标准" : "Acceptance Criteria"
+        }
+
+        public static func riskLevel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "风险等级" : "Risk Level"
+        }
+
+        public static func parallelMode(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "并行模式" : "Parallel Mode"
+        }
+
+        public static func sendButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "发送" : "Send"
+        }
+
+        public static func sending(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "发送中" : "Sending"
+        }
+
+        public static func linkedIssueCreated(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "已创建关联任务" : "Linked issue created"
+        }
+
+        public static func noMission(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无 Mission" : "No Mission"
         }
     }
 

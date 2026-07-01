@@ -12,6 +12,7 @@ public final class AppState: Sendable {
     public var daemonStatus: DaemonStatusDTO? = nil
     public var capabilities: CapabilitiesDTO? = nil
     public var sessions: [SessionDTO] = []
+    public var chatMessages: [ChatMessageDTO] = []
     public var snapshot: WorkbenchSnapshotDTO? = nil
     public var timelineEvents: [EventDTO] = []
     public var validationRuns: [ValidationRunDTO] = []

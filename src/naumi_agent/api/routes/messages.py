@@ -87,6 +87,9 @@ async def send_message(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    if body.stream and body.workbench_issue is not None:
+        raise HTTPException(status_code=400, detail="流式对话暂不支持同步创建 Issue")
+
     if body.stream:
         return StreamingResponse(
             _stream_response(engine, session_id, body.content, request),
@@ -98,12 +101,17 @@ async def send_message(
         if not await engine.load_session(session_id):
             raise HTTPException(status_code=404, detail="Session not found")
         result = await engine.run(body.content)
+        workbench_metadata = await _create_workbench_issue_from_message(
+            engine, session_id, body
+        )
+    metadata = {"turns": result.usage.turns, "cost_usd": result.usage.total_cost_usd}
+    metadata.update(workbench_metadata)
     return MessageResponse(
         id=uuid.uuid4().hex[:12],
         role="assistant",
         content=result.response,
         timestamp=datetime.now().isoformat(),
-        metadata={"turns": result.usage.turns, "cost_usd": result.usage.total_cost_usd},
+        metadata=metadata,
     )
 
 
@@ -213,6 +221,43 @@ def _engine_lock(request: Request):
         lock = asyncio.Lock()
         request.app.state.engine_lock = lock
     return lock
+
+
+async def _create_workbench_issue_from_message(
+    engine,
+    session_id: str,
+    body: MessageCreate,
+) -> dict[str, Any]:
+    if body.workbench_issue is None:
+        return {}
+    if body.stream:
+        raise HTTPException(status_code=400, detail="流式对话暂不支持同步创建 Issue")
+    workbench_service = getattr(engine, "workbench_service", None)
+    if workbench_service is None:
+        raise HTTPException(status_code=503, detail="Workbench 服务暂不可用")
+
+    issue_request = body.workbench_issue
+    try:
+        issue = await workbench_service.create_issue(
+            session_id=session_id,
+            mission_id=issue_request.mission_id,
+            title=issue_request.title,
+            description=issue_request.description,
+            blocked_by=issue_request.blocked_by,
+            acceptance_criteria=issue_request.acceptance_criteria,
+            parallel_mode=issue_request.parallel_mode,
+            risk_level=issue_request.risk_level,
+        )
+        snapshot = await workbench_service.dashboard_snapshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return {
+        "workbench_issue": issue,
+        "workbench_snapshot": snapshot,
+    }
 
 
 def _engine_event_to_stream_event(

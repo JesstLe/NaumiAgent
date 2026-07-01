@@ -34,6 +34,7 @@ public struct WorkbenchScaledPageLayout: Equatable, Sendable {
     public let baseHeight: Double
 
     public static let dashboard = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 858)
+    public static let chat = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 858)
     public static let taskMarket = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 858)
     public static let worktrees = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 858)
     public static let reviews = WorkbenchScaledPageLayout(baseWidth: 1440, baseHeight: 858)

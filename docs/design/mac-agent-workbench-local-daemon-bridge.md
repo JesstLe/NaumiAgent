@@ -382,6 +382,66 @@ active?: true | false
 - `active=false` 用于审计历史或排查旧规则影响。
 - intent lock detail 仍通过 `/intent-locks/{lock_id}` 按需加载完整规则。
 
+## 9.8 Daily Chat and Issue Link API
+
+Chat 页使用现有会话消息接口，不新增一套平行聊天后端：
+
+```text
+POST /api/v1/sessions/{session_id}/messages
+```
+
+普通对话请求：
+
+```json
+{
+  "content": "帮我分析登录失败的排查方向",
+  "stream": false
+}
+```
+
+对话同时创建 Issue：
+
+```json
+{
+  "content": "把登录失败问题记录成任务，并先标成高风险。",
+  "stream": false,
+  "workbench_issue": {
+    "mission_id": "mission-1",
+    "title": "修复登录失败",
+    "description": "用户输入正确密码后仍然失败。",
+    "blocked_by": [],
+    "acceptance_criteria": ["正确密码可以登录"],
+    "parallel_mode": "exclusive",
+    "risk_level": "high"
+  }
+}
+```
+
+响应仍是 `MessageResponse`，但 metadata 会包含 Workbench 联动结果：
+
+```json
+{
+  "id": "msg-001",
+  "role": "assistant",
+  "content": "已记录，并创建 Issue。",
+  "metadata": {
+    "workbench_issue": {
+      "task_id": "task-chat-1"
+    },
+    "workbench_snapshot": {
+      "session_id": "sess-1"
+    }
+  }
+}
+```
+
+约束：
+
+- 第一版对话转 Issue 必须使用 `stream=false`。
+- `stream=true` 且传入 `workbench_issue` 时，后端返回 400：`流式对话暂不支持同步创建 Issue`。
+- SwiftUI 收到 `workbench_issue` 后刷新 snapshot、Issue 列表和 timeline。
+- 未来升级流式对话时，只扩展事件协议，不改变 `workbench_issue` 字段语义。
+
 ## 10. 日志
 
 Phase 2 起，SwiftUI 收集 daemon 日志。

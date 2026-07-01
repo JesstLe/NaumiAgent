@@ -7,7 +7,7 @@
 
 ## 1. 设计目标
 
-Mac Agent Workbench 的界面目标是让用户治理一个本地自治研发系统，而不是和 Agent 聊天。
+Mac Agent Workbench 的界面目标是让用户治理一个本地自治研发系统，同时保留一个和 Codex 类似的日常对话入口。治理视图仍然是产品主干；对话视图用于快速沟通、澄清需求，并把自然语言上下文同步转成可治理的 Workbench Issue。
 
 第一版界面必须回答五个问题：
 
@@ -78,6 +78,7 @@ NaumiAgent Workbench
 
 ```text
 Dashboard
+Chat
 Task Market
 Worktrees
 Reviews
@@ -89,6 +90,7 @@ Settings
 
 ```text
 总览
+对话
 任务市场
 工作区
 审查
@@ -137,6 +139,7 @@ MVP 主页面：
 
 ```text
 Dashboard
+Chat
 Task Market
 Worktrees
 Reviews
@@ -147,11 +150,62 @@ Settings
 页面优先级：
 
 1. Dashboard：必须第一版实现。
-2. Task Market：必须第一版实现。
-3. Reviews：必须第一版实现基础状态。
-4. Timeline：必须第一版实现 snapshot/replay 基础。
-5. Worktrees：可以第一版实现列表，后续增强。
-6. Settings：第一版至少包含语言和治理策略入口。
+2. Chat：必须第一版实现非流式日常对话和对话转 Issue。
+3. Task Market：必须第一版实现。
+4. Reviews：必须第一版实现基础状态。
+5. Timeline：必须第一版实现 snapshot/replay 基础。
+6. Worktrees：可以第一版实现列表，后续增强。
+7. Settings：第一版至少包含语言和治理策略入口。
+
+### 4.1 Chat 页面规格
+
+Chat 是日常对话入口，目标是让用户像使用 Codex 一样直接表达问题、想法、约束和需求，同时可以把当前消息同步创建为 Workbench Issue。
+
+第一版定案：
+
+- 非流式发送。
+- 发送普通消息时只追加会话回复。
+- 勾选“同时创建任务”时，消息和 Issue 创建走同一个后端请求。
+- 创建成功后刷新 snapshot、Issue 列表和时间线。
+- 默认中文，英文 fallback。
+
+布局：
+
+```text
+┌──────────────┬──────────────────────────┬───────────────┐
+│ Session Rail │ Conversation             │ Issue Draft    │
+│ Mission      │ User/Assistant Messages  │ Risk/Criteria  │
+│ Open Issues  │ Composer                 │ Link Toggle    │
+└──────────────┴──────────────────────────┴───────────────┘
+```
+
+列宽：
+
+```text
+Session Rail: 300px
+Conversation: 760px
+Issue Draft: 380px
+```
+
+对话转任务字段：
+
+```text
+mission_id
+title
+description
+acceptance_criteria
+parallel_mode
+risk_level
+```
+
+如果用户勾选“同时创建任务”但没有填写标题，前端可以使用当前消息前 36 个字符作为标题；description 默认使用当前消息全文。
+
+联动规则：
+
+- Task Market 立即能看到新任务。
+- Dashboard snapshot 刷新。
+- Timeline 增加 issue.created 等审计事件。
+- 用户可以从任务市场继续 claim、验证、审批。
 
 ## 5. Dashboard 页面规格
 

@@ -70,6 +70,8 @@ apps/macos/NaumiAgentWorkbench/
       Dashboard/
         DashboardView.swift
         DashboardViewModel.swift
+      Chat/
+        ChatView.swift
       TaskMarket/
         TaskMarketView.swift
         TaskMarketViewModel.swift
@@ -114,6 +116,7 @@ AppState 是 SwiftUI 层唯一的共享状态根。
 selectedWorkspace
 selectedSessionID
 currentRoute
+chatMessages
 snapshot
 connectionState
 daemonStatus
@@ -136,6 +139,7 @@ lastError
 ```swift
 enum AppRoute: String, CaseIterable {
     case dashboard
+    case chat
     case taskMarket
     case worktrees
     case reviews
@@ -148,6 +152,7 @@ enum AppRoute: String, CaseIterable {
 
 ```text
 总览
+对话
 任务市场
 工作区
 审查
@@ -159,6 +164,7 @@ enum AppRoute: String, CaseIterable {
 
 ```text
 Dashboard
+Chat
 Task Market
 Worktrees
 Reviews
@@ -203,7 +209,10 @@ runValidation(...)
 createIntentLock(...)
 createDecision(...)
 resolveApproval(...)
+sendMessage(..., workbenchIssue: ...)
 ```
+
+Chat 页通过 `sendMessage(sessionID:content:workbenchIssue:)` 访问 `POST /sessions/{session_id}/messages`。普通对话传 `workbenchIssue=nil`；对话转任务传 `ChatIssueDraftDTO`，后端返回 assistant message，并在 metadata 中带回 `workbench_issue` 和 `workbench_snapshot`。
 
 `WorkbenchEventClient` 负责 WebSocket：
 
