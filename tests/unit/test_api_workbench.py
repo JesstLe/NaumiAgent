@@ -1855,7 +1855,7 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
 
     with client.websocket_connect("/workbench/sessions/sess-1/events/stream") as websocket:
         assert websocket.receive_json() == {"type": "connected", "session_id": "sess-1"}
-        assert websocket.receive_json()["type"] == "workbench.event"
+        assert websocket.receive_json()["type"] == "workbench/event"
         assert websocket.receive_json() == {"type": "refresh_complete", "count": 1}
         websocket.send_json(
             {
@@ -1891,8 +1891,9 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
         }
     ]
     assert event_message == {
-        "type": "workbench.event",
-        "event": {
+        "type": "workbench/event",
+        "version": 1,
+        "payload": {
             "id": "evt-1",
             "session_id": "sess-1",
             "type": "issue.created",
@@ -1949,8 +1950,9 @@ async def test_workbench_event_stream_sends_initial_audit_events_on_connect() ->
     assert websocket.sent_json == [
         {"type": "connected", "session_id": "sess-1"},
         {
-            "type": "workbench.event",
-            "event": {
+            "type": "workbench/event",
+            "version": 1,
+            "payload": {
                 "id": "evt-1",
                 "session_id": "sess-1",
                 "type": "mission.created",
