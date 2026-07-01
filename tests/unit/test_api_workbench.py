@@ -7294,6 +7294,28 @@ async def test_get_intent_lock_endpoint_reports_unavailable_session_store() -> N
 
 
 @pytest.mark.asyncio
+async def test_get_intent_lock_endpoint_reports_runtime_session_load_failure() -> None:
+    engine = _FakeEngine(
+        exists=True,
+        load_session_error=RuntimeError("运行态会话暂不可用"),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await get_intent_lock(
+            "sess-1",
+            "mission-2",
+            "lock-2",
+            _fake_request(engine),
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_intent_locks == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "运行态会话暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_get_intent_lock_endpoint_returns_lock_detail() -> None:
     engine = _FakeEngine(exists=True)
 
