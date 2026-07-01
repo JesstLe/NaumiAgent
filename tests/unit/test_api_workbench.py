@@ -3213,6 +3213,25 @@ async def test_attach_issue_endpoint_reports_unavailable_session_store() -> None
 
 
 @pytest.mark.asyncio
+async def test_attach_issue_endpoint_reports_runtime_session_load_failure() -> None:
+    engine = _FakeEngine(
+        exists=True, load_session_error=RuntimeError("运行态会话暂不可用")
+    )
+    body = IssueAttach(task_id="task-1", acceptance_criteria=["认领冲突必须被拒绝"])
+
+    with pytest.raises(HTTPException) as exc:
+        await attach_workbench_issue(
+            "sess-1", "mission-1", body, _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.attached_issues == []
+    assert engine.workbench_service.created_issues == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "运行态会话暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_attach_issue_endpoint_returns_attached_issue() -> None:
     engine = _FakeEngine(exists=True)
     body = IssueAttach(
