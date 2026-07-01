@@ -86,6 +86,8 @@ public protocol WorkbenchAPIProviding: Sendable {
     func fetchApprovals(
         sessionID: String,
         state: String?,
+        missionID: String?,
+        taskID: String?,
         limit: Int
     ) async throws(APIError) -> ApprovalsDTO
 

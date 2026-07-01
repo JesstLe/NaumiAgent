@@ -1023,17 +1023,36 @@ async def test_list_approvals_returns_json_friendly_state_strings(tmp_path) -> N
         requester="Agent-B",
         state=ApprovalState.APPROVED,
     )
+    waiting_other_mission = await workbench_store.add_approval(
+        session_id="s",
+        mission_id="mission-2",
+        task_id="task-3",
+        title="其他 Mission 等待审批",
+        detail="详情",
+        requester="Agent-C",
+    )
 
     all_approvals = await service.list_approvals("s", limit=50)
-    assert {a["id"] for a in all_approvals} == {waiting.id, approved.id}
+    assert {a["id"] for a in all_approvals} == {waiting.id, approved.id, waiting_other_mission.id}
     assert all(isinstance(a["state"], str) for a in all_approvals)
     approvals_by_id = {a["id"]: a for a in all_approvals}
     assert approvals_by_id[waiting.id]["state"] == "waiting"
     assert approvals_by_id[approved.id]["state"] == "approved"
 
     waiting_only = await service.list_approvals("s", state=ApprovalState.WAITING, limit=50)
-    assert [a["id"] for a in waiting_only] == [waiting.id]
-    assert waiting_only[0]["state"] == "waiting"
+    assert {a["id"] for a in waiting_only} == {waiting.id, waiting_other_mission.id}
+    assert all(a["state"] == "waiting" for a in waiting_only)
+
+    mission_filtered = await service.list_approvals("s", mission_id="mission-1", limit=50)
+    assert {a["id"] for a in mission_filtered} == {waiting.id, approved.id}
+
+    task_filtered = await service.list_approvals("s", task_id="task-2", limit=50)
+    assert [a["id"] for a in task_filtered] == [approved.id]
+
+    waiting_mission_filtered = await service.list_approvals(
+        "s", state=ApprovalState.WAITING, mission_id="mission-1", limit=50
+    )
+    assert [a["id"] for a in waiting_mission_filtered] == [waiting.id]
 
 
 @pytest.mark.asyncio

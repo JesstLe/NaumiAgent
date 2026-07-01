@@ -164,6 +164,8 @@ class ContextHealthRecord(BaseModel):
 class ApprovalsResponse(BaseModel):
     approvals: list[dict[str, Any]]
     state: str | None
+    mission_id: str | None
+    task_id: str | None
     limit: int
 
 
@@ -2028,6 +2030,8 @@ async def get_approvals(
     session_id: str,
     request: Request,
     state: ApprovalState | None = Query(default=None),
+    mission_id: Annotated[str | None, Query()] = None,
+    task_id: Annotated[str | None, Query()] = None,
     limit: int = Query(default=50, ge=1, le=200),
     auth: str = AuthDep,
 ):
@@ -2046,7 +2050,11 @@ async def get_approvals(
         raise HTTPException(status_code=404, detail="Session not found")
     try:
         approvals = await engine.workbench_service.list_approvals(
-            session_id, state=state, limit=limit
+            session_id,
+            state=state,
+            mission_id=mission_id,
+            task_id=task_id,
+            limit=limit,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2055,6 +2063,8 @@ async def get_approvals(
     return ApprovalsResponse(
         approvals=approvals,
         state=state.value if state is not None else None,
+        mission_id=mission_id,
+        task_id=task_id,
         limit=limit,
     )
 

@@ -205,11 +205,19 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     public func fetchApprovals(
         sessionID: String,
         state: String?,
+        missionID: String?,
+        taskID: String?,
         limit: Int
     ) async throws(APIError) -> ApprovalsDTO {
         var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
         if let state, !state.isEmpty {
             queryItems.append(URLQueryItem(name: "state", value: state))
+        }
+        if let missionID, !missionID.isEmpty {
+            queryItems.append(URLQueryItem(name: "mission_id", value: missionID))
+        }
+        if let taskID, !taskID.isEmpty {
+            queryItems.append(URLQueryItem(name: "task_id", value: taskID))
         }
         return try await get(
             path: encodePath("workbench", "sessions", sessionID, "approvals"),

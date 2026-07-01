@@ -316,6 +316,30 @@ limit?: 1..200
 - `task_id` / `status` / `kind` 可以组合使用，支撑单个 Issue 的 open test failures 或全部 unresolved merge conflicts。
 - failure detail 仍通过 `/failures/{failure_id}` 按需加载完整诊断内容。
 
+## 9.5 Human Approval Query API
+
+Dashboard 待介入卡片、Reviews 页和 Inspector 审批面板使用：
+
+```text
+GET /api/v1/workbench/sessions/{session_id}/approvals
+```
+
+查询参数：
+
+```text
+state?: waiting | approved | rejected | not_required
+mission_id?: string
+task_id?: string
+limit?: 1..200
+```
+
+约束：
+
+- `state=waiting` 是 Dashboard 和 Reviews 页默认关注的人工介入队列。
+- `mission_id` 用于聚焦当前 Mission 的审批事项，避免跨 Mission 干扰审查。
+- `task_id` 用于 Inspector 展示单个 Issue 需要用户决策的审批项。
+- approval detail 仍通过 `/approvals/{approval_id}` 按需加载完整决策上下文。
+
 ## 10. 日志
 
 Phase 2 起，SwiftUI 收集 daemon 日志。

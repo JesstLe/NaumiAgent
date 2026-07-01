@@ -1277,6 +1277,8 @@ class WorkbenchStore:
         self,
         session_id: str,
         state: ApprovalState | None = None,
+        mission_id: str | None = None,
+        task_id: str | None = None,
         limit: int = 50,
     ) -> list[Approval]:
         async with aiosqlite.connect(self._db_path) as db:
@@ -1287,6 +1289,12 @@ class WorkbenchStore:
             if state is not None:
                 filters.append("state = ?")
                 params.append(state.value)
+            if mission_id is not None:
+                filters.append("mission_id = ?")
+                params.append(mission_id)
+            if task_id is not None:
+                filters.append("task_id = ?")
+                params.append(task_id)
             params.append(limit)
             where_clause = " AND ".join(filters)
             cursor = await db.execute(

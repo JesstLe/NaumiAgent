@@ -330,7 +330,7 @@ public final class DaemonController: Sendable {
             )
         }
         async let approvalsResult = capturePreWarmResult {
-            try await self.apiProvider.fetchApprovals(sessionID: sessionID, state: "waiting", limit: 50)
+            try await self.apiProvider.fetchApprovals(sessionID: sessionID, state: "waiting", missionID: nil, taskID: nil, limit: 50)
         }
         async let validationRunsResult = capturePreWarmResult {
             try await self.apiProvider.fetchValidationRuns(
@@ -649,7 +649,12 @@ public final class DaemonController: Sendable {
     /// `appState.lastError` is set. Missing session clears the local approvals
     /// list to avoid showing stale data from another session. API failures leave
     /// the local list unchanged.
-    public func refreshApprovals(state: String? = "waiting", limit: Int = 50) async {
+    public func refreshApprovals(
+        state: String? = "waiting",
+        missionID: String? = nil,
+        taskID: String? = nil,
+        limit: Int = 50
+    ) async {
         guard let sessionID = appState.selectedSessionID else {
             appState.approvals = []
             appState.lastError = .missingSelectedSession
@@ -661,6 +666,8 @@ public final class DaemonController: Sendable {
             let response = try await apiProvider.fetchApprovals(
                 sessionID: sessionID,
                 state: state,
+                missionID: missionID,
+                taskID: taskID,
                 limit: limit
             )
             appState.approvals = response.approvals
