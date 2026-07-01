@@ -440,8 +440,11 @@ async def test_list_failures_filters_by_session_task_status_and_orders_newest_fi
     open_failures = await store.list_failures("s", status="open", limit=50)
     assert [f["id"] for f in open_failures] == [f_open_b["id"], f_open_a["id"]]
 
+    timeout_failures = await store.list_failures("s", kind="agent_timeout", limit=50)
+    assert [f["id"] for f in timeout_failures] == [f_open_b["id"]]
+
     task_a_open_failures = await store.list_failures(
-        "s", task_id="task-a", status="open", limit=50
+        "s", task_id="task-a", status="open", kind="test_failed", limit=50
     )
     assert [f["id"] for f in task_a_open_failures] == [f_open_a["id"]]
 

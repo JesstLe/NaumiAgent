@@ -694,10 +694,11 @@ class WorkbenchService:
         session_id: str,
         task_id: str | None = None,
         status: str | None = None,
+        kind: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         return await self._workbench_store.list_failures(
-            session_id, task_id=task_id, status=status, limit=limit
+            session_id, task_id=task_id, status=status, kind=kind, limit=limit
         )
 
     async def get_failure(

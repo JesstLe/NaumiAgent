@@ -872,6 +872,7 @@ class _FakeWorkbenchService:
         session_id: str,
         task_id: str | None = None,
         status: str | None = None,
+        kind: str | None = None,
         limit: int = 50,
     ):
         if self._list_failures_error is not None:
@@ -881,6 +882,7 @@ class _FakeWorkbenchService:
                 "session_id": session_id,
                 "task_id": task_id,
                 "status": status,
+                "kind": kind,
                 "limit": limit,
             }
         )
@@ -3812,13 +3814,20 @@ async def test_get_failures_endpoint_returns_failures_and_params() -> None:
         _fake_request(engine),
         task_id="task-2",
         status="resolved",
+        kind="test_failed",
         limit=25,
         auth="test",
     )
 
     assert engine.loaded == ["sess-1"]
     assert engine.workbench_service.listed_failures == [
-        {"session_id": "sess-1", "task_id": "task-2", "status": "resolved", "limit": 25}
+        {
+            "session_id": "sess-1",
+            "task_id": "task-2",
+            "status": "resolved",
+            "kind": "test_failed",
+            "limit": 25,
+        }
     ]
     assert response.model_dump() == {
         "failures": [
@@ -3836,6 +3845,7 @@ async def test_get_failures_endpoint_returns_failures_and_params() -> None:
         ],
         "task_id": "task-2",
         "status": "resolved",
+        "kind": "test_failed",
         "limit": 25,
     }
 
@@ -3855,10 +3865,17 @@ async def test_get_failures_endpoint_without_filters() -> None:
 
     assert engine.loaded == ["sess-1"]
     assert engine.workbench_service.listed_failures == [
-        {"session_id": "sess-1", "task_id": None, "status": None, "limit": 50}
+        {
+            "session_id": "sess-1",
+            "task_id": None,
+            "status": None,
+            "kind": None,
+            "limit": 50,
+        }
     ]
     assert response.model_dump()["task_id"] is None
     assert response.model_dump()["status"] is None
+    assert response.model_dump()["kind"] is None
     assert response.model_dump()["limit"] == 50
     assert len(response.model_dump()["failures"]) == 1
 

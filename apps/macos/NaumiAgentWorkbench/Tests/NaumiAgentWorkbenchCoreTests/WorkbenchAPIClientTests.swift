@@ -1043,9 +1043,10 @@ final class WorkbenchAPIClientTests {
         let sessionID = "sess 中文"
         let taskID = "task 001/审查"
         let status = "open"
+        let kind = "test_failed"
         let json = Data(
             """
-            {"failures":[{"id":"failure-001","session_id":"sess 中文","task_id":"task 001/审查","kind":"test_failed","title":"测试失败","detail":"保持测试通过","source_id":"run-001","status":"open","created_at":"2026-06-27T06:00:00"}],"task_id":"task 001/审查","status":"open","limit":25}
+            {"failures":[{"id":"failure-001","session_id":"sess 中文","task_id":"task 001/审查","kind":"test_failed","title":"测试失败","detail":"保持测试通过","source_id":"run-001","status":"open","created_at":"2026-06-27T06:00:00"}],"task_id":"task 001/审查","status":"open","kind":"test_failed","limit":25}
             """.utf8
         )
 
@@ -1057,7 +1058,8 @@ final class WorkbenchAPIClientTests {
             guard components?.percentEncodedPath == "/api/v1/workbench/sessions/sess%20%E4%B8%AD%E6%96%87/failures",
                   query["limit"] == "25",
                   query["task_id"] == taskID,
-                  query["status"] == status else {
+                  query["status"] == status,
+                  query["kind"] == kind else {
                 fatalError("Unexpected URL: \(String(describing: request.url))")
             }
             guard request.httpMethod == "GET" else {
@@ -1077,11 +1079,13 @@ final class WorkbenchAPIClientTests {
             sessionID: sessionID,
             taskID: taskID,
             status: status,
+            kind: kind,
             limit: 25
         )
 
         #expect(response.taskID == taskID)
         #expect(response.status == status)
+        #expect(response.kind == kind)
         #expect(response.limit == 25)
         #expect(response.failures.count == 1)
 
@@ -1100,7 +1104,7 @@ final class WorkbenchAPIClientTests {
     @Test func fetchFailuresWithoutFilters() async throws {
         let json = Data(
             """
-            {"failures":[],"task_id":null,"status":null,"limit":50}
+            {"failures":[],"task_id":null,"status":null,"kind":null,"limit":50}
             """.utf8
         )
 
@@ -1122,11 +1126,13 @@ final class WorkbenchAPIClientTests {
             sessionID: "sess-001",
             taskID: nil,
             status: nil,
+            kind: nil,
             limit: 50
         )
 
         #expect(response.taskID == nil)
         #expect(response.status == nil)
+        #expect(response.kind == nil)
         #expect(response.limit == 50)
         #expect(response.failures.isEmpty)
     }
