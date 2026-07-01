@@ -6922,6 +6922,31 @@ async def test_delete_worktree_endpoint_reports_unavailable_session_store() -> N
     assert exc.value.detail == "会话存储暂不可用"
 
 
+@pytest.mark.asyncio
+async def test_delete_worktree_endpoint_reports_runtime_session_load_failure() -> None:
+    worktree_manager = FakeWorktreeManager()
+    engine = _FakeEngine(
+        exists=True,
+        worktree_manager=worktree_manager,
+        load_session_error=RuntimeError("运行态会话暂不可用"),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await delete_worktree(
+            "sess-1",
+            "wt-clean",
+            _fake_request(engine),
+            discard_changes=False,
+            auth="test",
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert worktree_manager.remove_calls == []
+    assert worktree_manager.status_calls == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "运行态会话暂不可用"
+
+
 def test_delete_worktree_route_removes_worktree_and_records_audit_event() -> None:
     worktree_manager = FakeWorktreeManager(
         [
