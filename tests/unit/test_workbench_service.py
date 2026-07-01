@@ -1891,14 +1891,28 @@ async def test_list_decisions_returns_json_friendly_strings(tmp_path) -> None:
         title="采用策略 A",
         content="内容 A",
     )
+    architecture = await service.create_decision(
+        session_id="s",
+        mission_id="mission-1",
+        actor="Planner-Agent",
+        kind=DecisionKind.ARCHITECTURE,
+        title="采用架构 B",
+        content="内容 B",
+    )
 
     decisions = await service.list_decisions("s", "mission-1")
-    assert [item["id"] for item in decisions] == [decision["id"]]
+    assert [item["id"] for item in decisions] == [decision["id"], architecture["id"]]
     assert all(isinstance(item["kind"], str) for item in decisions)
     assert decisions[0]["kind"] == "policy"
     assert decisions[0]["title"] == "采用策略 A"
     assert decisions[0]["content"] == "内容 A"
     assert decisions[0]["actor"] == "Planner-Agent"
+
+    policy_only = await service.list_decisions(
+        "s", "mission-1", kind=DecisionKind.POLICY
+    )
+    assert [item["id"] for item in policy_only] == [decision["id"]]
+    assert policy_only[0]["kind"] == "policy"
 
 
 @pytest.mark.asyncio

@@ -340,6 +340,27 @@ limit?: 1..200
 - `task_id` 用于 Inspector 展示单个 Issue 需要用户决策的审批项。
 - approval detail 仍通过 `/approvals/{approval_id}` 按需加载完整决策上下文。
 
+## 9.6 Governance Decision Query API
+
+共享画板 Decision Card、Reviews 页治理记录和 Settings 治理策略入口使用：
+
+```text
+GET /api/v1/workbench/sessions/{session_id}/missions/{mission_id}/decisions
+```
+
+查询参数：
+
+```text
+kind?: principle | architecture | policy | temporary | experiment
+```
+
+约束：
+
+- 不传 `kind` 时返回当前 Mission 下的全部治理决策，按 `created_at` 稳定排序。
+- `kind=policy` 用于展示人工治理策略、租约策略、并发策略等可执行规则。
+- `kind=architecture` 用于展示架构取舍和 daemon / SwiftUI / API 合同层面的长期决策。
+- decision detail 仍通过 `/decisions/{decision_id}` 按需加载完整决策正文。
+
 ## 10. 日志
 
 Phase 2 起，SwiftUI 收集 daemon 日志。

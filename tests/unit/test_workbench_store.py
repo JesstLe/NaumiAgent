@@ -191,8 +191,21 @@ async def test_decision_and_audit_event_are_persisted(store: WorkbenchStore) -> 
         subject_id=decision.id,
         payload={"kind": decision.kind.value},
     )
+    policy_decision = await store.add_decision(
+        session_id="s",
+        mission_id=mission.id,
+        kind=DecisionKind.POLICY,
+        title="高风险变更需要审批",
+        content="风险等级 high 以上必须走人工审批。",
+        actor="Human",
+    )
 
-    assert [d.id for d in await store.list_decisions("s", mission.id)] == [decision.id]
+    assert [d.id for d in await store.list_decisions("s", mission.id)] == [
+        decision.id,
+        policy_decision.id,
+    ]
+    policy_only = await store.list_decisions("s", mission.id, kind=DecisionKind.POLICY)
+    assert [d.id for d in policy_only] == [policy_decision.id]
     assert [e.id for e in await store.list_events("s")] == [event.id]
 
 

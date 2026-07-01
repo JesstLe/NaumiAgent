@@ -160,9 +160,14 @@ class WorkbenchService:
         return data
 
     async def list_decisions(
-        self, session_id: str, mission_id: str
+        self,
+        session_id: str,
+        mission_id: str,
+        kind: DecisionKind | str | None = None,
     ) -> list[dict[str, Any]]:
-        decisions = await self._workbench_store.list_decisions(session_id, mission_id)
+        decisions = await self._workbench_store.list_decisions(
+            session_id, mission_id, kind=kind
+        )
         return [self._decision_to_dict(decision) for decision in decisions]
 
     async def get_decision(

@@ -692,8 +692,12 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
-    func fetchDecisions(sessionID: String, missionID: String) async throws(APIError) -> DecisionsDTO {
-        DecisionsDTO(decisions: [], missionID: missionID)
+    func fetchDecisions(
+        sessionID: String,
+        missionID: String,
+        kind: String?
+    ) async throws(APIError) -> DecisionsDTO {
+        DecisionsDTO(decisions: [], missionID: missionID, kind: kind)
     }
 
     func fetchDecision(

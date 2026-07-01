@@ -707,11 +707,20 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
 
     public func fetchDecisions(
         sessionID: String,
-        missionID: String
+        missionID: String,
+        kind: String?
     ) async throws(APIError) -> DecisionsDTO {
-        try await get(
-            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "decisions")
-        )
+        let path = encodePath("workbench", "sessions", sessionID, "missions", missionID, "decisions")
+        var queryItems: [URLQueryItem] = []
+        if let kind, !kind.isEmpty {
+            queryItems.append(URLQueryItem(name: "kind", value: kind))
+        }
+        if queryItems.isEmpty {
+            let response: DecisionsDTO = try await get(path: path)
+            return response
+        }
+        let response: DecisionsDTO = try await get(path: path, queryItems: queryItems)
+        return response
     }
 
     public func fetchDecision(
