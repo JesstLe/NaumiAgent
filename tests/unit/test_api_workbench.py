@@ -3326,6 +3326,27 @@ async def test_claim_issue_endpoint_reports_unavailable_session_store() -> None:
 
 
 @pytest.mark.asyncio
+async def test_claim_issue_endpoint_reports_runtime_session_load_failure() -> None:
+    market = FakeTaskMarket()
+    engine = _FakeEngine(
+        exists=True,
+        workbench_market=market,
+        load_session_error=RuntimeError("运行态会话暂不可用"),
+    )
+    body = ClaimIssue(agent_id="Agent-1", duration_minutes=30, worktree_name="wt-1")
+
+    with pytest.raises(HTTPException) as exc:
+        await claim_workbench_issue(
+            "sess-1", "task-1", body, _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert market.claimed == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "运行态会话暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_claim_issue_endpoint_returns_created_lease() -> None:
     market = FakeTaskMarket()
     lease = Lease(
