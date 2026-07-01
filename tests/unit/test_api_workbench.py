@@ -4657,6 +4657,36 @@ async def test_workbench_bootstrap_does_not_select_unloadable_latest_session() -
 
 
 @pytest.mark.asyncio
+async def test_workbench_bootstrap_keeps_daemon_ready_when_session_load_raises() -> None:
+    engine = _FakeEngine(
+        exists=True,
+        load_session_error=RuntimeError("运行态会话暂不可用"),
+    )
+    latest_session = SimpleNamespace(
+        id="sess-runtime-fails",
+        title="运行态暂不可用会话",
+        model="gpt-5",
+        created_at=datetime(2026, 6, 27, 8, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 27, 9, 0, tzinfo=UTC),
+        messages=[],
+        total_tokens=0,
+        total_cost_usd=0.0,
+        status="active",
+    )
+    engine.session_store = _FakeSessionStoreWithLatest([latest_session])
+    request = _fake_status_request(engine)
+
+    response = await get_workbench_bootstrap(request, auth="test")
+
+    assert response.sessions[0]["id"] == "sess-runtime-fails"
+    assert response.selected_session_id is None
+    assert response.snapshot is None
+    assert response.daemon_status.status == "running"
+    assert response.capabilities.protocol_version == 1
+    assert engine.loaded == ["sess-runtime-fails"]
+
+
+@pytest.mark.asyncio
 async def test_workbench_bootstrap_degrades_when_session_registry_is_unavailable() -> None:
     engine = _FakeEngine(exists=True)
     engine.session_store.list_sessions_error = RuntimeError("session registry unavailable")
