@@ -386,7 +386,11 @@ async def create_workbench_session(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     session_id = getattr(session, "id", "")
-    if not session_id or not await engine.load_session(session_id):
+    try:
+        session_loaded = bool(session_id and await engine.load_session(session_id))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session_loaded:
         raise HTTPException(status_code=503, detail="会话创建后无法加载")
 
     try:
