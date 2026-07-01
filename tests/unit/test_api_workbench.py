@@ -5288,6 +5288,30 @@ async def test_create_decision_endpoint_reports_unavailable_session_store() -> N
 
 
 @pytest.mark.asyncio
+async def test_create_decision_endpoint_reports_runtime_session_load_failure() -> None:
+    engine = _FakeEngine(
+        exists=True,
+        load_session_error=RuntimeError("运行态会话暂不可用"),
+    )
+    body = DecisionCreate(
+        actor="Planner-Agent",
+        kind=DecisionKind.ARCHITECTURE,
+        title="采用 SwiftUI 原生壳",
+        content="保持 Mac 体验",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_decision(
+            "sess-1", "mission-1", body, _fake_request(engine), auth="test"
+        )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.created_decisions == []
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "运行态会话暂不可用"
+
+
+@pytest.mark.asyncio
 async def test_create_decision_endpoint_returns_created_decision() -> None:
     engine = _FakeEngine(exists=True)
     body = DecisionCreate(
