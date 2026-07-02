@@ -13,6 +13,7 @@ public struct ValidationRunDTO: Decodable, Equatable, Sendable {
     public let output: String
     public let startedAt: String
     public let completedAt: String
+    public let task: TaskDTO?
 
     public enum CodingKeys: String, CodingKey {
         case id
@@ -26,6 +27,7 @@ public struct ValidationRunDTO: Decodable, Equatable, Sendable {
         case output
         case startedAt = "started_at"
         case completedAt = "completed_at"
+        case task
     }
 
     public init(
@@ -39,7 +41,8 @@ public struct ValidationRunDTO: Decodable, Equatable, Sendable {
         exitCode: Int,
         output: String,
         startedAt: String,
-        completedAt: String
+        completedAt: String,
+        task: TaskDTO? = nil
     ) {
         self.id = id
         self.sessionID = sessionID
@@ -52,5 +55,6 @@ public struct ValidationRunDTO: Decodable, Equatable, Sendable {
         self.output = output
         self.startedAt = startedAt
         self.completedAt = completedAt
+        self.task = task
     }
 }

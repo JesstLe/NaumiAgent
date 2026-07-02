@@ -623,16 +623,26 @@ class WorkbenchService:
         status: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        return await self._workbench_store.list_validation_runs(
+        runs = await self._workbench_store.list_validation_runs(
             session_id, task_id=task_id, status=status, limit=limit
         )
+        tasks = await self._task_store.list_tasks()
+        tasks_by_id = {task.id: task for task in tasks}
+        return [
+            run | {"task": self._task_to_summary(tasks_by_id.get(run["task_id"]))}
+            for run in runs
+        ]
 
     async def get_validation_run(
         self,
         session_id: str,
         run_id: str,
     ) -> dict[str, Any] | None:
-        return await self._workbench_store.get_validation_run(session_id, run_id)
+        run = await self._workbench_store.get_validation_run(session_id, run_id)
+        if run is None:
+            return None
+        task = await self._task_store.get_task(run["task_id"])
+        return run | {"task": self._task_to_summary(task)}
 
     async def list_context_snapshots(
         self,
