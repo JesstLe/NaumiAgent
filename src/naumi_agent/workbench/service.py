@@ -899,12 +899,10 @@ class WorkbenchService:
                 "command": argv,
             },
         )
-        return {
-            "id": result.id,
-            "status": result.status,
-            "exit_code": result.exit_code,
-            "output": result.output,
-        }
+        run = await self.get_validation_run(session_id, result.id)
+        if run is None:
+            raise RuntimeError("验证记录已完成但无法读取结果")
+        return run
 
     def _resolve_cwd(self, cwd: str | None) -> str:
         """Resolve and validate the working directory for a validation run."""

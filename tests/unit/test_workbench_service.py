@@ -1569,6 +1569,25 @@ async def test_run_validation_records_run_and_event(tmp_path) -> None:
     assert result["status"] == "passed"
     assert result["exit_code"] == 0
     assert "hello from validation" in result["output"]
+    assert result["session_id"] == "s"
+    assert result["task_id"] == task.id
+    assert result["actor"] == "Human"
+    assert result["command"] == argv
+    assert result["cwd"] == str(tmp_path.resolve())
+    assert result["started_at"] <= result["completed_at"]
+    assert result["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "运行验证",
+        "description": "",
+        "status": "pending",
+        "active_form": None,
+        "owner": None,
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": result["task"]["created_at"],
+        "updated_at": result["task"]["updated_at"],
+    }
 
     runs = await service.list_validation_runs("s", task_id=task.id)
     assert any(run["id"] == result["id"] for run in runs)

@@ -122,13 +122,6 @@ class ValidationRunCreate(BaseModel):
     cwd: str | None = None
 
 
-class ValidationRunResultResponse(BaseModel):
-    id: str
-    status: str
-    exit_code: int
-    output: str
-
-
 class WorkbenchEventsResponse(BaseModel):
     events: list[dict[str, Any]]
     event_type: str | None
@@ -2265,14 +2258,8 @@ async def create_validation_run(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    validation_run = ValidationRunResultResponse(
-        id=result["id"],
-        status=result["status"],
-        exit_code=result["exit_code"],
-        output=result["output"],
-    )
     if not include_snapshot:
-        return validation_run
+        return result
 
     try:
         snapshot = await _build_workbench_snapshot(engine, session_id)
@@ -2280,4 +2267,4 @@ async def create_validation_run(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return {"validation_run": validation_run.model_dump(), "snapshot": snapshot}
+    return {"validation_run": result, "snapshot": snapshot}

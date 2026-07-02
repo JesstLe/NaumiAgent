@@ -2883,7 +2883,7 @@ final class WorkbenchAPIClientTests {
         let sessionID = "sess 中文"
         let resultJSON = Data(
             """
-            {"id":"run-001","status":"passed","exit_code":0,"output":"ok"}
+            {"id":"run-001","session_id":"sess 中文","task_id":"task-001","actor":"Human","command":["pytest"],"cwd":"/workspace","status":"passed","exit_code":0,"output":"ok","task":{"id":"task-001","session_id":"sess 中文","subject":"运行验证","description":"写操作返回需要保留任务摘要","status":"in_progress","active_form":"issue-validation-run","owner":"Validation-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:59:00","updated_at":"2026-06-27T05:59:30"},"started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:01"}
             """.utf8
         )
 
@@ -2925,16 +2925,27 @@ final class WorkbenchAPIClientTests {
         )
 
         #expect(result.id == "run-001")
+        #expect(result.sessionID == sessionID)
+        #expect(result.taskID == "task-001")
+        #expect(result.actor == "Human")
+        #expect(result.command == ["pytest"])
+        #expect(result.cwd == "/workspace")
         #expect(result.status == "passed")
         #expect(result.exitCode == 0)
         #expect(result.output == "ok")
+        #expect(result.task?.subject == "运行验证")
+        #expect(result.task?.status == "in_progress")
+        #expect(result.task?.activeForm == "issue-validation-run")
+        #expect(result.task?.owner == "Validation-Agent")
+        #expect(result.startedAt == "2026-06-27T06:00:00")
+        #expect(result.completedAt == "2026-06-27T06:00:01")
     }
 
     @Test func runValidationWithSnapshotRequestsFreshSnapshot() async throws {
         let sessionID = "sess 中文"
         let resultJSON = Data(
             """
-            {"validation_run":{"id":"run-001","status":"passed","exit_code":0,"output":"ok"},"snapshot":{"session_id":"sess 中文","summary":{"current_mission_title":"验证后刷新","active_agents":2,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            {"validation_run":{"id":"run-001","session_id":"sess 中文","task_id":"task-001","actor":"Human","command":["pytest"],"cwd":"/workspace","status":"passed","exit_code":0,"output":"ok","task":{"id":"task-001","session_id":"sess 中文","subject":"运行验证","description":"写操作返回需要保留任务摘要","status":"in_progress","active_form":"issue-validation-run","owner":"Validation-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:59:00","updated_at":"2026-06-27T05:59:30"},"started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:01"},"snapshot":{"session_id":"sess 中文","summary":{"current_mission_title":"验证后刷新","active_agents":2,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
             """.utf8
         )
 
@@ -2979,6 +2990,8 @@ final class WorkbenchAPIClientTests {
         #expect(result.validationRun.status == "passed")
         #expect(result.validationRun.exitCode == 0)
         #expect(result.validationRun.output == "ok")
+        #expect(result.validationRun.task?.subject == "运行验证")
+        #expect(result.validationRun.task?.status == "in_progress")
         #expect(result.snapshot.sessionID == "sess 中文")
         #expect(result.snapshot.summary?.currentMissionTitle == "验证后刷新")
     }
