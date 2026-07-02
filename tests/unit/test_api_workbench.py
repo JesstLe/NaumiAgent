@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -1560,6 +1561,7 @@ class _FakeEngine:
         self.workbench_market = workbench_market
         self.worktree_manager = worktree_manager or FakeWorktreeManager()
         self.task_store = task_store or FakeTaskStore()
+        self.workspace_root = Path("/workspace/NaumiAgent")
         self.load_session_result = load_session_result
         self.load_session_results = load_session_results or {}
         self.load_session_error = load_session_error
@@ -5041,6 +5043,8 @@ async def test_daemon_status_returns_expected_fields() -> None:
     assert response.port == 9876
     assert response.started_at == "2026-06-27T10:00:00+00:00"
     assert response.workspace_count == 7
+    assert response.workspace_root == str(Path("/workspace/NaumiAgent"))
+    assert response.workspace_name == "NaumiAgent"
     assert response.api_base_url == "http://127.0.0.1:9876/api/v1"
     assert response.workbench_base_url == "http://127.0.0.1:9876/api/v1/workbench"
     assert (

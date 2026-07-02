@@ -197,6 +197,8 @@ GET /api/v1/workbench/daemon/status
   "port": 8765,
   "started_at": "2026-06-27T10:00:00",
   "workspace_count": 1,
+  "workspace_root": "/Users/lv/Workspace/NaumiAgent",
+  "workspace_name": "NaumiAgent",
   "api_base_url": "http://127.0.0.1:8765/api/v1",
   "workbench_base_url": "http://127.0.0.1:8765/api/v1/workbench",
   "event_stream_url_template": "ws://127.0.0.1:8765/api/v1/workbench/sessions/{session_id}/events/stream",
