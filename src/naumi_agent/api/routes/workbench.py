@@ -52,6 +52,59 @@ WORKBENCH_SUPPORTED_ACTIONS = [
     "keep_worktree",
     "delete_worktree",
 ]
+WORKBENCH_ROUTE_TEMPLATES = {
+    "daemon_status": "/workbench/daemon/status",
+    "capabilities": "/workbench/capabilities",
+    "bootstrap": "/workbench/bootstrap",
+    "sessions": "/workbench/sessions",
+    "snapshot": "/workbench/sessions/{session_id}/snapshot",
+    "missions": "/workbench/sessions/{session_id}/missions",
+    "mission": "/workbench/sessions/{session_id}/missions/{mission_id}",
+    "issues": "/workbench/sessions/{session_id}/issues",
+    "issue": "/workbench/sessions/{session_id}/issues/{task_id}",
+    "mission_issues": "/workbench/sessions/{session_id}/missions/{mission_id}/issues",
+    "claim_issue": "/workbench/sessions/{session_id}/issues/{task_id}/claim",
+    "leases": "/workbench/sessions/{session_id}/leases",
+    "lease": "/workbench/sessions/{session_id}/leases/{lease_id}",
+    "release_lease": "/workbench/sessions/{session_id}/leases/{lease_id}/release",
+    "expire_leases": "/workbench/sessions/{session_id}/leases/expire",
+    "worktrees": "/workbench/sessions/{session_id}/worktrees",
+    "worktree": "/workbench/sessions/{session_id}/worktrees/{name}",
+    "keep_worktree": "/workbench/sessions/{session_id}/worktrees/{name}/keep",
+    "validation_runs": "/workbench/sessions/{session_id}/validation-runs",
+    "validation_run": "/workbench/sessions/{session_id}/validation-runs/{run_id}",
+    "context_snapshots": "/workbench/sessions/{session_id}/context-snapshots",
+    "context_snapshot": (
+        "/workbench/sessions/{session_id}/context-snapshots/{snapshot_id}"
+    ),
+    "record_context_health": (
+        "/workbench/sessions/{session_id}/issues/{task_id}/context-health"
+    ),
+    "failures": "/workbench/sessions/{session_id}/failures",
+    "failure": "/workbench/sessions/{session_id}/failures/{failure_id}",
+    "events": "/workbench/sessions/{session_id}/events",
+    "event": "/workbench/sessions/{session_id}/events/{event_id}",
+    "event_stream": "/workbench/sessions/{session_id}/events/stream",
+    "agents": "/workbench/sessions/{session_id}/agents",
+    "agent": "/workbench/sessions/{session_id}/agents/{agent_id}",
+    "approvals": "/workbench/sessions/{session_id}/approvals",
+    "approval": "/workbench/sessions/{session_id}/approvals/{approval_id}",
+    "resolve_approval": (
+        "/workbench/sessions/{session_id}/approvals/{approval_id}/resolve"
+    ),
+    "intent_locks": (
+        "/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks"
+    ),
+    "intent_lock": (
+        "/workbench/sessions/{session_id}/missions/{mission_id}"
+        "/intent-locks/{lock_id}"
+    ),
+    "decisions": "/workbench/sessions/{session_id}/missions/{mission_id}/decisions",
+    "decision": (
+        "/workbench/sessions/{session_id}/missions/{mission_id}"
+        "/decisions/{decision_id}"
+    ),
+}
 logger = logging.getLogger(__name__)
 
 
@@ -82,6 +135,7 @@ class WorkbenchCapabilitiesResponse(BaseModel):
     protocol_version: int
     supported_resources: list[str]
     supported_actions: list[str]
+    route_templates: dict[str, str]
 
 
 class WorkbenchBootstrapResponse(BaseModel):
@@ -415,6 +469,7 @@ def _build_capabilities() -> WorkbenchCapabilitiesResponse:
         protocol_version=1,
         supported_resources=WORKBENCH_SUPPORTED_RESOURCES,
         supported_actions=WORKBENCH_SUPPORTED_ACTIONS,
+        route_templates=WORKBENCH_ROUTE_TEMPLATES,
     )
 
 
