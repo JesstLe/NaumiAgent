@@ -81,7 +81,7 @@ public final class DaemonController: Sendable {
 
             if appState.selectedSessionID == nil {
                 appState.selectedSessionID = bootstrap.selectedSessionID
-                appState.snapshot = bootstrap.snapshot
+                applySnapshot(bootstrap.snapshot)
             } else {
                 await refreshSnapshot(clearSessionScopedStateOnFailure: true)
             }
@@ -240,7 +240,7 @@ public final class DaemonController: Sendable {
                 return
             }
             appState.selectedSessionID = snapshot.sessionID
-            appState.snapshot = snapshot
+            applySnapshot(snapshot)
             appState.connectionState = .connected
             appState.lastError = nil
             await refreshWorkbenchListsAfterConnection()
@@ -275,6 +275,18 @@ public final class DaemonController: Sendable {
             return .sessionUnavailable
         }
         return .networkFailure(message)
+    }
+
+    private func applySnapshot(_ snapshot: WorkbenchSnapshotDTO?) {
+        appState.snapshot = snapshot
+        guard let snapshot else {
+            return
+        }
+        // Use snapshot validation runs as first-screen fallback without erasing
+        // a separately refreshed list when the snapshot omits this optional slice.
+        if !snapshot.validationRuns.isEmpty || appState.validationRuns.isEmpty {
+            appState.validationRuns = snapshot.validationRuns
+        }
     }
 
     /// Pre-warms lightweight first-screen list states after a successful connection.
@@ -661,7 +673,7 @@ public final class DaemonController: Sendable {
                 policyConflict: policyConflict,
                 actor: actor
             )
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             var snapshots = appState.contextSnapshots
             snapshots.removeAll { $0.id == response.contextSnapshot.id }
             appState.contextSnapshots = [response.contextSnapshot] + snapshots
@@ -962,7 +974,7 @@ public final class DaemonController: Sendable {
                 actor: actor,
                 reason: reason
             )
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshWorktrees()
             refreshError = refreshError ?? appState.lastError
@@ -996,7 +1008,7 @@ public final class DaemonController: Sendable {
                 name: name,
                 discardChanges: discardChanges
             )
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshWorktrees()
             refreshError = refreshError ?? appState.lastError
@@ -1214,7 +1226,7 @@ public final class DaemonController: Sendable {
                 status: status,
                 actor: actor
             )
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshAgentProfiles()
             refreshError = refreshError ?? appState.lastError
@@ -1281,7 +1293,7 @@ public final class DaemonController: Sendable {
             }
             appState.selectedSessionID = bootstrap.selectedSessionID ?? bootstrap.sessions.first?.id
             clearSessionScopedState()
-            appState.snapshot = bootstrap.snapshot
+            applySnapshot(bootstrap.snapshot)
 
             guard appState.snapshot != nil else {
                 return
@@ -1447,13 +1459,13 @@ public final class DaemonController: Sendable {
 
         do {
             let snapshot = try await apiProvider.fetchSnapshot(sessionID: sessionID)
-            appState.snapshot = snapshot
+            applySnapshot(snapshot)
         } catch APIError.sessionUnavailable {
             appState.lastError = APIError.sessionUnavailable
             clearUnavailableSelectedSession()
         } catch {
             appState.lastError = error
-            appState.snapshot = nil
+            applySnapshot(nil)
             if clearSessionScopedStateOnFailure {
                 clearSessionScopedState()
             }
@@ -1486,7 +1498,7 @@ public final class DaemonController: Sendable {
                 durationMinutes: durationMinutes,
                 worktreeName: worktreeName
             )
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             await refreshLeases()
             await refreshIssues()
             await refreshEvents(limit: 50)
@@ -1515,7 +1527,7 @@ public final class DaemonController: Sendable {
                 sessionID: sessionID,
                 leaseID: leaseID
             )
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshLeases()
             refreshError = refreshError ?? appState.lastError
@@ -1545,7 +1557,7 @@ public final class DaemonController: Sendable {
         appState.lastError = nil
         do {
             let response = try await apiProvider.expireLeasesWithSnapshot(sessionID: sessionID)
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshLeases()
             refreshError = refreshError ?? appState.lastError
@@ -1589,7 +1601,7 @@ public final class DaemonController: Sendable {
                 title: title,
                 goal: goal
             )
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshMissions()
             refreshError = refreshError ?? appState.lastError
@@ -1636,7 +1648,7 @@ public final class DaemonController: Sendable {
                 parallelMode: parallelMode,
                 riskLevel: riskLevel
             )
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshIssues(missionID: missionID)
             refreshError = refreshError ?? appState.lastError
@@ -1683,7 +1695,7 @@ public final class DaemonController: Sendable {
                 parallelMode: parallelMode,
                 riskLevel: riskLevel
             )
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshIssues(missionID: missionID)
             refreshError = refreshError ?? appState.lastError
@@ -1728,7 +1740,7 @@ public final class DaemonController: Sendable {
                 allowedPaths: allowedPaths,
                 requireProposalForRisk: requireProposalForRisk
             )
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshIntentLocks(missionID: missionID)
             refreshError = refreshError ?? appState.lastError
@@ -1771,7 +1783,7 @@ public final class DaemonController: Sendable {
                 content: content,
                 actor: actor
             )
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshDecisions(missionID: missionID)
             refreshError = refreshError ?? appState.lastError
@@ -1916,7 +1928,7 @@ public final class DaemonController: Sendable {
                 state: state,
                 decisionNote: decisionNote
             )
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshEvents(limit: 50)
             refreshError = refreshError ?? appState.lastError
@@ -1988,7 +2000,7 @@ public final class DaemonController: Sendable {
                 argv: argv,
                 cwd: cwd
             )
-            appState.snapshot = response.snapshot
+            applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshValidationRuns(taskID: taskID)
             refreshError = refreshError ?? appState.lastError
