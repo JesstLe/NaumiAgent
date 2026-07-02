@@ -40,7 +40,7 @@ final class WorkbenchAPIClientTests {
     @Test func fetchCapabilities() async throws {
         let json = Data(
             """
-            {"supports_daemon_management":false,"supports_workspace_registry":false,"supports_validation_runner":true,"supports_event_stream":true,"supports_cloud_sync":false,"supported_locales":["zh-CN","en-US"],"default_locale":"zh-CN","protocol_version":1}
+            {"supports_daemon_management":false,"supports_workspace_registry":false,"supports_validation_runner":true,"supports_event_stream":true,"supports_cloud_sync":false,"supported_locales":["zh-CN","en-US"],"default_locale":"zh-CN","protocol_version":1,"supported_resources":["snapshot","missions","messages"],"supported_actions":["create_session","send_message","send_message_with_issue"],"route_templates":{"create_session":"/workbench/sessions","send_message":"/sessions/{session_id}/messages","send_message_with_issue":"/sessions/{session_id}/messages"}}
             """.utf8
         )
 
@@ -67,6 +67,15 @@ final class WorkbenchAPIClientTests {
         #expect(!capabilities.supportsCloudSync)
         #expect(capabilities.supportedLocales == ["zh-CN", "en-US"])
         #expect(capabilities.defaultLocale == "zh-CN")
+        #expect(capabilities.supportedResources == ["snapshot", "missions", "messages"])
+        #expect(capabilities.supportedActions == [
+            "create_session",
+            "send_message",
+            "send_message_with_issue",
+        ])
+        #expect(capabilities.routeTemplate(for: "send_message_with_issue") == "/sessions/{session_id}/messages")
+        #expect(capabilities.supportsAction("send_message_with_issue"))
+        #expect(!capabilities.supportsAction("unknown_action"))
     }
 
     @Test func fetchCapabilitiesDefaultsToChineseForLegacyDaemon() async throws {
@@ -94,6 +103,9 @@ final class WorkbenchAPIClientTests {
 
         #expect(capabilities.defaultLocale == "zh-CN")
         #expect(capabilities.supportsEventStream)
+        #expect(capabilities.supportedResources == [])
+        #expect(capabilities.supportedActions == [])
+        #expect(capabilities.routeTemplates == [:])
     }
 
     @Test func fetchDaemonStatus() async throws {
