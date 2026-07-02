@@ -480,7 +480,7 @@ class WorkbenchService:
         )
         events = await self._workbench_store.list_events(session_id, limit=50)
         failures = await self._workbench_store.list_failures(session_id)
-        validation_runs = await self._workbench_store.list_validation_runs(
+        raw_validation_runs = await self._workbench_store.list_validation_runs(
             session_id, limit=50
         )
         context_snapshots = await self._workbench_store.list_context_snapshots(
@@ -491,6 +491,10 @@ class WorkbenchService:
         )
         missions = await self._list_missions_for_snapshot(session_id)
         tasks_by_id = {task.id: task for task in tasks}
+        validation_runs = [
+            run | {"task": self._task_to_summary(tasks_by_id.get(run["task_id"]))}
+            for run in raw_validation_runs
+        ]
         intent_locks: list[dict[str, Any]] = []
         decisions: list[dict[str, Any]] = []
         for mission in missions:
