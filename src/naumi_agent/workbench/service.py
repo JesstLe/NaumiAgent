@@ -242,7 +242,13 @@ class WorkbenchService:
             task_id=task_id,
             limit=limit,
         )
-        return [self._approval_to_dict(approval) for approval in approvals]
+        tasks = await self._task_store.list_tasks()
+        tasks_by_id = {task.id: task for task in tasks}
+        return [
+            self._approval_to_dict(approval)
+            | {"task": self._task_to_summary(tasks_by_id.get(approval.task_id))}
+            for approval in approvals
+        ]
 
     async def get_approval(
         self, session_id: str, approval_id: str
@@ -250,7 +256,8 @@ class WorkbenchService:
         approval = await self._workbench_store.get_approval(session_id, approval_id)
         if approval is None:
             return None
-        return self._approval_to_dict(approval)
+        task = await self._task_store.get_task(approval.task_id)
+        return self._approval_to_dict(approval) | {"task": self._task_to_summary(task)}
 
     async def attach_issue(
         self,

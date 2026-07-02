@@ -1125,10 +1125,30 @@ async def test_list_approvals_returns_json_friendly_state_strings(tmp_path) -> N
     workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
     service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
 
+    waiting_task = await task_store.create_task(
+        "审查高风险变更",
+        description="审批队列需要展示任务上下文",
+    )
+    await task_store.update_task(
+        waiting_task.id,
+        status=TaskStatus.BLOCKED,
+        active_form="issue-risk-approval",
+        owner="Reviewer-Agent",
+    )
+    approved_task = await task_store.create_task(
+        "批准 API 合同更新",
+        description="已处理审批仍需保留任务摘要",
+    )
+    await task_store.update_task(
+        approved_task.id,
+        status=TaskStatus.COMPLETED,
+        active_form="issue-api-contract",
+        owner="Backend-Agent",
+    )
     waiting = await workbench_store.add_approval(
         session_id="s",
         mission_id="mission-1",
-        task_id="task-1",
+        task_id=waiting_task.id,
         title="等待审批",
         detail="详情",
         requester="Agent-A",
@@ -1136,7 +1156,7 @@ async def test_list_approvals_returns_json_friendly_state_strings(tmp_path) -> N
     approved = await workbench_store.add_approval(
         session_id="s",
         mission_id="mission-1",
-        task_id="task-2",
+        task_id=approved_task.id,
         title="已批准",
         detail="详情",
         requester="Agent-B",
@@ -1145,7 +1165,7 @@ async def test_list_approvals_returns_json_friendly_state_strings(tmp_path) -> N
     waiting_other_mission = await workbench_store.add_approval(
         session_id="s",
         mission_id="mission-2",
-        task_id="task-3",
+        task_id="dangling-task-3",
         title="其他 Mission 等待审批",
         detail="详情",
         requester="Agent-C",
@@ -1156,7 +1176,22 @@ async def test_list_approvals_returns_json_friendly_state_strings(tmp_path) -> N
     assert all(isinstance(a["state"], str) for a in all_approvals)
     approvals_by_id = {a["id"]: a for a in all_approvals}
     assert approvals_by_id[waiting.id]["state"] == "waiting"
+    assert approvals_by_id[waiting.id]["task"] == {
+        "id": waiting_task.id,
+        "session_id": "s",
+        "subject": "审查高风险变更",
+        "description": "审批队列需要展示任务上下文",
+        "status": "blocked",
+        "active_form": "issue-risk-approval",
+        "owner": "Reviewer-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": approvals_by_id[waiting.id]["task"]["created_at"],
+        "updated_at": approvals_by_id[waiting.id]["task"]["updated_at"],
+    }
     assert approvals_by_id[approved.id]["state"] == "approved"
+    assert approvals_by_id[approved.id]["task"]["subject"] == "批准 API 合同更新"
+    assert approvals_by_id[waiting_other_mission.id]["task"] is None
 
     waiting_only = await service.list_approvals("s", state=ApprovalState.WAITING, limit=50)
     assert {a["id"] for a in waiting_only} == {waiting.id, waiting_other_mission.id}
@@ -1165,7 +1200,7 @@ async def test_list_approvals_returns_json_friendly_state_strings(tmp_path) -> N
     mission_filtered = await service.list_approvals("s", mission_id="mission-1", limit=50)
     assert {a["id"] for a in mission_filtered} == {waiting.id, approved.id}
 
-    task_filtered = await service.list_approvals("s", task_id="task-2", limit=50)
+    task_filtered = await service.list_approvals("s", task_id=approved_task.id, limit=50)
     assert [a["id"] for a in task_filtered] == [approved.id]
 
     waiting_mission_filtered = await service.list_approvals(
@@ -1181,10 +1216,20 @@ async def test_get_approval_returns_json_friendly_approval_detail(tmp_path) -> N
     workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
     service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
 
+    task = await task_store.create_task(
+        "确认高风险审批",
+        description="Inspector 审批详情需要任务摘要",
+    )
+    await task_store.update_task(
+        task.id,
+        status=TaskStatus.IN_PROGRESS,
+        active_form="issue-approval-detail",
+        owner="Governance-Agent",
+    )
     approval = await workbench_store.add_approval(
         session_id="s",
         mission_id="mission-1",
-        task_id="task-1",
+        task_id=task.id,
         title="请求审批",
         detail="需要人工确认高风险变更",
         requester="Agent-A",
@@ -1196,13 +1241,26 @@ async def test_get_approval_returns_json_friendly_approval_detail(tmp_path) -> N
     assert result["id"] == approval.id
     assert result["session_id"] == "s"
     assert result["mission_id"] == "mission-1"
-    assert result["task_id"] == "task-1"
+    assert result["task_id"] == task.id
     assert result["state"] == "waiting"
     assert result["title"] == "请求审批"
     assert result["detail"] == "需要人工确认高风险变更"
     assert result["requester"] == "Agent-A"
     assert result["reviewer"] == ""
     assert result["decision_note"] == ""
+    assert result["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "确认高风险审批",
+        "description": "Inspector 审批详情需要任务摘要",
+        "status": "in_progress",
+        "active_form": "issue-approval-detail",
+        "owner": "Governance-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": result["task"]["created_at"],
+        "updated_at": result["task"]["updated_at"],
+    }
 
 
 @pytest.mark.asyncio

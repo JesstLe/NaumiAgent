@@ -1035,7 +1035,7 @@ final class WorkbenchAPIClientTests {
         let taskID = "task 001/审批"
         let json = Data(
             """
-            {"approvals":[{"id":"approval-001","session_id":"sess 中文","mission_id":"mission 001/审查","task_id":"task 001/审批","state":"waiting","title":"允许重构","detail":"保持测试通过","requester":"Agent-A","reviewer":"","decision_note":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"state":"waiting","mission_id":"mission 001/审查","task_id":"task 001/审批","limit":25}
+            {"approvals":[{"id":"approval-001","session_id":"sess 中文","mission_id":"mission 001/审查","task_id":"task 001/审批","state":"waiting","title":"允许重构","detail":"保持测试通过","requester":"Agent-A","reviewer":"","decision_note":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","task":{"id":"task 001/审批","session_id":"sess 中文","subject":"审查高风险审批","description":"审批队列需要显示任务上下文","status":"blocked","active_form":"issue-risk-approval","owner":"Reviewer-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}],"state":"waiting","mission_id":"mission 001/审查","task_id":"task 001/审批","limit":25}
             """.utf8
         )
 
@@ -1085,6 +1085,10 @@ final class WorkbenchAPIClientTests {
         #expect(approval.taskID == taskID)
         #expect(approval.state == "waiting")
         #expect(approval.title == "允许重构")
+        #expect(approval.task?.subject == "审查高风险审批")
+        #expect(approval.task?.status == "blocked")
+        #expect(approval.task?.activeForm == "issue-risk-approval")
+        #expect(approval.task?.owner == "Reviewer-Agent")
     }
 
     @Test func fetchApprovalsWithoutState() async throws {
@@ -1128,7 +1132,7 @@ final class WorkbenchAPIClientTests {
         let approvalID = "approval/审查 001"
         let json = Data(
             """
-            {"id":"approval/审查 001","session_id":"sess 中文","mission_id":"mission-001","task_id":"task-001","state":"waiting","title":"请求审批","detail":"高风险变更需要人工确认","requester":"Backend-Agent","reviewer":"","decision_note":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}
+            {"id":"approval/审查 001","session_id":"sess 中文","mission_id":"mission-001","task_id":"task-001","state":"waiting","title":"请求审批","detail":"高风险变更需要人工确认","requester":"Backend-Agent","reviewer":"","decision_note":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","task":{"id":"task-001","session_id":"sess 中文","subject":"确认高风险审批","description":"Inspector 审批详情需要任务摘要","status":"in_progress","active_form":"issue-approval-detail","owner":"Governance-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}
             """.utf8
         )
 
@@ -1163,6 +1167,10 @@ final class WorkbenchAPIClientTests {
         #expect(approval.decisionNote == "")
         #expect(approval.createdAt == "2026-06-27T06:00:00")
         #expect(approval.updatedAt == "2026-06-27T06:10:00")
+        #expect(approval.task?.subject == "确认高风险审批")
+        #expect(approval.task?.status == "in_progress")
+        #expect(approval.task?.activeForm == "issue-approval-detail")
+        #expect(approval.task?.owner == "Governance-Agent")
     }
 
     @Test func fetchFailuresWithFilters() async throws {

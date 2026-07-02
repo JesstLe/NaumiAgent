@@ -348,6 +348,8 @@ limit?: 1..200
 - `mission_id` 用于聚焦当前 Mission 的审批事项，避免跨 Mission 干扰审查。
 - `task_id` 用于 Inspector 展示单个 Issue 需要用户决策的审批项。
 - approval detail 仍通过 `/approvals/{approval_id}` 按需加载完整决策上下文。
+- 每条 `approvals[]` 记录和 `GET /approvals/{approval_id}` 详情都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
+  如果 approval 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空审批记录。
 
 ## 9.6 Governance Decision Query API
 
