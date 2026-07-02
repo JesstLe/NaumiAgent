@@ -11,6 +11,7 @@ from naumi_agent import __version__
 from naumi_agent.api.routes.messages import (
     _engine_event_to_stream_event,
     _stream_response,
+    list_messages,
     send_message,
 )
 from naumi_agent.api.schemas import HealthResponse, MessageCreate, SessionCreate
@@ -50,8 +51,11 @@ class TestHealthEndpoint:
 
 
 class _FakeSessionStore:
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+
     async def load(self, session_id: str):
-        return SimpleNamespace(id=session_id)
+        return SimpleNamespace(id=session_id, messages=self.messages)
 
 
 class _FakeEngine:
@@ -218,6 +222,34 @@ class TestMessageRoutes:
         assert events[0]["type"] == "token_delta"
         assert events[0]["data"]["token"] == "你"
         assert events[-1]["type"] == "agent_end"
+
+    @pytest.mark.asyncio
+    async def test_list_messages_preserves_metadata_for_chat_history(self) -> None:
+        engine = _FakeEngine()
+        engine.session_store.messages = [
+            {
+                "role": "user",
+                "content": "把登录失败记录成任务",
+                "timestamp": "2026-07-02T08:00:00",
+                "metadata": {"source": "chat"},
+            },
+            {
+                "role": "assistant",
+                "content": "已创建关联任务。",
+                "timestamp": "2026-07-02T08:00:03",
+                "metadata": {"workbench_issue": {"task_id": "task-chat-1"}},
+            },
+        ]
+        request = _fake_request(engine)
+
+        response = await list_messages("sess_1", request, page=1, page_size=50, auth="test")
+
+        assert response.total == 2
+        assert [message.id for message in response.messages] == ["msg-1", "msg-2"]
+        assert response.messages[0].metadata == {"source": "chat"}
+        assert response.messages[1].metadata == {
+            "workbench_issue": {"task_id": "task-chat-1"}
+        }
 
     def test_engine_event_to_stream_event_normalizes_token(self) -> None:
         event = _engine_event_to_stream_event(

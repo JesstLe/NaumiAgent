@@ -23,6 +23,17 @@ public struct ChatMessageDTO: Decodable, Equatable, Sendable {
     }
 }
 
+/// Paginated chat history returned by `GET /sessions/{session_id}/messages`.
+public struct ChatMessageListDTO: Decodable, Equatable, Sendable {
+    public let messages: [ChatMessageDTO]
+    public let total: Int
+
+    public init(messages: [ChatMessageDTO], total: Int) {
+        self.messages = messages
+        self.total = total
+    }
+}
+
 /// Optional task-market draft sent with a daily chat message.
 public struct ChatIssueDraftDTO: Encodable, Equatable, Sendable {
     public let missionID: String

@@ -209,10 +209,13 @@ runValidation(...)
 createIntentLock(...)
 createDecision(...)
 resolveApproval(...)
+fetchMessages(...)
 sendMessage(..., workbenchIssue: ...)
 ```
 
 Chat 页通过 `sendMessage(sessionID:content:workbenchIssue:)` 访问 `POST /sessions/{session_id}/messages`。普通对话传 `workbenchIssue=nil`；对话转任务传 `ChatIssueDraftDTO`，后端返回 assistant message，并在 metadata 中带回 `workbench_issue` 和 `workbench_snapshot`。
+
+Chat 页通过 `fetchMessages(sessionID:page:pageSize:)` 访问 `GET /sessions/{session_id}/messages`。连接成功、切换会话和进入 Chat 页时都可以刷新 `AppState.chatMessages`，并保留消息 metadata 里的 Workbench 任务联动状态。
 
 `WorkbenchEventClient` 负责 WebSocket：
 

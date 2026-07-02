@@ -31,6 +31,13 @@ public protocol WorkbenchAPIProviding: Sendable {
         workbenchIssue: ChatIssueDraftDTO?
     ) async throws(APIError) -> ChatMessageDTO
 
+    /// Fetches persisted chat messages for the selected session.
+    func fetchMessages(
+        sessionID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws(APIError) -> ChatMessageListDTO
+
     /// Fetches audit events for the given session, optionally filtered by event fields.
     func fetchEvents(
         sessionID: String,

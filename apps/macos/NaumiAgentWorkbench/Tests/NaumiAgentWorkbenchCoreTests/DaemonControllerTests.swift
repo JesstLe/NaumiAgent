@@ -12,6 +12,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var createSessionResult: Result<SessionDTO, APIError>?
     var createWorkbenchSessionResult: Result<WorkbenchBootstrapDTO, APIError>?
     var sendMessageResult: Result<ChatMessageDTO, APIError>?
+    var messagesResult: Result<ChatMessageListDTO, APIError>?
     var eventsResult: Result<WorkbenchEventsDTO, APIError>?
     var eventResult: Result<EventDTO, APIError>?
     var validationRunsResult: Result<ValidationRunsDTO, APIError>?
@@ -86,6 +87,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var resolveApprovalWithSnapshotCallCount: Int = 0
     var runValidationCallCount: Int = 0
     var runValidationWithSnapshotCallCount: Int = 0
+    var fetchMessagesCallCount: Int = 0
     var createdSessions: [[String: String?]] = []
     var createdMissions: [[String: String]] = []
     var issueRequests: [[String: String?]] = []
@@ -204,6 +206,18 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
             throw .invalidResponse
         }
         return try result.get()
+    }
+
+    func fetchMessages(
+        sessionID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws(APIError) -> ChatMessageListDTO {
+        fetchMessagesCallCount += 1
+        if let result = messagesResult {
+            return try result.get()
+        }
+        return ChatMessageListDTO(messages: [], total: 0)
     }
 
     func fetchEvents(

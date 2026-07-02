@@ -93,6 +93,20 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         )
     }
 
+    public func fetchMessages(
+        sessionID: String,
+        page: Int = 1,
+        pageSize: Int = 50
+    ) async throws(APIError) -> ChatMessageListDTO {
+        try await get(
+            path: encodePath("sessions", sessionID, "messages"),
+            queryItems: [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "page_size", value: String(pageSize)),
+            ]
+        )
+    }
+
     public func fetchEvents(
         sessionID: String,
         eventType: String? = nil,

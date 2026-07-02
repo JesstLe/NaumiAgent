@@ -110,6 +110,15 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
         )
     }
 
+    func fetchMessages(
+        sessionID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws(APIError) -> ChatMessageListDTO {
+        let messages = WorkbenchPreviewLoader.previewChatMessages(locale: .zhCN)
+        return ChatMessageListDTO(messages: Array(messages.prefix(pageSize)), total: messages.count)
+    }
+
     func fetchEvents(
         sessionID: String,
         eventType: String?,
