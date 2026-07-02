@@ -1111,6 +1111,12 @@ async def test_record_context_health_evaluates_persists_and_records_event(tmp_pa
         goal="可视化治理多 Agent 研发",
     )
     task = await task_store.create_task("同步上下文")
+    await task_store.update_task(
+        task.id,
+        status=TaskStatus.BLOCKED,
+        active_form="issue-context-health",
+        owner="Context-Agent",
+    )
     await service.attach_issue(
         session_id="s",
         mission_id=mission.id,
@@ -1131,6 +1137,19 @@ async def test_record_context_health_evaluates_persists_and_records_event(tmp_pa
     assert snapshot["task_id"] == task.id
     assert snapshot["health"] == "stale"
     assert snapshot["reasons"] == ["超过 60 分钟未同步上下文"]
+    assert snapshot["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "同步上下文",
+        "description": "",
+        "status": "blocked",
+        "active_form": "issue-context-health",
+        "owner": "Context-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": snapshot["task"]["created_at"],
+        "updated_at": snapshot["task"]["updated_at"],
+    }
 
     stored = await service.list_context_snapshots(
         "s", task_id=task.id, agent_id="Agent-A"
