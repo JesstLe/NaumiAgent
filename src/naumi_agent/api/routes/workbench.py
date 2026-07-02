@@ -19,6 +19,8 @@ from naumi_agent.workbench.models import ApprovalState, DecisionKind, ParallelMo
 
 router = APIRouter(tags=["workbench"])
 LOCAL_DAEMON_BIND_HOST = "127.0.0.1"
+WORKBENCH_API_BASE_PATH = "/api/v1"
+WORKBENCH_BASE_PATH = f"{WORKBENCH_API_BASE_PATH}/workbench"
 logger = logging.getLogger(__name__)
 
 
@@ -30,6 +32,10 @@ class DaemonStatusResponse(BaseModel):
     port: int
     started_at: str
     workspace_count: int
+    api_base_url: str
+    workbench_base_url: str
+    event_stream_url_template: str
+    auth_mode: str
 
 
 class WorkbenchCapabilitiesResponse(BaseModel):
@@ -336,14 +342,25 @@ async def _build_daemon_status(request: Request) -> DaemonStatusResponse:
     if started_at is None:
         started_at = datetime.now(UTC).replace(microsecond=0).isoformat()
         request.app.state.started_at = started_at
+    port = request.url.port or 8765
+    api_base_url = f"http://{LOCAL_DAEMON_BIND_HOST}:{port}{WORKBENCH_API_BASE_PATH}"
+    workbench_base_url = f"http://{LOCAL_DAEMON_BIND_HOST}:{port}{WORKBENCH_BASE_PATH}"
+    event_stream_url_template = (
+        f"ws://{LOCAL_DAEMON_BIND_HOST}:{port}"
+        f"{WORKBENCH_BASE_PATH}/sessions/{{session_id}}/events/stream"
+    )
     return DaemonStatusResponse(
         status="running",
         version=__version__,
         pid=os.getpid(),
         host=LOCAL_DAEMON_BIND_HOST,
-        port=request.url.port or 8765,
+        port=port,
         started_at=started_at,
         workspace_count=await _count_workspaces(engine),
+        api_base_url=api_base_url,
+        workbench_base_url=workbench_base_url,
+        event_stream_url_template=event_stream_url_template,
+        auth_mode="dev_token",
     )
 
 
