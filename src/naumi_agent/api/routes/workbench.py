@@ -245,12 +245,34 @@ def _get_task_market(engine) -> TaskMarket:
     )
 
 
-def _worktree_to_dict(record) -> dict[str, Any]:
+def _task_to_summary(task: Any | None) -> dict[str, Any] | None:
+    if task is None:
+        return None
+    data = asdict(task)
+    status = data.get("status")
+    if hasattr(status, "value"):
+        data["status"] = status.value
+    return data
+
+
+async def _task_summaries_by_id(engine) -> dict[str, dict[str, Any] | None]:
+    task_store = getattr(engine, "task_store", None)
+    if task_store is None:
+        return {}
+    tasks = await task_store.list_tasks()
+    return {task.id: _task_to_summary(task) for task in tasks}
+
+
+def _worktree_to_dict(
+    record,
+    tasks_by_id: dict[str, dict[str, Any] | None] | None = None,
+) -> dict[str, Any]:
     data = asdict(record)
     status = data.get("status")
     if hasattr(status, "value"):
         data["status"] = status.value
     data["removable"] = record.removable
+    data["task"] = (tasks_by_id or {}).get(record.task_id)
     return data
 
 
@@ -263,9 +285,10 @@ async def _build_workbench_snapshot(engine, session_id: str) -> dict[str, Any]:
     records = await manager.status()
     if not isinstance(records, list):
         records = [records]
+    tasks_by_id = await _task_summaries_by_id(engine)
     return {
         **snapshot,
-        "worktrees": [_worktree_to_dict(record) for record in records],
+        "worktrees": [_worktree_to_dict(record, tasks_by_id) for record in records],
     }
 
 
@@ -1794,7 +1817,11 @@ async def get_worktrees(
     records = await manager.status()
     if not isinstance(records, list):
         records = [records]
-    worktrees = [_worktree_to_dict(record) for record in records]
+    try:
+        tasks_by_id = await _task_summaries_by_id(engine)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    worktrees = [_worktree_to_dict(record, tasks_by_id) for record in records]
     if task_id is not None:
         worktrees = [record for record in worktrees if record["task_id"] == task_id]
     if status is not None:
@@ -1901,7 +1928,11 @@ async def get_worktree(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if isinstance(record, list):
         raise HTTPException(status_code=404, detail="worktree 不存在")
-    return _worktree_to_dict(record)
+    try:
+        tasks_by_id = await _task_summaries_by_id(engine)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return _worktree_to_dict(record, tasks_by_id)
 
 
 @router.delete(

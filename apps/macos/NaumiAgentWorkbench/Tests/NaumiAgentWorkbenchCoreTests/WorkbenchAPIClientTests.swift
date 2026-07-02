@@ -1607,7 +1607,7 @@ final class WorkbenchAPIClientTests {
         let taskID = "task 001/审查"
         let json = Data(
             """
-            {"worktrees":[{"name":"wt-api","path":"/repo/.naumi/worktrees/wt-api","branch":"naumi/worktree-wt-api","base_ref":"abc123","status":"clean","task_id":"task 001/审查","dirty_files":0,"commits_ahead":0,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","kept_reason":"","metadata":{"owner":"Backend-Agent"},"removable":true}],"task_id":"task 001/审查","status":"clean","limit":25}
+            {"worktrees":[{"name":"wt-api","path":"/repo/.naumi/worktrees/wt-api","branch":"naumi/worktree-wt-api","base_ref":"abc123","status":"clean","task_id":"task 001/审查","dirty_files":0,"commits_ahead":0,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","kept_reason":"","metadata":{"owner":"Backend-Agent"},"removable":true,"task":{"id":"task 001/审查","session_id":"sess 中文","subject":"检查 API 工作区","description":"工作区列表需要任务摘要","status":"in_progress","active_form":"issue-worktree-api","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}],"task_id":"task 001/审查","status":"clean","limit":25}
             """.utf8
         )
 
@@ -1659,6 +1659,10 @@ final class WorkbenchAPIClientTests {
         #expect(worktree.keptReason == "")
         #expect(worktree.metadata == ["owner": "Backend-Agent"])
         #expect(worktree.removable)
+        #expect(worktree.task?.subject == "检查 API 工作区")
+        #expect(worktree.task?.status == "in_progress")
+        #expect(worktree.task?.activeForm == "issue-worktree-api")
+        #expect(worktree.task?.owner == "Backend-Agent")
     }
 
     @Test func fetchWorktreeEncodesPathComponents() async throws {
@@ -1666,7 +1670,7 @@ final class WorkbenchAPIClientTests {
         let worktreeName = "wt-审查"
         let json = Data(
             """
-            {"name":"wt-审查","path":"/repo/.naumi/worktrees/wt-review","branch":"naumi/worktree-wt-review","base_ref":"abc123","status":"dirty","task_id":"task-1","dirty_files":2,"commits_ahead":1,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:05:00","kept_reason":"","metadata":{"agent_id":"Reviewer-Agent"},"removable":false}
+            {"name":"wt-审查","path":"/repo/.naumi/worktrees/wt-review","branch":"naumi/worktree-wt-review","base_ref":"abc123","status":"dirty","task_id":"task-1","dirty_files":2,"commits_ahead":1,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:05:00","kept_reason":"","metadata":{"agent_id":"Reviewer-Agent"},"removable":false,"task":{"id":"task-1","session_id":"sess/中文","subject":"查看工作区详情","description":"Inspector 工作区详情需要任务摘要","status":"blocked","active_form":"issue-worktree-detail","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}
             """.utf8
         )
 
@@ -1695,6 +1699,10 @@ final class WorkbenchAPIClientTests {
         #expect(worktree.commitsAhead == 1)
         #expect(worktree.metadata == ["agent_id": "Reviewer-Agent"])
         #expect(!worktree.removable)
+        #expect(worktree.task?.subject == "查看工作区详情")
+        #expect(worktree.task?.status == "blocked")
+        #expect(worktree.task?.activeForm == "issue-worktree-detail")
+        #expect(worktree.task?.owner == "Backend-Agent")
     }
 
     @Test func keepWorktreeUsesPOSTAndEncodesBody() async throws {

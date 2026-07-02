@@ -15,6 +15,7 @@ public struct WorktreeDTO: Decodable, Equatable, Sendable {
     public let keptReason: String
     public let metadata: [String: String]
     public let removable: Bool
+    public let task: TaskDTO?
 
     public enum CodingKeys: String, CodingKey {
         case name
@@ -30,6 +31,39 @@ public struct WorktreeDTO: Decodable, Equatable, Sendable {
         case keptReason = "kept_reason"
         case metadata
         case removable
+        case task
+    }
+
+    public init(
+        name: String,
+        path: String,
+        branch: String,
+        baseRef: String,
+        status: String,
+        taskID: String,
+        dirtyFiles: Int,
+        commitsAhead: Int,
+        createdAt: String,
+        updatedAt: String,
+        keptReason: String,
+        metadata: [String: String],
+        removable: Bool,
+        task: TaskDTO? = nil
+    ) {
+        self.name = name
+        self.path = path
+        self.branch = branch
+        self.baseRef = baseRef
+        self.status = status
+        self.taskID = taskID
+        self.dirtyFiles = dirtyFiles
+        self.commitsAhead = commitsAhead
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.keptReason = keptReason
+        self.metadata = metadata
+        self.removable = removable
+        self.task = task
     }
 }
 

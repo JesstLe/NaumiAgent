@@ -74,6 +74,7 @@ from naumi_agent.api.routes.workbench import (
 from naumi_agent.api.routes.workbench import (
     router as workbench_router,
 )
+from naumi_agent.tasks.models import Task, TaskStatus
 from naumi_agent.workbench.models import (
     ApprovalState,
     ContextHealth,
@@ -1450,6 +1451,16 @@ class FakeWorktreeManager:
         return f"已删除 worktree：{name}"
 
 
+class FakeTaskStore:
+    def __init__(self, tasks: list[Task] | None = None) -> None:
+        self.tasks = list(tasks or [])
+        self.list_calls = 0
+
+    async def list_tasks(self) -> list[Task]:
+        self.list_calls += 1
+        return list(self.tasks)
+
+
 class FakeWorkbenchStore:
     def __init__(self) -> None:
         self.events: list[dict] = []
@@ -1480,6 +1491,7 @@ class _FakeEngine:
         exists: bool,
         workbench_market=None,
         worktree_manager: FakeWorktreeManager | None = None,
+        task_store: FakeTaskStore | None = None,
         load_session_result: bool | None = None,
         load_session_results: dict[str, bool] | None = None,
         load_session_error: Exception | None = None,
@@ -1489,6 +1501,7 @@ class _FakeEngine:
         self.workbench_store = FakeWorkbenchStore()
         self.workbench_market = workbench_market
         self.worktree_manager = worktree_manager or FakeWorktreeManager()
+        self.task_store = task_store or FakeTaskStore()
         self.load_session_result = load_session_result
         self.load_session_results = load_session_results or {}
         self.load_session_error = load_session_error
@@ -1639,6 +1652,17 @@ async def test_workbench_snapshot_endpoint_returns_service_snapshot() -> None:
 
 @pytest.mark.asyncio
 async def test_workbench_snapshot_endpoint_includes_worktree_statuses() -> None:
+    task = Task(
+        id="task-1",
+        session_id="sess-1",
+        subject="实现工作区列表",
+        description="Worktrees 页需要显示任务上下文",
+        status=TaskStatus.IN_PROGRESS,
+        active_form="issue-worktree-list",
+        owner="Workbench-Agent",
+        created_at="2024-01-01T00:00:00",
+        updated_at="2024-01-01T00:00:00",
+    )
     worktree_manager = FakeWorktreeManager(
         [
             WorktreeRecord(
@@ -1655,7 +1679,10 @@ async def test_workbench_snapshot_endpoint_includes_worktree_statuses() -> None:
             )
         ]
     )
-    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    task_store = FakeTaskStore([task])
+    engine = _FakeEngine(
+        exists=True, worktree_manager=worktree_manager, task_store=task_store
+    )
 
     response = await get_workbench_snapshot("sess-1", _fake_request(engine), auth="test")
 
@@ -1675,8 +1702,22 @@ async def test_workbench_snapshot_endpoint_includes_worktree_statuses() -> None:
             "kept_reason": "",
             "metadata": {},
             "removable": False,
+            "task": {
+                "id": "task-1",
+                "session_id": "sess-1",
+                "subject": "实现工作区列表",
+                "description": "Worktrees 页需要显示任务上下文",
+                "status": "in_progress",
+                "active_form": "issue-worktree-list",
+                "owner": "Workbench-Agent",
+                "blocks": [],
+                "blocked_by": [],
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+            },
         }
     ]
+    assert task_store.list_calls == 1
 
 
 @pytest.mark.asyncio
@@ -7200,6 +7241,17 @@ async def test_keep_worktree_endpoint_reports_runtime_session_load_failure() -> 
 
 @pytest.mark.asyncio
 async def test_get_worktrees_endpoint_filters_and_returns_json_ready_records() -> None:
+    task = Task(
+        id="task-1",
+        session_id="sess-1",
+        subject="检查 API 工作区",
+        description="工作区列表需要任务摘要",
+        status=TaskStatus.IN_PROGRESS,
+        active_form="issue-worktree-api",
+        owner="Backend-Agent",
+        created_at="2024-01-01T00:00:00",
+        updated_at="2024-01-01T00:00:00",
+    )
     worktree_manager = FakeWorktreeManager(
         [
             WorktreeRecord(
@@ -7229,7 +7281,10 @@ async def test_get_worktrees_endpoint_filters_and_returns_json_ready_records() -
             ),
         ]
     )
-    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    task_store = FakeTaskStore([task])
+    engine = _FakeEngine(
+        exists=True, worktree_manager=worktree_manager, task_store=task_store
+    )
 
     response = await get_worktrees(
         "sess-1",
@@ -7258,12 +7313,26 @@ async def test_get_worktrees_endpoint_filters_and_returns_json_ready_records() -
                 "kept_reason": "",
                 "metadata": {"owner": "Backend-Agent"},
                 "removable": True,
+                "task": {
+                    "id": "task-1",
+                    "session_id": "sess-1",
+                    "subject": "检查 API 工作区",
+                    "description": "工作区列表需要任务摘要",
+                    "status": "in_progress",
+                    "active_form": "issue-worktree-api",
+                    "owner": "Backend-Agent",
+                    "blocks": [],
+                    "blocked_by": [],
+                    "created_at": "2024-01-01T00:00:00",
+                    "updated_at": "2024-01-01T00:00:00",
+                },
             }
         ],
         "task_id": "task-1",
         "status": "clean",
         "limit": 10,
     }
+    assert task_store.list_calls == 1
 
 
 def test_get_worktrees_route_accepts_filters() -> None:
@@ -7331,6 +7400,17 @@ def test_get_worktrees_route_accepts_filters() -> None:
 
 
 def test_get_worktree_route_returns_single_worktree() -> None:
+    task = Task(
+        id="task-1",
+        session_id="sess-1",
+        subject="查看工作区详情",
+        description="Inspector 工作区详情需要任务摘要",
+        status=TaskStatus.BLOCKED,
+        active_form="issue-worktree-detail",
+        owner="Backend-Agent",
+        created_at="2024-01-01T00:00:00",
+        updated_at="2024-01-01T00:00:00",
+    )
     worktree_manager = FakeWorktreeManager(
         [
             WorktreeRecord(
@@ -7348,7 +7428,10 @@ def test_get_worktree_route_returns_single_worktree() -> None:
             )
         ]
     )
-    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    task_store = FakeTaskStore([task])
+    engine = _FakeEngine(
+        exists=True, worktree_manager=worktree_manager, task_store=task_store
+    )
     app = FastAPI()
     app.state.engine = engine
     app.include_router(workbench_router)
@@ -7373,7 +7456,21 @@ def test_get_worktree_route_returns_single_worktree() -> None:
         "kept_reason": "",
         "metadata": {"agent_id": "Backend-Agent"},
         "removable": False,
+        "task": {
+            "id": "task-1",
+            "session_id": "sess-1",
+            "subject": "查看工作区详情",
+            "description": "Inspector 工作区详情需要任务摘要",
+            "status": "blocked",
+            "active_form": "issue-worktree-detail",
+            "owner": "Backend-Agent",
+            "blocks": [],
+            "blocked_by": [],
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
+        },
     }
+    assert task_store.list_calls == 1
 
 
 def test_get_worktree_route_returns_404_for_missing_worktree() -> None:

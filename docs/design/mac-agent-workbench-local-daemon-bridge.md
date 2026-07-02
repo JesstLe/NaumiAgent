@@ -419,7 +419,31 @@ limit?: 1..200
 - snapshot 中的 `leases[]`、`GET /leases` 以及 `GET /leases/{lease_id}` 都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
   如果 lease 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空租约记录。
 
-## 9.9 Daily Chat and Issue Link API
+## 9.9 Worktree Query API
+
+Worktrees 页、任务市场 Worktree 列和 Inspector 工作区面板使用：
+
+```text
+GET /api/v1/workbench/sessions/{session_id}/worktrees
+```
+
+查询参数：
+
+```text
+task_id?: string
+status?: clean | dirty | missing | kept
+limit?: 1..200
+```
+
+约束：
+
+- `task_id` 用于查看单个 Issue / Task 绑定的隔离工作区。
+- `status=dirty` 用于提示有未保存或未审查改动的工作区。
+- worktree detail 仍通过 `/worktrees/{name}` 按需加载单个工作区记录。
+- snapshot 中的 `worktrees[]`、`GET /worktrees` 以及 `GET /worktrees/{name}` 都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
+  如果 worktree 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空工作区记录。
+
+## 9.10 Daily Chat and Issue Link API
 
 Chat 页使用现有会话消息接口，不新增一套平行聊天后端：
 
