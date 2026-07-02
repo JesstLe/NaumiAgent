@@ -13,6 +13,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
     public let leases: [LeaseDTO]
     public let failures: [FailureDTO]
     public let events: [EventDTO]
+    public let validationRuns: [ValidationRunDTO]
 
     public enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
@@ -24,6 +25,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         case leases
         case failures
         case events
+        case validationRuns = "validation_runs"
     }
 
     public init(
@@ -35,7 +37,8 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         issues: [IssueDTO],
         leases: [LeaseDTO] = [],
         failures: [FailureDTO],
-        events: [EventDTO]
+        events: [EventDTO],
+        validationRuns: [ValidationRunDTO] = []
     ) {
         self.sessionID = sessionID
         self.summary = summary
@@ -46,6 +49,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         self.leases = leases
         self.failures = failures
         self.events = events
+        self.validationRuns = validationRuns
     }
 
     public init(from decoder: Decoder) throws {
@@ -59,6 +63,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         leases = try container.decodeIfPresent([LeaseDTO].self, forKey: .leases) ?? []
         failures = try container.decode([FailureDTO].self, forKey: .failures)
         events = try container.decode([EventDTO].self, forKey: .events)
+        validationRuns = try container.decodeIfPresent([ValidationRunDTO].self, forKey: .validationRuns) ?? []
     }
 }
 

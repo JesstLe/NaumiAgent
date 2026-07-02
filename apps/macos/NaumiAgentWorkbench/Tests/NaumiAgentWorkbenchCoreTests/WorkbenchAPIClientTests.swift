@@ -3351,7 +3351,7 @@ final class WorkbenchAPIClientTests {
         let sessionID = "sess/中文"
         let snapshotJSON = Data(
             """
-            {"session_id":"sess/中文","missions":[],"tasks":[{"id":"task-001","session_id":"sess/中文","subject":"首屏 Issue 任务摘要","description":"snapshot issues 直接携带 task","status":"in_progress","active_form":"issue-snapshot-task","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}],"issues":[{"session_id":"sess/中文","task_id":"task-001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"medium","requires_human_approval":true,"acceptance_criteria":["首屏可见任务标题"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","task":{"id":"task-001","session_id":"sess/中文","subject":"首屏 Issue 任务摘要","description":"snapshot issues 直接携带 task","status":"in_progress","active_form":"issue-snapshot-task","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}],"failures":[],"events":[]}
+            {"session_id":"sess/中文","missions":[],"tasks":[{"id":"task-001","session_id":"sess/中文","subject":"首屏 Issue 任务摘要","description":"snapshot issues 直接携带 task","status":"in_progress","active_form":"issue-snapshot-task","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}],"issues":[{"session_id":"sess/中文","task_id":"task-001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"medium","requires_human_approval":true,"acceptance_criteria":["首屏可见任务标题"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","task":{"id":"task-001","session_id":"sess/中文","subject":"首屏 Issue 任务摘要","description":"snapshot issues 直接携带 task","status":"in_progress","active_form":"issue-snapshot-task","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}],"validation_runs":[{"id":"run-001","session_id":"sess/中文","task_id":"task-001","actor":"ValidationRunner","command":["pytest","test_a.py"],"cwd":"/workspace","status":"passed","exit_code":0,"output":"ok","started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:01","task":{"id":"task-001","session_id":"sess/中文","subject":"首屏 Issue 任务摘要","description":"snapshot issues 直接携带 task","status":"in_progress","active_form":"issue-snapshot-task","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}],"failures":[],"events":[]}
             """.utf8
         )
 
@@ -3381,6 +3381,9 @@ final class WorkbenchAPIClientTests {
         #expect(snapshot.issues.first?.taskID == "task-001")
         #expect(snapshot.issues.first?.task?.subject == "首屏 Issue 任务摘要")
         #expect(snapshot.issues.first?.task?.activeForm == "issue-snapshot-task")
+        #expect(snapshot.validationRuns.first?.id == "run-001")
+        #expect(snapshot.validationRuns.first?.task?.subject == "首屏 Issue 任务摘要")
+        #expect(snapshot.validationRuns.first?.task?.activeForm == "issue-snapshot-task")
         #expect(snapshot.failures.isEmpty)
         #expect(snapshot.events.isEmpty)
     }

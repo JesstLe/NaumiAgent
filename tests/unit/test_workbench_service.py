@@ -588,9 +588,19 @@ async def test_dashboard_snapshot_includes_validation_runs_context_snapshots_and
     workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
     service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
 
+    task = await task_store.create_task(
+        "验证运行首屏摘要",
+        description="Dashboard 验证记录需要任务上下文",
+    )
+    await task_store.update_task(
+        task.id,
+        status=TaskStatus.IN_PROGRESS,
+        active_form="issue-validation-snapshot",
+        owner="Validation-Agent",
+    )
     run = await workbench_store.record_validation_run(
         session_id="s",
-        task_id="task-1",
+        task_id=task.id,
         actor="ValidationRunner",
         command=["pytest", "test_a.py"],
         cwd="/workspace",
@@ -603,14 +613,14 @@ async def test_dashboard_snapshot_includes_validation_runs_context_snapshots_and
     snapshot = await workbench_store.record_context_snapshot(
         session_id="s",
         agent_id="agent-1",
-        task_id="task-1",
+        task_id=task.id,
         health=ContextHealth.GOOD,
         reasons=["上下文健康"],
     )
     waiting = await workbench_store.add_approval(
         session_id="s",
         mission_id="mission-1",
-        task_id="task-1",
+        task_id=task.id,
         title="等待审批",
         detail="详情",
         requester="Agent-A",
@@ -647,6 +657,19 @@ async def test_dashboard_snapshot_includes_validation_runs_context_snapshots_and
     assert "validation_runs" in result
     assert [r["id"] for r in result["validation_runs"]] == [run["id"]]
     assert result["validation_runs"][0]["status"] == "passed"
+    assert result["validation_runs"][0]["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "验证运行首屏摘要",
+        "description": "Dashboard 验证记录需要任务上下文",
+        "status": "in_progress",
+        "active_form": "issue-validation-snapshot",
+        "owner": "Validation-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": result["validation_runs"][0]["task"]["created_at"],
+        "updated_at": result["validation_runs"][0]["task"]["updated_at"],
+    }
 
     assert "context_snapshots" in result
     assert [s["id"] for s in result["context_snapshots"]] == [snapshot["id"]]
