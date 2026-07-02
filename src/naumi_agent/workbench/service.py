@@ -652,19 +652,31 @@ class WorkbenchService:
         health: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        return await self._workbench_store.list_context_snapshots(
+        snapshots = await self._workbench_store.list_context_snapshots(
             session_id, task_id=task_id, agent_id=agent_id, health=health, limit=limit
         )
+        tasks = await self._task_store.list_tasks()
+        tasks_by_id = {task.id: task for task in tasks}
+        return [
+            snapshot | {
+                "task": self._task_to_summary(tasks_by_id.get(snapshot["task_id"]))
+            }
+            for snapshot in snapshots
+        ]
 
     async def get_context_snapshot(
         self,
         session_id: str,
         snapshot_id: str,
     ) -> dict[str, Any] | None:
-        return await self._workbench_store.get_context_snapshot(
+        snapshot = await self._workbench_store.get_context_snapshot(
             session_id,
             snapshot_id,
         )
+        if snapshot is None:
+            return None
+        task = await self._task_store.get_task(snapshot["task_id"])
+        return snapshot | {"task": self._task_to_summary(task)}
 
     async def record_context_health(
         self,

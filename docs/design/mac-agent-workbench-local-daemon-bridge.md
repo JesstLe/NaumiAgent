@@ -297,6 +297,8 @@ limit?: 1..200
 - `health` 直接来自 context snapshot 的健康状态，用于筛出 stale / missing / conflicted 等需要人工关注的上下文。
 - `task_id` 与 `agent_id` 可以和 `health` 组合使用，支撑单个 Issue 或单个 Agent 的上下文诊断。
 - snapshot detail 仍通过 `/context-snapshots/{snapshot_id}` 按需加载完整原因列表。
+- 每条 `context_snapshots[]` 记录和 `GET /context-snapshots/{snapshot_id}` 详情都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
+  如果 context snapshot 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空上下文记录。
 
 ## 9.4 Failure Diagnostics Query API
 

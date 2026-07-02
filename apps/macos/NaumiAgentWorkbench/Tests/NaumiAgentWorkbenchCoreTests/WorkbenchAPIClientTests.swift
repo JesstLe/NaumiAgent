@@ -782,7 +782,7 @@ final class WorkbenchAPIClientTests {
         let health = "stale"
         let json = Data(
             """
-            {"context_snapshots":[{"id":"snap-001","session_id":"sess-001","agent_id":"agent 001/测试","task_id":"task 001/审查","health":"good","reasons":["上下文健康"],"created_at":"2026-06-27T06:00:00"}],"task_id":"task 001/审查","agent_id":"agent 001/测试","health":"stale","limit":25}
+            {"context_snapshots":[{"id":"snap-001","session_id":"sess-001","agent_id":"agent 001/测试","task_id":"task 001/审查","health":"good","reasons":["上下文健康"],"created_at":"2026-06-27T06:00:00","task":{"id":"task 001/审查","session_id":"sess-001","subject":"同步上下文健康","description":"Worktrees 页需要显示任务上下文","status":"blocked","active_form":"issue-context-health","owner":"Context-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}],"task_id":"task 001/审查","agent_id":"agent 001/测试","health":"stale","limit":25}
             """.utf8
         )
 
@@ -833,6 +833,10 @@ final class WorkbenchAPIClientTests {
         #expect(snapshot.health == "good")
         #expect(snapshot.reasons == ["上下文健康"])
         #expect(snapshot.createdAt == "2026-06-27T06:00:00")
+        #expect(snapshot.task?.subject == "同步上下文健康")
+        #expect(snapshot.task?.status == "blocked")
+        #expect(snapshot.task?.activeForm == "issue-context-health")
+        #expect(snapshot.task?.owner == "Context-Agent")
     }
 
     @Test func fetchContextSnapshotsWithoutOptionalFilters() async throws {
@@ -876,7 +880,7 @@ final class WorkbenchAPIClientTests {
         let snapshotID = "snap/上下文 001"
         let json = Data(
             """
-            {"id":"snap/上下文 001","session_id":"sess 中文","agent_id":"agent-001","task_id":"task-001","health":"stale","reasons":["超过 20 分钟未同步","存在策略冲突"],"created_at":"2026-06-27T06:10:00"}
+            {"id":"snap/上下文 001","session_id":"sess 中文","agent_id":"agent-001","task_id":"task-001","health":"stale","reasons":["超过 20 分钟未同步","存在策略冲突"],"created_at":"2026-06-27T06:10:00","task":{"id":"task-001","session_id":"sess 中文","subject":"修复上下文陈旧","description":"Inspector 详情需要任务摘要","status":"in_progress","active_form":"issue-context-stale","owner":"Reviewer-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}
             """.utf8
         )
 
@@ -906,6 +910,10 @@ final class WorkbenchAPIClientTests {
         #expect(snapshot.health == "stale")
         #expect(snapshot.reasons == ["超过 20 分钟未同步", "存在策略冲突"])
         #expect(snapshot.createdAt == "2026-06-27T06:10:00")
+        #expect(snapshot.task?.subject == "修复上下文陈旧")
+        #expect(snapshot.task?.status == "in_progress")
+        #expect(snapshot.task?.activeForm == "issue-context-stale")
+        #expect(snapshot.task?.owner == "Reviewer-Agent")
     }
 
     @Test func recordContextHealthUsesPOSTAndEncodesPathAndBody() async throws {

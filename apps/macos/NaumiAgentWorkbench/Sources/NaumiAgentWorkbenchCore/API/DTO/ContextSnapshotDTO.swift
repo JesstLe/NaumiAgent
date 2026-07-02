@@ -10,6 +10,7 @@ public struct ContextSnapshotDTO: Decodable, Equatable, Sendable {
     public let health: String
     public let reasons: [String]
     public let createdAt: String
+    public let task: TaskDTO?
 
     public enum CodingKeys: String, CodingKey {
         case id
@@ -19,6 +20,7 @@ public struct ContextSnapshotDTO: Decodable, Equatable, Sendable {
         case health
         case reasons
         case createdAt = "created_at"
+        case task
     }
 
     public init(
@@ -28,7 +30,8 @@ public struct ContextSnapshotDTO: Decodable, Equatable, Sendable {
         taskID: String,
         health: String,
         reasons: [String],
-        createdAt: String
+        createdAt: String,
+        task: TaskDTO? = nil
     ) {
         self.id = id
         self.sessionID = sessionID
@@ -37,6 +40,7 @@ public struct ContextSnapshotDTO: Decodable, Equatable, Sendable {
         self.health = health
         self.reasons = reasons
         self.createdAt = createdAt
+        self.task = task
     }
 }
 
