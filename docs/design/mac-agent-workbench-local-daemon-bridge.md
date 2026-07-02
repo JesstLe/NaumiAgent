@@ -237,6 +237,7 @@ GET /api/v1/workbench/capabilities
     "context_snapshots",
     "failures",
     "events",
+    "messages",
     "approvals",
     "intent_locks",
     "decisions"
@@ -253,6 +254,9 @@ GET /api/v1/workbench/capabilities
     "create_intent_lock",
     "create_decision",
     "resolve_approval",
+    "list_messages",
+    "send_message",
+    "send_message_with_issue",
     "keep_worktree",
     "delete_worktree"
   ],
@@ -285,6 +289,8 @@ GET /api/v1/workbench/capabilities
     "events": "/workbench/sessions/{session_id}/events",
     "event": "/workbench/sessions/{session_id}/events/{event_id}",
     "event_stream": "/workbench/sessions/{session_id}/events/stream",
+    "messages": "/sessions/{session_id}/messages",
+    "send_message": "/sessions/{session_id}/messages",
     "agents": "/workbench/sessions/{session_id}/agents",
     "agent": "/workbench/sessions/{session_id}/agents/{agent_id}",
     "approvals": "/workbench/sessions/{session_id}/approvals",
