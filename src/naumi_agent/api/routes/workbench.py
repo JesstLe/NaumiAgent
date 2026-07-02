@@ -47,6 +47,7 @@ WORKBENCH_SUPPORTED_ACTIONS = [
     "expire_leases",
     "run_validation",
     "record_context_health",
+    "upsert_agent_profile",
     "create_intent_lock",
     "create_decision",
     "resolve_approval",
@@ -93,6 +94,7 @@ WORKBENCH_ROUTE_TEMPLATES = {
     "send_message": "/sessions/{session_id}/messages",
     "agents": "/workbench/sessions/{session_id}/agents",
     "agent": "/workbench/sessions/{session_id}/agents/{agent_id}",
+    "upsert_agent_profile": "/workbench/sessions/{session_id}/agents/{agent_id}",
     "approvals": "/workbench/sessions/{session_id}/approvals",
     "approval": "/workbench/sessions/{session_id}/approvals/{approval_id}",
     "resolve_approval": (
