@@ -1293,7 +1293,7 @@ final class WorkbenchAPIClientTests {
         let status = "blocked"
         let json = Data(
             """
-            {"issues":[{"session_id":"sess 中文","task_id":"task-001","mission_id":"mission 中文","parallel_mode":"exclusive","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["通过测试"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"mission_id":"mission 中文","risk_level":"high","status":"blocked","limit":25}
+            {"issues":[{"session_id":"sess 中文","task_id":"task-001","mission_id":"mission 中文","parallel_mode":"exclusive","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["通过测试"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","task":{"id":"task-001","session_id":"sess 中文","subject":"任务市场租约策略","description":"让列表显示真实任务事实","status":"blocked","active_form":"issue-1-market-lease","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:30:00","updated_at":"2026-06-27T05:45:00"}}],"mission_id":"mission 中文","risk_level":"high","status":"blocked","limit":25}
             """.utf8
         )
 
@@ -1343,6 +1343,10 @@ final class WorkbenchAPIClientTests {
         #expect(issue.parallelMode == "exclusive")
         #expect(issue.riskLevel == "high")
         #expect(issue.acceptanceCriteria == ["通过测试"])
+        #expect(issue.task?.subject == "任务市场租约策略")
+        #expect(issue.task?.status == "blocked")
+        #expect(issue.task?.activeForm == "issue-1-market-lease")
+        #expect(issue.task?.owner == "Backend-Agent")
     }
 
     @Test func fetchIssuesWithoutFilters() async throws {

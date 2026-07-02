@@ -15,6 +15,7 @@ public struct IssueDTO: Decodable, Equatable, Sendable {
     public let relatedPR: String
     public let createdAt: String
     public let updatedAt: String
+    public let task: TaskDTO?
 
     public enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
@@ -30,6 +31,7 @@ public struct IssueDTO: Decodable, Equatable, Sendable {
         case relatedPR = "related_pr"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case task
     }
 
     public init(
@@ -45,7 +47,8 @@ public struct IssueDTO: Decodable, Equatable, Sendable {
         relatedWorktree: String,
         relatedPR: String,
         createdAt: String,
-        updatedAt: String
+        updatedAt: String,
+        task: TaskDTO? = nil
     ) {
         self.sessionID = sessionID
         self.taskID = taskID
@@ -60,6 +63,7 @@ public struct IssueDTO: Decodable, Equatable, Sendable {
         self.relatedPR = relatedPR
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.task = task
     }
 }
 

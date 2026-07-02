@@ -1651,6 +1651,49 @@ async def test_list_issues_can_filter_by_authoritative_task_status(tmp_path) -> 
     assert blocked["limit"] == 50
 
 
+@pytest.mark.asyncio
+async def test_list_issues_enriches_rows_with_authoritative_task_summary(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    task = await task_store.create_task(
+        "任务市场租约策略",
+        description="让 Mac App 列表直接展示任务事实",
+    )
+    await task_store.update_task(
+        task.id,
+        status=TaskStatus.IN_PROGRESS,
+        active_form="issue-1-market-lease",
+        owner="Backend-Agent",
+    )
+    await workbench_store.upsert_issue(
+        session_id="s",
+        task_id=task.id,
+        mission_id="mission-1",
+        risk_level=RiskLevel.HIGH,
+        acceptance_criteria=["列表必须显示真实任务状态"],
+    )
+
+    response = await service.list_issues("s", limit=50)
+
+    issue = response["issues"][0]
+    assert issue["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "任务市场租约策略",
+        "description": "让 Mac App 列表直接展示任务事实",
+        "status": "in_progress",
+        "active_form": "issue-1-market-lease",
+        "owner": "Backend-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": issue["task"]["created_at"],
+        "updated_at": issue["task"]["updated_at"],
+    }
+
+
 
 @pytest.mark.asyncio
 async def test_list_missions_returns_wrapper_and_json_friendly_fields(tmp_path) -> None:

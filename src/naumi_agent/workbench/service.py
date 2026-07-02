@@ -361,8 +361,9 @@ class WorkbenchService:
             risk_level=risk_level,
             limit=limit,
         )
+        tasks = await self._task_store.list_tasks()
+        tasks_by_id = {task.id: task for task in tasks}
         if task_status is not None:
-            tasks = await self._task_store.list_tasks()
             matching_task_ids = {
                 task.id for task in tasks if task.status == task_status
             }
@@ -370,7 +371,12 @@ class WorkbenchService:
                 issue for issue in issues if issue.task_id in matching_task_ids
             ]
         return {
-            "issues": [self._issue_to_dict(issue) for issue in issues],
+            "issues": [
+                self._issue_to_dict(issue) | {
+                    "task": self._task_to_summary(tasks_by_id.get(issue.task_id))
+                }
+                for issue in issues
+            ],
             "mission_id": mission_id,
             "risk_level": risk_level,
             "status": normalized_status,
@@ -559,6 +565,16 @@ class WorkbenchService:
                 1 for failure in failures if failure.get("status") == "open"
             ),
         }
+
+    @staticmethod
+    def _task_to_summary(task: Any | None) -> dict[str, Any] | None:
+        if task is None:
+            return None
+        data = asdict(task)
+        status = data.get("status")
+        if hasattr(status, "value"):
+            data["status"] = status.value
+        return data
 
     @staticmethod
     def _lease_to_dict(lease: Lease) -> dict[str, Any]:
