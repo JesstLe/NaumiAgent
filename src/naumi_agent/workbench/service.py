@@ -728,16 +728,26 @@ class WorkbenchService:
         kind: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        return await self._workbench_store.list_failures(
+        failures = await self._workbench_store.list_failures(
             session_id, task_id=task_id, status=status, kind=kind, limit=limit
         )
+        tasks = await self._task_store.list_tasks()
+        tasks_by_id = {task.id: task for task in tasks}
+        return [
+            failure | {"task": self._task_to_summary(tasks_by_id.get(failure["task_id"]))}
+            for failure in failures
+        ]
 
     async def get_failure(
         self,
         session_id: str,
         failure_id: str,
     ) -> dict[str, Any] | None:
-        return await self._workbench_store.get_failure(session_id, failure_id)
+        failure = await self._workbench_store.get_failure(session_id, failure_id)
+        if failure is None:
+            return None
+        task = await self._task_store.get_task(failure["task_id"])
+        return failure | {"task": self._task_to_summary(task)}
 
     async def list_leases(
         self,

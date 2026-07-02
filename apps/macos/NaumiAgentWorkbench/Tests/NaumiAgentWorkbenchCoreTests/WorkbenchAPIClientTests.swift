@@ -1252,7 +1252,7 @@ final class WorkbenchAPIClientTests {
         let failureID = "failure/测试 001"
         let json = Data(
             """
-            {"id":"failure/测试 001","session_id":"sess 中文","task_id":"task-001","kind":"test_failed","title":"DTO 解码测试失败","detail":"pytest tests/unit/test_dto.py -q failed with 2 failures","source_id":"run-001","status":"open","created_at":"2026-06-27T06:00:00"}
+            {"id":"failure/测试 001","session_id":"sess 中文","task_id":"task-001","kind":"test_failed","title":"DTO 解码测试失败","detail":"pytest tests/unit/test_dto.py -q failed with 2 failures","source_id":"run-001","status":"open","created_at":"2026-06-27T06:00:00","task":{"id":"task-001","session_id":"sess 中文","subject":"修复 DTO 解码测试","description":"失败诊断卡片需要显示任务上下文","status":"blocked","active_form":"issue-dto-failure","owner":"Test-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}
             """.utf8
         )
 
@@ -1284,6 +1284,10 @@ final class WorkbenchAPIClientTests {
         #expect(failure.sourceID == "run-001")
         #expect(failure.status == "open")
         #expect(failure.createdAt == "2026-06-27T06:00:00")
+        #expect(failure.task?.subject == "修复 DTO 解码测试")
+        #expect(failure.task?.status == "blocked")
+        #expect(failure.task?.activeForm == "issue-dto-failure")
+        #expect(failure.task?.owner == "Test-Agent")
     }
 
     @Test func fetchIssuesWithFilters() async throws {

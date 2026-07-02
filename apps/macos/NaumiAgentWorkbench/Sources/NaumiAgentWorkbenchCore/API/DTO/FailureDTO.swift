@@ -11,6 +11,7 @@ public struct FailureDTO: Decodable, Equatable, Sendable {
     public let sourceID: String
     public let status: String
     public let createdAt: String
+    public let task: TaskDTO?
 
     public enum CodingKeys: String, CodingKey {
         case id
@@ -22,5 +23,30 @@ public struct FailureDTO: Decodable, Equatable, Sendable {
         case sourceID = "source_id"
         case status
         case createdAt = "created_at"
+        case task
+    }
+
+    public init(
+        id: String,
+        sessionID: String,
+        taskID: String,
+        kind: String,
+        title: String,
+        detail: String,
+        sourceID: String,
+        status: String,
+        createdAt: String,
+        task: TaskDTO? = nil
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.taskID = taskID
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.sourceID = sourceID
+        self.status = status
+        self.createdAt = createdAt
+        self.task = task
     }
 }

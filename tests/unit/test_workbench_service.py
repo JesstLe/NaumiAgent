@@ -1135,9 +1135,19 @@ async def test_list_failures_returns_store_rows_and_respects_filters(tmp_path) -
     workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
     service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
 
+    task = await task_store.create_task(
+        "修复 DTO 解码测试",
+        description="失败诊断卡片需要显示任务上下文",
+    )
+    await task_store.update_task(
+        task.id,
+        status=TaskStatus.BLOCKED,
+        active_form="issue-dto-failure",
+        owner="Test-Agent",
+    )
     failure_open = await workbench_store.create_failure(
         session_id="s",
-        task_id="task-a",
+        task_id=task.id,
         kind=FailureKind.TEST_FAILED,
         title="测试失败",
         detail="detail",
@@ -1159,7 +1169,7 @@ async def test_list_failures_returns_store_rows_and_respects_filters(tmp_path) -
         await db.commit()
     await workbench_store.create_failure(
         session_id="s2",
-        task_id="task-a",
+        task_id=task.id,
         kind=FailureKind.LEASE_EXPIRED,
         title="其他会话失败",
         detail="detail",
@@ -1169,8 +1179,22 @@ async def test_list_failures_returns_store_rows_and_respects_filters(tmp_path) -
     all_failures = await service.list_failures("s", limit=50)
     assert {f["id"] for f in all_failures} == {failure_open["id"], failure_resolved["id"]}
     assert all(isinstance(f["status"], str) for f in all_failures)
+    enriched_failure = next(f for f in all_failures if f["id"] == failure_open["id"])
+    assert enriched_failure["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "修复 DTO 解码测试",
+        "description": "失败诊断卡片需要显示任务上下文",
+        "status": "blocked",
+        "active_form": "issue-dto-failure",
+        "owner": "Test-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": enriched_failure["task"]["created_at"],
+        "updated_at": enriched_failure["task"]["updated_at"],
+    }
 
-    filtered_task = await service.list_failures("s", task_id="task-a", limit=50)
+    filtered_task = await service.list_failures("s", task_id=task.id, limit=50)
     assert [f["id"] for f in filtered_task] == [failure_open["id"]]
 
     filtered_status = await service.list_failures("s", status="open", limit=50)
@@ -1190,9 +1214,19 @@ async def test_get_failure_returns_single_failure(tmp_path) -> None:
     workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
     service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
 
+    task = await task_store.create_task(
+        "修复验证失败卡片",
+        description="详情面板需要任务摘要",
+    )
+    await task_store.update_task(
+        task.id,
+        status=TaskStatus.IN_PROGRESS,
+        active_form="issue-validation-failure",
+        owner="Reviewer-Agent",
+    )
     failure = await workbench_store.create_failure(
         session_id="s",
-        task_id="task-a",
+        task_id=task.id,
         kind=FailureKind.TEST_FAILED,
         title="测试失败",
         detail="pytest failed",
@@ -1201,7 +1235,21 @@ async def test_get_failure_returns_single_failure(tmp_path) -> None:
 
     result = await service.get_failure("s", failure["id"])
 
-    assert result == failure
+    assert result is not None
+    assert result | {"task": None} == failure | {"task": None}
+    assert result["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "修复验证失败卡片",
+        "description": "详情面板需要任务摘要",
+        "status": "in_progress",
+        "active_form": "issue-validation-failure",
+        "owner": "Reviewer-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": result["task"]["created_at"],
+        "updated_at": result["task"]["updated_at"],
+    }
 
 
 @pytest.mark.asyncio

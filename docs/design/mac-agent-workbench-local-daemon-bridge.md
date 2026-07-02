@@ -318,6 +318,8 @@ limit?: 1..200
 - `kind` 来自 failure card 的类型字段，用于把测试失败、合并冲突、上下文陈旧等诊断流分开展示。
 - `task_id` / `status` / `kind` 可以组合使用，支撑单个 Issue 的 open test failures 或全部 unresolved merge conflicts。
 - failure detail 仍通过 `/failures/{failure_id}` 按需加载完整诊断内容。
+- 每条 `failures[]` 记录和 `GET /failures/{failure_id}` 详情都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
+  如果 failure 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空失败卡片。
 
 ## 9.5 Human Approval Query API
 
