@@ -546,7 +546,7 @@ final class WorkbenchAPIClientTests {
         let since = "2026-06-27T10:00:00+00:00"
         let json = Data(
             """
-            {"events":[{"id":"evt-002","session_id":"sess/中文","type":"issue.claimed","actor":"后端智能体","subject_id":"task/审查","payload":{"lease_id":"lease-001"},"timestamp":"2026-06-27T10:10:00"}],"event_type":"issue.claimed","subject_id":"task/审查","actor":"后端智能体","since":"2026-06-27T10:00:00+00:00","limit":25}
+            {"events":[{"id":"evt-002","session_id":"sess/中文","type":"issue.claimed","actor":"后端智能体","subject_id":"task/审查","payload":{"lease_id":"lease-001"},"timestamp":"2026-06-27T10:10:00","task":{"id":"task/审查","session_id":"sess/中文","subject":"查看审计事件","description":"时间线详情需要任务摘要","status":"in_progress","active_form":"issue-event-detail","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T10:00:00","updated_at":"2026-06-27T10:10:00"}}],"event_type":"issue.claimed","subject_id":"task/审查","actor":"后端智能体","since":"2026-06-27T10:00:00+00:00","limit":25}
             """.utf8
         )
 
@@ -597,6 +597,10 @@ final class WorkbenchAPIClientTests {
         #expect(event.actor == actor)
         #expect(event.subjectID == subjectID)
         #expect(event.payload == ["lease_id": .string("lease-001")])
+        #expect(event.task?.subject == "查看审计事件")
+        #expect(event.task?.status == "in_progress")
+        #expect(event.task?.activeForm == "issue-event-detail")
+        #expect(event.task?.owner == "Backend-Agent")
     }
 
     @Test func fetchEventEncodesPathComponentsAndDecodesPayload() async throws {
@@ -604,7 +608,7 @@ final class WorkbenchAPIClientTests {
         let eventID = "event/人工 审批"
         let json = Data(
             """
-            {"id":"event/人工 审批","session_id":"sess/中文","type":"approval.requested","actor":"Reviewer-Agent","subject_id":"approval-001","payload":{"risk":"high","requires_human":true},"timestamp":"2026-06-27T06:12:00"}
+            {"id":"event/人工 审批","session_id":"sess/中文","type":"approval.requested","actor":"Reviewer-Agent","subject_id":"approval-001","payload":{"risk":"high","requires_human":true,"task_id":"task-001"},"timestamp":"2026-06-27T06:12:00","task":{"id":"task-001","session_id":"sess/中文","subject":"人工审批详情","description":"审批事件需要任务上下文","status":"blocked","active_form":"approval-event-detail","owner":"Reviewer-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:12:00"}}
             """.utf8
         )
 
@@ -632,7 +636,11 @@ final class WorkbenchAPIClientTests {
         #expect(event.type == "approval.requested")
         #expect(event.actor == "Reviewer-Agent")
         #expect(event.subjectID == "approval-001")
-        #expect(event.payload == ["risk": .string("high"), "requires_human": .bool(true)])
+        #expect(event.payload == ["risk": .string("high"), "requires_human": .bool(true), "task_id": .string("task-001")])
+        #expect(event.task?.subject == "人工审批详情")
+        #expect(event.task?.status == "blocked")
+        #expect(event.task?.activeForm == "approval-event-detail")
+        #expect(event.task?.owner == "Reviewer-Agent")
     }
 
     @Test func fetchValidationRunsWithTaskID() async throws {

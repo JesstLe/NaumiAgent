@@ -489,6 +489,7 @@ class WorkbenchService:
             session_id, state=ApprovalState.WAITING, limit=50
         )
         missions = await self._list_missions_for_snapshot(session_id)
+        tasks_by_id = {task.id: task for task in tasks}
         intent_locks: list[dict[str, Any]] = []
         decisions: list[dict[str, Any]] = []
         for mission in missions:
@@ -535,7 +536,7 @@ class WorkbenchService:
             "issues": issues,
             "leases": leases,
             "failures": failures,
-            "events": [event.to_dict() for event in events],
+            "events": [self._event_to_dict(event, tasks_by_id) for event in events],
             "validation_runs": validation_runs,
             "context_snapshots": context_snapshots,
             "approvals": [self._approval_to_dict(approval) for approval in approvals],
@@ -585,6 +586,23 @@ class WorkbenchService:
         return data
 
     @staticmethod
+    def _event_task_id(event: Any, tasks_by_id: dict[str, Any]) -> str | None:
+        payload_task_id = event.payload.get("task_id")
+        if isinstance(payload_task_id, str) and payload_task_id:
+            return payload_task_id
+        if event.subject_id in tasks_by_id:
+            return event.subject_id
+        return None
+
+    @classmethod
+    def _event_to_dict(cls, event: Any, tasks_by_id: dict[str, Any]) -> dict[str, Any]:
+        data = event.to_dict()
+        task_id = cls._event_task_id(event, tasks_by_id)
+        if task_id is not None:
+            data["task"] = cls._task_to_summary(tasks_by_id.get(task_id))
+        return data
+
+    @staticmethod
     def _lease_to_dict(lease: Lease, task: Any | None = None) -> dict[str, Any]:
         data = asdict(lease)
         # Ensure enum values are JSON-friendly strings.
@@ -609,8 +627,10 @@ class WorkbenchService:
             since=since,
             limit=limit,
         )
+        tasks = await self._task_store.list_tasks()
+        tasks_by_id = {task.id: task for task in tasks}
         return {
-            "events": [event.to_dict() for event in events],
+            "events": [self._event_to_dict(event, tasks_by_id) for event in events],
             "event_type": event_type,
             "subject_id": subject_id,
             "actor": actor,
@@ -622,7 +642,8 @@ class WorkbenchService:
         event = await self._workbench_store.get_event(session_id, event_id)
         if event is None:
             return None
-        return event.to_dict()
+        tasks = await self._task_store.list_tasks()
+        return self._event_to_dict(event, {task.id: task for task in tasks})
 
     async def list_validation_runs(
         self,

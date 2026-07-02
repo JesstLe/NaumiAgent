@@ -443,7 +443,39 @@ limit?: 1..200
 - snapshot 中的 `worktrees[]`、`GET /worktrees` 以及 `GET /worktrees/{name}` 都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
   如果 worktree 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空工作区记录。
 
-## 9.10 Daily Chat and Issue Link API
+## 9.10 Audit Event Query API
+
+Dashboard 最近事件、Timeline 页和 Inspector 事件详情使用：
+
+```text
+GET /api/v1/workbench/sessions/{session_id}/events
+```
+
+查询参数：
+
+```text
+type?: string
+subject_id?: string
+actor?: string
+since?: ISO-8601 timestamp
+limit?: 1..200
+```
+
+事件详情：
+
+```text
+GET /api/v1/workbench/sessions/{session_id}/events/{event_id}
+```
+
+约束：
+
+- `type` 使用查询别名，映射后端的 `event_type`，例如 `issue.claimed`、`validation.completed`、`approval.resolved`。
+- `subject_id` 用于聚焦单个 task、mission、approval、lease 等审计主体。
+- `since` 用于 WebSocket 重连或 Timeline 增量刷新后的补拉。
+- 如果事件的 `subject_id` 对应 TaskStore 中的 task，或事件 `payload.task_id` 指向 task，则 `events[]`、`GET /events/{event_id}` 以及 snapshot 中的 `events[]` 都会附带可选 `task` 摘要。
+- 非任务事件不强行补 `task` 字段；SwiftUI 应把它们展示为 mission / policy / agent 级审计事件。
+
+## 9.11 Daily Chat and Issue Link API
 
 Chat 页使用现有会话消息接口，不新增一套平行聊天后端：
 
