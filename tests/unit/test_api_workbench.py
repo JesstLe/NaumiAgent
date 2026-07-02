@@ -7457,12 +7457,14 @@ def test_get_worktrees_route_accepts_filters() -> None:
                 "kept_reason": "等待人工审查",
                 "metadata": {},
                 "removable": False,
+                "task": None,
             }
         ],
         "task_id": "task-1",
         "status": "kept",
         "limit": 50,
     }
+    assert engine.task_store.list_calls == 1
 
 
 def test_get_worktree_route_returns_single_worktree() -> None:
@@ -7568,6 +7570,17 @@ def test_get_worktree_route_maps_invalid_name_to_400() -> None:
 
 
 def test_keep_worktree_route_marks_worktree_kept_and_records_audit_event() -> None:
+    task = Task(
+        id="task-1",
+        session_id="sess-1",
+        subject="保留工作区",
+        description="保留后 Inspector 仍需要任务摘要",
+        status=TaskStatus.BLOCKED,
+        active_form="issue-worktree-keep",
+        owner="Reviewer-Agent",
+        created_at="2024-01-01T00:00:00",
+        updated_at="2024-01-01T00:00:00",
+    )
     worktree_manager = FakeWorktreeManager(
         [
             WorktreeRecord(
@@ -7584,7 +7597,10 @@ def test_keep_worktree_route_marks_worktree_kept_and_records_audit_event() -> No
             )
         ]
     )
-    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    task_store = FakeTaskStore([task])
+    engine = _FakeEngine(
+        exists=True, worktree_manager=worktree_manager, task_store=task_store
+    )
     app = FastAPI()
     app.state.engine = engine
     app.include_router(workbench_router)
@@ -7603,6 +7619,20 @@ def test_keep_worktree_route_marks_worktree_kept_and_records_audit_event() -> No
     assert response.json()["status"] == "kept"
     assert response.json()["kept_reason"] == "等待人工审查"
     assert response.json()["removable"] is False
+    assert response.json()["task"] == {
+        "id": "task-1",
+        "session_id": "sess-1",
+        "subject": "保留工作区",
+        "description": "保留后 Inspector 仍需要任务摘要",
+        "status": "blocked",
+        "active_form": "issue-worktree-keep",
+        "owner": "Reviewer-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": "2024-01-01T00:00:00",
+        "updated_at": "2024-01-01T00:00:00",
+    }
+    assert task_store.list_calls == 1
     assert engine.workbench_store.events == [
         {
             "session_id": "sess-1",
@@ -7615,6 +7645,17 @@ def test_keep_worktree_route_marks_worktree_kept_and_records_audit_event() -> No
 
 
 def test_keep_worktree_route_can_return_fresh_snapshot() -> None:
+    task = Task(
+        id="task-1",
+        session_id="sess-1",
+        subject="保留工作区并刷新",
+        description="include_snapshot 外层 worktree 也需要任务摘要",
+        status=TaskStatus.BLOCKED,
+        active_form="issue-worktree-keep-snapshot",
+        owner="Reviewer-Agent",
+        created_at="2024-01-01T00:00:00",
+        updated_at="2024-01-01T00:00:00",
+    )
     worktree_manager = FakeWorktreeManager(
         [
             WorktreeRecord(
@@ -7631,7 +7672,10 @@ def test_keep_worktree_route_can_return_fresh_snapshot() -> None:
             )
         ]
     )
-    engine = _FakeEngine(exists=True, worktree_manager=worktree_manager)
+    task_store = FakeTaskStore([task])
+    engine = _FakeEngine(
+        exists=True, worktree_manager=worktree_manager, task_store=task_store
+    )
     app = FastAPI()
     app.state.engine = engine
     app.include_router(workbench_router)
@@ -7648,8 +7692,12 @@ def test_keep_worktree_route_can_return_fresh_snapshot() -> None:
     assert body["worktree"]["name"] == "wt-api"
     assert body["worktree"]["status"] == "kept"
     assert body["worktree"]["kept_reason"] == "等待人工审查"
+    assert body["worktree"]["task"]["id"] == "task-1"
+    assert body["worktree"]["task"]["subject"] == "保留工作区并刷新"
+    assert body["worktree"]["task"]["status"] == "blocked"
     assert body["snapshot"]["version"] == 1
     assert body["snapshot"]["session_id"] == "sess-1"
+    assert task_store.list_calls == 2
 
 
 def test_keep_worktree_route_returns_404_for_missing_worktree() -> None:
