@@ -14,6 +14,7 @@ public struct ApprovalDTO: Decodable, Equatable, Sendable {
     public let decisionNote: String
     public let createdAt: String
     public let updatedAt: String
+    public let task: TaskDTO?
 
     public enum CodingKeys: String, CodingKey {
         case id
@@ -28,6 +29,7 @@ public struct ApprovalDTO: Decodable, Equatable, Sendable {
         case decisionNote = "decision_note"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case task
     }
 
     public init(
@@ -42,7 +44,8 @@ public struct ApprovalDTO: Decodable, Equatable, Sendable {
         reviewer: String,
         decisionNote: String,
         createdAt: String,
-        updatedAt: String
+        updatedAt: String,
+        task: TaskDTO? = nil
     ) {
         self.id = id
         self.sessionID = sessionID
@@ -56,6 +59,7 @@ public struct ApprovalDTO: Decodable, Equatable, Sendable {
         self.decisionNote = decisionNote
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.task = task
     }
 }
 
