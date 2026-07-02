@@ -276,6 +276,18 @@ def _worktree_to_dict(
     return data
 
 
+def _lease_to_dict(
+    lease,
+    tasks_by_id: dict[str, dict[str, Any] | None] | None = None,
+) -> dict[str, Any]:
+    data = asdict(lease)
+    state = data.get("state")
+    if hasattr(state, "value"):
+        data["state"] = state.value
+    data["task"] = (tasks_by_id or {}).get(lease.task_id)
+    return data
+
+
 async def _build_workbench_snapshot(engine, session_id: str) -> dict[str, Any]:
     snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
     manager = getattr(engine, "worktree_manager", None)
@@ -1494,7 +1506,11 @@ async def claim_workbench_issue(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    lease_payload = asdict(lease)
+    try:
+        tasks_by_id = await _task_summaries_by_id(engine)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    lease_payload = _lease_to_dict(lease, tasks_by_id)
     if not include_snapshot:
         return lease_payload
 
@@ -1535,7 +1551,11 @@ async def release_workbench_lease(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if lease is None:
         raise HTTPException(status_code=404, detail="租约不存在")
-    lease_payload = asdict(lease)
+    try:
+        tasks_by_id = await _task_summaries_by_id(engine)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    lease_payload = _lease_to_dict(lease, tasks_by_id)
     if not include_snapshot:
         return lease_payload
 
@@ -1573,7 +1593,11 @@ async def expire_workbench_leases(
         expired = await market.expire_overdue_leases(session_id=session_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    response = {"expired": [asdict(lease) for lease in expired]}
+    try:
+        tasks_by_id = await _task_summaries_by_id(engine)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    response = {"expired": [_lease_to_dict(lease, tasks_by_id) for lease in expired]}
     if not include_snapshot:
         return response
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import asdict
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -3655,6 +3654,17 @@ async def test_claim_issue_endpoint_reports_runtime_session_load_failure() -> No
 @pytest.mark.asyncio
 async def test_claim_issue_endpoint_returns_created_lease() -> None:
     market = FakeTaskMarket()
+    task = Task(
+        id="task-1",
+        session_id="sess-1",
+        subject="认领 API Client",
+        description="认领后任务市场需要直接显示任务摘要",
+        status=TaskStatus.IN_PROGRESS,
+        active_form="issue-claim-api",
+        owner="Backend-Agent",
+        created_at="2024-01-01T00:00:00",
+        updated_at="2024-01-01T00:00:00",
+    )
     lease = Lease(
         id="lease-1",
         session_id="sess-1",
@@ -3665,7 +3675,10 @@ async def test_claim_issue_endpoint_returns_created_lease() -> None:
         worktree_name="wt-1",
     )
     market.set_lease(lease)
-    engine = _FakeEngine(exists=True, workbench_market=market)
+    task_store = FakeTaskStore([task])
+    engine = _FakeEngine(
+        exists=True, workbench_market=market, task_store=task_store
+    )
     body = ClaimIssue(agent_id="Agent-1", duration_minutes=30, worktree_name="wt-1")
 
     request = _fake_request(engine)
@@ -3687,6 +3700,20 @@ async def test_claim_issue_endpoint_returns_created_lease() -> None:
     assert response["agent_id"] == "Agent-1"
     assert response["state"] == LeaseState.ACTIVE
     assert response["worktree_name"] == "wt-1"
+    assert response["task"] == {
+        "id": "task-1",
+        "session_id": "sess-1",
+        "subject": "认领 API Client",
+        "description": "认领后任务市场需要直接显示任务摘要",
+        "status": "in_progress",
+        "active_form": "issue-claim-api",
+        "owner": "Backend-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": "2024-01-01T00:00:00",
+        "updated_at": "2024-01-01T00:00:00",
+    }
+    assert task_store.list_calls == 1
 
 
 @pytest.mark.asyncio
@@ -4650,6 +4677,17 @@ async def test_release_lease_endpoint_reports_runtime_session_load_failure() -> 
 @pytest.mark.asyncio
 async def test_release_lease_endpoint_returns_released_lease() -> None:
     market = FakeTaskMarket()
+    task = Task(
+        id="task-2",
+        session_id="sess-1",
+        subject="释放租约",
+        description="释放后仍要保留任务上下文",
+        status=TaskStatus.PENDING,
+        active_form="issue-release-api",
+        owner="Agent-2",
+        created_at="2024-01-01T00:00:00",
+        updated_at="2024-01-01T00:00:00",
+    )
     lease = Lease(
         id="lease-2",
         session_id="sess-1",
@@ -4659,7 +4697,10 @@ async def test_release_lease_endpoint_returns_released_lease() -> None:
         expires_at="2024-01-01T02:00:00",
     )
     market.set_lease(lease)
-    engine = _FakeEngine(exists=True, workbench_market=market)
+    task_store = FakeTaskStore([task])
+    engine = _FakeEngine(
+        exists=True, workbench_market=market, task_store=task_store
+    )
 
     request = _fake_request(engine)
     response = await release_workbench_lease(
@@ -4669,6 +4710,10 @@ async def test_release_lease_endpoint_returns_released_lease() -> None:
     assert market.released == [{"session_id": "sess-1", "lease_id": "lease-2"}]
     assert response["id"] == "lease-2"
     assert response["state"] == LeaseState.RELEASED
+    assert response["task"]["id"] == "task-2"
+    assert response["task"]["subject"] == "释放租约"
+    assert response["task"]["status"] == "pending"
+    assert task_store.list_calls == 1
 
 
 @pytest.mark.asyncio
@@ -4750,6 +4795,17 @@ async def test_release_lease_endpoint_reports_unavailable_task_market() -> None:
 @pytest.mark.asyncio
 async def test_expire_leases_endpoint_returns_expired_list() -> None:
     market = FakeTaskMarket()
+    task = Task(
+        id="task-3",
+        session_id="sess-1",
+        subject="回收过期租约",
+        description="过期列表需要任务摘要",
+        status=TaskStatus.PENDING,
+        active_form="issue-expire-api",
+        owner="Agent-3",
+        created_at="2024-01-01T00:00:00",
+        updated_at="2024-01-01T00:00:00",
+    )
     lease = Lease(
         id="lease-3",
         session_id="sess-1",
@@ -4759,14 +4815,22 @@ async def test_expire_leases_endpoint_returns_expired_list() -> None:
         expires_at="2024-01-01T00:00:00",
     )
     market.set_expired([lease])
-    engine = _FakeEngine(exists=True, workbench_market=market)
+    task_store = FakeTaskStore([task])
+    engine = _FakeEngine(
+        exists=True, workbench_market=market, task_store=task_store
+    )
 
     response = await expire_workbench_leases("sess-1", _fake_request(engine), auth="test")
 
     assert engine.loaded == ["sess-1"]
     assert market.expired_calls == 1
     assert market.expired_sessions == ["sess-1"]
-    assert response == {"expired": [asdict(lease)]}
+    assert response["expired"][0]["id"] == "lease-3"
+    assert response["expired"][0]["state"] == LeaseState.EXPIRED
+    assert response["expired"][0]["task"]["id"] == "task-3"
+    assert response["expired"][0]["task"]["subject"] == "回收过期租约"
+    assert response["expired"][0]["task"]["status"] == "pending"
+    assert task_store.list_calls == 1
 
 
 @pytest.mark.asyncio
@@ -4826,7 +4890,9 @@ async def test_expire_leases_endpoint_can_return_fresh_snapshot() -> None:
     )
 
     assert engine.loaded == ["sess-1"]
-    assert response["expired"] == [asdict(lease)]
+    assert response["expired"][0]["id"] == "lease-3"
+    assert response["expired"][0]["state"] == "expired"
+    assert response["expired"][0]["task"] is None
     assert response["snapshot"]["version"] == 1
     assert response["snapshot"]["session_id"] == "sess-1"
 
