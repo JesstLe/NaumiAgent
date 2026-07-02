@@ -268,7 +268,16 @@ async def test_get_issue_returns_json_friendly_issue_metadata(tmp_path) -> None:
         title="Mac 工作台",
         goal="让检查器可以直接读取 Issue 详情",
     )
-    task = await task_store.create_task("实现 Issue 详情 API")
+    task = await task_store.create_task(
+        "实现 Issue 详情 API",
+        description="检查器详情页直接读取任务事实",
+    )
+    await task_store.update_task(
+        task.id,
+        status=TaskStatus.IN_PROGRESS,
+        active_form="issue-detail-api",
+        owner="Backend-Agent",
+    )
     await service.attach_issue(
         session_id="s",
         mission_id=mission.id,
@@ -287,6 +296,19 @@ async def test_get_issue_returns_json_friendly_issue_metadata(tmp_path) -> None:
     assert issue["parallel_mode"] == "cooperative"
     assert issue["risk_level"] == "high"
     assert issue["acceptance_criteria"] == ["详情页不依赖全量 snapshot"]
+    assert issue["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "实现 Issue 详情 API",
+        "description": "检查器详情页直接读取任务事实",
+        "status": "in_progress",
+        "active_form": "issue-detail-api",
+        "owner": "Backend-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": issue["task"]["created_at"],
+        "updated_at": issue["task"]["updated_at"],
+    }
 
 
 @pytest.mark.asyncio

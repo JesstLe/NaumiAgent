@@ -387,7 +387,8 @@ class WorkbenchService:
         issue = await self._workbench_store.get_issue(session_id, task_id)
         if issue is None:
             return None
-        return self._issue_to_dict(issue)
+        task = await self._task_store.get_task(task_id)
+        return self._issue_to_dict(issue) | {"task": self._task_to_summary(task)}
 
     @staticmethod
     def _issue_to_dict(issue: IssueMetadata) -> dict[str, Any]:
