@@ -196,7 +196,11 @@ GET /api/v1/workbench/daemon/status
   "host": "127.0.0.1",
   "port": 8765,
   "started_at": "2026-06-27T10:00:00",
-  "workspace_count": 1
+  "workspace_count": 1,
+  "api_base_url": "http://127.0.0.1:8765/api/v1",
+  "workbench_base_url": "http://127.0.0.1:8765/api/v1/workbench",
+  "event_stream_url_template": "ws://127.0.0.1:8765/api/v1/workbench/sessions/{session_id}/events/stream",
+  "auth_mode": "dev_token"
 }
 ```
 

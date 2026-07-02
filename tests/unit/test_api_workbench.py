@@ -5041,6 +5041,13 @@ async def test_daemon_status_returns_expected_fields() -> None:
     assert response.port == 9876
     assert response.started_at == "2026-06-27T10:00:00+00:00"
     assert response.workspace_count == 7
+    assert response.api_base_url == "http://127.0.0.1:9876/api/v1"
+    assert response.workbench_base_url == "http://127.0.0.1:9876/api/v1/workbench"
+    assert (
+        response.event_stream_url_template
+        == "ws://127.0.0.1:9876/api/v1/workbench/sessions/{session_id}/events/stream"
+    )
+    assert response.auth_mode == "dev_token"
 
 
 @pytest.mark.asyncio
