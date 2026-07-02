@@ -22,6 +22,36 @@ router = APIRouter(tags=["workbench"])
 LOCAL_DAEMON_BIND_HOST = "127.0.0.1"
 WORKBENCH_API_BASE_PATH = "/api/v1"
 WORKBENCH_BASE_PATH = f"{WORKBENCH_API_BASE_PATH}/workbench"
+WORKBENCH_SUPPORTED_RESOURCES = [
+    "snapshot",
+    "missions",
+    "issues",
+    "agents",
+    "leases",
+    "worktrees",
+    "validation_runs",
+    "context_snapshots",
+    "failures",
+    "events",
+    "approvals",
+    "intent_locks",
+    "decisions",
+]
+WORKBENCH_SUPPORTED_ACTIONS = [
+    "create_session",
+    "create_mission",
+    "create_issue",
+    "claim_issue",
+    "release_lease",
+    "expire_leases",
+    "run_validation",
+    "record_context_health",
+    "create_intent_lock",
+    "create_decision",
+    "resolve_approval",
+    "keep_worktree",
+    "delete_worktree",
+]
 logger = logging.getLogger(__name__)
 
 
@@ -50,6 +80,8 @@ class WorkbenchCapabilitiesResponse(BaseModel):
     supported_locales: list[str]
     default_locale: str
     protocol_version: int
+    supported_resources: list[str]
+    supported_actions: list[str]
 
 
 class WorkbenchBootstrapResponse(BaseModel):
@@ -381,6 +413,8 @@ def _build_capabilities() -> WorkbenchCapabilitiesResponse:
         supported_locales=["zh-CN", "en-US"],
         default_locale="zh-CN",
         protocol_version=1,
+        supported_resources=WORKBENCH_SUPPORTED_RESOURCES,
+        supported_actions=WORKBENCH_SUPPORTED_ACTIONS,
     )
 
 
