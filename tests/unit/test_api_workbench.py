@@ -5151,6 +5151,36 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
     assert response.supported_locales == ["zh-CN", "en-US"]
     assert response.default_locale == "zh-CN"
     assert response.protocol_version == 1
+    assert response.supported_resources == [
+        "snapshot",
+        "missions",
+        "issues",
+        "agents",
+        "leases",
+        "worktrees",
+        "validation_runs",
+        "context_snapshots",
+        "failures",
+        "events",
+        "approvals",
+        "intent_locks",
+        "decisions",
+    ]
+    assert response.supported_actions == [
+        "create_session",
+        "create_mission",
+        "create_issue",
+        "claim_issue",
+        "release_lease",
+        "expire_leases",
+        "run_validation",
+        "record_context_health",
+        "create_intent_lock",
+        "create_decision",
+        "resolve_approval",
+        "keep_worktree",
+        "delete_worktree",
+    ]
 
 
 @pytest.mark.asyncio

@@ -225,7 +225,37 @@ GET /api/v1/workbench/capabilities
   "supports_cloud_sync": false,
   "supported_locales": ["zh-CN", "en-US"],
   "default_locale": "zh-CN",
-  "protocol_version": 1
+  "protocol_version": 1,
+  "supported_resources": [
+    "snapshot",
+    "missions",
+    "issues",
+    "agents",
+    "leases",
+    "worktrees",
+    "validation_runs",
+    "context_snapshots",
+    "failures",
+    "events",
+    "approvals",
+    "intent_locks",
+    "decisions"
+  ],
+  "supported_actions": [
+    "create_session",
+    "create_mission",
+    "create_issue",
+    "claim_issue",
+    "release_lease",
+    "expire_leases",
+    "run_validation",
+    "record_context_health",
+    "create_intent_lock",
+    "create_decision",
+    "resolve_approval",
+    "keep_worktree",
+    "delete_worktree"
+  ]
 }
 ```
 
