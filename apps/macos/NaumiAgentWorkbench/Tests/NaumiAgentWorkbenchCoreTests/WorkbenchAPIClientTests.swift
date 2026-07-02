@@ -1390,7 +1390,7 @@ final class WorkbenchAPIClientTests {
         let taskID = "task/市场 001"
         let json = Data(
             """
-            {"session_id":"sess 中文","task_id":"task/市场 001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["通过验证","更新审查说明"],"expected_artifacts":["src/naumi_agent/workbench/market.py"],"related_branch":"issue/task-market","related_worktree":"wt-task-market","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}
+            {"session_id":"sess 中文","task_id":"task/市场 001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["通过验证","更新审查说明"],"expected_artifacts":["src/naumi_agent/workbench/market.py"],"related_branch":"issue/task-market","related_worktree":"wt-task-market","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","task":{"id":"task/市场 001","session_id":"sess 中文","subject":"任务市场租约策略","description":"检查器详情页直接读取任务事实","status":"in_progress","active_form":"issue-detail-api","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}
             """.utf8
         )
 
@@ -1423,6 +1423,10 @@ final class WorkbenchAPIClientTests {
         #expect(issue.expectedArtifacts == ["src/naumi_agent/workbench/market.py"])
         #expect(issue.relatedBranch == "issue/task-market")
         #expect(issue.relatedWorktree == "wt-task-market")
+        #expect(issue.task?.subject == "任务市场租约策略")
+        #expect(issue.task?.status == "in_progress")
+        #expect(issue.task?.activeForm == "issue-detail-api")
+        #expect(issue.task?.owner == "Backend-Agent")
         #expect(issue.relatedPR == "")
         #expect(issue.createdAt == "2026-06-27T06:00:00")
         #expect(issue.updatedAt == "2026-06-27T06:10:00")

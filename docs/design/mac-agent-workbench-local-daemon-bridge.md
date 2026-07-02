@@ -247,7 +247,7 @@ limit?: 1..200
 - `status` 来自 `TaskStore.tasks.status`，不是 `workbench_issues` 的重复字段。
 - `mission_id` / `risk_level` 过滤 workbench metadata。
 - SwiftUI 可以用该接口实现 All / Active / Blocked / Done 队列筛选；snapshot 仍然是真相源。
-- 每条 `issues[]` 记录会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`：
+- 每条 `issues[]` 记录和 `GET /issues/{task_id}` 详情都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`：
   `id`、`session_id`、`subject`、`description`、`status`、`active_form`、`owner`、`blocks`、`blocked_by`、`created_at`、`updated_at`。
   如果 issue 指向的 task 已不存在，`task` 返回 `null`，便于前端显式展示悬空任务引用。
 
