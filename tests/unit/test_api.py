@@ -153,7 +153,6 @@ class TestMessageRoutes:
             "sess_1",
             MessageCreate(
                 content="把登录失败问题记录成任务",
-                stream=False,
                 workbench_issue={
                     "mission_id": "mission-1",
                     "title": "修复登录失败",
@@ -185,7 +184,9 @@ class TestMessageRoutes:
         assert response.metadata["workbench_snapshot"]["session_id"] == "sess_1"
 
     @pytest.mark.asyncio
-    async def test_streaming_message_rejects_synchronous_issue_creation(self) -> None:
+    async def test_explicit_streaming_message_rejects_synchronous_issue_creation(
+        self,
+    ) -> None:
         engine = _FakeEngine()
         request = _fake_request(engine)
 
@@ -194,6 +195,7 @@ class TestMessageRoutes:
                 "sess_1",
                 MessageCreate(
                     content="把这句变成任务",
+                    stream=True,
                     workbench_issue={
                         "mission_id": "mission-1",
                         "title": "补齐聊天联动",
