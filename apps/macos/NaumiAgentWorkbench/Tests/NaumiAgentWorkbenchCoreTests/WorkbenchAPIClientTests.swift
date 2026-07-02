@@ -2614,7 +2614,7 @@ final class WorkbenchAPIClientTests {
     @Test func attachIssue() async throws {
         let issueJSON = Data(
             """
-            {"session_id":"sess-001","task_id":"task-001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"medium","requires_human_approval":false,"acceptance_criteria":["通过 Swift 编译"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}
+            {"session_id":"sess-001","task_id":"task-001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"medium","requires_human_approval":false,"acceptance_criteria":["通过 Swift 编译"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","task":{"id":"task-001","session_id":"sess-001","subject":"绑定现有任务","description":"Task Market 立即展示任务摘要","status":"in_progress","active_form":"issue-attach-api","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:59:00","updated_at":"2026-06-27T05:59:30"}}
             """.utf8
         )
 
@@ -2662,12 +2662,16 @@ final class WorkbenchAPIClientTests {
         #expect(issue.parallelMode == "exclusive")
         #expect(issue.riskLevel == "medium")
         #expect(issue.acceptanceCriteria == ["通过 Swift 编译"])
+        #expect(issue.task?.subject == "绑定现有任务")
+        #expect(issue.task?.status == "in_progress")
+        #expect(issue.task?.activeForm == "issue-attach-api")
+        #expect(issue.task?.owner == "Backend-Agent")
     }
 
     @Test func attachIssueWithSnapshotRequestsFreshSnapshot() async throws {
         let responseJSON = Data(
             """
-            {"issue":{"session_id":"sess-001","task_id":"task-001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"medium","requires_human_approval":false,"acceptance_criteria":["通过 Swift 编译"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"},"snapshot":{"session_id":"sess-001","summary":{"current_mission_title":"Mac 工作台","active_agents":0,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[{"session_id":"sess-001","task_id":"task-001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"medium","requires_human_approval":false,"acceptance_criteria":["通过 Swift 编译"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"leases":[],"failures":[],"events":[]}}
+            {"issue":{"session_id":"sess-001","task_id":"task-001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"medium","requires_human_approval":false,"acceptance_criteria":["通过 Swift 编译"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","task":{"id":"task-001","session_id":"sess-001","subject":"绑定现有任务","description":"Task Market 立即展示任务摘要","status":"in_progress","active_form":"issue-attach-api","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:59:00","updated_at":"2026-06-27T05:59:30"}},"snapshot":{"session_id":"sess-001","summary":{"current_mission_title":"Mac 工作台","active_agents":0,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[{"session_id":"sess-001","task_id":"task-001","mission_id":"mission-001","parallel_mode":"exclusive","risk_level":"medium","requires_human_approval":false,"acceptance_criteria":["通过 Swift 编译"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","task":{"id":"task-001","session_id":"sess-001","subject":"绑定现有任务","description":"Task Market 立即展示任务摘要","status":"in_progress","active_form":"issue-attach-api","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:59:00","updated_at":"2026-06-27T05:59:30"}}],"leases":[],"failures":[],"events":[]}}
             """.utf8
         )
 
@@ -2711,6 +2715,8 @@ final class WorkbenchAPIClientTests {
 
         #expect(response.issue.taskID == "task-001")
         #expect(response.issue.missionID == "mission-001")
+        #expect(response.issue.task?.subject == "绑定现有任务")
+        #expect(response.issue.task?.status == "in_progress")
         #expect(response.snapshot.sessionID == "sess-001")
         #expect(response.snapshot.summary?.openIssues == 1)
         #expect(response.snapshot.issues == [response.issue])
@@ -2719,7 +2725,7 @@ final class WorkbenchAPIClientTests {
     @Test func createIssueUsesPOSTAndEncodesBackingTaskFields() async throws {
         let issueJSON = Data(
             """
-            {"session_id":"sess-001","task_id":"task-009","mission_id":"mission-001","parallel_mode":"cooperative","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["dashboard 刷新后可见","可被 Agent claim"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}
+            {"session_id":"sess-001","task_id":"task-009","mission_id":"mission-001","parallel_mode":"cooperative","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["dashboard 刷新后可见","可被 Agent claim"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","task":{"id":"task-009","session_id":"sess-001","subject":"实现 Issue 创建 API","description":"创建 backing task 并绑定 metadata","status":"pending","active_form":null,"owner":null,"blocks":[],"blocked_by":["1"],"created_at":"2026-06-27T05:59:00","updated_at":"2026-06-27T05:59:30"}}
             """.utf8
         )
 
@@ -2771,12 +2777,15 @@ final class WorkbenchAPIClientTests {
         #expect(issue.missionID == "mission-001")
         #expect(issue.parallelMode == "cooperative")
         #expect(issue.riskLevel == "high")
+        #expect(issue.task?.subject == "实现 Issue 创建 API")
+        #expect(issue.task?.status == "pending")
+        #expect(issue.task?.blockedBy == ["1"])
     }
 
     @Test func createIssueWithSnapshotRequestsFreshSnapshot() async throws {
         let responseJSON = Data(
             """
-            {"issue":{"session_id":"sess-001","task_id":"task-009","mission_id":"mission-001","parallel_mode":"cooperative","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["dashboard 刷新后可见","可被 Agent claim"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"},"snapshot":{"session_id":"sess-001","summary":{"current_mission_title":"Mac 工作台","active_agents":0,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[{"session_id":"sess-001","task_id":"task-009","mission_id":"mission-001","parallel_mode":"cooperative","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["dashboard 刷新后可见","可被 Agent claim"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"leases":[],"failures":[],"events":[]}}
+            {"issue":{"session_id":"sess-001","task_id":"task-009","mission_id":"mission-001","parallel_mode":"cooperative","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["dashboard 刷新后可见","可被 Agent claim"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","task":{"id":"task-009","session_id":"sess-001","subject":"实现 Issue 创建 API","description":"创建 backing task 并绑定 metadata","status":"pending","active_form":null,"owner":null,"blocks":[],"blocked_by":["1"],"created_at":"2026-06-27T05:59:00","updated_at":"2026-06-27T05:59:30"}},"snapshot":{"session_id":"sess-001","summary":{"current_mission_title":"Mac 工作台","active_agents":0,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[{"session_id":"sess-001","task_id":"task-009","mission_id":"mission-001","parallel_mode":"cooperative","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["dashboard 刷新后可见","可被 Agent claim"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","task":{"id":"task-009","session_id":"sess-001","subject":"实现 Issue 创建 API","description":"创建 backing task 并绑定 metadata","status":"pending","active_form":null,"owner":null,"blocks":[],"blocked_by":["1"],"created_at":"2026-06-27T05:59:00","updated_at":"2026-06-27T05:59:30"}}],"leases":[],"failures":[],"events":[]}}
             """.utf8
         )
 
@@ -2825,6 +2834,8 @@ final class WorkbenchAPIClientTests {
 
         #expect(response.issue.taskID == "task-009")
         #expect(response.issue.missionID == "mission-001")
+        #expect(response.issue.task?.subject == "实现 Issue 创建 API")
+        #expect(response.issue.task?.status == "pending")
         #expect(response.snapshot.sessionID == "sess-001")
         #expect(response.snapshot.summary?.openIssues == 1)
         #expect(response.snapshot.issues == [response.issue])
