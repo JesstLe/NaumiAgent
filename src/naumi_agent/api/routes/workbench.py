@@ -1906,7 +1906,11 @@ async def keep_worktree(
             subject_id=name,
             payload={"reason": reason},
         )
-    worktree = _worktree_to_dict(record)
+    try:
+        tasks_by_id = await _task_summaries_by_id(engine)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    worktree = _worktree_to_dict(record, tasks_by_id)
     if not include_snapshot:
         return worktree
 

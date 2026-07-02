@@ -443,6 +443,7 @@ limit?: 1..200
 - worktree detail 仍通过 `/worktrees/{name}` 按需加载单个工作区记录。
 - snapshot 中的 `worktrees[]`、`GET /worktrees` 以及 `GET /worktrees/{name}` 都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
   如果 worktree 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空工作区记录。
+- `POST /worktrees/{name}/keep` 的直接返回体和 `include_snapshot=true` 外层 `worktree` 也使用同一个 worktree 形状，包含可选 `task` 摘要。
 
 ## 9.10 Audit Event Query API
 

@@ -1716,7 +1716,7 @@ final class WorkbenchAPIClientTests {
     @Test func keepWorktreeUsesPOSTAndEncodesBody() async throws {
         let json = Data(
             """
-            {"name":"wt-api","path":"/repo/.naumi/worktrees/wt-api","branch":"naumi/worktree-wt-api","base_ref":"abc123","status":"kept","task_id":"task-1","dirty_files":2,"commits_ahead":1,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","kept_reason":"等待人工审查","metadata":{},"removable":false}
+            {"name":"wt-api","path":"/repo/.naumi/worktrees/wt-api","branch":"naumi/worktree-wt-api","base_ref":"abc123","status":"kept","task_id":"task-1","dirty_files":2,"commits_ahead":1,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","kept_reason":"等待人工审查","metadata":{},"removable":false,"task":{"id":"task-1","session_id":"sess-001","subject":"保留工作区","description":"保留后 Inspector 仍需要任务摘要","status":"blocked","active_form":"issue-worktree-keep","owner":"Reviewer-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}
             """.utf8
         )
 
@@ -1756,12 +1756,16 @@ final class WorkbenchAPIClientTests {
         #expect(worktree.status == "kept")
         #expect(worktree.keptReason == "等待人工审查")
         #expect(!worktree.removable)
+        #expect(worktree.task?.subject == "保留工作区")
+        #expect(worktree.task?.status == "blocked")
+        #expect(worktree.task?.activeForm == "issue-worktree-keep")
+        #expect(worktree.task?.owner == "Reviewer-Agent")
     }
 
     @Test func keepWorktreeWithSnapshotRequestsFreshSnapshot() async throws {
         let responseJSON = Data(
             """
-            {"worktree":{"name":"wt-api","path":"/repo/.naumi/worktrees/wt-api","branch":"naumi/worktree-wt-api","base_ref":"abc123","status":"kept","task_id":"task-1","dirty_files":2,"commits_ahead":1,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","kept_reason":"等待人工审查","metadata":{},"removable":false},"snapshot":{"session_id":"sess-001","summary":{"current_mission_title":"保留工作区后刷新","active_agents":0,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            {"worktree":{"name":"wt-api","path":"/repo/.naumi/worktrees/wt-api","branch":"naumi/worktree-wt-api","base_ref":"abc123","status":"kept","task_id":"task-1","dirty_files":2,"commits_ahead":1,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","kept_reason":"等待人工审查","metadata":{},"removable":false,"task":{"id":"task-1","session_id":"sess-001","subject":"保留工作区并刷新","description":"include_snapshot 外层 worktree 也需要任务摘要","status":"blocked","active_form":"issue-worktree-keep-snapshot","owner":"Reviewer-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}},"snapshot":{"session_id":"sess-001","summary":{"current_mission_title":"保留工作区后刷新","active_agents":0,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
             """.utf8
         )
 
@@ -1799,6 +1803,9 @@ final class WorkbenchAPIClientTests {
 
         #expect(response.worktree.name == "wt-api")
         #expect(response.worktree.status == "kept")
+        #expect(response.worktree.task?.subject == "保留工作区并刷新")
+        #expect(response.worktree.task?.status == "blocked")
+        #expect(response.worktree.task?.activeForm == "issue-worktree-keep-snapshot")
         #expect(response.snapshot.sessionID == "sess-001")
         #expect(response.snapshot.summary?.currentMissionTitle == "保留工作区后刷新")
     }
