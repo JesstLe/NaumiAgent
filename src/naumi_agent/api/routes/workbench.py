@@ -6,6 +6,7 @@ import logging
 import os
 from dataclasses import asdict
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -32,6 +33,8 @@ class DaemonStatusResponse(BaseModel):
     port: int
     started_at: str
     workspace_count: int
+    workspace_root: str
+    workspace_name: str
     api_base_url: str
     workbench_base_url: str
     event_stream_url_template: str
@@ -342,6 +345,8 @@ async def _build_daemon_status(request: Request) -> DaemonStatusResponse:
     if started_at is None:
         started_at = datetime.now(UTC).replace(microsecond=0).isoformat()
         request.app.state.started_at = started_at
+    workspace_root = str(getattr(engine, "workspace_root", "") or "")
+    workspace_name = Path(workspace_root).name if workspace_root else ""
     port = request.url.port or 8765
     api_base_url = f"http://{LOCAL_DAEMON_BIND_HOST}:{port}{WORKBENCH_API_BASE_PATH}"
     workbench_base_url = f"http://{LOCAL_DAEMON_BIND_HOST}:{port}{WORKBENCH_BASE_PATH}"
@@ -357,6 +362,8 @@ async def _build_daemon_status(request: Request) -> DaemonStatusResponse:
         port=port,
         started_at=started_at,
         workspace_count=await _count_workspaces(engine),
+        workspace_root=workspace_root,
+        workspace_name=workspace_name,
         api_base_url=api_base_url,
         workbench_base_url=workbench_base_url,
         event_stream_url_template=event_stream_url_template,
