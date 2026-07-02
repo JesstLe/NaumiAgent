@@ -87,8 +87,12 @@ async def send_message(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if body.stream and body.workbench_issue is not None:
+    has_issue_draft = body.workbench_issue is not None
+    explicit_stream = "stream" in body.model_fields_set
+    if body.stream and has_issue_draft and explicit_stream:
         raise HTTPException(status_code=400, detail="流式对话暂不支持同步创建 Issue")
+    if body.stream and has_issue_draft:
+        body.stream = False
 
     if body.stream:
         return StreamingResponse(

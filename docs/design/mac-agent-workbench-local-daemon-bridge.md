@@ -633,6 +633,8 @@ GET /api/v1/sessions/{session_id}/messages?page=1&page_size=50
 }
 ```
 
+SwiftUI 也可以省略 `stream` 字段；当 `workbench_issue` 非空且 `stream` 未显式传入时，后端按第一版 Chat MVP 的非流式请求处理。若 SwiftUI 显式传入 `stream=false`，语义相同。
+
 响应仍是 `MessageResponse`，但 metadata 会包含 Workbench 联动结果：
 
 ```json
@@ -653,7 +655,7 @@ GET /api/v1/sessions/{session_id}/messages?page=1&page_size=50
 
 约束：
 
-- 第一版对话转 Issue 必须使用 `stream=false`。
+- 第一版对话转 Issue 必须使用非流式请求：`stream=false` 或省略 `stream`。
 - `stream=true` 且传入 `workbench_issue` 时，后端返回 400：`流式对话暂不支持同步创建 Issue`。
 - SwiftUI 收到 `workbench_issue` 后刷新 snapshot、Issue 列表和 timeline。
 - 未来升级流式对话时，只扩展事件协议，不改变 `workbench_issue` 字段语义。
