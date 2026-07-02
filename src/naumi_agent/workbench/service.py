@@ -513,7 +513,7 @@ class WorkbenchService:
                 issues.append(asdict(issue))
             lease = await self._workbench_store.get_active_lease(session_id, task.id)
             if lease is not None:
-                leases.append(self._lease_to_dict(lease))
+                leases.append(self._lease_to_dict(lease, task=task))
         return {
             "version": 1,
             "session_id": session_id,
@@ -585,10 +585,11 @@ class WorkbenchService:
         return data
 
     @staticmethod
-    def _lease_to_dict(lease: Lease) -> dict[str, Any]:
+    def _lease_to_dict(lease: Lease, task: Any | None = None) -> dict[str, Any]:
         data = asdict(lease)
         # Ensure enum values are JSON-friendly strings.
         data["state"] = data["state"].value
+        data["task"] = WorkbenchService._task_to_summary(task)
         return data
 
     async def list_events(
@@ -790,8 +791,13 @@ class WorkbenchService:
             session_id, state=state, task_id=task_id, agent_id=agent_id, limit=limit
         )
         state_value = state.value if isinstance(state, LeaseState) else state
+        tasks = await self._task_store.list_tasks()
+        tasks_by_id = {task.id: task for task in tasks}
         return {
-            "leases": [self._lease_to_dict(lease) for lease in leases],
+            "leases": [
+                self._lease_to_dict(lease, task=tasks_by_id.get(lease.task_id))
+                for lease in leases
+            ],
             "state": state_value,
             "task_id": task_id,
             "agent_id": agent_id,
@@ -802,7 +808,8 @@ class WorkbenchService:
         lease = await self._workbench_store.get_lease(session_id, lease_id)
         if lease is None:
             return None
-        return self._lease_to_dict(lease)
+        task = await self._task_store.get_task(lease.task_id)
+        return self._lease_to_dict(lease, task=task)
 
     async def list_missions(
         self,
