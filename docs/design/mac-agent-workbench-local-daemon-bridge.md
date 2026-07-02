@@ -251,6 +251,7 @@ GET /api/v1/workbench/capabilities
     "expire_leases",
     "run_validation",
     "record_context_health",
+    "upsert_agent_profile",
     "create_intent_lock",
     "create_decision",
     "resolve_approval",
@@ -293,6 +294,7 @@ GET /api/v1/workbench/capabilities
     "send_message": "/sessions/{session_id}/messages",
     "agents": "/workbench/sessions/{session_id}/agents",
     "agent": "/workbench/sessions/{session_id}/agents/{agent_id}",
+    "upsert_agent_profile": "/workbench/sessions/{session_id}/agents/{agent_id}",
     "approvals": "/workbench/sessions/{session_id}/approvals",
     "approval": "/workbench/sessions/{session_id}/approvals/{approval_id}",
     "resolve_approval": "/workbench/sessions/{session_id}/approvals/{approval_id}/resolve",
@@ -361,7 +363,37 @@ limit?: 1..200
 - `POST /validation-runs` 的直接返回和 `include_snapshot=true` 外层 `validation_run` 使用同一验证记录形态，也必须附带可选
   `task` 摘要。这样 Reviews 页点击运行验证后，可以立即展示验证命令、输出、任务标题、状态和负责人。
 
-## 9.3 Context Health Query API
+## 9.3 Agent Profile API
+
+Dashboard、Task Market 和 Settings 的 Agent 状态区使用：
+
+```text
+GET /api/v1/workbench/sessions/{session_id}/agents
+GET /api/v1/workbench/sessions/{session_id}/agents/{agent_id}
+POST /api/v1/workbench/sessions/{session_id}/agents/{agent_id}
+```
+
+写入请求用于注册或刷新本地 Agent profile：
+
+```json
+{
+  "name": "Backend Agent",
+  "role": "coder",
+  "capabilities": ["code", "test"],
+  "permissions": ["read", "write"],
+  "max_parallel_tasks": 2,
+  "status": "busy",
+  "actor": "Human"
+}
+```
+
+约束：
+
+- `POST /agents/{agent_id}` 是 upsert 语义，用于本地 daemon、Agent runtime 或设置页同步 Agent 能力。
+- 使用 `include_snapshot=true` 时，响应外层返回 `agent_profile` 和最新 `snapshot`。
+- SwiftUI 必须优先通过 capabilities 中的 `upsert_agent_profile` 判断该写能力是否可用。
+
+## 9.4 Context Health Query API
 
 总览页、Worktrees 页和 Inspector 上下文健康卡片使用：
 
@@ -388,7 +420,7 @@ limit?: 1..200
 - `POST /issues/{task_id}/context-health` 的直接返回和 `include_snapshot=true` 外层 `context_snapshot` 使用同一快照形态，也必须附带可选
   `task` 摘要。这样 Worktrees 页或 Inspector 手动同步上下文后，可以立即展示任务标题、状态和负责人。
 
-## 9.4 Failure Diagnostics Query API
+## 9.5 Failure Diagnostics Query API
 
 时间线页、失败诊断页和 Inspector 风险卡片使用：
 
@@ -413,7 +445,7 @@ limit?: 1..200
 - 每条 `failures[]` 记录和 `GET /failures/{failure_id}` 详情都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
   如果 failure 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空失败卡片。
 
-## 9.5 Human Approval Query API
+## 9.6 Human Approval Query API
 
 Dashboard 待介入卡片、Reviews 页和 Inspector 审批面板使用：
 
@@ -441,7 +473,7 @@ limit?: 1..200
 - `POST /approvals/{approval_id}/resolve` 的直接返回和 `include_snapshot=true` 外层 `approval` 使用同一审批形态，也必须附带可选
   `task` 摘要。这样 Reviews 页在用户点击同意或请求修改后，不会短暂丢失任务标题、负责人和状态上下文。
 
-## 9.6 Governance Decision Query API
+## 9.7 Governance Decision Query API
 
 共享画板 Decision Card、Reviews 页治理记录和 Settings 治理策略入口使用：
 
@@ -462,7 +494,7 @@ kind?: principle | architecture | policy | temporary | experiment
 - `kind=architecture` 用于展示架构取舍和 daemon / SwiftUI / API 合同层面的长期决策。
 - decision detail 仍通过 `/decisions/{decision_id}` 按需加载完整决策正文。
 
-## 9.7 Intent Lock Query API
+## 9.8 Intent Lock Query API
 
 Settings 治理策略入口、Reviews 页和 Inspector 意图锁面板使用：
 
@@ -483,7 +515,7 @@ active?: true | false
 - `active=false` 用于审计历史或排查旧规则影响。
 - intent lock detail 仍通过 `/intent-locks/{lock_id}` 按需加载完整规则。
 
-## 9.8 Lease Query API
+## 9.9 Lease Query API
 
 任务市场、总览页 active lease、Inspector 租约面板使用：
 
@@ -510,7 +542,7 @@ limit?: 1..200
   如果 lease 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空租约记录。
 - `POST /issues/{task_id}/claim`、`POST /leases/{lease_id}/release` 和 `POST /leases/expire` 的直接返回体也使用同一个 lease 形状，包含 JSON 字符串状态和可选 `task` 摘要；使用 `include_snapshot=true` 时，外层 snapshot 仍然是真相源。
 
-## 9.9 Worktree Query API
+## 9.10 Worktree Query API
 
 Worktrees 页、任务市场 Worktree 列和 Inspector 工作区面板使用：
 
@@ -535,7 +567,7 @@ limit?: 1..200
   如果 worktree 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空工作区记录。
 - `POST /worktrees/{name}/keep` 的直接返回体和 `include_snapshot=true` 外层 `worktree` 也使用同一个 worktree 形状，包含可选 `task` 摘要。
 
-## 9.10 Audit Event Query API
+## 9.11 Audit Event Query API
 
 Dashboard 最近事件、Timeline 页和 Inspector 事件详情使用：
 
