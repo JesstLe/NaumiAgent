@@ -708,6 +708,60 @@ async def test_list_events_forwards_filters_and_reflected_in_response(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_list_events_enriches_task_scoped_events(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    task = await task_store.create_task(
+        "修复审计事件详情",
+        description="Timeline 选中事件后需要直接展示任务上下文",
+    )
+    direct_event = await workbench_store.append_event(
+        session_id="s",
+        type="issue.claimed",
+        actor="Backend-Agent",
+        subject_id=task.id,
+        payload={"lease_id": "lease-1"},
+    )
+    payload_event = await workbench_store.append_event(
+        session_id="s",
+        type="approval.resolved",
+        actor="Reviewer-Agent",
+        subject_id="approval-1",
+        payload={"task_id": task.id, "state": "approved"},
+    )
+    mission_event = await workbench_store.append_event(
+        session_id="s",
+        type="mission.created",
+        actor="Human",
+        subject_id="mission-1",
+        payload={"title": "Mac 工作台"},
+    )
+
+    events = await service.list_events("s", limit=50)
+    events_by_id = {event["id"]: event for event in events["events"]}
+
+    expected_task = {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "修复审计事件详情",
+        "description": "Timeline 选中事件后需要直接展示任务上下文",
+        "status": "pending",
+        "active_form": None,
+        "owner": None,
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": events_by_id[direct_event.id]["task"]["created_at"],
+        "updated_at": events_by_id[direct_event.id]["task"]["updated_at"],
+    }
+    assert events_by_id[direct_event.id]["task"] == expected_task
+    assert events_by_id[payload_event.id]["task"] == expected_task
+    assert "task" not in events_by_id[mission_event.id]
+
+
+@pytest.mark.asyncio
 async def test_get_event_returns_single_event_payload(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")
@@ -725,6 +779,33 @@ async def test_get_event_returns_single_event_payload(tmp_path) -> None:
     result = await service.get_event("s", event.id)
 
     assert result == event.to_dict()
+
+
+@pytest.mark.asyncio
+async def test_get_event_enriches_task_context(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    task = await task_store.create_task(
+        "查看事件详情",
+        description="事件详情面板需要任务摘要",
+    )
+    event = await workbench_store.append_event(
+        session_id="s",
+        type="validation.completed",
+        actor="Test-Agent",
+        subject_id=task.id,
+        payload={"run_id": "run-1", "status": "failed"},
+    )
+
+    result = await service.get_event("s", event.id)
+
+    assert result is not None
+    assert result["task"]["id"] == task.id
+    assert result["task"]["subject"] == "查看事件详情"
+    assert result["task"]["status"] == "pending"
 
 
 @pytest.mark.asyncio

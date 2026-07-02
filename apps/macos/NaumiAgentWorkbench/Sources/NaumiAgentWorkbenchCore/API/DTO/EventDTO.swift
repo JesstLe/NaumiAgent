@@ -9,6 +9,7 @@ public struct EventDTO: Decodable, Equatable, Sendable {
     public let subjectID: String
     public let payload: [String: JSONValue]
     public let timestamp: String
+    public let task: TaskDTO?
 
     public enum CodingKeys: String, CodingKey {
         case id
@@ -18,6 +19,7 @@ public struct EventDTO: Decodable, Equatable, Sendable {
         case subjectID = "subject_id"
         case payload
         case timestamp
+        case task
     }
 
     public init(
@@ -27,7 +29,8 @@ public struct EventDTO: Decodable, Equatable, Sendable {
         actor: String,
         subjectID: String,
         payload: [String: JSONValue],
-        timestamp: String
+        timestamp: String,
+        task: TaskDTO? = nil
     ) {
         self.id = id
         self.sessionID = sessionID
@@ -36,6 +39,7 @@ public struct EventDTO: Decodable, Equatable, Sendable {
         self.subjectID = subjectID
         self.payload = payload
         self.timestamp = timestamp
+        self.task = task
     }
 
     public init(from decoder: Decoder) throws {
@@ -47,5 +51,6 @@ public struct EventDTO: Decodable, Equatable, Sendable {
         subjectID = try container.decode(String.self, forKey: .subjectID)
         payload = try container.decodeIfPresent([String: JSONValue].self, forKey: .payload) ?? [:]
         timestamp = try container.decode(String.self, forKey: .timestamp)
+        task = try container.decodeIfPresent(TaskDTO.self, forKey: .task)
     }
 }
