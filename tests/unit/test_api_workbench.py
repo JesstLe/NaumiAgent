@@ -673,9 +673,29 @@ class _FakeWorkbenchService:
             raise self._run_validation_error
         return {
             "id": "run-1",
+            "session_id": session_id,
+            "task_id": task_id,
+            "actor": actor,
+            "command": argv,
+            "cwd": cwd or "/workspace",
             "status": "passed",
             "exit_code": 0,
             "output": "ok",
+            "task": {
+                "id": task_id,
+                "session_id": session_id,
+                "subject": "运行验证",
+                "description": "写操作返回需要保留任务摘要",
+                "status": "in_progress",
+                "active_form": "issue-validation-run",
+                "owner": "Validation-Agent",
+                "blocks": [],
+                "blocked_by": [],
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+            },
+            "started_at": "2024-01-01T00:00:00",
+            "completed_at": "2024-01-01T00:00:01",
         }
 
     async def list_validation_runs(
@@ -5544,11 +5564,31 @@ async def test_run_validation_endpoint_returns_result() -> None:
             "cwd": "/workspace",
         }
     ]
-    assert response.model_dump() == {
+    assert response == {
         "id": "run-1",
+        "session_id": "sess-1",
+        "task_id": "task-1",
+        "actor": "Human",
+        "command": ["pytest", "test.py"],
+        "cwd": "/workspace",
         "status": "passed",
         "exit_code": 0,
         "output": "ok",
+        "task": {
+            "id": "task-1",
+            "session_id": "sess-1",
+            "subject": "运行验证",
+            "description": "写操作返回需要保留任务摘要",
+            "status": "in_progress",
+            "active_form": "issue-validation-run",
+            "owner": "Validation-Agent",
+            "blocks": [],
+            "blocked_by": [],
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
+        },
+        "started_at": "2024-01-01T00:00:00",
+        "completed_at": "2024-01-01T00:00:01",
     }
 
 
@@ -5573,9 +5613,29 @@ async def test_run_validation_endpoint_can_return_fresh_snapshot() -> None:
     assert engine.loaded == ["sess-1"]
     assert response["validation_run"] == {
         "id": "run-1",
+        "session_id": "sess-1",
+        "task_id": "task-1",
+        "actor": "Human",
+        "command": ["pytest", "test.py"],
+        "cwd": "/workspace",
         "status": "passed",
         "exit_code": 0,
         "output": "ok",
+        "task": {
+            "id": "task-1",
+            "session_id": "sess-1",
+            "subject": "运行验证",
+            "description": "写操作返回需要保留任务摘要",
+            "status": "in_progress",
+            "active_form": "issue-validation-run",
+            "owner": "Validation-Agent",
+            "blocks": [],
+            "blocked_by": [],
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
+        },
+        "started_at": "2024-01-01T00:00:00",
+        "completed_at": "2024-01-01T00:00:01",
     }
     assert response["snapshot"]["version"] == 1
     assert response["snapshot"]["session_id"] == "sess-1"
@@ -5603,9 +5663,29 @@ def test_run_validation_route_can_return_fresh_snapshot() -> None:
     body = response.json()
     assert body["validation_run"] == {
         "id": "run-1",
+        "session_id": "sess-1",
+        "task_id": "task-1",
+        "actor": "Human",
+        "command": ["pytest", "test.py"],
+        "cwd": "/workspace",
         "status": "passed",
         "exit_code": 0,
         "output": "ok",
+        "task": {
+            "id": "task-1",
+            "session_id": "sess-1",
+            "subject": "运行验证",
+            "description": "写操作返回需要保留任务摘要",
+            "status": "in_progress",
+            "active_form": "issue-validation-run",
+            "owner": "Validation-Agent",
+            "blocks": [],
+            "blocked_by": [],
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
+        },
+        "started_at": "2024-01-01T00:00:00",
+        "completed_at": "2024-01-01T00:00:01",
     }
     assert body["snapshot"]["version"] == 1
     assert body["snapshot"]["session_id"] == "sess-1"

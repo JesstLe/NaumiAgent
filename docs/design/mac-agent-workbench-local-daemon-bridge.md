@@ -274,6 +274,8 @@ limit?: 1..200
 - run detail 仍通过 `/validation-runs/{run_id}` 按需加载完整输出。
 - 每条 `validation_runs[]` 记录和 `GET /validation-runs/{run_id}` 详情都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
   如果 validation run 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空验证记录。
+- `POST /validation-runs` 的直接返回和 `include_snapshot=true` 外层 `validation_run` 使用同一验证记录形态，也必须附带可选
+  `task` 摘要。这样 Reviews 页点击运行验证后，可以立即展示验证命令、输出、任务标题、状态和负责人。
 
 ## 9.3 Context Health Query API
 
