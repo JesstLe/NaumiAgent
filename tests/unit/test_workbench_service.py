@@ -750,9 +750,19 @@ async def test_list_validation_runs_returns_runs_and_respects_limit(tmp_path) ->
     workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
     service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
 
+    task = await task_store.create_task(
+        "验证任务市场租约",
+        description="Reviews 页需要展示验证对应任务",
+    )
+    await task_store.update_task(
+        task.id,
+        status=TaskStatus.IN_PROGRESS,
+        active_form="issue-validation-market",
+        owner="Validation-Agent",
+    )
     run_a = await workbench_store.record_validation_run(
         session_id="s",
-        task_id="task-a",
+        task_id=task.id,
         actor="ValidationRunner",
         command=["pytest", "test_a.py"],
         cwd="/workspace",
@@ -777,6 +787,19 @@ async def test_list_validation_runs_returns_runs_and_respects_limit(tmp_path) ->
 
     all_runs = await service.list_validation_runs("s", limit=50)
     assert [run["id"] for run in all_runs] == [run_a["id"], run_b["id"]]
+    assert all_runs[0]["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "验证任务市场租约",
+        "description": "Reviews 页需要展示验证对应任务",
+        "status": "in_progress",
+        "active_form": "issue-validation-market",
+        "owner": "Validation-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": all_runs[0]["task"]["created_at"],
+        "updated_at": all_runs[0]["task"]["updated_at"],
+    }
 
     filtered = await service.list_validation_runs("s", task_id="task-b", limit=50)
     assert [run["id"] for run in filtered] == [run_b["id"]]
@@ -795,9 +818,19 @@ async def test_get_validation_run_returns_single_run(tmp_path) -> None:
     workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
     service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
 
+    task = await task_store.create_task(
+        "验证审查证据",
+        description="详情面板需要任务摘要",
+    )
+    await task_store.update_task(
+        task.id,
+        status=TaskStatus.BLOCKED,
+        active_form="issue-validation-evidence",
+        owner="Reviewer-Agent",
+    )
     run = await workbench_store.record_validation_run(
         session_id="s",
-        task_id="task-a",
+        task_id=task.id,
         actor="ValidationRunner",
         command=["pytest", "test_a.py"],
         cwd="/workspace",
@@ -810,7 +843,21 @@ async def test_get_validation_run_returns_single_run(tmp_path) -> None:
 
     result = await service.get_validation_run("s", run["id"])
 
-    assert result == run
+    assert result is not None
+    assert result | {"task": None} == run | {"task": None}
+    assert result["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "验证审查证据",
+        "description": "详情面板需要任务摘要",
+        "status": "blocked",
+        "active_form": "issue-validation-evidence",
+        "owner": "Reviewer-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": result["task"]["created_at"],
+        "updated_at": result["task"]["updated_at"],
+    }
 
 
 @pytest.mark.asyncio

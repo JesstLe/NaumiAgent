@@ -640,7 +640,7 @@ final class WorkbenchAPIClientTests {
         let status = "failed"
         let json = Data(
             """
-            {"validation_runs":[{"id":"run-001","session_id":"sess-001","task_id":"task 001/审查","actor":"ValidationRunner","command":["pytest","test.py"],"cwd":"/workspace","status":"failed","exit_code":1,"output":"failed","started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:01"}],"task_id":"task 001/审查","status":"failed","limit":25}
+            {"validation_runs":[{"id":"run-001","session_id":"sess-001","task_id":"task 001/审查","actor":"ValidationRunner","command":["pytest","test.py"],"cwd":"/workspace","status":"failed","exit_code":1,"output":"failed","started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:01","task":{"id":"task 001/审查","session_id":"sess-001","subject":"验证任务市场租约","description":"Reviews 页需要展示验证对应任务","status":"in_progress","active_form":"issue-validation-market","owner":"Validation-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}],"task_id":"task 001/审查","status":"failed","limit":25}
             """.utf8
         )
 
@@ -692,6 +692,10 @@ final class WorkbenchAPIClientTests {
         #expect(run.output == "failed")
         #expect(run.startedAt == "2026-06-27T06:00:00")
         #expect(run.completedAt == "2026-06-27T06:00:01")
+        #expect(run.task?.subject == "验证任务市场租约")
+        #expect(run.task?.status == "in_progress")
+        #expect(run.task?.activeForm == "issue-validation-market")
+        #expect(run.task?.owner == "Validation-Agent")
     }
 
     @Test func fetchValidationRunsWithoutTaskID() async throws {
@@ -733,7 +737,7 @@ final class WorkbenchAPIClientTests {
         let runID = "run/验证 001"
         let json = Data(
             """
-            {"id":"run/验证 001","session_id":"sess/中文","task_id":"task/审查","actor":"ValidationRunner","command":["pytest","tests/unit/test_workbench_market.py","-q"],"cwd":"/Users/lv/Workspace/NaumiAgent","status":"failed","exit_code":1,"output":"2 failed, 3 passed","started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:03"}
+            {"id":"run/验证 001","session_id":"sess/中文","task_id":"task/审查","actor":"ValidationRunner","command":["pytest","tests/unit/test_workbench_market.py","-q"],"cwd":"/Users/lv/Workspace/NaumiAgent","status":"failed","exit_code":1,"output":"2 failed, 3 passed","started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:03","task":{"id":"task/审查","session_id":"sess/中文","subject":"验证审查证据","description":"详情面板需要任务摘要","status":"blocked","active_form":"issue-validation-evidence","owner":"Reviewer-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}
             """.utf8
         )
 
@@ -766,6 +770,10 @@ final class WorkbenchAPIClientTests {
         #expect(run.exitCode == 1)
         #expect(run.output == "2 failed, 3 passed")
         #expect(run.completedAt == "2026-06-27T06:00:03")
+        #expect(run.task?.subject == "验证审查证据")
+        #expect(run.task?.status == "blocked")
+        #expect(run.task?.activeForm == "issue-validation-evidence")
+        #expect(run.task?.owner == "Reviewer-Agent")
     }
 
     @Test func fetchContextSnapshotsWithTaskIDAndAgentID() async throws {

@@ -272,6 +272,8 @@ limit?: 1..200
 - `task_id` 定位单个 Issue / Task 的验证记录。
 - `status` 过滤验证结果状态，用于快速展示 failed validations 或 passed evidence。
 - run detail 仍通过 `/validation-runs/{run_id}` 按需加载完整输出。
+- 每条 `validation_runs[]` 记录和 `GET /validation-runs/{run_id}` 详情都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
+  如果 validation run 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空验证记录。
 
 ## 9.3 Context Health Query API
 
