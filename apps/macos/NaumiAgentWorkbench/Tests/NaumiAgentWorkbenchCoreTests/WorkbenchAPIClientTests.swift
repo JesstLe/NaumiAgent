@@ -463,6 +463,42 @@ final class WorkbenchAPIClientTests {
         #expect(message.metadata["workbench_issue"] == .object(["task_id": .string("task-chat-1")]))
     }
 
+    @Test func fetchMessagesLoadsPersistedChatHistory() async throws {
+        let json = Data(
+            """
+            {"messages":[{"id":"msg-1","role":"user","content":"把登录失败记录成任务","timestamp":"2026-07-02T08:00:00","metadata":{"source":"chat"}},{"id":"msg-2","role":"assistant","content":"已创建关联任务。","timestamp":"2026-07-02T08:00:03","metadata":{"workbench_issue":{"task_id":"task-chat-1"}}}],"total":2}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/sessions/sess%20%E4%B8%AD%E6%96%87/messages?page=1&page_size=50" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let history = try await client.fetchMessages(
+            sessionID: "sess 中文",
+            page: 1,
+            pageSize: 50
+        )
+
+        #expect(history.total == 2)
+        #expect(history.messages.map(\.id) == ["msg-1", "msg-2"])
+        #expect(history.messages[0].metadata["source"] == .string("chat"))
+        #expect(history.messages[1].metadata["workbench_issue"] == .object(["task_id": .string("task-chat-1")]))
+    }
+
     @Test func fetchEvents() async throws {
         let json = Data(
             """

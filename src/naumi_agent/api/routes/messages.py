@@ -135,12 +135,13 @@ async def list_messages(
     return MessageListResponse(
         messages=[
             MessageResponse(
-                id=uuid.uuid4().hex[:8],
+                id=str(m.get("id") or f"msg-{start + index + 1}"),
                 role=m.get("role", "unknown"),
                 content=m.get("content", ""),
                 timestamp=m.get("timestamp", ""),
+                metadata=m.get("metadata", {}),
             )
-            for m in msgs
+            for index, m in enumerate(msgs)
         ],
         total=len(session.messages),
     )

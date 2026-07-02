@@ -131,7 +131,7 @@ public enum WorkbenchPreviewLoader {
         )
     }
 
-    private static func previewChatMessages(locale: AppLocale) -> [ChatMessageDTO] {
+    public static func previewChatMessages(locale: AppLocale) -> [ChatMessageDTO] {
         [
             ChatMessageDTO(
                 id: "preview-chat-user-1",

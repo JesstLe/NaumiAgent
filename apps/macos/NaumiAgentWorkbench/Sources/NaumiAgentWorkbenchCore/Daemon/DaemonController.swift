@@ -85,6 +85,9 @@ public final class DaemonController: Sendable {
             } else {
                 await refreshSnapshot(clearSessionScopedStateOnFailure: true)
             }
+            if appState.selectedSessionID != nil {
+                await refreshChatMessages()
+            }
             await refreshWorkbenchListsAfterConnection()
             await startEventStreamIfAvailable()
         } catch {
@@ -457,6 +460,35 @@ public final class DaemonController: Sendable {
             return .failure(error)
         } catch {
             return .failure(.networkFailure(error.localizedDescription))
+        }
+    }
+
+    /// Fetches persisted daily chat messages for the selected session.
+    ///
+    /// This keeps the Chat page useful after reconnecting, switching sessions,
+    /// or relaunching the app. Missing sessions clear local chat state; ordinary
+    /// API failures leave the previous chat list visible while reporting the
+    /// error.
+    public func refreshChatMessages(page: Int = 1, pageSize: Int = 50) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.chatMessages = []
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchMessages(
+                sessionID: sessionID,
+                page: page,
+                pageSize: pageSize
+            )
+            appState.chatMessages = response.messages
+        } catch {
+            appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
         }
     }
 
@@ -1277,6 +1309,7 @@ public final class DaemonController: Sendable {
         appState.lastError = nil
 
         await refreshSnapshot()
+        await refreshChatMessages()
 
         guard appState.snapshot != nil else {
             return

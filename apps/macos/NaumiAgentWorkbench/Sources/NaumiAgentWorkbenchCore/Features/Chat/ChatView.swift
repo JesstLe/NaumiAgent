@@ -39,6 +39,11 @@ public struct ChatView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             ensureSelectedMission()
+            if !appState.isPreviewFixture, appState.selectedSessionID != nil {
+                Task {
+                    await daemonController.refreshChatMessages()
+                }
+            }
         }
         .onChange(of: appState.missions) { _, _ in
             ensureSelectedMission()

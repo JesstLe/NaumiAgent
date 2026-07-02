@@ -390,6 +390,37 @@ Chat 页使用现有会话消息接口，不新增一套平行聊天后端：
 POST /api/v1/sessions/{session_id}/messages
 ```
 
+Chat 页加载历史消息使用：
+
+```text
+GET /api/v1/sessions/{session_id}/messages?page=1&page_size=50
+```
+
+历史响应：
+
+```json
+{
+  "messages": [
+    {
+      "id": "msg-1",
+      "role": "user",
+      "content": "把登录失败问题记录成任务。",
+      "timestamp": "2026-07-02T08:00:00",
+      "metadata": {
+        "source": "chat"
+      }
+    }
+  ],
+  "total": 1
+}
+```
+
+历史消息规则：
+
+- 后端优先返回持久化消息自带 `id`，缺失时按分页 offset 生成稳定 `msg-N`。
+- `metadata` 必须保留，尤其是 `workbench_issue`，让 Chat 页恢复后仍能显示“已创建关联任务”。
+- SwiftUI 连接成功、切换会话、打开 Chat 页时都可以按需拉取历史。
+
 普通对话请求：
 
 ```json
