@@ -530,7 +530,7 @@ class WorkbenchService:
                 agent_profiles=agent_profiles,
                 tasks=tasks,
                 issues=issues,
-                failures=failures,
+                validation_runs=raw_validation_runs,
                 approvals=approvals,
             ),
             "missions": missions,
@@ -556,7 +556,7 @@ class WorkbenchService:
         agent_profiles: list[AgentProfile],
         tasks: list[Any],
         issues: list[dict[str, Any]],
-        failures: list[dict[str, Any]],
+        validation_runs: list[dict[str, Any]],
         approvals: list[Approval],
     ) -> dict[str, Any]:
         task_status_by_id = {task.id: task.status for task in tasks}
@@ -578,7 +578,7 @@ class WorkbenchService:
             ),
             "pending_approvals": len(approvals),
             "failed_validations": sum(
-                1 for failure in failures if failure.get("status") == "open"
+                1 for run in validation_runs if run.get("status") == "failed"
             ),
         }
 

@@ -102,6 +102,38 @@ async def test_dashboard_snapshot_includes_status_strip_summary(tmp_path) -> Non
         detail="pytest failed",
         source_id="run-1",
     )
+    await workbench_store.create_failure(
+        session_id="s",
+        task_id=blocked_task.id,
+        kind=FailureKind.MERGE_CONFLICT,
+        title="合并冲突",
+        detail="service.py conflict",
+        source_id="merge-1",
+    )
+    await workbench_store.record_validation_run(
+        session_id="s",
+        task_id=active_task.id,
+        actor="ValidationRunner",
+        command=["pytest", "tests/unit/test_api.py"],
+        cwd="/workspace",
+        status="failed",
+        exit_code=1,
+        output="1 failed",
+        started_at="2026-06-27T06:00:00",
+        completed_at="2026-06-27T06:01:00",
+    )
+    await workbench_store.record_validation_run(
+        session_id="s",
+        task_id=blocked_task.id,
+        actor="ValidationRunner",
+        command=["ruff", "check", "src"],
+        cwd="/workspace",
+        status="passed",
+        exit_code=0,
+        output="ok",
+        started_at="2026-06-27T06:02:00",
+        completed_at="2026-06-27T06:03:00",
+    )
 
     snapshot = await service.dashboard_snapshot("s")
 
