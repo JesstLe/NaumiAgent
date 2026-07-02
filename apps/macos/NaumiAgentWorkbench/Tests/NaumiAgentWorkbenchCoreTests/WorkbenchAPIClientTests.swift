@@ -2243,7 +2243,7 @@ final class WorkbenchAPIClientTests {
     @Test func claimIssue() async throws {
         let leaseJSON = Data(
             """
-            {"id":"lease-001","session_id":"sess-001","task_id":"task-001","agent_id":"agent-001","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}
+            {"id":"lease-001","session_id":"sess-001","task_id":"task-001","agent_id":"agent-001","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","task":{"id":"task-001","session_id":"sess-001","subject":"认领 API Client","description":"认领后任务市场需要直接显示任务摘要","status":"in_progress","active_form":"issue-claim-api","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}
             """.utf8
         )
 
@@ -2288,6 +2288,10 @@ final class WorkbenchAPIClientTests {
         #expect(lease.agentID == "agent-001")
         #expect(lease.state == "active")
         #expect(lease.worktreeName == "wt-001")
+        #expect(lease.task?.subject == "认领 API Client")
+        #expect(lease.task?.status == "in_progress")
+        #expect(lease.task?.activeForm == "issue-claim-api")
+        #expect(lease.task?.owner == "Backend-Agent")
     }
 
     @Test func claimIssueWithSnapshotRequestsFreshSnapshot() async throws {
@@ -2330,7 +2334,7 @@ final class WorkbenchAPIClientTests {
     @Test func releaseLease() async throws {
         let leaseJSON = Data(
             """
-            {"id":"lease-001","session_id":"sess-001","task_id":"task-001","agent_id":"agent-001","state":"released","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:30:00"}
+            {"id":"lease-001","session_id":"sess-001","task_id":"task-001","agent_id":"agent-001","state":"released","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:30:00","task":{"id":"task-001","session_id":"sess-001","subject":"释放租约","description":"释放后仍要保留任务上下文","status":"pending","active_form":"issue-release-api","owner":"Agent-A","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T06:30:00"}}
             """.utf8
         )
 
@@ -2356,6 +2360,10 @@ final class WorkbenchAPIClientTests {
 
         #expect(lease.id == "lease-001")
         #expect(lease.state == "released")
+        #expect(lease.task?.subject == "释放租约")
+        #expect(lease.task?.status == "pending")
+        #expect(lease.task?.activeForm == "issue-release-api")
+        #expect(lease.task?.owner == "Agent-A")
     }
 
     @Test func releaseLeaseWithSnapshotRequestsFreshSnapshot() async throws {
@@ -2395,7 +2403,7 @@ final class WorkbenchAPIClientTests {
         let sessionID = "sess 中文"
         let responseJSON = Data(
             """
-            {"expired":[{"id":"lease-001","session_id":"sess 中文","task_id":"task-001","agent_id":"agent-001","state":"expired","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}]}
+            {"expired":[{"id":"lease-001","session_id":"sess 中文","task_id":"task-001","agent_id":"agent-001","state":"expired","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","task":{"id":"task-001","session_id":"sess 中文","subject":"回收过期租约","description":"过期列表需要任务摘要","status":"pending","active_form":"issue-expire-api","owner":"Agent-A","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T06:00:00"}}]}
             """.utf8
         )
 
@@ -2424,6 +2432,10 @@ final class WorkbenchAPIClientTests {
         #expect(lease.id == "lease-001")
         #expect(lease.sessionID == sessionID)
         #expect(lease.state == "expired")
+        #expect(lease.task?.subject == "回收过期租约")
+        #expect(lease.task?.status == "pending")
+        #expect(lease.task?.activeForm == "issue-expire-api")
+        #expect(lease.task?.owner == "Agent-A")
     }
 
     @Test func expireLeasesWithSnapshotRequestsFreshSnapshot() async throws {

@@ -418,6 +418,7 @@ limit?: 1..200
 - lease detail 仍通过 `/leases/{lease_id}` 按需加载完整租约记录。
 - snapshot 中的 `leases[]`、`GET /leases` 以及 `GET /leases/{lease_id}` 都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
   如果 lease 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空租约记录。
+- `POST /issues/{task_id}/claim`、`POST /leases/{lease_id}/release` 和 `POST /leases/expire` 的直接返回体也使用同一个 lease 形状，包含 JSON 字符串状态和可选 `task` 摘要；使用 `include_snapshot=true` 时，外层 snapshot 仍然是真相源。
 
 ## 9.9 Worktree Query API
 
