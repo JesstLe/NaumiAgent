@@ -350,6 +350,8 @@ limit?: 1..200
 - approval detail 仍通过 `/approvals/{approval_id}` 按需加载完整决策上下文。
 - 每条 `approvals[]` 记录和 `GET /approvals/{approval_id}` 详情都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
   如果 approval 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空审批记录。
+- `POST /approvals/{approval_id}/resolve` 的直接返回和 `include_snapshot=true` 外层 `approval` 使用同一审批形态，也必须附带可选
+  `task` 摘要。这样 Reviews 页在用户点击同意或请求修改后，不会短暂丢失任务标题、负责人和状态上下文。
 
 ## 9.6 Governance Decision Query API
 
