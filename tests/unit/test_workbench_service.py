@@ -230,6 +230,19 @@ async def test_create_issue_creates_backing_task_and_issue_metadata(tmp_path) ->
         "实现 Issue 创建 API",
     ]
     assert snapshot["issues"][0]["task_id"] == created_task.id
+    assert snapshot["issues"][0]["task"] == {
+        "id": created_task.id,
+        "session_id": "s",
+        "subject": "实现 Issue 创建 API",
+        "description": "创建 backing task 并绑定 workbench metadata",
+        "status": "pending",
+        "active_form": None,
+        "owner": None,
+        "blocks": [],
+        "blocked_by": [blocker.id],
+        "created_at": snapshot["issues"][0]["task"]["created_at"],
+        "updated_at": snapshot["issues"][0]["task"]["updated_at"],
+    }
 
     events = await service.list_events("s", event_type="issue.created")
     assert events["events"][0]["subject_id"] == created_task.id

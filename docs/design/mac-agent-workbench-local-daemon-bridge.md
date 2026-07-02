@@ -250,6 +250,7 @@ limit?: 1..200
 - 每条 `issues[]` 记录和 `GET /issues/{task_id}` 详情都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`：
   `id`、`session_id`、`subject`、`description`、`status`、`active_form`、`owner`、`blocks`、`blocked_by`、`created_at`、`updated_at`。
   如果 issue 指向的 task 已不存在，`task` 返回 `null`，便于前端显式展示悬空任务引用。
+- `GET /snapshot` 中的 `issues[]` 使用同一份 issue shape，也附带 `task` 摘要。Dashboard 和 Task Market 首屏可以直接渲染任务标题、状态和负责人；`tasks[]` 仍保留为全局任务事实表，供聚合、兼容旧视图和交叉引用使用。
 - `POST /missions/{mission_id}/issues` 的 attach existing task、create backing task，以及 `include_snapshot=true` 外层 `issue` 都返回同一份 issue shape，也必须附带可选 `task` 摘要。这样 Chat 转任务和 Task Market 创建后可以立即渲染标题、状态、负责人和依赖关系，不需要等待下一次全量 snapshot。
 
 ## 9.2 Validation Run Query API

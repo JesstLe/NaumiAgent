@@ -512,7 +512,9 @@ class WorkbenchService:
         for task in tasks:
             issue = await self._workbench_store.get_issue(session_id, task.id)
             if issue is not None:
-                issues.append(asdict(issue))
+                issues.append(
+                    self._issue_to_dict(issue) | {"task": self._task_to_summary(task)}
+                )
             lease = await self._workbench_store.get_active_lease(session_id, task.id)
             if lease is not None:
                 leases.append(self._lease_to_dict(lease, task=task))
