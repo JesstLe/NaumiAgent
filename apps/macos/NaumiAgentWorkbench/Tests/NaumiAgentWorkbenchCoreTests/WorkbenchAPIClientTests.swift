@@ -1467,7 +1467,7 @@ final class WorkbenchAPIClientTests {
         let state = "active"
         let json = Data(
             """
-            {"leases":[{"id":"lease-001","session_id":"sess 中文","task_id":"task 001/审查","agent_id":"agent 001/测试","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"state":"active","task_id":"task 001/审查","agent_id":"agent 001/测试","limit":25}
+            {"leases":[{"id":"lease-001","session_id":"sess 中文","task_id":"task 001/审查","agent_id":"agent 001/测试","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","task":{"id":"task 001/审查","session_id":"sess 中文","subject":"实现租约详情","description":"任务市场需要直接显示租约所属任务","status":"in_progress","active_form":"issue-lease-detail","owner":"Backend-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}],"state":"active","task_id":"task 001/审查","agent_id":"agent 001/测试","limit":25}
             """.utf8
         )
 
@@ -1517,6 +1517,10 @@ final class WorkbenchAPIClientTests {
         #expect(lease.agentID == agentID)
         #expect(lease.state == state)
         #expect(lease.worktreeName == "wt-001")
+        #expect(lease.task?.subject == "实现租约详情")
+        #expect(lease.task?.status == "in_progress")
+        #expect(lease.task?.activeForm == "issue-lease-detail")
+        #expect(lease.task?.owner == "Backend-Agent")
     }
 
     @Test func fetchLeasesWithoutFilters() async throws {
@@ -1560,7 +1564,7 @@ final class WorkbenchAPIClientTests {
         let leaseID = "lease/任务 001"
         let json = Data(
             """
-            {"id":"lease/任务 001","session_id":"sess 中文","task_id":"task-001","agent_id":"agent-001","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-task-market","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}
+            {"id":"lease/任务 001","session_id":"sess 中文","task_id":"task-001","agent_id":"agent-001","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-task-market","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","task":{"id":"task-001","session_id":"sess 中文","subject":"查看租约详情","description":"Inspector 需要租约任务摘要","status":"in_progress","active_form":"issue-lease-inspector","owner":"Agent-A","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:00:00","updated_at":"2026-06-27T05:10:00"}}
             """.utf8
         )
 
@@ -1592,6 +1596,10 @@ final class WorkbenchAPIClientTests {
         #expect(lease.worktreeName == "wt-task-market")
         #expect(lease.createdAt == "2026-06-27T06:00:00")
         #expect(lease.updatedAt == "2026-06-27T06:10:00")
+        #expect(lease.task?.subject == "查看租约详情")
+        #expect(lease.task?.status == "in_progress")
+        #expect(lease.task?.activeForm == "issue-lease-inspector")
+        #expect(lease.task?.owner == "Agent-A")
     }
 
     @Test func fetchWorktreesWithFilters() async throws {

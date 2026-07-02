@@ -11,6 +11,7 @@ public struct LeaseDTO: Decodable, Equatable, Sendable {
     public let worktreeName: String
     public let createdAt: String
     public let updatedAt: String
+    public let task: TaskDTO?
 
     public enum CodingKeys: String, CodingKey {
         case id
@@ -22,6 +23,7 @@ public struct LeaseDTO: Decodable, Equatable, Sendable {
         case worktreeName = "worktree_name"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case task
     }
 }
 

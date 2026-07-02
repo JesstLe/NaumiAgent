@@ -535,6 +535,9 @@ async def test_dashboard_snapshot_includes_only_active_leases(tmp_path) -> None:
     assert lease_data["agent_id"] == "agent-a"
     assert lease_data["state"] == "active"
     assert lease_data["worktree_name"] == "wt-a"
+    assert lease_data["task"]["id"] == active_task.id
+    assert lease_data["task"]["subject"] == "active lease task"
+    assert lease_data["task"]["status"] == "pending"
 
 
 @pytest.mark.asyncio
@@ -2001,16 +2004,26 @@ async def test_list_leases_returns_wrapper_and_json_friendly_state_strings(tmp_p
     workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
     service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
 
+    active_task = await task_store.create_task(
+        "实现租约详情",
+        description="任务市场需要直接显示租约所属任务",
+    )
+    await task_store.update_task(
+        active_task.id,
+        status=TaskStatus.IN_PROGRESS,
+        active_form="issue-lease-detail",
+        owner="Backend-Agent",
+    )
     active = await workbench_store.create_lease(
         session_id="s",
-        task_id="task-a",
+        task_id=active_task.id,
         agent_id="agent-1",
         expires_at="2099-01-01T00:00:00",
         worktree_name="wt-a",
     )
     released = await workbench_store.create_lease(
         session_id="s",
-        task_id="task-b",
+        task_id="dangling-task-b",
         agent_id="agent-2",
         expires_at="2099-01-01T00:00:00",
         worktree_name="wt-b",
@@ -2024,6 +2037,21 @@ async def test_list_leases_returns_wrapper_and_json_friendly_state_strings(tmp_p
     assert all_leases["task_id"] is None
     assert all_leases["agent_id"] is None
     assert all_leases["limit"] == 50
+    leases_by_id = {lease["id"]: lease for lease in all_leases["leases"]}
+    assert leases_by_id[active.id]["task"] == {
+        "id": active_task.id,
+        "session_id": "s",
+        "subject": "实现租约详情",
+        "description": "任务市场需要直接显示租约所属任务",
+        "status": "in_progress",
+        "active_form": "issue-lease-detail",
+        "owner": "Backend-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": leases_by_id[active.id]["task"]["created_at"],
+        "updated_at": leases_by_id[active.id]["task"]["updated_at"],
+    }
+    assert leases_by_id[released.id]["task"] is None
 
     active_only = await service.list_leases("s", state=LeaseState.ACTIVE, limit=50)
     assert [lease["id"] for lease in active_only["leases"]] == [active.id]
@@ -2032,11 +2060,11 @@ async def test_list_leases_returns_wrapper_and_json_friendly_state_strings(tmp_p
     assert active_only["agent_id"] is None
 
     filtered = await service.list_leases(
-        "s", state="released", task_id="task-b", agent_id="agent-2", limit=10
+        "s", state="released", task_id="dangling-task-b", agent_id="agent-2", limit=10
     )
     assert [lease["id"] for lease in filtered["leases"]] == [released.id]
     assert filtered["state"] == "released"
-    assert filtered["task_id"] == "task-b"
+    assert filtered["task_id"] == "dangling-task-b"
     assert filtered["agent_id"] == "agent-2"
     assert filtered["limit"] == 10
     assert filtered["leases"][0]["state"] == "released"
@@ -2049,9 +2077,19 @@ async def test_get_lease_returns_json_friendly_lease_detail(tmp_path) -> None:
     workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
     service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
 
+    task = await task_store.create_task(
+        "查看租约详情",
+        description="Inspector 需要租约任务摘要",
+    )
+    await task_store.update_task(
+        task.id,
+        status=TaskStatus.IN_PROGRESS,
+        active_form="issue-lease-inspector",
+        owner="Agent-A",
+    )
     lease = await workbench_store.create_lease(
         session_id="s",
-        task_id="task-a",
+        task_id=task.id,
         agent_id="agent-1",
         expires_at="2099-01-01T00:00:00",
         worktree_name="wt-a",
@@ -2062,10 +2100,23 @@ async def test_get_lease_returns_json_friendly_lease_detail(tmp_path) -> None:
     assert result is not None
     assert result["id"] == lease.id
     assert result["session_id"] == "s"
-    assert result["task_id"] == "task-a"
+    assert result["task_id"] == task.id
     assert result["agent_id"] == "agent-1"
     assert result["state"] == "active"
     assert result["worktree_name"] == "wt-a"
+    assert result["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "查看租约详情",
+        "description": "Inspector 需要租约任务摘要",
+        "status": "in_progress",
+        "active_form": "issue-lease-inspector",
+        "owner": "Agent-A",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": result["task"]["created_at"],
+        "updated_at": result["task"]["updated_at"],
+    }
 
 
 @pytest.mark.asyncio

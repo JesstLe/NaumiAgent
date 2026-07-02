@@ -393,7 +393,33 @@ active?: true | false
 - `active=false` 用于审计历史或排查旧规则影响。
 - intent lock detail 仍通过 `/intent-locks/{lock_id}` 按需加载完整规则。
 
-## 9.8 Daily Chat and Issue Link API
+## 9.8 Lease Query API
+
+任务市场、总览页 active lease、Inspector 租约面板使用：
+
+```text
+GET /api/v1/workbench/sessions/{session_id}/leases
+```
+
+查询参数：
+
+```text
+state?: active | released | expired
+task_id?: string
+agent_id?: string
+limit?: 1..200
+```
+
+约束：
+
+- `state=active` 是任务市场默认关注的正在执行队列。
+- `task_id` 用于 Inspector 展示单个 Issue 的当前或历史租约。
+- `agent_id` 用于查看某个 Agent 当前占用的任务。
+- lease detail 仍通过 `/leases/{lease_id}` 按需加载完整租约记录。
+- snapshot 中的 `leases[]`、`GET /leases` 以及 `GET /leases/{lease_id}` 都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
+  如果 lease 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空租约记录。
+
+## 9.9 Daily Chat and Issue Link API
 
 Chat 页使用现有会话消息接口，不新增一套平行聊天后端：
 
