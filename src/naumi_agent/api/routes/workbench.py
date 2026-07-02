@@ -62,12 +62,15 @@ WORKBENCH_ROUTE_TEMPLATES = {
     "capabilities": "/workbench/capabilities",
     "bootstrap": "/workbench/bootstrap",
     "sessions": "/workbench/sessions",
+    "create_session": "/workbench/sessions",
     "snapshot": "/workbench/sessions/{session_id}/snapshot",
     "missions": "/workbench/sessions/{session_id}/missions",
+    "create_mission": "/workbench/sessions/{session_id}/missions",
     "mission": "/workbench/sessions/{session_id}/missions/{mission_id}",
     "issues": "/workbench/sessions/{session_id}/issues",
     "issue": "/workbench/sessions/{session_id}/issues/{task_id}",
     "mission_issues": "/workbench/sessions/{session_id}/missions/{mission_id}/issues",
+    "create_issue": "/workbench/sessions/{session_id}/missions/{mission_id}/issues",
     "claim_issue": "/workbench/sessions/{session_id}/issues/{task_id}/claim",
     "leases": "/workbench/sessions/{session_id}/leases",
     "lease": "/workbench/sessions/{session_id}/leases/{lease_id}",
@@ -76,7 +79,9 @@ WORKBENCH_ROUTE_TEMPLATES = {
     "worktrees": "/workbench/sessions/{session_id}/worktrees",
     "worktree": "/workbench/sessions/{session_id}/worktrees/{name}",
     "keep_worktree": "/workbench/sessions/{session_id}/worktrees/{name}/keep",
+    "delete_worktree": "/workbench/sessions/{session_id}/worktrees/{name}",
     "validation_runs": "/workbench/sessions/{session_id}/validation-runs",
+    "run_validation": "/workbench/sessions/{session_id}/validation-runs",
     "validation_run": "/workbench/sessions/{session_id}/validation-runs/{run_id}",
     "context_snapshots": "/workbench/sessions/{session_id}/context-snapshots",
     "context_snapshot": (
@@ -91,7 +96,9 @@ WORKBENCH_ROUTE_TEMPLATES = {
     "event": "/workbench/sessions/{session_id}/events/{event_id}",
     "event_stream": "/workbench/sessions/{session_id}/events/stream",
     "messages": "/sessions/{session_id}/messages",
+    "list_messages": "/sessions/{session_id}/messages",
     "send_message": "/sessions/{session_id}/messages",
+    "send_message_with_issue": "/sessions/{session_id}/messages",
     "agents": "/workbench/sessions/{session_id}/agents",
     "agent": "/workbench/sessions/{session_id}/agents/{agent_id}",
     "upsert_agent_profile": "/workbench/sessions/{session_id}/agents/{agent_id}",
@@ -103,11 +110,17 @@ WORKBENCH_ROUTE_TEMPLATES = {
     "intent_locks": (
         "/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks"
     ),
+    "create_intent_lock": (
+        "/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks"
+    ),
     "intent_lock": (
         "/workbench/sessions/{session_id}/missions/{mission_id}"
         "/intent-locks/{lock_id}"
     ),
     "decisions": "/workbench/sessions/{session_id}/missions/{mission_id}/decisions",
+    "create_decision": (
+        "/workbench/sessions/{session_id}/missions/{mission_id}/decisions"
+    ),
     "decision": (
         "/workbench/sessions/{session_id}/missions/{mission_id}"
         "/decisions/{decision_id}"
