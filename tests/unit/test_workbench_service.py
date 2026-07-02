@@ -893,10 +893,20 @@ async def test_list_context_snapshots_returns_store_snapshots_and_respects_limit
     workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
     service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
 
+    task = await task_store.create_task(
+        "同步上下文健康",
+        description="Worktrees 页需要显示任务上下文",
+    )
+    await task_store.update_task(
+        task.id,
+        status=TaskStatus.BLOCKED,
+        active_form="issue-context-health",
+        owner="Context-Agent",
+    )
     snap_a = await workbench_store.record_context_snapshot(
         session_id="s",
         agent_id="agent-1",
-        task_id="task-a",
+        task_id=task.id,
         health=ContextHealth.GOOD,
         reasons=["上下文健康"],
     )
@@ -910,6 +920,22 @@ async def test_list_context_snapshots_returns_store_snapshots_and_respects_limit
 
     all_snaps = await service.list_context_snapshots("s", limit=50)
     assert {snap["id"] for snap in all_snaps} == {snap_a["id"], snap_b["id"]}
+    enriched_snapshot = next(snap for snap in all_snaps if snap["id"] == snap_a["id"])
+    dangling_snapshot = next(snap for snap in all_snaps if snap["id"] == snap_b["id"])
+    assert enriched_snapshot["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "同步上下文健康",
+        "description": "Worktrees 页需要显示任务上下文",
+        "status": "blocked",
+        "active_form": "issue-context-health",
+        "owner": "Context-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": enriched_snapshot["task"]["created_at"],
+        "updated_at": enriched_snapshot["task"]["updated_at"],
+    }
+    assert dangling_snapshot["task"] is None
 
     filtered = await service.list_context_snapshots("s", agent_id="agent-2", limit=50)
     assert [snap["id"] for snap in filtered] == [snap_b["id"]]
@@ -930,17 +956,41 @@ async def test_get_context_snapshot_returns_single_snapshot(tmp_path) -> None:
     workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
     service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
 
+    task = await task_store.create_task(
+        "修复上下文陈旧",
+        description="Inspector 详情需要任务摘要",
+    )
+    await task_store.update_task(
+        task.id,
+        status=TaskStatus.IN_PROGRESS,
+        active_form="issue-context-stale",
+        owner="Reviewer-Agent",
+    )
     snapshot = await workbench_store.record_context_snapshot(
         session_id="s",
         agent_id="agent-1",
-        task_id="task-a",
+        task_id=task.id,
         health=ContextHealth.STALE,
         reasons=["超过 60 分钟未同步上下文"],
     )
 
     result = await service.get_context_snapshot("s", snapshot["id"])
 
-    assert result == snapshot
+    assert result is not None
+    assert result | {"task": None} == snapshot | {"task": None}
+    assert result["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "修复上下文陈旧",
+        "description": "Inspector 详情需要任务摘要",
+        "status": "in_progress",
+        "active_form": "issue-context-stale",
+        "owner": "Reviewer-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": result["task"]["created_at"],
+        "updated_at": result["task"]["updated_at"],
+    }
 
 
 @pytest.mark.asyncio
