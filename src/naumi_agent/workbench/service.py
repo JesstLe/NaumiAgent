@@ -290,7 +290,7 @@ class WorkbenchService:
             subject_id=task_id,
             payload={"mission_id": mission_id, "risk_level": risk_level.value},
         )
-        return asdict(issue)
+        return self._issue_to_dict(issue) | {"task": self._task_to_summary(task)}
 
     async def create_issue(
         self,
@@ -335,7 +335,7 @@ class WorkbenchService:
         issue = await self._workbench_store.get_issue(session_id, task.id)
         if issue is None:
             raise RuntimeError("issue 创建后无法读取")
-        return self._issue_to_dict(issue)
+        return self._issue_to_dict(issue) | {"task": self._task_to_summary(task)}
 
     async def _require_mission(self, session_id: str, mission_id: str) -> str:
         cleaned_mission_id = mission_id.strip()

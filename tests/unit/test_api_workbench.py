@@ -365,6 +365,19 @@ class _FakeWorkbenchService:
             "related_pr": "",
             "created_at": "2024-01-01T00:00:00",
             "updated_at": "2024-01-01T00:00:00",
+            "task": {
+                "id": "task-9",
+                "session_id": session_id,
+                "subject": title,
+                "description": description,
+                "status": "pending",
+                "active_form": None,
+                "owner": None,
+                "blocks": [],
+                "blocked_by": list(blocked_by or []),
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+            },
         }
 
     async def attach_issue(
@@ -403,6 +416,19 @@ class _FakeWorkbenchService:
             "related_pr": "",
             "created_at": "2024-01-01T00:00:00",
             "updated_at": "2024-01-01T00:00:00",
+            "task": {
+                "id": task_id,
+                "session_id": session_id,
+                "subject": "绑定现有任务",
+                "description": "任务市场立即展示任务摘要",
+                "status": "in_progress",
+                "active_form": "issue-attach-api",
+                "owner": "Backend-Agent",
+                "blocks": [],
+                "blocked_by": [],
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+            },
         }
 
     async def register_agent_profile(
@@ -3616,6 +3642,9 @@ async def test_attach_issue_endpoint_returns_attached_issue() -> None:
     assert response["acceptance_criteria"] == ["AC1", "AC2"]
     assert response["parallel_mode"] == ParallelMode.COOPERATIVE
     assert response["risk_level"] == RiskLevel.HIGH
+    assert response["task"]["id"] == "task-1"
+    assert response["task"]["subject"] == "绑定现有任务"
+    assert response["task"]["status"] == "in_progress"
 
 
 @pytest.mark.asyncio
@@ -6774,6 +6803,9 @@ def test_create_issue_route_accepts_json_body_without_existing_task_id() -> None
     assert response.json()["task_id"] == "task-9"
     assert response.json()["parallel_mode"] == "cooperative"
     assert response.json()["risk_level"] == "high"
+    assert response.json()["task"]["id"] == "task-9"
+    assert response.json()["task"]["subject"] == "实现 Issue 创建 API"
+    assert response.json()["task"]["status"] == "pending"
 
 
 def test_create_issue_route_can_return_fresh_snapshot() -> None:
@@ -6795,6 +6827,8 @@ def test_create_issue_route_can_return_fresh_snapshot() -> None:
     assert response.status_code == 201
     body = response.json()
     assert body["issue"]["task_id"] == "task-9"
+    assert body["issue"]["task"]["id"] == "task-9"
+    assert body["issue"]["task"]["subject"] == "实现 Issue 创建 API"
     assert body["snapshot"]["version"] == 1
     assert body["snapshot"]["session_id"] == "sess-1"
 

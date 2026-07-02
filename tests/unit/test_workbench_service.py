@@ -210,6 +210,19 @@ async def test_create_issue_creates_backing_task_and_issue_metadata(tmp_path) ->
     assert issue["acceptance_criteria"] == ["dashboard 刷新后可见", "可被 Agent claim"]
     assert issue["parallel_mode"] == "cooperative"
     assert issue["risk_level"] == "high"
+    assert issue["task"] == {
+        "id": created_task.id,
+        "session_id": "s",
+        "subject": "实现 Issue 创建 API",
+        "description": "创建 backing task 并绑定 workbench metadata",
+        "status": "pending",
+        "active_form": None,
+        "owner": None,
+        "blocks": [],
+        "blocked_by": [blocker.id],
+        "created_at": issue["task"]["created_at"],
+        "updated_at": issue["task"]["updated_at"],
+    }
 
     snapshot = await service.dashboard_snapshot("s")
     assert [task["subject"] for task in snapshot["tasks"]] == [
@@ -278,7 +291,7 @@ async def test_get_issue_returns_json_friendly_issue_metadata(tmp_path) -> None:
         active_form="issue-detail-api",
         owner="Backend-Agent",
     )
-    await service.attach_issue(
+    attached = await service.attach_issue(
         session_id="s",
         mission_id=mission.id,
         task_id=task.id,
@@ -286,6 +299,19 @@ async def test_get_issue_returns_json_friendly_issue_metadata(tmp_path) -> None:
         parallel_mode=ParallelMode.COOPERATIVE,
         risk_level=RiskLevel.HIGH,
     )
+    assert attached["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "实现 Issue 详情 API",
+        "description": "检查器详情页直接读取任务事实",
+        "status": "in_progress",
+        "active_form": "issue-detail-api",
+        "owner": "Backend-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": attached["task"]["created_at"],
+        "updated_at": attached["task"]["updated_at"],
+    }
 
     issue = await service.get_issue("s", task.id)
 
