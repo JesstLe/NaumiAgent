@@ -3207,7 +3207,7 @@ final class WorkbenchAPIClientTests {
         let approvalID = "approval 001 审批"
         let approvalJSON = Data(
             """
-            {"id":"approval 001 审批","session_id":"sess 中文","mission_id":"mission-001","task_id":"task-001","state":"approved","title":"允许重构","detail":"保持测试通过","requester":"Agent-A","reviewer":"Human","decision_note":"同意","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:01"}
+            {"id":"approval 001 审批","session_id":"sess 中文","mission_id":"mission-001","task_id":"task-001","state":"approved","title":"允许重构","detail":"保持测试通过","requester":"Agent-A","reviewer":"Human","decision_note":"同意","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:01","task":{"id":"task-001","session_id":"sess 中文","subject":"审批 API 合同","description":"确认审查页保留任务上下文","status":"in_progress","active_form":"issue-risk-approval","owner":"Reviewer-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:59:00","updated_at":"2026-06-27T05:59:30"}}
             """.utf8
         )
 
@@ -3258,6 +3258,11 @@ final class WorkbenchAPIClientTests {
         #expect(approval.decisionNote == "同意")
         #expect(approval.createdAt == "2026-06-27T06:00:00")
         #expect(approval.updatedAt == "2026-06-27T06:00:01")
+        #expect(approval.task?.id == "task-001")
+        #expect(approval.task?.subject == "审批 API 合同")
+        #expect(approval.task?.status == "in_progress")
+        #expect(approval.task?.activeForm == "issue-risk-approval")
+        #expect(approval.task?.owner == "Reviewer-Agent")
     }
 
     @Test func resolveApprovalWithSnapshotRequestsFreshSnapshot() async throws {
@@ -3265,7 +3270,7 @@ final class WorkbenchAPIClientTests {
         let approvalID = "approval 001 审批"
         let responseJSON = Data(
             """
-            {"approval":{"id":"approval 001 审批","session_id":"sess 中文","mission_id":"mission-001","task_id":"task-001","state":"approved","title":"允许重构","detail":"保持测试通过","requester":"Agent-A","reviewer":"Human","decision_note":"同意","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:01"},"snapshot":{"session_id":"sess 中文","summary":{"current_mission_title":"审批已更新","active_agents":0,"open_issues":0,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            {"approval":{"id":"approval 001 审批","session_id":"sess 中文","mission_id":"mission-001","task_id":"task-001","state":"approved","title":"允许重构","detail":"保持测试通过","requester":"Agent-A","reviewer":"Human","decision_note":"同意","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:01","task":{"id":"task-001","session_id":"sess 中文","subject":"审批 API 合同","description":"确认审查页保留任务上下文","status":"in_progress","active_form":"issue-risk-approval","owner":"Reviewer-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:59:00","updated_at":"2026-06-27T05:59:30"}},"snapshot":{"session_id":"sess 中文","summary":{"current_mission_title":"审批已更新","active_agents":0,"open_issues":0,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
             """.utf8
         )
 
@@ -3306,6 +3311,8 @@ final class WorkbenchAPIClientTests {
 
         #expect(response.approval.id == approvalID)
         #expect(response.approval.state == "approved")
+        #expect(response.approval.task?.id == "task-001")
+        #expect(response.approval.task?.subject == "审批 API 合同")
         #expect(response.snapshot.sessionID == sessionID)
         #expect(response.snapshot.summary?.currentMissionTitle == "审批已更新")
     }

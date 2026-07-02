@@ -219,7 +219,8 @@ class WorkbenchService:
                 "title": approval.title,
             },
         )
-        return self._approval_to_dict(approval)
+        task = await self._task_store.get_task(approval.task_id)
+        return self._approval_to_dict(approval) | {"task": self._task_to_summary(task)}
 
     @staticmethod
     def _approval_to_dict(approval: Approval) -> dict[str, Any]:

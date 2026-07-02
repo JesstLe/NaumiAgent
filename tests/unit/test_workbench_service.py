@@ -1794,11 +1794,21 @@ async def test_resolve_approval_persists_record_and_emits_event(tmp_path) -> Non
     task_store.set_session("s")
     workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
     service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+    task = await task_store.create_task(
+        "批准 API 合同更新",
+        description="确认 Mac 审查页可以保留任务上下文",
+    )
+    await task_store.update_task(
+        task.id,
+        status=TaskStatus.IN_PROGRESS,
+        active_form="issue-risk-approval",
+        owner="Reviewer-Agent",
+    )
 
     approval = await workbench_store.add_approval(
         session_id="s",
         mission_id="mission-1",
-        task_id="task-1",
+        task_id=task.id,
         title="允许重构 core 模块",
         detail="保持测试通过",
         requester="Agent-A",
@@ -1816,11 +1826,24 @@ async def test_resolve_approval_persists_record_and_emits_event(tmp_path) -> Non
     assert result["id"] == approval.id
     assert result["session_id"] == "s"
     assert result["mission_id"] == "mission-1"
-    assert result["task_id"] == "task-1"
+    assert result["task_id"] == task.id
     assert result["state"] == "approved"
     assert result["title"] == "允许重构 core 模块"
     assert result["reviewer"] == "Human"
     assert result["decision_note"] == "同意"
+    assert result["task"] == {
+        "id": task.id,
+        "session_id": "s",
+        "subject": "批准 API 合同更新",
+        "description": "确认 Mac 审查页可以保留任务上下文",
+        "status": "in_progress",
+        "active_form": "issue-risk-approval",
+        "owner": "Reviewer-Agent",
+        "blocks": [],
+        "blocked_by": [],
+        "created_at": result["task"]["created_at"],
+        "updated_at": result["task"]["updated_at"],
+    }
 
     events = await service.list_events("s")
     event = next((e for e in events["events"] if e["type"] == "approval.resolved"), None)
@@ -1829,7 +1852,7 @@ async def test_resolve_approval_persists_record_and_emits_event(tmp_path) -> Non
     assert event["subject_id"] == approval.id
     assert event["payload"]["state"] == "approved"
     assert event["payload"]["mission_id"] == "mission-1"
-    assert event["payload"]["task_id"] == "task-1"
+    assert event["payload"]["task_id"] == task.id
     assert event["payload"]["title"] == "允许重构 core 模块"
 
 
