@@ -13,6 +13,30 @@ public struct LeaseDTO: Decodable, Equatable, Sendable {
     public let updatedAt: String
     public let task: TaskDTO?
 
+    public init(
+        id: String,
+        sessionID: String,
+        taskID: String,
+        agentID: String,
+        state: String,
+        expiresAt: String,
+        worktreeName: String,
+        createdAt: String,
+        updatedAt: String,
+        task: TaskDTO? = nil
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.taskID = taskID
+        self.agentID = agentID
+        self.state = state
+        self.expiresAt = expiresAt
+        self.worktreeName = worktreeName
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.task = task
+    }
+
     public enum CodingKeys: String, CodingKey {
         case id
         case sessionID = "session_id"

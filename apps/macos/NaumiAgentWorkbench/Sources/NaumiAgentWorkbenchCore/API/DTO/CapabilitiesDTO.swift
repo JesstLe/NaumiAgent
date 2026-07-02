@@ -10,6 +10,9 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
     public let supportedLocales: [String]
     public let defaultLocale: String
     public let protocolVersion: Int
+    public let supportedResources: [String]
+    public let supportedActions: [String]
+    public let routeTemplates: [String: String]
 
     public enum CodingKeys: String, CodingKey {
         case supportsDaemonManagement = "supports_daemon_management"
@@ -20,6 +23,9 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
         case supportedLocales = "supported_locales"
         case defaultLocale = "default_locale"
         case protocolVersion = "protocol_version"
+        case supportedResources = "supported_resources"
+        case supportedActions = "supported_actions"
+        case routeTemplates = "route_templates"
     }
 
     public init(
@@ -30,7 +36,10 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
         supportsCloudSync: Bool,
         supportedLocales: [String],
         defaultLocale: String = "zh-CN",
-        protocolVersion: Int
+        protocolVersion: Int,
+        supportedResources: [String] = [],
+        supportedActions: [String] = [],
+        routeTemplates: [String: String] = [:]
     ) {
         self.supportsDaemonManagement = supportsDaemonManagement
         self.supportsWorkspaceRegistry = supportsWorkspaceRegistry
@@ -40,6 +49,9 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
         self.supportedLocales = supportedLocales
         self.defaultLocale = defaultLocale
         self.protocolVersion = protocolVersion
+        self.supportedResources = supportedResources
+        self.supportedActions = supportedActions
+        self.routeTemplates = routeTemplates
     }
 
     public init(from decoder: Decoder) throws {
@@ -67,5 +79,25 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
             forKey: .defaultLocale
         ) ?? "zh-CN"
         protocolVersion = try container.decode(Int.self, forKey: .protocolVersion)
+        supportedResources = try container.decodeIfPresent(
+            [String].self,
+            forKey: .supportedResources
+        ) ?? []
+        supportedActions = try container.decodeIfPresent(
+            [String].self,
+            forKey: .supportedActions
+        ) ?? []
+        routeTemplates = try container.decodeIfPresent(
+            [String: String].self,
+            forKey: .routeTemplates
+        ) ?? [:]
+    }
+
+    public func supportsAction(_ action: String) -> Bool {
+        supportedActions.contains(action)
+    }
+
+    public func routeTemplate(for actionOrResource: String) -> String? {
+        routeTemplates[actionOrResource]
     }
 }
