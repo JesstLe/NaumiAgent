@@ -865,6 +865,19 @@ class _FakeWorkbenchService:
             "task_id": task_id,
             "health": "stale",
             "reasons": ["超过 60 分钟未同步上下文"],
+            "task": {
+                "id": task_id,
+                "session_id": session_id,
+                "subject": "同步上下文健康",
+                "description": "写操作返回需要保留任务摘要",
+                "status": "blocked",
+                "active_form": "issue-context-health",
+                "owner": "Context-Agent",
+                "blocks": [],
+                "blocked_by": [],
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+            },
             "created_at": "2024-01-01T00:00:00",
         }
 
@@ -2967,6 +2980,19 @@ async def test_create_context_health_endpoint_records_snapshot() -> None:
         "task_id": "task-2",
         "health": "stale",
         "reasons": ["超过 60 分钟未同步上下文"],
+        "task": {
+            "id": "task-2",
+            "session_id": "sess-1",
+            "subject": "同步上下文健康",
+            "description": "写操作返回需要保留任务摘要",
+            "status": "blocked",
+            "active_form": "issue-context-health",
+            "owner": "Context-Agent",
+            "blocks": [],
+            "blocked_by": [],
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
+        },
         "created_at": "2024-01-01T00:00:00",
     }
 
@@ -2994,6 +3020,7 @@ async def test_create_context_health_endpoint_can_return_fresh_snapshot() -> Non
     assert engine.loaded == ["sess-1"]
     assert response["context_snapshot"]["id"] == "snap-1"
     assert response["context_snapshot"]["health"] == "stale"
+    assert response["context_snapshot"]["task"]["subject"] == "同步上下文健康"
     assert response["snapshot"]["version"] == 1
     assert response["snapshot"]["session_id"] == "sess-1"
 
@@ -3021,6 +3048,7 @@ def test_create_context_health_route_can_return_fresh_snapshot() -> None:
     body = response.json()
     assert body["context_snapshot"]["id"] == "snap-1"
     assert body["context_snapshot"]["health"] == "stale"
+    assert body["context_snapshot"]["task"]["subject"] == "同步上下文健康"
     assert body["snapshot"]["version"] == 1
     assert body["snapshot"]["session_id"] == "sess-1"
 
@@ -3110,6 +3138,7 @@ def test_create_context_health_route_accepts_json_body() -> None:
         }
     ]
     assert response.json()["health"] == "stale"
+    assert response.json()["task"]["subject"] == "同步上下文健康"
 
 
 @pytest.mark.asyncio

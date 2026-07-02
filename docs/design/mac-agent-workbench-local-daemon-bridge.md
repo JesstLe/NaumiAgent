@@ -299,6 +299,8 @@ limit?: 1..200
 - snapshot detail 仍通过 `/context-snapshots/{snapshot_id}` 按需加载完整原因列表。
 - 每条 `context_snapshots[]` 记录和 `GET /context-snapshots/{snapshot_id}` 详情都会附带可选 `task` 摘要，字段来自 `TaskStore.tasks`。
   如果 context snapshot 指向的 task 已不存在，`task` 返回 `null`，前端应明确展示为悬空上下文记录。
+- `POST /issues/{task_id}/context-health` 的直接返回和 `include_snapshot=true` 外层 `context_snapshot` 使用同一快照形态，也必须附带可选
+  `task` 摘要。这样 Worktrees 页或 Inspector 手动同步上下文后，可以立即展示任务标题、状态和负责人。
 
 ## 9.4 Failure Diagnostics Query API
 

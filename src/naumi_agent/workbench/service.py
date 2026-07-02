@@ -770,7 +770,8 @@ class WorkbenchService:
             },
         )
 
-        return snapshot
+        task = await self._task_store.get_task(task_id)
+        return snapshot | {"task": self._task_to_summary(task)}
 
     async def list_failures(
         self,

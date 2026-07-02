@@ -929,7 +929,7 @@ final class WorkbenchAPIClientTests {
         let taskID = "task/审查"
         let snapshotJSON = Data(
             """
-            {"id":"snap-001","session_id":"sess/中文","agent_id":"agent-001","task_id":"task/审查","health":"good","reasons":["上下文健康"],"created_at":"2026-06-27T06:00:00"}
+            {"id":"snap-001","session_id":"sess/中文","agent_id":"agent-001","task_id":"task/审查","health":"good","reasons":["上下文健康"],"created_at":"2026-06-27T06:00:00","task":{"id":"task/审查","session_id":"sess/中文","subject":"同步上下文健康","description":"写操作返回需要保留任务摘要","status":"blocked","active_form":"issue-context-health","owner":"Context-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:59:00","updated_at":"2026-06-27T05:59:30"}}
             """.utf8
         )
 
@@ -979,6 +979,10 @@ final class WorkbenchAPIClientTests {
         #expect(snapshot.health == "good")
         #expect(snapshot.reasons == ["上下文健康"])
         #expect(snapshot.createdAt == "2026-06-27T06:00:00")
+        #expect(snapshot.task?.subject == "同步上下文健康")
+        #expect(snapshot.task?.status == "blocked")
+        #expect(snapshot.task?.activeForm == "issue-context-health")
+        #expect(snapshot.task?.owner == "Context-Agent")
     }
 
     @Test func recordContextHealthWithSnapshotRequestsFreshSnapshot() async throws {
@@ -986,7 +990,7 @@ final class WorkbenchAPIClientTests {
         let taskID = "task/审查"
         let responseJSON = Data(
             """
-            {"context_snapshot":{"id":"snap-001","session_id":"sess/中文","agent_id":"agent-001","task_id":"task/审查","health":"good","reasons":["上下文健康"],"created_at":"2026-06-27T06:00:00"},"snapshot":{"session_id":"sess/中文","summary":{"current_mission_title":"上下文刷新","active_agents":1,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            {"context_snapshot":{"id":"snap-001","session_id":"sess/中文","agent_id":"agent-001","task_id":"task/审查","health":"good","reasons":["上下文健康"],"created_at":"2026-06-27T06:00:00","task":{"id":"task/审查","session_id":"sess/中文","subject":"同步上下文健康","description":"写操作返回需要保留任务摘要","status":"blocked","active_form":"issue-context-health","owner":"Context-Agent","blocks":[],"blocked_by":[],"created_at":"2026-06-27T05:59:00","updated_at":"2026-06-27T05:59:30"}},"snapshot":{"session_id":"sess/中文","summary":{"current_mission_title":"上下文刷新","active_agents":1,"open_issues":1,"blocked_issues":0,"pending_approvals":0,"failed_validations":0},"missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
             """.utf8
         )
 
@@ -1032,6 +1036,8 @@ final class WorkbenchAPIClientTests {
         #expect(response.contextSnapshot.id == "snap-001")
         #expect(response.contextSnapshot.sessionID == sessionID)
         #expect(response.contextSnapshot.taskID == taskID)
+        #expect(response.contextSnapshot.task?.subject == "同步上下文健康")
+        #expect(response.contextSnapshot.task?.status == "blocked")
         #expect(response.snapshot.sessionID == sessionID)
         #expect(response.snapshot.summary?.currentMissionTitle == "上下文刷新")
     }
