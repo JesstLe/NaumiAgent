@@ -71,6 +71,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var fetchEventHook: (@Sendable () async -> Void)?
     var fetchValidationRunsHook: (@Sendable () async -> Void)?
     var fetchValidationRunHook: (@Sendable () async -> Void)?
+    var fetchContextSnapshotsHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -316,6 +317,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         limit: Int
     ) async throws(APIError) -> ContextSnapshotsDTO {
         await recordPreWarmRequest()
+        if let fetchContextSnapshotsHook {
+            await fetchContextSnapshotsHook()
+        }
         guard let result = contextSnapshotsResult else {
             throw .invalidResponse
         }
@@ -4567,6 +4571,58 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    @Test @MainActor func refreshContextSnapshotsIgnoresSnapshotsAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherSnapshot = makeContextSnapshot(id: "ctx-other", taskID: "task-other", health: "good")
+        let staleSnapshot = makeContextSnapshot(id: "ctx-stale", taskID: "task-stale", health: "stale")
+        appState.contextSnapshots = []
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setContextSnapshotsResult(.success(ContextSnapshotsDTO(
+            contextSnapshots: [staleSnapshot],
+            taskID: nil,
+            agentID: nil,
+            health: nil,
+            limit: 50
+        )))
+        await api.setFetchContextSnapshotsHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.contextSnapshots = [otherSnapshot]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshContextSnapshots(limit: 50)
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.contextSnapshots == [otherSnapshot])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshContextSnapshotsIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherSnapshot = makeContextSnapshot(id: "ctx-other", taskID: "task-other", health: "good")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setContextSnapshotsResult(.failure(.sessionUnavailable))
+        await api.setFetchContextSnapshotsHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.contextSnapshots = [otherSnapshot]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshContextSnapshots(limit: 50)
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.contextSnapshots == [otherSnapshot])
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func refreshContextSnapshotsWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         appState.contextSnapshots = [
@@ -7830,6 +7886,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setContextSnapshotsResult(_ result: Result<ContextSnapshotsDTO, APIError>) {
         contextSnapshotsResult = result
+    }
+
+    fileprivate func setFetchContextSnapshotsHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchContextSnapshotsHook = hook
     }
 
     fileprivate func setContextSnapshotResult(_ result: Result<ContextSnapshotDTO, APIError>) {
