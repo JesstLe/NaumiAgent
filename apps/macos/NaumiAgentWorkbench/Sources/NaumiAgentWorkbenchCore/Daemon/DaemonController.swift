@@ -63,6 +63,7 @@ public final class DaemonController: Sendable {
             let capabilities = bootstrap.capabilities
             guard capabilities.protocolVersion == Self.supportedProtocolVersion else {
                 await stopEventStream()
+                await clearConfiguredDaemonTemplates()
                 clearDaemonMetadata()
                 clearUnavailableSelectedSession()
                 appState.lastError = .protocolVersionMismatch(
@@ -96,6 +97,9 @@ public final class DaemonController: Sendable {
             await stopEventStream()
             clearDaemonMetadata()
             clearUnavailableSelectedSession()
+            if shouldClearConfiguredDaemonTemplates(after: error) {
+                await clearConfiguredDaemonTemplates()
+            }
             appState.lastError = error
             appState.connectionState = .disconnected
         }
@@ -219,6 +223,20 @@ public final class DaemonController: Sendable {
             return
         }
         await apiProvider.setRouteTemplates(templates)
+    }
+
+    private func clearConfiguredDaemonTemplates() async {
+        await configureRouteTemplates([:])
+        await configureEventStreamTemplate(nil)
+    }
+
+    private func shouldClearConfiguredDaemonTemplates(after error: APIError) -> Bool {
+        switch error {
+        case .httpStatus(404), .invalidURL:
+            return true
+        default:
+            return false
+        }
     }
 
     private func consumeEventStream(
