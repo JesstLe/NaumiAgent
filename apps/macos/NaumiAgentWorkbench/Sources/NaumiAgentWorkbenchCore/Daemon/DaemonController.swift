@@ -247,7 +247,15 @@ public final class DaemonController: Sendable {
 
     private func handleEventStreamMessage(_ message: WorkbenchEventStreamMessage) async {
         switch message {
-        case .connected:
+        case .connected(let sessionID):
+            if let selectedSessionID = appState.selectedSessionID,
+               !sessionID.isEmpty,
+               selectedSessionID != sessionID {
+                appState.connectionState = .stale
+                appState.lastError = .networkFailure("事件流返回了不匹配的会话连接")
+                await stopEventStream()
+                return
+            }
             if appState.connectionState == .stale {
                 appState.connectionState = .connected
                 await refreshSnapshot()
