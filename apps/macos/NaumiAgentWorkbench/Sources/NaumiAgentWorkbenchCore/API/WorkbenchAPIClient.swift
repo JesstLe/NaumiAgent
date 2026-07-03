@@ -434,8 +434,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         reason: String
     ) async throws(APIError) -> WorktreeDTO {
         let body = KeepWorktreeRequest(actor: actor, reason: reason)
+        let path = try routePath(
+            named: "keep_worktree",
+            replacements: [
+                "session_id": sessionID,
+                "name": name,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "worktrees", name, "keep")
+        )
         return try await post(
-            path: encodePath("workbench", "sessions", sessionID, "worktrees", name, "keep"),
+            path: path,
             body: body
         )
     }
