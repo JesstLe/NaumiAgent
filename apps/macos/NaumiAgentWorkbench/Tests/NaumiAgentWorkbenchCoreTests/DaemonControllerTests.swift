@@ -67,6 +67,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var runValidationWithSnapshotResult: Result<ValidationResultSnapshotDTO, APIError>?
     var resolveApprovalWithSnapshotHook: (@Sendable () async -> Void)?
     var claimIssueWithSnapshotHook: (@Sendable () async -> Void)?
+    var runValidationWithSnapshotHook: (@Sendable () async -> Void)?
     var sendMessageHook: (@Sendable () async -> Void)?
     var fetchMessagesHook: (@Sendable () async -> Void)?
     var fetchEventsHook: (@Sendable () async -> Void)?
@@ -987,6 +988,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         cwd: String?
     ) async throws(APIError) -> ValidationResultSnapshotDTO {
         runValidationWithSnapshotCallCount += 1
+        if let runValidationWithSnapshotHook {
+            await runValidationWithSnapshotHook()
+        }
         guard let result = runValidationWithSnapshotResult else {
             throw .invalidResponse
         }
@@ -6101,6 +6105,89 @@ final class DaemonControllerTests {
         #expect(await api.snapshotCallCount == 0)
     }
 
+    @Test @MainActor func runValidationIgnoresSnapshotAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherRun = makeValidationRun(id: "run-other", taskID: "task-other", status: "passed")
+        let otherFailure = makeFailure(id: "failure-other", taskID: "task-other", status: "open")
+        let otherEvent = makeEvent(id: "evt-other", type: "validation.ran", subjectID: "run-other")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", missions: [
+            makeMission(id: "mission-other", sessionID: "sess-other")
+        ])
+
+        let staleRun = makeValidationRun(id: "run-stale", taskID: "task-stale", status: "failed")
+        let staleFailure = makeFailure(id: "failure-stale", taskID: "task-stale", status: "open")
+        let staleEvent = makeEvent(id: "evt-stale", type: "validation.ran", subjectID: "run-stale")
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [
+            makeMission(id: "mission-stale", sessionID: "sess-001")
+        ])
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setRunValidationWithSnapshotResult(.success(ValidationResultSnapshotDTO(
+            validationRun: ValidationResultDTO(id: "run-stale", status: "failed", exitCode: 1, output: "failed"),
+            snapshot: staleSnapshot
+        )))
+        await api.setValidationRunsResult(.success(ValidationRunsDTO(validationRuns: [staleRun], taskID: "task-stale", limit: 50)))
+        await api.setFailuresResult(.success(FailuresDTO(failures: [staleFailure], taskID: "task-stale", status: nil, limit: 50)))
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [staleEvent], limit: 50)))
+        await api.setRunValidationWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.validationRuns = [otherRun]
+                appState.failures = [otherFailure]
+                appState.timelineEvents = [otherEvent]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.runValidation(
+            taskID: "task-stale",
+            actor: "Human",
+            argv: ["pytest"],
+            cwd: "/workspace"
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.validationRuns == [otherRun])
+        #expect(appState.failures == [otherFailure])
+        #expect(appState.timelineEvents == [otherEvent])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func runValidationIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherRun = makeValidationRun(id: "run-other", taskID: "task-other", status: "passed")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", missions: [
+            makeMission(id: "mission-other", sessionID: "sess-other")
+        ])
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setRunValidationWithSnapshotResult(.failure(.sessionUnavailable))
+        await api.setRunValidationWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.validationRuns = [otherRun]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.runValidation(
+            taskID: "task-stale",
+            actor: "Human",
+            argv: ["pytest"],
+            cwd: "/workspace"
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.validationRuns == [otherRun])
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func runValidationSuccessRefreshesValidationRunsFailuresSnapshotAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -9313,6 +9400,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setRunValidationWithSnapshotResult(_ result: Result<ValidationResultSnapshotDTO, APIError>) {
         runValidationWithSnapshotResult = result
+    }
+
+    fileprivate func setRunValidationWithSnapshotHook(_ hook: (@Sendable () async -> Void)?) {
+        runValidationWithSnapshotHook = hook
     }
 
     fileprivate func setPreWarmDelayNanoseconds(_ delay: UInt64?) {
