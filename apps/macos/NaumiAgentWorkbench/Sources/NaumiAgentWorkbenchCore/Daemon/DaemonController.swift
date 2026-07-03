@@ -343,6 +343,11 @@ public final class DaemonController: Sendable {
         if !snapshot.contextSnapshots.isEmpty || appState.contextSnapshots.isEmpty {
             appState.contextSnapshots = snapshot.contextSnapshots
         }
+        // Keep recent audit events visible from the authoritative snapshot if
+        // the lightweight event list pre-warm is unavailable.
+        if !snapshot.events.isEmpty || appState.timelineEvents.isEmpty {
+            appState.timelineEvents = snapshot.events
+        }
     }
 
     /// Pre-warms lightweight first-screen list states after a successful connection.
