@@ -7308,6 +7308,47 @@ final class DaemonControllerTests {
         #expect(await api.fetchedEvents.isEmpty)
     }
 
+    @Test @MainActor func sendDailyMessageIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", missions: [])
+        let otherMessage = ChatMessageDTO(
+            id: "msg-other",
+            role: "assistant",
+            content: "另一个会话的消息。",
+            timestamp: "2026-07-02T08:00:01",
+            metadata: [:]
+        )
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setSendMessageResult(.failure(.sessionUnavailable))
+        await api.setSendMessageHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.chatMessages = [otherMessage]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.sendDailyMessage(
+            content: "把登录失败记录成任务",
+            issueDraft: ChatIssueDraftDTO(
+                missionID: "mission-stale",
+                title: "登录失败",
+                description: "把登录失败记录成任务",
+                acceptanceCriteria: ["任务市场可见"],
+                parallelMode: "exclusive",
+                riskLevel: "medium"
+            )
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.chatMessages == [otherMessage])
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func refreshAgentProfilesSuccessWritesToAppState() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
