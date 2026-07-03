@@ -63,8 +63,7 @@ public final class DaemonController: Sendable {
             let capabilities = bootstrap.capabilities
             guard capabilities.protocolVersion == Self.supportedProtocolVersion else {
                 await stopEventStream()
-                appState.daemonStatus = nil
-                appState.capabilities = nil
+                clearDaemonMetadata()
                 clearUnavailableSelectedSession()
                 appState.lastError = .protocolVersionMismatch(
                     expected: Self.supportedProtocolVersion,
@@ -95,8 +94,7 @@ public final class DaemonController: Sendable {
             }
         } catch {
             await stopEventStream()
-            appState.daemonStatus = nil
-            appState.capabilities = nil
+            clearDaemonMetadata()
             clearUnavailableSelectedSession()
             appState.lastError = error
             appState.connectionState = .disconnected
@@ -300,6 +298,12 @@ public final class DaemonController: Sendable {
         } else if !status.workspaceRoot.isEmpty {
             appState.selectedWorkspace = status.workspaceRoot
         }
+    }
+
+    private func clearDaemonMetadata() {
+        appState.daemonStatus = nil
+        appState.capabilities = nil
+        appState.selectedWorkspace = nil
     }
 
     private func applySnapshot(_ snapshot: WorkbenchSnapshotDTO?) {
@@ -1354,8 +1358,7 @@ public final class DaemonController: Sendable {
             let capabilities = bootstrap.capabilities
             guard capabilities.protocolVersion == Self.supportedProtocolVersion else {
                 await stopEventStream()
-                appState.daemonStatus = nil
-                appState.capabilities = nil
+                clearDaemonMetadata()
                 appState.lastError = .protocolVersionMismatch(
                     expected: Self.supportedProtocolVersion,
                     actual: capabilities.protocolVersion
