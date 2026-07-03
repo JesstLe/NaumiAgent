@@ -188,7 +188,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     public func fetchValidationRun(sessionID: String, runID: String) async throws(APIError) -> ValidationRunDTO {
-        try await get(path: encodePath("workbench", "sessions", sessionID, "validation-runs", runID))
+        let path = try routePath(
+            named: "validation_run",
+            replacements: [
+                "session_id": sessionID,
+                "run_id": runID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "validation-runs", runID)
+        )
+        return try await get(path: path)
     }
 
     public func fetchContextSnapshots(
