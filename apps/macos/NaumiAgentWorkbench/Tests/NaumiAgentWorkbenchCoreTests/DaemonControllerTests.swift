@@ -3,7 +3,7 @@ import Testing
 @testable import NaumiAgentWorkbenchCore
 
 /// In-memory fake conforming to `WorkbenchAPIProviding` for unit tests.
-actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
+actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateConfiguring {
     var bootstrapResult: Result<WorkbenchBootstrapDTO, APIError>?
     var statusResult: Result<DaemonStatusDTO, APIError>?
     var capabilitiesResult: Result<CapabilitiesDTO, APIError>?
@@ -93,6 +93,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     var issueRequests: [[String: String?]] = []
     var validationRunRequests: [[String: String?]] = []
     var fetchedEvents: [FakeWorkbenchEventRefreshRequest] = []
+    var routeTemplateConfigurations: [[String: String]] = []
     var preWarmDelayNanoseconds: UInt64?
     var preWarmInFlightCallCount: Int = 0
     var maxPreWarmInFlightCallCount: Int = 0
@@ -130,6 +131,14 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
             selectedSessionID: sessions.sessions.first?.id,
             snapshot: snapshot ?? nil
         )
+    }
+
+    func setRouteTemplates(_ templates: [String: String]) async {
+        routeTemplateConfigurations.append(templates)
+    }
+
+    func recordedRouteTemplateConfigurations() -> [[String: String]] {
+        routeTemplateConfigurations
     }
 
     func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
@@ -1181,6 +1190,41 @@ final class DaemonControllerTests {
         await controller.refreshConnection()
 
         #expect(await eventProvider.recordedEventStreamURLTemplates() == [eventStreamURLTemplate])
+    }
+
+    @Test @MainActor func refreshConnectionConfiguresRouteTemplatesFromCapabilities() async throws {
+        let appState = AppState()
+        let api = FakeWorkbenchAPIProvider()
+        let routeTemplates = [
+            "events": "/workbench-v2/sessions/{session_id}/audit-events",
+            "snapshot": "/workbench-v2/sessions/{session_id}/snapshot",
+        ]
+        let capabilities = CapabilitiesDTO(
+            supportsDaemonManagement: false,
+            supportsWorkspaceRegistry: true,
+            supportsValidationRunner: true,
+            supportsCloudSync: false,
+            supportedLocales: ["zh-CN", "en-US"],
+            protocolVersion: 1,
+            routeTemplates: routeTemplates
+        )
+        let session = makeSession(id: "sess-route-template", title: "Route Template Session")
+        let bootstrap = WorkbenchBootstrapDTO(
+            daemonStatus: makeStatus(),
+            capabilities: capabilities,
+            sessions: [session],
+            totalSessions: 1,
+            selectedSessionID: "sess-route-template",
+            snapshot: makeSnapshot(sessionID: "sess-route-template", missions: [])
+        )
+
+        await api.setBootstrapResult(.success(bootstrap))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-route-template")
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(await api.recordedRouteTemplateConfigurations() == [routeTemplates])
     }
 
     @Test @MainActor func refreshConnectionFailure() async throws {

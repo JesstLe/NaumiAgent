@@ -1,5 +1,10 @@
 import Foundation
 
+/// Optional API-provider capability for daemon-supplied REST route templates.
+public protocol WorkbenchRouteTemplateConfiguring: Sendable {
+    func setRouteTemplates(_ templates: [String: String]) async
+}
+
 /// Abstraction over the NaumiAgent Workbench REST API.
 ///
 /// Allows `WorkbenchAPIClient` to be replaced by fakes in tests,

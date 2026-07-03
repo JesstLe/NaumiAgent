@@ -3,10 +3,11 @@ import Foundation
 /// REST client for the NaumiAgent Workbench Kernel.
 ///
 /// SwiftUI 不直接读写 SQLite / 跑 git / pytest；所有业务状态通过此 client 访问本地 API。
-public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
+public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRouteTemplateConfiguring {
     public let baseURL: URL
     public let session: URLSession
     private let bearerToken: String?
+    private var routeTemplates: [String: String]
 
     /// - Parameters:
     ///   - baseURL: Default `http://127.0.0.1:8765/api/v1`.
@@ -15,7 +16,8 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     public init(
         baseURL: URL = URL(string: "http://127.0.0.1:8765/api/v1/")!,
         session: URLSession = .shared,
-        bearerToken: String? = nil
+        bearerToken: String? = nil,
+        routeTemplates: [String: String] = [:]
     ) {
         // Ensure the base URL ends with a slash so relative paths resolve correctly.
         let baseURLString = baseURL.absoluteString
@@ -26,6 +28,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         }
         self.session = session
         self.bearerToken = bearerToken
+        self.routeTemplates = routeTemplates
     }
 
     public func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
@@ -44,7 +47,12 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     }
 
     public func fetchSnapshot(sessionID: String) async throws(APIError) -> WorkbenchSnapshotDTO {
-        try await get(path: encodePath("workbench", "sessions", sessionID, "snapshot"))
+        let path = try routePath(
+            named: "snapshot",
+            replacements: ["session_id": sessionID],
+            fallback: encodePath("workbench", "sessions", sessionID, "snapshot")
+        )
+        return try await get(path: path)
     }
 
     public func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO {
@@ -128,10 +136,19 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
         if let since, !since.isEmpty {
             queryItems.append(URLQueryItem(name: "since", value: since))
         }
+        let path = try routePath(
+            named: "events",
+            replacements: ["session_id": sessionID],
+            fallback: encodePath("workbench", "sessions", sessionID, "events")
+        )
         return try await get(
-            path: encodePath("workbench", "sessions", sessionID, "events"),
+            path: path,
             queryItems: queryItems
         )
+    }
+
+    public func setRouteTemplates(_ templates: [String: String]) async {
+        routeTemplates = templates
     }
 
     public func fetchEvent(sessionID: String, eventID: String) async throws(APIError) -> EventDTO {
@@ -890,10 +907,39 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding {
     /// Builds a relative path from individual components, percent-encoding each one
     /// separately so that `/` inside a dynamic ID becomes `%2F` instead of a route separator.
     private func encodePath(_ components: String...) -> String {
+        components.map(encodePathComponent).joined(separator: "/")
+    }
+
+    private func encodePathComponent(_ component: String) -> String {
         let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))
-        return components
-            .map { $0.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0 }
-            .joined(separator: "/")
+        return component.addingPercentEncoding(withAllowedCharacters: allowed) ?? component
+    }
+
+    private func routePath(
+        named name: String,
+        replacements: [String: String],
+        fallback: String
+    ) throws(APIError) -> String {
+        guard let template = routeTemplates[name]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !template.isEmpty else {
+            return fallback
+        }
+        guard !template.contains("://") else {
+            throw .invalidURL
+        }
+
+        var path = template
+        for (key, value) in replacements {
+            path = path.replacingOccurrences(
+                of: "{\(key)}",
+                with: encodePathComponent(value)
+            )
+        }
+        guard !path.contains("{"), !path.contains("}") else {
+            throw .invalidURL
+        }
+
+        return path.hasPrefix("/") ? String(path.dropFirst()) : path
     }
 
     private func get<T: Decodable & Sendable>(path: String) async throws(APIError) -> T {
