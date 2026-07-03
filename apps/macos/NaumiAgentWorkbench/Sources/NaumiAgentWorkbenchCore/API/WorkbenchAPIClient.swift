@@ -835,8 +835,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             parallelMode: parallelMode,
             riskLevel: riskLevel
         )
+        let path = try routePath(
+            named: "mission_issues",
+            replacements: [
+                "session_id": sessionID,
+                "mission_id": missionID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "missions", missionID, "issues")
+        )
         return try await post(
-            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "issues"),
+            path: path,
             body: body
         )
     }

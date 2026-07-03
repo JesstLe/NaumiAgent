@@ -4158,6 +4158,61 @@ final class WorkbenchAPIClientTests {
         #expect(issue.task?.owner == "Backend-Agent")
     }
 
+    @Test func attachIssueUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/总览"
+        let issueJSON = Data(
+            """
+            {"session_id":"sess/中文","task_id":"task/挂载","mission_id":"mission/总览","parallel_mode":"cooperative","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["通过端到端 smoke"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/missions/mission%2F%E6%80%BB%E8%A7%88/issues" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["task_id"] as? String == "task/挂载",
+                  let criteria = json?["acceptance_criteria"] as? [String],
+                  criteria == ["通过端到端 smoke"],
+                  json?["parallel_mode"] as? String == "cooperative",
+                  json?["risk_level"] as? String == "high" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, issueJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "mission_issues": "/workbench-v2/sessions/{session_id}/missions/{mission_id}/issues",
+        ])
+        let issue = try await client.attachIssue(
+            sessionID: sessionID,
+            missionID: missionID,
+            taskID: "task/挂载",
+            acceptanceCriteria: ["通过端到端 smoke"],
+            parallelMode: "cooperative",
+            riskLevel: "high"
+        )
+
+        #expect(issue.sessionID == sessionID)
+        #expect(issue.taskID == "task/挂载")
+        #expect(issue.missionID == missionID)
+        #expect(issue.acceptanceCriteria == ["通过端到端 smoke"])
+    }
+
     @Test func attachIssueWithSnapshotRequestsFreshSnapshot() async throws {
         let responseJSON = Data(
             """
