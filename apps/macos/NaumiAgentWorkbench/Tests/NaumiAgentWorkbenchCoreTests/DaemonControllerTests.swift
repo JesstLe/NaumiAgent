@@ -2151,6 +2151,44 @@ final class DaemonControllerTests {
         await controller.stopEventStream()
     }
 
+    @Test @MainActor func eventStreamEventSessionUnavailableStopsStreamAndClearsState() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.connectionState = .connected
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        await api.setSnapshotResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.startEventStream()
+
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-missing"]
+        }
+
+        await eventProvider.emit(.event(makeEvent(id: "evt-session-missing", type: "issue.updated", subjectID: "task-1")))
+
+        await waitUntil {
+            await api.snapshotCallCount >= 1 && appState.selectedSessionID == nil
+        }
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.snapshot == nil)
+        #expect(controller.hasActiveEventStream == false)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+
+        await controller.stopEventStream()
+    }
+
     @Test @MainActor func eventStreamSnapshotAppliesSnapshotWithoutRESTRefresh() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-events"
