@@ -2190,12 +2190,19 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            appState.selectedIntentLock = try await apiProvider.fetchIntentLock(
+            let intentLock = try await apiProvider.fetchIntentLock(
                 sessionID: sessionID,
                 missionID: missionID,
                 lockID: lockID
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.selectedIntentLock = intentLock
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
