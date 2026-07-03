@@ -619,8 +619,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         if let status, !status.isEmpty {
             queryItems.append(URLQueryItem(name: "status", value: status))
         }
+        let path = try routePath(
+            named: "agents",
+            replacements: ["session_id": sessionID],
+            fallback: encodePath("workbench", "sessions", sessionID, "agents")
+        )
         return try await get(
-            path: encodePath("workbench", "sessions", sessionID, "agents"),
+            path: path,
             queryItems: queryItems
         )
     }
