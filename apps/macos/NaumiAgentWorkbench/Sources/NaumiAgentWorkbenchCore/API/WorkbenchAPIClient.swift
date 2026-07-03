@@ -1068,7 +1068,14 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         missionID: String,
         kind: String?
     ) async throws(APIError) -> DecisionsDTO {
-        let path = encodePath("workbench", "sessions", sessionID, "missions", missionID, "decisions")
+        let path = try routePath(
+            named: "decisions",
+            replacements: [
+                "session_id": sessionID,
+                "mission_id": missionID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "missions", missionID, "decisions")
+        )
         var queryItems: [URLQueryItem] = []
         if let kind, !kind.isEmpty {
             queryItems.append(URLQueryItem(name: "kind", value: kind))
