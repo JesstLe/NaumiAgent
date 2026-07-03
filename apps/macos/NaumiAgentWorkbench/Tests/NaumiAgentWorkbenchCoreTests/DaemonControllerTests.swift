@@ -1699,6 +1699,38 @@ final class DaemonControllerTests {
         #expect(appState.timelineEvents == [snapshotEvent])
     }
 
+    @Test @MainActor func refreshConnectionKeepsSnapshotIntentLocksWhenPreWarmFails() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-existing"
+
+        let api = FakeWorkbenchAPIProvider()
+        let snapshotMission = makeMission(id: "mission-snapshot", sessionID: "sess-existing")
+        let snapshotLock = makeIntentLock(id: "lock-snapshot", missionID: "mission-snapshot")
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-existing",
+            missions: [snapshotMission],
+            intentLocks: [snapshotLock],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+
+        await api.setStatusResult(.success(makeStatus()))
+        await api.setCapabilitiesResult(.success(makeCapabilities()))
+        await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-existing")
+        await api.setFetchIntentLocksResult(.failure(.httpStatus(502)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == .httpStatus(502))
+        #expect(appState.intentLocks == [snapshotLock])
+    }
+
     @Test @MainActor func refreshConnectionKeepsSnapshotValidationRunsWhenPreWarmFails() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-existing"
