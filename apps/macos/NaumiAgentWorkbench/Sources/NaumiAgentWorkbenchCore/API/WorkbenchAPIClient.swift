@@ -551,8 +551,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             durationMinutes: durationMinutes,
             worktreeName: worktreeName
         )
+        let path = try routePath(
+            named: "claim_issue",
+            replacements: [
+                "session_id": sessionID,
+                "task_id": taskID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "issues", taskID, "claim")
+        )
         return try await post(
-            path: encodePath("workbench", "sessions", sessionID, "issues", taskID, "claim") + "?include_snapshot=true",
+            path: path + "?include_snapshot=true",
             body: body
         )
     }
@@ -909,8 +917,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             argv: argv,
             cwd: cwd
         )
+        let path = try routePath(
+            named: "run_validation",
+            replacements: ["session_id": sessionID],
+            fallback: encodePath("workbench", "sessions", sessionID, "validation-runs")
+        )
         return try await post(
-            path: encodePath("workbench", "sessions", sessionID, "validation-runs") + "?include_snapshot=true",
+            path: path + "?include_snapshot=true",
             body: body
         )
     }
