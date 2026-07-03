@@ -87,11 +87,11 @@ public final class DaemonController: Sendable {
             } else {
                 await refreshSnapshot(clearSessionScopedStateOnFailure: true)
             }
-            if appState.selectedSessionID != nil {
+            if appState.selectedSessionID != nil, appState.snapshot != nil {
                 await refreshChatMessages()
+                await refreshWorkbenchListsAfterConnection()
+                await startEventStreamIfAvailable()
             }
-            await refreshWorkbenchListsAfterConnection()
-            await startEventStreamIfAvailable()
         } catch {
             await stopEventStream()
             appState.daemonStatus = nil
@@ -302,6 +302,11 @@ public final class DaemonController: Sendable {
         // a separately refreshed list when the snapshot omits this optional slice.
         if !snapshot.validationRuns.isEmpty || appState.validationRuns.isEmpty {
             appState.validationRuns = snapshot.validationRuns
+        }
+        // Use snapshot approvals as first-screen fallback so human intervention
+        // cards remain visible if the lightweight approvals pre-warm fails.
+        if !snapshot.approvals.isEmpty || appState.approvals.isEmpty {
+            appState.approvals = snapshot.approvals
         }
     }
 
@@ -1337,12 +1342,12 @@ public final class DaemonController: Sendable {
         appState.lastError = nil
 
         await refreshSnapshot()
-        await refreshChatMessages()
 
         guard appState.snapshot != nil else {
             return
         }
 
+        await refreshChatMessages()
         await refreshWorkbenchListsAfterConnection()
         await startEventStreamIfAvailable()
     }
