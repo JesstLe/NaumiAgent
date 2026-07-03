@@ -1019,8 +1019,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             allowedPaths: allowedPaths,
             requireProposalForRisk: requireProposalForRisk
         )
+        let path = try routePath(
+            named: "create_intent_lock",
+            replacements: [
+                "session_id": sessionID,
+                "mission_id": missionID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "missions", missionID, "intent-locks")
+        )
         return try await post(
-            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "intent-locks"),
+            path: path,
             body: body
         )
     }
