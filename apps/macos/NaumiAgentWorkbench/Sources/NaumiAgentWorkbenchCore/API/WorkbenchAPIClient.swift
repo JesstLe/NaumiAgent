@@ -41,7 +41,12 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     public func fetchCapabilities() async throws(APIError) -> CapabilitiesDTO {
-        try await get(path: "workbench/capabilities")
+        let path = try routePath(
+            named: "capabilities",
+            replacements: [:],
+            fallback: "workbench/capabilities"
+        )
+        return try await get(path: path)
     }
 
     public func fetchBootstrap(pageSize: Int = 1) async throws(APIError) -> WorkbenchBootstrapDTO {

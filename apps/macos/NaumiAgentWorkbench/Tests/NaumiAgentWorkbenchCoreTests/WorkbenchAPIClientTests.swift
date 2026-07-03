@@ -78,6 +78,43 @@ final class WorkbenchAPIClientTests {
         #expect(!capabilities.supportsAction("unknown_action"))
     }
 
+    @Test func fetchCapabilitiesUsesConfiguredRouteTemplate() async throws {
+        let json = Data(
+            """
+            {"supports_daemon_management":true,"supports_workspace_registry":true,"supports_validation_runner":true,"supports_event_stream":true,"supports_cloud_sync":false,"supported_locales":["zh-CN","en-US"],"default_locale":"zh-CN","protocol_version":2,"supported_resources":["snapshot","daemon_status","capabilities"],"supported_actions":["create_session"],"route_templates":{"daemon_status":"/workbench-v2/daemon/status","capabilities":"/workbench-v2/capabilities","bootstrap":"/workbench-v2/bootstrap"}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/capabilities" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "capabilities": "/workbench-v2/capabilities",
+        ])
+        let capabilities = try await client.fetchCapabilities()
+
+        #expect(capabilities.protocolVersion == 2)
+        #expect(capabilities.supportsDaemonManagement)
+        #expect(capabilities.supportsWorkspaceRegistry)
+        #expect(capabilities.defaultLocale == "zh-CN")
+        #expect(capabilities.supportedResources == ["snapshot", "daemon_status", "capabilities"])
+        #expect(capabilities.routeTemplate(for: "capabilities") == "/workbench-v2/capabilities")
+        #expect(capabilities.routeTemplate(for: "bootstrap") == "/workbench-v2/bootstrap")
+    }
+
     @Test func fetchCapabilitiesDefaultsToChineseForLegacyDaemon() async throws {
         let json = Data(
             """
