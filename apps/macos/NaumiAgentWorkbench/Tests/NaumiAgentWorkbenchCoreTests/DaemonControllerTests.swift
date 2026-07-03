@@ -1536,6 +1536,36 @@ final class DaemonControllerTests {
         #expect(appState.contextSnapshots.count == 1)
     }
 
+    @Test @MainActor func refreshConnectionKeepsSnapshotMissionsWhenPreWarmFails() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-existing"
+
+        let api = FakeWorkbenchAPIProvider()
+        let snapshotMission = makeMission(id: "mission-snapshot", sessionID: "sess-existing")
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-existing",
+            missions: [snapshotMission],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+
+        await api.setStatusResult(.success(makeStatus()))
+        await api.setCapabilitiesResult(.success(makeCapabilities()))
+        await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-existing")
+        await api.setMissionsResult(.failure(.httpStatus(502)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == .httpStatus(502))
+        #expect(appState.missions == [snapshotMission])
+    }
+
     @Test @MainActor func refreshConnectionKeepsSnapshotValidationRunsWhenPreWarmFails() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-existing"
@@ -3007,7 +3037,7 @@ final class DaemonControllerTests {
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.createMission(title: "Mac 工作台", goal: "补齐 API 调用面")
 
-        #expect(appState.missions.isEmpty)
+        #expect(appState.missions == [mission])
         #expect(appState.issues.isEmpty)
         #expect(appState.timelineEvents == [event])
         #expect(appState.snapshot == snapshot)
