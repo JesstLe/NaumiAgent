@@ -120,8 +120,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         page: Int = 1,
         pageSize: Int = 50
     ) async throws(APIError) -> ChatMessageListDTO {
-        try await get(
-            path: encodePath("sessions", sessionID, "messages"),
+        let path = try routePath(
+            named: "list_messages",
+            replacements: ["session_id": sessionID],
+            fallback: encodePath("sessions", sessionID, "messages")
+        )
+        return try await get(
+            path: path,
             queryItems: [
                 URLQueryItem(name: "page", value: String(page)),
                 URLQueryItem(name: "page_size", value: String(pageSize)),
