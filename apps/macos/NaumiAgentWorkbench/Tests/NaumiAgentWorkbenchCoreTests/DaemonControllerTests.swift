@@ -1244,6 +1244,34 @@ final class DaemonControllerTests {
         #expect(await eventProvider.connectedSessionIDs == ["sess-existing"])
     }
 
+    @Test @MainActor func startEventStreamSkipsConnectionWhenCapabilityDisabled() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-no-stream"
+        appState.connectionState = .connected
+        appState.capabilities = CapabilitiesDTO(
+            supportsDaemonManagement: false,
+            supportsWorkspaceRegistry: true,
+            supportsValidationRunner: true,
+            supportsEventStream: false,
+            supportsCloudSync: false,
+            supportedLocales: ["zh-CN", "en-US"],
+            protocolVersion: 1
+        )
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+
+        await controller.startEventStream()
+
+        #expect(controller.hasActiveEventStream == false)
+        #expect(await eventProvider.connectedSessionIDs == [])
+        #expect(appState.lastError == .networkFailure("当前本地服务不支持事件流"))
+    }
+
     @Test @MainActor func refreshConnectionConfiguresEventStreamTemplateFromDaemonStatus() async throws {
         let appState = AppState()
         let api = FakeWorkbenchAPIProvider()

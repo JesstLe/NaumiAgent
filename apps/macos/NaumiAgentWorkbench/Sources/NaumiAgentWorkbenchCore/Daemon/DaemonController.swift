@@ -115,6 +115,11 @@ public final class DaemonController: Sendable {
             appState.lastError = .missingSelectedSession
             return
         }
+        guard appState.capabilities?.supportsEventStream != false else {
+            await stopEventStream()
+            appState.lastError = .networkFailure("当前本地服务不支持事件流")
+            return
+        }
 
         await stopEventStream()
         appState.lastError = nil
