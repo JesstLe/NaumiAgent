@@ -6433,6 +6433,33 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    @Test @MainActor func loadEventIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherEvent = makeEvent(
+            id: "event-other",
+            sessionID: "sess-other",
+            type: "mission.created",
+            subjectID: "mission-other"
+        )
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setEventResult(.failure(.sessionUnavailable))
+        await api.setFetchEventHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.selectedEvent = otherEvent
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadEvent(eventID: "event-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.selectedEvent == otherEvent)
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func loadEventWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         let oldEvent = makeEvent(id: "event-old", type: "mission.created", subjectID: "mission-001")
