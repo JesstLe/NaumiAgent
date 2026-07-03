@@ -1876,6 +1876,42 @@ final class WorkbenchAPIClientTests {
         #expect(failure.task?.owner == "Test-Agent")
     }
 
+    @Test func fetchFailureUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let failureID = "failure/诊断"
+        let json = Data(
+            """
+            {"id":"failure/诊断","session_id":"sess/中文","task_id":"task-template","kind":"context_stale","title":"上下文陈旧","detail":"从模板路径加载诊断详情","source_id":"context-template","status":"open","created_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/failures/failure%2F%E8%AF%8A%E6%96%AD" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "failure": "/workbench-v2/sessions/{session_id}/failures/{failure_id}",
+        ])
+        let failure = try await client.fetchFailure(sessionID: sessionID, failureID: failureID)
+
+        #expect(failure.id == failureID)
+        #expect(failure.sessionID == sessionID)
+        #expect(failure.kind == "context_stale")
+        #expect(failure.detail == "从模板路径加载诊断详情")
+    }
+
     @Test func fetchIssuesWithFilters() async throws {
         let sessionID = "sess 中文"
         let missionID = "mission 中文"
