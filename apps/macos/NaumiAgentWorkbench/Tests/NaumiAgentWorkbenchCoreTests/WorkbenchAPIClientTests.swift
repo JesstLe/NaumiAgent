@@ -512,6 +512,55 @@ final class WorkbenchAPIClientTests {
         #expect(message.metadata["workbench_issue"] == .object(["task_id": .string("task-chat-1")]))
     }
 
+    @Test func sendMessageUsesConfiguredRouteTemplate() async throws {
+        let json = Data(
+            """
+            {"id":"msg-chat-template","role":"assistant","content":"我会先检查当前任务状态。","timestamp":"2026-07-02T08:00:00","metadata":{"source":"chat"}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/chat-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/messages" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard request.value(forHTTPHeaderField: "Content-Type") == "application/json" else {
+                fatalError("Missing JSON content type")
+            }
+            guard let bodyData = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Missing body")
+            }
+            let body = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
+            guard body?["content"] as? String == "现在进度怎么样？",
+                  body?["stream"] as? Bool == false,
+                  body?["workbench_issue"] == nil else {
+                fatalError("Unexpected body: \(String(describing: body))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "send_message": "/chat-v2/sessions/{session_id}/messages",
+        ])
+        let message = try await client.sendMessage(
+            sessionID: "sess/中文",
+            content: "现在进度怎么样？",
+            workbenchIssue: nil
+        )
+
+        #expect(message.id == "msg-chat-template")
+        #expect(message.role == "assistant")
+        #expect(message.metadata["source"] == .string("chat"))
+    }
+
     @Test func sendMessageWithIssueUsesConfiguredRouteTemplate() async throws {
         let json = Data(
             """
