@@ -1767,6 +1767,58 @@ final class WorkbenchAPIClientTests {
         #expect(lease.task?.owner == "Backend-Agent")
     }
 
+    @Test func fetchLeasesUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let taskID = "task/租约"
+        let agentID = "agent/后端"
+        let json = Data(
+            """
+            {"leases":[{"id":"lease-template","session_id":"sess/中文","task_id":"task/租约","agent_id":"agent/后端","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-template","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"state":"active","task_id":"task/租约","agent_id":"agent/后端","limit":18}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/leases",
+                  query["limit"] == "18",
+                  query["state"] == "active",
+                  query["task_id"] == taskID,
+                  query["agent_id"] == agentID else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "leases": "/workbench-v2/sessions/{session_id}/leases",
+        ])
+        let response = try await client.fetchLeases(
+            sessionID: sessionID,
+            state: "active",
+            taskID: taskID,
+            agentID: agentID,
+            limit: 18
+        )
+
+        #expect(response.state == "active")
+        #expect(response.taskID == taskID)
+        #expect(response.agentID == agentID)
+        #expect(response.limit == 18)
+        #expect(response.leases.first?.id == "lease-template")
+    }
+
     @Test func fetchLeasesWithoutFilters() async throws {
         let json = Data(
             """
