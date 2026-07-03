@@ -84,6 +84,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var fetchMissionsHook: (@Sendable () async -> Void)?
     var fetchMissionHook: (@Sendable () async -> Void)?
     var fetchAgentProfilesHook: (@Sendable () async -> Void)?
+    var fetchAgentProfileHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -603,6 +604,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     }
 
     func fetchAgentProfile(sessionID: String, agentID: String) async throws(APIError) -> AgentProfileDTO {
+        if let fetchAgentProfileHook {
+            await fetchAgentProfileHook()
+        }
         guard let result = agentProfileResult else {
             throw .invalidResponse
         }
@@ -7729,6 +7733,52 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    @Test @MainActor func loadAgentProfileIgnoresProfileAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherProfile = makeAgentProfile(id: "agent-other", sessionID: "sess-other", status: "idle")
+        let staleProfile = makeAgentProfile(id: "agent-stale", sessionID: "sess-001", status: "busy")
+        appState.selectedAgentProfile = nil
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setAgentProfileResult(.success(staleProfile))
+        await api.setFetchAgentProfileHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.selectedAgentProfile = otherProfile
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadAgentProfile(agentID: "agent-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.selectedAgentProfile == otherProfile)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadAgentProfileIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherProfile = makeAgentProfile(id: "agent-other", sessionID: "sess-other", status: "idle")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setAgentProfileResult(.failure(.sessionUnavailable))
+        await api.setFetchAgentProfileHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.selectedAgentProfile = otherProfile
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadAgentProfile(agentID: "agent-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.selectedAgentProfile == otherProfile)
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func loadAgentProfileWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         let oldProfile = makeAgentProfile(id: "agent-old", sessionID: "sess-001", status: "idle")
@@ -8656,6 +8706,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setAgentProfileResult(_ result: Result<AgentProfileDTO, APIError>) {
         agentProfileResult = result
+    }
+
+    fileprivate func setFetchAgentProfileHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchAgentProfileHook = hook
     }
 
     fileprivate func setRegisterAgentProfileResult(_ result: Result<AgentProfileDTO, APIError>) {
