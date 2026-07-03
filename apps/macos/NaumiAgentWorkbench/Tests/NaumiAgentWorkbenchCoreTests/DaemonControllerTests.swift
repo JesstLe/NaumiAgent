@@ -1115,6 +1115,49 @@ final class DaemonControllerTests {
         #expect(await api.snapshotCallCount == 0)
     }
 
+    @Test @MainActor func refreshConnectionStoresWorkspaceNameFromDaemonStatus() async throws {
+        let appState = AppState()
+        let api = FakeWorkbenchAPIProvider()
+        let status = DaemonStatusDTO(
+            status: "running",
+            version: "0.2.0",
+            pid: 42,
+            host: "127.0.0.1",
+            port: 8765,
+            startedAt: "2026-06-27T06:00:00",
+            workspaceCount: 1,
+            workspaceRoot: "/Users/lv/Workspace/NaumiAgent",
+            workspaceName: "NaumiAgent"
+        )
+        let session = makeSession(id: "sess-workspace", title: "Workspace Session")
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-workspace",
+            missions: [],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+        let bootstrap = WorkbenchBootstrapDTO(
+            daemonStatus: status,
+            capabilities: makeCapabilities(),
+            sessions: [session],
+            totalSessions: 1,
+            selectedSessionID: "sess-workspace",
+            snapshot: snapshot
+        )
+
+        await api.setBootstrapResult(.success(bootstrap))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-workspace")
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.daemonStatus == status)
+        #expect(appState.selectedWorkspace == "NaumiAgent")
+    }
+
     @Test @MainActor func refreshConnectionSkipsEventStreamWhenCapabilityDisabled() async throws {
         let appState = AppState()
         let api = FakeWorkbenchAPIProvider()

@@ -75,6 +75,7 @@ public final class DaemonController: Sendable {
             }
 
             appState.daemonStatus = bootstrap.daemonStatus
+            syncSelectedWorkspace(from: bootstrap.daemonStatus)
             appState.capabilities = capabilities
             appState.sessions = bootstrap.sessions
             appState.connectionState = .connected
@@ -291,6 +292,14 @@ public final class DaemonController: Sendable {
             return .sessionUnavailable
         }
         return .networkFailure(message)
+    }
+
+    private func syncSelectedWorkspace(from status: DaemonStatusDTO) {
+        if !status.workspaceName.isEmpty {
+            appState.selectedWorkspace = status.workspaceName
+        } else if !status.workspaceRoot.isEmpty {
+            appState.selectedWorkspace = status.workspaceRoot
+        }
     }
 
     private func applySnapshot(_ snapshot: WorkbenchSnapshotDTO?) {
@@ -1357,6 +1366,7 @@ public final class DaemonController: Sendable {
 
             await stopEventStream()
             appState.daemonStatus = bootstrap.daemonStatus
+            syncSelectedWorkspace(from: bootstrap.daemonStatus)
             appState.capabilities = capabilities
             for session in bootstrap.sessions.reversed() {
                 appState.sessions.removeAll { $0.id == session.id }
