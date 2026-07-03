@@ -65,6 +65,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var resolveApprovalWithSnapshotResult: Result<ApprovalSnapshotDTO, APIError>?
     var runValidationResult: Result<ValidationResultDTO, APIError>?
     var runValidationWithSnapshotResult: Result<ValidationResultSnapshotDTO, APIError>?
+    var resolveApprovalWithSnapshotHook: (@Sendable () async -> Void)?
     var sendMessageHook: (@Sendable () async -> Void)?
     var fetchMessagesHook: (@Sendable () async -> Void)?
     var fetchEventsHook: (@Sendable () async -> Void)?
@@ -951,6 +952,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         decisionNote: String
     ) async throws(APIError) -> ApprovalSnapshotDTO {
         resolveApprovalWithSnapshotCallCount += 1
+        if let resolveApprovalWithSnapshotHook {
+            await resolveApprovalWithSnapshotHook()
+        }
         guard let result = resolveApprovalWithSnapshotResult else {
             throw .invalidResponse
         }
@@ -8173,6 +8177,83 @@ final class DaemonControllerTests {
         #expect(await api.snapshotCallCount == 0)
     }
 
+    @Test @MainActor func resolveApprovalIgnoresSnapshotAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", missions: [
+            makeMission(id: "mission-other", sessionID: "sess-other")
+        ])
+        let otherApproval = makeApproval(id: "approval-other", missionID: "mission-other", state: "waiting")
+        let otherEvent = makeEvent(id: "evt-other", type: "approval.resolved", subjectID: "approval-other")
+
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [
+            makeMission(id: "mission-stale", sessionID: "sess-001")
+        ])
+        let staleApproval = makeApproval(id: "approval-stale", missionID: "mission-stale", state: "waiting")
+        let staleEvent = makeEvent(id: "evt-stale", type: "approval.resolved", subjectID: "approval-stale")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setResolveApprovalWithSnapshotResult(.success(
+            ApprovalSnapshotDTO(approval: staleApproval, snapshot: staleSnapshot)
+        ))
+        await api.setApprovalsResult(.success(ApprovalsDTO(approvals: [staleApproval], state: "waiting", limit: 50)))
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [staleEvent], limit: 50)))
+        await api.setResolveApprovalWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.approvals = [otherApproval]
+                appState.timelineEvents = [otherEvent]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.resolveApproval(
+            approvalID: "approval-stale",
+            actor: "Human",
+            state: "approved",
+            decisionNote: "同意"
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.approvals == [otherApproval])
+        #expect(appState.timelineEvents == [otherEvent])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func resolveApprovalIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", missions: [
+            makeMission(id: "mission-other", sessionID: "sess-other")
+        ])
+        let otherApproval = makeApproval(id: "approval-other", missionID: "mission-other", state: "waiting")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setResolveApprovalWithSnapshotResult(.failure(.sessionUnavailable))
+        await api.setResolveApprovalWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.approvals = [otherApproval]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.resolveApproval(
+            approvalID: "approval-stale",
+            actor: "Human",
+            state: "approved",
+            decisionNote: "同意"
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.approvals == [otherApproval])
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func resolveApprovalWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         #expect(appState.selectedSessionID == nil)
@@ -9135,6 +9216,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setResolveApprovalWithSnapshotResult(_ result: Result<ApprovalSnapshotDTO, APIError>) {
         resolveApprovalWithSnapshotResult = result
+    }
+
+    fileprivate func setResolveApprovalWithSnapshotHook(_ hook: (@Sendable () async -> Void)?) {
+        resolveApprovalWithSnapshotHook = hook
     }
 
     fileprivate func setRunValidationResult(_ result: Result<ValidationResultDTO, APIError>) {
