@@ -66,6 +66,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var runValidationResult: Result<ValidationResultDTO, APIError>?
     var runValidationWithSnapshotResult: Result<ValidationResultSnapshotDTO, APIError>?
     var resolveApprovalWithSnapshotHook: (@Sendable () async -> Void)?
+    var claimIssueWithSnapshotHook: (@Sendable () async -> Void)?
     var sendMessageHook: (@Sendable () async -> Void)?
     var fetchMessagesHook: (@Sendable () async -> Void)?
     var fetchEventsHook: (@Sendable () async -> Void)?
@@ -682,6 +683,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         worktreeName: String
     ) async throws(APIError) -> LeaseSnapshotDTO {
         claimIssueWithSnapshotCallCount += 1
+        if let claimIssueWithSnapshotHook {
+            await claimIssueWithSnapshotHook()
+        }
         guard let result = claimIssueWithSnapshotResult else {
             throw .invalidResponse
         }
@@ -3549,6 +3553,83 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
         #expect(await api.claimIssueWithSnapshotCallCount == 1)
         #expect(await api.snapshotCallCount == 0)
+    }
+
+    @Test @MainActor func claimIssueIgnoresSnapshotAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherIssue = makeIssue(taskID: "task-other")
+        let otherLease = makeLease(id: "lease-other", taskID: "task-other", state: "active")
+        let otherEvent = makeEvent(id: "evt-other", type: "issue.claimed", subjectID: "task-other")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", lease: otherLease)
+
+        let staleLease = makeLease(id: "lease-stale", taskID: "task-stale", state: "active")
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", lease: staleLease)
+        let staleIssue = makeIssue(taskID: "task-stale")
+        let staleEvent = makeEvent(id: "evt-stale", type: "issue.claimed", subjectID: "task-stale")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setClaimIssueWithSnapshotResult(.success(LeaseSnapshotDTO(lease: staleLease, snapshot: staleSnapshot)))
+        await api.setIssuesResult(.success(IssuesDTO(issues: [staleIssue], missionID: nil, riskLevel: nil, limit: 50)))
+        await api.setLeasesResult(.success(LeasesDTO(leases: [staleLease], state: nil, taskID: nil, agentID: nil, limit: 50)))
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [staleEvent], limit: 50)))
+        await api.setClaimIssueWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.issues = [otherIssue]
+                appState.leases = [otherLease]
+                appState.timelineEvents = [otherEvent]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.claimIssue(
+            taskID: "task-stale",
+            agentID: "local-agent",
+            durationMinutes: 30,
+            worktreeName: "wt-stale"
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.issues == [otherIssue])
+        #expect(appState.leases == [otherLease])
+        #expect(appState.timelineEvents == [otherEvent])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func claimIssueIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherIssue = makeIssue(taskID: "task-other")
+        let otherLease = makeLease(id: "lease-other", taskID: "task-other", state: "active")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", lease: otherLease)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setClaimIssueWithSnapshotResult(.failure(.sessionUnavailable))
+        await api.setClaimIssueWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.issues = [otherIssue]
+                appState.leases = [otherLease]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.claimIssue(
+            taskID: "task-stale",
+            agentID: "local-agent",
+            durationMinutes: 30,
+            worktreeName: "wt-stale"
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.issues == [otherIssue])
+        #expect(appState.leases == [otherLease])
+        #expect(appState.lastError == nil)
     }
 
     @Test @MainActor func claimIssueWithSnapshotFailurePreservesExistingState() async throws {
@@ -9124,6 +9205,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setClaimIssueWithSnapshotResult(_ result: Result<LeaseSnapshotDTO, APIError>) {
         claimIssueWithSnapshotResult = result
+    }
+
+    fileprivate func setClaimIssueWithSnapshotHook(_ hook: (@Sendable () async -> Void)?) {
+        claimIssueWithSnapshotHook = hook
     }
 
     fileprivate func setLeaseResult(_ result: Result<LeaseDTO, APIError>) {
