@@ -80,6 +80,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var fetchLeasesHook: (@Sendable () async -> Void)?
     var fetchLeaseHook: (@Sendable () async -> Void)?
     var fetchWorktreesHook: (@Sendable () async -> Void)?
+    var fetchWorktreeHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -501,6 +502,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     }
 
     func fetchWorktree(sessionID: String, name: String) async throws(APIError) -> WorktreeDTO {
+        if let fetchWorktreeHook {
+            await fetchWorktreeHook()
+        }
         guard let result = worktreeResult else {
             throw .invalidResponse
         }
@@ -7439,6 +7443,52 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    @Test @MainActor func loadWorktreeIgnoresWorktreeAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherWorktree = makeWorktree(name: "wt-other", taskID: "task-other", status: "active")
+        let staleWorktree = makeWorktree(name: "wt-stale", taskID: "task-stale", status: "active")
+        appState.selectedWorktree = nil
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setWorktreeResult(.success(staleWorktree))
+        await api.setFetchWorktreeHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.selectedWorktree = otherWorktree
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadWorktree(name: "wt-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.selectedWorktree == otherWorktree)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadWorktreeIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherWorktree = makeWorktree(name: "wt-other", taskID: "task-other", status: "active")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setWorktreeResult(.failure(.sessionUnavailable))
+        await api.setFetchWorktreeHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.selectedWorktree = otherWorktree
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadWorktree(name: "wt-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.selectedWorktree == otherWorktree)
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func loadWorktreeWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         let oldWorktree = makeWorktree(name: "wt-old", taskID: "task-001", status: "active")
@@ -8388,6 +8438,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setWorktreeResult(_ result: Result<WorktreeDTO, APIError>) {
         worktreeResult = result
+    }
+
+    fileprivate func setFetchWorktreeHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchWorktreeHook = hook
     }
 
     fileprivate func setFetchLeaseHook(_ hook: (@Sendable () async -> Void)?) {
