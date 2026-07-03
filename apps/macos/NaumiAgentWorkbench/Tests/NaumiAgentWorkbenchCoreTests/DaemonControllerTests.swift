@@ -4270,6 +4270,45 @@ final class DaemonControllerTests {
         ])
     }
 
+    @Test @MainActor func refreshEventsIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherEvent = EventDTO(
+            id: "evt-other",
+            sessionID: "sess-other",
+            type: "mission.created",
+            actor: "Human",
+            subjectID: "mission-other",
+            payload: ["title": .string("另一个会话")],
+            timestamp: "2026-06-27T06:01:00"
+        )
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setEventsResult(.failure(.sessionUnavailable))
+        await api.setFetchEventsHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.timelineEvents = [otherEvent]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshEvents(limit: 50)
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.timelineEvents == [otherEvent])
+        #expect(appState.lastError == nil)
+        #expect(await api.fetchedEvents == [
+            FakeWorkbenchEventRefreshRequest(
+                eventType: nil,
+                subjectID: nil,
+                actor: nil,
+                since: nil,
+                limit: 50
+            )
+        ])
+    }
+
     @Test @MainActor func refreshEventsWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         appState.timelineEvents = [
