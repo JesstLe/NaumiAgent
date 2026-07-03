@@ -1311,6 +1311,7 @@ final class DaemonControllerTests {
         appState.connectionState = .connected
         appState.daemonStatus = makeStatus()
         appState.capabilities = makeCapabilities()
+        appState.selectedWorkspace = "Old Workspace"
 
         let api = FakeWorkbenchAPIProvider()
         await api.setBootstrapResult(.failure(.networkFailure("daemon unavailable")))
@@ -1321,6 +1322,7 @@ final class DaemonControllerTests {
         #expect(appState.connectionState == .disconnected)
         #expect(appState.daemonStatus == nil)
         #expect(appState.capabilities == nil)
+        #expect(appState.selectedWorkspace == nil)
         #expect(appState.lastError == .networkFailure("daemon unavailable"))
     }
 
@@ -1353,6 +1355,7 @@ final class DaemonControllerTests {
         let appState = AppState()
         appState.selectedSessionID = "sess-events"
         appState.connectionState = .connected
+        appState.selectedWorkspace = "Old Workspace"
         let api = FakeWorkbenchAPIProvider()
         let eventProvider = FakeWorkbenchEventProvider()
 
@@ -1381,6 +1384,7 @@ final class DaemonControllerTests {
         #expect(appState.connectionState == .disconnected)
         #expect(appState.daemonStatus == nil)
         #expect(appState.capabilities == nil)
+        #expect(appState.selectedWorkspace == nil)
         #expect(appState.lastError == .protocolVersionMismatch(expected: 1, actual: 999))
         #expect(controller.hasActiveEventStream == false)
     }
