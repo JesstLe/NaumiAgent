@@ -2164,11 +2164,18 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            appState.selectedValidationRun = try await apiProvider.fetchValidationRun(
+            let run = try await apiProvider.fetchValidationRun(
                 sessionID: sessionID,
                 runID: runID
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.selectedValidationRun = run
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
