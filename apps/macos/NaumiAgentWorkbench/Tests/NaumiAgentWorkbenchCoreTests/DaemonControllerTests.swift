@@ -2639,6 +2639,7 @@ final class DaemonControllerTests {
         let existingSession = makeSession(id: "sess-old", title: "Old Session")
         let createdSession = makeSession(id: "sess-new", title: "Mac 工作台")
         let snapshot = makeSnapshot(sessionID: "sess-new", missions: [])
+        appState.connectionState = .disconnected
         appState.sessions = [existingSession]
 
         let api = FakeWorkbenchAPIProvider()
@@ -2671,6 +2672,7 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == snapshot)
         #expect(appState.daemonStatus == makeStatus())
         #expect(appState.capabilities == makeCapabilities())
+        #expect(appState.connectionState == .connected)
         #expect(appState.lastError == nil)
         expectWorkbenchListsPopulated(appState)
     }
