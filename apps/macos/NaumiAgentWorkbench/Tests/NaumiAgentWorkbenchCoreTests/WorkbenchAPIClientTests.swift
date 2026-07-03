@@ -1898,6 +1898,42 @@ final class WorkbenchAPIClientTests {
         #expect(lease.task?.owner == "Agent-A")
     }
 
+    @Test func fetchLeaseUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let leaseID = "lease/详情"
+        let json = Data(
+            """
+            {"id":"lease/详情","session_id":"sess/中文","task_id":"task-template","agent_id":"agent-template","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-template","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/leases/lease%2F%E8%AF%A6%E6%83%85" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "lease": "/workbench-v2/sessions/{session_id}/leases/{lease_id}",
+        ])
+        let lease = try await client.fetchLease(sessionID: sessionID, leaseID: leaseID)
+
+        #expect(lease.id == leaseID)
+        #expect(lease.sessionID == sessionID)
+        #expect(lease.taskID == "task-template")
+        #expect(lease.worktreeName == "wt-template")
+    }
+
     @Test func fetchWorktreesWithFilters() async throws {
         let sessionID = "sess 中文"
         let taskID = "task 001/审查"
