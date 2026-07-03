@@ -308,6 +308,11 @@ public final class DaemonController: Sendable {
         if !snapshot.issues.isEmpty || appState.issues.isEmpty {
             appState.issues = snapshot.issues
         }
+        // Keep agent activity visible from the authoritative snapshot if the
+        // lightweight agent profile pre-warm is unavailable.
+        if !snapshot.agentProfiles.isEmpty || appState.agentProfiles.isEmpty {
+            appState.agentProfiles = snapshot.agentProfiles
+        }
         // Use snapshot validation runs as first-screen fallback without erasing
         // a separately refreshed list when the snapshot omits this optional slice.
         if !snapshot.validationRuns.isEmpty || appState.validationRuns.isEmpty {
