@@ -668,6 +668,9 @@ public final class DaemonController: Sendable {
                 since: since,
                 limit: limit
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.timelineEvents = response.events
         } catch {
             appState.lastError = error
