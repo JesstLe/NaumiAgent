@@ -3382,6 +3382,62 @@ final class WorkbenchAPIClientTests {
         #expect(profile.status == "busy")
     }
 
+    @Test func registerAgentProfileUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let agentID = "agent/规划"
+        let profileJSON = Data(
+            """
+            {"id":"agent/规划","session_id":"sess/中文","name":"规划智能体","role":"planner","capabilities":["planning"],"permissions":["read"],"max_parallel_tasks":1,"status":"idle","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/agents/agent%2F%E8%A7%84%E5%88%92" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["name"] as? String == "规划智能体",
+                  json?["role"] as? String == "planner",
+                  json?["actor"] as? String == "Human" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, profileJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "upsert_agent_profile": "/workbench-v2/sessions/{session_id}/agents/{agent_id}",
+        ])
+        let profile = try await client.registerAgentProfile(
+            sessionID: sessionID,
+            agentID: agentID,
+            name: "规划智能体",
+            role: "planner",
+            capabilities: ["planning"],
+            permissions: ["read"],
+            maxParallelTasks: 1,
+            status: "idle",
+            actor: "Human"
+        )
+
+        #expect(profile.id == agentID)
+        #expect(profile.sessionID == sessionID)
+        #expect(profile.name == "规划智能体")
+        #expect(profile.status == "idle")
+    }
+
     @Test func registerAgentProfileWithSnapshotRequestsFreshSnapshot() async throws {
         let sessionID = "sess/中文"
         let agentID = "agent/后端"

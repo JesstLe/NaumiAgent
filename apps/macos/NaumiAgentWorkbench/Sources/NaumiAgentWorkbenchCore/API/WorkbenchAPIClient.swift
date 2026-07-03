@@ -662,8 +662,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             status: status,
             actor: actor
         )
+        let path = try routePath(
+            named: "upsert_agent_profile",
+            replacements: [
+                "session_id": sessionID,
+                "agent_id": agentID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "agents", agentID)
+        )
         return try await post(
-            path: encodePath("workbench", "sessions", sessionID, "agents", agentID),
+            path: path,
             body: body
         )
     }
