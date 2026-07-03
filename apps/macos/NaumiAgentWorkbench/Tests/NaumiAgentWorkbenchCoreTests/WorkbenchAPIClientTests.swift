@@ -2085,6 +2085,42 @@ final class WorkbenchAPIClientTests {
         #expect(worktree.task?.owner == "Backend-Agent")
     }
 
+    @Test func fetchWorktreeUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let worktreeName = "wt/详情"
+        let json = Data(
+            """
+            {"name":"wt/详情","path":"/repo/.naumi/worktrees/wt-template","branch":"naumi/worktree-wt-template","base_ref":"abc123","status":"active","task_id":"task-template","dirty_files":1,"commits_ahead":2,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","kept_reason":"","metadata":{},"removable":true}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/worktrees/wt%2F%E8%AF%A6%E6%83%85" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "worktree": "/workbench-v2/sessions/{session_id}/worktrees/{name}",
+        ])
+        let worktree = try await client.fetchWorktree(sessionID: sessionID, name: worktreeName)
+
+        #expect(worktree.name == worktreeName)
+        #expect(worktree.taskID == "task-template")
+        #expect(worktree.status == "active")
+        #expect(worktree.removable)
+    }
+
     @Test func keepWorktreeUsesPOSTAndEncodesBody() async throws {
         let json = Data(
             """
