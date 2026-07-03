@@ -210,6 +210,39 @@ final class WorkbenchAPIClientTests {
         #expect(bootstrap.snapshot?.sessionID == "sess-latest")
     }
 
+    @Test func fetchBootstrapUsesConfiguredRouteTemplate() async throws {
+        let json = Data(
+            """
+            {"daemon_status":{"status":"running","version":"0.1.0","pid":12345,"host":"127.0.0.1","port":8765,"started_at":"2026-06-27T06:00:00","workspace_count":3},"capabilities":{"supports_daemon_management":false,"supports_workspace_registry":false,"supports_validation_runner":true,"supports_cloud_sync":false,"supported_locales":["zh-CN","en-US"],"protocol_version":1},"sessions":[{"id":"sess-template","title":"模板启动","model":"gpt-5","created_at":"2026-06-27T08:00:00+00:00","updated_at":"2026-06-27T09:00:00+00:00","message_count":1,"total_tokens":64,"total_cost_usd":0.006,"status":"active"}],"total_sessions":1,"selected_session_id":"sess-template","snapshot":{"session_id":"sess-template","missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/bootstrap?page_size=3" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "bootstrap": "/workbench-v2/bootstrap",
+        ])
+        let bootstrap = try await client.fetchBootstrap(pageSize: 3)
+
+        #expect(bootstrap.selectedSessionID == "sess-template")
+        #expect(bootstrap.sessions.first?.id == "sess-template")
+        #expect(bootstrap.snapshot?.sessionID == "sess-template")
+    }
+
     @Test func httpErrorThrowsAPIError() async {
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
