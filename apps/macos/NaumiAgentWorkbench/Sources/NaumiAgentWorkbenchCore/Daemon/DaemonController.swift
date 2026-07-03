@@ -348,6 +348,11 @@ public final class DaemonController: Sendable {
         if !snapshot.intentLocks.isEmpty || appState.intentLocks.isEmpty {
             appState.intentLocks = snapshot.intentLocks
         }
+        // Keep human-governance decisions visible from the authoritative
+        // snapshot if the mission-scoped pre-warm is unavailable.
+        if !snapshot.decisions.isEmpty || appState.decisions.isEmpty {
+            appState.decisions = snapshot.decisions
+        }
         // Keep recent audit events visible from the authoritative snapshot if
         // the lightweight event list pre-warm is unavailable.
         if !snapshot.events.isEmpty || appState.timelineEvents.isEmpty {
