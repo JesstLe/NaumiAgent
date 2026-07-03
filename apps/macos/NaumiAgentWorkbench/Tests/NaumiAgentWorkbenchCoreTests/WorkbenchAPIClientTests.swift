@@ -4494,6 +4494,59 @@ final class WorkbenchAPIClientTests {
         #expect(result.completedAt == "2026-06-27T06:00:01")
     }
 
+    @Test func runValidationUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let resultJSON = Data(
+            """
+            {"id":"run-template","session_id":"sess/中文","task_id":"task/验证","actor":"Human","command":["pytest","tests/unit/test_api_workbench.py"],"cwd":"/workspace","status":"passed","exit_code":0,"output":"ok","started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:01"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/validation-runs" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["task_id"] as? String == "task/验证",
+                  json?["actor"] as? String == "Human",
+                  let argv = json?["argv"] as? [String],
+                  argv == ["pytest", "tests/unit/test_api_workbench.py"],
+                  json?["cwd"] as? String == "/workspace" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, resultJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "run_validation": "/workbench-v2/sessions/{session_id}/validation-runs",
+        ])
+        let result = try await client.runValidation(
+            sessionID: sessionID,
+            taskID: "task/验证",
+            actor: "Human",
+            argv: ["pytest", "tests/unit/test_api_workbench.py"],
+            cwd: "/workspace"
+        )
+
+        #expect(result.id == "run-template")
+        #expect(result.sessionID == sessionID)
+        #expect(result.taskID == "task/验证")
+        #expect(result.command == ["pytest", "tests/unit/test_api_workbench.py"])
+    }
+
     @Test func runValidationWithSnapshotRequestsFreshSnapshot() async throws {
         let sessionID = "sess 中文"
         let resultJSON = Data(

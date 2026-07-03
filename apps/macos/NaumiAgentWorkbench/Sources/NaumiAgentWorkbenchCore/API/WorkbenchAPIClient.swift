@@ -1132,8 +1132,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             argv: argv,
             cwd: cwd
         )
+        let path = try routePath(
+            named: "run_validation",
+            replacements: ["session_id": sessionID],
+            fallback: encodePath("workbench", "sessions", sessionID, "validation-runs")
+        )
         return try await post(
-            path: encodePath("workbench", "sessions", sessionID, "validation-runs"),
+            path: path,
             body: body
         )
     }
