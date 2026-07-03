@@ -793,8 +793,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         goal: String
     ) async throws(APIError) -> MissionDTO {
         let body = CreateMissionRequest(title: title, goal: goal)
+        let path = try routePath(
+            named: "create_mission",
+            replacements: ["session_id": sessionID],
+            fallback: encodePath("workbench", "sessions", sessionID, "missions")
+        )
         return try await post(
-            path: encodePath("workbench", "sessions", sessionID, "missions"),
+            path: path,
             body: body
         )
     }

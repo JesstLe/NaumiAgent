@@ -3970,6 +3970,54 @@ final class WorkbenchAPIClientTests {
         #expect(mission.sessionID == sessionID)
     }
 
+    @Test func createMissionUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let missionJSON = Data(
+            """
+            {"id":"mission-template","session_id":"sess/中文","title":"模板 Mission","goal":"从模板路径创建 Mission","status":"active","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/missions" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["title"] as? String == "模板 Mission",
+                  json?["goal"] as? String == "从模板路径创建 Mission" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, missionJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "create_mission": "/workbench-v2/sessions/{session_id}/missions",
+        ])
+        let mission = try await client.createMission(
+            sessionID: sessionID,
+            title: "模板 Mission",
+            goal: "从模板路径创建 Mission"
+        )
+
+        #expect(mission.id == "mission-template")
+        #expect(mission.sessionID == sessionID)
+        #expect(mission.title == "模板 Mission")
+        #expect(mission.goal == "从模板路径创建 Mission")
+    }
+
     @Test func createMissionWithSnapshotRequestsFreshSnapshot() async throws {
         let responseJSON = Data(
             """
