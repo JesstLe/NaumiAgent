@@ -228,7 +228,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     public func fetchContextSnapshot(sessionID: String, snapshotID: String) async throws(APIError) -> ContextSnapshotDTO {
-        try await get(path: encodePath("workbench", "sessions", sessionID, "context-snapshots", snapshotID))
+        let path = try routePath(
+            named: "context_snapshot",
+            replacements: [
+                "session_id": sessionID,
+                "snapshot_id": snapshotID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "context-snapshots", snapshotID)
+        )
+        return try await get(path: path)
     }
 
     public func recordContextHealth(

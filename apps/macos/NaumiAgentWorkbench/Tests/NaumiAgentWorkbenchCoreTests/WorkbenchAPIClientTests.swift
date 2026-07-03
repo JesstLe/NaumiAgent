@@ -1184,6 +1184,42 @@ final class WorkbenchAPIClientTests {
         #expect(snapshot.task?.owner == "Reviewer-Agent")
     }
 
+    @Test func fetchContextSnapshotUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let snapshotID = "snap/上下文"
+        let json = Data(
+            """
+            {"id":"snap/上下文","session_id":"sess/中文","agent_id":"agent-template","task_id":"task-template","health":"conflicted","reasons":["策略冲突"],"created_at":"2026-06-27T06:20:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/context-snapshots/snap%2F%E4%B8%8A%E4%B8%8B%E6%96%87" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "context_snapshot": "/workbench-v2/sessions/{session_id}/context-snapshots/{snapshot_id}",
+        ])
+        let snapshot = try await client.fetchContextSnapshot(sessionID: sessionID, snapshotID: snapshotID)
+
+        #expect(snapshot.id == snapshotID)
+        #expect(snapshot.sessionID == sessionID)
+        #expect(snapshot.health == "conflicted")
+        #expect(snapshot.reasons == ["策略冲突"])
+    }
+
     @Test func recordContextHealthUsesPOSTAndEncodesPathAndBody() async throws {
         let sessionID = "sess/中文"
         let taskID = "task/审查"
