@@ -1997,6 +1997,54 @@ final class WorkbenchAPIClientTests {
         #expect(worktree.task?.owner == "Backend-Agent")
     }
 
+    @Test func fetchWorktreesUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let taskID = "task/工作区"
+        let json = Data(
+            """
+            {"worktrees":[{"name":"wt-template","path":"/repo/.naumi/worktrees/wt-template","branch":"naumi/worktree-wt-template","base_ref":"abc123","status":"active","task_id":"task/工作区","dirty_files":1,"commits_ahead":2,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","kept_reason":"","metadata":{},"removable":true}],"task_id":"task/工作区","status":"active","limit":16}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/worktrees",
+                  query["limit"] == "16",
+                  query["task_id"] == taskID,
+                  query["status"] == "active" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "worktrees": "/workbench-v2/sessions/{session_id}/worktrees",
+        ])
+        let response = try await client.fetchWorktrees(
+            sessionID: sessionID,
+            taskID: taskID,
+            status: "active",
+            limit: 16
+        )
+
+        #expect(response.taskID == taskID)
+        #expect(response.status == "active")
+        #expect(response.limit == 16)
+        #expect(response.worktrees.first?.name == "wt-template")
+    }
+
     @Test func fetchWorktreeEncodesPathComponents() async throws {
         let sessionID = "sess/中文"
         let worktreeName = "wt-审查"
