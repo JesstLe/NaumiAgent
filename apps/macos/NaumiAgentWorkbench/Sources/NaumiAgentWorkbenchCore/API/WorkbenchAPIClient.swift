@@ -416,7 +416,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     public func fetchWorktree(sessionID: String, name: String) async throws(APIError) -> WorktreeDTO {
-        try await get(path: encodePath("workbench", "sessions", sessionID, "worktrees", name))
+        let path = try routePath(
+            named: "worktree",
+            replacements: [
+                "session_id": sessionID,
+                "name": name,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "worktrees", name)
+        )
+        return try await get(path: path)
     }
 
     public func keepWorktree(
