@@ -65,6 +65,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var resolveApprovalWithSnapshotResult: Result<ApprovalSnapshotDTO, APIError>?
     var runValidationResult: Result<ValidationResultDTO, APIError>?
     var runValidationWithSnapshotResult: Result<ValidationResultSnapshotDTO, APIError>?
+    var sendMessageHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -211,6 +212,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         content: String,
         workbenchIssue: ChatIssueDraftDTO?
     ) async throws(APIError) -> ChatMessageDTO {
+        if let sendMessageHook {
+            await sendMessageHook()
+        }
         guard let result = sendMessageResult else {
             throw .invalidResponse
         }
@@ -7238,6 +7242,72 @@ final class DaemonControllerTests {
         #expect(await api.fetchedEvents.map(\.limit) == [50])
     }
 
+    @Test @MainActor func sendDailyMessageIgnoresReplyAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", missions: [])
+        let otherMessage = ChatMessageDTO(
+            id: "msg-other",
+            role: "assistant",
+            content: "另一个会话的消息。",
+            timestamp: "2026-07-02T08:00:01",
+            metadata: [:]
+        )
+
+        let staleIssue = makeIssue(taskID: "task-stale", missionID: "mission-stale")
+        let staleEvent = makeEvent(id: "evt-stale", type: "issue.created", subjectID: "task-stale")
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", issues: [staleIssue], events: [staleEvent])
+        let response = ChatMessageDTO(
+            id: "msg-stale",
+            role: "assistant",
+            content: "已记录，并创建 Issue。",
+            timestamp: "2026-07-02T08:00:03",
+            metadata: [
+                "workbench_issue": .object(["task_id": .string("task-stale")]),
+                "workbench_snapshot": snapshotMetadata(
+                    sessionID: staleSnapshot.sessionID,
+                    issues: [staleIssue],
+                    events: [staleEvent]
+                ),
+            ]
+        )
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setSendMessageResult(.success(response))
+        await api.setSendMessageHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.chatMessages = [otherMessage]
+                appState.issues = []
+                appState.timelineEvents = []
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.sendDailyMessage(
+            content: "把登录失败记录成任务",
+            issueDraft: ChatIssueDraftDTO(
+                missionID: "mission-stale",
+                title: "登录失败",
+                description: "把登录失败记录成任务",
+                acceptanceCriteria: ["任务市场可见"],
+                parallelMode: "exclusive",
+                riskLevel: "medium"
+            )
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.chatMessages == [otherMessage])
+        #expect(appState.issues.isEmpty)
+        #expect(appState.timelineEvents.isEmpty)
+        #expect(appState.lastError == nil)
+        #expect(await api.snapshotCallCount == 0)
+        #expect(await api.issueRequests.isEmpty)
+        #expect(await api.fetchedEvents.isEmpty)
+    }
+
     @Test @MainActor func refreshAgentProfilesSuccessWritesToAppState() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -7341,6 +7411,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setSendMessageResult(_ result: Result<ChatMessageDTO, APIError>) {
         sendMessageResult = result
+    }
+
+    fileprivate func setSendMessageHook(_ hook: (@Sendable () async -> Void)?) {
+        sendMessageHook = hook
     }
 
     fileprivate func setEventsResult(_ result: Result<WorkbenchEventsDTO, APIError>) {
