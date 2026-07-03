@@ -1337,6 +1337,10 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             throw .invalidURL
         }
 
+        for key in replacements.keys where !template.contains("{\(key)}") {
+            throw .invalidURL
+        }
+
         var path = template
         for (key, value) in replacements {
             path = path.replacingOccurrences(
