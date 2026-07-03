@@ -2278,6 +2278,52 @@ final class DaemonControllerTests {
         await controller.stopEventStream()
     }
 
+    @Test @MainActor func eventStreamConnectedForDifferentSessionMarksStaleAndStopsStream() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-current"
+        appState.connectionState = .stale
+        let currentSnapshot = makeSnapshot(
+            sessionID: "sess-current",
+            missions: [makeMission(id: "mission-current", sessionID: "sess-current")]
+        )
+        appState.snapshot = currentSnapshot
+
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let unexpectedSnapshot = makeSnapshot(
+            sessionID: "sess-current",
+            missions: [makeMission(id: "mission-unexpected", sessionID: "sess-current")]
+        )
+        await api.setSnapshotResult(.success(unexpectedSnapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-current")
+
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.startEventStream()
+
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-current"]
+        }
+
+        await eventProvider.emit(.connected(sessionID: "sess-other"))
+
+        await waitUntil {
+            appState.lastError != nil
+        }
+
+        #expect(appState.connectionState == .stale)
+        #expect(appState.selectedSessionID == "sess-current")
+        #expect(appState.snapshot == currentSnapshot)
+        #expect(appState.lastError == .networkFailure("事件流返回了不匹配的会话连接"))
+        #expect(await api.snapshotCallCount == 0)
+        #expect(controller.hasActiveEventStream == false)
+
+        await controller.stopEventStream()
+    }
+
     @Test @MainActor func eventStreamConnectedAfterStaleRefreshesSnapshotAndWorkbenchLists() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-reconnect"
