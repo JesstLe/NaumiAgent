@@ -991,9 +991,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         missionID: String,
         lockID: String
     ) async throws(APIError) -> IntentLockDTO {
-        try await get(
-            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "intent-locks", lockID)
+        let path = try routePath(
+            named: "intent_lock",
+            replacements: [
+                "session_id": sessionID,
+                "mission_id": missionID,
+                "lock_id": lockID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "missions", missionID, "intent-locks", lockID)
         )
+        return try await get(path: path)
     }
 
     public func createIntentLock(
