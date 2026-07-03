@@ -519,6 +519,56 @@ final class WorkbenchAPIClientTests {
         #expect(bootstrap.snapshot?.sessionID == "sess-new")
     }
 
+    @Test func createWorkbenchSessionUsesConfiguredRouteTemplate() async throws {
+        let json = Data(
+            """
+            {"daemon_status":{"status":"running","version":"0.1.0","pid":12345,"host":"127.0.0.1","port":8765,"started_at":"2026-06-27T06:00:00","workspace_count":3},"capabilities":{"supports_daemon_management":false,"supports_workspace_registry":false,"supports_validation_runner":true,"supports_cloud_sync":false,"supported_locales":["zh-CN","en-US"],"protocol_version":1},"sessions":[{"id":"sess-template-create","title":"模板新会话","model":"gpt-5","created_at":"2026-06-27T06:00:00+00:00","updated_at":"2026-06-27T06:00:00+00:00","message_count":0,"total_tokens":0,"total_cost_usd":0.0,"status":"active"}],"total_sessions":4,"selected_session_id":"sess-template-create","snapshot":{"session_id":"sess-template-create","missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard request.value(forHTTPHeaderField: "Content-Type") == "application/json" else {
+                fatalError("Missing JSON content type")
+            }
+            guard let bodyData = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Missing body")
+            }
+            let body = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
+            guard body?["title"] as? String == "模板新会话",
+                  body?["model"] as? String == "gpt-5",
+                  body?["system_prompt"] as? String == "你是本地工作台协调者" else {
+                fatalError("Unexpected body: \(String(describing: body))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "create_session": "/workbench-v2/sessions",
+        ])
+        let bootstrap = try await client.createWorkbenchSession(
+            title: "模板新会话",
+            model: "gpt-5",
+            systemPrompt: "你是本地工作台协调者"
+        )
+
+        #expect(bootstrap.selectedSessionID == "sess-template-create")
+        #expect(bootstrap.sessions.first?.id == "sess-template-create")
+        #expect(bootstrap.totalSessions == 4)
+        #expect(bootstrap.snapshot?.sessionID == "sess-template-create")
+    }
+
     @Test func sendMessageCanIncludeWorkbenchIssueDraft() async throws {
         let json = Data(
             """
