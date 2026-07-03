@@ -1438,6 +1438,9 @@ public final class DaemonController: Sendable {
                 await stopEventStream()
                 clearUnavailableSelectedSession()
             }
+            if shouldClearConfiguredDaemonTemplates(after: error) {
+                await clearConfiguredDaemonTemplates()
+            }
             appState.lastError = error
         }
     }
