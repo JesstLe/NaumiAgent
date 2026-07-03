@@ -8,6 +8,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
     public let summary: WorkbenchSnapshotSummaryDTO?
     public let missions: [MissionDTO]
     public let agentProfiles: [AgentProfileDTO]
+    public let intentLocks: [IntentLockDTO]
     public let tasks: [TaskDTO]
     public let issues: [IssueDTO]
     public let leases: [LeaseDTO]
@@ -23,6 +24,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         case summary
         case missions
         case agentProfiles = "agent_profiles"
+        case intentLocks = "intent_locks"
         case tasks
         case issues
         case leases
@@ -39,6 +41,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         summary: WorkbenchSnapshotSummaryDTO? = nil,
         missions: [MissionDTO],
         agentProfiles: [AgentProfileDTO] = [],
+        intentLocks: [IntentLockDTO] = [],
         tasks: [TaskDTO],
         issues: [IssueDTO],
         leases: [LeaseDTO] = [],
@@ -53,6 +56,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         self.summary = summary
         self.missions = missions
         self.agentProfiles = agentProfiles
+        self.intentLocks = intentLocks
         self.tasks = tasks
         self.issues = issues
         self.leases = leases
@@ -70,6 +74,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         summary = try container.decodeIfPresent(WorkbenchSnapshotSummaryDTO.self, forKey: .summary)
         missions = try container.decode([MissionDTO].self, forKey: .missions)
         agentProfiles = try container.decodeIfPresent([AgentProfileDTO].self, forKey: .agentProfiles) ?? []
+        intentLocks = try container.decodeIfPresent([IntentLockDTO].self, forKey: .intentLocks) ?? []
         tasks = try container.decode([TaskDTO].self, forKey: .tasks)
         issues = try container.decode([IssueDTO].self, forKey: .issues)
         leases = try container.decodeIfPresent([LeaseDTO].self, forKey: .leases) ?? []

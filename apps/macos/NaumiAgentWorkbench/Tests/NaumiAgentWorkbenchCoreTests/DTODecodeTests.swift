@@ -111,6 +111,46 @@ struct DTODecodeTests {
         #expect(summary.failedValidations == 1)
     }
 
+    @Test func decodeSnapshotIntentLocks() throws {
+        let data = Data(
+            """
+            {
+              "session_id": "sess-governance",
+              "missions": [],
+              "agent_profiles": [],
+              "intent_locks": [
+                {
+                  "id": "lock-001",
+                  "session_id": "sess-governance",
+                  "mission_id": "mission-001",
+                  "rule": "高风险任务需要人工审批",
+                  "blocked_paths": ["src/core"],
+                  "allowed_paths": ["src/core/README.md"],
+                  "require_proposal_for_risk": "high",
+                  "active": true,
+                  "created_at": "2026-06-27T06:00:00"
+                }
+              ],
+              "tasks": [],
+              "issues": [],
+              "failures": [],
+              "events": []
+            }
+            """.utf8
+        )
+
+        let snapshot = try JSONDecoder().decode(WorkbenchSnapshotDTO.self, from: data)
+        let lock = try #require(snapshot.intentLocks.first)
+
+        #expect(lock.id == "lock-001")
+        #expect(lock.missionID == "mission-001")
+        #expect(lock.rule == "高风险任务需要人工审批")
+        #expect(lock.blockedPaths == ["src/core"])
+        #expect(lock.allowedPaths == ["src/core/README.md"])
+        #expect(lock.requireProposalForRisk == "high")
+        #expect(lock.active == true)
+    }
+
     @Test func decodeValidationRuns() throws {
         let data = Data(
             """
