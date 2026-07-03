@@ -263,6 +263,9 @@ public final class DaemonController: Sendable {
         case .snapshot(let snapshot):
             if let selectedSessionID = appState.selectedSessionID,
                selectedSessionID != snapshot.sessionID {
+                appState.connectionState = .stale
+                appState.lastError = .networkFailure("事件流返回了不匹配的会话快照")
+                await stopEventStream()
                 return
             }
             appState.selectedSessionID = snapshot.sessionID

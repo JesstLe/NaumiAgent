@@ -2226,6 +2226,49 @@ final class DaemonControllerTests {
         await controller.stopEventStream()
     }
 
+    @Test @MainActor func eventStreamSnapshotForDifferentSessionMarksStaleAndStopsStream() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-current"
+        appState.connectionState = .connected
+        let currentSnapshot = makeSnapshot(
+            sessionID: "sess-current",
+            missions: [makeMission(id: "mission-current", sessionID: "sess-current")]
+        )
+        let otherSnapshot = makeSnapshot(
+            sessionID: "sess-other",
+            missions: [makeMission(id: "mission-other", sessionID: "sess-other")]
+        )
+        appState.snapshot = currentSnapshot
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.startEventStream()
+
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-current"]
+        }
+
+        await eventProvider.emit(.snapshot(otherSnapshot))
+
+        await waitUntil {
+            appState.connectionState == .stale
+        }
+
+        #expect(appState.selectedSessionID == "sess-current")
+        #expect(appState.snapshot == currentSnapshot)
+        #expect(appState.lastError == .networkFailure("事件流返回了不匹配的会话快照"))
+        #expect(controller.hasActiveEventStream == false)
+
+        await controller.stopEventStream()
+    }
+
     @Test @MainActor func eventStreamConnectedAfterStaleRefreshesSnapshotAndWorkbenchLists() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-reconnect"
