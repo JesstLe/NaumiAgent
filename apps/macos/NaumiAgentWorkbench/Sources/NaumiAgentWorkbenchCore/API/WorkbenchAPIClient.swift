@@ -596,8 +596,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     public func expireLeasesWithSnapshot(sessionID: String) async throws(APIError) -> ExpiredLeasesSnapshotDTO {
-        try await post(
-            path: encodePath("workbench", "sessions", sessionID, "leases", "expire") + "?include_snapshot=true"
+        let path = try routePath(
+            named: "expire_leases",
+            replacements: ["session_id": sessionID],
+            fallback: encodePath("workbench", "sessions", sessionID, "leases", "expire")
+        )
+        return try await post(
+            path: path + "?include_snapshot=true"
         )
     }
 

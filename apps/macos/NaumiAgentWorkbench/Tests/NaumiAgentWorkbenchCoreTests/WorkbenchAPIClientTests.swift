@@ -2706,6 +2706,41 @@ final class WorkbenchAPIClientTests {
         #expect(response.snapshot.summary?.currentMissionTitle == "租约过期后刷新")
     }
 
+    @Test func expireLeasesWithSnapshotUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let responseJSON = Data(
+            """
+            {"expired":[{"id":"lease-过期","session_id":"sess/中文","task_id":"task-001","agent_id":"agent-001","state":"expired","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:30:00"}],"snapshot":{"session_id":"sess/中文","missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/leases/expire?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "expire_leases": "/workbench-v2/sessions/{session_id}/leases/expire",
+        ])
+        let response = try await client.expireLeasesWithSnapshot(sessionID: sessionID)
+
+        #expect(response.expired.map(\.id) == ["lease-过期"])
+        #expect(response.expired.first?.state == "expired")
+        #expect(response.snapshot.sessionID == sessionID)
+    }
+
     @Test func createMission() async throws {
         let missionJSON = Data(
             """
