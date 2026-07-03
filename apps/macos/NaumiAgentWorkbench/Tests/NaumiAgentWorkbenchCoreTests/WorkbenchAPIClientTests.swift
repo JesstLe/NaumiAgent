@@ -6022,6 +6022,34 @@ final class WorkbenchAPIClientTests {
         #expect(snapshot.issues.isEmpty)
     }
 
+    @Test func fetchSnapshotRejectsRouteTemplateMissingRequiredSessionPlaceholder() async {
+        var didSendRequest = false
+        let snapshotJSON = Data(
+            """
+            {"session_id":"unexpected","missions":[],"tasks":[],"issues":[],"failures":[],"events":[]}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            didSendRequest = true
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, snapshotJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "snapshot": "/workbench-v2/snapshot",
+        ])
+        await #expect(throws: APIError.invalidURL) {
+            try await client.fetchSnapshot(sessionID: "sess-template")
+        }
+        #expect(!didSendRequest)
+    }
+
     @Test func claimIssueEncodesSlashInPathComponents() async throws {
         let sessionID = "sess/中文"
         let taskID = "task/审查"
