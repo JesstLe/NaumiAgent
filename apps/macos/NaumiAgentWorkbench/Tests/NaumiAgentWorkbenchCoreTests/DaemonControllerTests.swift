@@ -2265,6 +2265,45 @@ final class DaemonControllerTests {
         await controller.stopEventStream()
     }
 
+    @Test @MainActor func eventStreamConnectedAfterStaleSessionUnavailableStopsStreamAndKeepsStale() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.connectionState = .stale
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        await api.setSnapshotResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.startEventStream()
+
+        await waitUntil {
+            await eventProvider.connectedSessionIDs == ["sess-missing"]
+        }
+
+        await eventProvider.emit(.connected(sessionID: "sess-missing"))
+
+        await waitUntil {
+            await api.snapshotCallCount >= 1 && appState.selectedSessionID == nil
+        }
+
+        #expect(appState.connectionState == .stale)
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.snapshot == nil)
+        #expect(controller.hasActiveEventStream == false)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+
+        await controller.stopEventStream()
+    }
+
     @Test @MainActor func requestEventStreamRefreshForwardsFiltersToActiveStream() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-events"
