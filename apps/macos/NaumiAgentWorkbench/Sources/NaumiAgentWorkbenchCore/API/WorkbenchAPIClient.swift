@@ -599,7 +599,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     public func fetchMission(sessionID: String, missionID: String) async throws(APIError) -> MissionDTO {
-        try await get(path: encodePath("workbench", "sessions", sessionID, "missions", missionID))
+        let path = try routePath(
+            named: "mission",
+            replacements: [
+                "session_id": sessionID,
+                "mission_id": missionID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "missions", missionID)
+        )
+        return try await get(path: path)
     }
 
     public func fetchAgentProfiles(
