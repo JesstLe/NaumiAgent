@@ -752,8 +752,14 @@ public final class DaemonController: Sendable {
                 health: health,
                 limit: limit
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.contextSnapshots = response.contextSnapshots
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
