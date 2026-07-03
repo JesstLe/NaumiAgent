@@ -15,7 +15,13 @@ struct SettingsDashboardPresentationTests {
             host: "127.0.0.1",
             port: 8765,
             startedAt: "2026-06-27T09:00:00",
-            workspaceCount: 1
+            workspaceCount: 1,
+            workspaceRoot: "/Users/lv/Workspace/NaumiAgent",
+            workspaceName: "NaumiAgent",
+            apiBaseURL: "http://127.0.0.1:8765/api/v1",
+            workbenchBaseURL: "http://127.0.0.1:8765/api/v1/workbench",
+            eventStreamURLTemplate: "ws://127.0.0.1:8765/api/v1/workbench/sessions/{session_id}/events/stream",
+            authMode: "dev_token"
         )
         state.capabilities = CapabilitiesDTO(
             supportsDaemonManagement: false,
@@ -71,6 +77,11 @@ struct SettingsDashboardPresentationTests {
         let presentation = SettingsDashboardPresentation(appState: state)
 
         #expect(presentation.runtimeEndpoint == "127.0.0.1:8765")
+        #expect(presentation.workspaceSummary == "NaumiAgent · /Users/lv/Workspace/NaumiAgent")
+        #expect(presentation.apiBaseURL == "http://127.0.0.1:8765/api/v1")
+        #expect(presentation.workbenchBaseURL == "http://127.0.0.1:8765/api/v1/workbench")
+        #expect(presentation.eventStreamURLTemplate == "ws://127.0.0.1:8765/api/v1/workbench/sessions/{session_id}/events/stream")
+        #expect(presentation.authMode == "dev_token")
         #expect(presentation.activeMissionTitle == "实现 SwiftUI 工作台骨架")
         #expect(presentation.enabledCapabilityCount == 2)
         #expect(presentation.supportedActionCount == 3)
@@ -114,6 +125,11 @@ struct SettingsDashboardPresentationTests {
         let presentation = SettingsDashboardPresentation(appState: AppState())
 
         #expect(presentation.runtimeEndpoint == "-")
+        #expect(presentation.workspaceSummary == "-")
+        #expect(presentation.apiBaseURL == "-")
+        #expect(presentation.workbenchBaseURL == "-")
+        #expect(presentation.eventStreamURLTemplate == "-")
+        #expect(presentation.authMode == "-")
         #expect(presentation.activeMissionTitle == "-")
         #expect(presentation.enabledCapabilityCount == 0)
         #expect(presentation.supportedActionCount == 0)
