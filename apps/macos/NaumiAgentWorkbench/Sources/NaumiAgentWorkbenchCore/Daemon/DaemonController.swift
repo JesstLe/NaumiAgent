@@ -936,11 +936,18 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            appState.selectedFailure = try await apiProvider.fetchFailure(
+            let failure = try await apiProvider.fetchFailure(
                 sessionID: sessionID,
                 failureID: failureID
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.selectedFailure = failure
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()

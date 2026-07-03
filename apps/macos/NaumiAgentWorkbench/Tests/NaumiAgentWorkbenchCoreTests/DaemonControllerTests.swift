@@ -74,6 +74,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var fetchContextSnapshotsHook: (@Sendable () async -> Void)?
     var fetchContextSnapshotHook: (@Sendable () async -> Void)?
     var fetchFailuresHook: (@Sendable () async -> Void)?
+    var fetchFailureHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -408,6 +409,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     }
 
     func fetchFailure(sessionID: String, failureID: String) async throws(APIError) -> FailureDTO {
+        if let fetchFailureHook {
+            await fetchFailureHook()
+        }
         guard let result = failureResult else {
             throw .invalidResponse
         }
@@ -6924,6 +6928,52 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    @Test @MainActor func loadFailureIgnoresFailureAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherFailure = makeFailure(id: "failure-other", taskID: "task-other", status: "open")
+        let staleFailure = makeFailure(id: "failure-stale", taskID: "task-stale", status: "open")
+        appState.selectedFailure = nil
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setFailureResult(.success(staleFailure))
+        await api.setFetchFailureHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.selectedFailure = otherFailure
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadFailure(failureID: "failure-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.selectedFailure == otherFailure)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadFailureIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherFailure = makeFailure(id: "failure-other", taskID: "task-other", status: "open")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setFailureResult(.failure(.sessionUnavailable))
+        await api.setFetchFailureHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.selectedFailure = otherFailure
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadFailure(failureID: "failure-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.selectedFailure == otherFailure)
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func loadFailureWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         let oldFailure = makeFailure(id: "failure-old", taskID: "task-001", status: "open")
@@ -8031,6 +8081,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setFailureResult(_ result: Result<FailureDTO, APIError>) {
         failureResult = result
+    }
+
+    fileprivate func setFetchFailureHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchFailureHook = hook
     }
 
     fileprivate func setIssuesResult(_ result: Result<IssuesDTO, APIError>) {
