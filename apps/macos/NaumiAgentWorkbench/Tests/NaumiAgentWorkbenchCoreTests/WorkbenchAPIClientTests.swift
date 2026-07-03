@@ -6032,6 +6032,51 @@ final class WorkbenchAPIClientTests {
         #expect(decision.createdAt == "2026-06-27T06:00:00")
     }
 
+    @Test func fetchDecisionsUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/治理"
+        let kind = "architecture"
+        let json = Data(
+            """
+            {"decisions":[{"id":"decision-template","session_id":"sess/中文","mission_id":"mission/治理","kind":"architecture","title":"模板化决策列表","content":"Settings 决策列表使用 capabilities 路由","actor":"Planner-Agent","created_at":"2026-06-27T06:00:00"}],"mission_id":"mission/治理","kind":"architecture"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/missions/mission%2F%E6%B2%BB%E7%90%86/decisions",
+                  query["kind"] == kind else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "decisions": "/workbench-v2/sessions/{session_id}/missions/{mission_id}/decisions",
+        ])
+        let response = try await client.fetchDecisions(
+            sessionID: sessionID,
+            missionID: missionID,
+            kind: kind
+        )
+
+        #expect(response.missionID == missionID)
+        #expect(response.kind == kind)
+        #expect(response.decisions.map(\.id) == ["decision-template"])
+    }
+
     @Test func fetchDecisionEncodesPathComponentsAndDecodesGovernanceRecord() async throws {
         let sessionID = "sess/中文"
         let missionID = "mission/审查"
