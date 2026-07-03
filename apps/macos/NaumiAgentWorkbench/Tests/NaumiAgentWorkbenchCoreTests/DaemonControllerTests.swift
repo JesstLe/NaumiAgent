@@ -2681,6 +2681,11 @@ final class DaemonControllerTests {
         appState.connectionState = .connected
         let api = FakeWorkbenchAPIProvider()
         let eventProvider = FakeWorkbenchEventProvider()
+        let lateSnapshot = makeSnapshot(
+            sessionID: "sess-events",
+            missions: [makeMission(id: "mission-late", sessionID: "sess-events")]
+        )
+        await configureWorkbenchListResults(for: api, sessionID: "sess-events")
         let controller = DaemonController(
             appState: appState,
             apiProvider: api,
@@ -2697,6 +2702,14 @@ final class DaemonControllerTests {
             appState.connectionState == .stale
         }
 
+        #expect(appState.lastError == .networkFailure("daemon restarted"))
+        #expect(controller.hasActiveEventStream == false)
+
+        await eventProvider.emit(.snapshot(lateSnapshot))
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        #expect(appState.connectionState == .stale)
+        #expect(appState.snapshot == nil)
         #expect(appState.lastError == .networkFailure("daemon restarted"))
         #expect(controller.hasActiveEventStream == false)
 
