@@ -3201,6 +3201,47 @@ final class WorkbenchAPIClientTests {
         #expect(response.agentProfiles.isEmpty)
     }
 
+    @Test func fetchAgentProfilesUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let json = Data(
+            """
+            {"agent_profiles":[{"id":"agent-template","session_id":"sess/中文","name":"模板智能体","role":"reviewer","capabilities":["review","risk"],"permissions":["read"],"max_parallel_tasks":1,"status":"idle","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}],"status":"idle","limit":12}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/agents",
+                  query["limit"] == "12",
+                  query["status"] == "idle" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "agents": "/workbench-v2/sessions/{session_id}/agents",
+        ])
+        let response = try await client.fetchAgentProfiles(sessionID: sessionID, status: "idle", limit: 12)
+
+        #expect(response.status == "idle")
+        #expect(response.limit == 12)
+        #expect(response.agentProfiles.first?.id == "agent-template")
+        #expect(response.agentProfiles.first?.sessionID == sessionID)
+    }
+
     @Test func fetchAgentProfileEncodesPathComponentsAndDecodesCapabilities() async throws {
         let sessionID = "sess/中文"
         let agentID = "agent/后端"
