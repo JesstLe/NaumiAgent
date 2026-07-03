@@ -595,8 +595,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         goal: String
     ) async throws(APIError) -> MissionSnapshotDTO {
         let body = CreateMissionRequest(title: title, goal: goal)
+        let path = try routePath(
+            named: "create_mission",
+            replacements: ["session_id": sessionID],
+            fallback: encodePath("workbench", "sessions", sessionID, "missions")
+        )
         return try await post(
-            path: encodePath("workbench", "sessions", sessionID, "missions") + "?include_snapshot=true",
+            path: path + "?include_snapshot=true",
             body: body
         )
     }
@@ -683,8 +688,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             parallelMode: parallelMode,
             riskLevel: riskLevel
         )
+        let path = try routePath(
+            named: "create_issue",
+            replacements: [
+                "session_id": sessionID,
+                "mission_id": missionID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "missions", missionID, "issues")
+        )
         return try await post(
-            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "issues") + "?include_snapshot=true",
+            path: path + "?include_snapshot=true",
             body: body
         )
     }

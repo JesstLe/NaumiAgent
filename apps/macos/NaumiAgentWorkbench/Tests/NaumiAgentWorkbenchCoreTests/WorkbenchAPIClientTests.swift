@@ -2698,6 +2698,44 @@ final class WorkbenchAPIClientTests {
         #expect(response.snapshot.missions == [response.mission])
     }
 
+    @Test func createMissionWithSnapshotUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let responseJSON = Data(
+            """
+            {"mission":{"id":"mission-template","session_id":"sess/中文","title":"模板 Mission","goal":"使用 daemon route template","status":"active","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"},"snapshot":{"session_id":"sess/中文","missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/missions?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "create_mission": "/workbench-v2/sessions/{session_id}/missions",
+        ])
+        let response = try await client.createMissionWithSnapshot(
+            sessionID: sessionID,
+            title: "模板 Mission",
+            goal: "使用 daemon route template"
+        )
+
+        #expect(response.mission.id == "mission-template")
+        #expect(response.snapshot.sessionID == sessionID)
+    }
+
     @Test func attachIssue() async throws {
         let issueJSON = Data(
             """
@@ -2926,6 +2964,51 @@ final class WorkbenchAPIClientTests {
         #expect(response.snapshot.sessionID == "sess-001")
         #expect(response.snapshot.summary?.openIssues == 1)
         #expect(response.snapshot.issues == [response.issue])
+    }
+
+    @Test func createIssueWithSnapshotUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/治理"
+        let responseJSON = Data(
+            """
+            {"issue":{"session_id":"sess/中文","task_id":"task-template","mission_id":"mission/治理","parallel_mode":"exclusive","risk_level":"medium","requires_human_approval":true,"acceptance_criteria":["可在任务市场看到"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"},"snapshot":{"session_id":"sess/中文","missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/missions/mission%2F%E6%B2%BB%E7%90%86/issues?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "create_issue": "/workbench-v2/sessions/{session_id}/missions/{mission_id}/issues",
+        ])
+        let response = try await client.createIssueWithSnapshot(
+            sessionID: sessionID,
+            missionID: missionID,
+            title: "模板 Issue",
+            description: "使用 daemon route template",
+            blockedBy: [],
+            acceptanceCriteria: ["可在任务市场看到"],
+            parallelMode: "exclusive",
+            riskLevel: "medium"
+        )
+
+        #expect(response.issue.taskID == "task-template")
+        #expect(response.issue.missionID == missionID)
+        #expect(response.snapshot.sessionID == sessionID)
     }
 
     @Test func attachIssueEncodesPathComponentsAndBody() async throws {
