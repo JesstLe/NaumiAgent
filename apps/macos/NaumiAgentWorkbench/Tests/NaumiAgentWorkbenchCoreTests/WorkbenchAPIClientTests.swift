@@ -1534,6 +1534,57 @@ final class WorkbenchAPIClientTests {
         #expect(issue.task?.owner == "Backend-Agent")
     }
 
+    @Test func fetchIssuesUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/治理"
+        let json = Data(
+            """
+            {"issues":[{"session_id":"sess/中文","task_id":"task-template","mission_id":"mission/治理","parallel_mode":"exclusive","risk_level":"medium","requires_human_approval":true,"acceptance_criteria":["任务市场可见"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"mission_id":"mission/治理","risk_level":"medium","status":"pending","limit":12}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/issues",
+                  query["limit"] == "12",
+                  query["mission_id"] == missionID,
+                  query["risk_level"] == "medium",
+                  query["status"] == "pending" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "issues": "/workbench-v2/sessions/{session_id}/issues",
+        ])
+        let response = try await client.fetchIssues(
+            sessionID: sessionID,
+            missionID: missionID,
+            riskLevel: "medium",
+            status: "pending",
+            limit: 12
+        )
+
+        #expect(response.missionID == missionID)
+        #expect(response.riskLevel == "medium")
+        #expect(response.status == "pending")
+        #expect(response.limit == 12)
+        #expect(response.issues.first?.taskID == "task-template")
+    }
+
     @Test func fetchIssuesWithoutFilters() async throws {
         let json = Data(
             """
