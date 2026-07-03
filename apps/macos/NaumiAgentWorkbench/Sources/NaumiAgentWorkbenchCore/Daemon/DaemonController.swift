@@ -1119,8 +1119,14 @@ public final class DaemonController: Sendable {
                 status: status,
                 limit: limit
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.worktrees = response.worktrees
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
