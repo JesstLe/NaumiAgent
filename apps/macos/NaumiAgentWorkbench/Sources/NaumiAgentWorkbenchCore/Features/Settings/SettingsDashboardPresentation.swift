@@ -6,6 +6,9 @@ public struct SettingsDashboardPresentation: Equatable {
     public let runtimeEndpoint: String
     public let activeMissionTitle: String
     public let enabledCapabilityCount: Int
+    public let supportedActionCount: Int
+    public let routeTemplateCount: Int
+    public let missingActionRouteTemplates: [String]
     public let governancePolicyCount: Int
     public let connectionState: AppState.ConnectionState
     public let supportedLocales: [String]
@@ -22,6 +25,11 @@ public struct SettingsDashboardPresentation: Equatable {
         }
         self.activeMissionTitle = appState.missions.first?.title ?? "-"
         self.enabledCapabilityCount = SettingsDashboardPresentation.enabledCapabilityCount(
+            capabilities: appState.capabilities
+        )
+        self.supportedActionCount = appState.capabilities?.supportedActions.count ?? 0
+        self.routeTemplateCount = appState.capabilities?.routeTemplates.count ?? 0
+        self.missingActionRouteTemplates = SettingsDashboardPresentation.missingActionRouteTemplates(
             capabilities: appState.capabilities
         )
         self.governancePolicyCount = 3
@@ -68,6 +76,18 @@ public struct SettingsDashboardPresentation: Equatable {
         .count
     }
 
+    private static func missingActionRouteTemplates(capabilities: CapabilitiesDTO?) -> [String] {
+        guard let capabilities else { return [] }
+        return capabilities.supportedActions.filter {
+            capabilities.routeTemplate(for: $0) == nil
+        }
+    }
+
+    private static func actionRouteTemplateState(capabilities: CapabilitiesDTO?) -> SettingsChecklistState {
+        guard let capabilities else { return .blocked }
+        return missingActionRouteTemplates(capabilities: capabilities).isEmpty ? .passed : .warning
+    }
+
     private static func runtimeChecklist(appState: AppState) -> [SettingsChecklistItem] {
         [
             SettingsChecklistItem(
@@ -81,6 +101,10 @@ public struct SettingsDashboardPresentation: Equatable {
             SettingsChecklistItem(
                 kind: .validationRunnerAvailable,
                 state: appState.capabilities?.supportsValidationRunner == true ? .passed : .blocked
+            ),
+            SettingsChecklistItem(
+                kind: .actionRouteTemplates,
+                state: actionRouteTemplateState(capabilities: appState.capabilities)
             ),
         ]
     }
@@ -108,6 +132,7 @@ public enum SettingsChecklistKind: Equatable, Sendable {
     case loopbackOnly
     case protocolCompatible
     case validationRunnerAvailable
+    case actionRouteTemplates
     case humanApproval
     case workbenchWritePath
     case intentLockReady
@@ -132,6 +157,8 @@ public struct SettingsChecklistItem: Equatable, Sendable, Identifiable {
             return locale == .zhCN ? "Workbench 协议兼容" : "Workbench protocol compatible"
         case .validationRunnerAvailable:
             return locale == .zhCN ? "验证运行器可用" : "Validation runner available"
+        case .actionRouteTemplates:
+            return locale == .zhCN ? "动作路由模板完整" : "Action route templates complete"
         case .humanApproval:
             return locale == .zhCN ? "高风险动作人工审批" : "Human approval for high risk"
         case .workbenchWritePath:

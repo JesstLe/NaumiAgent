@@ -43,7 +43,7 @@ public struct SettingsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         runtimePanel(presentation: presentation)
-                        capabilitiesPanel
+                        capabilitiesPanel(presentation: presentation)
                         selectedDecisionPanel
                         selectedIntentLockPanel
                         readinessGrid(presentation: presentation)
@@ -557,7 +557,7 @@ public struct SettingsView: View {
         }
     }
 
-    private var capabilitiesPanel: some View {
+    private func capabilitiesPanel(presentation: SettingsDashboardPresentation) -> some View {
         panel(title: appState.locale == .zhCN ? "服务能力" : "Service Capabilities") {
             VStack(alignment: .leading, spacing: 10) {
                 capabilityRow(
@@ -575,6 +575,17 @@ public struct SettingsView: View {
                 capabilityRow(
                     title: appState.locale == .zhCN ? "云同步" : "Cloud Sync",
                     enabled: appState.capabilities?.supportsCloudSync == true
+                )
+                Divider()
+                settingsRow(
+                    label: appState.locale == .zhCN ? "动作路由" : "Action Routes",
+                    value: "\(presentation.supportedActionCount)/\(presentation.routeTemplateCount)"
+                )
+                settingsRow(
+                    label: appState.locale == .zhCN ? "缺失模板" : "Missing Templates",
+                    value: presentation.missingActionRouteTemplates.isEmpty
+                        ? "-"
+                        : presentation.missingActionRouteTemplates.joined(separator: ", ")
                 )
             }
         }
