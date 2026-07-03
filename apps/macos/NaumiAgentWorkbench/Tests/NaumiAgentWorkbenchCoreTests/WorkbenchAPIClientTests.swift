@@ -3547,6 +3547,57 @@ final class WorkbenchAPIClientTests {
         #expect(lease.task?.owner == "Backend-Agent")
     }
 
+    @Test func claimIssueUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let taskID = "task/认领"
+        let leaseJSON = Data(
+            """
+            {"id":"lease-template","session_id":"sess/中文","task_id":"task/认领","agent_id":"agent-001","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-template","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/issues/task%2F%E8%AE%A4%E9%A2%86/claim" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["agent_id"] as? String == "agent-001",
+                  json?["duration_minutes"] as? Int == 45,
+                  json?["worktree_name"] as? String == "wt-template" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, leaseJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "claim_issue": "/workbench-v2/sessions/{session_id}/issues/{task_id}/claim",
+        ])
+        let lease = try await client.claimIssue(
+            sessionID: sessionID,
+            taskID: taskID,
+            agentID: "agent-001",
+            durationMinutes: 45,
+            worktreeName: "wt-template"
+        )
+
+        #expect(lease.id == "lease-template")
+        #expect(lease.sessionID == sessionID)
+        #expect(lease.taskID == taskID)
+        #expect(lease.worktreeName == "wt-template")
+    }
+
     @Test func claimIssueWithSnapshotRequestsFreshSnapshot() async throws {
         let responseJSON = Data(
             """
