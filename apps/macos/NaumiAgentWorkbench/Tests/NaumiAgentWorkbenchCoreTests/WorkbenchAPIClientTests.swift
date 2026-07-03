@@ -3571,6 +3571,64 @@ final class WorkbenchAPIClientTests {
         #expect(response.snapshot.summary?.currentMissionTitle == "治理规则更新")
     }
 
+    @Test func createIntentLockWithSnapshotUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/治理"
+        let responseJSON = Data(
+            """
+            {"intent_lock":{"id":"lock-template","session_id":"sess/中文","mission_id":"mission/治理","rule":"高风险需要人工审批","blocked_paths":["src/core"],"allowed_paths":["src/core/README.md"],"require_proposal_for_risk":"critical","active":true,"created_at":"2026-06-27T06:00:00"},"snapshot":{"session_id":"sess/中文","missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/missions/mission%2F%E6%B2%BB%E7%90%86/intent-locks?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["actor"] as? String == "Planner-Agent",
+                  json?["rule"] as? String == "高风险需要人工审批",
+                  let blockedPaths = json?["blocked_paths"] as? [String],
+                  blockedPaths == ["src/core"],
+                  let allowedPaths = json?["allowed_paths"] as? [String],
+                  allowedPaths == ["src/core/README.md"],
+                  json?["require_proposal_for_risk"] as? String == "critical" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "create_intent_lock": "/workbench-v2/sessions/{session_id}/missions/{mission_id}/intent-locks",
+        ])
+        let response = try await client.createIntentLockWithSnapshot(
+            sessionID: sessionID,
+            missionID: missionID,
+            actor: "Planner-Agent",
+            rule: "高风险需要人工审批",
+            blockedPaths: ["src/core"],
+            allowedPaths: ["src/core/README.md"],
+            requireProposalForRisk: "critical"
+        )
+
+        #expect(response.intentLock.id == "lock-template")
+        #expect(response.intentLock.missionID == missionID)
+        #expect(response.intentLock.requireProposalForRisk == "critical")
+        #expect(response.snapshot.sessionID == sessionID)
+    }
+
     @Test func createDecisionUsesPOSTAndEncodesPathAndBody() async throws {
         let sessionID = "sess 中文"
         let missionID = "mission 中文"
