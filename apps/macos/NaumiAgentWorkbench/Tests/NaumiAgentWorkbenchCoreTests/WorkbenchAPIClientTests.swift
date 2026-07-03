@@ -1091,6 +1091,58 @@ final class WorkbenchAPIClientTests {
         #expect(response.contextSnapshots.isEmpty)
     }
 
+    @Test func fetchContextSnapshotsUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let taskID = "task/上下文"
+        let agentID = "agent/审查"
+        let json = Data(
+            """
+            {"context_snapshots":[{"id":"snap-template","session_id":"sess/中文","agent_id":"agent/审查","task_id":"task/上下文","health":"stale","reasons":["超过 20 分钟未同步"],"created_at":"2026-06-27T06:00:00"}],"task_id":"task/上下文","agent_id":"agent/审查","health":"stale","limit":14}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/context-snapshots",
+                  query["limit"] == "14",
+                  query["task_id"] == taskID,
+                  query["agent_id"] == agentID,
+                  query["health"] == "stale" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "context_snapshots": "/workbench-v2/sessions/{session_id}/context-snapshots",
+        ])
+        let response = try await client.fetchContextSnapshots(
+            sessionID: sessionID,
+            taskID: taskID,
+            agentID: agentID,
+            health: "stale",
+            limit: 14
+        )
+
+        #expect(response.taskID == taskID)
+        #expect(response.agentID == agentID)
+        #expect(response.health == "stale")
+        #expect(response.limit == 14)
+        #expect(response.contextSnapshots.first?.id == "snap-template")
+    }
+
     @Test func fetchContextSnapshotEncodesPathComponentsAndDecodesReasons() async throws {
         let sessionID = "sess 中文"
         let snapshotID = "snap/上下文 001"
