@@ -76,6 +76,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var fetchFailuresHook: (@Sendable () async -> Void)?
     var fetchFailureHook: (@Sendable () async -> Void)?
     var fetchIssuesHook: (@Sendable () async -> Void)?
+    var fetchIssueHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -444,6 +445,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     }
 
     func fetchIssue(sessionID: String, taskID: String) async throws(APIError) -> IssueDTO {
+        if let fetchIssueHook {
+            await fetchIssueHook()
+        }
         guard let result = issueResult else {
             throw .invalidResponse
         }
@@ -7096,6 +7100,52 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    @Test @MainActor func loadIssueIgnoresIssueAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherIssue = makeIssue(taskID: "task-other", missionID: "mission-other")
+        let staleIssue = makeIssue(taskID: "task-stale", missionID: "mission-stale")
+        appState.selectedIssue = nil
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setIssueResult(.success(staleIssue))
+        await api.setFetchIssueHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.selectedIssue = otherIssue
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadIssue(taskID: "task-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.selectedIssue == otherIssue)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadIssueIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherIssue = makeIssue(taskID: "task-other", missionID: "mission-other")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setIssueResult(.failure(.sessionUnavailable))
+        await api.setFetchIssueHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.selectedIssue = otherIssue
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadIssue(taskID: "task-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.selectedIssue == otherIssue)
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func loadIssueWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         let oldIssue = makeIssue(taskID: "task-old", missionID: "mission-001")
@@ -8153,6 +8203,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setIssueResult(_ result: Result<IssueDTO, APIError>) {
         issueResult = result
+    }
+
+    fileprivate func setFetchIssueHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchIssueHook = hook
     }
 
     fileprivate func setLeasesResult(_ result: Result<LeasesDTO, APIError>) {
