@@ -1648,6 +1648,42 @@ final class WorkbenchAPIClientTests {
         #expect(approval.task?.owner == "Governance-Agent")
     }
 
+    @Test func fetchApprovalUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let approvalID = "approval/人工审批"
+        let json = Data(
+            """
+            {"id":"approval/人工审批","session_id":"sess/中文","mission_id":"mission-template","task_id":"task-template","state":"waiting","title":"模板审批详情","detail":"从模板路径加载","requester":"Reviewer-Agent","reviewer":"","decision_note":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/approvals/approval%2F%E4%BA%BA%E5%B7%A5%E5%AE%A1%E6%89%B9" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "approval": "/workbench-v2/sessions/{session_id}/approvals/{approval_id}",
+        ])
+        let approval = try await client.fetchApproval(sessionID: sessionID, approvalID: approvalID)
+
+        #expect(approval.id == approvalID)
+        #expect(approval.sessionID == sessionID)
+        #expect(approval.title == "模板审批详情")
+        #expect(approval.detail == "从模板路径加载")
+    }
+
     @Test func fetchFailuresWithFilters() async throws {
         let sessionID = "sess 中文"
         let taskID = "task 001/审查"

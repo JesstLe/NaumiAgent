@@ -328,7 +328,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     public func fetchApproval(sessionID: String, approvalID: String) async throws(APIError) -> ApprovalDTO {
-        try await get(path: encodePath("workbench", "sessions", sessionID, "approvals", approvalID))
+        let path = try routePath(
+            named: "approval",
+            replacements: [
+                "session_id": sessionID,
+                "approval_id": approvalID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "approvals", approvalID)
+        )
+        return try await get(path: path)
     }
 
     public func fetchFailures(
