@@ -873,11 +873,12 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding {
     }
 }
 
-actor FakeWorkbenchEventProvider: WorkbenchEventProviding {
+actor FakeWorkbenchEventProvider: WorkbenchEventProviding, WorkbenchEventStreamTemplateConfiguring {
     private var continuation: AsyncThrowingStream<WorkbenchEventStreamMessage, Error>.Continuation?
     private let streamRecorder = FakeWorkbenchEventStreamRecorder()
     private var connectResult: Result<Void, APIError> = .success(())
     private(set) var connectedSessionIDs: [String] = []
+    private var eventStreamURLTemplates: [String?] = []
 
     func connect(sessionID: String) async throws(APIError) -> any WorkbenchEventStreaming {
         connectedSessionIDs.append(sessionID)
@@ -902,6 +903,14 @@ actor FakeWorkbenchEventProvider: WorkbenchEventProviding {
 
     func setConnectResult(_ result: Result<Void, APIError>) {
         connectResult = result
+    }
+
+    func setEventStreamURLTemplate(_ template: String?) async {
+        eventStreamURLTemplates.append(template)
+    }
+
+    func recordedEventStreamURLTemplates() -> [String?] {
+        eventStreamURLTemplates
     }
 
     func recordedRefreshRequests() async -> [FakeWorkbenchEventRefreshRequest] {
@@ -1135,6 +1144,43 @@ final class DaemonControllerTests {
         #expect(appState.snapshot == snapshot)
         #expect(controller.hasActiveEventStream == false)
         #expect(await eventProvider.connectedSessionIDs == [])
+    }
+
+    @Test @MainActor func refreshConnectionConfiguresEventStreamTemplateFromDaemonStatus() async throws {
+        let appState = AppState()
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let session = makeSession(id: "sess-template", title: "Template Session")
+        let eventStreamURLTemplate = "wss://daemon.local:9443/api/v1/workbench/sessions/{session_id}/events/stream"
+        let bootstrap = WorkbenchBootstrapDTO(
+            daemonStatus: DaemonStatusDTO(
+                status: "running",
+                version: "0.2.0",
+                pid: 42,
+                host: "127.0.0.1",
+                port: 8765,
+                startedAt: "2026-06-27T06:00:00",
+                workspaceCount: 7,
+                eventStreamURLTemplate: eventStreamURLTemplate
+            ),
+            capabilities: makeCapabilities(),
+            sessions: [session],
+            totalSessions: 1,
+            selectedSessionID: "sess-template",
+            snapshot: makeSnapshot(sessionID: "sess-template", missions: [])
+        )
+
+        await api.setBootstrapResult(.success(bootstrap))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-template")
+
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.refreshConnection()
+
+        #expect(await eventProvider.recordedEventStreamURLTemplates() == [eventStreamURLTemplate])
     }
 
     @Test @MainActor func refreshConnectionFailure() async throws {

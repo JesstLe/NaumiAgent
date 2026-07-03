@@ -30,6 +30,11 @@ public protocol WorkbenchEventProviding: Sendable {
     func connect(sessionID: String) async throws(APIError) -> any WorkbenchEventStreaming
 }
 
+/// Optional event-provider capability for daemon-supplied stream URL templates.
+public protocol WorkbenchEventStreamTemplateConfiguring: Sendable {
+    func setEventStreamURLTemplate(_ template: String?) async
+}
+
 /// Minimal task surface used by `WorkbenchEventClient`.
 public protocol WorkbenchWebSocketTasking: Sendable {
     func start() async
@@ -71,15 +76,17 @@ extension URLSession: WorkbenchWebSocketTransporting {
 ///
 /// Snapshot remains the source of truth. The stream asks the daemon for an
 /// initial snapshot, then carries event hints for lightweight follow-up refreshes.
-public actor WorkbenchEventClient: Sendable, WorkbenchEventProviding {
+public actor WorkbenchEventClient: Sendable, WorkbenchEventProviding, WorkbenchEventStreamTemplateConfiguring {
     public let baseURL: URL
     private let transport: WorkbenchWebSocketTransporting
     private let bearerToken: String?
+    private var eventStreamURLTemplate: String?
 
     public init(
         baseURL: URL = URL(string: "http://127.0.0.1:8765/api/v1/")!,
         transport: WorkbenchWebSocketTransporting = URLSession.shared,
-        bearerToken: String? = nil
+        bearerToken: String? = nil,
+        eventStreamURLTemplate: String? = nil
     ) {
         let baseURLString = baseURL.absoluteString
         if baseURLString.hasSuffix("/") {
@@ -89,13 +96,24 @@ public actor WorkbenchEventClient: Sendable, WorkbenchEventProviding {
         }
         self.transport = transport
         self.bearerToken = bearerToken
+        self.eventStreamURLTemplate = eventStreamURLTemplate
     }
 
     public static func eventStreamURL(
         baseURL: URL,
         sessionID: String,
-        includeSnapshot: Bool = false
+        includeSnapshot: Bool = false,
+        eventStreamURLTemplate: String? = nil
     ) throws(APIError) -> URL {
+        if let eventStreamURLTemplate,
+           !eventStreamURLTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return try eventStreamURLFromTemplate(
+                eventStreamURLTemplate,
+                sessionID: sessionID,
+                includeSnapshot: includeSnapshot
+            )
+        }
+
         var components = URLComponents(url: normalizedBaseURL(baseURL), resolvingAgainstBaseURL: false)
         switch components?.scheme {
         case "http":
@@ -126,7 +144,8 @@ public actor WorkbenchEventClient: Sendable, WorkbenchEventProviding {
         let url = try Self.eventStreamURL(
             baseURL: baseURL,
             sessionID: sessionID,
-            includeSnapshot: true
+            includeSnapshot: true,
+            eventStreamURLTemplate: eventStreamURLTemplate
         )
         var request = URLRequest(url: url)
         if let bearerToken, !bearerToken.isEmpty {
@@ -136,6 +155,44 @@ public actor WorkbenchEventClient: Sendable, WorkbenchEventProviding {
         let task = await transport.makeWebSocketTask(with: request)
         await task.start()
         return WorkbenchEventStream(task: task)
+    }
+
+    public func setEventStreamURLTemplate(_ template: String?) async {
+        eventStreamURLTemplate = template
+    }
+
+    private static func eventStreamURLFromTemplate(
+        _ template: String,
+        sessionID: String,
+        includeSnapshot: Bool
+    ) throws(APIError) -> URL {
+        guard template.contains("{session_id}") else {
+            throw .invalidURL
+        }
+
+        let encodedSessionID = encodePathSegment(sessionID)
+        let expanded = template.replacingOccurrences(
+            of: "{session_id}",
+            with: encodedSessionID
+        )
+        guard var components = URLComponents(string: expanded) else {
+            throw .invalidURL
+        }
+        guard components.scheme == "ws" || components.scheme == "wss" else {
+            throw .invalidURL
+        }
+
+        if includeSnapshot {
+            var queryItems = components.queryItems ?? []
+            queryItems.removeAll { $0.name == "include_snapshot" }
+            queryItems.append(URLQueryItem(name: "include_snapshot", value: "true"))
+            components.queryItems = queryItems
+        }
+
+        guard let url = components.url else {
+            throw .invalidURL
+        }
+        return url
     }
 
     private static func normalizedBaseURL(_ baseURL: URL) -> URL {

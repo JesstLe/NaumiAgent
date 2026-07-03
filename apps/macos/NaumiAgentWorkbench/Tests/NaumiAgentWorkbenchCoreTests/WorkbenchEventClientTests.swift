@@ -38,6 +38,30 @@ final class WorkbenchEventClientTests {
         )
     }
 
+    @Test func eventStreamURLUsesDaemonTemplateWhenAvailable() throws {
+        let url = try WorkbenchEventClient.eventStreamURL(
+            baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
+            sessionID: "sess/中文",
+            includeSnapshot: true,
+            eventStreamURLTemplate: "wss://daemon.local:9443/api/v1/workbench/sessions/{session_id}/events/stream"
+        )
+
+        #expect(
+            url.absoluteString
+                == "wss://daemon.local:9443/api/v1/workbench/sessions/sess%2F%E4%B8%AD%E6%96%87/events/stream?include_snapshot=true"
+        )
+    }
+
+    @Test func eventStreamURLRejectsTemplateWithoutSessionPlaceholder() {
+        #expect(throws: APIError.invalidURL) {
+            _ = try WorkbenchEventClient.eventStreamURL(
+                baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
+                sessionID: "sess-001",
+                eventStreamURLTemplate: "wss://daemon.local:9443/events/stream"
+            )
+        }
+    }
+
     @Test func connectStartsTaskAndAddsBearerToken() async throws {
         let transport = RecordingWorkbenchWebSocketTransport(messages: [
             .string(#"{"type":"connected","session_id":"sess-001"}"#),
@@ -45,7 +69,8 @@ final class WorkbenchEventClientTests {
         let client = WorkbenchEventClient(
             baseURL: URL(string: "http://127.0.0.1:8765/api/v1/")!,
             transport: transport,
-            bearerToken: "local-token"
+            bearerToken: "local-token",
+            eventStreamURLTemplate: "wss://daemon.local:9443/api/v1/workbench/sessions/{session_id}/events/stream"
         )
 
         let stream = try await client.connect(sessionID: "sess-001")
@@ -53,7 +78,7 @@ final class WorkbenchEventClientTests {
 
         #expect(
             request.url?.absoluteString
-                == "ws://127.0.0.1:8765/api/v1/workbench/sessions/sess-001/events/stream?include_snapshot=true"
+                == "wss://daemon.local:9443/api/v1/workbench/sessions/sess-001/events/stream?include_snapshot=true"
         )
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer local-token")
         #expect(await transport.task.resumeCallCount == 1)
