@@ -1282,11 +1282,18 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            appState.selectedMission = try await apiProvider.fetchMission(
+            let mission = try await apiProvider.fetchMission(
                 sessionID: sessionID,
                 missionID: missionID
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.selectedMission = mission
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
