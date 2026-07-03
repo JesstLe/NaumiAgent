@@ -67,6 +67,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var runValidationWithSnapshotResult: Result<ValidationResultSnapshotDTO, APIError>?
     var sendMessageHook: (@Sendable () async -> Void)?
     var fetchMessagesHook: (@Sendable () async -> Void)?
+    var fetchEventsHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -253,6 +254,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
             since: since,
             limit: limit
         ))
+        if let fetchEventsHook {
+            await fetchEventsHook()
+        }
         guard let result = eventsResult else {
             throw .invalidResponse
         }
@@ -4218,6 +4222,54 @@ final class DaemonControllerTests {
         ])
     }
 
+    @Test @MainActor func refreshEventsIgnoresEventsAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherEvent = EventDTO(
+            id: "evt-other",
+            sessionID: "sess-other",
+            type: "mission.created",
+            actor: "Human",
+            subjectID: "mission-other",
+            payload: ["title": .string("另一个会话")],
+            timestamp: "2026-06-27T06:01:00"
+        )
+        let staleEvent = EventDTO(
+            id: "evt-stale",
+            sessionID: "sess-001",
+            type: "issue.created",
+            actor: "Backend-Agent",
+            subjectID: "task-stale",
+            payload: ["title": .string("旧事件")],
+            timestamp: "2026-06-27T06:02:00"
+        )
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [staleEvent], limit: 50)))
+        await api.setFetchEventsHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.timelineEvents = [otherEvent]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshEvents(limit: 50)
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.timelineEvents == [otherEvent])
+        #expect(appState.lastError == nil)
+        #expect(await api.fetchedEvents == [
+            FakeWorkbenchEventRefreshRequest(
+                eventType: nil,
+                subjectID: nil,
+                actor: nil,
+                since: nil,
+                limit: 50
+            )
+        ])
+    }
+
     @Test @MainActor func refreshEventsWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         appState.timelineEvents = [
@@ -7537,6 +7589,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setEventsResult(_ result: Result<WorkbenchEventsDTO, APIError>) {
         eventsResult = result
+    }
+
+    fileprivate func setFetchEventsHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchEventsHook = hook
     }
 
     fileprivate func setEventResult(_ result: Result<EventDTO, APIError>) {
