@@ -151,6 +151,44 @@ struct DTODecodeTests {
         #expect(lock.active == true)
     }
 
+    @Test func decodeSnapshotDecisions() throws {
+        let data = Data(
+            """
+            {
+              "session_id": "sess-governance",
+              "missions": [],
+              "agent_profiles": [],
+              "decisions": [
+                {
+                  "id": "decision-001",
+                  "session_id": "sess-governance",
+                  "mission_id": "mission-001",
+                  "kind": "architecture",
+                  "title": "采用本地 FastAPI 桥接",
+                  "content": "SwiftUI 只通过本地 Workbench API 访问运行时。",
+                  "actor": "Planner-Agent",
+                  "created_at": "2026-06-27T06:00:00"
+                }
+              ],
+              "tasks": [],
+              "issues": [],
+              "failures": [],
+              "events": []
+            }
+            """.utf8
+        )
+
+        let snapshot = try JSONDecoder().decode(WorkbenchSnapshotDTO.self, from: data)
+        let decision = try #require(snapshot.decisions.first)
+
+        #expect(decision.id == "decision-001")
+        #expect(decision.missionID == "mission-001")
+        #expect(decision.kind == "architecture")
+        #expect(decision.title == "采用本地 FastAPI 桥接")
+        #expect(decision.content == "SwiftUI 只通过本地 Workbench API 访问运行时。")
+        #expect(decision.actor == "Planner-Agent")
+    }
+
     @Test func decodeValidationRuns() throws {
         let data = Data(
             """

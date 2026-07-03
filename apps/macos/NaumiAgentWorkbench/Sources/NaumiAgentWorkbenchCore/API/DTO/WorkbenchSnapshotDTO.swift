@@ -9,6 +9,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
     public let missions: [MissionDTO]
     public let agentProfiles: [AgentProfileDTO]
     public let intentLocks: [IntentLockDTO]
+    public let decisions: [DecisionDTO]
     public let tasks: [TaskDTO]
     public let issues: [IssueDTO]
     public let leases: [LeaseDTO]
@@ -25,6 +26,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         case missions
         case agentProfiles = "agent_profiles"
         case intentLocks = "intent_locks"
+        case decisions
         case tasks
         case issues
         case leases
@@ -42,6 +44,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         missions: [MissionDTO],
         agentProfiles: [AgentProfileDTO] = [],
         intentLocks: [IntentLockDTO] = [],
+        decisions: [DecisionDTO] = [],
         tasks: [TaskDTO],
         issues: [IssueDTO],
         leases: [LeaseDTO] = [],
@@ -57,6 +60,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         self.missions = missions
         self.agentProfiles = agentProfiles
         self.intentLocks = intentLocks
+        self.decisions = decisions
         self.tasks = tasks
         self.issues = issues
         self.leases = leases
@@ -75,6 +79,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         missions = try container.decode([MissionDTO].self, forKey: .missions)
         agentProfiles = try container.decodeIfPresent([AgentProfileDTO].self, forKey: .agentProfiles) ?? []
         intentLocks = try container.decodeIfPresent([IntentLockDTO].self, forKey: .intentLocks) ?? []
+        decisions = try container.decodeIfPresent([DecisionDTO].self, forKey: .decisions) ?? []
         tasks = try container.decode([TaskDTO].self, forKey: .tasks)
         issues = try container.decode([IssueDTO].self, forKey: .issues)
         leases = try container.decodeIfPresent([LeaseDTO].self, forKey: .leases) ?? []
