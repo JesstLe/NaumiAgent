@@ -82,6 +82,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var fetchWorktreesHook: (@Sendable () async -> Void)?
     var fetchWorktreeHook: (@Sendable () async -> Void)?
     var fetchMissionsHook: (@Sendable () async -> Void)?
+    var fetchMissionHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -576,6 +577,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     }
 
     func fetchMission(sessionID: String, missionID: String) async throws(APIError) -> MissionDTO {
+        if let fetchMissionHook {
+            await fetchMissionHook()
+        }
         guard let result = missionResult else {
             throw .invalidResponse
         }
@@ -7609,6 +7613,52 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    @Test @MainActor func loadMissionIgnoresMissionAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherMission = makeMission(id: "mission-other", sessionID: "sess-other")
+        let staleMission = makeMission(id: "mission-stale", sessionID: "sess-001")
+        appState.selectedMission = nil
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setMissionResult(.success(staleMission))
+        await api.setFetchMissionHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.selectedMission = otherMission
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadMission(missionID: "mission-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.selectedMission == otherMission)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadMissionIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherMission = makeMission(id: "mission-other", sessionID: "sess-other")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setMissionResult(.failure(.sessionUnavailable))
+        await api.setFetchMissionHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.selectedMission = otherMission
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadMission(missionID: "mission-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.selectedMission == otherMission)
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func loadMissionWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         let oldMission = makeMission(id: "mission-old", sessionID: "sess-001")
@@ -8528,6 +8578,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setMissionResult(_ result: Result<MissionDTO, APIError>) {
         missionResult = result
+    }
+
+    fileprivate func setFetchMissionHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchMissionHook = hook
     }
 
     fileprivate func setCreateMissionWithSnapshotResult(_ result: Result<MissionSnapshotDTO, APIError>) {
