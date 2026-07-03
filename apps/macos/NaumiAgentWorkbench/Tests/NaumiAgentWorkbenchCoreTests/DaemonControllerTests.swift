@@ -75,6 +75,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var fetchContextSnapshotHook: (@Sendable () async -> Void)?
     var fetchFailuresHook: (@Sendable () async -> Void)?
     var fetchFailureHook: (@Sendable () async -> Void)?
+    var fetchIssuesHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -433,6 +434,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
             "limit": String(limit),
         ])
         await recordPreWarmRequest()
+        if let fetchIssuesHook {
+            await fetchIssuesHook()
+        }
         guard let result = issuesResult else {
             throw .invalidResponse
         }
@@ -5224,6 +5228,58 @@ final class DaemonControllerTests {
         ]])
     }
 
+    @Test @MainActor func refreshIssuesIgnoresIssuesAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherIssue = makeIssue(taskID: "task-other", missionID: "mission-other")
+        let staleIssue = makeIssue(taskID: "task-stale", missionID: "mission-stale")
+        appState.issues = []
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setIssuesResult(.success(IssuesDTO(
+            issues: [staleIssue],
+            missionID: nil,
+            riskLevel: nil,
+            status: nil,
+            limit: 50
+        )))
+        await api.setFetchIssuesHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.issues = [otherIssue]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshIssues(limit: 50)
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.issues == [otherIssue])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshIssuesIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherIssue = makeIssue(taskID: "task-other", missionID: "mission-other")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setIssuesResult(.failure(.sessionUnavailable))
+        await api.setFetchIssuesHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.issues = [otherIssue]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshIssues(limit: 50)
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.issues == [otherIssue])
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func refreshIssuesWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         appState.issues = [makeIssue(taskID: "task-stale", missionID: "mission-old")]
@@ -8089,6 +8145,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setIssuesResult(_ result: Result<IssuesDTO, APIError>) {
         issuesResult = result
+    }
+
+    fileprivate func setFetchIssuesHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchIssuesHook = hook
     }
 
     fileprivate func setIssueResult(_ result: Result<IssueDTO, APIError>) {
