@@ -78,6 +78,7 @@ public final class DaemonController: Sendable {
             appState.capabilities = capabilities
             appState.sessions = bootstrap.sessions
             appState.connectionState = .connected
+            await configureRouteTemplates(capabilities.routeTemplates)
             await configureEventStreamTemplate(bootstrap.daemonStatus.eventStreamURLTemplate)
 
             if appState.selectedSessionID == nil {
@@ -206,6 +207,13 @@ public final class DaemonController: Sendable {
             return
         }
         await eventProvider.setEventStreamURLTemplate(template)
+    }
+
+    private func configureRouteTemplates(_ templates: [String: String]) async {
+        guard let apiProvider = apiProvider as? any WorkbenchRouteTemplateConfiguring else {
+            return
+        }
+        await apiProvider.setRouteTemplates(templates)
     }
 
     private func consumeEventStream(

@@ -587,6 +587,44 @@ final class WorkbenchAPIClientTests {
         #expect(event.payload == ["title": .string("Mac Workbench")])
     }
 
+    @Test func fetchEventsUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let json = Data(
+            """
+            {"events":[],"limit":10}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/audit-events",
+                  query["limit"] == "10" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "events": "/workbench-v2/sessions/{session_id}/audit-events",
+        ])
+        let response = try await client.fetchEvents(sessionID: sessionID, limit: 10)
+
+        #expect(response.events == [])
+        #expect(response.limit == 10)
+    }
+
     @Test func fetchEventsWithFilters() async throws {
         let sessionID = "sess/中文"
         let eventType = "issue.claimed"
@@ -3437,6 +3475,41 @@ final class WorkbenchAPIClientTests {
         #expect(snapshot.events.isEmpty)
     }
 
+    @Test func fetchSnapshotUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let snapshotJSON = Data(
+            """
+            {"session_id":"sess/中文","missions":[],"tasks":[],"issues":[],"failures":[],"events":[]}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/snapshot" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, snapshotJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "snapshot": "/workbench-v2/sessions/{session_id}/snapshot",
+        ])
+        let snapshot = try await client.fetchSnapshot(sessionID: sessionID)
+
+        #expect(snapshot.sessionID == sessionID)
+        #expect(snapshot.tasks.isEmpty)
+        #expect(snapshot.issues.isEmpty)
+    }
+
     @Test func claimIssueEncodesSlashInPathComponents() async throws {
         let sessionID = "sess/中文"
         let taskID = "task/审查"
@@ -3645,11 +3718,18 @@ final class WorkbenchAPIClientTests {
 
     // MARK: - Helpers
 
-    private func makeClient(bearerToken: String? = nil) -> WorkbenchAPIClient {
+    private func makeClient(
+        bearerToken: String? = nil,
+        routeTemplates: [String: String] = [:]
+    ) -> WorkbenchAPIClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: configuration)
-        return WorkbenchAPIClient(session: session, bearerToken: bearerToken)
+        return WorkbenchAPIClient(
+            session: session,
+            bearerToken: bearerToken,
+            routeTemplates: routeTemplates
+        )
     }
 
     @Test func fetchIntentLocksEncodesPathAndDecodesResponse() async throws {
