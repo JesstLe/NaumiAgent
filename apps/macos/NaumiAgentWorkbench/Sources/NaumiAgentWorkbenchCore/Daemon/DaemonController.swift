@@ -1146,11 +1146,18 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            appState.selectedWorktree = try await apiProvider.fetchWorktree(
+            let worktree = try await apiProvider.fetchWorktree(
                 sessionID: sessionID,
                 name: name
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.selectedWorktree = worktree
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
