@@ -85,6 +85,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var fetchMissionHook: (@Sendable () async -> Void)?
     var fetchAgentProfilesHook: (@Sendable () async -> Void)?
     var fetchAgentProfileHook: (@Sendable () async -> Void)?
+    var fetchDecisionsHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -860,6 +861,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         kind: String?
     ) async throws(APIError) -> DecisionsDTO {
         await recordPreWarmRequest()
+        if let fetchDecisionsHook {
+            await fetchDecisionsHook()
+        }
         guard let result = fetchDecisionsResult else {
             throw .invalidResponse
         }
@@ -6557,6 +6561,55 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    @Test @MainActor func refreshDecisionsIgnoresDecisionsAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherDecision = makeDecision(id: "decision-other", missionID: "mission-other")
+        let staleDecision = makeDecision(id: "decision-stale", missionID: "mission-001")
+        appState.decisions = []
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setFetchDecisionsResult(.success(DecisionsDTO(
+            decisions: [staleDecision],
+            missionID: "mission-001"
+        )))
+        await api.setFetchDecisionsHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.decisions = [otherDecision]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshDecisions(missionID: "mission-001")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.decisions == [otherDecision])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshDecisionsIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherDecision = makeDecision(id: "decision-other", missionID: "mission-other")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setFetchDecisionsResult(.failure(.sessionUnavailable))
+        await api.setFetchDecisionsHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.decisions = [otherDecision]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshDecisions(missionID: "mission-001")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.decisions == [otherDecision])
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func refreshDecisionsWithoutSelectedSessionClearsListAndRecordsError() async throws {
         let appState = AppState()
         let staleDecision = makeDecision(id: "decision-stale", missionID: "mission-old")
@@ -8790,6 +8843,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setFetchDecisionsResult(_ result: Result<DecisionsDTO, APIError>) {
         fetchDecisionsResult = result
+    }
+
+    fileprivate func setFetchDecisionsHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchDecisionsHook = hook
     }
 
     fileprivate func setFetchDecisionResult(_ result: Result<DecisionDTO, APIError>) {
