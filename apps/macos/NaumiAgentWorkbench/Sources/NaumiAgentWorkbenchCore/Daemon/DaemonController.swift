@@ -779,11 +779,18 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            appState.selectedContextSnapshot = try await apiProvider.fetchContextSnapshot(
+            let snapshot = try await apiProvider.fetchContextSnapshot(
                 sessionID: sessionID,
                 snapshotID: snapshotID
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.selectedContextSnapshot = snapshot
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
