@@ -5232,6 +5232,60 @@ final class WorkbenchAPIClientTests {
         #expect(decision.createdAt == "2026-06-27T06:00:00")
     }
 
+    @Test func createDecisionUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/治理"
+        let decisionJSON = Data(
+            """
+            {"id":"decision-template","session_id":"sess/中文","mission_id":"mission/治理","kind":"policy","title":"保留人工审批","content":"高风险任务必须经过人工审批","actor":"Planner-Agent","created_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/missions/mission%2F%E6%B2%BB%E7%90%86/decisions" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["actor"] as? String == "Planner-Agent",
+                  json?["kind"] as? String == "policy",
+                  json?["title"] as? String == "保留人工审批",
+                  json?["content"] as? String == "高风险任务必须经过人工审批" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, decisionJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "create_decision": "/workbench-v2/sessions/{session_id}/missions/{mission_id}/decisions",
+        ])
+        let decision = try await client.createDecision(
+            sessionID: sessionID,
+            missionID: missionID,
+            kind: "policy",
+            title: "保留人工审批",
+            content: "高风险任务必须经过人工审批",
+            actor: "Planner-Agent"
+        )
+
+        #expect(decision.id == "decision-template")
+        #expect(decision.sessionID == sessionID)
+        #expect(decision.missionID == missionID)
+        #expect(decision.kind == "policy")
+    }
+
     @Test func createDecisionWithSnapshotRequestsFreshSnapshot() async throws {
         let sessionID = "sess 中文"
         let missionID = "mission 中文"

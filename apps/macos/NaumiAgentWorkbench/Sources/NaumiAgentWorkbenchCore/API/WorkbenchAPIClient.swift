@@ -1119,8 +1119,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             title: title,
             content: content
         )
+        let path = try routePath(
+            named: "create_decision",
+            replacements: [
+                "session_id": sessionID,
+                "mission_id": missionID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "missions", missionID, "decisions")
+        )
         return try await post(
-            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "decisions"),
+            path: path,
             body: body
         )
     }
