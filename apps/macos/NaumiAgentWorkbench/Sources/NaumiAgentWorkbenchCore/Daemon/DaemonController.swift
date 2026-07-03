@@ -2012,10 +2012,14 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            appState.selectedEvent = try await apiProvider.fetchEvent(
+            let event = try await apiProvider.fetchEvent(
                 sessionID: sessionID,
                 eventID: eventID
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.selectedEvent = event
         } catch {
             appState.lastError = error
             if error == .sessionUnavailable {

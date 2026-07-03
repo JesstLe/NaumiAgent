@@ -68,6 +68,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var sendMessageHook: (@Sendable () async -> Void)?
     var fetchMessagesHook: (@Sendable () async -> Void)?
     var fetchEventsHook: (@Sendable () async -> Void)?
+    var fetchEventHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -264,6 +265,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     }
 
     func fetchEvent(sessionID: String, eventID: String) async throws(APIError) -> EventDTO {
+        if let fetchEventHook {
+            await fetchEventHook()
+        }
         guard let result = eventResult else {
             throw .invalidResponse
         }
@@ -6395,6 +6399,40 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    @Test @MainActor func loadEventIgnoresEventAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherEvent = makeEvent(
+            id: "event-other",
+            sessionID: "sess-other",
+            type: "mission.created",
+            subjectID: "mission-other"
+        )
+        let staleEvent = makeEvent(
+            id: "event-stale",
+            sessionID: "sess-001",
+            type: "issue.claimed",
+            subjectID: "task-stale"
+        )
+        appState.selectedEvent = nil
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setEventResult(.success(staleEvent))
+        await api.setFetchEventHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.selectedEvent = otherEvent
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadEvent(eventID: "event-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.selectedEvent == otherEvent)
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func loadEventWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         let oldEvent = makeEvent(id: "event-old", type: "mission.created", subjectID: "mission-001")
@@ -7636,6 +7674,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setEventResult(_ result: Result<EventDTO, APIError>) {
         eventResult = result
+    }
+
+    fileprivate func setFetchEventHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchEventHook = hook
     }
 
     fileprivate func setValidationRunsResult(_ result: Result<ValidationRunsDTO, APIError>) {
