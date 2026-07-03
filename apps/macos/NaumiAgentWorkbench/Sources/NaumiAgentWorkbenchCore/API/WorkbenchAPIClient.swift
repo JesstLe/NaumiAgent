@@ -40,8 +40,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     public func fetchBootstrap(pageSize: Int = 1) async throws(APIError) -> WorkbenchBootstrapDTO {
-        try await get(
-            path: "workbench/bootstrap",
+        let path = try routePath(
+            named: "bootstrap",
+            replacements: [:],
+            fallback: "workbench/bootstrap"
+        )
+        return try await get(
+            path: path,
             queryItems: [URLQueryItem(name: "page_size", value: String(pageSize))]
         )
     }
