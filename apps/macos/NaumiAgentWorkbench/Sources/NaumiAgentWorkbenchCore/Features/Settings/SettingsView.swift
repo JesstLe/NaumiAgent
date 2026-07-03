@@ -241,6 +241,26 @@ public struct SettingsView: View {
                     label: appState.locale == .zhCN ? "工作区" : "Workspaces",
                     value: appState.daemonStatus.map { "\($0.workspaceCount)" } ?? "-"
                 )
+                settingsRow(
+                    label: appState.locale == .zhCN ? "当前工作区" : "Workspace",
+                    value: presentation.workspaceSummary
+                )
+                settingsRow(
+                    label: appState.locale == .zhCN ? "API Base" : "API Base",
+                    value: presentation.apiBaseURL
+                )
+                settingsRow(
+                    label: appState.locale == .zhCN ? "Workbench Base" : "Workbench Base",
+                    value: presentation.workbenchBaseURL
+                )
+                settingsRow(
+                    label: appState.locale == .zhCN ? "事件流" : "Event Stream",
+                    value: presentation.eventStreamURLTemplate
+                )
+                settingsRow(
+                    label: appState.locale == .zhCN ? "认证模式" : "Auth Mode",
+                    value: presentation.authMode
+                )
             }
         }
     }

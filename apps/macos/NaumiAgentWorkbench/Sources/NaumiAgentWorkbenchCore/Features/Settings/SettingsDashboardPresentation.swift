@@ -4,6 +4,11 @@ import Foundation
 @MainActor
 public struct SettingsDashboardPresentation: Equatable {
     public let runtimeEndpoint: String
+    public let workspaceSummary: String
+    public let apiBaseURL: String
+    public let workbenchBaseURL: String
+    public let eventStreamURLTemplate: String
+    public let authMode: String
     public let activeMissionTitle: String
     public let enabledCapabilityCount: Int
     public let supportedActionCount: Int
@@ -20,8 +25,20 @@ public struct SettingsDashboardPresentation: Equatable {
     public init(appState: AppState) {
         if let daemonStatus = appState.daemonStatus {
             self.runtimeEndpoint = "\(daemonStatus.host):\(daemonStatus.port)"
+            self.workspaceSummary = SettingsDashboardPresentation.workspaceSummary(
+                status: daemonStatus
+            )
+            self.apiBaseURL = daemonStatus.apiBaseURL
+            self.workbenchBaseURL = daemonStatus.workbenchBaseURL
+            self.eventStreamURLTemplate = daemonStatus.eventStreamURLTemplate
+            self.authMode = daemonStatus.authMode
         } else {
             self.runtimeEndpoint = "-"
+            self.workspaceSummary = "-"
+            self.apiBaseURL = "-"
+            self.workbenchBaseURL = "-"
+            self.eventStreamURLTemplate = "-"
+            self.authMode = "-"
         }
         self.activeMissionTitle = appState.missions.first?.title ?? "-"
         self.enabledCapabilityCount = SettingsDashboardPresentation.enabledCapabilityCount(
@@ -62,6 +79,19 @@ public struct SettingsDashboardPresentation: Equatable {
                 createdAt: $0.createdAt
             )
         }
+    }
+
+    private static func workspaceSummary(status: DaemonStatusDTO) -> String {
+        if !status.workspaceName.isEmpty && !status.workspaceRoot.isEmpty {
+            return "\(status.workspaceName) · \(status.workspaceRoot)"
+        }
+        if !status.workspaceRoot.isEmpty {
+            return status.workspaceRoot
+        }
+        if !status.workspaceName.isEmpty {
+            return status.workspaceName
+        }
+        return "-"
     }
 
     private static func enabledCapabilityCount(capabilities: CapabilitiesDTO?) -> Int {

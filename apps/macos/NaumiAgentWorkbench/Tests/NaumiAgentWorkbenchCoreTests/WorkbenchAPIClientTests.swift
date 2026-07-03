@@ -111,7 +111,7 @@ final class WorkbenchAPIClientTests {
     @Test func fetchDaemonStatus() async throws {
         let json = Data(
             """
-            {"status":"running","version":"0.1.0","pid":12345,"host":"127.0.0.1","port":8765,"started_at":"2026-06-27T06:00:00","workspace_count":3}
+            {"status":"running","version":"0.1.0","pid":12345,"host":"127.0.0.1","port":8765,"started_at":"2026-06-27T06:00:00","workspace_count":3,"workspace_root":"/Users/lv/Workspace/NaumiAgent","workspace_name":"NaumiAgent","api_base_url":"http://127.0.0.1:8765/api/v1","workbench_base_url":"http://127.0.0.1:8765/api/v1/workbench","event_stream_url_template":"ws://127.0.0.1:8765/api/v1/workbench/sessions/{session_id}/events/stream","auth_mode":"dev_token"}
             """.utf8
         )
 
@@ -137,6 +137,43 @@ final class WorkbenchAPIClientTests {
         #expect(status.host == "127.0.0.1")
         #expect(status.port == 8765)
         #expect(status.workspaceCount == 3)
+        #expect(status.workspaceRoot == "/Users/lv/Workspace/NaumiAgent")
+        #expect(status.workspaceName == "NaumiAgent")
+        #expect(status.apiBaseURL == "http://127.0.0.1:8765/api/v1")
+        #expect(status.workbenchBaseURL == "http://127.0.0.1:8765/api/v1/workbench")
+        #expect(status.eventStreamURLTemplate == "ws://127.0.0.1:8765/api/v1/workbench/sessions/{session_id}/events/stream")
+        #expect(status.authMode == "dev_token")
+    }
+
+    @Test func fetchDaemonStatusDefaultsMacFieldsForLegacyDaemon() async throws {
+        let json = Data(
+            """
+            {"status":"running","version":"0.1.0","pid":12345,"host":"127.0.0.1","port":8765,"started_at":"2026-06-27T06:00:00","workspace_count":3}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench/daemon/status" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient()
+        let status = try await client.fetchDaemonStatus()
+
+        #expect(status.workspaceRoot == "")
+        #expect(status.workspaceName == "")
+        #expect(status.apiBaseURL == "http://127.0.0.1:8765/api/v1")
+        #expect(status.workbenchBaseURL == "http://127.0.0.1:8765/api/v1/workbench")
+        #expect(status.eventStreamURLTemplate == "ws://127.0.0.1:8765/api/v1/workbench/sessions/{session_id}/events/stream")
+        #expect(status.authMode == "unknown")
     }
 
     @Test func fetchBootstrap() async throws {
