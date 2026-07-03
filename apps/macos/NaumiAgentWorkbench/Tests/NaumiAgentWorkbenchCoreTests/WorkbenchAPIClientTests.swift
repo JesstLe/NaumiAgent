@@ -512,6 +512,66 @@ final class WorkbenchAPIClientTests {
         #expect(message.metadata["workbench_issue"] == .object(["task_id": .string("task-chat-1")]))
     }
 
+    @Test func sendMessageWithIssueUsesConfiguredRouteTemplate() async throws {
+        let json = Data(
+            """
+            {"id":"msg-template","role":"assistant","content":"已创建关联任务。","timestamp":"2026-07-02T08:00:00","metadata":{"workbench_issue":{"task_id":"task-template"}}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/chat-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/messages" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard request.value(forHTTPHeaderField: "Content-Type") == "application/json" else {
+                fatalError("Missing JSON content type")
+            }
+            guard let bodyData = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Missing body")
+            }
+            let body = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
+            let issue = body?["workbench_issue"] as? [String: Any]
+            guard body?["content"] as? String == "把登录失败记录成任务",
+                  body?["stream"] as? Bool == false,
+                  issue?["mission_id"] as? String == "mission/对话",
+                  issue?["title"] as? String == "登录失败追踪",
+                  issue?["description"] as? String == "排查登录失败并生成可验证任务",
+                  issue?["acceptance_criteria"] as? [String] == ["任务市场可见"],
+                  issue?["risk_level"] as? String == "medium" else {
+                fatalError("Unexpected body: \(String(describing: body))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "send_message_with_issue": "/chat-v2/sessions/{session_id}/messages",
+        ])
+        let message = try await client.sendMessage(
+            sessionID: "sess/中文",
+            content: "把登录失败记录成任务",
+            workbenchIssue: ChatIssueDraftDTO(
+                missionID: "mission/对话",
+                title: "登录失败追踪",
+                description: "排查登录失败并生成可验证任务",
+                acceptanceCriteria: ["任务市场可见"],
+                riskLevel: "medium"
+            )
+        )
+
+        #expect(message.id == "msg-template")
+        #expect(message.role == "assistant")
+        #expect(message.metadata["workbench_issue"] == .object(["task_id": .string("task-template")]))
+    }
+
     @Test func fetchMessagesLoadsPersistedChatHistory() async throws {
         let json = Data(
             """
