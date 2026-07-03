@@ -623,6 +623,9 @@ public final class DaemonController: Sendable {
                 page: page,
                 pageSize: pageSize
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.chatMessages = response.messages
         } catch {
             appState.lastError = error

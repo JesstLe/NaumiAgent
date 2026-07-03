@@ -66,6 +66,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var runValidationResult: Result<ValidationResultDTO, APIError>?
     var runValidationWithSnapshotResult: Result<ValidationResultSnapshotDTO, APIError>?
     var sendMessageHook: (@Sendable () async -> Void)?
+    var fetchMessagesHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -227,6 +228,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         pageSize: Int
     ) async throws(APIError) -> ChatMessageListDTO {
         fetchMessagesCallCount += 1
+        if let fetchMessagesHook {
+            await fetchMessagesHook()
+        }
         if let result = messagesResult {
             return try result.get()
         }
@@ -7126,6 +7130,42 @@ final class DaemonControllerTests {
         #expect(await api.fetchedEvents.isEmpty)
     }
 
+    @Test @MainActor func refreshChatMessagesIgnoresHistoryAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherMessage = ChatMessageDTO(
+            id: "msg-other",
+            role: "assistant",
+            content: "另一个会话的历史。",
+            timestamp: "2026-07-02T08:00:01",
+            metadata: [:]
+        )
+        let staleMessage = ChatMessageDTO(
+            id: "msg-stale",
+            role: "assistant",
+            content: "旧会话的历史。",
+            timestamp: "2026-07-02T08:00:02",
+            metadata: [:]
+        )
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setMessagesResult(.success(ChatMessageListDTO(messages: [staleMessage], total: 1)))
+        await api.setFetchMessagesHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.chatMessages = [otherMessage]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshChatMessages()
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.chatMessages == [otherMessage])
+        #expect(appState.lastError == nil)
+        #expect(await api.fetchMessagesCallCount == 1)
+    }
+
     @Test @MainActor func sendDailyMessageLinkedIssueUsesReturnedWorkbenchSnapshot() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -7456,6 +7496,14 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setSendMessageHook(_ hook: (@Sendable () async -> Void)?) {
         sendMessageHook = hook
+    }
+
+    fileprivate func setMessagesResult(_ result: Result<ChatMessageListDTO, APIError>) {
+        messagesResult = result
+    }
+
+    fileprivate func setFetchMessagesHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchMessagesHook = hook
     }
 
     fileprivate func setEventsResult(_ result: Result<WorkbenchEventsDTO, APIError>) {
