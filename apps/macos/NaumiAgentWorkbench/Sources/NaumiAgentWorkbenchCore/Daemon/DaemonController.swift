@@ -308,6 +308,11 @@ public final class DaemonController: Sendable {
         if !snapshot.approvals.isEmpty || appState.approvals.isEmpty {
             appState.approvals = snapshot.approvals
         }
+        // Keep active lease evidence visible from the authoritative snapshot if
+        // the lightweight task-market lease pre-warm is unavailable.
+        if !snapshot.leases.isEmpty || appState.leases.isEmpty {
+            appState.leases = snapshot.leases
+        }
         // Keep worktree cards visible from the authoritative snapshot if the
         // lightweight worktree pre-warm is unavailable.
         if !snapshot.worktrees.isEmpty || appState.worktrees.isEmpty {
