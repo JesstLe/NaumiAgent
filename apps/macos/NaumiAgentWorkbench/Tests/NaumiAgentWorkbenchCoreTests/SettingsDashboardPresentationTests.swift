@@ -23,7 +23,13 @@ struct SettingsDashboardPresentationTests {
             supportsValidationRunner: true,
             supportsCloudSync: false,
             supportedLocales: ["zh-CN", "en-US"],
-            protocolVersion: 1
+            protocolVersion: 1,
+            supportedActions: ["create_session", "send_message", "run_validation"],
+            routeTemplates: [
+                "create_session": "/workbench/sessions",
+                "send_message": "/sessions/{session_id}/messages",
+                "run_validation": "/workbench/sessions/{session_id}/validation-runs",
+            ]
         )
         state.missions = [
             MissionDTO(
@@ -67,13 +73,18 @@ struct SettingsDashboardPresentationTests {
         #expect(presentation.runtimeEndpoint == "127.0.0.1:8765")
         #expect(presentation.activeMissionTitle == "实现 SwiftUI 工作台骨架")
         #expect(presentation.enabledCapabilityCount == 2)
+        #expect(presentation.supportedActionCount == 3)
+        #expect(presentation.routeTemplateCount == 3)
+        #expect(presentation.missingActionRouteTemplates == [])
         #expect(presentation.governancePolicyCount == 3)
         #expect(presentation.runtimeChecklist.map(\.kind) == [
             .loopbackOnly,
             .protocolCompatible,
             .validationRunnerAvailable,
+            .actionRouteTemplates,
         ])
         #expect(presentation.runtimeChecklist.map(\.state) == [
+            .passed,
             .passed,
             .passed,
             .passed,
@@ -105,12 +116,54 @@ struct SettingsDashboardPresentationTests {
         #expect(presentation.runtimeEndpoint == "-")
         #expect(presentation.activeMissionTitle == "-")
         #expect(presentation.enabledCapabilityCount == 0)
+        #expect(presentation.supportedActionCount == 0)
+        #expect(presentation.routeTemplateCount == 0)
+        #expect(presentation.missingActionRouteTemplates == [])
         #expect(presentation.runtimeChecklist.map(\.state) == [
+            .blocked,
             .blocked,
             .blocked,
             .blocked,
         ])
         #expect(presentation.intentLocks == [])
         #expect(presentation.decisions == [])
+    }
+
+    @Test func flagsMissingActionRouteTemplates() {
+        let state = AppState()
+        state.daemonStatus = DaemonStatusDTO(
+            status: "running",
+            version: "preview",
+            pid: 4242,
+            host: "127.0.0.1",
+            port: 8765,
+            startedAt: "2026-06-27T09:00:00",
+            workspaceCount: 1
+        )
+        state.capabilities = CapabilitiesDTO(
+            supportsDaemonManagement: false,
+            supportsWorkspaceRegistry: false,
+            supportsValidationRunner: true,
+            supportsCloudSync: false,
+            supportedLocales: ["zh-CN", "en-US"],
+            protocolVersion: 1,
+            supportedActions: [
+                "create_session",
+                "run_validation",
+                "send_message_with_issue",
+            ],
+            routeTemplates: [
+                "create_session": "/workbench/sessions",
+                "send_message_with_issue": "/sessions/{session_id}/messages",
+            ]
+        )
+
+        let presentation = SettingsDashboardPresentation(appState: state)
+
+        #expect(presentation.supportedActionCount == 3)
+        #expect(presentation.routeTemplateCount == 2)
+        #expect(presentation.missingActionRouteTemplates == ["run_validation"])
+        #expect(presentation.runtimeChecklist.last?.kind == .actionRouteTemplates)
+        #expect(presentation.runtimeChecklist.last?.state == .warning)
     }
 }
