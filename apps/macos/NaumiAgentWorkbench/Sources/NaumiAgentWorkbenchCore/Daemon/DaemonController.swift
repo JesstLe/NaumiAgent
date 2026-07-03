@@ -1557,6 +1557,10 @@ public final class DaemonController: Sendable {
             appState.chatMessages.append(response)
 
             if issueDraft != nil {
+                if let snapshot = workbenchSnapshot(from: response) {
+                    applySnapshot(snapshot)
+                    return
+                }
                 await refreshSnapshot()
                 guard appState.selectedSessionID != nil else {
                     return
@@ -1572,6 +1576,33 @@ public final class DaemonController: Sendable {
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
             }
+        }
+    }
+
+    private func workbenchSnapshot(from message: ChatMessageDTO) -> WorkbenchSnapshotDTO? {
+        guard let value = message.metadata["workbench_snapshot"],
+              let jsonObject = Self.jsonObject(from: value) as? [String: Any],
+              JSONSerialization.isValidJSONObject(jsonObject),
+              let data = try? JSONSerialization.data(withJSONObject: jsonObject) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(WorkbenchSnapshotDTO.self, from: data)
+    }
+
+    private static func jsonObject(from value: JSONValue) -> Any {
+        switch value {
+        case .string(let string):
+            return string
+        case .number(let number):
+            return number
+        case .bool(let bool):
+            return bool
+        case .object(let object):
+            return object.mapValues { jsonObject(from: $0) }
+        case .array(let array):
+            return array.map { jsonObject(from: $0) }
+        case .null:
+            return NSNull()
         }
     }
 

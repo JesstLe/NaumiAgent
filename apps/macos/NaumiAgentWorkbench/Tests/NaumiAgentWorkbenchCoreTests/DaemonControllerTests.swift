@@ -7122,6 +7122,49 @@ final class DaemonControllerTests {
         #expect(await api.fetchedEvents.isEmpty)
     }
 
+    @Test @MainActor func sendDailyMessageLinkedIssueUsesReturnedWorkbenchSnapshot() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let issue = makeIssue(taskID: "task-chat-1", missionID: "mission-chat")
+        let event = makeEvent(id: "evt-chat-1", type: "issue.created", subjectID: "task-chat-1")
+        let snapshot = makeSnapshot(sessionID: "sess-001", issues: [issue], events: [event])
+        let response = ChatMessageDTO(
+            id: "msg-assistant",
+            role: "assistant",
+            content: "已记录，并创建 Issue。",
+            timestamp: "2026-07-02T08:00:03",
+            metadata: [
+                "workbench_issue": .object(["task_id": .string("task-chat-1")]),
+                "workbench_snapshot": snapshotMetadata(sessionID: snapshot.sessionID, issues: [issue], events: [event]),
+            ]
+        )
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setSendMessageResult(.success(response))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.sendDailyMessage(
+            content: "把登录失败记录成任务",
+            issueDraft: ChatIssueDraftDTO(
+                missionID: "mission-chat",
+                title: "登录失败",
+                description: "把登录失败记录成任务",
+                acceptanceCriteria: ["任务市场可见"],
+                parallelMode: "exclusive",
+                riskLevel: "medium"
+            )
+        )
+
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.issues == [issue])
+        #expect(appState.timelineEvents == [event])
+        #expect(appState.lastError == nil)
+        #expect(await api.snapshotCallCount == 0)
+        #expect(await api.issueRequests.isEmpty)
+        #expect(await api.fetchedEvents.isEmpty)
+    }
+
     @Test @MainActor func refreshAgentProfilesSuccessWritesToAppState() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -7655,6 +7698,21 @@ private func makeSnapshot(sessionID: String, issues: [IssueDTO]) -> WorkbenchSna
     )
 }
 
+private func makeSnapshot(
+    sessionID: String,
+    issues: [IssueDTO],
+    events: [EventDTO]
+) -> WorkbenchSnapshotDTO {
+    WorkbenchSnapshotDTO(
+        sessionID: sessionID,
+        missions: [],
+        tasks: [],
+        issues: issues,
+        failures: [],
+        events: events
+    )
+}
+
 private func makeTask(id: String, subject: String, status: String) -> TaskDTO {
     TaskDTO(
         id: id,
@@ -7834,6 +7892,59 @@ private func makeFailure(id: String, taskID: String, status: String) -> FailureD
         status: status,
         createdAt: "2026-06-27T06:00:00"
     )
+}
+
+private func snapshotMetadata(
+    sessionID: String,
+    issues: [IssueDTO],
+    events: [EventDTO]
+) -> JSONValue {
+    .object([
+        "session_id": .string(sessionID),
+        "missions": .array([]),
+        "agent_profiles": .array([]),
+        "intent_locks": .array([]),
+        "decisions": .array([]),
+        "tasks": .array([]),
+        "issues": .array(issues.map(issueMetadata)),
+        "leases": .array([]),
+        "failures": .array([]),
+        "events": .array(events.map(eventMetadata)),
+        "validation_runs": .array([]),
+        "approvals": .array([]),
+        "worktrees": .array([]),
+        "context_snapshots": .array([]),
+    ])
+}
+
+private func issueMetadata(_ issue: IssueDTO) -> JSONValue {
+    .object([
+        "session_id": .string(issue.sessionID),
+        "task_id": .string(issue.taskID),
+        "mission_id": .string(issue.missionID),
+        "parallel_mode": .string(issue.parallelMode),
+        "risk_level": .string(issue.riskLevel),
+        "requires_human_approval": .bool(issue.requiresHumanApproval),
+        "acceptance_criteria": .array(issue.acceptanceCriteria.map { .string($0) }),
+        "expected_artifacts": .array(issue.expectedArtifacts.map { .string($0) }),
+        "related_branch": .string(issue.relatedBranch),
+        "related_worktree": .string(issue.relatedWorktree),
+        "related_pr": .string(issue.relatedPR),
+        "created_at": .string(issue.createdAt),
+        "updated_at": .string(issue.updatedAt),
+    ])
+}
+
+private func eventMetadata(_ event: EventDTO) -> JSONValue {
+    .object([
+        "id": .string(event.id),
+        "session_id": .string(event.sessionID),
+        "type": .string(event.type),
+        "actor": .string(event.actor),
+        "subject_id": .string(event.subjectID),
+        "payload": .object(event.payload),
+        "timestamp": .string(event.timestamp),
+    ])
 }
 
 @MainActor
