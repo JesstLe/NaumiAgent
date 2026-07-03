@@ -298,6 +298,11 @@ public final class DaemonController: Sendable {
         guard let snapshot else {
             return
         }
+        // Keep the current Mission visible from the authoritative snapshot if
+        // the lightweight mission list pre-warm is unavailable.
+        if !snapshot.missions.isEmpty || appState.missions.isEmpty {
+            appState.missions = snapshot.missions
+        }
         // Use snapshot validation runs as first-screen fallback without erasing
         // a separately refreshed list when the snapshot omits this optional slice.
         if !snapshot.validationRuns.isEmpty || appState.validationRuns.isEmpty {
