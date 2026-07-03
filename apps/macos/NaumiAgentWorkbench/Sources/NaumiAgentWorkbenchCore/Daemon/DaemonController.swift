@@ -1815,11 +1815,17 @@ public final class DaemonController: Sendable {
                 durationMinutes: durationMinutes,
                 worktreeName: worktreeName
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             applySnapshot(response.snapshot)
             await refreshLeases()
             await refreshIssues()
             await refreshEvents(limit: 50)
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
