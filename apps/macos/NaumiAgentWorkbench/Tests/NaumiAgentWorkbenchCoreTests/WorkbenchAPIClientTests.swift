@@ -5455,6 +5455,58 @@ final class WorkbenchAPIClientTests {
         #expect(approval.task?.owner == "Reviewer-Agent")
     }
 
+    @Test func resolveApprovalUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let approvalID = "approval/人工审批"
+        let approvalJSON = Data(
+            """
+            {"id":"approval/人工审批","session_id":"sess/中文","mission_id":"mission-001","task_id":"task-001","state":"approved","title":"允许发布","detail":"验证已通过","requester":"Agent-A","reviewer":"Human","decision_note":"证据充分","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:01"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/approvals/approval%2F%E4%BA%BA%E5%B7%A5%E5%AE%A1%E6%89%B9/resolve" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["actor"] as? String == "Human",
+                  json?["state"] as? String == "approved",
+                  json?["decision_note"] as? String == "证据充分" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, approvalJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "resolve_approval": "/workbench-v2/sessions/{session_id}/approvals/{approval_id}/resolve",
+        ])
+        let approval = try await client.resolveApproval(
+            sessionID: sessionID,
+            approvalID: approvalID,
+            actor: "Human",
+            state: "approved",
+            decisionNote: "证据充分"
+        )
+
+        #expect(approval.id == approvalID)
+        #expect(approval.sessionID == sessionID)
+        #expect(approval.state == "approved")
+        #expect(approval.decisionNote == "证据充分")
+    }
+
     @Test func resolveApprovalWithSnapshotRequestsFreshSnapshot() async throws {
         let sessionID = "sess 中文"
         let approvalID = "approval 001 审批"
