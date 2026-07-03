@@ -1553,6 +1553,9 @@ public final class DaemonController: Sendable {
                 content: trimmedContent,
                 workbenchIssue: issueDraft
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.chatMessages.append(localUserMessage)
             appState.chatMessages.append(response)
 
