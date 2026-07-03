@@ -3282,6 +3282,42 @@ final class WorkbenchAPIClientTests {
         #expect(profile.updatedAt == "2026-06-27T06:10:00")
     }
 
+    @Test func fetchAgentProfileUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let agentID = "agent/审查"
+        let json = Data(
+            """
+            {"id":"agent/审查","session_id":"sess/中文","name":"模板审查智能体","role":"reviewer","capabilities":["review","approval"],"permissions":["read"],"max_parallel_tasks":1,"status":"idle","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/agents/agent%2F%E5%AE%A1%E6%9F%A5" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "agent": "/workbench-v2/sessions/{session_id}/agents/{agent_id}",
+        ])
+        let profile = try await client.fetchAgentProfile(sessionID: sessionID, agentID: agentID)
+
+        #expect(profile.id == agentID)
+        #expect(profile.sessionID == sessionID)
+        #expect(profile.name == "模板审查智能体")
+        #expect(profile.capabilities == ["review", "approval"])
+    }
+
     @Test func registerAgentProfileUsesPOSTAndEncodesPathAndBody() async throws {
         let sessionID = "sess/中文"
         let agentID = "agent/后端"
