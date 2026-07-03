@@ -1782,6 +1782,57 @@ final class WorkbenchAPIClientTests {
         #expect(response.failures.isEmpty)
     }
 
+    @Test func fetchFailuresUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let taskID = "task/失败"
+        let json = Data(
+            """
+            {"failures":[{"id":"failure-template","session_id":"sess/中文","task_id":"task/失败","kind":"merge_conflict","title":"合并冲突","detail":"需要人工检查","source_id":"run-template","status":"open","created_at":"2026-06-27T06:00:00"}],"task_id":"task/失败","status":"open","kind":"merge_conflict","limit":16}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/failures",
+                  query["limit"] == "16",
+                  query["task_id"] == taskID,
+                  query["status"] == "open",
+                  query["kind"] == "merge_conflict" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "failures": "/workbench-v2/sessions/{session_id}/failures",
+        ])
+        let response = try await client.fetchFailures(
+            sessionID: sessionID,
+            taskID: taskID,
+            status: "open",
+            kind: "merge_conflict",
+            limit: 16
+        )
+
+        #expect(response.taskID == taskID)
+        #expect(response.status == "open")
+        #expect(response.kind == "merge_conflict")
+        #expect(response.limit == 16)
+        #expect(response.failures.first?.id == "failure-template")
+    }
+
     @Test func fetchFailureEncodesPathComponentsAndDecodesDiagnostics() async throws {
         let sessionID = "sess 中文"
         let failureID = "failure/测试 001"
