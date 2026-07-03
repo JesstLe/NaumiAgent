@@ -176,11 +176,17 @@ struct WorktreesDashboardPresentationTests {
 
         let dirty = try #require(presentation.selectedWorktree(id: "wt-dirty"))
         #expect(dirty.canRemoveSafely == false)
+        #expect(dirty.canForceRemove == true)
         #expect(dirty.removeDisabledReason(locale: .zhCN) == "存在未提交或未审查的工作，只能通过强制删除流程处理")
         #expect(dirty.removeDisabledReason(locale: .enUS) == "Uncommitted or unreviewed work requires the force-remove flow")
+        #expect(dirty.forceRemoveConfirmationTitle(locale: .zhCN) == "强制删除 wt-dirty？")
+        #expect(dirty.forceRemoveConfirmationTitle(locale: .enUS) == "Force remove wt-dirty?")
+        #expect(dirty.forceRemoveConfirmationMessage(locale: .zhCN) == "该工作区包含 2 个脏文件和 1 个领先提交。强制删除会丢弃这些未审查改动。")
+        #expect(dirty.forceRemoveConfirmationMessage(locale: .enUS) == "This worktree has 2 dirty files and 1 commits ahead. Force removal discards those unreviewed changes.")
 
         let kept = try #require(presentation.selectedWorktree(id: "wt-kept"))
         #expect(kept.canRemoveSafely == false)
+        #expect(kept.canForceRemove == false)
         #expect(kept.removeDisabledReason(locale: .zhCN) == "已人工保留，需先确认治理结果")
         #expect(kept.removeDisabledReason(locale: .enUS) == "Kept worktrees require governance confirmation first")
     }

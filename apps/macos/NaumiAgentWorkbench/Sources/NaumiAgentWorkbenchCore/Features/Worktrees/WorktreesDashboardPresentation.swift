@@ -120,6 +120,10 @@ public struct WorktreeManagementRow: Equatable, Sendable, Identifiable {
         removable
     }
 
+    public var canForceRemove: Bool {
+        hasUnreviewedWork && !isKept
+    }
+
     private var isKept: Bool {
         !keptReason.isEmpty || status.lowercased() == "kept"
     }
@@ -152,6 +156,17 @@ public struct WorktreeManagementRow: Equatable, Sendable, Identifiable {
                 : "Uncommitted or unreviewed work requires the force-remove flow"
         }
         return locale == .zhCN ? "当前状态不可安全删除" : "Current state cannot be safely removed"
+    }
+
+    public func forceRemoveConfirmationTitle(locale: AppLocale) -> String {
+        locale == .zhCN ? "强制删除 \(name)？" : "Force remove \(name)?"
+    }
+
+    public func forceRemoveConfirmationMessage(locale: AppLocale) -> String {
+        if locale == .zhCN {
+            return "该工作区包含 \(dirtyFiles) 个脏文件和 \(commitsAhead) 个领先提交。强制删除会丢弃这些未审查改动。"
+        }
+        return "This worktree has \(dirtyFiles) dirty files and \(commitsAhead) commits ahead. Force removal discards those unreviewed changes."
     }
 
     public init(worktree: WorktreeDTO) {

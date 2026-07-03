@@ -9,6 +9,7 @@ public struct WorktreesView: View {
     @State private var selectedWorktreeID: String?
     @State private var isKeepingWorktree = false
     @State private var isRemovingWorktree = false
+    @State private var forceRemoveCandidate: WorktreeManagementRow?
     @State private var isPresentingContextRecorder = false
     @State private var contextHealthDraft = ContextHealthRecordDraft()
     @State private var isRecordingContextHealth = false
@@ -120,10 +121,42 @@ public struct WorktreesView: View {
                 }
             )
         }
+        .confirmationDialog(
+            forceRemoveCandidate?.forceRemoveConfirmationTitle(locale: appState.locale) ?? "",
+            isPresented: forceRemoveConfirmationBinding,
+            titleVisibility: .visible,
+            presenting: forceRemoveCandidate
+        ) { worktree in
+            Button(
+                appState.locale == .zhCN ? "强制删除" : "Force Remove",
+                role: .destructive
+            ) {
+                forceRemoveWorktree(worktree)
+            }
+            Button(
+                appState.locale == .zhCN ? "取消" : "Cancel",
+                role: .cancel
+            ) {
+                forceRemoveCandidate = nil
+            }
+        } message: { worktree in
+            Text(worktree.forceRemoveConfirmationMessage(locale: appState.locale))
+        }
         .task {
             guard !appState.isPreviewFixture else { return }
             await refreshWorktreesPage()
         }
+    }
+
+    private var forceRemoveConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { forceRemoveCandidate != nil },
+            set: { isPresented in
+                if !isPresented {
+                    forceRemoveCandidate = nil
+                }
+            }
+        )
     }
 
     private func refreshWorktreesPage() async {
@@ -171,10 +204,20 @@ public struct WorktreesView: View {
 
     private func removeWorktree(_ worktree: WorktreeManagementRow) {
         guard worktree.canRemoveSafely, !isRemovingWorktree else { return }
+        removeWorktree(worktree, discardChanges: false)
+    }
+
+    private func forceRemoveWorktree(_ worktree: WorktreeManagementRow) {
+        guard worktree.canForceRemove, !isRemovingWorktree else { return }
+        forceRemoveCandidate = nil
+        removeWorktree(worktree, discardChanges: true)
+    }
+
+    private func removeWorktree(_ worktree: WorktreeManagementRow, discardChanges: Bool) {
         let removedID = worktree.id
         isRemovingWorktree = true
         Task {
-            await daemonController.removeWorktree(name: worktree.name, discardChanges: false)
+            await daemonController.removeWorktree(name: worktree.name, discardChanges: discardChanges)
             if appState.lastError == nil,
                selectedWorktreeID == removedID,
                !appState.worktrees.contains(where: { $0.name == removedID }) {
@@ -666,6 +709,19 @@ public struct WorktreesView: View {
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+
+                        Button {
+                            forceRemoveCandidate = worktree
+                        } label: {
+                            Label(
+                                appState.locale == .zhCN ? "强制删除" : "Force Remove",
+                                systemImage: "trash.slash"
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                        .disabled(!worktree.canForceRemove || isRemovingWorktree)
                     }
                 }
             } else {
