@@ -152,7 +152,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     public func fetchEvent(sessionID: String, eventID: String) async throws(APIError) -> EventDTO {
-        try await get(path: encodePath("workbench", "sessions", sessionID, "events", eventID))
+        let path = try routePath(
+            named: "event",
+            replacements: [
+                "session_id": sessionID,
+                "event_id": eventID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "events", eventID)
+        )
+        return try await get(path: path)
     }
 
     public func fetchValidationRuns(

@@ -730,6 +730,42 @@ final class WorkbenchAPIClientTests {
         #expect(event.task?.owner == "Reviewer-Agent")
     }
 
+    @Test func fetchEventUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let eventID = "event/时间线"
+        let json = Data(
+            """
+            {"id":"event/时间线","session_id":"sess/中文","type":"validation.failed","actor":"Validation-Agent","subject_id":"task-001","payload":{"run_id":"run-001"},"timestamp":"2026-06-27T10:20:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/audit-events/event%2F%E6%97%B6%E9%97%B4%E7%BA%BF" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "event": "/workbench-v2/sessions/{session_id}/audit-events/{event_id}",
+        ])
+        let event = try await client.fetchEvent(sessionID: sessionID, eventID: eventID)
+
+        #expect(event.id == eventID)
+        #expect(event.sessionID == sessionID)
+        #expect(event.type == "validation.failed")
+        #expect(event.payload == ["run_id": .string("run-001")])
+    }
+
     @Test func fetchValidationRunsWithTaskID() async throws {
         let taskID = "task 001/审查"
         let status = "failed"
