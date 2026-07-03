@@ -95,8 +95,18 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             stream: false,
             workbenchIssue: workbenchIssue
         )
+        let path: String
+        if workbenchIssue == nil {
+            path = encodePath("sessions", sessionID, "messages")
+        } else {
+            path = try routePath(
+                named: "send_message_with_issue",
+                replacements: ["session_id": sessionID],
+                fallback: encodePath("sessions", sessionID, "messages")
+            )
+        }
         return try await post(
-            path: encodePath("sessions", sessionID, "messages"),
+            path: path,
             body: body
         )
     }
