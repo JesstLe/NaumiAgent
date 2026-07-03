@@ -98,7 +98,12 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             systemPrompt: systemPrompt,
             model: model
         )
-        return try await post(path: "workbench/sessions", body: body)
+        let path = try routePath(
+            named: "create_session",
+            replacements: [:],
+            fallback: "workbench/sessions"
+        )
+        return try await post(path: path, body: body)
     }
 
     public func sendMessage(
