@@ -2149,12 +2149,19 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            appState.selectedDecision = try await apiProvider.fetchDecision(
+            let decision = try await apiProvider.fetchDecision(
                 sessionID: sessionID,
                 missionID: missionID,
                 decisionID: decisionID
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.selectedDecision = decision
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
