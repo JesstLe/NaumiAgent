@@ -7165,6 +7165,79 @@ final class DaemonControllerTests {
         #expect(await api.fetchedEvents.isEmpty)
     }
 
+    @Test @MainActor func sendDailyMessageLinkedIssueIgnoresSnapshotMetadataForDifferentSession() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let wrongIssue = makeIssue(
+            sessionID: "sess-other",
+            taskID: "task-wrong",
+            missionID: "mission-wrong"
+        )
+        let wrongEvent = makeEvent(
+            id: "evt-wrong",
+            sessionID: "sess-other",
+            type: "issue.created",
+            subjectID: "task-wrong"
+        )
+        let response = ChatMessageDTO(
+            id: "msg-assistant",
+            role: "assistant",
+            content: "已记录，并创建 Issue。",
+            timestamp: "2026-07-02T08:00:03",
+            metadata: [
+                "workbench_issue": .object(["task_id": .string("task-chat-1")]),
+                "workbench_snapshot": snapshotMetadata(
+                    sessionID: "sess-other",
+                    issues: [wrongIssue],
+                    events: [wrongEvent]
+                ),
+            ]
+        )
+
+        let freshIssue = makeIssue(taskID: "task-chat-1", missionID: "mission-chat")
+        let freshEvent = makeEvent(id: "evt-chat-1", type: "issue.created", subjectID: "task-chat-1")
+        let freshSnapshot = makeSnapshot(sessionID: "sess-001", issues: [freshIssue], events: [freshEvent])
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setSendMessageResult(.success(response))
+        await api.setSnapshotResult(.success(freshSnapshot))
+        await api.setIssuesResult(.success(IssuesDTO(
+            issues: [freshIssue],
+            missionID: "mission-chat",
+            riskLevel: nil,
+            limit: 50
+        )))
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [freshEvent], limit: 50)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.sendDailyMessage(
+            content: "把登录失败记录成任务",
+            issueDraft: ChatIssueDraftDTO(
+                missionID: "mission-chat",
+                title: "登录失败",
+                description: "把登录失败记录成任务",
+                acceptanceCriteria: ["任务市场可见"],
+                parallelMode: "exclusive",
+                riskLevel: "medium"
+            )
+        )
+
+        #expect(appState.snapshot == freshSnapshot)
+        #expect(appState.issues == [freshIssue])
+        #expect(appState.timelineEvents == [freshEvent])
+        #expect(appState.lastError == nil)
+        #expect(await api.snapshotCallCount == 1)
+        #expect(await api.issueRequests == [[
+            "session_id": "sess-001",
+            "mission_id": "mission-chat",
+            "risk_level": nil,
+            "status": nil,
+            "limit": "50",
+        ]])
+        #expect(await api.fetchedEvents.map(\.limit) == [50])
+    }
+
     @Test @MainActor func refreshAgentProfilesSuccessWritesToAppState() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -7729,9 +7802,13 @@ private func makeTask(id: String, subject: String, status: String) -> TaskDTO {
     )
 }
 
-private func makeIssue(taskID: String, missionID: String = "mission-001") -> IssueDTO {
+private func makeIssue(
+    sessionID: String = "sess-001",
+    taskID: String,
+    missionID: String = "mission-001"
+) -> IssueDTO {
     IssueDTO(
-        sessionID: "sess-001",
+        sessionID: sessionID,
         taskID: taskID,
         missionID: missionID,
         parallelMode: "exclusive",
@@ -7868,10 +7945,15 @@ private func makeApproval(id: String, missionID: String, state: String) -> Appro
     )
 }
 
-private func makeEvent(id: String, type: String, subjectID: String) -> EventDTO {
+private func makeEvent(
+    id: String,
+    sessionID: String = "sess-001",
+    type: String,
+    subjectID: String
+) -> EventDTO {
     EventDTO(
         id: id,
-        sessionID: "sess-001",
+        sessionID: sessionID,
         type: type,
         actor: "Human",
         subjectID: subjectID,
