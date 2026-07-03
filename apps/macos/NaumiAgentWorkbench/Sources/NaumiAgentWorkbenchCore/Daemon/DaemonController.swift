@@ -187,12 +187,12 @@ public final class DaemonController: Sendable {
         do {
             try await activeEventStream.sendPing()
         } catch {
-            self.activeEventStream = nil
             appState.connectionState = .stale
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
             }
+            await stopEventStream()
         }
     }
 

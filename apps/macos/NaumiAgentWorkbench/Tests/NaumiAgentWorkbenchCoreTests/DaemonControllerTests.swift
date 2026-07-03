@@ -2551,6 +2551,11 @@ final class DaemonControllerTests {
         appState.connectionState = .connected
         let api = FakeWorkbenchAPIProvider()
         let eventProvider = FakeWorkbenchEventProvider()
+        let lateSnapshot = makeSnapshot(
+            sessionID: "sess-events",
+            missions: [makeMission(id: "mission-late", sessionID: "sess-events")]
+        )
+        await configureWorkbenchListResults(for: api, sessionID: "sess-events")
         await eventProvider.setPingResult(.failure(.networkFailure("ping timeout")))
         let controller = DaemonController(
             appState: appState,
@@ -2567,6 +2572,14 @@ final class DaemonControllerTests {
 
         #expect(await eventProvider.recordedPingCount() == 1)
         #expect(appState.connectionState == .stale)
+        #expect(appState.lastError == .networkFailure("ping timeout"))
+        #expect(controller.hasActiveEventStream == false)
+
+        await eventProvider.emit(.snapshot(lateSnapshot))
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        #expect(appState.connectionState == .stale)
+        #expect(appState.snapshot == nil)
         #expect(appState.lastError == .networkFailure("ping timeout"))
         #expect(controller.hasActiveEventStream == false)
 
