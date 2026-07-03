@@ -167,12 +167,12 @@ public final class DaemonController: Sendable {
                 limit: limit
             )
         } catch {
-            self.activeEventStream = nil
             appState.connectionState = .stale
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
             }
+            await stopEventStream()
         }
     }
 

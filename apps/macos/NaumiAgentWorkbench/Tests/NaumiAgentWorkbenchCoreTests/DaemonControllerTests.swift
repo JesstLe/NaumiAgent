@@ -895,7 +895,13 @@ actor FakeWorkbenchEventProvider: WorkbenchEventProviding, WorkbenchEventStreamT
         let stream = AsyncThrowingStream<WorkbenchEventStreamMessage, Error> { continuation in
             self.continuation = continuation
         }
-        return FakeWorkbenchEventStream(stream: stream, recorder: streamRecorder)
+        return FakeWorkbenchEventStream(
+            stream: stream,
+            recorder: streamRecorder,
+            cancelHandler: { [weak self] in
+                await self?.finish()
+            }
+        )
     }
 
     func emit(_ message: WorkbenchEventStreamMessage) {
@@ -942,6 +948,7 @@ actor FakeWorkbenchEventProvider: WorkbenchEventProviding, WorkbenchEventStreamT
 struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
     let stream: AsyncThrowingStream<WorkbenchEventStreamMessage, Error>
     let recorder: FakeWorkbenchEventStreamRecorder
+    let cancelHandler: @Sendable () async -> Void
 
     func next() async throws(APIError) -> WorkbenchEventStreamMessage {
         do {
@@ -977,7 +984,9 @@ struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
         try await recorder.recordPing()
     }
 
-    func cancel() async {}
+    func cancel() async {
+        await cancelHandler()
+    }
 }
 
 struct FakeWorkbenchEventRefreshRequest: Equatable, Sendable {
@@ -2395,6 +2404,11 @@ final class DaemonControllerTests {
         appState.connectionState = .connected
         let api = FakeWorkbenchAPIProvider()
         let eventProvider = FakeWorkbenchEventProvider()
+        let lateSnapshot = makeSnapshot(
+            sessionID: "sess-events",
+            missions: [makeMission(id: "mission-late", sessionID: "sess-events")]
+        )
+        await configureWorkbenchListResults(for: api, sessionID: "sess-events")
         await eventProvider.setRefreshResult(.failure(.networkFailure("refresh send failed")))
         let controller = DaemonController(
             appState: appState,
@@ -2419,6 +2433,14 @@ final class DaemonControllerTests {
             ),
         ])
         #expect(appState.connectionState == .stale)
+        #expect(appState.lastError == .networkFailure("refresh send failed"))
+        #expect(controller.hasActiveEventStream == false)
+
+        await eventProvider.emit(.snapshot(lateSnapshot))
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        #expect(appState.connectionState == .stale)
+        #expect(appState.snapshot == nil)
         #expect(appState.lastError == .networkFailure("refresh send failed"))
         #expect(controller.hasActiveEventStream == false)
 
