@@ -6120,6 +6120,47 @@ final class WorkbenchAPIClientTests {
         #expect(decision.createdAt == "2026-06-27T06:00:00")
     }
 
+    @Test func fetchDecisionUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/治理"
+        let decisionID = "decision/模板"
+        let json = Data(
+            """
+            {"id":"decision/模板","session_id":"sess/中文","mission_id":"mission/治理","kind":"architecture","title":"模板化决策详情","content":"Settings 决策详情使用 capabilities 路由","actor":"Planner-Agent","created_at":"2026-06-27T06:00:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/missions/mission%2F%E6%B2%BB%E7%90%86/decisions/decision%2F%E6%A8%A1%E6%9D%BF" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "decision": "/workbench-v2/sessions/{session_id}/missions/{mission_id}/decisions/{decision_id}",
+        ])
+        let decision = try await client.fetchDecision(
+            sessionID: sessionID,
+            missionID: missionID,
+            decisionID: decisionID
+        )
+
+        #expect(decision.id == decisionID)
+        #expect(decision.sessionID == sessionID)
+        #expect(decision.missionID == missionID)
+        #expect(decision.title == "模板化决策详情")
+    }
+
     @Test func fetchIntentLocksEncodesSlashInPathComponents() async throws {
         let sessionID = "sess/中文"
         let missionID = "mission/审查"

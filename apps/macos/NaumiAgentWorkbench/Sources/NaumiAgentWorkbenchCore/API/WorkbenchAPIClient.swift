@@ -1093,9 +1093,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         missionID: String,
         decisionID: String
     ) async throws(APIError) -> DecisionDTO {
-        try await get(
-            path: encodePath("workbench", "sessions", sessionID, "missions", missionID, "decisions", decisionID)
+        let path = try routePath(
+            named: "decision",
+            replacements: [
+                "session_id": sessionID,
+                "mission_id": missionID,
+                "decision_id": decisionID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "missions", missionID, "decisions", decisionID)
         )
+        return try await get(path: path)
     }
 
     public func createDecision(
