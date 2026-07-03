@@ -340,7 +340,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     public func fetchIssue(sessionID: String, taskID: String) async throws(APIError) -> IssueDTO {
-        try await get(path: encodePath("workbench", "sessions", sessionID, "issues", taskID))
+        let path = try routePath(
+            named: "issue",
+            replacements: [
+                "session_id": sessionID,
+                "task_id": taskID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "issues", taskID)
+        )
+        return try await get(path: path)
     }
 
     public func fetchLeases(
