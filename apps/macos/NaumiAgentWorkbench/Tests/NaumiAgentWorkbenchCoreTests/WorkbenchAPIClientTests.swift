@@ -3003,6 +3003,47 @@ final class WorkbenchAPIClientTests {
         #expect(response.missions.isEmpty)
     }
 
+    @Test func fetchMissionsUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let json = Data(
+            """
+            {"missions":[{"id":"mission-template","session_id":"sess/中文","title":"模板 Mission","goal":"从模板路径加载 Mission 列表","status":"active","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:05:00"}],"status":"active","limit":18}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/missions",
+                  query["limit"] == "18",
+                  query["status"] == "active" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "missions": "/workbench-v2/sessions/{session_id}/missions",
+        ])
+        let response = try await client.fetchMissions(sessionID: sessionID, status: "active", limit: 18)
+
+        #expect(response.status == "active")
+        #expect(response.limit == 18)
+        #expect(response.missions.first?.id == "mission-template")
+        #expect(response.missions.first?.sessionID == sessionID)
+    }
+
     @Test func fetchMissionEncodesPathComponentsAndDecodesGoal() async throws {
         let sessionID = "sess 中文"
         let missionID = "mission/总览 001"
