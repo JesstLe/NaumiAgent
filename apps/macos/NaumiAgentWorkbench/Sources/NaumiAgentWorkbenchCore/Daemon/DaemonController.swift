@@ -709,8 +709,14 @@ public final class DaemonController: Sendable {
                 status: status,
                 limit: limit
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.validationRuns = response.validationRuns
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()

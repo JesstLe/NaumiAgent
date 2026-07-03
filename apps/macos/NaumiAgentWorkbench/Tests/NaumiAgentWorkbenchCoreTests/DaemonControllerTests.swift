@@ -69,6 +69,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var fetchMessagesHook: (@Sendable () async -> Void)?
     var fetchEventsHook: (@Sendable () async -> Void)?
     var fetchEventHook: (@Sendable () async -> Void)?
+    var fetchValidationRunsHook: (@Sendable () async -> Void)?
     var fetchValidationRunHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
@@ -288,6 +289,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
             "limit": String(limit),
         ])
         await recordPreWarmRequest()
+        if let fetchValidationRunsHook {
+            await fetchValidationRunsHook()
+        }
         guard let result = validationRunsResult else {
             throw .invalidResponse
         }
@@ -4403,6 +4407,57 @@ final class DaemonControllerTests {
         ]])
     }
 
+    @Test @MainActor func refreshValidationRunsIgnoresRunsAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherRun = makeValidationRun(id: "run-other", taskID: "task-other", status: "passed")
+        let staleRun = makeValidationRun(id: "run-stale", taskID: "task-stale", status: "failed")
+        appState.validationRuns = []
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setValidationRunsResult(.success(ValidationRunsDTO(
+            validationRuns: [staleRun],
+            taskID: nil,
+            status: nil,
+            limit: 50
+        )))
+        await api.setFetchValidationRunsHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.validationRuns = [otherRun]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshValidationRuns(limit: 50)
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.validationRuns == [otherRun])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshValidationRunsIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherRun = makeValidationRun(id: "run-other", taskID: "task-other", status: "passed")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setValidationRunsResult(.failure(.sessionUnavailable))
+        await api.setFetchValidationRunsHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.validationRuns = [otherRun]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshValidationRuns(limit: 50)
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.validationRuns == [otherRun])
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func refreshValidationRunsWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         appState.validationRuns = [
@@ -7759,6 +7814,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setValidationRunsResult(_ result: Result<ValidationRunsDTO, APIError>) {
         validationRunsResult = result
+    }
+
+    fileprivate func setFetchValidationRunsHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchValidationRunsHook = hook
     }
 
     fileprivate func setFetchValidationRunHook(_ hook: (@Sendable () async -> Void)?) {
