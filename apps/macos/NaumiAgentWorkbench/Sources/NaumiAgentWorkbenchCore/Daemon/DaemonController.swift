@@ -1399,6 +1399,8 @@ public final class DaemonController: Sendable {
             syncSelectedWorkspace(from: bootstrap.daemonStatus)
             appState.capabilities = capabilities
             appState.connectionState = .connected
+            await configureRouteTemplates(capabilities.routeTemplates)
+            await configureEventStreamTemplate(bootstrap.daemonStatus.eventStreamURLTemplate)
             for session in bootstrap.sessions.reversed() {
                 appState.sessions.removeAll { $0.id == session.id }
                 appState.sessions.insert(session, at: 0)

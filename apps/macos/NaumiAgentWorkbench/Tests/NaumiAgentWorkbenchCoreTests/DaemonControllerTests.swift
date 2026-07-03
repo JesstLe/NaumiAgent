@@ -2965,6 +2965,61 @@ final class DaemonControllerTests {
         expectWorkbenchListsPopulated(appState)
     }
 
+    @Test @MainActor func createSessionConfiguresRouteAndEventStreamTemplatesFromBootstrap() async throws {
+        let appState = AppState()
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let routeTemplates = [
+            "snapshot": "/workbench-v2/sessions/{session_id}/snapshot",
+            "events": "/workbench-v2/sessions/{session_id}/events",
+        ]
+        let eventStreamURLTemplate = "wss://daemon.local:9443/api/v1/workbench-v2/sessions/{session_id}/events/stream"
+        let capabilities = CapabilitiesDTO(
+            supportsDaemonManagement: false,
+            supportsWorkspaceRegistry: true,
+            supportsValidationRunner: true,
+            supportsCloudSync: false,
+            supportedLocales: ["zh-CN", "en-US"],
+            protocolVersion: 1,
+            routeTemplates: routeTemplates
+        )
+        let createdSession = makeSession(id: "sess-template", title: "Template Session")
+        let snapshot = makeSnapshot(sessionID: "sess-template", missions: [])
+
+        await api.setCreateWorkbenchSessionResult(.success(WorkbenchBootstrapDTO(
+            daemonStatus: DaemonStatusDTO(
+                status: "running",
+                version: "0.2.0",
+                pid: 42,
+                host: "127.0.0.1",
+                port: 8765,
+                startedAt: "2026-06-27T06:00:00",
+                workspaceCount: 1,
+                eventStreamURLTemplate: eventStreamURLTemplate
+            ),
+            capabilities: capabilities,
+            sessions: [createdSession],
+            totalSessions: 1,
+            selectedSessionID: "sess-template",
+            snapshot: snapshot
+        )))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-template")
+
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.createSession(
+            title: "Mac 工作台",
+            model: "gpt-5",
+            systemPrompt: "默认中文治理工作台"
+        )
+
+        #expect(await api.recordedRouteTemplateConfigurations() == [routeTemplates])
+        #expect(await eventProvider.recordedEventStreamURLTemplates() == [eventStreamURLTemplate])
+    }
+
     @Test @MainActor func createSessionFailurePreservesWorkbenchStateAndRecordsError() async throws {
         let appState = AppState()
         let existingSession = makeSession(id: "sess-old", title: "Old Session")
