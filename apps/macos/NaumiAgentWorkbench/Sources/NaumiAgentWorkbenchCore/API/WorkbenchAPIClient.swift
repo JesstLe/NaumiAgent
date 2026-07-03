@@ -61,7 +61,18 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     public func fetchSessions(page: Int, pageSize: Int) async throws(APIError) -> SessionListDTO {
-        try await get(path: "workbench/sessions?page=\(page)&page_size=\(pageSize)")
+        let path = try routePath(
+            named: "sessions",
+            replacements: [:],
+            fallback: "workbench/sessions"
+        )
+        return try await get(
+            path: path,
+            queryItems: [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "page_size", value: String(pageSize)),
+            ]
+        )
     }
 
     public func createSession(

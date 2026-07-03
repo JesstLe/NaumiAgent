@@ -388,6 +388,40 @@ final class WorkbenchAPIClientTests {
         #expect(session.status == "active")
     }
 
+    @Test func fetchSessionsUsesConfiguredRouteTemplate() async throws {
+        let json = Data(
+            """
+            {"sessions":[{"id":"sess-template","title":"模板会话","model":"gpt-5","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:45:00","message_count":3,"total_tokens":96,"total_cost_usd":0.004,"status":"active"}],"total":1,"page":2,"page_size":7}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions?page=2&page_size=7" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "sessions": "/workbench-v2/sessions",
+        ])
+        let list = try await client.fetchSessions(page: 2, pageSize: 7)
+
+        #expect(list.total == 1)
+        #expect(list.page == 2)
+        #expect(list.pageSize == 7)
+        #expect(list.sessions.first?.id == "sess-template")
+    }
+
     @Test func createSessionUsesPOSTAndEncodesBody() async throws {
         let json = Data(
             """
