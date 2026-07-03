@@ -1395,6 +1395,7 @@ public final class DaemonController: Sendable {
             await startEventStreamIfAvailable()
         } catch {
             if error == .sessionUnavailable {
+                await stopEventStream()
                 clearUnavailableSelectedSession()
             }
             appState.lastError = error

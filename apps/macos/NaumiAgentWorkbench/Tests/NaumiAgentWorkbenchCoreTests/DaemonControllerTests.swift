@@ -2815,6 +2815,45 @@ final class DaemonControllerTests {
         expectSelectedDetailsEmpty(appState)
     }
 
+    @Test @MainActor func createSessionSessionUnavailableStopsActiveEventStream() async throws {
+        let appState = AppState()
+        appState.connectionState = .connected
+        appState.selectedSessionID = "sess-stale"
+        appState.snapshot = makeSnapshot(
+            sessionID: "sess-stale",
+            missions: [makeMission(id: "mission-stale", sessionID: "sess-stale")]
+        )
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateWorkbenchSessionResult(.failure(.sessionUnavailable))
+        let eventProvider = FakeWorkbenchEventProvider()
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+
+        await controller.startEventStream()
+        await waitUntil {
+            controller.hasActiveEventStream
+        }
+
+        await controller.createSession(
+            title: "Mac 工作台",
+            model: "gpt-5",
+            systemPrompt: "默认中文治理工作台"
+        )
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        #expect(controller.hasActiveEventStream == false)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+    }
+
     @Test @MainActor func createSessionProtocolMismatchClearsStaleSessionState() async throws {
         let appState = AppState()
         appState.connectionState = .connected
