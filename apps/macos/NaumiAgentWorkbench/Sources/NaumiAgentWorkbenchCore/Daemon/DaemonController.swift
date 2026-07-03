@@ -1349,11 +1349,18 @@ public final class DaemonController: Sendable {
 
         appState.lastError = nil
         do {
-            appState.selectedAgentProfile = try await apiProvider.fetchAgentProfile(
+            let agentProfile = try await apiProvider.fetchAgentProfile(
                 sessionID: sessionID,
                 agentID: agentID
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.selectedAgentProfile = agentProfile
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
