@@ -7166,6 +7166,35 @@ final class DaemonControllerTests {
         #expect(await api.fetchMessagesCallCount == 1)
     }
 
+    @Test @MainActor func refreshChatMessagesIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherMessage = ChatMessageDTO(
+            id: "msg-other",
+            role: "assistant",
+            content: "另一个会话的历史。",
+            timestamp: "2026-07-02T08:00:01",
+            metadata: [:]
+        )
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setMessagesResult(.failure(.sessionUnavailable))
+        await api.setFetchMessagesHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.chatMessages = [otherMessage]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshChatMessages()
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.chatMessages == [otherMessage])
+        #expect(appState.lastError == nil)
+        #expect(await api.fetchMessagesCallCount == 1)
+    }
+
     @Test @MainActor func sendDailyMessageLinkedIssueUsesReturnedWorkbenchSnapshot() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"

@@ -628,6 +628,9 @@ public final class DaemonController: Sendable {
             }
             appState.chatMessages = response.messages
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
