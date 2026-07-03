@@ -863,6 +863,54 @@ final class WorkbenchAPIClientTests {
         #expect(response.validationRuns.isEmpty)
     }
 
+    @Test func fetchValidationRunsUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let taskID = "task/验证"
+        let json = Data(
+            """
+            {"validation_runs":[{"id":"run-template","session_id":"sess/中文","task_id":"task/验证","actor":"ValidationRunner","command":["pytest","tests/unit/test_workbench_validation.py"],"cwd":"/workspace","status":"passed","exit_code":0,"output":"ok","started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:01"}],"task_id":"task/验证","status":"passed","limit":12}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/validation-runs",
+                  query["limit"] == "12",
+                  query["task_id"] == taskID,
+                  query["status"] == "passed" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "validation_runs": "/workbench-v2/sessions/{session_id}/validation-runs",
+        ])
+        let response = try await client.fetchValidationRuns(
+            sessionID: sessionID,
+            taskID: taskID,
+            status: "passed",
+            limit: 12
+        )
+
+        #expect(response.taskID == taskID)
+        #expect(response.status == "passed")
+        #expect(response.limit == 12)
+        #expect(response.validationRuns.first?.id == "run-template")
+    }
+
     @Test func fetchValidationRunEncodesPathComponentsAndDecodesOutput() async throws {
         let sessionID = "sess/中文"
         let runID = "run/验证 001"
