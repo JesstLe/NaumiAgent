@@ -1402,6 +1402,7 @@ public final class DaemonController: Sendable {
             let capabilities = bootstrap.capabilities
             guard capabilities.protocolVersion == Self.supportedProtocolVersion else {
                 await stopEventStream()
+                await clearConfiguredDaemonTemplates()
                 clearDaemonMetadata()
                 clearUnavailableSelectedSession()
                 appState.lastError = .protocolVersionMismatch(

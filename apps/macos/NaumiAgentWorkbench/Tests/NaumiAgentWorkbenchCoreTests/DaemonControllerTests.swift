@@ -3224,6 +3224,49 @@ final class DaemonControllerTests {
         expectSelectedDetailsEmpty(appState)
     }
 
+    @Test @MainActor func createSessionProtocolMismatchClearsConfiguredDaemonTemplates() async throws {
+        let staleRouteTemplates = [
+            "create_session": "/workbench-v2/sessions",
+            "snapshot": "/workbench-v2/sessions/{session_id}/snapshot",
+        ]
+        let staleEventStreamTemplate = "wss://daemon.local:9443/api/v1/workbench-v2/sessions/{session_id}/events/stream"
+        let appState = AppState()
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        await api.setRouteTemplates(staleRouteTemplates)
+        await eventProvider.setEventStreamURLTemplate(staleEventStreamTemplate)
+        await api.setCreateWorkbenchSessionResult(.success(WorkbenchBootstrapDTO(
+            daemonStatus: makeStatus(),
+            capabilities: CapabilitiesDTO(
+                supportsDaemonManagement: false,
+                supportsWorkspaceRegistry: true,
+                supportsValidationRunner: true,
+                supportsCloudSync: false,
+                supportedLocales: ["zh-CN", "en-US"],
+                protocolVersion: 999
+            ),
+            sessions: [makeSession(id: "sess-new", title: "Unsupported Session")],
+            totalSessions: 1,
+            selectedSessionID: "sess-new",
+            snapshot: makeSnapshot(sessionID: "sess-new", missions: [])
+        )))
+
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.createSession(
+            title: "Mac 工作台",
+            model: "gpt-5",
+            systemPrompt: "默认中文治理工作台"
+        )
+
+        #expect(await api.recordedRouteTemplateConfigurations() == [staleRouteTemplates, [:]])
+        #expect(await eventProvider.recordedEventStreamURLTemplates() == [staleEventStreamTemplate, nil])
+        #expect(appState.lastError == .protocolVersionMismatch(expected: 1, actual: 999))
+    }
+
     @Test @MainActor func selectSessionSuccessClearsStaleListsSelectsAndPreWarms() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-old"
