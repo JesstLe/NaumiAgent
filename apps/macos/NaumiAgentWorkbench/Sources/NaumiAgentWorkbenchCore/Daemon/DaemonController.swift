@@ -1424,8 +1424,14 @@ public final class DaemonController: Sendable {
                 missionID: missionID,
                 active: nil
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.intentLocks = response.intentLocks
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
