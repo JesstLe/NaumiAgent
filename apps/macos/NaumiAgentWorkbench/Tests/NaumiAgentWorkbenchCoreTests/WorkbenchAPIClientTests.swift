@@ -2597,6 +2597,42 @@ final class WorkbenchAPIClientTests {
         #expect(response.snapshot.summary?.currentMissionTitle == "释放后刷新")
     }
 
+    @Test func releaseLeaseWithSnapshotUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let leaseID = "lease/释放"
+        let responseJSON = Data(
+            """
+            {"lease":{"id":"lease/释放","session_id":"sess/中文","task_id":"task-001","agent_id":"agent-001","state":"released","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:30:00"},"snapshot":{"session_id":"sess/中文","missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/leases/lease%2F%E9%87%8A%E6%94%BE/release?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "release_lease": "/workbench-v2/sessions/{session_id}/leases/{lease_id}/release",
+        ])
+        let response = try await client.releaseLeaseWithSnapshot(sessionID: sessionID, leaseID: leaseID)
+
+        #expect(response.lease.id == leaseID)
+        #expect(response.lease.state == "released")
+        #expect(response.snapshot.sessionID == sessionID)
+    }
+
     @Test func expireLeasesUsesPOSTAndEncodesPath() async throws {
         let sessionID = "sess 中文"
         let responseJSON = Data(
