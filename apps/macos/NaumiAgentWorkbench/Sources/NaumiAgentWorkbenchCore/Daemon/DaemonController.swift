@@ -303,6 +303,11 @@ public final class DaemonController: Sendable {
         if !snapshot.missions.isEmpty || appState.missions.isEmpty {
             appState.missions = snapshot.missions
         }
+        // Keep task-market issues visible from the authoritative snapshot if
+        // the lightweight issue list pre-warm is unavailable.
+        if !snapshot.issues.isEmpty || appState.issues.isEmpty {
+            appState.issues = snapshot.issues
+        }
         // Use snapshot validation runs as first-screen fallback without erasing
         // a separately refreshed list when the snapshot omits this optional slice.
         if !snapshot.validationRuns.isEmpty || appState.validationRuns.isEmpty {
