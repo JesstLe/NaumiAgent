@@ -4382,6 +4382,66 @@ final class WorkbenchAPIClientTests {
         #expect(issue.task?.blockedBy == ["1"])
     }
 
+    @Test func createIssueUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/对话"
+        let issueJSON = Data(
+            """
+            {"session_id":"sess/中文","task_id":"task-template","mission_id":"mission/对话","parallel_mode":"cooperative","risk_level":"medium","requires_human_approval":false,"acceptance_criteria":["从对话创建任务"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00","task":{"id":"task-template","session_id":"sess/中文","subject":"对话联动任务","description":"从日常对话创建 Workbench Issue","status":"pending","active_form":null,"owner":null,"blocks":[],"blocked_by":["task/前置"],"created_at":"2026-06-27T05:59:00","updated_at":"2026-06-27T05:59:30"}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/missions/mission%2F%E5%AF%B9%E8%AF%9D/issues" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["title"] as? String == "对话联动任务",
+                  json?["description"] as? String == "从日常对话创建 Workbench Issue",
+                  let blockedBy = json?["blocked_by"] as? [String],
+                  blockedBy == ["task/前置"],
+                  let criteria = json?["acceptance_criteria"] as? [String],
+                  criteria == ["从对话创建任务"],
+                  json?["parallel_mode"] as? String == "cooperative",
+                  json?["risk_level"] as? String == "medium" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, issueJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "create_issue": "/workbench-v2/sessions/{session_id}/missions/{mission_id}/issues",
+        ])
+        let issue = try await client.createIssue(
+            sessionID: sessionID,
+            missionID: missionID,
+            title: "对话联动任务",
+            description: "从日常对话创建 Workbench Issue",
+            blockedBy: ["task/前置"],
+            acceptanceCriteria: ["从对话创建任务"],
+            parallelMode: "cooperative",
+            riskLevel: "medium"
+        )
+
+        #expect(issue.sessionID == sessionID)
+        #expect(issue.taskID == "task-template")
+        #expect(issue.missionID == missionID)
+        #expect(issue.task?.subject == "对话联动任务")
+    }
+
     @Test func createIssueWithSnapshotRequestsFreshSnapshot() async throws {
         let responseJSON = Data(
             """
