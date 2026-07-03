@@ -2170,6 +2170,55 @@ final class WorkbenchAPIClientTests {
         #expect(worktree.task?.owner == "Reviewer-Agent")
     }
 
+    @Test func keepWorktreeUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let worktreeName = "wt/保留"
+        let json = Data(
+            """
+            {"name":"wt/保留","path":"/repo/.naumi/worktrees/wt-keep","branch":"naumi/worktree-wt-keep","base_ref":"abc123","status":"kept","task_id":"task-1","dirty_files":2,"commits_ahead":1,"created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:10:00","kept_reason":"等待人工审查","metadata":{},"removable":false}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/worktrees/wt%2F%E4%BF%9D%E7%95%99/keep" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard payload?["actor"] as? String == "Reviewer-Agent",
+                  payload?["reason"] as? String == "等待人工审查" else {
+                fatalError("Unexpected body: \(String(describing: payload))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "keep_worktree": "/workbench-v2/sessions/{session_id}/worktrees/{name}/keep",
+        ])
+        let worktree = try await client.keepWorktree(
+            sessionID: sessionID,
+            name: worktreeName,
+            actor: "Reviewer-Agent",
+            reason: "等待人工审查"
+        )
+
+        #expect(worktree.name == worktreeName)
+        #expect(worktree.status == "kept")
+        #expect(worktree.keptReason == "等待人工审查")
+        #expect(!worktree.removable)
+    }
+
     @Test func keepWorktreeWithSnapshotRequestsFreshSnapshot() async throws {
         let responseJSON = Data(
             """
