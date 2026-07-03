@@ -1198,6 +1198,52 @@ final class DaemonControllerTests {
         #expect(await eventProvider.connectedSessionIDs == [])
     }
 
+    @Test @MainActor func refreshConnectionStopsActiveEventStreamWhenCapabilityDisabled() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-existing"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        let snapshot = makeSnapshot(sessionID: "sess-existing", missions: [])
+        let bootstrap = WorkbenchBootstrapDTO(
+            daemonStatus: makeStatus(),
+            capabilities: CapabilitiesDTO(
+                supportsDaemonManagement: false,
+                supportsWorkspaceRegistry: true,
+                supportsValidationRunner: true,
+                supportsEventStream: false,
+                supportsCloudSync: false,
+                supportedLocales: ["zh-CN", "en-US"],
+                protocolVersion: 1
+            ),
+            sessions: [makeSession(id: "sess-existing", title: "Existing Session")],
+            totalSessions: 1,
+            selectedSessionID: "sess-existing",
+            snapshot: snapshot
+        )
+
+        await api.setBootstrapResult(.success(bootstrap))
+        await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-existing")
+
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.startEventStream()
+        await waitUntil {
+            controller.hasActiveEventStream
+        }
+
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.selectedSessionID == "sess-existing")
+        #expect(controller.hasActiveEventStream == false)
+        #expect(await eventProvider.connectedSessionIDs == ["sess-existing"])
+    }
+
     @Test @MainActor func refreshConnectionConfiguresEventStreamTemplateFromDaemonStatus() async throws {
         let appState = AppState()
         let api = FakeWorkbenchAPIProvider()
