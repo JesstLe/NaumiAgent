@@ -308,6 +308,11 @@ public final class DaemonController: Sendable {
         if !snapshot.approvals.isEmpty || appState.approvals.isEmpty {
             appState.approvals = snapshot.approvals
         }
+        // Keep worktree cards visible from the authoritative snapshot if the
+        // lightweight worktree pre-warm is unavailable.
+        if !snapshot.worktrees.isEmpty || appState.worktrees.isEmpty {
+            appState.worktrees = snapshot.worktrees
+        }
     }
 
     /// Pre-warms lightweight first-screen list states after a successful connection.
