@@ -631,7 +631,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     public func fetchAgentProfile(sessionID: String, agentID: String) async throws(APIError) -> AgentProfileDTO {
-        try await get(path: encodePath("workbench", "sessions", sessionID, "agents", agentID))
+        let path = try routePath(
+            named: "agent",
+            replacements: [
+                "session_id": sessionID,
+                "agent_id": agentID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "agents", agentID)
+        )
+        return try await get(path: path)
     }
 
     public func registerAgentProfile(
