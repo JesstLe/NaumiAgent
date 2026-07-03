@@ -89,6 +89,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var fetchDecisionHook: (@Sendable () async -> Void)?
     var fetchIntentLocksHook: (@Sendable () async -> Void)?
     var fetchIntentLockHook: (@Sendable () async -> Void)?
+    var fetchApprovalsHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -392,6 +393,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         limit: Int
     ) async throws(APIError) -> ApprovalsDTO {
         await recordPreWarmRequest()
+        if let fetchApprovalsHook {
+            await fetchApprovalsHook()
+        }
         guard let result = approvalsResult else {
             throw .invalidResponse
         }
@@ -5119,6 +5123,56 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    @Test @MainActor func refreshApprovalsIgnoresApprovalsAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherApproval = makeApproval(id: "approval-other", missionID: "mission-other", state: "waiting")
+        let staleApproval = makeApproval(id: "approval-stale", missionID: "mission-stale", state: "waiting")
+        appState.approvals = []
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setApprovalsResult(.success(ApprovalsDTO(
+            approvals: [staleApproval],
+            state: "waiting",
+            limit: 50
+        )))
+        await api.setFetchApprovalsHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.approvals = [otherApproval]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshApprovals(state: "waiting", limit: 50)
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.approvals == [otherApproval])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshApprovalsIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherApproval = makeApproval(id: "approval-other", missionID: "mission-other", state: "waiting")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setApprovalsResult(.failure(.sessionUnavailable))
+        await api.setFetchApprovalsHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.approvals = [otherApproval]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshApprovals(state: "waiting", limit: 50)
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.approvals == [otherApproval])
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func refreshApprovalsWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         appState.approvals = [
@@ -8796,6 +8850,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setApprovalsResult(_ result: Result<ApprovalsDTO, APIError>) {
         approvalsResult = result
+    }
+
+    fileprivate func setFetchApprovalsHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchApprovalsHook = hook
     }
 
     fileprivate func setApprovalResult(_ result: Result<ApprovalDTO, APIError>) {
