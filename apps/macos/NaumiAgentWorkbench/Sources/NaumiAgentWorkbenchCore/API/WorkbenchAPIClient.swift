@@ -967,7 +967,14 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         missionID: String,
         active: Bool?
     ) async throws(APIError) -> IntentLocksDTO {
-        let path = encodePath("workbench", "sessions", sessionID, "missions", missionID, "intent-locks")
+        let path = try routePath(
+            named: "intent_locks",
+            replacements: [
+                "session_id": sessionID,
+                "mission_id": missionID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "missions", missionID, "intent-locks")
+        )
         if let active {
             let response: IntentLocksDTO = try await get(
                 path: path,

@@ -5799,6 +5799,50 @@ final class WorkbenchAPIClientTests {
         #expect(lock.createdAt == "2026-06-27T06:00:00")
     }
 
+    @Test func fetchIntentLocksUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/治理"
+        let json = Data(
+            """
+            {"intent_locks":[{"id":"lock-模板","session_id":"sess/中文","mission_id":"mission/治理","rule":"高风险必须先提案","blocked_paths":["src/core"],"allowed_paths":["docs/adr"],"require_proposal_for_risk":"high","active":false,"created_at":"2026-06-27T06:00:00"}],"mission_id":"mission/治理","active":false}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/missions/mission%2F%E6%B2%BB%E7%90%86/intent-locks",
+                  query["active"] == "false" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "intent_locks": "/workbench-v2/sessions/{session_id}/missions/{mission_id}/intent-locks",
+        ])
+        let response = try await client.fetchIntentLocks(
+            sessionID: sessionID,
+            missionID: missionID,
+            active: false
+        )
+
+        #expect(response.missionID == missionID)
+        #expect(response.active == false)
+        #expect(response.intentLocks.map(\.id) == ["lock-模板"])
+    }
+
     @Test func fetchIntentLockEncodesPathComponentsAndDecodesPolicy() async throws {
         let sessionID = "sess/中文"
         let missionID = "mission/审查"
