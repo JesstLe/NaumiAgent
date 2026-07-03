@@ -267,6 +267,10 @@ public final class DaemonController: Sendable {
             await refreshWorkbenchListsAfterConnection()
         case .event:
             await refreshSnapshot()
+            if appState.lastError == .sessionUnavailable {
+                await stopEventStream()
+                return
+            }
             if appState.snapshot != nil {
                 await refreshWorkbenchListsAfterConnection()
             }
