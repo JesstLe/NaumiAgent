@@ -3712,6 +3712,42 @@ final class WorkbenchAPIClientTests {
         #expect(lease.task?.owner == "Agent-A")
     }
 
+    @Test func releaseLeaseUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let leaseID = "lease/释放"
+        let leaseJSON = Data(
+            """
+            {"id":"lease/释放","session_id":"sess/中文","task_id":"task-001","agent_id":"agent-001","state":"released","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-001","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:30:00"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/leases/lease%2F%E9%87%8A%E6%94%BE/release" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, leaseJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "release_lease": "/workbench-v2/sessions/{session_id}/leases/{lease_id}/release",
+        ])
+        let lease = try await client.releaseLease(sessionID: sessionID, leaseID: leaseID)
+
+        #expect(lease.id == leaseID)
+        #expect(lease.sessionID == sessionID)
+        #expect(lease.state == "released")
+    }
+
     @Test func releaseLeaseWithSnapshotRequestsFreshSnapshot() async throws {
         let responseJSON = Data(
             """
