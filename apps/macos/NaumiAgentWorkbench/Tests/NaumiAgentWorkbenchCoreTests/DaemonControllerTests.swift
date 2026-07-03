@@ -1409,6 +1409,30 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .networkFailure("daemon unavailable"))
     }
 
+    @Test @MainActor func refreshConnectionFailureClearsConfiguredDaemonTemplates() async throws {
+        let staleRouteTemplates = [
+            "bootstrap": "/workbench-v2/bootstrap",
+            "snapshot": "/workbench-v2/sessions/{session_id}/snapshot",
+        ]
+        let staleEventStreamTemplate = "wss://daemon.local:9443/api/v1/workbench-v2/sessions/{session_id}/events/stream"
+        let appState = AppState()
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        await api.setRouteTemplates(staleRouteTemplates)
+        await eventProvider.setEventStreamURLTemplate(staleEventStreamTemplate)
+        await api.setBootstrapResult(.failure(.httpStatus(404)))
+
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider
+        )
+        await controller.refreshConnection()
+
+        #expect(await api.recordedRouteTemplateConfigurations() == [staleRouteTemplates, [:]])
+        #expect(await eventProvider.recordedEventStreamURLTemplates() == [staleEventStreamTemplate, nil])
+    }
+
     @Test @MainActor func refreshConnectionFailureClearsStaleSessionState() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-stale"
