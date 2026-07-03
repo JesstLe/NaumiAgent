@@ -2431,6 +2431,48 @@ final class WorkbenchAPIClientTests {
         #expect(response.snapshot.summary?.currentMissionTitle == "认领后刷新")
     }
 
+    @Test func claimIssueWithSnapshotUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let taskID = "task/认领"
+        let responseJSON = Data(
+            """
+            {"lease":{"id":"lease-template","session_id":"sess/中文","task_id":"task/认领","agent_id":"agent-001","state":"active","expires_at":"2026-06-27T08:00:00","worktree_name":"wt-template","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"},"snapshot":{"session_id":"sess/中文","missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/issues/task%2F%E8%AE%A4%E9%A2%86/claim?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "claim_issue": "/workbench-v2/sessions/{session_id}/issues/{task_id}/claim",
+        ])
+        let response = try await client.claimIssueWithSnapshot(
+            sessionID: sessionID,
+            taskID: taskID,
+            agentID: "agent-001",
+            durationMinutes: 60,
+            worktreeName: "wt-template"
+        )
+
+        #expect(response.lease.id == "lease-template")
+        #expect(response.lease.taskID == taskID)
+        #expect(response.snapshot.sessionID == sessionID)
+    }
+
     @Test func releaseLease() async throws {
         let leaseJSON = Data(
             """
@@ -3175,6 +3217,58 @@ final class WorkbenchAPIClientTests {
         #expect(result.validationRun.task?.status == "in_progress")
         #expect(result.snapshot.sessionID == "sess 中文")
         #expect(result.snapshot.summary?.currentMissionTitle == "验证后刷新")
+    }
+
+    @Test func runValidationWithSnapshotUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let resultJSON = Data(
+            """
+            {"validation_run":{"id":"run-template","session_id":"sess/中文","task_id":"task-001","actor":"Human","command":["pytest"],"cwd":"/workspace","status":"passed","exit_code":0,"output":"ok","started_at":"2026-06-27T06:00:00","completed_at":"2026-06-27T06:00:01"},"snapshot":{"session_id":"sess/中文","missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/validation-runs?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["task_id"] as? String == "task-001",
+                  json?["actor"] as? String == "Human",
+                  let argv = json?["argv"] as? [String],
+                  argv == ["pytest"],
+                  json?["cwd"] as? String == "/workspace" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, resultJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "run_validation": "/workbench-v2/sessions/{session_id}/validation-runs",
+        ])
+        let result = try await client.runValidationWithSnapshot(
+            sessionID: sessionID,
+            taskID: "task-001",
+            actor: "Human",
+            argv: ["pytest"],
+            cwd: "/workspace"
+        )
+
+        #expect(result.validationRun.id == "run-template")
+        #expect(result.validationRun.status == "passed")
+        #expect(result.snapshot.sessionID == sessionID)
     }
 
     @Test func createIntentLockUsesPOSTAndEncodesPathAndBody() async throws {
