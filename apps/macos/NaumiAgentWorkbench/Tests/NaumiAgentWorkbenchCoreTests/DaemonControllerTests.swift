@@ -77,6 +77,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var fetchFailureHook: (@Sendable () async -> Void)?
     var fetchIssuesHook: (@Sendable () async -> Void)?
     var fetchIssueHook: (@Sendable () async -> Void)?
+    var fetchLeasesHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -462,6 +463,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         limit: Int
     ) async throws(APIError) -> LeasesDTO {
         await recordPreWarmRequest()
+        if let fetchLeasesHook {
+            await fetchLeasesHook()
+        }
         guard let result = leasesResult else {
             throw .invalidResponse
         }
@@ -5359,6 +5363,58 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    @Test @MainActor func refreshLeasesIgnoresLeasesAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherLease = makeLease(id: "lease-other", taskID: "task-other", state: "active")
+        let staleLease = makeLease(id: "lease-stale", taskID: "task-stale", state: "active")
+        appState.leases = []
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setLeasesResult(.success(LeasesDTO(
+            leases: [staleLease],
+            state: nil,
+            taskID: nil,
+            agentID: nil,
+            limit: 50
+        )))
+        await api.setFetchLeasesHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.leases = [otherLease]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshLeases(limit: 50)
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.leases == [otherLease])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshLeasesIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherLease = makeLease(id: "lease-other", taskID: "task-other", state: "active")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setLeasesResult(.failure(.sessionUnavailable))
+        await api.setFetchLeasesHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.leases = [otherLease]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshLeases(limit: 50)
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.leases == [otherLease])
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func refreshLeasesWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         appState.leases = [makeLease(id: "lease-stale", taskID: "task-old", state: "active")]
@@ -8211,6 +8267,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setLeasesResult(_ result: Result<LeasesDTO, APIError>) {
         leasesResult = result
+    }
+
+    fileprivate func setFetchLeasesHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchLeasesHook = hook
     }
 
     fileprivate func setWorktreesResult(_ result: Result<WorktreesDTO, APIError>) {
