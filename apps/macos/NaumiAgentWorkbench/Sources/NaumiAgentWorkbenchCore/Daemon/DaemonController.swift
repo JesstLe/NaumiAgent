@@ -313,6 +313,11 @@ public final class DaemonController: Sendable {
         if !snapshot.worktrees.isEmpty || appState.worktrees.isEmpty {
             appState.worktrees = snapshot.worktrees
         }
+        // Keep context-health evidence visible from the authoritative snapshot
+        // if the lightweight context pre-warm is unavailable.
+        if !snapshot.contextSnapshots.isEmpty || appState.contextSnapshots.isEmpty {
+            appState.contextSnapshots = snapshot.contextSnapshots
+        }
     }
 
     /// Pre-warms lightweight first-screen list states after a successful connection.
