@@ -145,6 +145,41 @@ final class WorkbenchAPIClientTests {
         #expect(status.authMode == "dev_token")
     }
 
+    @Test func fetchDaemonStatusUsesConfiguredRouteTemplate() async throws {
+        let json = Data(
+            """
+            {"status":"running","version":"0.1.0","pid":4242,"host":"127.0.0.1","port":8766,"started_at":"2026-06-27T06:00:00","workspace_count":2,"workspace_root":"/Users/lv/Workspace/NaumiAgent","workspace_name":"NaumiAgent","api_base_url":"http://127.0.0.1:8766/api/v1","workbench_base_url":"http://127.0.0.1:8766/api/v1/workbench-v2","event_stream_url_template":"ws://127.0.0.1:8766/api/v1/workbench-v2/sessions/{session_id}/events/stream","auth_mode":"dev_token"}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/daemon/status" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "daemon_status": "/workbench-v2/daemon/status",
+        ])
+        let status = try await client.fetchDaemonStatus()
+
+        #expect(status.pid == 4242)
+        #expect(status.port == 8766)
+        #expect(status.workspaceCount == 2)
+        #expect(status.workbenchBaseURL == "http://127.0.0.1:8766/api/v1/workbench-v2")
+        #expect(status.eventStreamURLTemplate == "ws://127.0.0.1:8766/api/v1/workbench-v2/sessions/{session_id}/events/stream")
+    }
+
     @Test func fetchDaemonStatusDefaultsMacFieldsForLegacyDaemon() async throws {
         let json = Data(
             """

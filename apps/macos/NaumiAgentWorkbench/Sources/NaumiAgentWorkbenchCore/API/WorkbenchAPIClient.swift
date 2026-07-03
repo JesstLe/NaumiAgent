@@ -32,7 +32,12 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     public func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
-        try await get(path: "workbench/daemon/status")
+        let path = try routePath(
+            named: "daemon_status",
+            replacements: [:],
+            fallback: "workbench/daemon/status"
+        )
+        return try await get(path: path)
     }
 
     public func fetchCapabilities() async throws(APIError) -> CapabilitiesDTO {
