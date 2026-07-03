@@ -1550,6 +1550,58 @@ final class WorkbenchAPIClientTests {
         #expect(response.approvals.isEmpty)
     }
 
+    @Test func fetchApprovalsUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/审批"
+        let taskID = "task/风险"
+        let json = Data(
+            """
+            {"approvals":[{"id":"approval-template","session_id":"sess/中文","mission_id":"mission/审批","task_id":"task/风险","state":"waiting","title":"需要人工审批","detail":"高风险变更","requester":"Reviewer-Agent","reviewer":"","decision_note":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"}],"state":"waiting","mission_id":"mission/审批","task_id":"task/风险","limit":12}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/approvals",
+                  query["limit"] == "12",
+                  query["state"] == "waiting",
+                  query["mission_id"] == missionID,
+                  query["task_id"] == taskID else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "GET" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "approvals": "/workbench-v2/sessions/{session_id}/approvals",
+        ])
+        let response = try await client.fetchApprovals(
+            sessionID: sessionID,
+            state: "waiting",
+            missionID: missionID,
+            taskID: taskID,
+            limit: 12
+        )
+
+        #expect(response.state == "waiting")
+        #expect(response.missionID == missionID)
+        #expect(response.taskID == taskID)
+        #expect(response.limit == 12)
+        #expect(response.approvals.first?.id == "approval-template")
+    }
+
     @Test func fetchApprovalEncodesPathComponentsAndDecodesDecisionContext() async throws {
         let sessionID = "sess 中文"
         let approvalID = "approval/审查 001"
