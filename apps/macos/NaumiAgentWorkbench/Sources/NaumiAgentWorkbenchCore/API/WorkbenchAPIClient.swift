@@ -243,8 +243,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             policyConflict: policyConflict,
             actor: actor
         )
+        let path = try routePath(
+            named: "record_context_health",
+            replacements: [
+                "session_id": sessionID,
+                "task_id": taskID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "issues", taskID, "context-health")
+        )
         return try await post(
-            path: encodePath("workbench", "sessions", sessionID, "issues", taskID, "context-health") + "?include_snapshot=true",
+            path: path + "?include_snapshot=true",
             body: body
         )
     }
