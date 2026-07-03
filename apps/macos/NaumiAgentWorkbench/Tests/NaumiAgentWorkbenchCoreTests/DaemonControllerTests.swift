@@ -1641,6 +1641,41 @@ final class DaemonControllerTests {
         #expect(appState.worktrees == [snapshotWorktree])
     }
 
+    @Test @MainActor func refreshConnectionKeepsSnapshotContextSnapshotsWhenPreWarmFails() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-existing"
+
+        let api = FakeWorkbenchAPIProvider()
+        let snapshotContext = makeContextSnapshot(
+            id: "ctx-snapshot",
+            taskID: "task-snapshot",
+            health: "stale"
+        )
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-existing",
+            missions: [],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: [],
+            contextSnapshots: [snapshotContext]
+        )
+
+        await api.setStatusResult(.success(makeStatus()))
+        await api.setCapabilitiesResult(.success(makeCapabilities()))
+        await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-existing")
+        await api.setContextSnapshotsResult(.failure(.httpStatus(502)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == .httpStatus(502))
+        #expect(appState.contextSnapshots == [snapshotContext])
+    }
+
     @Test @MainActor func refreshConnectionPreWarmsIndependentListsConcurrently() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-existing"
