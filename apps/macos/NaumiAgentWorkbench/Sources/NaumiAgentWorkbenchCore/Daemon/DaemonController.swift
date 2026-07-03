@@ -1394,6 +1394,9 @@ public final class DaemonController: Sendable {
             await refreshWorkbenchListsAfterConnection()
             await startEventStreamIfAvailable()
         } catch {
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
             appState.lastError = error
         }
     }

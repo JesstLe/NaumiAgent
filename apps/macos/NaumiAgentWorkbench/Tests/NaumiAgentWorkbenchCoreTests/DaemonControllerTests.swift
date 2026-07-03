@@ -2785,6 +2785,36 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(503))
     }
 
+    @Test @MainActor func createSessionSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
+        let appState = AppState()
+        appState.connectionState = .connected
+        appState.selectedSessionID = "sess-stale"
+        appState.snapshot = makeSnapshot(
+            sessionID: "sess-stale",
+            missions: [makeMission(id: "mission-stale", sessionID: "sess-stale")]
+        )
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateWorkbenchSessionResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createSession(
+            title: "Mac 工作台",
+            model: "gpt-5",
+            systemPrompt: "默认中文治理工作台"
+        )
+
+        #expect(await api.createWorkbenchSessionCallCount == 1)
+        #expect(appState.connectionState == .connected)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        #expect(appState.lastError == .sessionUnavailable)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+    }
+
     @Test @MainActor func createSessionProtocolMismatchClearsStaleSessionState() async throws {
         let appState = AppState()
         appState.connectionState = .connected
