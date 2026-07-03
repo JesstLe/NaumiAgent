@@ -2021,6 +2021,9 @@ public final class DaemonController: Sendable {
             }
             appState.selectedEvent = event
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
