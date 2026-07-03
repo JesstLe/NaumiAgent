@@ -196,6 +196,7 @@ public final class DaemonController: Sendable {
             return
         }
         guard appState.capabilities?.supportsEventStream != false else {
+            await stopEventStream()
             return
         }
         await startEventStream()
