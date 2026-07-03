@@ -1359,6 +1359,7 @@ public final class DaemonController: Sendable {
             guard capabilities.protocolVersion == Self.supportedProtocolVersion else {
                 await stopEventStream()
                 clearDaemonMetadata()
+                clearUnavailableSelectedSession()
                 appState.lastError = .protocolVersionMismatch(
                     expected: Self.supportedProtocolVersion,
                     actual: capabilities.protocolVersion
