@@ -2711,6 +2711,54 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(503))
     }
 
+    @Test @MainActor func createSessionProtocolMismatchClearsStaleSessionState() async throws {
+        let appState = AppState()
+        appState.connectionState = .connected
+        appState.selectedSessionID = "sess-stale"
+        appState.snapshot = makeSnapshot(
+            sessionID: "sess-stale",
+            missions: [makeMission(id: "mission-stale", sessionID: "sess-stale")]
+        )
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateWorkbenchSessionResult(.success(WorkbenchBootstrapDTO(
+            daemonStatus: makeStatus(),
+            capabilities: CapabilitiesDTO(
+                supportsDaemonManagement: false,
+                supportsWorkspaceRegistry: true,
+                supportsValidationRunner: true,
+                supportsCloudSync: false,
+                supportedLocales: ["zh-CN", "en-US"],
+                protocolVersion: 999
+            ),
+            sessions: [makeSession(id: "sess-new", title: "Unsupported Session")],
+            totalSessions: 1,
+            selectedSessionID: "sess-new",
+            snapshot: makeSnapshot(
+                sessionID: "sess-new",
+                missions: [makeMission(id: "mission-new", sessionID: "sess-new")]
+            )
+        )))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createSession(
+            title: "Mac 工作台",
+            model: "gpt-5",
+            systemPrompt: "默认中文治理工作台"
+        )
+
+        #expect(appState.connectionState == .disconnected)
+        #expect(appState.daemonStatus == nil)
+        #expect(appState.capabilities == nil)
+        #expect(appState.lastError == .protocolVersionMismatch(expected: 1, actual: 999))
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+    }
+
     @Test @MainActor func selectSessionSuccessClearsStaleListsSelectsAndPreWarms() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-old"
