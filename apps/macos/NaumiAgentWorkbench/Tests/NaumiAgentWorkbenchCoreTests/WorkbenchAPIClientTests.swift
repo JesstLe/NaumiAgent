@@ -3166,6 +3166,61 @@ final class WorkbenchAPIClientTests {
         #expect(response.snapshot.issues == [response.issue])
     }
 
+    @Test func attachIssueWithSnapshotUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let missionID = "mission/治理"
+        let taskID = "task/挂接"
+        let responseJSON = Data(
+            """
+            {"issue":{"session_id":"sess/中文","task_id":"task/挂接","mission_id":"mission/治理","parallel_mode":"cooperative","risk_level":"high","requires_human_approval":true,"acceptance_criteria":["Dashboard 立即刷新"],"expected_artifacts":[],"related_branch":"","related_worktree":"","related_pr":"","created_at":"2026-06-27T06:00:00","updated_at":"2026-06-27T06:00:00"},"snapshot":{"session_id":"sess/中文","missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/missions/mission%2F%E6%B2%BB%E7%90%86/issues?include_snapshot=true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData() else {
+                fatalError("Expected a request body")
+            }
+            let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+            guard json?["task_id"] as? String == taskID,
+                  let criteria = json?["acceptance_criteria"] as? [String],
+                  criteria == ["Dashboard 立即刷新"],
+                  json?["parallel_mode"] as? String == "cooperative",
+                  json?["risk_level"] as? String == "high" else {
+                fatalError("Unexpected body: \(String(describing: json))")
+            }
+
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "mission_issues": "/workbench-v2/sessions/{session_id}/missions/{mission_id}/issues",
+        ])
+        let response = try await client.attachIssueWithSnapshot(
+            sessionID: sessionID,
+            missionID: missionID,
+            taskID: taskID,
+            acceptanceCriteria: ["Dashboard 立即刷新"],
+            parallelMode: "cooperative",
+            riskLevel: "high"
+        )
+
+        #expect(response.issue.taskID == taskID)
+        #expect(response.issue.missionID == missionID)
+        #expect(response.snapshot.sessionID == sessionID)
+    }
+
     @Test func createIssueUsesPOSTAndEncodesBackingTaskFields() async throws {
         let issueJSON = Data(
             """
