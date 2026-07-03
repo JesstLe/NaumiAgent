@@ -1631,6 +1631,40 @@ final class DaemonControllerTests {
         #expect(appState.agentProfiles == [snapshotProfile])
     }
 
+    @Test @MainActor func refreshConnectionKeepsSnapshotFailuresWhenPreWarmFails() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-existing"
+
+        let api = FakeWorkbenchAPIProvider()
+        let snapshotFailure = makeFailure(
+            id: "failure-snapshot",
+            taskID: "task-snapshot",
+            status: "open"
+        )
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess-existing",
+            missions: [],
+            tasks: [],
+            issues: [],
+            failures: [snapshotFailure],
+            events: []
+        )
+
+        await api.setStatusResult(.success(makeStatus()))
+        await api.setCapabilitiesResult(.success(makeCapabilities()))
+        await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-existing")
+        await api.setFailuresResult(.failure(.httpStatus(502)))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.snapshot == snapshot)
+        #expect(appState.lastError == .httpStatus(502))
+        #expect(appState.failures == [snapshotFailure])
+    }
+
     @Test @MainActor func refreshConnectionKeepsSnapshotValidationRunsWhenPreWarmFails() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-existing"

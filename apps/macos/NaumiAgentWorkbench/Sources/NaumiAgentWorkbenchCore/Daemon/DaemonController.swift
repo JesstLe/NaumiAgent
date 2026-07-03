@@ -313,6 +313,11 @@ public final class DaemonController: Sendable {
         if !snapshot.agentProfiles.isEmpty || appState.agentProfiles.isEmpty {
             appState.agentProfiles = snapshot.agentProfiles
         }
+        // Keep failure cards visible from the authoritative snapshot if the
+        // lightweight failure list pre-warm is unavailable.
+        if !snapshot.failures.isEmpty || appState.failures.isEmpty {
+            appState.failures = snapshot.failures
+        }
         // Use snapshot validation runs as first-screen fallback without erasing
         // a separately refreshed list when the snapshot omits this optional slice.
         if !snapshot.validationRuns.isEmpty || appState.validationRuns.isEmpty {
