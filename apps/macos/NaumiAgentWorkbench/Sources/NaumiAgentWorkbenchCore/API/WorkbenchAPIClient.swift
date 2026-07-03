@@ -438,8 +438,16 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         name: String,
         discardChanges: Bool
     ) async throws(APIError) -> WorktreeRemovalSnapshotDTO {
-        try await delete(
-            path: encodePath("workbench", "sessions", sessionID, "worktrees", name),
+        let path = try routePath(
+            named: "delete_worktree",
+            replacements: [
+                "session_id": sessionID,
+                "name": name,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "worktrees", name)
+        )
+        return try await delete(
+            path: path,
             queryItems: [
                 URLQueryItem(name: "discard_changes", value: discardChanges ? "true" : "false"),
                 URLQueryItem(name: "include_snapshot", value: "true"),

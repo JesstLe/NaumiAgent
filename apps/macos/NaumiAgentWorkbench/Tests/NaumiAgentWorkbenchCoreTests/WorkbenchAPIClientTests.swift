@@ -2090,6 +2090,51 @@ final class WorkbenchAPIClientTests {
         #expect(response.snapshot.summary?.currentMissionTitle == "删除工作区后刷新")
     }
 
+    @Test func removeWorktreeWithSnapshotUsesConfiguredRouteTemplate() async throws {
+        let sessionID = "sess/中文"
+        let worktreeName = "wt/清理"
+        let responseJSON = Data(
+            """
+            {"removal":{"name":"wt/清理","discard_changes":false,"message":"已删除 worktree：wt/清理"},"snapshot":{"session_id":"sess/中文","missions":[],"agent_profiles":[],"tasks":[],"issues":[],"leases":[],"failures":[],"events":[]}}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
+            let query = Dictionary(
+                uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+            guard components?.percentEncodedPath == "/api/v1/workbench-v2/sessions/sess%2F%E4%B8%AD%E6%96%87/worktrees/wt%2F%E6%B8%85%E7%90%86",
+                  query["discard_changes"] == "false",
+                  query["include_snapshot"] == "true" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "DELETE" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, responseJSON)
+        }
+
+        let client = makeClient(routeTemplates: [
+            "delete_worktree": "/workbench-v2/sessions/{session_id}/worktrees/{name}",
+        ])
+        let response = try await client.removeWorktreeWithSnapshot(
+            sessionID: sessionID,
+            name: worktreeName,
+            discardChanges: false
+        )
+
+        #expect(response.removal.name == worktreeName)
+        #expect(!response.removal.discardChanges)
+        #expect(response.snapshot.sessionID == sessionID)
+    }
+
     @Test func fetchMissionsWithStatus() async throws {
         let json = Data(
             """
