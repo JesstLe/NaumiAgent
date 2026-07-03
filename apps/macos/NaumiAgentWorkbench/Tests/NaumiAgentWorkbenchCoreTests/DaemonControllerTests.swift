@@ -87,6 +87,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var fetchAgentProfileHook: (@Sendable () async -> Void)?
     var fetchDecisionsHook: (@Sendable () async -> Void)?
     var fetchDecisionHook: (@Sendable () async -> Void)?
+    var fetchIntentLocksHook: (@Sendable () async -> Void)?
     var bootstrapCallCount: Int = 0
     var bootstrapPageSizes: [Int] = []
     var createWorkbenchSessionCallCount: Int = 0
@@ -808,6 +809,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         active: Bool?
     ) async throws(APIError) -> IntentLocksDTO {
         await recordPreWarmRequest()
+        if let fetchIntentLocksHook {
+            await fetchIntentLocksHook()
+        }
         guard let result = fetchIntentLocksResult else {
             throw .invalidResponse
         }
@@ -6393,6 +6397,55 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    @Test @MainActor func refreshIntentLocksIgnoresLocksAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherLock = makeIntentLock(id: "lock-other", missionID: "mission-other")
+        let staleLock = makeIntentLock(id: "lock-stale", missionID: "mission-001")
+        appState.intentLocks = []
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setFetchIntentLocksResult(.success(IntentLocksDTO(
+            intentLocks: [staleLock],
+            missionID: "mission-001"
+        )))
+        await api.setFetchIntentLocksHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.intentLocks = [otherLock]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshIntentLocks(missionID: "mission-001")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.intentLocks == [otherLock])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshIntentLocksIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherLock = makeIntentLock(id: "lock-other", missionID: "mission-other")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setFetchIntentLocksResult(.failure(.sessionUnavailable))
+        await api.setFetchIntentLocksHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.intentLocks = [otherLock]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshIntentLocks(missionID: "mission-001")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.intentLocks == [otherLock])
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func refreshIntentLocksWithoutSelectedSessionClearsListAndRecordsError() async throws {
         let appState = AppState()
         let staleLock = makeIntentLock(id: "lock-stale", missionID: "mission-old")
@@ -8877,6 +8930,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setFetchIntentLocksResult(_ result: Result<IntentLocksDTO, APIError>) {
         fetchIntentLocksResult = result
+    }
+
+    fileprivate func setFetchIntentLocksHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchIntentLocksHook = hook
     }
 
     fileprivate func setFetchIntentLockResult(_ result: Result<IntentLockDTO, APIError>) {
