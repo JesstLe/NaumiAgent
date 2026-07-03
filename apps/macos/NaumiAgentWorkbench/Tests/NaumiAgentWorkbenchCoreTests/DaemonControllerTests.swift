@@ -7079,6 +7079,49 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .httpStatus(500))
     }
 
+    @Test @MainActor func sendDailyMessageLinkedIssuePreservesSessionUnavailableFromSnapshotRefresh() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-missing"
+        appState.snapshot = makeSnapshot(sessionID: "sess-missing", missions: [
+            makeMission(id: "mission-stale", sessionID: "sess-missing")
+        ])
+        seedWorkbenchLists(appState)
+        seedSelectedDetails(appState)
+
+        let response = ChatMessageDTO(
+            id: "msg-assistant",
+            role: "assistant",
+            content: "已记录，并创建 Issue。",
+            timestamp: "2026-07-02T08:00:03",
+            metadata: ["workbench_issue": .object(["task_id": .string("task-chat-1")])]
+        )
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setSendMessageResult(.success(response))
+        await api.setSnapshotResult(.failure(.sessionUnavailable))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.sendDailyMessage(
+            content: "把登录失败记录成任务",
+            issueDraft: ChatIssueDraftDTO(
+                missionID: "mission-stale",
+                title: "登录失败",
+                description: "把登录失败记录成任务",
+                acceptanceCriteria: ["有复现步骤"],
+                parallelMode: "exclusive",
+                riskLevel: "medium"
+            )
+        )
+
+        #expect(appState.lastError == .sessionUnavailable)
+        #expect(appState.selectedSessionID == nil)
+        #expect(appState.snapshot == nil)
+        expectWorkbenchListsEmpty(appState)
+        expectSelectedDetailsEmpty(appState)
+        #expect(await api.issueRequests.isEmpty)
+        #expect(await api.fetchedEvents.isEmpty)
+    }
+
     @Test @MainActor func refreshAgentProfilesSuccessWritesToAppState() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -7178,6 +7221,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setCreateWorkbenchSessionResult(_ result: Result<WorkbenchBootstrapDTO, APIError>) {
         createWorkbenchSessionResult = result
+    }
+
+    fileprivate func setSendMessageResult(_ result: Result<ChatMessageDTO, APIError>) {
+        sendMessageResult = result
     }
 
     fileprivate func setEventsResult(_ result: Result<WorkbenchEventsDTO, APIError>) {

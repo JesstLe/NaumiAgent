@@ -1558,7 +1558,13 @@ public final class DaemonController: Sendable {
 
             if issueDraft != nil {
                 await refreshSnapshot()
+                guard appState.selectedSessionID != nil else {
+                    return
+                }
                 await refreshIssues(missionID: issueDraft?.missionID)
+                guard appState.selectedSessionID != nil else {
+                    return
+                }
                 await refreshEvents(limit: 50)
             }
         } catch {
