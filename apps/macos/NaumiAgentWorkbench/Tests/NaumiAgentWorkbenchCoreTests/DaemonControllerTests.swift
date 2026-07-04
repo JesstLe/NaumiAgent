@@ -67,6 +67,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var runValidationWithSnapshotResult: Result<ValidationResultSnapshotDTO, APIError>?
     var resolveApprovalWithSnapshotHook: (@Sendable () async -> Void)?
     var claimIssueWithSnapshotHook: (@Sendable () async -> Void)?
+    var releaseLeaseWithSnapshotHook: (@Sendable () async -> Void)?
     var runValidationWithSnapshotHook: (@Sendable () async -> Void)?
     var sendMessageHook: (@Sendable () async -> Void)?
     var fetchMessagesHook: (@Sendable () async -> Void)?
@@ -702,6 +703,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
 
     func releaseLeaseWithSnapshot(sessionID: String, leaseID: String) async throws(APIError) -> LeaseSnapshotDTO {
         releaseLeaseWithSnapshotCallCount += 1
+        if let releaseLeaseWithSnapshotHook {
+            await releaseLeaseWithSnapshotHook()
+        }
         guard let result = releaseLeaseWithSnapshotResult else {
             throw .invalidResponse
         }
@@ -3737,6 +3741,69 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
         #expect(await api.releaseLeaseWithSnapshotCallCount == 1)
         #expect(await api.snapshotCallCount == 0)
+    }
+
+    @Test @MainActor func releaseLeaseIgnoresSnapshotAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherLease = makeLease(id: "lease-other", taskID: "task-other", state: "active")
+        let otherEvent = makeEvent(id: "evt-other", type: "lease.released", subjectID: "lease-other")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", lease: otherLease)
+
+        let staleLease = makeLease(id: "lease-stale", taskID: "task-stale", state: "released")
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", lease: staleLease)
+        let staleEvent = makeEvent(id: "evt-stale", type: "lease.released", subjectID: "lease-stale")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setReleaseLeaseWithSnapshotResult(.success(
+            LeaseSnapshotDTO(lease: staleLease, snapshot: staleSnapshot)
+        ))
+        await api.setLeasesResult(.success(
+            LeasesDTO(leases: [staleLease], state: nil, taskID: nil, agentID: nil, limit: 50)
+        ))
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [staleEvent], limit: 50)))
+        await api.setReleaseLeaseWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.leases = [otherLease]
+                appState.timelineEvents = [otherEvent]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.releaseLease(leaseID: "lease-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.leases == [otherLease])
+        #expect(appState.timelineEvents == [otherEvent])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func releaseLeaseIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherLease = makeLease(id: "lease-other", taskID: "task-other", state: "active")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", lease: otherLease)
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setReleaseLeaseWithSnapshotResult(.failure(.sessionUnavailable))
+        await api.setReleaseLeaseWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.leases = [otherLease]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.releaseLease(leaseID: "lease-stale")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.leases == [otherLease])
+        #expect(appState.lastError == nil)
     }
 
     @Test @MainActor func releaseLeaseSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
@@ -9308,6 +9375,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setReleaseLeaseWithSnapshotResult(_ result: Result<LeaseSnapshotDTO, APIError>) {
         releaseLeaseWithSnapshotResult = result
+    }
+
+    fileprivate func setReleaseLeaseWithSnapshotHook(_ hook: (@Sendable () async -> Void)?) {
+        releaseLeaseWithSnapshotHook = hook
     }
 
     fileprivate func setExpireLeasesResult(_ result: Result<ExpiredLeasesDTO, APIError>) {
