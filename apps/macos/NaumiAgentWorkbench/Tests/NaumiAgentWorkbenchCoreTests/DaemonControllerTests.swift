@@ -72,6 +72,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var createMissionWithSnapshotHook: (@Sendable () async -> Void)?
     var attachIssueWithSnapshotHook: (@Sendable () async -> Void)?
     var createIssueWithSnapshotHook: (@Sendable () async -> Void)?
+    var createIntentLockWithSnapshotHook: (@Sendable () async -> Void)?
     var runValidationWithSnapshotHook: (@Sendable () async -> Void)?
     var sendMessageHook: (@Sendable () async -> Void)?
     var fetchMessagesHook: (@Sendable () async -> Void)?
@@ -892,6 +893,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         requireProposalForRisk: String
     ) async throws(APIError) -> IntentLockSnapshotDTO {
         createIntentLockWithSnapshotCallCount += 1
+        if let createIntentLockWithSnapshotHook {
+            await createIntentLockWithSnapshotHook()
+        }
         guard let result = createIntentLockWithSnapshotResult else {
             throw .invalidResponse
         }
@@ -6904,6 +6908,83 @@ final class DaemonControllerTests {
         #expect(await api.snapshotCallCount == 0)
     }
 
+    @Test @MainActor func createIntentLockIgnoresSnapshotAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherLock = makeIntentLock(id: "lock-other", missionID: "mission-other")
+        let otherEvent = makeEvent(id: "evt-other", type: "intent_lock.created", subjectID: "lock-other")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", intentLocks: [otherLock])
+
+        let staleLock = makeIntentLock(id: "lock-stale", missionID: "mission-stale")
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", intentLocks: [staleLock])
+        let staleEvent = makeEvent(id: "evt-stale", type: "intent_lock.created", subjectID: "lock-stale")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateIntentLockWithSnapshotResult(.success(
+            IntentLockSnapshotDTO(intentLock: staleLock, snapshot: staleSnapshot)
+        ))
+        await api.setFetchIntentLocksResult(.success(
+            IntentLocksDTO(intentLocks: [staleLock], missionID: "mission-stale")
+        ))
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [staleEvent], limit: 50)))
+        await api.setCreateIntentLockWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.intentLocks = [otherLock]
+                appState.timelineEvents = [otherEvent]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createIntentLock(
+            missionID: "mission-stale",
+            actor: "Planner-Agent",
+            rule: "旧会话规则",
+            blockedPaths: [],
+            allowedPaths: [],
+            requireProposalForRisk: "high"
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.intentLocks == [otherLock])
+        #expect(appState.timelineEvents == [otherEvent])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func createIntentLockIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherLock = makeIntentLock(id: "lock-other", missionID: "mission-other")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", intentLocks: [otherLock])
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateIntentLockWithSnapshotResult(.failure(.sessionUnavailable))
+        await api.setCreateIntentLockWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.intentLocks = [otherLock]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createIntentLock(
+            missionID: "mission-stale",
+            actor: "Planner-Agent",
+            rule: "旧会话规则",
+            blockedPaths: [],
+            allowedPaths: [],
+            requireProposalForRisk: "high"
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.intentLocks == [otherLock])
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func createIntentLockWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         #expect(appState.selectedSessionID == nil)
@@ -9724,6 +9805,10 @@ extension FakeWorkbenchAPIProvider {
         createIntentLockWithSnapshotResult = result
     }
 
+    fileprivate func setCreateIntentLockWithSnapshotHook(_ hook: (@Sendable () async -> Void)?) {
+        createIntentLockWithSnapshotHook = hook
+    }
+
     fileprivate func setFetchIntentLocksResult(_ result: Result<IntentLocksDTO, APIError>) {
         fetchIntentLocksResult = result
     }
@@ -10003,6 +10088,18 @@ private func makeSnapshot(sessionID: String, issues: [IssueDTO]) -> WorkbenchSna
         missions: [],
         tasks: [],
         issues: issues,
+        failures: [],
+        events: []
+    )
+}
+
+private func makeSnapshot(sessionID: String, intentLocks: [IntentLockDTO]) -> WorkbenchSnapshotDTO {
+    WorkbenchSnapshotDTO(
+        sessionID: sessionID,
+        missions: [],
+        intentLocks: intentLocks,
+        tasks: [],
+        issues: [],
         failures: [],
         events: []
     )
