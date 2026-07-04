@@ -71,6 +71,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var expireLeasesWithSnapshotHook: (@Sendable () async -> Void)?
     var createMissionWithSnapshotHook: (@Sendable () async -> Void)?
     var attachIssueWithSnapshotHook: (@Sendable () async -> Void)?
+    var createIssueWithSnapshotHook: (@Sendable () async -> Void)?
     var runValidationWithSnapshotHook: (@Sendable () async -> Void)?
     var sendMessageHook: (@Sendable () async -> Void)?
     var fetchMessagesHook: (@Sendable () async -> Void)?
@@ -828,6 +829,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         riskLevel: String
     ) async throws(APIError) -> IssueSnapshotDTO {
         createIssueWithSnapshotCallCount += 1
+        if let createIssueWithSnapshotHook {
+            await createIssueWithSnapshotHook()
+        }
         guard let result = createIssueWithSnapshotResult else {
             throw .invalidResponse
         }
@@ -4640,6 +4644,85 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
         #expect(await api.createIssueWithSnapshotCallCount == 1)
         #expect(await api.snapshotCallCount == 0)
+    }
+
+    @Test @MainActor func createIssueIgnoresSnapshotAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherIssue = makeIssue(taskID: "task-other", missionID: "mission-other")
+        let otherEvent = makeEvent(id: "evt-other", type: "issue.created", subjectID: "task-other")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", issues: [otherIssue])
+
+        let staleIssue = makeIssue(taskID: "task-stale", missionID: "mission-stale")
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", issues: [staleIssue])
+        let staleEvent = makeEvent(id: "evt-stale", type: "issue.created", subjectID: "task-stale")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateIssueWithSnapshotResult(.success(
+            IssueSnapshotDTO(issue: staleIssue, snapshot: staleSnapshot)
+        ))
+        await api.setIssuesResult(.success(
+            IssuesDTO(issues: [staleIssue], missionID: "mission-stale", riskLevel: nil, limit: 50)
+        ))
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [staleEvent], limit: 50)))
+        await api.setCreateIssueWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.issues = [otherIssue]
+                appState.timelineEvents = [otherEvent]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createIssue(
+            missionID: "mission-stale",
+            title: "旧 Issue",
+            description: "",
+            blockedBy: [],
+            acceptanceCriteria: ["不应覆盖新会话"],
+            parallelMode: "exclusive",
+            riskLevel: "medium"
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.issues == [otherIssue])
+        #expect(appState.timelineEvents == [otherEvent])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func createIssueIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherIssue = makeIssue(taskID: "task-other", missionID: "mission-other")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", issues: [otherIssue])
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateIssueWithSnapshotResult(.failure(.sessionUnavailable))
+        await api.setCreateIssueWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.issues = [otherIssue]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createIssue(
+            missionID: "mission-stale",
+            title: "旧 Issue",
+            description: "",
+            blockedBy: [],
+            acceptanceCriteria: ["不应清理新会话"],
+            parallelMode: "exclusive",
+            riskLevel: "medium"
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.issues == [otherIssue])
+        #expect(appState.lastError == nil)
     }
 
     @Test @MainActor func createIssueWithoutSelectedSessionRecordsError() async throws {
@@ -9627,6 +9710,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setCreateIssueWithSnapshotResult(_ result: Result<IssueSnapshotDTO, APIError>) {
         createIssueWithSnapshotResult = result
+    }
+
+    fileprivate func setCreateIssueWithSnapshotHook(_ hook: (@Sendable () async -> Void)?) {
+        createIssueWithSnapshotHook = hook
     }
 
     fileprivate func setCreateIntentLockResult(_ result: Result<IntentLockDTO, APIError>) {
