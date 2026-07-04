@@ -69,6 +69,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var claimIssueWithSnapshotHook: (@Sendable () async -> Void)?
     var releaseLeaseWithSnapshotHook: (@Sendable () async -> Void)?
     var expireLeasesWithSnapshotHook: (@Sendable () async -> Void)?
+    var createMissionWithSnapshotHook: (@Sendable () async -> Void)?
     var runValidationWithSnapshotHook: (@Sendable () async -> Void)?
     var sendMessageHook: (@Sendable () async -> Void)?
     var fetchMessagesHook: (@Sendable () async -> Void)?
@@ -758,6 +759,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
             "title": title,
             "goal": goal,
         ])
+        if let createMissionWithSnapshotHook {
+            await createMissionWithSnapshotHook()
+        }
         guard let result = createMissionWithSnapshotResult else {
             throw .invalidResponse
         }
@@ -4034,6 +4038,68 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
         #expect(await api.createMissionWithSnapshotCallCount == 1)
         #expect(await api.snapshotCallCount == 0)
+    }
+
+    @Test @MainActor func createMissionIgnoresSnapshotAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherMission = makeMission(id: "mission-other", sessionID: "sess-other")
+        let otherEvent = makeEvent(id: "evt-other", type: "mission.created", subjectID: "mission-other")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", missions: [otherMission])
+
+        let staleMission = makeMission(id: "mission-stale", sessionID: "sess-001")
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", missions: [staleMission])
+        let staleEvent = makeEvent(id: "evt-stale", type: "mission.created", subjectID: "mission-stale")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateMissionWithSnapshotResult(.success(
+            MissionSnapshotDTO(mission: staleMission, snapshot: staleSnapshot)
+        ))
+        await api.setMissionsResult(.success(MissionsDTO(missions: [staleMission], status: nil, limit: 50)))
+        await api.setIssuesResult(.success(IssuesDTO(issues: [], missionID: nil, riskLevel: nil, limit: 50)))
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [staleEvent], limit: 50)))
+        await api.setCreateMissionWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.missions = [otherMission]
+                appState.timelineEvents = [otherEvent]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createMission(title: "旧 Mission", goal: "不应覆盖新会话")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.missions == [otherMission])
+        #expect(appState.timelineEvents == [otherEvent])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func createMissionIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherMission = makeMission(id: "mission-other", sessionID: "sess-other")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", missions: [otherMission])
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateMissionWithSnapshotResult(.failure(.sessionUnavailable))
+        await api.setCreateMissionWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.missions = [otherMission]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createMission(title: "旧 Mission", goal: "不应清理新会话")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.missions == [otherMission])
+        #expect(appState.lastError == nil)
     }
 
     @Test @MainActor func createMissionWithoutSelectedSessionCreatesDefaultSessionFirst() async throws {
@@ -9390,6 +9456,10 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setCreateMissionWithSnapshotResult(_ result: Result<MissionSnapshotDTO, APIError>) {
         createMissionWithSnapshotResult = result
+    }
+
+    fileprivate func setCreateMissionWithSnapshotHook(_ hook: (@Sendable () async -> Void)?) {
+        createMissionWithSnapshotHook = hook
     }
 
     fileprivate func setAttachIssueWithSnapshotResult(_ result: Result<IssueSnapshotDTO, APIError>) {
