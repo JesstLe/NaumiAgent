@@ -2093,6 +2093,9 @@ public final class DaemonController: Sendable {
                 allowedPaths: allowedPaths,
                 requireProposalForRisk: requireProposalForRisk
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshIntentLocks(missionID: missionID)
@@ -2101,6 +2104,9 @@ public final class DaemonController: Sendable {
             refreshError = refreshError ?? appState.lastError
             appState.lastError = refreshError
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
