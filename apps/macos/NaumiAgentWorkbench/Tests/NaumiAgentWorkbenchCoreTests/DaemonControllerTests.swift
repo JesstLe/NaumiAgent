@@ -73,6 +73,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var attachIssueWithSnapshotHook: (@Sendable () async -> Void)?
     var createIssueWithSnapshotHook: (@Sendable () async -> Void)?
     var createIntentLockWithSnapshotHook: (@Sendable () async -> Void)?
+    var createDecisionWithSnapshotHook: (@Sendable () async -> Void)?
     var runValidationWithSnapshotHook: (@Sendable () async -> Void)?
     var sendMessageHook: (@Sendable () async -> Void)?
     var fetchMessagesHook: (@Sendable () async -> Void)?
@@ -954,6 +955,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         actor: String
     ) async throws(APIError) -> DecisionSnapshotDTO {
         createDecisionWithSnapshotCallCount += 1
+        if let createDecisionWithSnapshotHook {
+            await createDecisionWithSnapshotHook()
+        }
         guard let result = createDecisionWithSnapshotResult else {
             throw .invalidResponse
         }
@@ -7209,6 +7213,81 @@ final class DaemonControllerTests {
         #expect(await api.snapshotCallCount == 0)
     }
 
+    @Test @MainActor func createDecisionIgnoresSnapshotAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherDecision = makeDecision(id: "decision-other", missionID: "mission-other")
+        let otherEvent = makeEvent(id: "evt-other", type: "decision.created", subjectID: "decision-other")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", decisions: [otherDecision])
+
+        let staleDecision = makeDecision(id: "decision-stale", missionID: "mission-stale")
+        let staleSnapshot = makeSnapshot(sessionID: "sess-001", decisions: [staleDecision])
+        let staleEvent = makeEvent(id: "evt-stale", type: "decision.created", subjectID: "decision-stale")
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateDecisionWithSnapshotResult(.success(
+            DecisionSnapshotDTO(decision: staleDecision, snapshot: staleSnapshot)
+        ))
+        await api.setFetchDecisionsResult(.success(
+            DecisionsDTO(decisions: [staleDecision], missionID: "mission-stale")
+        ))
+        await api.setEventsResult(.success(WorkbenchEventsDTO(events: [staleEvent], limit: 50)))
+        await api.setCreateDecisionWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.decisions = [otherDecision]
+                appState.timelineEvents = [otherEvent]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createDecision(
+            missionID: "mission-stale",
+            actor: "Planner-Agent",
+            kind: "architecture",
+            title: "旧决策",
+            content: "不应覆盖新会话"
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.decisions == [otherDecision])
+        #expect(appState.timelineEvents == [otherEvent])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func createDecisionIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let otherDecision = makeDecision(id: "decision-other", missionID: "mission-other")
+        let otherSnapshot = makeSnapshot(sessionID: "sess-other", decisions: [otherDecision])
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setCreateDecisionWithSnapshotResult(.failure(.sessionUnavailable))
+        await api.setCreateDecisionWithSnapshotHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+                appState.snapshot = otherSnapshot
+                appState.decisions = [otherDecision]
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.createDecision(
+            missionID: "mission-stale",
+            actor: "Planner-Agent",
+            kind: "architecture",
+            title: "旧决策",
+            content: "不应清理新会话"
+        )
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.snapshot == otherSnapshot)
+        #expect(appState.decisions == [otherDecision])
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func createDecisionWithoutSelectedSessionRecordsError() async throws {
         let appState = AppState()
         #expect(appState.selectedSessionID == nil)
@@ -9833,6 +9912,10 @@ extension FakeWorkbenchAPIProvider {
         createDecisionWithSnapshotResult = result
     }
 
+    fileprivate func setCreateDecisionWithSnapshotHook(_ hook: (@Sendable () async -> Void)?) {
+        createDecisionWithSnapshotHook = hook
+    }
+
     fileprivate func setFetchDecisionsResult(_ result: Result<DecisionsDTO, APIError>) {
         fetchDecisionsResult = result
     }
@@ -10098,6 +10181,18 @@ private func makeSnapshot(sessionID: String, intentLocks: [IntentLockDTO]) -> Wo
         sessionID: sessionID,
         missions: [],
         intentLocks: intentLocks,
+        tasks: [],
+        issues: [],
+        failures: [],
+        events: []
+    )
+}
+
+private func makeSnapshot(sessionID: String, decisions: [DecisionDTO]) -> WorkbenchSnapshotDTO {
+    WorkbenchSnapshotDTO(
+        sessionID: sessionID,
+        missions: [],
+        decisions: decisions,
         tasks: [],
         issues: [],
         failures: [],
