@@ -2142,6 +2142,9 @@ public final class DaemonController: Sendable {
                 content: content,
                 actor: actor
             )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshDecisions(missionID: missionID)
@@ -2150,6 +2153,9 @@ public final class DaemonController: Sendable {
             refreshError = refreshError ?? appState.lastError
             appState.lastError = refreshError
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
