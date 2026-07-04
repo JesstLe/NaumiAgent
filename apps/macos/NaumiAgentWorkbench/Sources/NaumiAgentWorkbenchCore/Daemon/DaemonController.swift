@@ -1886,6 +1886,9 @@ public final class DaemonController: Sendable {
         appState.lastError = nil
         do {
             let response = try await apiProvider.expireLeasesWithSnapshot(sessionID: sessionID)
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             applySnapshot(response.snapshot)
             var refreshError: APIError?
             await refreshLeases()
@@ -1894,6 +1897,9 @@ public final class DaemonController: Sendable {
             refreshError = refreshError ?? appState.lastError
             appState.lastError = refreshError
         } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
             appState.lastError = error
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
