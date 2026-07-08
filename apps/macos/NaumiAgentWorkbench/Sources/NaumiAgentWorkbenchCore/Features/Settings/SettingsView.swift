@@ -711,6 +711,10 @@ public struct SettingsView: View {
             return appState.locale == .zhCN ? "未连接" : "Disconnected"
         case .stale:
             return appState.locale == .zhCN ? "已过期" : "Stale"
+        case .authFailed:
+            return appState.locale == .zhCN ? "认证失败" : "Auth Failed"
+        case .protocolMismatch:
+            return appState.locale == .zhCN ? "协议不兼容" : "Protocol Mismatch"
         }
     }
 

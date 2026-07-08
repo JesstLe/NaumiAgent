@@ -70,7 +70,7 @@ public final class DaemonController: Sendable {
                     expected: Self.supportedProtocolVersion,
                     actual: capabilities.protocolVersion
                 )
-                appState.connectionState = .disconnected
+                appState.connectionState = .protocolMismatch
                 return
             }
 
@@ -101,7 +101,21 @@ public final class DaemonController: Sendable {
                 await clearConfiguredDaemonTemplates()
             }
             appState.lastError = error
-            appState.connectionState = .disconnected
+            appState.connectionState = connectionState(for: error)
+        }
+    }
+
+    /// Maps an `APIError` to the user-facing connection state that explains the
+    /// specific reason the bootstrap failed.
+    ///
+    /// - `.authFailed` → the daemon rejected the bearer token.
+    /// - other errors → generic `.disconnected` so the UI can prompt to retry.
+    private func connectionState(for error: APIError) -> AppState.ConnectionState {
+        switch error {
+        case .authFailed:
+            return .authFailed
+        default:
+            return .disconnected
         }
     }
 
@@ -1536,7 +1550,7 @@ public final class DaemonController: Sendable {
                     expected: Self.supportedProtocolVersion,
                     actual: capabilities.protocolVersion
                 )
-                appState.connectionState = .disconnected
+                appState.connectionState = .protocolMismatch
                 return
             }
 

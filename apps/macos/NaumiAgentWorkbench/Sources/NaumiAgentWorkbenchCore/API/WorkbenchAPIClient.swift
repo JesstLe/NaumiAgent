@@ -4,9 +4,9 @@ import Foundation
 ///
 /// SwiftUI 不直接读写 SQLite / 跑 git / pytest；所有业务状态通过此 client 访问本地 API。
 public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRouteTemplateConfiguring {
-    public let baseURL: URL
+    public var baseURL: URL
     public let session: URLSession
-    private let bearerToken: String?
+    private var bearerToken: String?
     private var routeTemplates: [String: String]
 
     /// - Parameters:
@@ -29,6 +29,20 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         self.session = session
         self.bearerToken = bearerToken
         self.routeTemplates = routeTemplates
+    }
+
+    /// Re-points the client at a new endpoint, clearing cached route templates
+    /// and updating the bearer token. Used when the user changes connection
+    /// settings without restarting the app.
+    public func updateConnection(baseURL newBaseURL: URL, bearerToken newBearerToken: String?) {
+        let baseURLString = newBaseURL.absoluteString
+        if baseURLString.hasSuffix("/") {
+            self.baseURL = newBaseURL
+        } else {
+            self.baseURL = URL(string: baseURLString + "/")!
+        }
+        self.bearerToken = newBearerToken
+        self.routeTemplates = [:]
     }
 
     public func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {

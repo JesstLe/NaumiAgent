@@ -204,6 +204,14 @@ public enum AppStrings {
         public static func stale(_ locale: AppLocale) -> String {
             locale == .zhCN ? "连接失效" : "Connection Stale"
         }
+
+        public static func authFailed(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "认证失败" : "Authentication Failed"
+        }
+
+        public static func protocolMismatch(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "协议版本不兼容" : "Protocol Mismatch"
+        }
     }
 
     // MARK: - Connection Control
@@ -216,6 +224,85 @@ public enum AppStrings {
             locale == .zhCN
                 ? "手动刷新本地服务连接"
                 : "Manually refresh the local daemon connection"
+        }
+    }
+
+    // MARK: - Connection Setup
+    public enum ConnectionSetup {
+        public static func title(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "连接本地服务" : "Connect to Local Daemon"
+        }
+
+        public static func endpointLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "服务地址" : "Endpoint"
+        }
+
+        public static func tokenLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "Bearer Token（可选）" : "Bearer Token (optional)"
+        }
+
+        public static func startCommandLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "启动命令" : "Start Command"
+        }
+
+        public static func startCommand(_ locale: AppLocale) -> String {
+            "naumi-agent api --host 127.0.0.1 --port 8765"
+        }
+
+        public static func copyCommandButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "复制命令" : "Copy Command"
+        }
+
+        public static func retryButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "重试" : "Retry"
+        }
+
+        public static func saveButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "保存并连接" : "Save & Connect"
+        }
+
+        public static func connectingHint(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "正在连接…" : "Connecting…"
+        }
+
+        public static func reasonDisconnected(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "无法连接本地 NaumiAgent 服务。请确认守护进程已启动。"
+                : "Cannot reach the local NaumiAgent daemon. Make sure it is running."
+        }
+
+        public static func reasonAuthFailed(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "认证失败：Bearer Token 被服务拒绝。"
+                : "Authentication failed: the bearer token was rejected."
+        }
+
+        public static func reasonProtocolMismatch(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "协议版本不兼容：请升级 NaumiAgent 守护进程或客户端。"
+                : "Protocol version mismatch: upgrade the NaumiAgent daemon or the client."
+        }
+
+        public static func reasonStale(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "连接已失效，正在尝试恢复。"
+                : "The connection is stale; trying to recover."
+        }
+
+        /// Returns the human-readable explanation for a failure connection state.
+        public static func reason(_ locale: AppLocale, for state: AppState.ConnectionState) -> String {
+            switch state {
+            case .authFailed:
+                return reasonAuthFailed(locale)
+            case .protocolMismatch:
+                return reasonProtocolMismatch(locale)
+            case .stale:
+                return reasonStale(locale)
+            case .disconnected:
+                return reasonDisconnected(locale)
+            case .connected, .connecting:
+                return ""
+            }
         }
     }
 
