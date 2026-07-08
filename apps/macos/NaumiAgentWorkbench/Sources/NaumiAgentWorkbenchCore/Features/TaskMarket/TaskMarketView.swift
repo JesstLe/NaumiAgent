@@ -32,7 +32,8 @@ public struct TaskMarketView: View {
     public var body: some View {
         let presentation = TaskMarketDesignPresentation(
             snapshot: appState.snapshot,
-            refreshedLeases: appState.leases
+            refreshedLeases: appState.leases,
+            policy: RealDataPolicy(isPreviewFixture: appState.isPreviewFixture)
         )
         let selectedRow = presentation.rows.first { $0.taskID == selectedTaskID }
             ?? presentation.selectedIssue
@@ -316,15 +317,31 @@ public struct TaskMarketView: View {
                 .background(Color.secondary.opacity(0.06))
 
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(presentation.rows) { row in
-                        designIssueRow(row)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectIssue(row)
-                            }
-                            .background(selectedTaskID == row.taskID ? Color.accentColor.opacity(0.10) : Color.clear)
-                        Divider()
+                if presentation.rows.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.secondary)
+                        Text(AppStrings.TaskMarket.emptyIssues(appState.locale))
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Text(AppStrings.TaskMarket.createIssueButton(appState.locale))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 48)
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(presentation.rows) { row in
+                            designIssueRow(row)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectIssue(row)
+                                }
+                                .background(selectedTaskID == row.taskID ? Color.accentColor.opacity(0.10) : Color.clear)
+                            Divider()
+                        }
                     }
                 }
             }
@@ -444,7 +461,7 @@ public struct TaskMarketView: View {
                 Divider()
 
                 HStack {
-                    Text(appState.locale == .zhCN ? "智能体竞标 (3)" : "Agent Bids (3)")
+                    Text(AppStrings.TaskMarket.bidCountTitle(appState.locale, count: bids.count))
                         .font(.headline)
                     Spacer()
                     Menu(appState.locale == .zhCN ? "置信度" : "Confidence") {
@@ -452,10 +469,27 @@ public struct TaskMarketView: View {
                     }
                 }
 
-                ScrollView {
-                    VStack(spacing: 10) {
-                        ForEach(bids) { bid in
-                            bidCard(issue: issue, bid: bid)
+                if bids.isEmpty {
+                    VStack(spacing: 6) {
+                        Image(systemName: "person.2.slash")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.secondary)
+                        Text(AppStrings.Reviews.emptyBids(appState.locale))
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Text(AppStrings.Reviews.emptyBidsHint(appState.locale))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 10) {
+                            ForEach(bids) { bid in
+                                bidCard(issue: issue, bid: bid)
+                            }
                         }
                     }
                 }

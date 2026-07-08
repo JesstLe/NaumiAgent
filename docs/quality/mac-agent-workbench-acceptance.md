@@ -83,6 +83,22 @@ events
 - `workbench/event` 可被 terminal-ui protocol 识别。
 - task panel 可展示 risk 和 worktree。
 
+### 3.9 真实数据边界（Real-Mode Fixture Boundary）
+
+真实模式（非 `--preview-fixture`）下，Mac Workbench 不得混入任何 fixture/design 数据：
+
+- Task Market 不得出现 `design-*` 行、`fixture-lease-*` 租约或 fabricated bids。
+- Reviews 不得出现 fixture 文件变更、diff 行、timeline 或 agent notes。
+- 空后端数据必须展示明确的空状态文案（如"暂无待审批请求"），而非用假数据填充。
+- 预览模式（`--preview-fixture`）下可保留完整参考截图，并在顶部显示调试徽标。
+- `TaskMarketDesignPresentation` / `ReviewsDesignPresentation` 的默认策略必须为 `.real`，忘记传 policy 时不得意外渲染 fixture。
+
+验证：
+
+```bash
+apps/macos/NaumiAgentWorkbench/scripts/test.sh --filter "DesignPresentation"
+```
+
 ## 4. 非功能验收
 
 ### 4.1 安全
@@ -145,3 +161,4 @@ pytest tests/e2e/test_ui_scenarios.py -q
 - 高风险操作能被 LLM tool 直接执行。
 - Task status 在 TaskStore 和 WorkbenchStore 之间出现双写冲突。
 - 文档和实际事件字段不一致。
+- 真实模式下出现任何 `fixture-`、`design-` 前缀的假数据行或 fabricated bids/diff/review notes。

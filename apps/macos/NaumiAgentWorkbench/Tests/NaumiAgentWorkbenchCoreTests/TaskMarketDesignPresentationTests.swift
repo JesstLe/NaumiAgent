@@ -4,9 +4,11 @@ import Testing
 
 struct TaskMarketDesignPresentationTests {
 
+    // MARK: - Preview mode (fixture fillers explicitly allowed)
+
     @Test func fixtureExpandsToDenseReferenceMarket() throws {
         let snapshot = try loadZHSnapshot()
-        let presentation = TaskMarketDesignPresentation(snapshot: snapshot)
+        let presentation = TaskMarketDesignPresentation(snapshot: snapshot, policy: .preview)
 
         #expect(presentation.rows.count == 8)
         #expect(presentation.activeLeases.count == 4)
@@ -22,7 +24,7 @@ struct TaskMarketDesignPresentationTests {
     }
 
     @Test func exposesClaimActionStateAndLocalizedDisabledReasons() {
-        let presentation = TaskMarketDesignPresentation(snapshot: nil)
+        let presentation = TaskMarketDesignPresentation(snapshot: nil, policy: .preview)
 
         let openIssue = presentation.rows.first { $0.taskID == "design-lease" }
         let blockedIssue = presentation.rows.first { $0.taskID == "design-snapshot" }
@@ -55,7 +57,8 @@ struct TaskMarketDesignPresentationTests {
 
         let presentation = TaskMarketDesignPresentation(
             snapshot: snapshot,
-            refreshedLeases: [refreshedLease]
+            refreshedLeases: [refreshedLease],
+            policy: .preview
         )
 
         #expect(presentation.activeLeases.map(\.leaseID) == ["lease-refreshed"])
@@ -88,10 +91,80 @@ struct TaskMarketDesignPresentationTests {
 
         let presentation = TaskMarketDesignPresentation(
             snapshot: snapshot,
-            refreshedLeases: [releasedLease, activeLease]
+            refreshedLeases: [releasedLease, activeLease],
+            policy: .preview
         )
 
         #expect(presentation.activeLeases.map(\.leaseID) == ["lease-active"])
+    }
+
+    // MARK: - Real mode (no fixture fillers)
+
+    @Test func realModeNeverAppendsFixtureRows() throws {
+        let snapshot = try loadZHSnapshot()
+        let presentation = TaskMarketDesignPresentation(snapshot: snapshot, policy: .real)
+
+        #expect(presentation.rows.contains { $0.taskID.hasPrefix("design-") } == false)
+        #expect(presentation.activeLeases.contains { $0.leaseID.hasPrefix("fixture-lease-") } == false)
+    }
+
+    @Test func realModeShowsNoBidsWhenBidModelAbsent() throws {
+        let snapshot = try loadZHSnapshot()
+        let presentation = TaskMarketDesignPresentation(snapshot: snapshot, policy: .real)
+
+        // No persisted bid model exists yet (see M08). Real mode must not
+        // fabricate bids.
+        #expect(presentation.bids.isEmpty)
+    }
+
+    @Test func realModeEmptySnapshotShowsNoFixtures() {
+        let presentation = TaskMarketDesignPresentation(snapshot: nil, policy: .real)
+
+        #expect(presentation.rows.isEmpty)
+        #expect(presentation.bids.isEmpty)
+        #expect(presentation.activeLeases.isEmpty)
+    }
+
+    @Test func realModeMapsLiveRowsWithoutBackfill() throws {
+        let snapshot = try loadZHSnapshot()
+        let presentation = TaskMarketDesignPresentation(snapshot: snapshot, policy: .real)
+
+        // The zh fixture snapshot carries live tasks/issues; real mode should
+        // surface only those mapped rows, never padded to 8.
+        #expect(presentation.rows.count <= snapshot.tasks.count)
+        #expect(presentation.rows.allSatisfy { !$0.taskID.hasPrefix("design-") })
+    }
+
+    @Test func realModeRespectsRefreshedActiveLeasesOnly() throws {
+        let snapshot = try loadZHSnapshot()
+        let refreshedLease = makeLease(
+            id: "lease-real-1",
+            taskID: "2",
+            agentID: "agent-real",
+            state: "active",
+            expiresAt: "2026-06-27T09:15:00",
+            worktreeName: "wt-real"
+        )
+
+        let presentation = TaskMarketDesignPresentation(
+            snapshot: snapshot,
+            refreshedLeases: [refreshedLease],
+            policy: .real
+        )
+
+        #expect(presentation.activeLeases.map(\.leaseID) == ["lease-real-1"])
+        #expect(presentation.activeLeases.allSatisfy { !$0.leaseID.hasPrefix("fixture-lease-") })
+    }
+
+    @Test func realModeDefaultsToNoFixtureFillers() throws {
+        // The default policy must be real — production views that forget to
+        // pass a policy must never accidentally render fixtures.
+        let snapshot = try loadZHSnapshot()
+        let presentation = TaskMarketDesignPresentation(snapshot: snapshot)
+
+        #expect(presentation.rows.contains { $0.taskID.hasPrefix("design-") } == false)
+        #expect(presentation.activeLeases.contains { $0.leaseID.hasPrefix("fixture-lease-") } == false)
+        #expect(presentation.bids.isEmpty)
     }
 
     private func loadZHSnapshot() throws -> WorkbenchSnapshotDTO {

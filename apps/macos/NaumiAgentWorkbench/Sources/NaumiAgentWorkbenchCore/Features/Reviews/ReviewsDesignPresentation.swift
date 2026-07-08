@@ -1,61 +1,115 @@
 import Foundation
 
 /// Dense visual presentation for the Reviews reference screen.
+///
+/// In real mode (`policy.canUseDesignFillers == false`) it surfaces only
+/// authoritative approvals, validation runs, and snapshot-derived metadata —
+/// no fixture queues, files, diffs, timeline, or agent notes. In preview mode
+/// it keeps the rich reference screenshots.
 public struct ReviewsDesignPresentation: Equatable, Sendable {
     public let reviewQueues: [ReviewDesignQueue]
-    public let selectedReview: ReviewDesignItem
+    public let selectedReview: ReviewDesignItem?
     public let validationChecks: [ReviewDesignCheck]
     public let fileChanges: [ReviewDesignFile]
     public let diffRows: [ReviewDesignDiffRow]
     public let timeline: [ReviewDesignTimelineEvent]
     public let agentReviews: [ReviewDesignAgentNote]
+    public let policy: RealDataPolicy
 
     public init(
         approvals: [ApprovalDTO],
         validationRuns: [ValidationRunDTO],
-        snapshot: WorkbenchSnapshotDTO?
+        snapshot: WorkbenchSnapshotDTO?,
+        policy: RealDataPolicy = .real
     ) {
-        let waitingItems = approvals.prefix(2).enumerated().map { index, approval in
-            ReviewDesignItem(
-                id: approval.id,
-                taskID: approval.taskID,
-                title: approval.title,
-                number: index == 0 ? 3 : 7,
-                agent: approval.requester,
-                worktree: "issue-\(index == 0 ? "3-market" : "7-failure-cards")",
-                time: "09:\(28 + index)",
-                risk: "High",
-                tone: "red"
-            )
+        self.policy = policy
+
+        if policy.canUseDesignFillers {
+            let waitingItems = approvals.prefix(2).enumerated().map { index, approval in
+                ReviewDesignItem(
+                    id: approval.id,
+                    taskID: approval.taskID,
+                    title: approval.title,
+                    number: index == 0 ? 3 : 7,
+                    agent: approval.requester,
+                    worktree: "issue-\(index == 0 ? "3-market" : "7-failure-cards")",
+                    time: "09:\(28 + index)",
+                    risk: "High",
+                    tone: "red"
+                )
+            }
+
+            let waiting = waitingItems.isEmpty ? Self.fixtureWaiting : Array(waitingItems)
+            reviewQueues = [
+                ReviewDesignQueue(title: "WAITING APPROVAL", badge: 2, items: waiting),
+                ReviewDesignQueue(title: "REQUEST CHANGES", badge: 1, items: Self.fixtureRequestChanges),
+                ReviewDesignQueue(title: "AUTO-MERGE CANDIDATE", badge: 1, items: Self.fixtureAutoMerge),
+                ReviewDesignQueue(title: "HIGH RISK", badge: 1, items: Self.fixtureHighRisk)
+            ]
+            selectedReview = waiting.first ?? Self.fixtureWaiting[0]
+
+            let liveChecks = validationRuns.prefix(2).map {
+                ReviewDesignCheck(
+                    runID: $0.id,
+                    name: $0.command.joined(separator: " "),
+                    status: $0.status,
+                    time: String($0.completedAt.suffix(5))
+                )
+            }
+            validationChecks = Array((liveChecks + [
+                ReviewDesignCheck(name: "ruff (lint)", status: "passed", time: "09:28"),
+                ReviewDesignCheck(name: "pytest tests/unit/test_workbench_market.py -q", status: "passed", time: "09:29"),
+                ReviewDesignCheck(name: "frontend protocol", status: "not affected", time: "-")
+            ]).prefix(3))
+
+            fileChanges = Self.fixtureFiles
+            diffRows = Self.fixtureDiffRows
+            timeline = Self.fixtureTimeline
+            agentReviews = Self.fixtureAgentReviews
+        } else {
+            // Real mode: derive the waiting queue from live approvals and
+            // snapshot issue metadata. No fabricated queues, files, diffs,
+            // timeline, or agent notes.
+            let issuesByTaskID = Dictionary(uniqueKeysWithValues: snapshot?.issues.map { ($0.taskID, $0) } ?? [])
+            let waitingItems = approvals
+                .filter { $0.state.lowercased() == "waiting" }
+                .enumerated()
+                .map { index, approval in
+                    let issue = issuesByTaskID[approval.taskID]
+                    return ReviewDesignItem(
+                        id: approval.id,
+                        taskID: approval.taskID,
+                        title: approval.title,
+                        number: index + 1,
+                        agent: approval.requester,
+                        worktree: issue?.relatedWorktree ?? "",
+                        time: approval.updatedAt.isEmpty ? "" : String(approval.updatedAt.suffix(5)),
+                        risk: issue.map { Self.normalizedRisk($0.riskLevel) } ?? "",
+                        tone: Self.tone(forRisk: issue?.riskLevel ?? "")
+                    )
+                }
+
+            reviewQueues = waitingItems.isEmpty
+                ? []
+                : [ReviewDesignQueue(title: "WAITING APPROVAL", badge: waitingItems.count, items: waitingItems)]
+            selectedReview = waitingItems.first
+
+            validationChecks = validationRuns.map {
+                ReviewDesignCheck(
+                    runID: $0.id,
+                    name: $0.command.joined(separator: " "),
+                    status: $0.status,
+                    time: $0.completedAt.isEmpty ? "" : String($0.completedAt.suffix(5))
+                )
+            }
+
+            // No diff-evidence endpoint exists yet (see M12). Real mode shows
+            // no fabricated file changes, diffs, timeline, or agent notes.
+            fileChanges = []
+            diffRows = []
+            timeline = []
+            agentReviews = []
         }
-
-        let waiting = waitingItems.isEmpty ? Self.fixtureWaiting : Array(waitingItems)
-        reviewQueues = [
-            ReviewDesignQueue(title: "WAITING APPROVAL", badge: 2, items: waiting),
-            ReviewDesignQueue(title: "REQUEST CHANGES", badge: 1, items: Self.fixtureRequestChanges),
-            ReviewDesignQueue(title: "AUTO-MERGE CANDIDATE", badge: 1, items: Self.fixtureAutoMerge),
-            ReviewDesignQueue(title: "HIGH RISK", badge: 1, items: Self.fixtureHighRisk)
-        ]
-        selectedReview = waiting.first ?? Self.fixtureWaiting[0]
-
-        let liveChecks = validationRuns.prefix(2).map {
-            ReviewDesignCheck(
-                runID: $0.id,
-                name: $0.command.joined(separator: " "),
-                status: $0.status,
-                time: String($0.completedAt.suffix(5))
-            )
-        }
-        validationChecks = Array((liveChecks + [
-            ReviewDesignCheck(name: "ruff (lint)", status: "passed", time: "09:28"),
-            ReviewDesignCheck(name: "pytest tests/unit/test_workbench_market.py -q", status: "passed", time: "09:29"),
-            ReviewDesignCheck(name: "frontend protocol", status: "not affected", time: "-")
-        ]).prefix(3))
-
-        fileChanges = Self.fixtureFiles
-        diffRows = Self.fixtureDiffRows
-        timeline = Self.fixtureTimeline
-        agentReviews = Self.fixtureAgentReviews
     }
 
     public func defaultValidationDraft(for review: ReviewDesignItem) -> ValidationRunDraft {
@@ -64,6 +118,34 @@ public struct ReviewsDesignPresentation: Equatable, Sendable {
             actor: review.agent,
             commandLine: "pytest tests/unit/test_workbench_market.py -q"
         )
+    }
+
+    private static func normalizedRisk(_ risk: String) -> String {
+        switch risk.lowercased() {
+        case "critical":
+            return "Critical"
+        case "high":
+            return "High"
+        case "medium":
+            return "Medium"
+        case "low":
+            return "Low"
+        default:
+            return risk
+        }
+    }
+
+    private static func tone(forRisk risk: String) -> String {
+        switch risk.lowercased() {
+        case "critical", "high":
+            return "red"
+        case "medium":
+            return "orange"
+        case "low":
+            return "green"
+        default:
+            return "gray"
+        }
     }
 
     private static let fixtureWaiting = [
