@@ -43,6 +43,107 @@ struct ReviewsDesignPresentationTests {
         #expect(presentation.selectedReview == nil)
     }
 
+    @Test func realModeMergesEvidenceIntoRealDiffRowsAndFiles() {
+        let base = ReviewsDesignPresentation(
+            approvals: [],
+            validationRuns: [],
+            snapshot: nil,
+            policy: .real
+        )
+        let evidence = ReviewEvidenceDTO(
+            approval: EvidenceApprovalDTO(
+                id: "approval-1",
+                sessionID: "sess",
+                missionID: "m",
+                taskID: "task-1",
+                state: "waiting",
+                title: "T",
+                detail: "",
+                requester: "Agent-A",
+                reviewer: "",
+                decisionNote: ""
+            ),
+            issue: nil,
+            worktree: EvidenceWorktreeDTO(name: "wt-1", path: "/tmp/wt-1", status: "present"),
+            validationRuns: [],
+            changedFiles: [
+                ReviewChangedFileDTO(path: "src/app.py", status: "modified"),
+                ReviewChangedFileDTO(path: "src/new.py", status: "added"),
+            ],
+            diffHunks: [
+                ReviewDiffHunkDTO(
+                    path: "src/app.py",
+                    patch: "@@ -1 +1 @@\n-old\n+new\n"
+                ),
+            ],
+            agentNotes: [
+                ReviewAgentNoteDTO(actor: "Backend-Agent", note: "looks good", type: "review.note", timestamp: "2026-07-09T08:00:00"),
+            ],
+            events: []
+        )
+
+        let merged = base.merging(evidence: evidence)
+
+        // Real evidence surfaces as real rows — never fixture rows.
+        #expect(merged.fileChanges.count == 2)
+        #expect(merged.fileChanges.map(\.name) == ["app.py", "new.py"])
+        // The hunk patch flattens into one added + one removed line.
+        #expect(merged.diffRows.count == 2)
+        #expect(merged.agentReviews.count == 1)
+        #expect(merged.agentReviews.first?.agent == "Backend-Agent")
+    }
+
+    @Test func realModeWithoutEvidenceStaysEmpty() {
+        let base = ReviewsDesignPresentation(
+            approvals: [],
+            validationRuns: [],
+            snapshot: nil,
+            policy: .real
+        )
+
+        // No evidence → nothing fabricated; the receiver is returned as-is.
+        let merged = base.merging(evidence: nil)
+        #expect(merged.fileChanges.isEmpty)
+        #expect(merged.diffRows.isEmpty)
+        #expect(merged.timeline.isEmpty)
+        #expect(merged.agentReviews.isEmpty)
+    }
+
+    @Test func previewModeIgnoresEvidenceAndKeepsFixtures() {
+        let base = ReviewsDesignPresentation(
+            approvals: [],
+            validationRuns: [],
+            snapshot: nil,
+            policy: .preview
+        )
+        let evidence = ReviewEvidenceDTO(
+            approval: EvidenceApprovalDTO(
+                id: "approval-1",
+                sessionID: "sess",
+                missionID: "m",
+                taskID: "task-1",
+                state: "waiting",
+                title: "T",
+                detail: "",
+                requester: "Agent-A",
+                reviewer: "",
+                decisionNote: ""
+            ),
+            issue: nil,
+            worktree: EvidenceWorktreeDTO(name: "", path: "", status: "unbound"),
+            validationRuns: [],
+            changedFiles: [ReviewChangedFileDTO(path: "real.py", status: "modified")],
+            diffHunks: [],
+            agentNotes: [],
+            events: []
+        )
+
+        // Preview mode keeps its fixture fileChanges; real evidence is ignored.
+        let merged = base.merging(evidence: evidence)
+        #expect(merged == base)
+        #expect(!merged.fileChanges.contains { $0.name == "real.py" })
+    }
+
     @Test func realModeBuildsWaitingQueueFromLiveApprovalsOnly() throws {
         let approval = ApprovalDTO(
             id: "approval-1",

@@ -58,6 +58,7 @@ from naumi_agent.api.routes.workbench import (
     get_leases,
     get_mission,
     get_missions,
+    get_review_evidence,
     get_validation_run,
     get_validation_runs,
     get_workbench_bootstrap,
@@ -161,6 +162,7 @@ class _FakeWorkbenchService:
         self.requested_context_snapshots: list[dict] = []
         self.listed_approvals: list[dict] = []
         self.requested_approvals: list[dict] = []
+        self.requested_evidence: list[dict] = []
         self.listed_agent_profiles: list[dict] = []
         self.requested_agent_profiles: list[dict] = []
         self.listed_failures: list[dict] = []
@@ -1016,6 +1018,28 @@ class _FakeWorkbenchService:
             },
             "created_at": "2024-01-01T00:00:00",
             "updated_at": "2024-01-01T00:00:00",
+        }
+
+    async def get_review_evidence(self, session_id: str, approval_id: str):
+        self.requested_evidence.append(
+            {"session_id": session_id, "approval_id": approval_id}
+        )
+        if approval_id == "missing-approval":
+            return None
+        return {
+            "approval": {
+                "id": approval_id,
+                "session_id": session_id,
+                "task_id": "task-1",
+                "state": "waiting",
+            },
+            "issue": None,
+            "worktree": {"name": "wt-1", "path": "/tmp/wt-1", "status": "present"},
+            "validation_runs": [],
+            "changed_files": [{"path": "src/app.py", "status": "modified"}],
+            "diff_hunks": [{"path": "src/app.py", "patch": "@@ -1 +1 @@"}],
+            "agent_notes": [],
+            "events": [],
         }
 
     async def list_failures(
@@ -4347,6 +4371,48 @@ async def test_get_approval_endpoint_reports_invalid_approval_request() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_review_evidence_returns_real_evidence_for_approval() -> None:
+    engine = _FakeEngine(exists=True)
+
+    evidence = await get_review_evidence(
+        "sess-1", "approval-1", _fake_request(engine), auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.requested_evidence == [
+        {"session_id": "sess-1", "approval_id": "approval-1"}
+    ]
+    assert evidence["approval"]["id"] == "approval-1"
+    assert evidence["worktree"]["status"] == "present"
+    assert evidence["changed_files"] == [{"path": "src/app.py", "status": "modified"}]
+    assert evidence["diff_hunks"][0]["path"] == "src/app.py"
+
+
+@pytest.mark.asyncio
+async def test_get_review_evidence_404_for_missing_approval() -> None:
+    engine = _FakeEngine(exists=True)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_review_evidence(
+            "sess-1", "missing-approval", _fake_request(engine), auth="test"
+        )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_review_evidence_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await get_review_evidence(
+            "missing", "approval-1", _fake_request(engine), auth="test"
+        )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_get_failures_endpoint_requires_existing_session() -> None:
     engine = _FakeEngine(exists=False)
 
@@ -5362,6 +5428,7 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
         "create_intent_lock",
         "create_decision",
         "resolve_approval",
+        "review_evidence",
         "list_messages",
         "send_message",
         "send_message_with_issue",
@@ -5427,6 +5494,9 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
         "approval": "/workbench/sessions/{session_id}/approvals/{approval_id}",
         "resolve_approval": (
             "/workbench/sessions/{session_id}/approvals/{approval_id}/resolve"
+        ),
+        "review_evidence": (
+            "/workbench/sessions/{session_id}/approvals/{approval_id}/evidence"
         ),
         "intent_locks": (
             "/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks"

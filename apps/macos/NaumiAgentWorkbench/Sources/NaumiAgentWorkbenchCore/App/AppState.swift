@@ -89,6 +89,7 @@ public final class AppState: Sendable {
     public var validationRuns: [ValidationRunDTO] = []
     public var contextSnapshots: [ContextSnapshotDTO] = []
     public var approvals: [ApprovalDTO] = []
+    public var reviewEvidence: ReviewEvidenceDTO? = nil
     public var failures: [FailureDTO] = []
     public var issues: [IssueDTO] = []
     public var leases: [LeaseDTO] = []

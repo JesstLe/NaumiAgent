@@ -113,6 +113,10 @@ public protocol WorkbenchAPIProviding: Sendable {
     /// Fetches one approval request by id for human-governance detail views.
     func fetchApproval(sessionID: String, approvalID: String) async throws(APIError) -> ApprovalDTO
 
+    /// Fetches real review evidence (diff, changed files, validation runs, ...)
+    /// for an approval, collected from the store + local git worktree.
+    func fetchReviewEvidence(sessionID: String, approvalID: String) async throws(APIError) -> ReviewEvidenceDTO
+
     /// Fetches failure cards for the given session, optionally filtered by task or status.
     func fetchFailures(
         sessionID: String,
