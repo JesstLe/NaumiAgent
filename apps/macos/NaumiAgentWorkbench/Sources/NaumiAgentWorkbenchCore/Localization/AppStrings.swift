@@ -151,6 +151,24 @@ public enum AppStrings {
             locale == .zhCN ? "发送中" : "Sending"
         }
 
+        public static func retryButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "重试发送" : "Retry Send"
+        }
+
+        public static func sendFailedHint(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "上次发送失败，内容已保留，可编辑后重试。" : "Last send failed. Content is kept — edit and retry."
+        }
+
+        public static func issueNeedsMission(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "创建关联任务需要先选择 Mission" : "Select a Mission to create a linked issue"
+        }
+
+        public static func highRiskNeedsCriteria(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "高风险任务至少需要一条验收标准"
+                : "High-risk issues need at least one acceptance criterion"
+        }
+
         public static func linkedIssueCreated(_ locale: AppLocale) -> String {
             locale == .zhCN ? "已创建关联任务" : "Linked issue created"
         }

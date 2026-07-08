@@ -14,6 +14,7 @@ public struct ChatView: View {
     @State private var parallelMode = "exclusive"
     @State private var riskLevel = "medium"
     @State private var isSending = false
+    @State private var sendError: APIError? = nil
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -152,12 +153,22 @@ public struct ChatView: View {
                 .lineLimit(3...6)
 
                 HStack {
-                    if let error = appState.lastError {
-                        Text(error.localizedMessage(locale: appState.locale))
+                    if let error = sendError {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(error.localizedMessage(locale: appState.locale))
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Text(AppStrings.Chat.sendFailedHint(appState.locale))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if let reason = sendDisabledReason {
+                        Text(reason)
                             .font(.caption)
-                            .foregroundStyle(.red)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
                     }
 
                     Spacer()
@@ -168,8 +179,10 @@ public struct ChatView: View {
                         Label(
                             isSending
                                 ? AppStrings.Chat.sending(appState.locale)
-                                : AppStrings.Chat.sendButton(appState.locale),
-                            systemImage: "paperplane.fill"
+                                : (sendError != nil
+                                    ? AppStrings.Chat.retryButton(appState.locale)
+                                    : AppStrings.Chat.sendButton(appState.locale)),
+                            systemImage: sendError != nil ? "arrow.clockwise" : "paperplane.fill"
                         )
                     }
                     .buttonStyle(.borderedProminent)
@@ -243,7 +256,34 @@ public struct ChatView: View {
 
     private var canSend: Bool {
         let hasMessage = !draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return hasMessage && !isSending && (!createsIssue || currentMissionID != nil)
+        guard hasMessage && !isSending else { return false }
+        // Creating a linked issue requires a mission AND, for high-risk issues,
+        // at least one acceptance criterion so the agent has a verifiable target.
+        if createsIssue {
+            guard currentMissionID != nil else { return false }
+            if isHighRiskIssue && acceptanceCriteriaLines.isEmpty {
+                return false
+            }
+        }
+        return true
+    }
+
+    private var isHighRiskIssue: Bool {
+        let lowered = riskLevel.lowercased()
+        return lowered == "high" || lowered == "critical"
+    }
+
+    /// Localized reason the send button is disabled, for accessibility/tooltips.
+    private var sendDisabledReason: String? {
+        let hasMessage = !draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if !hasMessage { return nil }
+        if createsIssue && currentMissionID == nil {
+            return AppStrings.Chat.issueNeedsMission(appState.locale)
+        }
+        if createsIssue && isHighRiskIssue && acceptanceCriteriaLines.isEmpty {
+            return AppStrings.Chat.highRiskNeedsCriteria(appState.locale)
+        }
+        return nil
     }
 
     private var currentMissionID: String? {
@@ -258,6 +298,7 @@ public struct ChatView: View {
         guard !trimmedMessage.isEmpty else { return }
 
         let draft = issueDraft(for: trimmedMessage)
+        sendError = nil
         isSending = true
         Task {
             await daemonController.sendDailyMessage(content: trimmedMessage, issueDraft: draft)
@@ -269,6 +310,9 @@ public struct ChatView: View {
                     issueDescription = ""
                     acceptanceCriteria = ""
                 }
+            } else {
+                // Keep the composer content so the user can edit and retry.
+                sendError = appState.lastError
             }
         }
     }

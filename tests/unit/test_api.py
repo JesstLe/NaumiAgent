@@ -211,6 +211,31 @@ class TestMessageRoutes:
         assert engine.created_issues == []
 
     @pytest.mark.asyncio
+    async def test_implicit_stream_with_issue_falls_back_to_non_streaming(self) -> None:
+        # When the client does not explicitly opt into streaming but the default
+        # `stream=True` is set alongside a workbench issue, the route silently
+        # downgrades to non-streaming so the issue can be created synchronously.
+        engine = _FakeEngine()
+        request = _fake_request(engine)
+
+        body = MessageCreate(
+            content="把这句变成任务",
+            workbench_issue={
+                "mission_id": "mission-1",
+                "title": "隐式降级",
+            },
+        )
+        # The model default for `stream` is True; we did not set it explicitly.
+        assert body.stream is True
+        assert "stream" not in body.model_fields_set
+
+        response = await send_message("sess_1", body, request, auth="test")
+
+        # Non-streaming path ran and the linked issue metadata is present.
+        assert engine.ran == ["把这句变成任务"]
+        assert response.metadata["workbench_issue"]["task_id"] == "task-chat-1"
+
+    @pytest.mark.asyncio
     async def test_stream_response_uses_run_streaming_events(self) -> None:
         engine = _FakeEngine()
         request = _fake_request(engine)
