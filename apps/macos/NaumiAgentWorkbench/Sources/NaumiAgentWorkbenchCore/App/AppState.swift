@@ -20,6 +20,10 @@ public final class AppState: Sendable {
     /// appended at the end; the buffer is capped to `connectionLogCapacity`.
     public var connectionLog: [ConnectionLogEntry] = []
 
+    /// Wall-clock time of the most recent successful snapshot refresh. Stays
+    /// unchanged on failure so the UI can show stale data is still on screen.
+    public var lastSnapshotRefreshAt: Date? = nil
+
     /// Maximum number of connection-log entries retained.
     public static let connectionLogCapacity: Int = 50
 

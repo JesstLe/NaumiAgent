@@ -14,6 +14,7 @@ public struct DashboardView: View {
     @State private var selectedEventID: String?
     @State private var isRerunningValidation = false
     @State private var isRefreshingContext = false
+    @State private var isRefreshingSnapshot = false
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -787,6 +788,7 @@ public struct DashboardView: View {
         let selectedWorktree = selectedWorktreePresentation()
 
         return VStack(alignment: .leading, spacing: 14) {
+            snapshotFreshnessStrip
             Text(AppStrings.Dashboard.inspectorSection(appState.locale))
                 .font(.system(size: 14, weight: .semibold))
             Picker("", selection: .constant("Context")) {
@@ -1006,6 +1008,69 @@ public struct DashboardView: View {
             )
             isRerunningValidation = false
         }
+    }
+
+    /// Compact strip showing when the snapshot was last refreshed, whether it is
+    /// stale, why the latest attempt failed (with the old data still shown), and
+    /// a button to trigger a manual refresh.
+    private var snapshotFreshnessStrip: some View {
+        let freshness = SnapshotFreshnessPresentation(
+            locale: appState.locale,
+            lastRefreshedAt: appState.lastSnapshotRefreshAt,
+            lastError: appState.lastError
+        )
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: freshness.isStale ? "clock.badge.exclamationmark" : "clock")
+                    .foregroundStyle(freshness.isStale ? .orange : .secondary)
+                    .font(.system(size: 13))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(AppStrings.SnapshotFreshness.lastRefreshedLabel(appState.locale) + ": " + freshness.lastRefreshedText)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.primary)
+                    if freshness.isStale {
+                        Text(AppStrings.SnapshotFreshness.staleHint(appState.locale))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.orange)
+                    }
+                    if let summary = freshness.failureSummary {
+                        Text(summary)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.red)
+                        Text(AppStrings.SnapshotFreshness.failureKeptOldDataHint(appState.locale))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+
+            Button {
+                guard !isRefreshingSnapshot else { return }
+                isRefreshingSnapshot = true
+                Task {
+                    await daemonController.performManualSnapshotRefresh()
+                    isRefreshingSnapshot = false
+                }
+            } label: {
+                if isRefreshingSnapshot {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Text(AppStrings.SnapshotFreshness.refreshButton(appState.locale))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(appState.selectedSessionID == nil || isRefreshingSnapshot)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
     }
 
     private func refreshContext(_ command: DashboardContextRefreshCommand) {

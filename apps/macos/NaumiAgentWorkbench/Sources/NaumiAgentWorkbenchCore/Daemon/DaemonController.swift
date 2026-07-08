@@ -444,6 +444,9 @@ public final class DaemonController: Sendable {
         guard let snapshot else {
             return
         }
+        // A non-nil snapshot means the refresh succeeded; stamp the freshness
+        // timestamp so the UI can show when data was last current.
+        appState.lastSnapshotRefreshAt = Date()
         // Keep the current Mission visible from the authoritative snapshot if
         // the lightweight mission list pre-warm is unavailable.
         if !snapshot.missions.isEmpty || appState.missions.isEmpty {
@@ -1843,7 +1846,10 @@ public final class DaemonController: Sendable {
     /// `appState.sessions`. Failures are written to `appState.lastError` and the
     /// snapshot is cleared to avoid showing stale data. If the backend reports
     /// that the selected session no longer exists, the selection is cleared too.
-    func refreshSnapshot(clearSessionScopedStateOnFailure: Bool = false) async {
+    func refreshSnapshot(
+        clearSessionScopedStateOnFailure: Bool = false,
+        preserveSnapshotOnFailure: Bool = false
+    ) async {
         let sessionID: String
         if let existingID = appState.selectedSessionID {
             sessionID = existingID
@@ -1872,11 +1878,29 @@ public final class DaemonController: Sendable {
             clearUnavailableSelectedSession()
         } catch {
             appState.lastError = error
-            applySnapshot(nil)
+            // When a manual refresh asks to keep the last good data on screen,
+            // leave the existing snapshot untouched so the user can still read
+            // it alongside the error. Otherwise the snapshot is cleared.
+            if !preserveSnapshotOnFailure {
+                applySnapshot(nil)
+            }
             if clearSessionScopedStateOnFailure {
                 clearSessionScopedState()
             }
         }
+    }
+
+    /// User-triggered "Refresh Snapshot" entry point for the inspector.
+    ///
+    /// Re-fetches the snapshot for the selected session. On failure the previous
+    /// snapshot and derived lists are preserved (the user keeps reading the last
+    /// good data) and the error is surfaced via `appState.lastError` so the
+    /// freshness indicator can explain why the data may be stale.
+    public func performManualSnapshotRefresh() async {
+        await refreshSnapshot(
+            clearSessionScopedStateOnFailure: false,
+            preserveSnapshotOnFailure: true
+        )
     }
 
     /// Claims an issue on behalf of an agent and refreshes leases, issues,

@@ -934,7 +934,7 @@ public struct WorktreesView: View {
             Image(systemName: "folder.badge.questionmark")
                 .font(.system(size: 28))
                 .foregroundStyle(.secondary)
-            Text(appState.locale == .zhCN ? "暂无 Git 工作区" : "No Git worktrees")
+            Text(AppStrings.Worktrees.emptyWorktrees(appState.locale))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
