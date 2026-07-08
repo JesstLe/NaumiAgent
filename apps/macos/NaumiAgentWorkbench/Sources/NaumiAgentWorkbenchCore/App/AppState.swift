@@ -39,6 +39,12 @@ public final class AppState: Sendable {
             connectionLog.removeFirst(overflow)
         }
     }
+
+    // MARK: - App-managed (supervised) daemon
+    public var supervisedDaemonState: SupervisedDaemonState = .idle
+    public var supervisedDaemonStatus: SupervisedDaemonStatus? = nil
+    public var supervisedDaemonFailureMessage: String? = nil
+
     public var sessions: [SessionDTO] = []
     public var chatMessages: [ChatMessageDTO] = []
     public var snapshot: WorkbenchSnapshotDTO? = nil
@@ -119,5 +125,30 @@ public final class AppState: Sendable {
     /// daemon speaks an incompatible protocol version.
     public var canPerformWrites: Bool {
         !connectionState.disablesWrites
+    }
+}
+
+/// Lifecycle state of an app-supervised local daemon process.
+public enum SupervisedDaemonState: String, Equatable, Sendable, CaseIterable {
+    case idle
+    case starting
+    case running
+    case stopping
+    case failed
+    case exited
+}
+
+/// Snapshot of a running supervised daemon: chosen port, pid, endpoint.
+public struct SupervisedDaemonStatus: Equatable, Sendable {
+    public let port: Int
+    public let pid: Int32
+    public let endpoint: URL
+    public let startedAt: Date
+
+    public init(port: Int, pid: Int32, endpoint: URL, startedAt: Date = Date()) {
+        self.port = port
+        self.pid = pid
+        self.endpoint = endpoint
+        self.startedAt = startedAt
     }
 }
