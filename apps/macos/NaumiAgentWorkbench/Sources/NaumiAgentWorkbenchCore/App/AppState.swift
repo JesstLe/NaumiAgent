@@ -24,6 +24,24 @@ public final class AppState: Sendable {
     /// unchanged on failure so the UI can show stale data is still on screen.
     public var lastSnapshotRefreshAt: Date? = nil
 
+    // MARK: - Event stream lifecycle
+    /// Coarse lifecycle of the Workbench event WebSocket. Drives the live/stale
+    /// indicator in the top bar and Timeline header.
+    public var eventStreamStatus: EventStreamStatus = .idle
+    /// Wall-clock time the stream last reached the `.connected` state.
+    public var eventStreamLastConnectedAt: Date? = nil
+    /// Number of consecutive reconnect attempts since the last `.connected`.
+    /// Resets to zero once the stream reconnects. Drives the backoff delay and
+    /// the "attempt N" hint shown while reconnecting.
+    public var eventStreamReconnectAttempt: Int = 0
+
+    /// Maximum number of automatic reconnect attempts before giving up and
+    /// leaving the stream in `.stale` for the user to retry manually.
+    public static let eventStreamMaxReconnectAttempts: Int = 5
+
+    /// Maximum delay between reconnect attempts (the backoff ceiling).
+    public static let eventStreamMaxReconnectDelay: Duration = .seconds(30)
+
     /// Maximum number of connection-log entries retained.
     public static let connectionLogCapacity: Int = 50
 
@@ -169,5 +187,33 @@ public struct SupervisedDaemonStatus: Equatable, Sendable {
         self.pid = pid
         self.endpoint = endpoint
         self.startedAt = startedAt
+    }
+}
+
+/// Lifecycle of the Workbench event WebSocket subscription.
+public enum EventStreamStatus: String, Equatable, Sendable, CaseIterable {
+    /// No stream has been started (or it was stopped manually / on idle).
+    case idle
+    /// A connect attempt is in flight; no `.connected` message yet.
+    case connecting
+    /// Live: messages are flowing.
+    case connected
+    /// A transient error occurred and an automatic reconnect is scheduled.
+    case reconnecting
+    /// Lost and not auto-reconnecting (backoff exhausted or a hard stop).
+    case stale
+    /// Stopped because the user switched to a different session.
+    case stoppedBySessionSwitch
+    /// Stopped because of an auth failure or incompatible protocol version.
+    case stoppedByAuthOrProtocol
+
+    /// Whether the user can usefully press "reconnect" in this state.
+    public var allowsManualReconnect: Bool {
+        switch self {
+        case .idle, .stale, .stoppedBySessionSwitch:
+            return true
+        case .connecting, .connected, .reconnecting, .stoppedByAuthOrProtocol:
+            return false
+        }
     }
 }

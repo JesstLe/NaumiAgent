@@ -15,6 +15,7 @@ public final class DaemonController: Sendable {
     public let apiProvider: WorkbenchAPIProviding
     public let eventProvider: (any WorkbenchEventProviding)?
     public let workspaceRegistryStore: WorkspaceRegistryStore?
+    public let reconnectPolicy: EventStreamReconnectPolicy
     private var eventStreamTask: Task<Void, Never>?
     private var activeEventStream: (any WorkbenchEventStreaming)?
 
@@ -27,12 +28,14 @@ public final class DaemonController: Sendable {
         appState: AppState,
         apiProvider: WorkbenchAPIProviding,
         eventProvider: (any WorkbenchEventProviding)? = nil,
-        workspaceRegistryStore: WorkspaceRegistryStore? = nil
+        workspaceRegistryStore: WorkspaceRegistryStore? = nil,
+        reconnectPolicy: EventStreamReconnectPolicy = .disabled
     ) {
         self.appState = appState
         self.apiProvider = apiProvider
         self.eventProvider = eventProvider
         self.workspaceRegistryStore = workspaceRegistryStore
+        self.reconnectPolicy = reconnectPolicy
     }
 
     private static func nowISO8601() -> String {
@@ -182,11 +185,14 @@ public final class DaemonController: Sendable {
         guard appState.capabilities?.supportsEventStream != false else {
             await stopEventStream()
             appState.lastError = .networkFailure("当前本地服务不支持事件流")
+            appState.eventStreamStatus = .idle
             return
         }
 
         await stopEventStream()
         appState.lastError = nil
+        appState.eventStreamReconnectAttempt = 0
+        appState.eventStreamStatus = .connecting
         eventStreamTask = Task { [weak self, eventProvider] in
             await self?.consumeEventStream(
                 sessionID: sessionID,
@@ -196,11 +202,35 @@ public final class DaemonController: Sendable {
     }
 
     /// Stops any active Workbench event stream subscription.
+    ///
+    /// This is the user-initiated / idle stop: it marks the stream `.idle`. Use
+    /// the internal ``stopEventStream(reason:)`` to record a session switch or
+    /// auth/protocol stop with a more precise status.
     public func stopEventStream() async {
+        await stopEventStream(reason: .manual)
+    }
+
+    /// Reason a stream was stopped, used to set an accurate ``EventStreamStatus``.
+    private enum EventStreamStopReason {
+        case manual
+        case sessionSwitch
+        case authOrProtocol
+        case capabilityUnavailable
+    }
+
+    private func stopEventStream(reason: EventStreamStopReason) async {
         eventStreamTask?.cancel()
         eventStreamTask = nil
         await activeEventStream?.cancel()
         activeEventStream = nil
+        switch reason {
+        case .manual, .capabilityUnavailable:
+            appState.eventStreamStatus = .idle
+        case .sessionSwitch:
+            appState.eventStreamStatus = .stoppedBySessionSwitch
+        case .authOrProtocol:
+            appState.eventStreamStatus = .stoppedByAuthOrProtocol
+        }
     }
 
     /// Requests a filtered replay from the active Workbench event stream.
@@ -299,20 +329,86 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// What a single stream message handler wants the consume loop to do next.
+    private enum EventStreamMessageAction {
+        case continueConsuming
+        case endCycle
+    }
+
+    /// Consumes the event stream with bounded-backoff reconnection.
+    ///
+    /// Each iteration is one connect + consume cycle. A transient transport
+    /// error (WebSocket drop) ends the cycle as reconnectable; the loop then
+    /// waits out an exponential backoff and retries, up to the policy limit.
+    /// Hard stops — task cancellation, session switch, auth/protocol error —
+    /// never reconnect. A stale stream whose session was switched away never
+    /// mutates the freshly selected session's state.
     private func consumeEventStream(
         sessionID: String,
         eventProvider: any WorkbenchEventProviding
     ) async {
+        while !Task.isCancelled {
+            let reconnectable = await runStreamCycle(
+                sessionID: sessionID,
+                eventProvider: eventProvider
+            )
+            guard reconnectable, !Task.isCancelled else {
+                return
+            }
+            // Session-switch isolation: never reconnect a stale stream into a
+            // different session, and never touch the new session's state.
+            guard appState.selectedSessionID == sessionID else {
+                appState.eventStreamStatus = .stoppedBySessionSwitch
+                return
+            }
+            // Auth/protocol errors are not transient: do not auto-reconnect.
+            if Self.isAuthOrProtocolError(appState.lastError) {
+                appState.eventStreamStatus = .stoppedByAuthOrProtocol
+                return
+            }
+            guard reconnectPolicy.canRetry(after: appState.eventStreamReconnectAttempt) else {
+                appState.eventStreamStatus = .stale
+                return
+            }
+            appState.eventStreamReconnectAttempt += 1
+            appState.eventStreamStatus = .reconnecting
+            let delay = EventStreamBackoff.delay(forAttempt: appState.eventStreamReconnectAttempt)
+            await reconnectPolicy.sleep(for: delay)
+            // Re-check after sleeping: the user may have switched sessions or
+            // stopped the stream while we waited.
+            guard !Task.isCancelled, appState.selectedSessionID == sessionID else {
+                appState.eventStreamStatus = .stoppedBySessionSwitch
+                return
+            }
+            appState.eventStreamStatus = .connecting
+        }
+    }
+
+    /// Runs one connect + consume cycle.
+    ///
+    /// - Returns: `true` when the cycle ended with a transient transport error
+    ///   that the reconnect loop may retry; `false` for a clean cancel, a
+    ///   session switch, or a hard logical stop requested by a message handler.
+    private func runStreamCycle(
+        sessionID: String,
+        eventProvider: any WorkbenchEventProviding
+    ) async -> Bool {
         do {
             let stream = try await eventProvider.connect(sessionID: sessionID)
             activeEventStream = stream
             while !Task.isCancelled {
                 let message = try await stream.next()
-                await handleEventStreamMessage(message)
+                let action = await handleEventStreamMessage(message)
+                if action == .endCycle {
+                    await activeEventStream?.cancel()
+                    activeEventStream = nil
+                    return false
+                }
             }
+            return false
         } catch {
             guard !Task.isCancelled else {
-                return
+                return false
             }
             activeEventStream = nil
             appState.connectionState = .stale
@@ -320,10 +416,21 @@ public final class DaemonController: Sendable {
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
             }
+            return true
         }
     }
 
-    private func handleEventStreamMessage(_ message: WorkbenchEventStreamMessage) async {
+    private static func isAuthOrProtocolError(_ error: APIError?) -> Bool {
+        guard let error else { return false }
+        switch error {
+        case .authFailed, .protocolVersionMismatch:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func handleEventStreamMessage(_ message: WorkbenchEventStreamMessage) async -> EventStreamMessageAction {
         switch message {
         case .connected(let sessionID):
             if let selectedSessionID = appState.selectedSessionID,
@@ -331,43 +438,52 @@ public final class DaemonController: Sendable {
                selectedSessionID != sessionID {
                 appState.connectionState = .stale
                 appState.lastError = .networkFailure("事件流返回了不匹配的会话连接")
-                await stopEventStream()
-                return
+                appState.eventStreamStatus = .stale
+                return .endCycle
             }
             if appState.connectionState == .stale {
                 appState.connectionState = .connected
                 await refreshSnapshot()
                 if appState.lastError == .sessionUnavailable {
                     appState.connectionState = .stale
-                    await stopEventStream()
-                    return
+                    appState.eventStreamStatus = .stale
+                    return .endCycle
                 }
                 if appState.snapshot != nil {
                     await refreshWorkbenchListsAfterConnection()
                 }
             }
+            appState.eventStreamStatus = .connected
+            appState.eventStreamReconnectAttempt = 0
+            appState.eventStreamLastConnectedAt = Date()
+            return .continueConsuming
         case .snapshot(let snapshot):
             if let selectedSessionID = appState.selectedSessionID,
                selectedSessionID != snapshot.sessionID {
                 appState.connectionState = .stale
                 appState.lastError = .networkFailure("事件流返回了不匹配的会话快照")
-                await stopEventStream()
-                return
+                appState.eventStreamStatus = .stale
+                return .endCycle
             }
             appState.selectedSessionID = snapshot.sessionID
             applySnapshot(snapshot)
             appState.connectionState = .connected
             appState.lastError = nil
+            appState.eventStreamStatus = .connected
+            appState.eventStreamReconnectAttempt = 0
+            appState.eventStreamLastConnectedAt = Date()
             await refreshWorkbenchListsAfterConnection()
+            return .continueConsuming
         case .event:
             await refreshSnapshot()
             if appState.lastError == .sessionUnavailable {
-                await stopEventStream()
-                return
+                appState.eventStreamStatus = .stale
+                return .endCycle
             }
             if appState.snapshot != nil {
                 await refreshWorkbenchListsAfterConnection()
             }
+            return .continueConsuming
         case .error(let message):
             appState.connectionState = .stale
             let error = apiError(forEventStreamError: message)
@@ -375,13 +491,16 @@ public final class DaemonController: Sendable {
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
             }
-            await stopEventStream()
+            appState.eventStreamStatus = Self.isAuthOrProtocolError(error)
+                ? .stoppedByAuthOrProtocol
+                : .stale
+            return .endCycle
         case .refreshComplete:
-            break
+            return .continueConsuming
         case .pong:
-            break
+            return .continueConsuming
         case .ignored:
-            break
+            return .continueConsuming
         }
     }
 
@@ -1674,7 +1793,7 @@ public final class DaemonController: Sendable {
     /// the requested ID, the local session-scoped lists stay cleared, and the
     /// error is recorded in `lastError`.
     public func selectSession(_ sessionID: String) async {
-        await stopEventStream()
+        await stopEventStream(reason: .sessionSwitch)
         appState.selectedSessionID = sessionID
         clearSessionScopedState()
         appState.lastError = nil
