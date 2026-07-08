@@ -67,6 +67,36 @@ struct WorktreeLocalActionExecutorTests {
         }
     }
 
+    @Test func unreadableWorktreePathReturnsPermissionDeniedMessage() throws {
+        // A directory that exists but cannot be read must surface a distinct
+        // permission-denied state so the user knows to fix permissions, not
+        // re-create the worktree. (No-op when running as root, which bypasses
+        // Unix permission bits.)
+        guard getuid() != 0 else { return }
+        let directory = try temporaryDirectory()
+        defer {
+            // Restore permissions so the temp dir can be cleaned up.
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: directory.path
+            )
+        }
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o000],
+            ofItemAtPath: directory.path
+        )
+
+        let executor = WorktreeLocalActionExecutor(launcher: RecordingWorktreeLocalActionLauncher())
+
+        do {
+            try executor.perform(.revealInFinder, path: directory.path)
+            Issue.record("expected permissionDenied error")
+        } catch let error as WorktreeLocalActionError {
+            #expect(error.localizedMessage(locale: .zhCN) == "没有权限访问工作区：\(directory.path)")
+            #expect(error.localizedMessage(locale: .enUS) == "Permission denied for worktree: \(directory.path)")
+        }
+    }
+
     private func temporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("naumi-worktree-action-\(UUID().uuidString)")

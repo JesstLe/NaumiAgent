@@ -10,6 +10,7 @@ public enum WorktreeLocalActionError: Error, Equatable, Sendable {
     case emptyPath
     case pathDoesNotExist(String)
     case pathIsNotDirectory(String)
+    case permissionDenied(String)
     case launchFailed(String)
 
     public func localizedMessage(locale: AppLocale) -> String {
@@ -20,6 +21,10 @@ public enum WorktreeLocalActionError: Error, Equatable, Sendable {
             return locale == .zhCN ? "工作区路径不存在：\(path)" : "Worktree path does not exist: \(path)"
         case .pathIsNotDirectory(let path):
             return locale == .zhCN ? "工作区路径不是目录：\(path)" : "Worktree path is not a directory: \(path)"
+        case .permissionDenied(let path):
+            return locale == .zhCN
+                ? "没有权限访问工作区：\(path)"
+                : "Permission denied for worktree: \(path)"
         case .launchFailed(let reason):
             return locale == .zhCN ? "无法打开工作区：\(reason)" : "Unable to open worktree: \(reason)"
         }
@@ -65,6 +70,11 @@ public final class WorktreeLocalActionExecutor {
         }
         guard isDirectory.boolValue else {
             throw WorktreeLocalActionError.pathIsNotDirectory(trimmedPath)
+        }
+        // A path that exists but cannot be read is a distinct, actionable state:
+        // the user needs to fix permissions, not re-create the worktree.
+        guard fileManager.isReadableFile(atPath: trimmedPath) else {
+            throw WorktreeLocalActionError.permissionDenied(trimmedPath)
         }
         return URL(fileURLWithPath: trimmedPath).standardizedFileURL
     }
