@@ -108,13 +108,50 @@ struct TaskMarketDesignPresentationTests {
         #expect(presentation.activeLeases.contains { $0.leaseID.hasPrefix("fixture-lease-") } == false)
     }
 
-    @Test func realModeShowsNoBidsWhenBidModelAbsent() throws {
+    @Test func realModeShowsNoDesignBidCardsButCountsRealBids() throws {
         let snapshot = try loadZHSnapshot()
         let presentation = TaskMarketDesignPresentation(snapshot: snapshot, policy: .real)
 
-        // No persisted bid model exists yet (see M08). Real mode must not
-        // fabricate bids.
+        // Design bid cards are never fabricated in real mode; real bids surface
+        // as per-row bid counts derived from the snapshot's persisted bids list.
         #expect(presentation.bids.isEmpty)
+    }
+
+    @Test func realModeRowBidCountReflectsPersistedBids() throws {
+        // A snapshot with two bids on task "t-1" and one on "t-2" must surface
+        // those real counts on the corresponding market rows — never fabricated.
+        let task1 = makeTask(id: "t-1")
+        let task2 = makeTask(id: "t-2")
+        let issue1 = makeIssue(taskID: "t-1")
+        let issue2 = makeIssue(taskID: "t-2")
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "sess",
+            missions: [],
+            tasks: [task1, task2],
+            issues: [issue1, issue2],
+            leases: [],
+            bids: [
+                makeBid(taskID: "t-1"),
+                makeBid(taskID: "t-1"),
+                makeBid(taskID: "t-2"),
+            ],
+            failures: [],
+            events: []
+        )
+        let presentation = TaskMarketDesignPresentation(snapshot: snapshot, policy: .real)
+
+        let row1 = try #require(presentation.rows.first { $0.taskID == "t-1" })
+        let row2 = try #require(presentation.rows.first { $0.taskID == "t-2" })
+        #expect(row1.bids == 2)
+        #expect(row2.bids == 1)
+    }
+
+    @Test func realModeZeroBidsWhenSnapshotHasNoBids() throws {
+        let snapshot = try loadZHSnapshot()
+        let presentation = TaskMarketDesignPresentation(snapshot: snapshot, policy: .real)
+
+        // No persisted bids → every real row shows zero, never a fabricated minimum.
+        #expect(presentation.rows.allSatisfy { $0.bids == 0 })
     }
 
     @Test func realModeEmptySnapshotShowsNoFixtures() {
@@ -199,6 +236,55 @@ struct TaskMarketDesignPresentationTests {
             worktreeName: worktreeName,
             createdAt: "2026-06-27T08:00:00",
             updatedAt: "2026-06-27T08:05:00"
+        )
+    }
+
+    private func makeTask(id: String) -> TaskDTO {
+        TaskDTO(
+            id: id,
+            sessionID: "sess",
+            subject: "Task \(id)",
+            description: "",
+            status: "open",
+            activeForm: nil,
+            owner: nil,
+            blocks: [],
+            blockedBy: [],
+            createdAt: "2026-07-09T08:00:00",
+            updatedAt: "2026-07-09T08:00:00"
+        )
+    }
+
+    private func makeIssue(taskID: String) -> IssueDTO {
+        IssueDTO(
+            sessionID: "sess",
+            taskID: taskID,
+            missionID: "m-1",
+            parallelMode: "exclusive",
+            riskLevel: "medium",
+            requiresHumanApproval: false,
+            acceptanceCriteria: [],
+            expectedArtifacts: [],
+            relatedBranch: "",
+            relatedWorktree: "",
+            relatedPR: "",
+            createdAt: "2026-07-09T08:00:00",
+            updatedAt: "2026-07-09T08:00:00"
+        )
+    }
+
+    private func makeBid(taskID: String) -> IssueBidDTO {
+        IssueBidDTO(
+            id: UUID().uuidString,
+            sessionID: "sess",
+            taskID: taskID,
+            agentID: "agent-a",
+            confidence: 0.7,
+            estimateMinutes: 30,
+            eta: "",
+            note: "",
+            createdAt: "2026-07-09T08:00:00",
+            updatedAt: "2026-07-09T08:00:00"
         )
     }
 }

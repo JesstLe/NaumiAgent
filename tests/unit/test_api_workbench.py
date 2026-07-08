@@ -18,6 +18,7 @@ from naumi_agent import __version__
 from naumi_agent.api.routes.workbench import (
     AgentProfileUpsert,
     ApprovalResolve,
+    BidCreate,
     ClaimIssue,
     ContextHealthRecord,
     DecisionCreate,
@@ -33,6 +34,7 @@ from naumi_agent.api.routes.workbench import (
     create_decision,
     create_intent_lock,
     create_validation_run,
+    create_workbench_bid,
     create_workbench_mission,
     create_workbench_session,
     delete_worktree,
@@ -66,6 +68,7 @@ from naumi_agent.api.routes.workbench import (
     get_worktree,
     get_worktrees,
     keep_worktree,
+    list_workbench_bids,
     release_workbench_lease,
     resolve_approval,
     upsert_agent_profile,
@@ -141,6 +144,8 @@ class _FakeWorkbenchService:
     def __init__(self) -> None:
         self.created_missions: list[dict] = []
         self.created_issues: list[dict] = []
+        self.created_bids: list[dict] = []
+        self.listed_bids: list[dict] = []
         self.attached_issues: list[dict] = []
         self.registered_agent_profiles: list[dict] = []
         self.created_intent_locks: list[dict] = []
@@ -1230,6 +1235,76 @@ class _FakeWorkbenchService:
                 }
             ],
             "state": state,
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "limit": limit,
+        }
+
+    async def create_bid(
+        self,
+        *,
+        session_id: str,
+        task_id: str,
+        agent_id: str,
+        confidence: float,
+        estimate_minutes: int,
+        eta: str,
+        note: str,
+    ):
+        self.created_bids.append(
+            {
+                "session_id": session_id,
+                "task_id": task_id,
+                "agent_id": agent_id,
+                "confidence": confidence,
+                "estimate_minutes": estimate_minutes,
+                "eta": eta,
+                "note": note,
+            }
+        )
+        return {
+            "id": "bid-1",
+            "session_id": session_id,
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "confidence": confidence,
+            "estimate_minutes": estimate_minutes,
+            "eta": eta,
+            "note": note,
+            "created_at": "2026-07-09T08:00:00",
+            "updated_at": "2026-07-09T08:00:00",
+        }
+
+    async def list_bids(
+        self,
+        session_id: str,
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        limit: int = 50,
+    ):
+        self.listed_bids.append(
+            {
+                "session_id": session_id,
+                "task_id": task_id,
+                "agent_id": agent_id,
+                "limit": limit,
+            }
+        )
+        return {
+            "bids": [
+                {
+                    "id": "bid-1",
+                    "session_id": session_id,
+                    "task_id": task_id or "task-1",
+                    "agent_id": agent_id or "agent-a",
+                    "confidence": 0.8,
+                    "estimate_minutes": 30,
+                    "eta": "2026-07-09T12:00:00",
+                    "note": "I can take this",
+                    "created_at": "2026-07-09T08:00:00",
+                    "updated_at": "2026-07-09T08:00:00",
+                }
+            ],
             "task_id": task_id,
             "agent_id": agent_id,
             "limit": limit,
@@ -3860,6 +3935,100 @@ async def test_claim_issue_endpoint_reports_unavailable_task_market() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_workbench_bids_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+
+    with pytest.raises(HTTPException) as exc:
+        await list_workbench_bids(
+            "missing",
+            "task-1",
+            _fake_request(engine),
+            agent_id=None,
+            limit=50,
+            auth="test",
+        )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_workbench_bids_endpoint_delegates_to_service() -> None:
+    engine = _FakeEngine(exists=True)
+    response = await list_workbench_bids(
+        "sess-1",
+        "task-1",
+        _fake_request(engine),
+        agent_id="agent-a",
+        limit=25,
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.listed_bids == [
+        {
+            "session_id": "sess-1",
+            "task_id": "task-1",
+            "agent_id": "agent-a",
+            "limit": 25,
+        }
+    ]
+    assert response.task_id == "task-1"
+    assert response.agent_id == "agent-a"
+    assert response.limit == 25
+    assert len(response.bids) == 1
+    assert response.bids[0]["id"] == "bid-1"
+    assert response.bids[0]["task_id"] == "task-1"
+
+
+@pytest.mark.asyncio
+async def test_create_workbench_bid_endpoint_persists_and_returns_bid() -> None:
+    engine = _FakeEngine(exists=True)
+    body = BidCreate(
+        agent_id="agent-a",
+        confidence=0.8,
+        estimate_minutes=30,
+        eta="2026-07-09T12:00:00",
+        note="I can take this",
+    )
+
+    response = await create_workbench_bid(
+        "sess-1", "task-1", body, _fake_request(engine), auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.created_bids == [
+        {
+            "session_id": "sess-1",
+            "task_id": "task-1",
+            "agent_id": "agent-a",
+            "confidence": 0.8,
+            "estimate_minutes": 30,
+            "eta": "2026-07-09T12:00:00",
+            "note": "I can take this",
+        }
+    ]
+    assert response.task_id == "task-1"
+    assert len(response.bids) == 1
+    assert response.bids[0]["agent_id"] == "agent-a"
+    assert response.bids[0]["confidence"] == 0.8
+    assert response.bids[0]["estimate_minutes"] == 30
+
+
+@pytest.mark.asyncio
+async def test_create_workbench_bid_endpoint_requires_existing_session() -> None:
+    engine = _FakeEngine(exists=False)
+    body = BidCreate(agent_id="agent-a")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_workbench_bid(
+            "missing", "task-1", body, _fake_request(engine), auth="test"
+        )
+
+    assert exc.value.status_code == 404
+    assert engine.workbench_service.created_bids == []
+
+
+@pytest.mark.asyncio
 async def test_get_approvals_endpoint_requires_existing_session() -> None:
     engine = _FakeEngine(exists=False)
 
@@ -5172,6 +5341,7 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
         "create_mission",
         "create_issue",
         "claim_issue",
+        "create_bid",
         "release_lease",
         "expire_leases",
         "run_validation",
@@ -5205,6 +5375,8 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
             "/workbench/sessions/{session_id}/missions/{mission_id}/issues"
         ),
         "claim_issue": "/workbench/sessions/{session_id}/issues/{task_id}/claim",
+        "bids": "/workbench/sessions/{session_id}/issues/{task_id}/bids",
+        "create_bid": "/workbench/sessions/{session_id}/issues/{task_id}/bids",
         "leases": "/workbench/sessions/{session_id}/leases",
         "lease": "/workbench/sessions/{session_id}/leases/{lease_id}",
         "release_lease": "/workbench/sessions/{session_id}/leases/{lease_id}/release",

@@ -13,6 +13,11 @@ public struct TaskMarketView: View {
     @State private var claimDurationMinutes = 45
     @State private var claimWorktreeName = ""
     @State private var isClaimingIssue = false
+    @State private var bidAgentID = "Backend-Agent"
+    @State private var bidConfidence = 0.7
+    @State private var bidEstimateMinutes = 30
+    @State private var bidNote = ""
+    @State private var isSubmittingBid = false
     @State private var isPresentingIssueComposer = false
     @State private var issueDraft = IssueCreationDraft()
     @State private var isCreatingIssue = false
@@ -500,12 +505,150 @@ public struct TaskMarketView: View {
                 }
                 .buttonStyle(.bordered)
                 .frame(maxWidth: .infinity)
+
+                Divider()
+
+                realBidsPanel(issue: issue)
             }
 
             Spacer(minLength: 0)
         }
         .padding(16)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    /// Real bid panel: lists persisted bids for the selected issue and offers a
+    /// submit form that POSTs a new bid. In preview mode it is hidden because
+    /// there is no live daemon to persist against.
+    private func realBidsPanel(issue: TaskMarketDesignIssue) -> some View {
+        let bids = appState.issueBids.filter { $0.taskID == issue.taskID }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(AppStrings.TaskMarket.bidCountTitle(appState.locale, count: bids.count))
+                    .font(.headline)
+                Spacer()
+            }
+
+            if bids.isEmpty {
+                VStack(spacing: 4) {
+                    Image(systemName: "person.2.slash")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.secondary)
+                    Text(AppStrings.Reviews.emptyBids(appState.locale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(bids) { bid in
+                        realBidRow(bid)
+                    }
+                }
+            }
+
+            bidSubmissionForm(issue: issue)
+        }
+    }
+
+    private func realBidRow(_ bid: IssueBidDTO) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: "person.crop.square")
+                    .foregroundStyle(.purple)
+                Text(bid.agentID)
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Text(appState.locale == .zhCN
+                    ? "置信度 \(Int((bid.confidence * 100).rounded()))%"
+                    : "confidence \(Int((bid.confidence * 100).rounded()))%"
+                )
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundStyle(.green)
+            }
+            HStack {
+                inspectorLabel(appState.locale == .zhCN ? "预计：" : "Est:")
+                Text("\(bid.estimateMinutes)min")
+                inspectorLabel(appState.locale == .zhCN ? "ETA：" : "ETA:")
+                Text(bid.eta.isEmpty ? "-" : bid.eta)
+            }
+            .font(.caption)
+            if !bid.note.isEmpty {
+                Text(bid.note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func bidSubmissionForm(issue: TaskMarketDesignIssue) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField(AppStrings.TaskMarket.agentIDLabel(appState.locale), text: $bidAgentID)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12))
+            HStack {
+                inspectorLabel(appState.locale == .zhCN ? "置信度" : "Confidence")
+                Slider(value: $bidConfidence, in: 0...1)
+                Text("\(Int((bidConfidence * 100).rounded()))%")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 40, alignment: .trailing)
+            }
+            HStack {
+                inspectorLabel(appState.locale == .zhCN ? "预计耗时（分钟）" : "Estimate (min)")
+                Stepper("\(bidEstimateMinutes)", value: $bidEstimateMinutes, in: 0...480, step: 5)
+                    .font(.caption)
+            }
+            TextField(
+                appState.locale == .zhCN ? "备注（可选）" : "Note (optional)",
+                text: $bidNote
+            )
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 12))
+
+            Button {
+                submitBid(for: issue)
+            } label: {
+                if isSubmittingBid {
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Text(AppStrings.TaskMarket.processingLabel(appState.locale))
+                    }
+                    .frame(maxWidth: .infinity)
+                } else {
+                    Text(appState.locale == .zhCN ? "提交投标" : "Submit Bid")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(appState.isPreviewFixture || isSubmittingBid || bidAgentID.isEmpty)
+        }
+    }
+
+    private func submitBid(for issue: TaskMarketDesignIssue) {
+        guard !appState.isPreviewFixture, !isSubmittingBid else { return }
+        let agent = bidAgentID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !agent.isEmpty else { return }
+        isSubmittingBid = true
+        let draft = IssueBidDraft(
+            agentID: agent,
+            confidence: bidConfidence,
+            estimateMinutes: bidEstimateMinutes,
+            eta: "",
+            note: bidNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        Task {
+            await daemonController.submitIssueBid(taskID: issue.taskID, draft: draft)
+            isSubmittingBid = false
+            if appState.lastError == nil {
+                bidNote = ""
+            }
+        }
     }
 
     private func claimCommandPanel(_ issue: TaskMarketDesignIssue) -> some View {
@@ -585,6 +728,7 @@ public struct TaskMarketView: View {
 
         Task {
             await daemonController.loadIssue(taskID: command.taskID)
+            await daemonController.refreshIssueBids(taskID: command.taskID)
         }
     }
 

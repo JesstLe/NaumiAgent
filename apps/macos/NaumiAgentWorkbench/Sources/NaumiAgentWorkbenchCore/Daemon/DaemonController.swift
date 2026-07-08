@@ -1828,6 +1828,7 @@ public final class DaemonController: Sendable {
         appState.leases = []
         appState.worktrees = []
         appState.missions = []
+        appState.issueBids = []
         appState.agentProfiles = []
         appState.decisions = []
         appState.intentLocks = []
@@ -2054,6 +2055,70 @@ public final class DaemonController: Sendable {
             applySnapshot(response.snapshot)
             await refreshLeases()
             await refreshIssues()
+            await refreshEvents(limit: 50)
+        } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
+        }
+    }
+
+    /// Refreshes the competing bids for a single issue (task).
+    ///
+    /// Stores the result in ``AppState/issueBids``. Failures are recorded in
+    /// `appState.lastError` and never mutate the previous bid list, so the UI
+    /// keeps showing the last good bids alongside the error.
+    public func refreshIssueBids(taskID: String, agentID: String? = nil, limit: Int = 50) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.fetchIssueBids(
+                sessionID: sessionID,
+                taskID: taskID,
+                agentID: agentID,
+                limit: limit
+            )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.issueBids = response.bids
+        } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
+        }
+    }
+
+    /// Submits a new agent bid for an issue and refreshes the bid list on success.
+    public func submitIssueBid(taskID: String, draft: IssueBidDraft) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.submitIssueBid(
+                sessionID: sessionID,
+                taskID: taskID,
+                draft: draft
+            )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.issueBids = response.bids
             await refreshEvents(limit: 50)
         } catch {
             guard appState.selectedSessionID == sessionID else {

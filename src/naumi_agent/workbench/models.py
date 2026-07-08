@@ -125,6 +125,27 @@ class Lease:
 
 
 @dataclass
+class IssueBid:
+    """A single agent's bid to claim an issue (task).
+
+    Bids express confidence, an effort estimate, an ETA, and a free-form note.
+    They are persisted independently of leases so the market can show competing
+    bids before a lease is granted.
+    """
+
+    id: str
+    session_id: str
+    task_id: str
+    agent_id: str
+    confidence: float
+    estimate_minutes: int
+    eta: str
+    note: str
+    created_at: str = field(default_factory=now_iso)
+    updated_at: str = field(default_factory=now_iso)
+
+
+@dataclass
 class IntentLock:
     id: str
     session_id: str

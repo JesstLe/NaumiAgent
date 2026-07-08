@@ -254,6 +254,21 @@ public protocol WorkbenchAPIProviding: Sendable {
         worktreeName: String
     ) async throws(APIError) -> LeaseSnapshotDTO
 
+    /// Fetches competing bids for an issue (task).
+    func fetchIssueBids(
+        sessionID: String,
+        taskID: String,
+        agentID: String?,
+        limit: Int
+    ) async throws(APIError) -> IssueBidsDTO
+
+    /// Submits a new agent bid for an issue, returning the bids for that issue.
+    func submitIssueBid(
+        sessionID: String,
+        taskID: String,
+        draft: IssueBidDraft
+    ) async throws(APIError) -> IssueBidsDTO
+
     /// Releases an existing lease, returning the updated lease record.
     func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO
 

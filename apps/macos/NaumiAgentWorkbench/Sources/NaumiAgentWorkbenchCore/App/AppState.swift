@@ -94,6 +94,7 @@ public final class AppState: Sendable {
     public var leases: [LeaseDTO] = []
     public var worktrees: [WorktreeDTO] = []
     public var missions: [MissionDTO] = []
+    public var issueBids: [IssueBidDTO] = []
     public var agentProfiles: [AgentProfileDTO] = []
     public var decisions: [DecisionDTO] = []
     public var intentLocks: [IntentLockDTO] = []

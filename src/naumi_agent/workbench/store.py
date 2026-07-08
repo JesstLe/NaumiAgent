@@ -17,6 +17,7 @@ from naumi_agent.workbench.models import (
     DecisionKind,
     FailureKind,
     IntentLock,
+    IssueBid,
     IssueMetadata,
     Lease,
     LeaseState,
@@ -186,6 +187,21 @@ CREATE TABLE IF NOT EXISTS workbench_approvals (
 )
 """
 
+_CREATE_BIDS = """
+CREATE TABLE IF NOT EXISTS workbench_bids (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    estimate_minutes INTEGER NOT NULL,
+    eta TEXT NOT NULL,
+    note TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+"""
+
 
 class WorkbenchStore:
     """SQLite-backed state for the workbench dashboard."""
@@ -208,6 +224,7 @@ class WorkbenchStore:
         await db.execute(_CREATE_VALIDATION_RUNS)
         await db.execute(_CREATE_FAILURES)
         await db.execute(_CREATE_APPROVALS)
+        await db.execute(_CREATE_BIDS)
         await db.commit()
         self._initialized = True
 
@@ -918,6 +935,108 @@ class WorkbenchStore:
             )
             await db.commit()
 
+    async def create_bid(
+        self,
+        *,
+        session_id: str,
+        task_id: str,
+        agent_id: str,
+        confidence: float,
+        estimate_minutes: int,
+        eta: str,
+        note: str,
+    ) -> IssueBid:
+        """Persist a new agent bid for an issue (task)."""
+        confidence = max(0.0, min(1.0, float(confidence)))
+        estimate_minutes = max(0, int(estimate_minutes))
+        bid = IssueBid(
+            id=uuid.uuid4().hex[:12],
+            session_id=session_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            confidence=confidence,
+            estimate_minutes=estimate_minutes,
+            eta=eta,
+            note=note,
+        )
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                """INSERT INTO workbench_bids
+                   (id, session_id, task_id, agent_id, confidence, estimate_minutes,
+                    eta, note, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    bid.id,
+                    bid.session_id,
+                    bid.task_id,
+                    bid.agent_id,
+                    bid.confidence,
+                    bid.estimate_minutes,
+                    bid.eta,
+                    bid.note,
+                    bid.created_at,
+                    bid.updated_at,
+                ),
+            )
+            await db.commit()
+        return bid
+
+    async def list_bids(
+        self,
+        session_id: str,
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        limit: int = 50,
+    ) -> list[IssueBid]:
+        """List bids, optionally filtered by task and/or agent."""
+        filters = ["session_id = ?"]
+        params: list[Any] = [session_id]
+        if task_id is not None:
+            filters.append("task_id = ?")
+            params.append(task_id)
+        if agent_id is not None:
+            filters.append("agent_id = ?")
+            params.append(agent_id)
+        params.append(limit)
+        where_clause = " AND ".join(filters)
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                f"""SELECT * FROM workbench_bids
+                   WHERE {where_clause}
+                   ORDER BY created_at ASC
+                   LIMIT ?""",
+                params,
+            )
+            rows = await cursor.fetchall()
+        return [_row_to_bid(dict(row)) for row in rows]
+
+    async def list_bids_for_snapshot(
+        self, session_id: str, task_ids: list[str]
+    ) -> list[IssueBid]:
+        """Fetch bids for a snapshot's tasks in one query.
+
+        Used by the snapshot builder so the market can surface competing bids
+        without an N+1 round-trip per task.
+        """
+        if not task_ids:
+            return []
+        placeholders = ",".join("?" for _ in task_ids)
+        params: list[Any] = [session_id, *task_ids]
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                f"""SELECT * FROM workbench_bids
+                   WHERE session_id = ? AND task_id IN ({placeholders})
+                   ORDER BY created_at ASC""",
+                params,
+            )
+            rows = await cursor.fetchall()
+        return [_row_to_bid(dict(row)) for row in rows]
+
     async def record_context_snapshot(
         self,
         *,
@@ -1425,6 +1544,21 @@ def _row_to_lease(row: dict[str, Any]) -> Lease:
         state=LeaseState(row["state"]),
         expires_at=row["expires_at"],
         worktree_name=row["worktree_name"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _row_to_bid(row: dict[str, Any]) -> IssueBid:
+    return IssueBid(
+        id=row["id"],
+        session_id=row["session_id"],
+        task_id=row["task_id"],
+        agent_id=row["agent_id"],
+        confidence=float(row["confidence"]),
+        estimate_minutes=int(row["estimate_minutes"]),
+        eta=row["eta"],
+        note=row["note"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

@@ -1154,3 +1154,89 @@ async def test_list_events_filters_by_since_timestamp(store: WorkbenchStore) -> 
     )
 
     assert [event.id for event in newer] == [event_b.id]
+
+
+async def test_create_bid_persists_and_clamps_fields(store: WorkbenchStore) -> None:
+    bid = await store.create_bid(
+        session_id="s",
+        task_id="task-1",
+        agent_id="agent-a",
+        confidence=1.5,  # out-of-range high → clamped to 1.0
+        estimate_minutes=-5,  # negative → clamped to 0
+        eta="2026-07-09T12:00:00",
+        note="I can take this",
+    )
+
+    assert bid.id
+    assert bid.session_id == "s"
+    assert bid.task_id == "task-1"
+    assert bid.agent_id == "agent-a"
+    assert bid.confidence == 1.0
+    assert bid.estimate_minutes == 0
+    assert bid.eta == "2026-07-09T12:00:00"
+    assert bid.note == "I can take this"
+
+
+async def test_list_bids_filters_by_task_and_agent(store: WorkbenchStore) -> None:
+    await store.create_bid(
+        session_id="s",
+        task_id="task-1",
+        agent_id="agent-a",
+        confidence=0.8,
+        estimate_minutes=30,
+        eta="",
+        note="a",
+    )
+    await store.create_bid(
+        session_id="s",
+        task_id="task-1",
+        agent_id="agent-b",
+        confidence=0.6,
+        estimate_minutes=45,
+        eta="",
+        note="b",
+    )
+    await store.create_bid(
+        session_id="s",
+        task_id="task-2",
+        agent_id="agent-a",
+        confidence=0.5,
+        estimate_minutes=10,
+        eta="",
+        note="c",
+    )
+
+    task1_bids = await store.list_bids("s", task_id="task-1")
+    assert [b.agent_id for b in task1_bids] == ["agent-a", "agent-b"]
+
+    agent_a_bids = await store.list_bids("s", agent_id="agent-a")
+    assert sorted(b.task_id for b in agent_a_bids) == ["task-1", "task-2"]
+
+    scoped = await store.list_bids("s", task_id="task-1", agent_id="agent-a")
+    assert [b.note for b in scoped] == ["a"]
+
+    other_session = await store.list_bids("other")
+    assert other_session == []
+
+
+async def test_list_bids_for_snapshot_fetches_only_given_tasks(
+    store: WorkbenchStore,
+) -> None:
+    await store.create_bid(
+        session_id="s", task_id="t1", agent_id="a", confidence=0.5,
+        estimate_minutes=10, eta="", note="",
+    )
+    await store.create_bid(
+        session_id="s", task_id="t2", agent_id="a", confidence=0.5,
+        estimate_minutes=10, eta="", note="",
+    )
+    await store.create_bid(
+        session_id="s", task_id="t3", agent_id="a", confidence=0.5,
+        estimate_minutes=10, eta="", note="",
+    )
+
+    result = await store.list_bids_for_snapshot("s", ["t1", "t3"])
+    assert sorted(b.task_id for b in result) == ["t1", "t3"]
+
+    assert await store.list_bids_for_snapshot("s", []) == []
+
