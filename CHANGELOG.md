@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.211] - 2026-07-08
+
+### Changed
+- **End-to-End First Token Telemetry** — 流式引擎新增 `latency_metric` 事件，区分首反馈、模型首包与端到端首字；CLI/TUI 最终统计与状态栏统一采用这套口径，避免只从 `turn_start` 起算低估用户实际等待时间。
+
 ## [0.1.210] - 2026-06-15
 
 ### Fixed
