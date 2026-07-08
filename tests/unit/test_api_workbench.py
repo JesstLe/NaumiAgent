@@ -1595,6 +1595,17 @@ class FakeTaskStore:
         return list(self.tasks)
 
 
+class _FakeValidationRunner:
+    """Exposes an allowlist like the real ValidationRunner for capability tests."""
+
+    def __init__(self) -> None:
+        self._allowed_commands = [
+            ["pytest"],
+            ["ruff"],
+            ["swift", "test"],
+        ]
+
+
 class FakeWorkbenchStore:
     def __init__(self) -> None:
         self.events: list[dict] = []
@@ -1636,6 +1647,7 @@ class _FakeEngine:
         self.workbench_market = workbench_market
         self.worktree_manager = worktree_manager or FakeWorktreeManager()
         self.task_store = task_store or FakeTaskStore()
+        self.validation_runner = _FakeValidationRunner()
         self.workspace_root = Path("/workspace/NaumiAgent")
         self.load_session_result = load_session_result
         self.load_session_results = load_session_results or {}
@@ -5437,6 +5449,11 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
             "/decisions/{decision_id}"
         ),
     }
+    assert response.allowed_validation_commands == [
+        ["pytest"],
+        ["ruff"],
+        ["swift", "test"],
+    ]
 
 
 @pytest.mark.asyncio

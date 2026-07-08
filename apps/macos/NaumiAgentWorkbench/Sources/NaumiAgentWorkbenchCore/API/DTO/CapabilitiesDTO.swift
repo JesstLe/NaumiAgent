@@ -13,6 +13,7 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
     public let supportedResources: [String]
     public let supportedActions: [String]
     public let routeTemplates: [String: String]
+    public let allowedValidationCommands: [[String]]
 
     public enum CodingKeys: String, CodingKey {
         case supportsDaemonManagement = "supports_daemon_management"
@@ -26,6 +27,7 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
         case supportedResources = "supported_resources"
         case supportedActions = "supported_actions"
         case routeTemplates = "route_templates"
+        case allowedValidationCommands = "allowed_validation_commands"
     }
 
     public init(
@@ -39,7 +41,8 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
         protocolVersion: Int,
         supportedResources: [String] = [],
         supportedActions: [String] = [],
-        routeTemplates: [String: String] = [:]
+        routeTemplates: [String: String] = [:],
+        allowedValidationCommands: [[String]] = []
     ) {
         self.supportsDaemonManagement = supportsDaemonManagement
         self.supportsWorkspaceRegistry = supportsWorkspaceRegistry
@@ -52,6 +55,7 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
         self.supportedResources = supportedResources
         self.supportedActions = supportedActions
         self.routeTemplates = routeTemplates
+        self.allowedValidationCommands = allowedValidationCommands
     }
 
     public init(from decoder: Decoder) throws {
@@ -91,6 +95,22 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
             [String: String].self,
             forKey: .routeTemplates
         ) ?? [:]
+        allowedValidationCommands = try container.decodeIfPresent(
+            [[String]].self,
+            forKey: .allowedValidationCommands
+        ) ?? []
+    }
+
+    /// Whether a command argv is permitted by the daemon's validation allowlist.
+    /// Used for client-side rejection with Chinese copy before submitting.
+    public func isValidationCommandAllowed(_ argv: [String]) -> Bool {
+        guard !allowedValidationCommands.isEmpty else { return true }
+        for prefix in allowedValidationCommands where !prefix.isEmpty {
+            if argv.count >= prefix.count && Array(argv.prefix(prefix.count)) == prefix {
+                return true
+            }
+        }
+        return false
     }
 
     public func supportsAction(_ action: String) -> Bool {

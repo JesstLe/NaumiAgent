@@ -160,6 +160,7 @@ class WorkbenchCapabilitiesResponse(BaseModel):
     supported_resources: list[str]
     supported_actions: list[str]
     route_templates: dict[str, str]
+    allowed_validation_commands: list[list[str]] = []
 
 
 class WorkbenchBootstrapResponse(BaseModel):
@@ -497,7 +498,10 @@ async def _build_daemon_status(request: Request) -> DaemonStatusResponse:
     )
 
 
-def _build_capabilities() -> WorkbenchCapabilitiesResponse:
+def _build_capabilities(
+    engine: Any | None = None,
+) -> WorkbenchCapabilitiesResponse:
+    allowed_commands = _engine_allowed_validation_commands(engine)
     return WorkbenchCapabilitiesResponse(
         supports_daemon_management=False,
         supports_workspace_registry=False,
@@ -510,7 +514,28 @@ def _build_capabilities() -> WorkbenchCapabilitiesResponse:
         supported_resources=WORKBENCH_SUPPORTED_RESOURCES,
         supported_actions=WORKBENCH_SUPPORTED_ACTIONS,
         route_templates=WORKBENCH_ROUTE_TEMPLATES,
+        allowed_validation_commands=allowed_commands,
     )
+
+
+def _engine_allowed_validation_commands(engine: Any | None) -> list[list[str]]:
+    """Reads the validation allowlist from the engine, if available.
+
+    Exposed so the Mac app can show preset commands and reject non-allowlisted
+    input before submitting.
+    """
+    runner = getattr(engine, "validation_runner", None) if engine else None
+    if runner is None:
+        return []
+    raw = getattr(runner, "_allowed_commands", None)
+    if not isinstance(raw, list):
+        return []
+    # Defensively coerce to a JSON-friendly list[list[str]].
+    result: list[list[str]] = []
+    for entry in raw:
+        if isinstance(entry, list) and all(isinstance(part, str) for part in entry):
+            result.append(list(entry))
+    return result
 
 
 def _is_workbench_websocket_api_key_valid(websocket: WebSocket) -> bool:
@@ -530,7 +555,8 @@ async def get_daemon_status(request: Request, auth: str = AuthDep):
 
 @router.get("/workbench/capabilities", response_model=WorkbenchCapabilitiesResponse)
 async def get_workbench_capabilities(request: Request, auth: str = AuthDep):
-    return _build_capabilities()
+    engine = getattr(request.app.state, "engine", None)
+    return _build_capabilities(engine=engine)
 
 
 @router.get("/workbench/sessions", response_model=SessionListResponse)
