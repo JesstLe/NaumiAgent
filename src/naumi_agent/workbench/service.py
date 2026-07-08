@@ -19,6 +19,7 @@ from naumi_agent.workbench.models import (
     Decision,
     DecisionKind,
     IntentLock,
+    IssueBid,
     IssueMetadata,
     Lease,
     LeaseState,
@@ -522,6 +523,9 @@ class WorkbenchService:
             lease = await self._workbench_store.get_active_lease(session_id, task.id)
             if lease is not None:
                 leases.append(self._lease_to_dict(lease, task=task))
+        bids = await self._workbench_store.list_bids_for_snapshot(
+            session_id, [task.id for task in tasks]
+        )
         return {
             "version": 1,
             "session_id": session_id,
@@ -542,6 +546,7 @@ class WorkbenchService:
             "tasks": [asdict(task) for task in tasks],
             "issues": issues,
             "leases": leases,
+            "bids": [self._bid_to_dict(bid) for bid in bids],
             "failures": failures,
             "events": [self._event_to_dict(event, tasks_by_id) for event in events],
             "validation_runs": validation_runs,
@@ -616,6 +621,67 @@ class WorkbenchService:
         data["state"] = data["state"].value
         data["task"] = WorkbenchService._task_to_summary(task)
         return data
+
+    @staticmethod
+    def _bid_to_dict(bid: IssueBid) -> dict[str, Any]:
+        return {
+            "id": bid.id,
+            "session_id": bid.session_id,
+            "task_id": bid.task_id,
+            "agent_id": bid.agent_id,
+            "confidence": bid.confidence,
+            "estimate_minutes": bid.estimate_minutes,
+            "eta": bid.eta,
+            "note": bid.note,
+            "created_at": bid.created_at,
+            "updated_at": bid.updated_at,
+        }
+
+    async def create_bid(
+        self,
+        session_id: str,
+        task_id: str,
+        agent_id: str,
+        confidence: float,
+        estimate_minutes: int,
+        eta: str,
+        note: str,
+    ) -> dict[str, Any]:
+        """Persist a new agent bid for an issue and return it as a dict."""
+        bid = await self._workbench_store.create_bid(
+            session_id=session_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            confidence=confidence,
+            estimate_minutes=estimate_minutes,
+            eta=eta,
+            note=note,
+        )
+        await self._workbench_store.append_event(
+            session_id=session_id,
+            type="bid.created",
+            actor=agent_id,
+            subject_id=task_id,
+            payload={"bid_id": bid.id},
+        )
+        return self._bid_to_dict(bid)
+
+    async def list_bids(
+        self,
+        session_id: str,
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        bids = await self._workbench_store.list_bids(
+            session_id, task_id=task_id, agent_id=agent_id, limit=limit
+        )
+        return {
+            "bids": [self._bid_to_dict(bid) for bid in bids],
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "limit": limit,
+        }
 
     async def list_events(
         self,

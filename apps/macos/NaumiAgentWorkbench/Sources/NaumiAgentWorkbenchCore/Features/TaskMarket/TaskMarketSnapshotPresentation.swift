@@ -22,13 +22,25 @@ public struct TaskMarketSnapshotPresentation: Equatable, Sendable {
             activeLeaseByTaskID[lease.taskID] = lease
         }
 
+        // Count real bids per task from the snapshot's persisted bid list.
+        var bidCountByTaskID: [String: Int] = [:]
+        for bid in snapshot.bids {
+            bidCountByTaskID[bid.taskID, default: 0] += 1
+        }
+
         // Build one row per issue that can be matched to a task. Issues without
         // a matching task are dropped because the market table needs task-level
         // fields (status, owner, dependencies).
         let unsortedRows: [(index: Int, row: TaskMarketIssueRow)] = snapshot.issues.enumerated().compactMap { index, issue in
             guard let task = taskByID[issue.taskID] else { return nil }
             let activeLease = activeLeaseByTaskID[issue.taskID]
-            return (index, TaskMarketIssueRow(issue: issue, task: task, activeLease: activeLease))
+            let bidCount = bidCountByTaskID[issue.taskID] ?? 0
+            return (index, TaskMarketIssueRow(
+                issue: issue,
+                task: task,
+                activeLease: activeLease,
+                bidCount: bidCount
+            ))
         }
 
         self.rows = TaskMarketSnapshotPresentation.sortRows(unsortedRows)
@@ -111,16 +123,20 @@ public struct TaskMarketIssueRow: Equatable, Sendable {
         return lowercased == "high" || lowercased == "critical"
     }
 
-    public init(issue: IssueDTO, task: TaskDTO, activeLease: LeaseDTO? = nil) {
+    public init(
+        issue: IssueDTO,
+        task: TaskDTO,
+        activeLease: LeaseDTO? = nil,
+        bidCount: Int = 0
+    ) {
         self.taskID = task.id
         self.subject = task.subject
         self.status = task.status
         self.parallelMode = issue.parallelMode
         self.riskLevel = issue.riskLevel
         self.dependencyCount = task.blockedBy.count
-        // The current snapshot does not expose a bid list, so the market table
-        // shows zero bids until the backend adds bid fields.
-        self.bidCount = 0
+        // Real bid count comes from the persisted `workbench_bids` snapshot field.
+        self.bidCount = max(0, bidCount)
         self.leaseID = activeLease?.id
         self.leaseAgentID = activeLease?.agentID
         self.leaseExpiresAt = activeLease?.expiresAt

@@ -43,6 +43,7 @@ WORKBENCH_SUPPORTED_ACTIONS = [
     "create_mission",
     "create_issue",
     "claim_issue",
+    "create_bid",
     "release_lease",
     "expire_leases",
     "run_validation",
@@ -72,6 +73,8 @@ WORKBENCH_ROUTE_TEMPLATES = {
     "mission_issues": "/workbench/sessions/{session_id}/missions/{mission_id}/issues",
     "create_issue": "/workbench/sessions/{session_id}/missions/{mission_id}/issues",
     "claim_issue": "/workbench/sessions/{session_id}/issues/{task_id}/claim",
+    "bids": "/workbench/sessions/{session_id}/issues/{task_id}/bids",
+    "create_bid": "/workbench/sessions/{session_id}/issues/{task_id}/bids",
     "leases": "/workbench/sessions/{session_id}/leases",
     "lease": "/workbench/sessions/{session_id}/leases/{lease_id}",
     "release_lease": "/workbench/sessions/{session_id}/leases/{lease_id}/release",
@@ -226,6 +229,15 @@ class ClaimIssue(BaseModel):
     worktree_name: str = ""
 
 
+class BidCreate(BaseModel):
+    agent_id: str
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    estimate_minutes: int = Field(default=30, ge=0)
+    eta: str = ""
+    note: str = ""
+
+
+
 class WorktreeKeep(BaseModel):
     actor: str = "Human"
     reason: str = ""
@@ -297,6 +309,13 @@ class IssuesResponse(BaseModel):
 class LeasesResponse(BaseModel):
     leases: list[dict[str, Any]]
     state: str | None
+    task_id: str | None
+    agent_id: str | None
+    limit: int
+
+
+class BidsResponse(BaseModel):
+    bids: list[dict[str, Any]]
     task_id: str | None
     agent_id: str | None
     limit: int
@@ -1648,6 +1667,89 @@ async def claim_workbench_issue(
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"lease": lease_payload, "snapshot": snapshot}
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/issues/{task_id}/bids",
+    response_model=BidsResponse,
+)
+async def list_workbench_bids(
+    session_id: str,
+    task_id: str,
+    request: Request,
+    agent_id: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    try:
+        session = await engine.session_store.load(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        session_loaded = await engine.load_session(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session_loaded:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        bids = await engine.workbench_service.list_bids(
+            session_id, task_id=task_id, agent_id=agent_id, limit=limit
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return BidsResponse(
+        bids=bids["bids"],
+        task_id=task_id,
+        agent_id=agent_id,
+        limit=limit,
+    )
+
+
+@router.post(
+    "/workbench/sessions/{session_id}/issues/{task_id}/bids",
+    response_model=BidsResponse,
+    status_code=201,
+)
+async def create_workbench_bid(
+    session_id: str,
+    task_id: str,
+    body: BidCreate,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    try:
+        session = await engine.session_store.load(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        session_loaded = await engine.load_session(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session_loaded:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        bid = await engine.workbench_service.create_bid(
+            session_id=session_id,
+            task_id=task_id,
+            agent_id=body.agent_id,
+            confidence=body.confidence,
+            estimate_minutes=body.estimate_minutes,
+            eta=body.eta,
+            note=body.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return BidsResponse(bids=[bid], task_id=task_id, agent_id=None, limit=50)
 
 
 @router.post("/workbench/sessions/{session_id}/leases/{lease_id}/release")

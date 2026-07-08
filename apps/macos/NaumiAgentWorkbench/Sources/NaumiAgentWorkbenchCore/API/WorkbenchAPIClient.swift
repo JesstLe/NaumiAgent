@@ -826,6 +826,49 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         )
     }
 
+    public func fetchIssueBids(
+        sessionID: String,
+        taskID: String,
+        agentID: String?,
+        limit: Int
+    ) async throws(APIError) -> IssueBidsDTO {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let agentID, !agentID.isEmpty {
+            queryItems.append(URLQueryItem(name: "agent_id", value: agentID))
+        }
+        let path = try routePath(
+            named: "bids",
+            replacements: [
+                "session_id": sessionID,
+                "task_id": taskID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "issues", taskID, "bids")
+        )
+        return try await get(
+            path: path,
+            queryItems: queryItems
+        )
+    }
+
+    public func submitIssueBid(
+        sessionID: String,
+        taskID: String,
+        draft: IssueBidDraft
+    ) async throws(APIError) -> IssueBidsDTO {
+        let path = try routePath(
+            named: "create_bid",
+            replacements: [
+                "session_id": sessionID,
+                "task_id": taskID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "issues", taskID, "bids")
+        )
+        return try await post(
+            path: path,
+            body: draft
+        )
+    }
+
     public func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
         let path = try routePath(
             named: "release_lease",

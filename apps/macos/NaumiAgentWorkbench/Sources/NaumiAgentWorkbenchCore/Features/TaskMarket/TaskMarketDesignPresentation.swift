@@ -29,9 +29,9 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
                 detail: Self.detail(for: row.subject),
                 parallelMode: row.parallelMode,
                 risk: Self.normalizedRisk(row.riskLevel),
-                dependency: row.dependencyCount > 0 ? "Blocked by #1" : "-",
-                bids: max(row.bidCount, index == 0 ? 3 : 1),
-                lease: row.leaseState == .claimed ? "42m remaining" : "Requires proposal",
+                dependency: Self.dependencyLabel(for: row),
+                bids: row.bidCount,
+                lease: Self.leaseLabel(for: row),
                 worktree: row.worktreeLabel ?? "-",
                 status: Self.status(for: row),
                 tag: Self.tag(for: row.subject)
@@ -100,6 +100,23 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
         switch row.leaseState {
         case .claimed:
             return "Leased"
+        case .open:
+            return "Requires proposal"
+        }
+    }
+
+    /// Real dependency label derived from the task's `blocked_by` count.
+    private static func dependencyLabel(for row: TaskMarketIssueRow) -> String {
+        guard row.dependencyCount > 0 else { return "-" }
+        return row.dependencyCount == 1 ? "Blocked by 1 task" : "Blocked by \(row.dependencyCount) tasks"
+    }
+
+    /// Real lease label: the active lease's expiry, or "Requires proposal" when open.
+    private static func leaseLabel(for row: TaskMarketIssueRow) -> String {
+        switch row.leaseState {
+        case .claimed:
+            let expiry = row.leaseExpiresAt ?? ""
+            return expiry.isEmpty ? "Leased" : "Expires \(expiry)"
         case .open:
             return "Requires proposal"
         }

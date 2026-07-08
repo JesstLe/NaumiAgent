@@ -42,6 +42,13 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var registerAgentProfileWithSnapshotResult: Result<AgentProfileSnapshotDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var claimIssueWithSnapshotResult: Result<LeaseSnapshotDTO, APIError>?
+    var fetchIssueBidsResult: IssueBidsDTO = IssueBidsDTO(bids: [], taskID: nil, agentID: nil, limit: 50)
+    var fetchIssueBidsError: APIError?
+    var fetchIssueBidsHook: (@Sendable () async -> Void)?
+    private(set) var fetchIssueBidsCalls: [FetchIssueBidsCall] = []
+    var submitIssueBidResult: IssueBidsDTO = IssueBidsDTO(bids: [], taskID: nil, agentID: nil, limit: 50)
+    var submitIssueBidError: APIError?
+    private(set) var submitIssueBidCalls: [SubmitIssueBidCall] = []
     var releaseLeaseResult: Result<LeaseDTO, APIError>?
     var releaseLeaseWithSnapshotResult: Result<LeaseSnapshotDTO, APIError>?
     var expireLeasesResult: Result<ExpiredLeasesDTO, APIError>?
@@ -700,6 +707,43 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         return try result.get()
     }
 
+    func fetchIssueBids(
+        sessionID: String,
+        taskID: String,
+        agentID: String?,
+        limit: Int
+    ) async throws(APIError) -> IssueBidsDTO {
+        fetchIssueBidsCalls.append(FetchIssueBidsCall(
+            sessionID: sessionID,
+            taskID: taskID,
+            agentID: agentID,
+            limit: limit
+        ))
+        if let fetchIssueBidsHook {
+            await fetchIssueBidsHook()
+        }
+        if let fetchIssueBidsError {
+            throw fetchIssueBidsError
+        }
+        return fetchIssueBidsResult
+    }
+
+    func submitIssueBid(
+        sessionID: String,
+        taskID: String,
+        draft: IssueBidDraft
+    ) async throws(APIError) -> IssueBidsDTO {
+        submitIssueBidCalls.append(SubmitIssueBidCall(
+            sessionID: sessionID,
+            taskID: taskID,
+            draft: draft
+        ))
+        if let submitIssueBidError {
+            throw submitIssueBidError
+        }
+        return submitIssueBidResult
+    }
+
     func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
         guard let result = releaseLeaseResult else {
             throw .invalidResponse
@@ -1139,6 +1183,19 @@ struct FakeWorkbenchEventRefreshRequest: Equatable, Sendable {
     let actor: String?
     let since: String?
     let limit: Int
+}
+
+struct FetchIssueBidsCall: Equatable, Sendable {
+    let sessionID: String
+    let taskID: String
+    let agentID: String?
+    let limit: Int
+}
+
+struct SubmitIssueBidCall: Equatable, Sendable {
+    let sessionID: String
+    let taskID: String
+    let draft: IssueBidDraft
 }
 
 actor FakeWorkbenchEventStreamRecorder {
@@ -4145,6 +4202,147 @@ final class DaemonControllerTests {
         #expect(appState.lastError != nil)
         #expect(appState.lastError == .missingSelectedSession)
         #expect(appState.snapshot == nil)
+    }
+
+    // MARK: - Issue bids (M08)
+
+    @Test @MainActor func refreshIssueBidsStoresBidsAndClearsError() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-bids"
+        appState.lastError = .networkFailure("prior")
+
+        let api = FakeWorkbenchAPIProvider()
+        let bid = IssueBidDTO(
+            id: "bid-1",
+            sessionID: "sess-bids",
+            taskID: "task-1",
+            agentID: "agent-a",
+            confidence: 0.8,
+            estimateMinutes: 30,
+            eta: "2026-07-09T12:00:00",
+            note: "I can take this",
+            createdAt: "2026-07-09T08:00:00",
+            updatedAt: "2026-07-09T08:00:00"
+        )
+        await api.setIssueBidsResult(IssueBidsDTO(bids: [bid], taskID: "task-1", agentID: nil, limit: 50))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshIssueBids(taskID: "task-1")
+
+        #expect(await api.fetchIssueBidsCalls == [
+            FetchIssueBidsCall(sessionID: "sess-bids", taskID: "task-1", agentID: nil, limit: 50)
+        ])
+        #expect(appState.issueBids == [bid])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func refreshIssueBidsFailurePreservesExistingBids() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-bids"
+        let existing = IssueBidDTO(
+            id: "bid-old",
+            sessionID: "sess-bids",
+            taskID: "task-1",
+            agentID: "agent-a",
+            confidence: 0.5,
+            estimateMinutes: 10,
+            eta: "",
+            note: "old",
+            createdAt: "2026-07-09T07:00:00",
+            updatedAt: "2026-07-09T07:00:00"
+        )
+        appState.issueBids = [existing]
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setIssueBidsError(.networkFailure("offline"))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshIssueBids(taskID: "task-1")
+
+        // A failed refresh must keep the last good bid list and surface the error.
+        #expect(appState.issueBids == [existing])
+        #expect(appState.lastError == .networkFailure("offline"))
+    }
+
+    @Test @MainActor func refreshIssueBidsIgnoresStaleResultsAfterSessionSwitch() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-old"
+
+        let api = FakeWorkbenchAPIProvider()
+        let bid = IssueBidDTO(
+            id: "bid-1",
+            sessionID: "sess-old",
+            taskID: "task-1",
+            agentID: "agent-a",
+            confidence: 0.8,
+            estimateMinutes: 30,
+            eta: "",
+            note: "",
+            createdAt: "2026-07-09T08:00:00",
+            updatedAt: "2026-07-09T08:00:00"
+        )
+        await api.setIssueBidsResult(IssueBidsDTO(bids: [bid], taskID: "task-1", agentID: nil, limit: 50))
+        // Switch sessions mid-flight so the stale result must be ignored.
+        await api.setFetchIssueBidsHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-new"
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshIssueBids(taskID: "task-1")
+
+        // The stale bid result from sess-old must not overwrite the new session's state.
+        #expect(appState.selectedSessionID == "sess-new")
+        #expect(appState.issueBids == [])
+    }
+
+    @Test @MainActor func submitIssueBidPostsDraftAndStoresReturnedBids() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-bids"
+
+        let api = FakeWorkbenchAPIProvider()
+        let bid = IssueBidDTO(
+            id: "bid-new",
+            sessionID: "sess-bids",
+            taskID: "task-1",
+            agentID: "agent-a",
+            confidence: 0.7,
+            estimateMinutes: 30,
+            eta: "",
+            note: "pick me",
+            createdAt: "2026-07-09T08:00:00",
+            updatedAt: "2026-07-09T08:00:00"
+        )
+        await api.setSubmitIssueBidResult(IssueBidsDTO(bids: [bid], taskID: "task-1", agentID: nil, limit: 50))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-bids")
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        let draft = IssueBidDraft(agentID: "agent-a", confidence: 0.7, estimateMinutes: 30, eta: "", note: "pick me")
+        await controller.submitIssueBid(taskID: "task-1", draft: draft)
+
+        #expect(await api.submitIssueBidCalls == [
+            SubmitIssueBidCall(sessionID: "sess-bids", taskID: "task-1", draft: draft)
+        ])
+        #expect(appState.issueBids == [bid])
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func submitIssueBidRecordsErrorWithoutMutatingBids() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-bids"
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setSubmitIssueBidError(.serverError(statusCode: 500, detail: "boom"))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.submitIssueBid(
+            taskID: "task-1",
+            draft: IssueBidDraft(agentID: "agent-a", confidence: 0.5, estimateMinutes: 10, eta: "", note: "")
+        )
+
+        #expect(appState.issueBids == [])
+        #expect(appState.lastError == .serverError(statusCode: 500, detail: "boom"))
     }
 
     @Test @MainActor func releaseLeaseSuccessUsesIncludedSnapshotAndRefreshesLists() async throws {
@@ -10126,6 +10324,26 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setLeasesResult(_ result: Result<LeasesDTO, APIError>) {
         leasesResult = result
+    }
+
+    fileprivate func setIssueBidsResult(_ result: IssueBidsDTO) {
+        fetchIssueBidsResult = result
+    }
+
+    fileprivate func setIssueBidsError(_ error: APIError?) {
+        fetchIssueBidsError = error
+    }
+
+    fileprivate func setFetchIssueBidsHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchIssueBidsHook = hook
+    }
+
+    fileprivate func setSubmitIssueBidResult(_ result: IssueBidsDTO) {
+        submitIssueBidResult = result
+    }
+
+    fileprivate func setSubmitIssueBidError(_ error: APIError?) {
+        submitIssueBidError = error
     }
 
     fileprivate func setFetchLeasesHook(_ hook: (@Sendable () async -> Void)?) {
