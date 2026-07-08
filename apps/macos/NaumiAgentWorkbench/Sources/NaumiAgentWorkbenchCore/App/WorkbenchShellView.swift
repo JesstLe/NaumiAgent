@@ -272,13 +272,11 @@ private struct TopNavigationBar: View {
                 Circle()
                     .fill(connectionColor)
                     .frame(width: 7, height: 7)
-                Text(workspaceLabel)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+
+                workspaceMenu
+                sessionMenu
             }
-            .frame(maxWidth: 180, alignment: .trailing)
+            .frame(maxWidth: 240, alignment: .trailing)
             .layoutPriority(-1)
         }
         .padding(.leading, shellPresentation.leadingContentInset)
@@ -288,14 +286,87 @@ private struct TopNavigationBar: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private var workspaceLabel: String {
-        let workspace = appState.selectedWorkspace ?? "~/naumi"
-        return appState.locale == .zhCN ? "工作区: \(workspace)" : "Workspace: \(workspace)"
-    }
-
     private var currentMissionTitle: String {
         appState.snapshot?.missions.first?.title
             ?? (appState.locale == .zhCN ? "Mac Agent Workbench MVP" : "Mac Agent Workbench MVP")
+    }
+
+    private var switcherPresentation: WorkspaceSwitcherPresentation {
+        WorkspaceSwitcherPresentation(
+            registry: appState.workspaceRegistry,
+            sessions: appState.sessions,
+            selectedSessionID: appState.selectedSessionID,
+            activeWorkspaceLabel: appState.selectedWorkspace
+        )
+    }
+
+    private var workspaceMenu: some View {
+        let locale = appState.locale
+        let presentation = switcherPresentation
+        let title = presentation.activeWorkspaceTitle.isEmpty
+            ? AppStrings.WorkspaceSwitcher.workspaceLabel(locale)
+            : presentation.activeWorkspaceTitle
+        return Menu {
+            if presentation.workspaces.isEmpty {
+                Text(AppStrings.WorkspaceSwitcher.noKnownWorkspaces(locale))
+            } else {
+                ForEach(presentation.workspaces) { item in
+                    Button {
+                        switchToWorkspace(item)
+                    } label: {
+                        Text(item.isSelected ? "✓ \(item.displayTitle)" : item.displayTitle)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "folder")
+                Text(title).lineLimit(1).truncationMode(.middle)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .controlSize(.small)
+        .help(AppStrings.WorkspaceSwitcher.knownWorkspacesTitle(locale))
+    }
+
+    private var sessionMenu: some View {
+        let locale = appState.locale
+        let presentation = switcherPresentation
+        let title = presentation.hasActiveSession
+            ? presentation.activeSessionTitle
+            : AppStrings.WorkspaceSwitcher.sessionLabel(locale)
+        return Menu {
+            if presentation.recentSessions.isEmpty {
+                Text(AppStrings.WorkspaceSwitcher.noRecentSessions(locale))
+            } else {
+                ForEach(presentation.recentSessions) { item in
+                    Button {
+                        Task { await daemonController.selectSession(item.id) }
+                    } label: {
+                        Text(item.isSelected ? "✓ \(item.title)" : item.title)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                Text(title).lineLimit(1).truncationMode(.middle)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .controlSize(.small)
+        .help(AppStrings.WorkspaceSwitcher.recentSessionsTitle(locale))
+    }
+
+    /// Selecting a known workspace jumps to its last known session when that
+    /// session is present on the daemon.
+    private func switchToWorkspace(_ item: WorkspaceSwitcherItem) {
+        guard let entry = appState.workspaceRegistry.entry(forRoot: item.root),
+              let lastSessionID = entry.lastSessionID,
+              appState.sessions.contains(where: { $0.id == lastSessionID }) else {
+            return
+        }
+        Task { await daemonController.selectSession(lastSessionID) }
     }
 
     private var connectionColor: Color {

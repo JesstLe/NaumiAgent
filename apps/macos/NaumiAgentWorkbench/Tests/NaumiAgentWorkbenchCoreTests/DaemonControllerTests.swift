@@ -3577,6 +3577,79 @@ final class DaemonControllerTests {
         #expect(appState.selectedIntentLock == nil)
     }
 
+    @Test @MainActor func selectSessionRecordsSessionInWorkspaceRegistry() async throws {
+        let appState = AppState()
+        let storeURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("naumi-select-session-\(UUID().uuidString).json")
+        let store = WorkspaceRegistryStore(url: storeURL)
+
+        let api = FakeWorkbenchAPIProvider()
+        let status = DaemonStatusDTO(
+            status: "running",
+            version: "0.2.0",
+            pid: 42,
+            host: "127.0.0.1",
+            port: 8765,
+            startedAt: "2026-06-27T06:00:00",
+            workspaceCount: 1,
+            workspaceRoot: "/home/me/naumi",
+            workspaceName: "naumi"
+        )
+        let bootstrap = WorkbenchBootstrapDTO(
+            daemonStatus: status,
+            capabilities: makeCapabilities(),
+            sessions: [makeSession(id: "sess-new", title: "New")],
+            totalSessions: 1,
+            selectedSessionID: "sess-new",
+            snapshot: makeSnapshot(sessionID: "sess-new", missions: [])
+        )
+        await api.setBootstrapResult(.success(bootstrap))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-new")
+
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            workspaceRegistryStore: store
+        )
+        await controller.refreshConnection()
+
+        // refreshConnection registered the daemon workspace.
+        #expect(appState.workspaceRegistry.selectedRoot == "/home/me/naumi")
+
+        await controller.selectSession("sess-new")
+
+        let entry = appState.workspaceRegistry.entry(forRoot: "/home/me/naumi")
+        #expect(entry?.lastSessionID == "sess-new")
+        #expect(entry?.recentSessionIDs == ["sess-new"])
+        // Persisted to disk.
+        let loaded = store.load()
+        #expect(loaded.entry(forRoot: "/home/me/naumi")?.recentSessionIDs == ["sess-new"])
+    }
+
+    @Test @MainActor func workspaceValidationFlagsMissingWorkspace() {
+        let appState = AppState()
+        // No daemon -> workspace unavailable (UI blocks worktree actions).
+        #expect(appState.hasValidWorkspaceForWorktrees == false)
+
+        appState.daemonStatus = DaemonStatusDTO(
+            status: "running", version: "0.2.0", pid: 1, host: "127.0.0.1",
+            port: 8765, startedAt: "2026-06-27T06:00:00", workspaceCount: 1,
+            workspaceRoot: "/home/me/naumi", workspaceName: "naumi"
+        )
+        #expect(appState.hasValidWorkspaceForWorktrees == true)
+
+        // Empty workspace root still counts as missing.
+        appState.daemonStatus = DaemonStatusDTO(
+            status: "running", version: "0.2.0", pid: 1, host: "127.0.0.1",
+            port: 8765, startedAt: "2026-06-27T06:00:00", workspaceCount: 1
+        )
+        #expect(appState.hasValidWorkspaceForWorktrees == false)
+
+        // Preview mode bypasses the check so fixtures render.
+        appState.isPreviewFixture = true
+        #expect(appState.hasValidWorkspaceForWorktrees == true)
+    }
+
     @Test @MainActor func claimIssueSuccessRefreshesSnapshotIssuesLeasesAndEvents() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
