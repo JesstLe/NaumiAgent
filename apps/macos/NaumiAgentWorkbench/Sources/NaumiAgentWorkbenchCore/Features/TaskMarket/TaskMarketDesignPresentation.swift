@@ -1,17 +1,25 @@
 import Foundation
 
 /// Dense visual presentation for the Task Market reference screen.
-/// It uses live snapshot rows first, then deterministic fixture rows to keep the
-/// Mac preview visually complete before every backend surface is implemented.
+///
+/// In real mode (`policy.canUseDesignFillers == false`) it surfaces only
+/// authoritative snapshot data — no design rows, no fabricated bids, no
+/// fixture leases. In preview mode it keeps the rich reference screenshots.
 public struct TaskMarketDesignPresentation: Equatable, Sendable {
     public let filters: TaskMarketDesignFilters
     public let rows: [TaskMarketDesignIssue]
     public let bids: [TaskMarketDesignBid]
     public let activeLeases: [TaskMarketDesignLease]
+    public let policy: RealDataPolicy
 
     public var selectedIssue: TaskMarketDesignIssue? { rows.first }
 
-    public init(snapshot: WorkbenchSnapshotDTO?, refreshedLeases: [LeaseDTO] = []) {
+    public init(
+        snapshot: WorkbenchSnapshotDTO?,
+        refreshedLeases: [LeaseDTO] = [],
+        policy: RealDataPolicy = .real
+    ) {
+        self.policy = policy
         let liveRows = snapshot.map { TaskMarketSnapshotPresentation(snapshot: $0).rows } ?? []
         let mappedLiveRows = liveRows.enumerated().map { index, row in
             TaskMarketDesignIssue(
@@ -30,29 +38,41 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
             )
         }
 
-        var filledRows = mappedLiveRows
-        let fixtureRows = mappedLiveRows.isEmpty ? Self.fixtureRows : Array(Self.fixtureRows.dropFirst())
-        for fixture in fixtureRows where filledRows.count < 8 {
-            if !filledRows.contains(where: { $0.title == fixture.title }) {
-                filledRows.append(fixture.withNumber(filledRows.count + 1))
+        if policy.canUseDesignFillers {
+            var filledRows = mappedLiveRows
+            let fixtureRows = mappedLiveRows.isEmpty ? Self.fixtureRows : Array(Self.fixtureRows.dropFirst())
+            for fixture in fixtureRows where filledRows.count < 8 {
+                if !filledRows.contains(where: { $0.title == fixture.title }) {
+                    filledRows.append(fixture.withNumber(filledRows.count + 1))
+                }
             }
+            rows = Array(filledRows.prefix(8)).enumerated().map { index, row in
+                row.withNumber(index + 1)
+            }
+            filters = TaskMarketDesignFilters.reference
+            bids = Self.fixtureBids
+        } else {
+            // Real mode: live snapshot rows only, never padded with fixtures.
+            rows = mappedLiveRows
+            filters = TaskMarketDesignFilters.reference
+            // No persisted bid model exists yet (see M08); never fabricate bids.
+            bids = []
         }
 
-        rows = Array(filledRows.prefix(8)).enumerated().map { index, row in
-            row.withNumber(index + 1)
-        }
-        filters = TaskMarketDesignFilters.reference
-        bids = Self.fixtureBids
         let tasksByID = Dictionary(uniqueKeysWithValues: snapshot?.tasks.map { ($0.id, $0) } ?? [])
         if refreshedLeases.isEmpty {
             let liveLeases = Self.activeLeases(from: snapshot?.leases ?? [], tasksByID: tasksByID)
-            var filledLeases = liveLeases
-            for fixture in Self.fixtureLeases where filledLeases.count < 4 {
-                if !filledLeases.contains(where: { $0.leaseID == fixture.leaseID || $0.worktree == fixture.worktree }) {
-                    filledLeases.append(fixture)
+            if policy.canUseDesignFillers {
+                var filledLeases = liveLeases
+                for fixture in Self.fixtureLeases where filledLeases.count < 4 {
+                    if !filledLeases.contains(where: { $0.leaseID == fixture.leaseID || $0.worktree == fixture.worktree }) {
+                        filledLeases.append(fixture)
+                    }
                 }
+                activeLeases = Array(filledLeases.prefix(4))
+            } else {
+                activeLeases = Array(liveLeases.prefix(4))
             }
-            activeLeases = Array(filledLeases.prefix(4))
         } else {
             activeLeases = Array(Self.activeLeases(from: refreshedLeases, tasksByID: tasksByID).prefix(4))
         }

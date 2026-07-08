@@ -3,6 +3,19 @@ import Foundation
 /// Centralized user-facing strings. 默认中文，en-US fallback。
 public enum AppStrings {
 
+    // MARK: - Debug
+    public enum Debug {
+        public static func previewFixtureBadge(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "预览数据" : "PREVIEW FIXTURE"
+        }
+
+        public static func previewFixtureBadgeHelp(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "当前为预览模式，数据来自本地 fixture，非真实后端状态"
+                : "Preview mode: data comes from local fixtures, not the live daemon"
+        }
+    }
+
     // MARK: - Session Selector
     public enum SessionSelector {
         public static func sectionTitle(_ locale: AppLocale) -> String {
@@ -575,6 +588,10 @@ public enum AppStrings {
             locale == .zhCN ? "新建 Issue" : "New Issue"
         }
 
+        public static func bidCountTitle(_ locale: AppLocale, count: Int) -> String {
+            locale == .zhCN ? "智能体竞标 (\(count))" : "Agent Bids (\(count))"
+        }
+
         public static func createIssueSectionTitle(_ locale: AppLocale) -> String {
             locale == .zhCN ? "新建 Issue" : "New Issue"
         }
@@ -745,6 +762,22 @@ public enum AppStrings {
 
         public static func emptyApprovals(_ locale: AppLocale) -> String {
             locale == .zhCN ? "暂无待审批请求" : "No pending approvals"
+        }
+
+        public static func emptyApprovalHint(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "Agent 完成高风险任务后会在此请求审批" : "Agents request approval here after high-risk work"
+        }
+
+        public static func emptyBids(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "还没有 Agent 投标记录" : "No agent bids yet"
+        }
+
+        public static func emptyBidsHint(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "Agent 认领任务后会显示竞标详情" : "Bid details appear after an agent claims a task"
+        }
+
+        public static func selectApprovalPrompt(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "选择左侧审批项以查看详情" : "Select an approval on the left to review details"
         }
 
         public static func statusLabel(_ locale: AppLocale) -> String {

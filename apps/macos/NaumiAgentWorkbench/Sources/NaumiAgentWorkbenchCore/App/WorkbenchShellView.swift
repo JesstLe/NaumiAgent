@@ -204,6 +204,21 @@ private struct TopNavigationBar: View {
             .frame(minWidth: 460, idealWidth: 620, maxWidth: 740)
             .layoutPriority(2)
 
+            #if DEBUG
+            if appState.isPreviewFixture {
+                Text(AppStrings.Debug.previewFixtureBadge(appState.locale))
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.orange.opacity(0.18))
+                    .foregroundStyle(.orange)
+                    .clipShape(Capsule())
+                    .help(AppStrings.Debug.previewFixtureBadgeHelp(appState.locale))
+                    .layoutPriority(-1)
+            }
+            #endif
+
             Spacer(minLength: 12)
 
             Button {

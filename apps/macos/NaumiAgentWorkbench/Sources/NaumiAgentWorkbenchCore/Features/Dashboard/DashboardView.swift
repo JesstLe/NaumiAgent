@@ -62,7 +62,10 @@ public struct DashboardView: View {
         presentation: DashboardSnapshotPresentation
     ) -> some View {
         let layout = WorkbenchScaledPageLayout.dashboard
-        let market = TaskMarketDesignPresentation(snapshot: snapshot)
+        let market = TaskMarketDesignPresentation(
+            snapshot: snapshot,
+            policy: RealDataPolicy(isPreviewFixture: appState.isPreviewFixture)
+        )
 
         return ScaledWorkbenchPage(layout: layout) {
             workbenchLayoutContent(presentation: presentation, market: market)

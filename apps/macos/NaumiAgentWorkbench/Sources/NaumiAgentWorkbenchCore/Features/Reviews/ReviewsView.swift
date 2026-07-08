@@ -26,7 +26,8 @@ public struct ReviewsView: View {
         let presentation = ReviewsDesignPresentation(
             approvals: appState.approvals,
             validationRuns: appState.validationRuns,
-            snapshot: appState.snapshot
+            snapshot: appState.snapshot,
+            policy: RealDataPolicy(isPreviewFixture: appState.isPreviewFixture)
         )
         let selected = selectedReview(presentation)
         let layout = WorkbenchScaledPageLayout.reviews
@@ -36,14 +37,18 @@ public struct ReviewsView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
-            selectedReviewID = selected.id
-            validationDraft = presentation.defaultValidationDraft(for: selected)
+            if let selected {
+                selectedReviewID = selected.id
+                validationDraft = presentation.defaultValidationDraft(for: selected)
+            } else {
+                selectedReviewID = nil
+            }
         }
     }
 
     private func reviewLayoutContent(
         presentation: ReviewsDesignPresentation,
-        selected: ReviewDesignItem
+        selected: ReviewDesignItem?
     ) -> some View {
         HStack(alignment: .top, spacing: 0) {
             reviewQueueRail(presentation)
@@ -70,18 +75,22 @@ public struct ReviewsView: View {
         )
     }
 
-    private func selectedReview(_ presentation: ReviewsDesignPresentation) -> ReviewDesignItem {
-        let selected = presentation.reviewQueues
+    private func selectedReview(_ presentation: ReviewsDesignPresentation) -> ReviewDesignItem? {
+        let queueSelected = presentation.reviewQueues
             .flatMap(\.items)
             .first { $0.id == selectedReviewID }
             ?? presentation.selectedReview
 
-        guard let loadedApproval = appState.selectedApproval,
-              loadedApproval.id == selected.id else {
-            return selected
+        guard let queueSelected else {
+            return nil
         }
 
-        return selectedReviewPresentation(approval: loadedApproval, fallback: selected)
+        guard let loadedApproval = appState.selectedApproval,
+              loadedApproval.id == queueSelected.id else {
+            return queueSelected
+        }
+
+        return selectedReviewPresentation(approval: loadedApproval, fallback: queueSelected)
     }
 
     private func selectedReviewPresentation(
@@ -142,6 +151,23 @@ public struct ReviewsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    if presentation.reviewQueues.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "checkmark.seal")
+                                .font(.system(size: 26))
+                                .foregroundStyle(.secondary)
+                            Text(AppStrings.Reviews.emptyApprovals(appState.locale))
+                                .font(.caption)
+                                .fontWeight(.medium)
+                            Text(AppStrings.Reviews.emptyApprovalHint(appState.locale))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                    }
+
                     ForEach(presentation.reviewQueues) { queue in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
@@ -239,24 +265,43 @@ public struct ReviewsView: View {
         }
     }
 
-    private func reviewMain(presentation: ReviewsDesignPresentation, selected: ReviewDesignItem) -> some View {
+    private func reviewMain(presentation: ReviewsDesignPresentation, selected: ReviewDesignItem?) -> some View {
         let validationChecks = selectedValidationChecks(presentation.validationChecks)
 
         return VStack(spacing: 0) {
-            metaStrip(selected)
-            validationSummary(validationChecks)
-                .padding(14)
-            HStack(spacing: 0) {
-                filesChanged(presentation.fileChanges)
-                    .frame(width: 192)
+            if let selected {
+                metaStrip(selected)
+                validationSummary(validationChecks)
+                    .padding(14)
+                HStack(spacing: 0) {
+                    filesChanged(presentation.fileChanges)
+                        .frame(width: 192)
+                    Divider()
+                    diffViewer(presentation.diffRows)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
                 Divider()
-                diffViewer(presentation.diffRows)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                reviewTimeline(presentation.timeline)
+                    .frame(height: 168)
+            } else {
+                reviewsEmptyState
             }
-            Divider()
-            reviewTimeline(presentation.timeline)
-                .frame(height: 168)
         }
+    }
+
+    private var reviewsEmptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "checkmark.seal")
+                .font(.system(size: 34))
+                .foregroundStyle(.secondary)
+            Text(AppStrings.Reviews.emptyApprovals(appState.locale))
+                .font(.system(size: 16, weight: .semibold))
+            Text(AppStrings.Reviews.emptyApprovalHint(appState.locale))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private func metaStrip(_ selected: ReviewDesignItem) -> some View {
@@ -507,10 +552,41 @@ public struct ReviewsView: View {
             .frame(minWidth: isDetails ? 330 : 92, alignment: .leading)
     }
 
-    private func reviewInspector(presentation: ReviewsDesignPresentation, selected: ReviewDesignItem) -> some View {
+    private func reviewInspector(presentation: ReviewsDesignPresentation, selected: ReviewDesignItem?) -> some View {
         let validationChecks = selectedValidationChecks(presentation.validationChecks)
 
         return VStack(alignment: .leading, spacing: 14) {
+            if let selected {
+                reviewInspectorContent(
+                    presentation: presentation,
+                    selected: selected,
+                    validationChecks: validationChecks
+                )
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.secondary)
+                    Text(AppStrings.Reviews.selectApprovalPrompt(appState.locale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func reviewInspectorContent(
+        presentation: ReviewsDesignPresentation,
+        selected: ReviewDesignItem,
+        validationChecks: [ReviewDesignCheck]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
             Picker("", selection: $selectedTab) {
                 Text(appState.locale == .zhCN ? "详情" : "Details").tag("Details")
                 Text(appState.locale == .zhCN ? "检查" : "Checks").tag("Checks")
@@ -659,11 +735,7 @@ public struct ReviewsView: View {
                 .padding(.bottom, 4)
             }
             .scrollIndicators(.hidden)
-
-            Spacer(minLength: 0)
         }
-        .padding(14)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private func validationRunRow(_ check: ReviewDesignCheck) -> some View {
