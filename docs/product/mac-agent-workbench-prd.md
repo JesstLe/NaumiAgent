@@ -2,6 +2,7 @@
 
 > 参考输入：`docs/references/mac-app-agent-workbench-reference.md`  
 > 执行计划：`docs/superpowers/plans/2026-06-27-mac-agent-workbench-mvp.md`
+> 剩余模块：`docs/product/mac-agent-workbench-remaining-module-spec.md`
 
 ## 1. 产品定位
 
