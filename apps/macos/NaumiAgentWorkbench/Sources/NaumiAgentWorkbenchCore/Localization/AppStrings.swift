@@ -554,6 +554,67 @@ public enum AppStrings {
         }
     }
 
+    // MARK: - EventStreamStatus
+    public enum EventStreamStatus {
+        public static func statusIdle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "事件流未启动" : "Event stream idle"
+        }
+
+        public static func statusConnecting(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "正在连接事件流" : "Connecting event stream"
+        }
+
+        public static func statusConnected(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "事件流已连接" : "Event stream live"
+        }
+
+        public static func statusReconnecting(_ locale: AppLocale, attempt: Int, max: Int) -> String {
+            locale == .zhCN
+                ? "正在重连事件流（第 \(attempt)/\(max) 次）"
+                : "Reconnecting event stream (attempt \(attempt)/\(max))"
+        }
+
+        public static func statusStale(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "事件流已断开" : "Event stream disconnected"
+        }
+
+        public static func statusStoppedBySessionSwitch(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "事件流已随会话切换停止" : "Event stream stopped on session switch"
+        }
+
+        public static func statusStoppedByAuthOrProtocol(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "事件流因鉴权或协议不匹配停止" : "Event stream stopped on auth/protocol error"
+        }
+
+        public static func liveLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "实时" : "Live"
+        }
+
+        public static func staleLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "延迟" : "Lag"
+        }
+
+        public static func lastConnectedLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "上次连接" : "Last connected"
+        }
+
+        public static func reconnectButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "重新连接事件流" : "Reconnect Event Stream"
+        }
+
+        public static func reconnectHelp(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "自动重连已达上限，请手动重连。"
+                : "Automatic reconnect attempts are exhausted. Reconnect manually."
+        }
+
+        public static func stoppedByAuthHelp(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "鉴权失败或协议版本不匹配，请重新配置连接后再重连。"
+                : "Auth failed or protocol version mismatch. Reconfigure the connection, then reconnect."
+        }
+    }
+
     // MARK: - Dashboard
     public enum Dashboard {
         public static func title(_ locale: AppLocale) -> String {

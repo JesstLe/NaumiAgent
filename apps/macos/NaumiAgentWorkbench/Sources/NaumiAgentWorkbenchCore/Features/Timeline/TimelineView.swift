@@ -7,6 +7,7 @@ public struct TimelineView: View {
     @State private var selectedEventID: String?
     @State private var filterDraft = TimelineEventFilterDraft()
     @State private var isRefreshingEvents = false
+    @State private var isReconnectingStream = false
 
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
@@ -84,6 +85,9 @@ public struct TimelineView: View {
 
             Spacer()
 
+            eventStreamStatusChip
+                .help(appState.isPreviewFixture ? "" : eventStreamHelpText)
+
             Button {
                 if !appState.isPreviewFixture {
                     Task {
@@ -98,6 +102,71 @@ public struct TimelineView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 11)
+    }
+
+    /// Compact event-stream lifecycle chip: shows live/stale/reconnecting state
+    /// and, when the stream is reconnectable, a "重新连接事件流" action.
+    private var eventStreamStatusChip: some View {
+        let presentation = eventStreamPresentation
+        return HStack(spacing: 6) {
+            Image(systemName: presentation.iconName)
+                .foregroundStyle(eventStreamToneColor(presentation.tone))
+                .font(.system(size: 12))
+            Text(presentation.shortLabel)
+                .font(.caption)
+                .foregroundStyle(eventStreamToneColor(presentation.tone))
+            if presentation.showsManualReconnect {
+                Button {
+                    guard !isReconnectingStream else { return }
+                    isReconnectingStream = true
+                    Task {
+                        await daemonController.startEventStream()
+                        isReconnectingStream = false
+                    }
+                } label: {
+                    if isReconnectingStream {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text(AppStrings.EventStreamStatus.reconnectButton(appState.locale))
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isReconnectingStream)
+            }
+        }
+    }
+
+    private var eventStreamPresentation: EventStreamStatusPresentation {
+        EventStreamStatusPresentation(
+            locale: appState.locale,
+            status: appState.eventStreamStatus,
+            reconnectAttempt: appState.eventStreamReconnectAttempt,
+            maxReconnectAttempts: AppState.eventStreamMaxReconnectAttempts,
+            lastConnectedAt: appState.eventStreamLastConnectedAt
+        )
+    }
+
+    private var eventStreamHelpText: String {
+        var parts: [String] = []
+        if let status = eventStreamPresentation.helpText {
+            parts.append(status)
+        }
+        if let last = eventStreamPresentation.lastConnectedText {
+            parts.append(
+                AppStrings.EventStreamStatus.lastConnectedLabel(appState.locale) + ": " + last
+            )
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func eventStreamToneColor(_ tone: EventStreamStatusTone) -> Color {
+        switch tone {
+        case .healthy: return .green
+        case .warning: return .orange
+        case .error: return .red
+        case .neutral: return .secondary
+        }
     }
 
     private func eventRail(presentation: TimelineDashboardPresentation) -> some View {

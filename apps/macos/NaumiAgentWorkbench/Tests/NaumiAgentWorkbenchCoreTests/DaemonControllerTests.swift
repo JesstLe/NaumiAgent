@@ -3153,6 +3153,187 @@ final class DaemonControllerTests {
         await controller.stopEventStream()
     }
 
+    // MARK: - Event stream reconnect (M06)
+
+    @Test @MainActor func eventStreamReconnectsAfterTransientTransportDrop() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-reconnect"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        await configureWorkbenchListResults(for: api, sessionID: "sess-reconnect")
+        // Instant backoff so the reconnect loop is deterministic and fast.
+        let policy = EventStreamReconnectPolicy(enabled: true, maxAttempts: 3) { _ in }
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider,
+            reconnectPolicy: policy
+        )
+
+        await controller.startEventStream()
+        await waitUntil { controller.hasActiveEventStream }
+        await eventProvider.emit(.connected(sessionID: "sess-reconnect"))
+        await waitUntil { appState.eventStreamStatus == .connected }
+        #expect(await eventProvider.connectedSessionIDs == ["sess-reconnect"])
+
+        // Simulate a transient transport drop (WebSocket reset).
+        await eventProvider.fail(.networkFailure("connection reset"))
+
+        // The controller must reconnect: connect() is called a second time.
+        await waitUntil {
+            (await eventProvider.connectedSessionIDs.count) >= 2
+        }
+        let attempts = await eventProvider.connectedSessionIDs.count
+        #expect(attempts >= 2)
+        // The stream is attempting to reconnect (no .connected yet on the new stream).
+        #expect(appState.eventStreamReconnectAttempt >= 1)
+
+        await controller.stopEventStream()
+    }
+
+    @Test @MainActor func eventStreamDisabledPolicyDoesNotReconnect() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-no-reconnect"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        await configureWorkbenchListResults(for: api, sessionID: "sess-no-reconnect")
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider,
+            reconnectPolicy: .disabled
+        )
+
+        await controller.startEventStream()
+        await waitUntil { controller.hasActiveEventStream }
+        await eventProvider.emit(.connected(sessionID: "sess-no-reconnect"))
+        await waitUntil { appState.eventStreamStatus == .connected }
+
+        await eventProvider.fail(.networkFailure("connection reset"))
+        await waitUntil { appState.eventStreamStatus == .stale }
+
+        // Give any hypothetical reconnect a chance to fire, then assert it never did.
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        #expect(await eventProvider.connectedSessionIDs.count == 1)
+        #expect(appState.eventStreamStatus == .stale)
+        #expect(appState.connectionState == .stale)
+
+        await controller.stopEventStream()
+    }
+
+    @Test @MainActor func eventStreamReconnectExhaustsAttemptsThenGoesStale() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-exhaust"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        await configureWorkbenchListResults(for: api, sessionID: "sess-exhaust")
+        let policy = EventStreamReconnectPolicy(enabled: true, maxAttempts: 2) { _ in }
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider,
+            reconnectPolicy: policy
+        )
+
+        await controller.startEventStream()
+        await waitUntil { controller.hasActiveEventStream }
+        await eventProvider.emit(.connected(sessionID: "sess-exhaust"))
+        await waitUntil { appState.eventStreamStatus == .connected }
+
+        // Every subsequent connect attempt fails, so reconnect exhausts quickly.
+        await eventProvider.setConnectResult(.failure(.networkFailure("daemon down")))
+        await eventProvider.fail(.networkFailure("connection reset"))
+
+        await waitUntil { appState.eventStreamStatus == .stale }
+        // 1 initial connect + 2 reconnect attempts = 3 total.
+        #expect(await eventProvider.connectedSessionIDs.count == 3)
+        #expect(appState.eventStreamReconnectAttempt == 2)
+
+        await controller.stopEventStream()
+    }
+
+    @Test @MainActor func eventStreamSessionSwitchStopsReconnectAndNeverMutatesNewSession() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-old"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        await configureWorkbenchListResults(for: api, sessionID: "sess-old")
+        await configureWorkbenchListResults(for: api, sessionID: "sess-new")
+        let policy = EventStreamReconnectPolicy(enabled: true, maxAttempts: 5) { _ in }
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider,
+            reconnectPolicy: policy
+        )
+
+        await controller.startEventStream()
+        await waitUntil { controller.hasActiveEventStream }
+        await eventProvider.emit(.connected(sessionID: "sess-old"))
+        await waitUntil { appState.eventStreamStatus == .connected }
+
+        // Drop the old stream, then immediately switch sessions mid-backoff.
+        await eventProvider.fail(.networkFailure("reset"))
+        await waitUntil { appState.eventStreamReconnectAttempt >= 1 }
+
+        // Seed "new session" state that a stale stream must never clobber.
+        let newSnapshot = makeSnapshot(sessionID: "sess-new", missions: [
+            makeMission(id: "mission-new", sessionID: "sess-new")
+        ])
+        await api.setSnapshotResult(.success(newSnapshot))
+        await controller.selectSession("sess-new")
+
+        await waitUntil { appState.eventStreamStatus == .stoppedBySessionSwitch || appState.eventStreamStatus == .connecting }
+
+        // The new session's snapshot must come from sess-new, never the old stream.
+        await waitUntil { appState.snapshot?.sessionID == "sess-new" }
+        #expect(appState.selectedSessionID == "sess-new")
+        // A late message on the old (finished) stream must not leak into the new session.
+        await eventProvider.emit(.snapshot(makeSnapshot(sessionID: "sess-old", missions: [])))
+        try? await Task.sleep(nanoseconds: 40_000_000)
+        #expect(appState.snapshot?.sessionID == "sess-new")
+
+        await controller.stopEventStream()
+    }
+
+    @Test @MainActor func eventStreamServerErrorLeavesStatusStaleWithoutReconnect() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-srv-err"
+        appState.connectionState = .connected
+        let api = FakeWorkbenchAPIProvider()
+        let eventProvider = FakeWorkbenchEventProvider()
+        await configureWorkbenchListResults(for: api, sessionID: "sess-srv-err")
+        // Even with reconnect enabled, a server-sent .error is a hard stop.
+        let policy = EventStreamReconnectPolicy(enabled: true, maxAttempts: 5) { _ in }
+        let controller = DaemonController(
+            appState: appState,
+            apiProvider: api,
+            eventProvider: eventProvider,
+            reconnectPolicy: policy
+        )
+
+        await controller.startEventStream()
+        await waitUntil { controller.hasActiveEventStream }
+        await eventProvider.emit(.connected(sessionID: "sess-srv-err"))
+        await waitUntil { appState.eventStreamStatus == .connected }
+
+        await eventProvider.emit(.error(message: "daemon restarted"))
+        await waitUntil { appState.connectionState == .stale }
+        try? await Task.sleep(nanoseconds: 60_000_000)
+
+        #expect(appState.eventStreamStatus == .stale)
+        // No reconnect attempt consumed for a hard server error.
+        #expect(appState.eventStreamReconnectAttempt == 0)
+        #expect(await eventProvider.connectedSessionIDs.count == 1)
+        #expect(controller.hasActiveEventStream == false)
+
+        await controller.stopEventStream()
+    }
+
     @Test @MainActor func refreshConnectionSnapshotFailureSkipsPreWarmingAndKeepsSnapshotError() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-existing"

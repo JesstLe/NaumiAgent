@@ -47,7 +47,8 @@ public final class AppEnvironment: Sendable {
             appState: appState,
             apiProvider: resolvedClient,
             eventProvider: self.eventClient,
-            workspaceRegistryStore: workspaceRegistryStore
+            workspaceRegistryStore: workspaceRegistryStore,
+            reconnectPolicy: .default
         )
         self.refreshCoordinator = WorkbenchRefreshCoordinator(
             daemonController: daemonController
