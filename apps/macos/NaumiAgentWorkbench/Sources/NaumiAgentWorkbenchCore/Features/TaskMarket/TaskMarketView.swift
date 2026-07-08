@@ -927,6 +927,13 @@ public struct TaskMarketView: View {
                     }
                 }
             }
+            .overlay {
+                if leases.isEmpty {
+                    Text(AppStrings.TaskMarket.emptyLeases(appState.locale))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

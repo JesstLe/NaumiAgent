@@ -523,6 +523,37 @@ public enum AppStrings {
         }
     }
 
+    // MARK: - Snapshot Freshness
+    public enum SnapshotFreshness {
+        public static func lastRefreshedLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "上次刷新" : "Last refreshed"
+        }
+
+        public static func neverRefreshed(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "尚未刷新" : "Never refreshed"
+        }
+
+        public static func agoSuffix(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "前" : "ago"
+        }
+
+        public static func staleHint(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "数据可能已过期，已保留上次的内容。"
+                : "Data may be stale; the last good snapshot is still shown."
+        }
+
+        public static func failureKeptOldDataHint(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "刷新失败，已保留上次的数据。"
+                : "Refresh failed; the previous data is still shown."
+        }
+
+        public static func refreshButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "刷新快照" : "Refresh Snapshot"
+        }
+    }
+
     // MARK: - Dashboard
     public enum Dashboard {
         public static func title(_ locale: AppLocale) -> String {
@@ -872,6 +903,10 @@ public enum AppStrings {
             locale == .zhCN ? "活跃租约 (\(count))" : "Active Leases (\(count))"
         }
 
+        public static func emptyLeases(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无活跃租约" : "No active leases"
+        }
+
         public static func viewAllLeasesButton(_ locale: AppLocale) -> String {
             locale == .zhCN ? "查看全部租约" : "View All Leases"
         }
@@ -966,6 +1001,10 @@ public enum AppStrings {
 
         public static func emptySnapshots(_ locale: AppLocale) -> String {
             locale == .zhCN ? "暂无上下文快照" : "No context snapshots"
+        }
+
+        public static func emptyWorktrees(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无 Git 工作区" : "No Git worktrees"
         }
 
         public static func healthLabel(_ locale: AppLocale) -> String {

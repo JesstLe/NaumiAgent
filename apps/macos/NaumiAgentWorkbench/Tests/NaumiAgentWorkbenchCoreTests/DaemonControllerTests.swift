@@ -1268,6 +1268,102 @@ final class DaemonControllerTests {
         #expect(await api.snapshotCallCount == 0)
     }
 
+    @Test @MainActor func refreshConnectionStampsSnapshotFreshnessOnSuccess() async throws {
+        let appState = AppState()
+        // No refresh yet: the freshness timestamp must be unset.
+        #expect(appState.lastSnapshotRefreshAt == nil)
+
+        let api = FakeWorkbenchAPIProvider()
+        let status = makeStatus()
+        let capabilities = makeCapabilities()
+        let session = makeSession(id: "sess-fresh", title: "Fresh Session")
+        let snapshot = makeSnapshot(sessionID: "sess-fresh", missions: [])
+        let bootstrap = WorkbenchBootstrapDTO(
+            daemonStatus: status,
+            capabilities: capabilities,
+            sessions: [session],
+            totalSessions: 1,
+            selectedSessionID: "sess-fresh",
+            snapshot: snapshot
+        )
+        await api.setBootstrapResult(.success(bootstrap))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-fresh")
+
+        let before = Date()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+        let after = Date()
+
+        let stamped = try #require(appState.lastSnapshotRefreshAt)
+        #expect(stamped >= before)
+        #expect(stamped <= after)
+        #expect(appState.snapshot == snapshot)
+    }
+
+    @Test @MainActor func refreshConnectionFailurePreservesLastSnapshotFreshness() async throws {
+        let appState = AppState()
+        // Simulate a previously successful refresh timestamp.
+        let previousStamp = Date(timeIntervalSince1970: 1_000)
+        appState.lastSnapshotRefreshAt = previousStamp
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setBootstrapResult(.failure(.networkFailure("offline")))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        // A failed refresh must not overwrite or clear the last good timestamp,
+        // so the UI keeps indicating how old the on-screen data is.
+        #expect(appState.lastSnapshotRefreshAt == previousStamp)
+        #expect(appState.lastError != nil)
+    }
+
+    @Test @MainActor func manualSnapshotRefreshFetchesAndStampsFreshness() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-manual"
+
+        let api = FakeWorkbenchAPIProvider()
+        let snapshot = makeSnapshot(sessionID: "sess-manual", missions: [])
+        await api.setSnapshotResult(.success(snapshot))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-manual")
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        let before = Date()
+        await controller.performManualSnapshotRefresh()
+        let after = Date()
+
+        #expect(await api.snapshotCallCount == 1)
+        #expect(appState.snapshot == snapshot)
+        let stamped = try #require(appState.lastSnapshotRefreshAt)
+        #expect(stamped >= before)
+        #expect(stamped <= after)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func manualSnapshotRefreshFailurePreservesOldData() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-manual-fail"
+
+        // Simulate a previously loaded snapshot + freshness stamp.
+        let previousSnapshot = makeSnapshot(sessionID: "sess-manual-fail", missions: [])
+        let previousStamp = Date(timeIntervalSince1970: 2_000)
+        appState.snapshot = previousSnapshot
+        appState.lastSnapshotRefreshAt = previousStamp
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setSnapshotResult(.failure(.networkFailure("offline")))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.performManualSnapshotRefresh()
+
+        // A manual refresh failure must keep the last good snapshot on screen
+        // (not nil it) and must not advance the freshness timestamp.
+        #expect(appState.snapshot == previousSnapshot)
+        #expect(appState.lastSnapshotRefreshAt == previousStamp)
+        #expect(appState.lastError == .networkFailure("offline"))
+        #expect(await api.snapshotCallCount == 1)
+    }
+
     @Test @MainActor func refreshConnectionStoresWorkspaceNameFromDaemonStatus() async throws {
         let appState = AppState()
         let api = FakeWorkbenchAPIProvider()
