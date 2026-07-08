@@ -403,6 +403,18 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         return try await get(path: path)
     }
 
+    public func fetchReviewEvidence(sessionID: String, approvalID: String) async throws(APIError) -> ReviewEvidenceDTO {
+        let path = try routePath(
+            named: "review_evidence",
+            replacements: [
+                "session_id": sessionID,
+                "approval_id": approvalID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "approvals", approvalID, "evidence")
+        )
+        return try await get(path: path)
+    }
+
     public func fetchFailures(
         sessionID: String,
         taskID: String?,

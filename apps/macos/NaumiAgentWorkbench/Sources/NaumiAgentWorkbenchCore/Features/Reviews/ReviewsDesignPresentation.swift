@@ -16,6 +16,28 @@ public struct ReviewsDesignPresentation: Equatable, Sendable {
     public let agentReviews: [ReviewDesignAgentNote]
     public let policy: RealDataPolicy
 
+    /// Private memberwise init used by ``merging(evidence:)`` to replace the
+    /// real-mode fields with live evidence without re-deriving everything.
+    private init(
+        policy: RealDataPolicy,
+        reviewQueues: [ReviewDesignQueue],
+        selectedReview: ReviewDesignItem?,
+        validationChecks: [ReviewDesignCheck],
+        fileChanges: [ReviewDesignFile],
+        diffRows: [ReviewDesignDiffRow],
+        timeline: [ReviewDesignTimelineEvent],
+        agentReviews: [ReviewDesignAgentNote]
+    ) {
+        self.policy = policy
+        self.reviewQueues = reviewQueues
+        self.selectedReview = selectedReview
+        self.validationChecks = validationChecks
+        self.fileChanges = fileChanges
+        self.diffRows = diffRows
+        self.timeline = timeline
+        self.agentReviews = agentReviews
+    }
+
     public init(
         approvals: [ApprovalDTO],
         validationRuns: [ValidationRunDTO],
@@ -110,6 +132,108 @@ public struct ReviewsDesignPresentation: Equatable, Sendable {
             timeline = []
             agentReviews = []
         }
+    }
+
+    /// Returns a copy with real review evidence merged into the real-mode fields
+    /// (changed files, diff rows, timeline, agent notes). In preview mode or when
+    /// no evidence is supplied, the receiver is returned unchanged so fixtures
+    /// stay illustrative offline and the real path never fabricates rows.
+    public func merging(evidence: ReviewEvidenceDTO?) -> ReviewsDesignPresentation {
+        guard policy == .real, let evidence else {
+            return self
+        }
+        return ReviewsDesignPresentation(
+            policy: policy,
+            reviewQueues: reviewQueues,
+            selectedReview: selectedReview,
+            validationChecks: validationChecks,
+            fileChanges: Self.files(from: evidence.changedFiles),
+            diffRows: Self.diffRows(from: evidence.diffHunks),
+            timeline: Self.timeline(from: evidence.events),
+            agentReviews: Self.agentNotes(from: evidence.agentNotes)
+        )
+    }
+
+    private static func files(from changed: [ReviewChangedFileDTO]) -> [ReviewDesignFile] {
+        changed.map { file in
+            let name = (file.path as NSString).lastPathComponent
+            return ReviewDesignFile(
+                path: (file.path as NSString).deletingLastPathComponent,
+                name: name.isEmpty ? file.path : name,
+                status: file.status,
+                selected: false
+            )
+        }
+    }
+
+    private static func diffRows(from hunks: [ReviewDiffHunkDTO]) -> [ReviewDesignDiffRow] {
+        // Flatten real diff hunk patches into per-line rows the existing view renders.
+        var rows: [ReviewDesignDiffRow] = []
+        var number = 0
+        for hunk in hunks {
+            for line in hunk.patch.split(separator: "\n", omittingEmptySubsequences: false) {
+                let text = String(line)
+                guard text.hasPrefix("+") || text.hasPrefix("-") else { continue }
+                number += 1
+                let tone = text.hasPrefix("+") ? "green" : "red"
+                rows.append(
+                    ReviewDesignDiffRow(
+                        number: number,
+                        old: text.hasPrefix("-") ? String(text.dropFirst()) : "",
+                        new: text.hasPrefix("+") ? String(text.dropFirst()) : "",
+                        tone: tone
+                    )
+                )
+                if rows.count >= 200 { return rows }
+            }
+        }
+        return rows
+    }
+
+    private static func timeline(from events: [EventDTO]) -> [ReviewDesignTimelineEvent] {
+        events.map { event in
+            ReviewDesignTimelineEvent(
+                time: event.timestamp,
+                event: event.type,
+                actor: event.actor,
+                detail: event.subjectID,
+                tone: Self.tone(forEventType: event.type)
+            )
+        }
+    }
+
+    private static func tone(forEventType type: String) -> String {
+        let lowered = type.lowercased()
+        if lowered.contains("fail") || lowered.contains("error") {
+            return "red"
+        }
+        if lowered.contains("approval") || lowered.contains("review") || lowered.contains("blocked") {
+            return "orange"
+        }
+        if lowered.contains("success") || lowered.contains("passed") || lowered.contains("completed") {
+            return "green"
+        }
+        return "blue"
+    }
+
+    private static func agentNotes(from notes: [ReviewAgentNoteDTO]) -> [ReviewDesignAgentNote] {
+        notes.map { note in
+            ReviewDesignAgentNote(
+                agent: note.actor,
+                initials: Self.initials(from: note.actor),
+                time: note.timestamp,
+                body: note.note
+            )
+        }
+    }
+
+    private static func initials(from agent: String) -> String {
+        let trimmed = agent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "?" }
+        let parts = trimmed.split(separator: "-")
+        let letters = parts.compactMap { $0.first }.prefix(2)
+        let result = String(letters).uppercased()
+        return result.isEmpty ? String(trimmed.prefix(1)).uppercased() : result
     }
 
     public func defaultValidationDraft(for review: ReviewDesignItem) -> ValidationRunDraft {

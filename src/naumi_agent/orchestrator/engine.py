@@ -53,6 +53,7 @@ from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
 from naumi_agent.tools.web import create_web_tools
 from naumi_agent.workbench import WorkbenchStore
+from naumi_agent.workbench.review_evidence import ReviewEvidenceCollector
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.tools import create_workbench_tools
 from naumi_agent.workbench.validation import ValidationRunner
@@ -445,11 +446,17 @@ class AgentEngine:
             ],
             timeout_seconds=120,
         )
+        self.review_evidence_collector = ReviewEvidenceCollector(
+            store=self.workbench_store,
+            task_store=self.task_store,
+            worktree_storage_dir=self._worktree_storage_dir,
+        )
         self.workbench_service = WorkbenchService(
             task_store=self.task_store,
             workbench_store=self.workbench_store,
             validation_runner=self.validation_runner,
             workspace_root=str(self.workspace_root),
+            review_evidence_collector=self.review_evidence_collector,
         )
         self.background_runner = BackgroundRunner(
             BackgroundTaskStore(self._runtime_data_dir / "background")

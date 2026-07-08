@@ -52,6 +52,7 @@ WORKBENCH_SUPPORTED_ACTIONS = [
     "create_intent_lock",
     "create_decision",
     "resolve_approval",
+    "review_evidence",
     "list_messages",
     "send_message",
     "send_message_with_issue",
@@ -109,6 +110,9 @@ WORKBENCH_ROUTE_TEMPLATES = {
     "approval": "/workbench/sessions/{session_id}/approvals/{approval_id}",
     "resolve_approval": (
         "/workbench/sessions/{session_id}/approvals/{approval_id}/resolve"
+    ),
+    "review_evidence": (
+        "/workbench/sessions/{session_id}/approvals/{approval_id}/evidence"
     ),
     "intent_locks": (
         "/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks"
@@ -2434,6 +2438,41 @@ async def get_approval(
     if approval is None:
         raise HTTPException(status_code=404, detail="审批请求不存在")
     return approval
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/approvals/{approval_id}/evidence"
+)
+async def get_review_evidence(
+    session_id: str,
+    approval_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    try:
+        session = await engine.session_store.load(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        session_loaded = await engine.load_session(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session_loaded:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        evidence = await engine.workbench_service.get_review_evidence(
+            session_id, approval_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="审批请求不存在")
+    return evidence
 
 
 @router.post("/workbench/sessions/{session_id}/approvals/{approval_id}/resolve")

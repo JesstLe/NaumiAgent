@@ -430,6 +430,21 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         return try result.get()
     }
 
+    var reviewEvidenceResult: Result<ReviewEvidenceDTO, APIError>?
+    private(set) var fetchReviewEvidenceCalls: [(sessionID: String, approvalID: String)] = []
+    var fetchReviewEvidenceHook: (@Sendable () async -> Void)?
+
+    func fetchReviewEvidence(sessionID: String, approvalID: String) async throws(APIError) -> ReviewEvidenceDTO {
+        fetchReviewEvidenceCalls.append((sessionID, approvalID))
+        if let fetchReviewEvidenceHook {
+            await fetchReviewEvidenceHook()
+        }
+        guard let result = reviewEvidenceResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
     func fetchFailures(
         sessionID: String,
         taskID: String?,
@@ -8355,6 +8370,89 @@ final class DaemonControllerTests {
         #expect(appState.lastError == nil)
     }
 
+    // MARK: - Review evidence (M12)
+
+    @Test @MainActor func loadReviewEvidenceStoresRealEvidence() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let api = FakeWorkbenchAPIProvider()
+        let evidence = ReviewEvidenceDTO(
+            approval: EvidenceApprovalDTO(
+                id: "approval-001",
+                sessionID: "sess-001",
+                missionID: "mission-001",
+                taskID: "task-001",
+                state: "waiting",
+                title: "T",
+                detail: "",
+                requester: "Agent-A",
+                reviewer: "",
+                decisionNote: ""
+            ),
+            issue: nil,
+            worktree: EvidenceWorktreeDTO(name: "wt-1", path: "/tmp/wt-1", status: "present"),
+            validationRuns: [],
+            changedFiles: [ReviewChangedFileDTO(path: "src/app.py", status: "modified")],
+            diffHunks: [],
+            agentNotes: [],
+            events: []
+        )
+        await api.setReviewEvidenceResult(.success(evidence))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadReviewEvidence(approvalID: "approval-001")
+
+        #expect(await api.fetchReviewEvidenceCalls.count == 1)
+        let call = await api.fetchReviewEvidenceCalls.first
+        #expect(call?.sessionID == "sess-001")
+        #expect(call?.approvalID == "approval-001")
+        #expect(appState.reviewEvidence == evidence)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func loadReviewEvidenceIgnoresResultAfterSessionSwitch() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-old"
+
+        let api = FakeWorkbenchAPIProvider()
+        let evidence = ReviewEvidenceDTO(
+            approval: EvidenceApprovalDTO(
+                id: "approval-001",
+                sessionID: "sess-old",
+                missionID: "m",
+                taskID: "task-001",
+                state: "waiting",
+                title: "T",
+                detail: "",
+                requester: "Agent-A",
+                reviewer: "",
+                decisionNote: ""
+            ),
+            issue: nil,
+            worktree: EvidenceWorktreeDTO(name: "", path: "", status: "unbound"),
+            validationRuns: [],
+            changedFiles: [],
+            diffHunks: [],
+            agentNotes: [],
+            events: []
+        )
+        await api.setReviewEvidenceResult(.success(evidence))
+        // Switch sessions while the fetch is in flight.
+        await api.setFetchReviewEvidenceHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-new"
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.loadReviewEvidence(approvalID: "approval-001")
+
+        // The stale evidence from sess-old must not be written to the new session.
+        #expect(appState.selectedSessionID == "sess-new")
+        #expect(appState.reviewEvidence == nil)
+    }
+
     @Test @MainActor func loadApprovalIgnoresApprovalAfterSelectedSessionChanges() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -10371,6 +10469,14 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setFetchIssueBidsHook(_ hook: (@Sendable () async -> Void)?) {
         fetchIssueBidsHook = hook
+    }
+
+    fileprivate func setFetchReviewEvidenceHook(_ hook: (@Sendable () async -> Void)?) {
+        fetchReviewEvidenceHook = hook
+    }
+
+    fileprivate func setReviewEvidenceResult(_ result: Result<ReviewEvidenceDTO, APIError>) {
+        reviewEvidenceResult = result
     }
 
     fileprivate func setSubmitIssueBidResult(_ result: IssueBidsDTO) {

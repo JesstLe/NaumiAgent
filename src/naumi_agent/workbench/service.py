@@ -27,6 +27,7 @@ from naumi_agent.workbench.models import (
     ParallelMode,
     RiskLevel,
 )
+from naumi_agent.workbench.review_evidence import ReviewEvidenceCollector
 from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.workbench.validation import ValidationCommand, ValidationRunner
 
@@ -41,11 +42,13 @@ class WorkbenchService:
         workbench_store: WorkbenchStore,
         validation_runner: ValidationRunner | None = None,
         workspace_root: str | None = None,
+        review_evidence_collector: ReviewEvidenceCollector | None = None,
     ) -> None:
         self._task_store = task_store
         self._workbench_store = workbench_store
         self._validation_runner = validation_runner
         self._workspace_root = workspace_root
+        self._review_evidence_collector = review_evidence_collector
 
     async def create_mission(self, *, session_id: str, title: str, goal: str) -> Mission:
         mission = await self._workbench_store.create_mission(session_id, title, goal)
@@ -260,6 +263,33 @@ class WorkbenchService:
             return None
         task = await self._task_store.get_task(approval.task_id)
         return self._approval_to_dict(approval) | {"task": self._task_to_summary(task)}
+
+    async def get_review_evidence(
+        self, session_id: str, approval_id: str
+    ) -> dict[str, Any] | None:
+        """Collects real review evidence for an approval (diff, files, runs...).
+
+        Returns ``None`` when the approval does not exist. When the evidence
+        collector is not configured (no worktree storage dir), still returns
+        the approval with empty diff fields rather than failing.
+        """
+        if self._review_evidence_collector is None:
+            approval = await self._workbench_store.get_approval(session_id, approval_id)
+            if approval is None:
+                return None
+            return {
+                "approval": self._approval_to_dict(approval),
+                "issue": None,
+                "worktree": {"name": "", "path": "", "status": "unbound"},
+                "validation_runs": [],
+                "changed_files": [],
+                "diff_hunks": [],
+                "agent_notes": [],
+                "events": [],
+            }
+        return await self._review_evidence_collector.collect(
+            session_id=session_id, approval_id=approval_id
+        )
 
     async def attach_issue(
         self,

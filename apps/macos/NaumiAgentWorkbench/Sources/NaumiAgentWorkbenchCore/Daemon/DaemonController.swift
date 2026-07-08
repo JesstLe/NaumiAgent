@@ -1823,6 +1823,7 @@ public final class DaemonController: Sendable {
         appState.validationRuns = []
         appState.contextSnapshots = []
         appState.approvals = []
+        appState.reviewEvidence = nil
         appState.failures = []
         appState.issues = []
         appState.leases = []
@@ -2582,6 +2583,36 @@ public final class DaemonController: Sendable {
                 return
             }
             appState.selectedApproval = approval
+        } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
+        }
+    }
+
+    /// Loads real review evidence (diff, changed files, validation runs, agent
+    /// notes, events) for an approval. On failure the previous evidence is
+    /// preserved and the error surfaces via ``AppState/lastError``.
+    public func loadReviewEvidence(approvalID: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let evidence = try await apiProvider.fetchReviewEvidence(
+                sessionID: sessionID,
+                approvalID: approvalID
+            )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.reviewEvidence = evidence
         } catch {
             guard appState.selectedSessionID == sessionID else {
                 return
