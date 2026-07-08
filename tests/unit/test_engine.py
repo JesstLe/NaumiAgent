@@ -2346,6 +2346,51 @@ class TestStreamingStartupLatency:
             await engine.shutdown()
 
     @pytest.mark.asyncio
+    async def test_streaming_emits_end_to_end_latency_metrics(self, tmp_path) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        async def stream_response(**_: object):
+            yield StreamChunk(token="ok")
+            yield StreamChunk(finish_reason="stop")
+
+        try:
+            with (
+                patch.object(engine._router, "stream", new=stream_response),
+                patch.object(
+                    engine.long_term_memory,
+                    "recall",
+                    new_callable=AsyncMock,
+                    return_value=[],
+                ),
+            ):
+                result = await engine.run_streaming("直接回答这个问题", on_event)
+
+            assert result.status == "completed"
+            metrics = [
+                data for event, data in events
+                if event == "latency_metric"
+            ]
+            assert [data["metric"] for data in metrics] == [
+                "first_progress",
+                "first_model_chunk",
+                "first_token",
+            ]
+            assert metrics[0]["label"] == "首反馈"
+            assert metrics[1]["label"] == "模型首包"
+            assert metrics[2]["label"] == "端到端首字"
+            assert all(isinstance(data["duration_ms"], int) for data in metrics)
+            assert all(data["duration_ms"] >= 0 for data in metrics)
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
     async def test_streaming_preplans_when_user_explicitly_requests_orchestration(
         self,
         tmp_path,

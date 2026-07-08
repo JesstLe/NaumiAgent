@@ -115,7 +115,8 @@ public struct WorkbenchShellView: View {
         case .settings:
             SettingsView(
                 appState: environment.appState,
-                daemonController: environment.daemonController
+                daemonController: environment.daemonController,
+                onEditEndpoint: { isPresentingConnectionSetup = true }
             )
         }
     }
@@ -256,6 +257,7 @@ private struct TopNavigationBar: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .disabled(!appState.canPerformWrites)
 
             Menu {
                 Button(currentMissionTitle) {}
@@ -375,7 +377,7 @@ private struct MissionComposerSheet: View {
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(!canCreate)
+                .disabled(!canCreate || !appState.canPerformWrites)
             }
         }
         .padding()

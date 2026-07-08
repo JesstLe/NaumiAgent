@@ -142,7 +142,7 @@ public struct TaskMarketView: View {
                 )
             }
             .buttonStyle(.borderedProminent)
-            .disabled(currentMissionID.isEmpty)
+            .disabled(currentMissionID.isEmpty || !appState.canPerformWrites)
 
             Button {
                 attachmentDraft = attachmentDraftForCurrentMission(selected: selected)

@@ -235,6 +235,19 @@ class EngineEventAdapter:
             raw_data=None,
         )
 
+    def _adapt_latency_metric(
+        self, event: str, data: dict[str, Any]
+    ) -> RuntimeStatusMessage:
+        return RuntimeStatusMessage(
+            type=MessageType.RUNTIME_STATUS,
+            phase="latency_metric",
+            label=_safe_str(data.get("label") or data.get("metric")),
+            duration_ms=_safe_int(data.get("duration_ms")),
+            turn=_safe_int(data.get("turn")),
+            raw_event=event,
+            raw_data=None,
+        )
+
     # -- thinking --
 
     def _adapt_thinking_start(
@@ -567,6 +580,7 @@ class EngineEventAdapter:
         "run_started": _adapt_run_started,
         "turn_start": _adapt_turn_start,
         "perf_phase": _adapt_perf_phase,
+        "latency_metric": _adapt_latency_metric,
         "thinking_start": _adapt_thinking_start,
         "thinking_delta": _adapt_thinking_delta,
         "thinking_end": _adapt_thinking_end,

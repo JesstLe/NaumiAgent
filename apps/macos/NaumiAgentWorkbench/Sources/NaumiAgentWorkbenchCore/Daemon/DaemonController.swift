@@ -71,6 +71,13 @@ public final class DaemonController: Sendable {
                     actual: capabilities.protocolVersion
                 )
                 appState.connectionState = .protocolMismatch
+                appState.recordConnectionLog(
+                    state: .protocolMismatch,
+                    message: Self.protocolMismatchLogMessage(
+                        expected: Self.supportedProtocolVersion,
+                        actual: capabilities.protocolVersion
+                    )
+                )
                 return
             }
 
@@ -79,6 +86,7 @@ public final class DaemonController: Sendable {
             appState.capabilities = capabilities
             appState.sessions = bootstrap.sessions
             appState.connectionState = .connected
+            appState.recordConnectionLog(state: .connected)
             await configureRouteTemplates(capabilities.routeTemplates)
             await configureEventStreamTemplate(bootstrap.daemonStatus.eventStreamURLTemplate)
 
@@ -101,11 +109,46 @@ public final class DaemonController: Sendable {
                 await clearConfiguredDaemonTemplates()
             }
             appState.lastError = error
-            appState.connectionState = connectionState(for: error)
+            let resolvedState = connectionState(for: error)
+            appState.connectionState = resolvedState
+            appState.recordConnectionLog(
+                state: resolvedState,
+                message: Self.connectionLogMessage(for: error)
+            )
         }
     }
 
-    /// Maps an `APIError` to the user-facing connection state that explains the
+    /// Formats the protocol-version mismatch as a single-line log message.
+    static func protocolMismatchLogMessage(expected: Int, actual: Int) -> String {
+        "protocol v\(actual) ≠ expected v\(expected)"
+    }
+
+    /// Reduces an `APIError` to a concise, token-free log line for the
+    /// connection log. Keeps the line readable without leaking secrets.
+    static func connectionLogMessage(for error: APIError) -> String {
+        switch error {
+        case .authFailed:
+            return "auth rejected"
+        case .protocolVersionMismatch(let expected, let actual):
+            return protocolMismatchLogMessage(expected: expected, actual: actual)
+        case .invalidResponse:
+            return "invalid response"
+        case .decodingFailed:
+            return "decoding failed"
+        case .missingSelectedSession:
+            return "no session selected"
+        case .sessionUnavailable:
+            return "session unavailable"
+        case .capabilityUnavailable:
+            return "capability unavailable"
+        case .serverError(let statusCode, _):
+            return "server error \(statusCode)"
+        case .httpStatus(let statusCode):
+            return "http \(statusCode)"
+        case .networkFailure, .invalidURL:
+            return "network error"
+        }
+    }
     /// specific reason the bootstrap failed.
     ///
     /// - `.authFailed` → the daemon rejected the bearer token.

@@ -1857,6 +1857,69 @@ class AgentEngine:
     ) -> AgentResult:
         """执行任务 — 流式 ReAct 主循环，通过回调实时推送事件."""
         perf_start = time.perf_counter()
+        latency_start = perf_start
+        first_progress_recorded = False
+        first_model_chunk_recorded = False
+        first_token_recorded = False
+        progress_events = {
+            "perf_phase",
+            "thinking_start",
+            "thinking_delta",
+            "response_start",
+            "token",
+            "tool_prepare_start",
+            "tool_prepare_snapshot",
+            "tool_start",
+            "error",
+        }
+
+        async def emit_latency_metric(
+            metric: str,
+            label: str,
+            now: float,
+            *,
+            turn: int = 0,
+        ) -> None:
+            await on_event(
+                "latency_metric",
+                {
+                    "metric": metric,
+                    "label": label,
+                    "duration_ms": int((now - latency_start) * 1000),
+                    "turn": turn,
+                },
+            )
+
+        async def emit_event(event: str, data: dict[str, Any]) -> None:
+            nonlocal first_progress_recorded
+            nonlocal first_model_chunk_recorded
+            nonlocal first_token_recorded
+
+            await on_event(event, data)
+            if event == "latency_metric":
+                return
+
+            now = time.perf_counter()
+            turn = int(data.get("turn", 0) or 0)
+            if not first_progress_recorded and event in progress_events:
+                first_progress_recorded = True
+                await emit_latency_metric("first_progress", "首反馈", now, turn=turn)
+
+            if (
+                not first_model_chunk_recorded
+                and event == "perf_phase"
+                and data.get("phase") == "llm_first_chunk"
+            ):
+                first_model_chunk_recorded = True
+                await emit_latency_metric("first_model_chunk", "模型首包", now, turn=turn)
+
+            if (
+                not first_token_recorded
+                and event == "token"
+                and data.get("content")
+            ):
+                first_token_recorded = True
+                await emit_latency_metric("first_token", "端到端首字", now, turn=turn)
 
         async def emit_perf_phase(
             phase: str,
@@ -1864,7 +1927,7 @@ class AgentEngine:
             start: float,
             **extra: Any,
         ) -> None:
-            await on_event(
+            await emit_event(
                 "perf_phase",
                 {
                     "phase": phase,
@@ -1874,7 +1937,7 @@ class AgentEngine:
                 },
             )
 
-        await on_event("run_started", {"task": task})
+        await emit_event("run_started", {"task": task})
         self._ensure_system_prompt()
 
         phase_start = time.perf_counter()
@@ -1886,18 +1949,18 @@ class AgentEngine:
         hooked_task = await self._fire_user_prompt_submit(
             task,
             streaming=True,
-            on_event=on_event,
+            on_event=emit_event,
         )
         await emit_perf_phase("prompt_hooks", "输入 Hook", phase_start)
         if hooked_task is None:
             message = "用户输入已被 hook 拦截。"
-            await on_event("error", {"message": message})
+            await emit_event("error", {"message": message})
             await self._fire_agent_stop(
                 status="error",
                 response=message,
                 reason="user_prompt_submit_aborted",
                 streaming=True,
-                on_event=on_event,
+                on_event=emit_event,
             )
             return AgentResult(status="error", error=message)
         task = hooked_task
@@ -1920,7 +1983,7 @@ class AgentEngine:
             point=HookPoint.ENGINE_RUN_START,
             data={"task": task, "streaming": True},
             session_id=session_id,
-        ), on_event)
+        ), emit_event)
         await emit_perf_phase("engine_start_hooks", "启动 Hook", phase_start)
 
         try:
@@ -1947,11 +2010,11 @@ class AgentEngine:
             ):
                 result = await self._run_orchestrated(plan, tools)
             else:
-                result = await self._react_loop_streaming(tools, on_event, plan=plan)
+                result = await self._react_loop_streaming(tools, emit_event, plan=plan)
         except Exception as e:
             logger.exception("Agent streaming loop failed")
             error_msg = self._format_error(e)
-            await on_event("error", {"message": error_msg})
+            await emit_event("error", {"message": error_msg})
             result = AgentResult(status="error", error=error_msg)
 
         phase_start = time.perf_counter()
@@ -1959,7 +2022,7 @@ class AgentEngine:
             point=HookPoint.ENGINE_RUN_END,
             data={"status": result.status, "task": task, "streaming": True},
             session_id=session_id,
-        ), on_event)
+        ), emit_event)
         await emit_perf_phase("engine_end_hooks", "结束 Hook", phase_start)
 
         phase_start = time.perf_counter()

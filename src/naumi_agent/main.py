@@ -973,6 +973,9 @@ def _cli_event_factory(cli: Any):
     first_token_time = 0.0
     last_token_time = 0.0
     turn_start_time = 0.0
+    first_feedback_latency = 0.0
+    first_model_chunk_latency = 0.0
+    first_token_latency = 0.0
     markdown_highlighter = _StreamingMarkdownHighlighter()
     stream_buffer: list[str] = []
     last_stream_flush_time: float | None = None
@@ -998,6 +1001,7 @@ def _cli_event_factory(cli: Any):
         nonlocal thinking_started, has_streamed_tokens
         nonlocal model_name, token_count, first_token_time, last_token_time
         nonlocal turn_start_time, last_stream_flush_time
+        nonlocal first_feedback_latency, first_model_chunk_latency, first_token_latency
         if hasattr(cli, "record_debug_event"):
             cli.record_debug_event("engine.stream_event", {"event": event, "data": data})
 
@@ -1011,6 +1015,9 @@ def _cli_event_factory(cli: Any):
             first_token_time = 0.0
             last_token_time = 0.0
             turn_start_time = time.monotonic()
+            first_feedback_latency = 0.0
+            first_model_chunk_latency = 0.0
+            first_token_latency = 0.0
             # Fall through to adapter for ⚙ model display
         elif event == "response_start":
             markdown_highlighter.reset()
@@ -1062,6 +1069,18 @@ def _cli_event_factory(cli: Any):
                     cli.set_activity_status(
                         f"{msg.label}: {msg.duration_ms}ms"
                     )
+                elif msg.phase == "latency_metric":
+                    metric = str(data.get("metric", ""))
+                    seconds = msg.duration_ms / 1000
+                    if metric == "first_progress":
+                        first_feedback_latency = seconds
+                    elif metric == "first_model_chunk":
+                        first_model_chunk_latency = seconds
+                    elif metric == "first_token":
+                        first_token_latency = seconds
+                    cli.set_activity_status(
+                        f"{msg.label}: {msg.duration_ms}ms"
+                    )
         elif isinstance(msg, ToolPrepareMessage):
             if hasattr(cli, "set_activity_status"):
                 if msg.phase == "end":
@@ -1100,10 +1119,18 @@ def _cli_event_factory(cli: Any):
         return 0.0
 
     def _get_ttft() -> float:
-        """Time to first token (seconds)."""
+        """End-to-end time to first token (seconds)."""
+        if first_token_latency > 0:
+            return first_token_latency
         if first_token_time > 0 and turn_start_time > 0:
             return first_token_time - turn_start_time
         return 0.0
+
+    def _get_first_feedback() -> float:
+        return first_feedback_latency
+
+    def _get_first_model_chunk() -> float:
+        return first_model_chunk_latency
 
     def _get_duration() -> float:
         """Total response duration (seconds)."""
@@ -1116,6 +1143,8 @@ def _cli_event_factory(cli: Any):
     handler._get_model = _get_model
     handler._get_token_speed = _get_token_speed
     handler._get_ttft = _get_ttft
+    handler._get_first_feedback = _get_first_feedback
+    handler._get_first_model_chunk = _get_first_model_chunk
     handler._get_duration = _get_duration
     return handler
 
@@ -1212,6 +1241,8 @@ async def _chat(config_path: str) -> None:
                     skip_response=skip_response,
                     model=event_handler._get_model(),
                     token_speed=event_handler._get_token_speed(),
+                    first_feedback=event_handler._get_first_feedback(),
+                    first_model_chunk=event_handler._get_first_model_chunk(),
                     ttft=event_handler._get_ttft(),
                     duration=event_handler._get_duration(),
                     engine=engine,
@@ -1375,6 +1406,8 @@ def _render_result(
     skip_response: bool = False,
     model: str = "",
     token_speed: float = 0.0,
+    first_feedback: float = 0.0,
+    first_model_chunk: float = 0.0,
     ttft: float = 0.0,
     duration: float = 0.0,
     engine: Any = None,
@@ -1412,6 +1445,12 @@ def _render_result(
     if result.usage.cache_tokens > 0:
         line1.append(" | ", style="dim")
         line1.append(f"缓存: {result.usage.cache_tokens}", style="dim")
+    if first_feedback > 0:
+        line1.append(" | ", style="dim")
+        line1.append(f"首反馈: {first_feedback:.1f}s", style="dim")
+    if first_model_chunk > 0:
+        line1.append(" | ", style="dim")
+        line1.append(f"首包: {first_model_chunk:.1f}s", style="dim")
     if ttft > 0:
         line1.append(" | ", style="dim")
         line1.append(f"首字: {ttft:.1f}s", style="dim")
