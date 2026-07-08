@@ -673,6 +673,10 @@ public enum AppStrings {
             locale == .zhCN ? "暂无快照数据" : "No snapshot data"
         }
 
+        public static func noMission(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无 Mission" : "No Mission"
+        }
+
         public static func errorSection(_ locale: AppLocale) -> String {
             locale == .zhCN ? "连接错误" : "Connection Error"
         }

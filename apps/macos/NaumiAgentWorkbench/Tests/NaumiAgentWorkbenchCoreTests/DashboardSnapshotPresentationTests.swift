@@ -274,6 +274,45 @@ struct DashboardSnapshotPresentationTests {
         #expect(presentation.agentRows.map(\.id) == ["agent-1", "agent-2", "agent-3", "agent-4", "agent-5"])
     }
 
+    // MARK: - Minimal real-mode fixture (no fake fillers)
+
+    @Test func minimalSnapshotDecodesAndSurfacesOnlyTheMission() throws {
+        // A freshly created real session carries one mission and nothing else.
+        // The presentation must surface exactly that — no fabricated tasks,
+        // issues, agents, failures, or events.
+        for token in ["workbench_snapshot_minimal_zh", "workbench_snapshot_minimal_en"] {
+            let data = try loadFixture(named: token)
+            let snapshot = try JSONDecoder().decode(WorkbenchSnapshotDTO.self, from: data)
+            let presentation = DashboardSnapshotPresentation(snapshot: snapshot)
+
+            let mission = try #require(presentation.currentMission)
+            #expect(mission.status == "planning")
+
+            #expect(presentation.taskRows == [])
+            #expect(presentation.issueRows == [])
+            #expect(presentation.agentRows == [])
+            #expect(presentation.failureRows == [])
+            #expect(presentation.recentEventRows == [])
+            // Only the mission landmark appears; no fabricated nodes.
+            #expect(presentation.workbench.canvasNodes.map(\.kind) == [.mission])
+            #expect(presentation.workbench.inspector == nil)
+            #expect(presentation.workbench.auditRows == [])
+            #expect(presentation.validationRerunCommand(validationRuns: []) == nil)
+            #expect(presentation.contextRefreshCommand() == nil)
+        }
+    }
+
+    @Test func minimalSnapshotTaskMarketDesignShowsNoFillerRows() throws {
+        // Real mode must not pad the sparse minimal session with fixture rows.
+        let data = try loadFixture(named: "workbench_snapshot_minimal_en")
+        let snapshot = try JSONDecoder().decode(WorkbenchSnapshotDTO.self, from: data)
+        let market = TaskMarketDesignPresentation(snapshot: snapshot, policy: .real)
+
+        #expect(market.rows == [])
+        #expect(market.bids == [])
+        #expect(market.activeLeases == [])
+    }
+
     // MARK: - Helpers
 
     private func loadZHSnapshot() throws -> WorkbenchSnapshotDTO {

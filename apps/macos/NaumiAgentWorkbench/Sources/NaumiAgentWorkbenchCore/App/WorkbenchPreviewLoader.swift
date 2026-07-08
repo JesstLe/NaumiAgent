@@ -81,11 +81,13 @@ public enum WorkbenchPreviewLoader {
     public static func applyPreviewState(
         locale: AppLocale,
         to appState: AppState,
-        fixtureDirectory: URL? = nil
+        fixtureDirectory: URL? = nil,
+        fixtureName: String? = nil
     ) throws {
         let fixtureURL = try resolveFixtureURL(
             for: locale,
-            fixtureDirectory: fixtureDirectory
+            fixtureDirectory: fixtureDirectory,
+            fixtureName: fixtureName
         )
         let data = try Data(contentsOf: fixtureURL)
         let snapshot = try JSONDecoder().decode(WorkbenchSnapshotDTO.self, from: data)
@@ -155,9 +157,13 @@ public enum WorkbenchPreviewLoader {
 
     private static func resolveFixtureURL(
         for locale: AppLocale,
-        fixtureDirectory: URL?
+        fixtureDirectory: URL?,
+        fixtureName: String? = nil
     ) throws -> URL {
-        guard let fixtureFile = fixtureNames[locale] else {
+        // An explicit fixture name overrides the locale-default fixture, so the
+        // screenshot tool can capture the minimal real-mode fixture.
+        let fixtureFile = fixtureName ?? fixtureNames[locale]
+        guard let fixtureFile else {
             throw Error.malformedLocaleArgument
         }
 

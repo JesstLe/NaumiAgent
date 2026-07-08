@@ -31,7 +31,8 @@ struct WorkbenchSnapshotTool {
             try WorkbenchPreviewLoader.applyPreviewState(
                 locale: options.locale,
                 to: state,
-                fixtureDirectory: options.fixtureDirectory
+                fixtureDirectory: options.fixtureDirectory,
+                fixtureName: options.fixtureName
             )
             state.currentRoute = route
 
@@ -43,7 +44,7 @@ struct WorkbenchSnapshotTool {
                 height: options.height
             )
             let outputURL = options.outputDirectory
-                .appendingPathComponent("\(fileName(for: route))-\(options.localeToken).png")
+                .appendingPathComponent("\(fileName(for: route))-\(options.localeToken)\(options.fixtureToken).png")
             try imageData.write(to: outputURL, options: .atomic)
             print(outputURL.path)
         }
@@ -105,10 +106,24 @@ private struct SnapshotOptions {
     let locale: AppLocale
     let outputDirectory: URL
     let fixtureDirectory: URL?
+    let fixtureName: String?
     let width: Double
     let height: Double
     let routes: [AppRoute]
     var localeToken: String { locale == .zhCN ? "zh" : "en" }
+
+    /// File-name suffix derived from a custom fixture (e.g. "minimal"), or empty
+    /// for the locale-default fixture so existing screenshot names stay stable.
+    var fixtureToken: String {
+        guard let fixtureName, !fixtureName.isEmpty else { return "" }
+        // "workbench_snapshot_minimal_zh" → "-minimal"
+        let base = (fixtureName as NSString).lastPathComponent
+        let trimmed = base
+            .replacingOccurrences(of: "workbench_snapshot_", with: "")
+            .replacingOccurrences(of: "_zh", with: "")
+            .replacingOccurrences(of: "_en", with: "")
+        return trimmed.isEmpty ? "" : "-\(trimmed)"
+    }
 
     init(arguments: [String]) throws {
         let localeArgument = Self.value(after: "--locale", in: arguments) ?? "zh"
@@ -118,6 +133,7 @@ private struct SnapshotOptions {
         locale = parsedLocale
         outputDirectory = URL(fileURLWithPath: Self.value(after: "--out", in: arguments) ?? "docs/mac-app/ui-audit/screenshots")
         fixtureDirectory = Self.value(after: "--fixtures", in: arguments).map { URL(fileURLWithPath: $0) }
+        fixtureName = Self.value(after: "--fixture-name", in: arguments)
         width = Double(Self.value(after: "--width", in: arguments) ?? "1440") ?? 1440
         height = Double(Self.value(after: "--height", in: arguments) ?? "900") ?? 900
 

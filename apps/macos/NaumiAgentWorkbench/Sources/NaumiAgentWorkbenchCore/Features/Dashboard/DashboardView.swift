@@ -189,6 +189,14 @@ public struct DashboardView: View {
                     .onTapGesture {
                         selectMission(mission)
                     }
+                } else {
+                    railRow(
+                        icon: "scope",
+                        title: AppStrings.Dashboard.noMission(appState.locale),
+                        subtitle: "",
+                        color: .secondary
+                    )
+                    .foregroundStyle(.secondary)
                 }
                 railRow(
                     icon: "square.grid.2x2",
@@ -391,6 +399,18 @@ public struct DashboardView: View {
                 dottedCanvasBackground
                 canvasConnectors
 
+                if presentation.workbench.canvasNodes.isEmpty {
+                    VStack(spacing: 6) {
+                        Image(systemName: "square.dashed")
+                            .font(.system(size: 26))
+                            .foregroundStyle(.secondary)
+                        Text(AppStrings.Dashboard.emptySnapshot(appState.locale))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+
                 VStack(spacing: 12) {
                     HStack {
                         Spacer()
@@ -484,8 +504,8 @@ public struct DashboardView: View {
                 .font(.caption2)
                 .foregroundStyle(statusDotColor(row.status))
             Text(appState.locale == .zhCN
-                ? "智能体：\(row.number % 3 == 0 ? "Test-Agent" : "Backend-Agent")"
-                : "Agent: \(row.number % 3 == 0 ? "Test-Agent" : "Backend-Agent")"
+                ? "工作区：\(row.worktree.isEmpty ? "-" : row.worktree)"
+                : "Worktree: \(row.worktree.isEmpty ? "-" : row.worktree)"
             )
                 .font(.caption2)
                 .foregroundStyle(.secondary)

@@ -1,0 +1,20 @@
+{
+    "session_id": "sess-minimal-zh",
+    "missions": [
+        {
+            "id": "mmin-zh-001",
+            "session_id": "sess-minimal-zh",
+            "title": "新建工作台会话",
+            "goal": "尚未注册任何任务或智能体",
+            "status": "planning",
+            "created_at": "2026-07-09T08:00:00",
+            "updated_at": "2026-07-09T08:00:00"
+        }
+    ],
+    "agent_profiles": [],
+    "tasks": [],
+    "issues": [],
+    "leases": [],
+    "failures": [],
+    "events": []
+}
