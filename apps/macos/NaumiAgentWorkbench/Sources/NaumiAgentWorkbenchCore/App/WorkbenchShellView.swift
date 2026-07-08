@@ -116,6 +116,7 @@ public struct WorkbenchShellView: View {
             SettingsView(
                 appState: environment.appState,
                 daemonController: environment.daemonController,
+                daemonProcessController: environment.daemonProcessController,
                 onEditEndpoint: { isPresentingConnectionSetup = true }
             )
         }

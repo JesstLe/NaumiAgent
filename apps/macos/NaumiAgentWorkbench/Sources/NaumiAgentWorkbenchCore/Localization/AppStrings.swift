@@ -371,6 +371,106 @@ public enum AppStrings {
         }
     }
 
+    // MARK: - Supervised Daemon
+    public enum SupervisedDaemon {
+        public static func sectionTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "本地服务进程" : "Local Daemon Process"
+        }
+
+        public static func startButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "启动本地服务" : "Start Local Daemon"
+        }
+
+        public static func stopButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "停止本地服务" : "Stop Local Daemon"
+        }
+
+        public static func startingHint(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "正在启动…" : "Starting…"
+        }
+
+        public static func stoppingHint(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "正在停止…" : "Stopping…"
+        }
+
+        public static func pidLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "进程 ID" : "PID"
+        }
+
+        public static func portLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "端口" : "Port"
+        }
+
+        public static func endpointLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "服务地址" : "Endpoint"
+        }
+
+        public static func stateLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "状态" : "State"
+        }
+
+        public static func logLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "守护进程日志" : "Daemon Log"
+        }
+
+        public static func emptyLog(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无日志" : "No log output yet"
+        }
+
+        public static func refreshLogButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "刷新日志" : "Refresh Log"
+        }
+
+        public static func clearLogButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "清空日志" : "Clear Log"
+        }
+
+        public static func failurePrefix(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "启动失败：" : "Failed to start: "
+        }
+
+        public static func exitedHint(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "守护进程意外退出，请重新启动或查看日志。"
+                : "The daemon exited unexpectedly. Restart it or inspect the log."
+        }
+
+        public static func shutdownPromptTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "保留本地服务？" : "Keep the local daemon running?"
+        }
+
+        public static func shutdownPromptMessage(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "应用即将退出。是否保留正在运行的 NaumiAgent 守护进程？"
+                : "The app is quitting. Keep the running NaumiAgent daemon alive?"
+        }
+
+        public static func shutdownKeepButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "保留并退出" : "Keep & Quit"
+        }
+
+        public static func shutdownStopButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "停止并退出" : "Stop & Quit"
+        }
+
+        public static func stateDisplayName(_ locale: AppLocale, for state: SupervisedDaemonState) -> String {
+            switch state {
+            case .idle:
+                return locale == .zhCN ? "未启动" : "Idle"
+            case .starting:
+                return locale == .zhCN ? "启动中" : "Starting"
+            case .running:
+                return locale == .zhCN ? "运行中" : "Running"
+            case .stopping:
+                return locale == .zhCN ? "停止中" : "Stopping"
+            case .failed:
+                return locale == .zhCN ? "启动失败" : "Failed"
+            case .exited:
+                return locale == .zhCN ? "已退出" : "Exited"
+            }
+        }
+    }
+
     // MARK: - Dashboard
     public enum Dashboard {
         public static func title(_ locale: AppLocale) -> String {

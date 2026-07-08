@@ -4,6 +4,7 @@ import NaumiAgentWorkbenchCore
 
 @main
 struct NaumiAgentWorkbenchApp: App {
+    @NSApplicationDelegateAdaptor(WorkbenchAppDelegate.self) private var appDelegate
     @State private var environment = AppEnvironment()
     private let shellPresentation = WorkbenchShellPresentation()
 
@@ -11,6 +12,7 @@ struct NaumiAgentWorkbenchApp: App {
         WindowGroup(shellPresentation.nativeWindowTitle) {
             WorkbenchShellView(environment: environment)
                 .background(WindowChromeConfigurator())
+                .onAppear { appDelegate.environment = environment }
                 .task {
                     switch WorkbenchPreviewLoader.requestedMode(from: CommandLine.arguments) {
                     case .disabled:
@@ -41,6 +43,41 @@ struct NaumiAgentWorkbenchApp: App {
                     }
                 }
         }
+    }
+}
+
+/// Intercepts app termination to offer keeping a supervised daemon alive.
+final class WorkbenchAppDelegate: NSObject, NSApplicationDelegate {
+    var environment: AppEnvironment?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let environment,
+              environment.appState.supervisedDaemonState == .running else {
+            return .terminateNow
+        }
+        let locale = environment.appState.locale
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = AppStrings.SupervisedDaemon.shutdownPromptTitle(locale)
+        alert.informativeText = AppStrings.SupervisedDaemon.shutdownPromptMessage(locale)
+        alert.addButton(withTitle: AppStrings.SupervisedDaemon.shutdownKeepButton(locale))
+        alert.addButton(withTitle: AppStrings.SupervisedDaemon.shutdownStopButton(locale))
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            // Keep the daemon running; quit immediately.
+            return .terminateNow
+        }
+        // Stop the supervised daemon, then complete termination.
+        Task { @MainActor in
+            await environment.daemonProcessController.stop()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
     }
 }
 

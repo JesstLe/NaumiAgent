@@ -4,20 +4,25 @@ import SwiftUI
 public struct SettingsView: View {
     @Bindable public var appState: AppState
     public let daemonController: DaemonController
+    public let daemonProcessController: DaemonProcessController?
     public let onEditEndpoint: (() -> Void)?
 
     @State private var draft = IntentLockDraft()
     @State private var isSubmitting = false
     @State private var didCopyHealthCommand = false
     @State private var isRetryingHealth = false
+    @State private var supervisedLogLines: [DaemonLogLine] = []
+    @State private var supervisedActionInFlight = false
 
     public init(
         appState: AppState,
         daemonController: DaemonController,
+        daemonProcessController: DaemonProcessController? = nil,
         onEditEndpoint: (() -> Void)? = nil
     ) {
         self.appState = appState
         self.daemonController = daemonController
+        self.daemonProcessController = daemonProcessController
         self.onEditEndpoint = onEditEndpoint
     }
 
@@ -51,6 +56,7 @@ public struct SettingsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         daemonHealthPanel
+                        supervisedDaemonPanel
                         runtimePanel(presentation: presentation)
                         capabilitiesPanel(presentation: presentation)
                         selectedDecisionPanel
@@ -371,6 +377,168 @@ public struct SettingsView: View {
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var supervisedDaemonPanel: some View {
+        if let controller = daemonProcessController {
+            supervisedDaemonPanel(controller: controller)
+        }
+    }
+
+    private func supervisedDaemonPanel(controller: DaemonProcessController) -> some View {
+        let locale = appState.locale
+        let state = appState.supervisedDaemonState
+        let status = appState.supervisedDaemonStatus
+
+        return panel(title: AppStrings.SupervisedDaemon.sectionTitle(locale)) {
+            VStack(alignment: .leading, spacing: 12) {
+                settingsRow(
+                    label: AppStrings.SupervisedDaemon.stateLabel(locale),
+                    value: AppStrings.SupervisedDaemon.stateDisplayName(locale, for: state)
+                )
+                if let status {
+                    settingsRow(label: AppStrings.SupervisedDaemon.pidLabel(locale), value: "\(status.pid)")
+                    settingsRow(label: AppStrings.SupervisedDaemon.portLabel(locale), value: "\(status.port)")
+                    settingsRow(label: AppStrings.SupervisedDaemon.endpointLabel(locale), value: status.endpoint.absoluteString)
+                }
+
+                if let message = appState.supervisedDaemonFailureMessage, state == .failed {
+                    Text(AppStrings.SupervisedDaemon.failurePrefix(locale) + message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if state == .exited {
+                    Text(AppStrings.SupervisedDaemon.exitedHint(locale))
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(spacing: 8) {
+                    if state == .running {
+                        Button(role: .destructive) {
+                            stopSupervisedDaemon(controller: controller)
+                        } label: {
+                            Label(
+                                supervisedActionInFlight
+                                    ? AppStrings.SupervisedDaemon.stoppingHint(locale)
+                                    : AppStrings.SupervisedDaemon.stopButton(locale),
+                                systemImage: "stop.circle"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(supervisedActionInFlight)
+                    } else {
+                        Button {
+                            startSupervisedDaemon(controller: controller)
+                        } label: {
+                            Label(
+                                supervisedActionInFlight
+                                    ? AppStrings.SupervisedDaemon.startingHint(locale)
+                                    : AppStrings.SupervisedDaemon.startButton(locale),
+                                systemImage: "play.circle"
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(supervisedActionInFlight)
+                    }
+
+                    Button {
+                        Task { supervisedLogLines = await controller.currentLogLines() }
+                    } label: {
+                        Label(AppStrings.SupervisedDaemon.refreshLogButton(locale), systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button(role: .destructive) {
+                        Task {
+                            await controller.clearLog()
+                            supervisedLogLines = await controller.currentLogLines()
+                        }
+                    } label: {
+                        Label(AppStrings.SupervisedDaemon.clearLogButton(locale), systemImage: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(supervisedLogLines.isEmpty)
+
+                    Spacer()
+                }
+
+                Divider()
+
+                supervisedLogSection
+            }
+        }
+        .task(id: appState.supervisedDaemonState) {
+            // Periodically refresh the redacted log while the panel is visible.
+            while !Task.isCancelled {
+                supervisedLogLines = await controller.currentLogLines()
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var supervisedLogSection: some View {
+        let locale = appState.locale
+        VStack(alignment: .leading, spacing: 6) {
+            Text(AppStrings.SupervisedDaemon.logLabel(locale))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if supervisedLogLines.isEmpty {
+                Text(AppStrings.SupervisedDaemon.emptyLog(locale))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(supervisedLogLines) { line in
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(line.source == .stderr ? "ERR" : "OUT")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(line.source == .stderr ? .red : .secondary)
+                                    .frame(width: 28, alignment: .leading)
+                                Text(line.text)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                .frame(maxHeight: 160)
+            }
+        }
+    }
+
+    private func startSupervisedDaemon(controller: DaemonProcessController) {
+        guard !supervisedActionInFlight else { return }
+        supervisedActionInFlight = true
+        Task {
+            await controller.start()
+            supervisedActionInFlight = false
+            supervisedLogLines = await controller.currentLogLines()
+        }
+    }
+
+    private func stopSupervisedDaemon(controller: DaemonProcessController) {
+        guard !supervisedActionInFlight else { return }
+        supervisedActionInFlight = true
+        Task {
+            await controller.stop()
+            supervisedActionInFlight = false
+            supervisedLogLines = await controller.currentLogLines()
         }
     }
 

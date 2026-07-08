@@ -9,6 +9,7 @@ public final class AppEnvironment: Sendable {
     public let eventClient: WorkbenchEventClient
     public let appState: AppState
     public let daemonController: DaemonController
+    public let daemonProcessController: DaemonProcessController
     public let refreshCoordinator: WorkbenchRefreshCoordinator
     public let connectionSettingsStore: WorkbenchConnectionSettingsStore
     public var connectionSettings: WorkbenchConnectionSettings
@@ -17,7 +18,8 @@ public final class AppEnvironment: Sendable {
         appState: AppState = AppState(),
         apiClient: WorkbenchAPIClient? = nil,
         eventClient: WorkbenchEventClient? = nil,
-        connectionSettingsStore: WorkbenchConnectionSettingsStore = .default
+        connectionSettingsStore: WorkbenchConnectionSettingsStore = .default,
+        daemonProcessController: DaemonProcessController? = nil
     ) {
         self.appState = appState
         self.connectionSettingsStore = connectionSettingsStore
@@ -45,6 +47,27 @@ public final class AppEnvironment: Sendable {
         self.refreshCoordinator = WorkbenchRefreshCoordinator(
             daemonController: daemonController
         )
+        let supervisedController: DaemonProcessController
+        if let daemonProcessController {
+            supervisedController = daemonProcessController
+        } else {
+            supervisedController = DaemonProcessController(appState: appState)
+        }
+        self.daemonProcessController = supervisedController
+        // Wire the ready callback now that every stored property is initialized.
+        supervisedController.onReady = { [weak self] endpoint in
+            await self?.repointConnection(to: endpoint)
+        }
+    }
+
+    /// Re-points the connection at a supervised daemon endpoint, preserving the
+    /// stored bearer token.
+    public func repointConnection(to endpoint: URL) async {
+        let settings = WorkbenchConnectionSettings(
+            baseURLString: endpoint.absoluteString,
+            bearerToken: connectionSettings.bearerToken
+        )
+        await updateConnection(settings)
     }
 
     /// Persists new connection settings and re-points both API and event
