@@ -49,6 +49,8 @@ public final class AppState: Sendable {
         case connecting
         case connected
         case stale
+        case authFailed
+        case protocolMismatch
 
         public func displayName(locale: AppLocale) -> String {
             switch self {
@@ -60,6 +62,20 @@ public final class AppState: Sendable {
                 return AppStrings.Connection.disconnected(locale)
             case .stale:
                 return AppStrings.Connection.stale(locale)
+            case .authFailed:
+                return AppStrings.Connection.authFailed(locale)
+            case .protocolMismatch:
+                return AppStrings.Connection.protocolMismatch(locale)
+            }
+        }
+
+        /// Whether this state represents a recoverable problem the user can act on.
+        public var isFailure: Bool {
+            switch self {
+            case .disconnected, .authFailed, .protocolMismatch, .stale:
+                return true
+            case .connected, .connecting:
+                return false
             }
         }
     }

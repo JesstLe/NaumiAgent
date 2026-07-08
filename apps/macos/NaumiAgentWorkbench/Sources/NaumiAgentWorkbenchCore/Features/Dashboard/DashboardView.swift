@@ -1210,6 +1210,10 @@ public struct DashboardView: View {
             return .orange
         case .disconnected, .stale:
             return .red
+        case .authFailed:
+            return .purple
+        case .protocolMismatch:
+            return .pink
         }
     }
 

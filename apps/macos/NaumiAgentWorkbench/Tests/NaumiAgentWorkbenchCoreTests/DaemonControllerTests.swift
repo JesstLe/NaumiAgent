@@ -1632,12 +1632,30 @@ final class DaemonControllerTests {
 
         await controller.refreshConnection()
 
-        #expect(appState.connectionState == .disconnected)
+        #expect(appState.connectionState == .protocolMismatch)
         #expect(appState.daemonStatus == nil)
         #expect(appState.capabilities == nil)
         #expect(appState.selectedWorkspace == nil)
         #expect(appState.lastError == .protocolVersionMismatch(expected: 1, actual: 999))
         #expect(controller.hasActiveEventStream == false)
+    }
+
+    @Test @MainActor func refreshConnectionAuthFailureSetsAuthFailedState() async throws {
+        let appState = AppState()
+        appState.connectionState = .connected
+        appState.daemonStatus = makeStatus()
+        appState.capabilities = makeCapabilities()
+
+        let api = FakeWorkbenchAPIProvider()
+        await api.setBootstrapResult(.failure(.authFailed))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .authFailed)
+        #expect(appState.lastError == .authFailed)
+        #expect(appState.daemonStatus == nil)
+        #expect(appState.capabilities == nil)
     }
 
     @Test @MainActor func refreshConnectionProtocolMismatchClearsStaleSessionState() async throws {
@@ -1675,7 +1693,7 @@ final class DaemonControllerTests {
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.refreshConnection()
 
-        #expect(appState.connectionState == .disconnected)
+        #expect(appState.connectionState == .protocolMismatch)
         #expect(appState.lastError == .protocolVersionMismatch(expected: 1, actual: 999))
         #expect(appState.selectedSessionID == nil)
         #expect(appState.snapshot == nil)
@@ -3358,7 +3376,7 @@ final class DaemonControllerTests {
             systemPrompt: "默认中文治理工作台"
         )
 
-        #expect(appState.connectionState == .disconnected)
+        #expect(appState.connectionState == .protocolMismatch)
         #expect(appState.daemonStatus == nil)
         #expect(appState.capabilities == nil)
         #expect(appState.lastError == .protocolVersionMismatch(expected: 1, actual: 999))

@@ -77,9 +77,9 @@ extension URLSession: WorkbenchWebSocketTransporting {
 /// Snapshot remains the source of truth. The stream asks the daemon for an
 /// initial snapshot, then carries event hints for lightweight follow-up refreshes.
 public actor WorkbenchEventClient: Sendable, WorkbenchEventProviding, WorkbenchEventStreamTemplateConfiguring {
-    public let baseURL: URL
+    public var baseURL: URL
     private let transport: WorkbenchWebSocketTransporting
-    private let bearerToken: String?
+    private var bearerToken: String?
     private var eventStreamURLTemplate: String?
 
     public init(
@@ -97,6 +97,19 @@ public actor WorkbenchEventClient: Sendable, WorkbenchEventProviding, WorkbenchE
         self.transport = transport
         self.bearerToken = bearerToken
         self.eventStreamURLTemplate = eventStreamURLTemplate
+    }
+
+    /// Re-points the client at a new endpoint, clearing the cached event
+    /// stream template and updating the bearer token.
+    public func updateConnection(baseURL newBaseURL: URL, bearerToken newBearerToken: String?) {
+        let baseURLString = newBaseURL.absoluteString
+        if baseURLString.hasSuffix("/") {
+            self.baseURL = newBaseURL
+        } else {
+            self.baseURL = URL(string: baseURLString + "/")!
+        }
+        self.bearerToken = newBearerToken
+        self.eventStreamURLTemplate = nil
     }
 
     public static func eventStreamURL(

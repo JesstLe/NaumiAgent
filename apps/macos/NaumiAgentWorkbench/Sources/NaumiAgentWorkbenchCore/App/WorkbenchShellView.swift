@@ -4,6 +4,7 @@ import SwiftUI
 public struct WorkbenchShellView: View {
     public let environment: AppEnvironment
     @State private var isPresentingMissionComposer = false
+    @State private var isPresentingConnectionSetup = false
     private let shellPresentation = WorkbenchShellPresentation()
 
     public init(environment: AppEnvironment) {
@@ -65,6 +66,16 @@ public struct WorkbenchShellView: View {
                 appState: environment.appState,
                 daemonController: environment.daemonController
             )
+        }
+        .onChange(of: appState.connectionState) { _, newState in
+            // Auto-present the setup sheet on the first hard failure so the
+            // user sees a clear reason and next action instead of a blank UI.
+            if newState.isFailure, !appState.isPreviewFixture {
+                isPresentingConnectionSetup = true
+            }
+        }
+        .sheet(isPresented: $isPresentingConnectionSetup) {
+            ConnectionSetupSheet(environment: environment)
         }
     }
 
@@ -292,6 +303,10 @@ private struct TopNavigationBar: View {
             return .orange
         case .disconnected, .stale:
             return .red
+        case .authFailed:
+            return .purple
+        case .protocolMismatch:
+            return .pink
         }
     }
 }
@@ -367,3 +382,161 @@ private struct MissionComposerSheet: View {
         .frame(minWidth: 360, minHeight: 180)
     }
 }
+
+/// First-run / connection-failure setup sheet. Lets the user edit the daemon
+/// endpoint and token, copy the start command, or retry the connection.
+struct ConnectionSetupSheet: View {
+    let environment: AppEnvironment
+    @Environment(\.dismiss) private var dismiss
+    @State private var endpointText = ""
+    @State private var tokenText = ""
+    @State private var isConnecting = false
+    @State private var didCopyCommand = false
+
+    private var appState: AppState { environment.appState }
+    private var locale: AppLocale { appState.locale }
+
+    private var trimmedEndpoint: String {
+        endpointText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSave: Bool {
+        !trimmedEndpoint.isEmpty
+        && URL(string: trimmedEndpoint) != nil
+        && !isConnecting
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(AppStrings.ConnectionSetup.title(locale))
+                        .font(.headline)
+                    if appState.connectionState.isFailure {
+                        Text(AppStrings.ConnectionSetup.reason(locale, for: appState.connectionState))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer()
+            }
+
+            Form {
+                TextField(
+                    AppStrings.ConnectionSetup.endpointLabel(locale),
+                    text: $endpointText
+                )
+                .textFieldStyle(.roundedBorder)
+
+                SecureField(
+                    AppStrings.ConnectionSetup.tokenLabel(locale),
+                    text: $tokenText
+                )
+                .textFieldStyle(.roundedBorder)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(AppStrings.ConnectionSetup.startCommandLabel(locale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Text(AppStrings.ConnectionSetup.startCommand(locale))
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(8)
+                            .background(Color.secondary.opacity(0.10))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        Spacer()
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(
+                                AppStrings.ConnectionSetup.startCommand(locale),
+                                forType: .string
+                            )
+                            didCopyCommand = true
+                        } label: {
+                            Label(
+                                didCopyCommand
+                                    ? (locale == .zhCN ? "已复制" : "Copied")
+                                    : AppStrings.ConnectionSetup.copyCommandButton(locale),
+                                systemImage: "doc.on.doc"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+
+            HStack {
+                Spacer()
+                if appState.connectionState.isFailure {
+                    Button {
+                        retry()
+                    } label: {
+                        Label(
+                            isConnecting
+                                ? AppStrings.ConnectionSetup.connectingHint(locale)
+                                : AppStrings.ConnectionSetup.retryButton(locale),
+                            systemImage: "arrow.clockwise"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isConnecting)
+                }
+                Button {
+                    saveAndConnect()
+                } label: {
+                    Label(
+                        isConnecting
+                            ? AppStrings.ConnectionSetup.connectingHint(locale)
+                            : AppStrings.ConnectionSetup.saveButton(locale),
+                        systemImage: "checkmark.circle"
+                    )
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canSave)
+
+                Button(AppStrings.MissionComposer.cancelButton(locale)) {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding()
+        .frame(minWidth: 480, minHeight: 360)
+        .onAppear {
+            endpointText = environment.connectionSettings.baseURLString
+            tokenText = environment.connectionSettings.bearerToken ?? ""
+        }
+    }
+
+    private func saveAndConnect() {
+        guard canSave else { return }
+        let settings = WorkbenchConnectionSettings(
+            baseURLString: trimmedEndpoint,
+            bearerToken: tokenText
+        )
+        isConnecting = true
+        Task {
+            await environment.updateConnection(settings)
+            isConnecting = false
+            if environment.appState.connectionState == .connected {
+                dismiss()
+            }
+        }
+    }
+
+    private func retry() {
+        guard !isConnecting else { return }
+        isConnecting = true
+        Task {
+            await environment.daemonController.refreshConnection()
+            isConnecting = false
+            if environment.appState.connectionState == .connected {
+                dismiss()
+            }
+        }
+    }
+}
+

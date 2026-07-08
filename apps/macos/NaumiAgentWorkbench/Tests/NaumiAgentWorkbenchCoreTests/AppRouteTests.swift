@@ -31,6 +31,7 @@ struct AppRouteTests {
     @Test func topNavigationUsesReferenceOrder() {
         #expect(AppRoute.topNavigationRoutes == [
             .dashboard,
+            .chat,
             .taskMarket,
             .worktrees,
             .reviews,
