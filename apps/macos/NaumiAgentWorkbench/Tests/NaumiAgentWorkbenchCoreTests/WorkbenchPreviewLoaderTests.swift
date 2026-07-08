@@ -102,6 +102,43 @@ final class WorkbenchPreviewLoaderTests {
         }
     }
 
+    @Test func applyMinimalFixtureByNameLoadsSparseSession() throws {
+        let appState = AppState()
+        let fixturesDirectory = fixtureDirectory()
+
+        try WorkbenchPreviewLoader.applyPreviewState(
+            locale: .enUS,
+            to: appState,
+            fixtureDirectory: fixturesDirectory,
+            fixtureName: "workbench_snapshot_minimal_en.json"
+        )
+
+        // The minimal fixture carries one mission and no other entities, so the
+        // loaded preview state must reflect that sparse real session.
+        #expect(appState.snapshot?.sessionID == "sess-minimal-en")
+        #expect(appState.snapshot?.missions.count == 1)
+        #expect(appState.snapshot?.agentProfiles == [])
+        #expect(appState.snapshot?.tasks == [])
+        #expect(appState.snapshot?.issues == [])
+        #expect(appState.snapshot?.leases == [])
+        #expect(appState.snapshot?.failures == [])
+        #expect(appState.snapshot?.events == [])
+    }
+
+    @Test func explicitFixtureNameMissingThrows() {
+        let appState = AppState()
+        let fixturesDirectory = fixtureDirectory()
+
+        #expect(throws: WorkbenchPreviewLoader.Error.self) {
+            try WorkbenchPreviewLoader.applyPreviewState(
+                locale: .enUS,
+                to: appState,
+                fixtureDirectory: fixturesDirectory,
+                fixtureName: "workbench_snapshot_does_not_exist.json"
+            )
+        }
+    }
+
     private func fixtureDirectory() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
