@@ -7347,6 +7347,41 @@ final class DaemonControllerTests {
         #expect(await api.runValidationWithSnapshotCallCount == 1)
     }
 
+    @Test @MainActor func runValidationRejectsNonAllowlistedCommandClientSide() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        appState.locale = .zhCN
+        appState.capabilities = CapabilitiesDTO(
+            supportsDaemonManagement: false,
+            supportsWorkspaceRegistry: false,
+            supportsValidationRunner: true,
+            supportsCloudSync: false,
+            supportedLocales: ["zh-CN", "en-US"],
+            protocolVersion: 1,
+            allowedValidationCommands: [["pytest"], ["ruff"]]
+        )
+
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.runValidation(
+            taskID: "task-001",
+            actor: "Human",
+            argv: ["make", "boom"],
+            cwd: "/workspace"
+        )
+
+        // The non-allowlisted command must be rejected with Chinese copy and
+        // never reach the backend.
+        let error = try #require(appState.lastError)
+        if case let .networkFailure(message) = error {
+            #expect(message.contains("验证命令不在允许列表"))
+            #expect(message.contains("make boom"))
+        } else {
+            Issue.record("expected networkFailure with Chinese allowlist message")
+        }
+        #expect(await api.runValidationWithSnapshotCallCount == 0)
+    }
+
     @Test @MainActor func runValidationSessionUnavailableClearsSelectedSessionAndSessionState() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-missing"

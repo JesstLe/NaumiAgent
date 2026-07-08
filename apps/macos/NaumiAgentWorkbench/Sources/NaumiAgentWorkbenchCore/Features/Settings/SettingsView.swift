@@ -911,6 +911,8 @@ public struct SettingsView: View {
                     enabled: appState.capabilities?.supportsCloudSync == true
                 )
                 Divider()
+                validationAllowlistSection
+                Divider()
                 settingsRow(
                     label: appState.locale == .zhCN ? "动作路由" : "Action Routes",
                     value: "\(presentation.supportedActionCount)/\(presentation.routeTemplateCount)"
@@ -921,6 +923,31 @@ public struct SettingsView: View {
                         ? "-"
                         : presentation.missingActionRouteTemplates.joined(separator: ", ")
                 )
+            }
+        }
+    }
+
+    /// Lists the daemon's allowlisted validation commands so users know which
+    /// presets they can run; non-allowlisted commands are rejected.
+    private var validationAllowlistSection: some View {
+        let commands = appState.capabilities?.allowedValidationCommands ?? []
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(appState.locale == .zhCN ? "允许的验证命令" : "Allowed Validation Commands")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if commands.isEmpty {
+                Text(appState.locale == .zhCN ? "未提供（任意命令将被服务端拒绝）" : "None provided (any command is rejected server-side)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(commands, id: \.self) { command in
+                    Text(command.joined(separator: " "))
+                        .font(.system(size: 12, design: .monospaced))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
             }
         }
     }

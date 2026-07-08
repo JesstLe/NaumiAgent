@@ -2695,6 +2695,18 @@ public final class DaemonController: Sendable {
             return
         }
 
+        // Client-side allowlist rejection with Chinese copy: avoids a round-trip
+        // when the command is clearly not permitted by the daemon.
+        if let capabilities = appState.capabilities,
+           !capabilities.isValidationCommandAllowed(argv) {
+            appState.lastError = .networkFailure(
+                appState.locale == .zhCN
+                    ? "验证命令不在允许列表：\(argv.joined(separator: " "))"
+                    : "Validation command not on allowlist: \(argv.joined(separator: " "))"
+            )
+            return
+        }
+
         appState.lastError = nil
         do {
             let response = try await apiProvider.runValidationWithSnapshot(
