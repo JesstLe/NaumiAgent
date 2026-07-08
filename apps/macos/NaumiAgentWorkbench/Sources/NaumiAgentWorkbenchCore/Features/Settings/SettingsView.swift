@@ -4,13 +4,21 @@ import SwiftUI
 public struct SettingsView: View {
     @Bindable public var appState: AppState
     public let daemonController: DaemonController
+    public let onEditEndpoint: (() -> Void)?
 
     @State private var draft = IntentLockDraft()
     @State private var isSubmitting = false
+    @State private var didCopyHealthCommand = false
+    @State private var isRetryingHealth = false
 
-    public init(appState: AppState, daemonController: DaemonController) {
+    public init(
+        appState: AppState,
+        daemonController: DaemonController,
+        onEditEndpoint: (() -> Void)? = nil
+    ) {
         self.appState = appState
         self.daemonController = daemonController
+        self.onEditEndpoint = onEditEndpoint
     }
 
     public var body: some View {
@@ -42,6 +50,7 @@ public struct SettingsView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
+                        daemonHealthPanel
                         runtimePanel(presentation: presentation)
                         capabilitiesPanel(presentation: presentation)
                         selectedDecisionPanel
@@ -228,6 +237,143 @@ public struct SettingsView: View {
         }
     }
 
+    private var daemonHealthPanel: some View {
+        let locale = appState.locale
+        let health = DaemonHealthPresentation(
+            locale: locale,
+            connectionState: appState.connectionState,
+            lastHealthCheckAt: appState.lastHealthCheckAt,
+            connectionLog: appState.connectionLog
+        )
+
+        return panel(title: AppStrings.DaemonHealth.sectionTitle(locale)) {
+            VStack(alignment: .leading, spacing: 12) {
+                settingsRow(
+                    label: AppStrings.DaemonHealth.statusLabel(locale),
+                    value: health.statusText
+                )
+                settingsRow(
+                    label: AppStrings.DaemonHealth.lastCheckedLabel(locale),
+                    value: health.lastCheckedText
+                )
+
+                if health.writesDisabledBanner != nil {
+                    Text(health.writesDisabledBanner ?? "")
+                        .font(.caption)
+                        .foregroundStyle(.pink)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if !health.nextActionText.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(AppStrings.DaemonHealth.nextActionLabel(locale))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(health.nextActionText)
+                            .font(.system(size: 13, weight: .medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(AppStrings.ConnectionSetup.startCommandLabel(locale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Text(health.startCommand)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(8)
+                            .background(Color.secondary.opacity(0.10))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        Spacer()
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(health.startCommand, forType: .string)
+                            didCopyHealthCommand = true
+                        } label: {
+                            Label(
+                                didCopyHealthCommand
+                                    ? (locale == .zhCN ? "已复制" : "Copied")
+                                    : AppStrings.ConnectionSetup.copyCommandButton(locale),
+                                systemImage: "doc.on.doc"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        guard !isRetryingHealth else { return }
+                        isRetryingHealth = true
+                        Task {
+                            await daemonController.refreshConnection()
+                            isRetryingHealth = false
+                        }
+                    } label: {
+                        Label(
+                            isRetryingHealth
+                                ? AppStrings.ConnectionSetup.connectingHint(locale)
+                                : AppStrings.ConnectionControl.refreshButton(locale),
+                            systemImage: "arrow.clockwise"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isRetryingHealth || appState.connectionState == .connecting)
+
+                    if onEditEndpoint != nil {
+                        Button {
+                            onEditEndpoint?()
+                        } label: {
+                            Label(
+                                AppStrings.DaemonHealth.editEndpointButton(locale),
+                                systemImage: "pencil.line"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    Spacer()
+                }
+
+                Divider()
+
+                connectionLogSection(health: health)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func connectionLogSection(health: DaemonHealthPresentation) -> some View {
+        let locale = appState.locale
+        VStack(alignment: .leading, spacing: 6) {
+            Text(AppStrings.DaemonHealth.connectionLogLabel(locale))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if health.recentLog.isEmpty {
+                Text(AppStrings.DaemonHealth.emptyLog(locale))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(health.recentLog) { entry in
+                        Text(health.logLine(for: entry))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+    }
+
     private func runtimePanel(presentation: SettingsDashboardPresentation) -> some View {
         panel(title: appState.locale == .zhCN ? "运行时状态" : "Runtime Status") {
             VStack(alignment: .leading, spacing: 12) {
@@ -332,7 +478,7 @@ public struct SettingsView: View {
                     } label: {
                         Label(AppStrings.Settings.createIntentLockButton(appState.locale), systemImage: "lock.badge.plus")
                     }
-                    .disabled(!draft.canSubmit || isSubmitting)
+                    .disabled(!draft.canSubmit || isSubmitting || !appState.canPerformWrites)
 
                     if isSubmitting {
                         Text(AppStrings.Settings.processingLabel(appState.locale))

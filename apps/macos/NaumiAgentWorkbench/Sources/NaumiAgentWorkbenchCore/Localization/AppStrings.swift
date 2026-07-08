@@ -306,6 +306,71 @@ public enum AppStrings {
         }
     }
 
+    // MARK: - Daemon Health
+    public enum DaemonHealth {
+        public static func sectionTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "本地服务健康" : "Daemon Health"
+        }
+
+        public static func statusLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "状态" : "Status"
+        }
+
+        public static func lastCheckedLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "上次检查" : "Last Checked"
+        }
+
+        public static func lastCheckedNever(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "尚未检查" : "Never checked"
+        }
+
+        public static func nextActionLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "建议操作" : "Next Action"
+        }
+
+        public static func connectionLogLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "连接日志" : "Connection Log"
+        }
+
+        public static func emptyLog(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无连接记录" : "No connection attempts yet"
+        }
+
+        public static func editEndpointButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "编辑地址" : "Edit Endpoint"
+        }
+
+        public static func writesDisabledBanner(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "协议版本不兼容，写入操作已禁用。"
+                : "Protocol version mismatch — write actions are disabled."
+        }
+
+        /// Concrete next-step hint for a failure state. Empty for healthy states.
+        public static func nextAction(_ locale: AppLocale, for state: AppState.ConnectionState) -> String {
+            switch state {
+            case .disconnected:
+                return locale == .zhCN
+                    ? "请在终端启动 NaumiAgent 守护进程后重试。"
+                    : "Start the NaumiAgent daemon in a terminal, then retry."
+            case .authFailed:
+                return locale == .zhCN
+                    ? "请检查或更新 Bearer Token 后重试。"
+                    : "Check or update the bearer token, then retry."
+            case .protocolMismatch:
+                return locale == .zhCN
+                    ? "请升级 NaumiAgent 守护进程或本应用到兼容版本。"
+                    : "Upgrade the NaumiAgent daemon or this app to a compatible version."
+            case .stale:
+                return locale == .zhCN
+                    ? "连接已失效，正在尝试恢复。"
+                    : "The connection is stale; recovering."
+            case .connected, .connecting:
+                return ""
+            }
+        }
+    }
+
     // MARK: - Dashboard
     public enum Dashboard {
         public static func title(_ locale: AppLocale) -> String {

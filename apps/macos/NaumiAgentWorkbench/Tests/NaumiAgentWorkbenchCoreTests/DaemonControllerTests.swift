@@ -1656,6 +1656,46 @@ final class DaemonControllerTests {
         #expect(appState.lastError == .authFailed)
         #expect(appState.daemonStatus == nil)
         #expect(appState.capabilities == nil)
+        // Auth failure is recorded in the connection log with a concise note.
+        #expect(appState.lastHealthCheckAt != nil)
+        let lastEntry = try #require(appState.connectionLog.last)
+        #expect(lastEntry.state == .authFailed)
+        #expect(lastEntry.message == "auth rejected")
+    }
+
+    @Test @MainActor func refreshConnectionRecordsConnectedLogOnSuccess() async throws {
+        let appState = AppState()
+        let status = makeStatus()
+        let session = makeSession(id: "sess-log", title: "Log Session")
+        let snapshot = makeSnapshot(sessionID: "sess-log", missions: [])
+        let api = FakeWorkbenchAPIProvider()
+        let bootstrap = WorkbenchBootstrapDTO(
+            daemonStatus: status,
+            capabilities: makeCapabilities(),
+            sessions: [session],
+            totalSessions: 1,
+            selectedSessionID: "sess-log",
+            snapshot: snapshot
+        )
+        await api.setBootstrapResult(.success(bootstrap))
+        await configureWorkbenchListResults(for: api, sessionID: "sess-log")
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.refreshConnection()
+
+        #expect(appState.connectionState == .connected)
+        #expect(appState.lastHealthCheckAt != nil)
+        let lastEntry = try #require(appState.connectionLog.last)
+        #expect(lastEntry.state == .connected)
+        #expect(lastEntry.message == nil)
+    }
+
+    @Test @MainActor func connectionLogIsCappedToCapacity() async {
+        let appState = AppState()
+        for _ in 0..<(AppState.connectionLogCapacity + 10) {
+            appState.recordConnectionLog(state: .connected)
+        }
+        #expect(appState.connectionLog.count == AppState.connectionLogCapacity)
     }
 
     @Test @MainActor func refreshConnectionProtocolMismatchClearsStaleSessionState() async throws {

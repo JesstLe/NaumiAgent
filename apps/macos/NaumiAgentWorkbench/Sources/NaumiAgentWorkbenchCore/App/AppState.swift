@@ -11,6 +11,34 @@ public final class AppState: Sendable {
     public var connectionState: ConnectionState = .disconnected
     public var daemonStatus: DaemonStatusDTO? = nil
     public var capabilities: CapabilitiesDTO? = nil
+
+    /// Wall-clock time of the most recent connection health check, regardless
+    /// of whether it succeeded. Drives the "last checked" display.
+    public var lastHealthCheckAt: Date? = nil
+
+    /// Ring buffer of recent connection-attempt outcomes. Newest entries are
+    /// appended at the end; the buffer is capped to `connectionLogCapacity`.
+    public var connectionLog: [ConnectionLogEntry] = []
+
+    /// Maximum number of connection-log entries retained.
+    public static let connectionLogCapacity: Int = 50
+
+    /// Appends a connection-log entry and trims the buffer to the capacity,
+    /// keeping the most recent entries.
+    public func recordConnectionLog(
+        state: ConnectionState,
+        message: String? = nil,
+        at date: Date = Date()
+    ) {
+        lastHealthCheckAt = date
+        connectionLog.append(
+            ConnectionLogEntry(date: date, state: state, message: message)
+        )
+        let overflow = connectionLog.count - Self.connectionLogCapacity
+        if overflow > 0 {
+            connectionLog.removeFirst(overflow)
+        }
+    }
     public var sessions: [SessionDTO] = []
     public var chatMessages: [ChatMessageDTO] = []
     public var snapshot: WorkbenchSnapshotDTO? = nil
@@ -78,5 +106,18 @@ public final class AppState: Sendable {
                 return false
             }
         }
+
+        /// Whether this state should hard-disable write actions in the UI.
+        /// Only an incompatible protocol version makes writes unsafe; other
+        /// failures simply leave no connected session to act on.
+        public var disablesWrites: Bool {
+            self == .protocolMismatch
+        }
+    }
+
+    /// Whether the UI should allow write actions right now. False whenever the
+    /// daemon speaks an incompatible protocol version.
+    public var canPerformWrites: Bool {
+        !connectionState.disablesWrites
     }
 }

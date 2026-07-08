@@ -492,6 +492,8 @@ class ChatPanel(VerticalScroll):
         tokens: int = 0,
         model: str = "",
         token_speed: float = 0.0,
+        first_feedback: float = 0.0,
+        first_model_chunk: float = 0.0,
         ttft: float = 0.0,
         duration: float = 0.0,
         cache_tokens: int = 0,
@@ -527,6 +529,10 @@ class ChatPanel(VerticalScroll):
         line1_parts.append(tok_str)
         if cache_tokens > 0:
             line1_parts.append(f"缓存: {cache_tokens}")
+        if first_feedback > 0:
+            line1_parts.append(f"首反馈: {first_feedback:.1f}s")
+        if first_model_chunk > 0:
+            line1_parts.append(f"首包: {first_model_chunk:.1f}s")
         if ttft > 0:
             line1_parts.append(f"首字: {ttft:.1f}s")
         if duration > 0:
@@ -1616,11 +1622,16 @@ class NaumiApp(App):
         streaming_first_time = 0.0
         streaming_last_time = 0.0
         streaming_turn_start = 0.0
+        streaming_first_feedback = 0.0
+        streaming_first_model_chunk = 0.0
+        streaming_first_token_latency = 0.0
 
         async def on_event(event_type: str, data: dict[str, Any]) -> None:
             nonlocal streaming_model, streaming_token_count
             nonlocal streaming_first_time, streaming_last_time
             nonlocal streaming_turn_start
+            nonlocal streaming_first_feedback, streaming_first_model_chunk
+            nonlocal streaming_first_token_latency
             if self.debug_trace is not None:
                 self.debug_trace.event(
                     "engine.stream_event",
@@ -1636,6 +1647,18 @@ class NaumiApp(App):
                     label = data.get("label") or data.get("phase") or "阶段"
                     duration = int(data.get("duration_ms", 0) or 0)
                     status.status_text = f"⏱ {label}: {duration}ms"
+                case "latency_metric":
+                    metric = str(data.get("metric", ""))
+                    duration = int(data.get("duration_ms", 0) or 0)
+                    seconds = duration / 1000
+                    if metric == "first_progress":
+                        streaming_first_feedback = seconds
+                    elif metric == "first_model_chunk":
+                        streaming_first_model_chunk = seconds
+                    elif metric == "first_token":
+                        streaming_first_token_latency = seconds
+                    label = data.get("label") or metric or "延迟"
+                    status.status_text = f"⏱ {label}: {duration}ms"
                 case "turn_start":
                     model_val = data.get("model", "")
                     if model_val:
@@ -1648,6 +1671,9 @@ class NaumiApp(App):
                     streaming_first_time = 0.0
                     streaming_last_time = 0.0
                     streaming_turn_start = time.monotonic()
+                    streaming_first_feedback = 0.0
+                    streaming_first_model_chunk = 0.0
+                    streaming_first_token_latency = 0.0
                 case "thinking_start":
                     chat.start_thinking()
                     status.status_text = "💭 思考中..."
@@ -1883,6 +1909,8 @@ class NaumiApp(App):
             return 0.0
 
         def _get_ttft() -> float:
+            if streaming_first_token_latency > 0:
+                return streaming_first_token_latency
             if streaming_first_time > 0 and streaming_turn_start > 0:
                 return streaming_first_time - streaming_turn_start
             return 0.0
@@ -1924,6 +1952,8 @@ class NaumiApp(App):
                 total_tokens,
                 model=streaming_model,
                 token_speed=token_speed,
+                first_feedback=streaming_first_feedback,
+                first_model_chunk=streaming_first_model_chunk,
                 ttft=ttft,
                 duration=duration,
                 cache_tokens=result.usage.cache_tokens,
@@ -1939,6 +1969,10 @@ class NaumiApp(App):
             if token_speed > 0:
                 tok_str += f" ({token_speed:.1f} tok/s)"
             status_parts.append(tok_str)
+            if streaming_first_feedback > 0:
+                status_parts.append(f"首反馈: {streaming_first_feedback:.1f}s")
+            if streaming_first_model_chunk > 0:
+                status_parts.append(f"首包: {streaming_first_model_chunk:.1f}s")
             if ttft > 0:
                 status_parts.append(f"首字: {ttft:.1f}s")
             if duration > 0:

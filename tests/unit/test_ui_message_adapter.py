@@ -470,6 +470,19 @@ class TestRuntimeEvents:
         assert msg.label == "模型首包"
         assert msg.duration_ms == 350
 
+    def test_latency_metric(self, adapter: EngineEventAdapter) -> None:
+        msg = adapter.adapt("latency_metric", {
+            "metric": "first_token",
+            "label": "端到端首字",
+            "duration_ms": 1200,
+            "turn": 1,
+        })
+        assert isinstance(msg, RuntimeStatusMessage)
+        assert msg.phase == "latency_metric"
+        assert msg.label == "端到端首字"
+        assert msg.duration_ms == 1200
+        assert msg.turn == 1
+
 
 class TestRuntimeNotification:
 

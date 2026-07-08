@@ -154,6 +154,34 @@ def test_fullscreen_result_omits_environment_stats(monkeypatch) -> None:
     assert "main" not in rendered
 
 
+def test_fullscreen_result_shows_end_to_end_latency_metrics() -> None:
+    result = SimpleNamespace(
+        status="completed",
+        error=None,
+        response="完成",
+        usage=FakeUsage(),
+    )
+
+    rendered = _capture(
+        lambda: _render_result(
+            main_module.console,
+            result,
+            skip_response=True,
+            model="test-model",
+            first_feedback=0.12,
+            first_model_chunk=0.55,
+            ttft=0.8,
+            duration=1.3,
+            engine=FakeEngine(),
+            show_environment_stats=False,
+        )
+    )
+
+    assert "首反馈: 0.1s" in rendered
+    assert "首包: 0.6s" in rendered
+    assert "首字: 0.8s" in rendered
+
+
 @pytest.mark.asyncio
 async def test_fullscreen_cli_tool_end_includes_tool_output() -> None:
     cli = FakeCLI()
@@ -174,6 +202,31 @@ async def test_fullscreen_cli_tool_end_includes_tool_output() -> None:
     assert "-old" in text
     assert "+new" in text
     assert "tool output · file_edit" in text
+
+
+@pytest.mark.asyncio
+async def test_fullscreen_cli_records_latency_metrics() -> None:
+    cli = FakeCLI()
+    handler = _cli_event_factory(cli)
+
+    await handler("turn_start", {"turn": 1, "model": "test-model"})
+    await handler(
+        "latency_metric",
+        {"metric": "first_progress", "label": "首反馈", "duration_ms": 90},
+    )
+    await handler(
+        "latency_metric",
+        {"metric": "first_model_chunk", "label": "模型首包", "duration_ms": 320},
+    )
+    await handler(
+        "latency_metric",
+        {"metric": "first_token", "label": "端到端首字", "duration_ms": 640},
+    )
+
+    assert handler._get_first_feedback() == pytest.approx(0.09)
+    assert handler._get_first_model_chunk() == pytest.approx(0.32)
+    assert handler._get_ttft() == pytest.approx(0.64)
+    assert cli.activity_status == "端到端首字: 640ms"
 
 
 def test_tool_output_highlights_fenced_code() -> None:
