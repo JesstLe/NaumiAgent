@@ -61,6 +61,9 @@ public struct WorktreesView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        if !appState.hasValidWorkspaceForWorktrees {
+                            workspaceUnavailableBanner
+                        }
                         summaryStrip(presentation: presentation)
                         worktreeTable(presentation: presentation)
                         operationsGrid(presentation: presentation)
@@ -164,6 +167,26 @@ public struct WorktreesView: View {
         await daemonController.refreshContextSnapshots(limit: 50)
     }
 
+    private var workspaceUnavailableBanner: some View {
+        let locale = appState.locale
+        return VStack(alignment: .leading, spacing: 6) {
+            Label(
+                AppStrings.WorktreeValidation.missingWorkspaceTitle(locale),
+                systemImage: "exclamationmark.triangle"
+            )
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.orange)
+            Text(AppStrings.WorktreeValidation.missingWorkspaceMessage(locale))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.orange.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
     private func selectSnapshot(_ snapshot: ContextSnapshotPresentation) {
         selectedSnapshotID = snapshot.id
         guard !appState.isPreviewFixture,
@@ -189,7 +212,7 @@ public struct WorktreesView: View {
     }
 
     private func keepWorktree(_ worktree: WorktreeManagementRow) {
-        guard worktree.canKeep, !isKeepingWorktree else { return }
+        guard worktree.canKeep, !isKeepingWorktree, appState.hasValidWorkspaceForWorktrees else { return }
         isKeepingWorktree = true
         Task {
             await daemonController.keepWorktree(
@@ -203,12 +226,12 @@ public struct WorktreesView: View {
     }
 
     private func removeWorktree(_ worktree: WorktreeManagementRow) {
-        guard worktree.canRemoveSafely, !isRemovingWorktree else { return }
+        guard worktree.canRemoveSafely, !isRemovingWorktree, appState.hasValidWorkspaceForWorktrees else { return }
         removeWorktree(worktree, discardChanges: false)
     }
 
     private func forceRemoveWorktree(_ worktree: WorktreeManagementRow) {
-        guard worktree.canForceRemove, !isRemovingWorktree else { return }
+        guard worktree.canForceRemove, !isRemovingWorktree, appState.hasValidWorkspaceForWorktrees else { return }
         forceRemoveCandidate = nil
         removeWorktree(worktree, discardChanges: true)
     }

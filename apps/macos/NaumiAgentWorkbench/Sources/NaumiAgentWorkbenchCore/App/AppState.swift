@@ -45,6 +45,21 @@ public final class AppState: Sendable {
     public var supervisedDaemonStatus: SupervisedDaemonStatus? = nil
     public var supervisedDaemonFailureMessage: String? = nil
 
+    // MARK: - Workspace registry
+    public var workspaceRegistry: WorkspaceRegistry = .empty
+
+    /// Whether the active daemon workspace is usable for worktree operations.
+    /// Requires a connected daemon reporting a non-empty workspace root, except
+    /// in preview-fixture mode where the root is illustrative. The daemon is
+    /// authoritative about whether its workspace path is real.
+    public var hasValidWorkspaceForWorktrees: Bool {
+        if isPreviewFixture { return true }
+        guard let root = daemonStatus?.workspaceRoot, !root.isEmpty else {
+            return false
+        }
+        return true
+    }
+
     public var sessions: [SessionDTO] = []
     public var chatMessages: [ChatMessageDTO] = []
     public var snapshot: WorkbenchSnapshotDTO? = nil

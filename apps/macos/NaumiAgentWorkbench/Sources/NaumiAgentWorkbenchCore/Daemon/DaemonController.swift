@@ -14,6 +14,7 @@ public final class DaemonController: Sendable {
     public let appState: AppState
     public let apiProvider: WorkbenchAPIProviding
     public let eventProvider: (any WorkbenchEventProviding)?
+    public let workspaceRegistryStore: WorkspaceRegistryStore?
     private var eventStreamTask: Task<Void, Never>?
     private var activeEventStream: (any WorkbenchEventStreaming)?
 
@@ -25,11 +26,13 @@ public final class DaemonController: Sendable {
     public init(
         appState: AppState,
         apiProvider: WorkbenchAPIProviding,
-        eventProvider: (any WorkbenchEventProviding)? = nil
+        eventProvider: (any WorkbenchEventProviding)? = nil,
+        workspaceRegistryStore: WorkspaceRegistryStore? = nil
     ) {
         self.appState = appState
         self.apiProvider = apiProvider
         self.eventProvider = eventProvider
+        self.workspaceRegistryStore = workspaceRegistryStore
     }
 
     private static func nowISO8601() -> String {
@@ -399,6 +402,35 @@ public final class DaemonController: Sendable {
         } else if !status.workspaceRoot.isEmpty {
             appState.selectedWorkspace = status.workspaceRoot
         }
+        if !status.workspaceRoot.isEmpty {
+            upsertWorkspaceRegistry(
+                root: status.workspaceRoot,
+                name: status.workspaceName
+            )
+        }
+    }
+
+    /// Records the current daemon workspace into the registry and persists it.
+    private func upsertWorkspaceRegistry(root: String, name: String) {
+        let protocolVersion = appState.capabilities?.protocolVersion
+        let updated = appState.workspaceRegistry.upserting(
+            root: root,
+            name: name,
+            lastEndpoint: nil,
+            protocolVersion: protocolVersion
+        )
+        applyWorkspaceRegistry(updated)
+    }
+
+    /// Records the selected session as recently-used for the active workspace.
+    private func recordSelectedSessionInRegistry(_ sessionID: String) {
+        let updated = appState.workspaceRegistry.recordingSession(sessionID)
+        applyWorkspaceRegistry(updated)
+    }
+
+    private func applyWorkspaceRegistry(_ registry: WorkspaceRegistry) {
+        appState.workspaceRegistry = registry
+        try? workspaceRegistryStore?.save(registry)
     }
 
     private func clearDaemonMetadata() {
@@ -1643,6 +1675,7 @@ public final class DaemonController: Sendable {
         appState.selectedSessionID = sessionID
         clearSessionScopedState()
         appState.lastError = nil
+        recordSelectedSessionInRegistry(sessionID)
 
         await refreshSnapshot()
 

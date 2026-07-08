@@ -19,12 +19,16 @@ public final class AppEnvironment: Sendable {
         apiClient: WorkbenchAPIClient? = nil,
         eventClient: WorkbenchEventClient? = nil,
         connectionSettingsStore: WorkbenchConnectionSettingsStore = .default,
+        workspaceRegistryStore: WorkspaceRegistryStore = .default,
         daemonProcessController: DaemonProcessController? = nil
     ) {
         self.appState = appState
         self.connectionSettingsStore = connectionSettingsStore
         let settings = connectionSettingsStore.load()
         self.connectionSettings = settings
+
+        // Load the persisted workspace registry into observable state.
+        appState.workspaceRegistry = workspaceRegistryStore.load()
 
         let resolvedBaseURL = settings.baseURL
             ?? URL(string: WorkbenchConnectionSettings.defaultBaseURLString)!
@@ -42,7 +46,8 @@ public final class AppEnvironment: Sendable {
         self.daemonController = DaemonController(
             appState: appState,
             apiProvider: resolvedClient,
-            eventProvider: self.eventClient
+            eventProvider: self.eventClient,
+            workspaceRegistryStore: workspaceRegistryStore
         )
         self.refreshCoordinator = WorkbenchRefreshCoordinator(
             daemonController: daemonController

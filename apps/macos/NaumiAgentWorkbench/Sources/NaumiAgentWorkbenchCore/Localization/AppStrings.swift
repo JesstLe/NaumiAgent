@@ -471,6 +471,58 @@ public enum AppStrings {
         }
     }
 
+    // MARK: - Workspace Switcher
+    public enum WorkspaceSwitcher {
+        public static func workspaceLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "工作区" : "Workspace"
+        }
+
+        public static func sessionLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "会话" : "Session"
+        }
+
+        public static func noWorkspace(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "无工作区" : "No Workspace"
+        }
+
+        public static func noSession(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "未选择会话" : "No Session"
+        }
+
+        public static func recentSessionsTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "最近会话" : "Recent Sessions"
+        }
+
+        public static func knownWorkspacesTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "已知工作区" : "Known Workspaces"
+        }
+
+        public static func noRecentSessions(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无最近会话" : "No recent sessions"
+        }
+
+        public static func noKnownWorkspaces(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无已知工作区" : "No known workspaces"
+        }
+
+        public static func activeSessionTitle(_ locale: AppLocale, _ title: String) -> String {
+            locale == .zhCN ? "当前会话：\(title)" : "Active session: \(title)"
+        }
+    }
+
+    // MARK: - Worktree Validation
+    public enum WorktreeValidation {
+        public static func missingWorkspaceTitle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "工作区不可用" : "Workspace Unavailable"
+        }
+
+        public static func missingWorkspaceMessage(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "未找到有效的工作区路径，无法执行工作区操作。请先连接到本地服务。"
+                : "No valid workspace path is available, so worktree operations are blocked. Connect to the local daemon first."
+        }
+    }
+
     // MARK: - Dashboard
     public enum Dashboard {
         public static func title(_ locale: AppLocale) -> String {
