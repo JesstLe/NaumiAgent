@@ -274,6 +274,151 @@ struct DashboardSnapshotPresentationTests {
         #expect(presentation.agentRows.map(\.id) == ["agent-1", "agent-2", "agent-3", "agent-4", "agent-5"])
     }
 
+    @Test func agentStatusBusyWhenHeartbeatFreshAndLeasePresent() throws {
+        let formatter = ISO8601DateFormatter()
+        let heartbeat = formatter.string(from: Date())
+        let lease = LeaseDTO(
+            id: "lease-1",
+            sessionID: "s",
+            taskID: "task-1",
+            agentID: "agent-a",
+            state: "active",
+            expiresAt: "2026-12-31T23:59:59",
+            worktreeName: "wt1",
+            createdAt: "",
+            updatedAt: ""
+        )
+        let profile = AgentProfileDTO(
+            id: "agent-a",
+            sessionID: "s",
+            name: "Agent A",
+            role: "coder",
+            capabilities: ["code"],
+            permissions: ["write"],
+            maxParallelTasks: 1,
+            status: "idle",
+            lastHeartbeatAt: heartbeat,
+            currentLease: lease,
+            createdAt: "",
+            updatedAt: ""
+        )
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "s",
+            missions: [],
+            agentProfiles: [profile],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+
+        let presentation = DashboardSnapshotPresentation(snapshot: snapshot)
+        let row = try #require(presentation.agentRows.first)
+        #expect(row.status == "busy")
+        #expect(row.permissions == ["write"])
+        #expect(row.currentLease?.leaseID == "lease-1")
+    }
+
+    @Test func agentStatusIdleWhenHeartbeatFreshAndNoLease() throws {
+        let formatter = ISO8601DateFormatter()
+        let heartbeat = formatter.string(from: Date())
+        let profile = AgentProfileDTO(
+            id: "agent-a",
+            sessionID: "s",
+            name: "Agent A",
+            role: "coder",
+            capabilities: ["code"],
+            permissions: [],
+            maxParallelTasks: 1,
+            status: "busy",
+            lastHeartbeatAt: heartbeat,
+            createdAt: "",
+            updatedAt: ""
+        )
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "s",
+            missions: [],
+            agentProfiles: [profile],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+
+        let presentation = DashboardSnapshotPresentation(snapshot: snapshot)
+        let row = try #require(presentation.agentRows.first)
+        #expect(row.status == "idle")
+        #expect(row.currentLease == nil)
+    }
+
+    @Test func agentStatusStaleWhenHeartbeatOld() throws {
+        let formatter = ISO8601DateFormatter()
+        let staleHeartbeat = formatter.string(from: Date().addingTimeInterval(-400))
+        let profile = AgentProfileDTO(
+            id: "agent-a",
+            sessionID: "s",
+            name: "Agent A",
+            role: "coder",
+            capabilities: ["code"],
+            permissions: [],
+            maxParallelTasks: 1,
+            status: "busy",
+            lastHeartbeatAt: staleHeartbeat,
+            createdAt: "",
+            updatedAt: ""
+        )
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "s",
+            missions: [],
+            agentProfiles: [profile],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+
+        let presentation = DashboardSnapshotPresentation(
+            snapshot: snapshot,
+            thresholds: AgentHeartbeatThresholds(staleSeconds: 300, offlineSeconds: 900)
+        )
+        let row = try #require(presentation.agentRows.first)
+        #expect(row.status == "stale")
+    }
+
+    @Test func agentStatusOfflineWhenHeartbeatVeryOld() throws {
+        let formatter = ISO8601DateFormatter()
+        let offlineHeartbeat = formatter.string(from: Date().addingTimeInterval(-1000))
+        let profile = AgentProfileDTO(
+            id: "agent-a",
+            sessionID: "s",
+            name: "Agent A",
+            role: "coder",
+            capabilities: ["code"],
+            permissions: [],
+            maxParallelTasks: 1,
+            status: "busy",
+            lastHeartbeatAt: offlineHeartbeat,
+            createdAt: "",
+            updatedAt: ""
+        )
+        let snapshot = WorkbenchSnapshotDTO(
+            sessionID: "s",
+            missions: [],
+            agentProfiles: [profile],
+            tasks: [],
+            issues: [],
+            failures: [],
+            events: []
+        )
+
+        let presentation = DashboardSnapshotPresentation(
+            snapshot: snapshot,
+            thresholds: AgentHeartbeatThresholds(staleSeconds: 300, offlineSeconds: 900)
+        )
+        let row = try #require(presentation.agentRows.first)
+        #expect(row.status == "offline")
+    }
+
     // MARK: - Minimal real-mode fixture (no fake fillers)
 
     @Test func minimalSnapshotDecodesAndSurfacesOnlyTheMission() throws {

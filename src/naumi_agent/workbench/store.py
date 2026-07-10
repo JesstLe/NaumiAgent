@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS workbench_agent_profiles (
     permissions TEXT NOT NULL,
     max_parallel_tasks INTEGER NOT NULL,
     status TEXT NOT NULL,
+    last_heartbeat_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (session_id, id)
@@ -248,6 +249,12 @@ class WorkbenchStore:
         )
         await self._ensure_column(
             db, "workbench_intent_locks", "updated_at", "TEXT NOT NULL DEFAULT ''"
+        )
+        await self._ensure_column(
+            db,
+            "workbench_agent_profiles",
+            "last_heartbeat_at",
+            "TEXT NOT NULL DEFAULT ''",
         )
 
     async def _ensure_column(
@@ -567,6 +574,41 @@ class WorkbenchStore:
             )
             rows = await cursor.fetchall()
         return [_row_to_agent_profile(dict(row)) for row in rows]
+
+    async def record_agent_heartbeat(
+        self, session_id: str, agent_id: str
+    ) -> AgentProfile | None:
+        """Records a heartbeat for an agent and returns the updated profile."""
+        profile = await self.get_agent_profile(session_id, agent_id)
+        if profile is None:
+            return None
+        now = now_iso()
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                """UPDATE workbench_agent_profiles
+                   SET last_heartbeat_at = ?, updated_at = ?
+                   WHERE session_id = ? AND id = ?""",
+                (now, now, session_id, agent_id),
+            )
+            await db.commit()
+        return await self.get_agent_profile(session_id, agent_id)
+
+    async def get_agent_active_lease(
+        self, session_id: str, agent_id: str
+    ) -> Lease | None:
+        """Returns the newest active lease for the given agent, if any."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_leases
+                   WHERE session_id = ? AND agent_id = ? AND state = ?
+                   ORDER BY updated_at DESC, created_at DESC LIMIT 1""",
+                (session_id, agent_id, LeaseState.ACTIVE.value),
+            )
+            row = await cursor.fetchone()
+        return _row_to_lease(dict(row)) if row else None
 
     async def add_decision(
         self,
@@ -1563,6 +1605,7 @@ def _row_to_agent_profile(row: dict[str, Any]) -> AgentProfile:
         permissions=cast(list[str], json.loads(row["permissions"])),
         max_parallel_tasks=row["max_parallel_tasks"],
         status=row["status"],
+        last_heartbeat_at=row.get("last_heartbeat_at", ""),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

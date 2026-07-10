@@ -786,6 +786,38 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         )
     }
 
+    public func recordAgentHeartbeat(sessionID: String, agentID: String) async throws(APIError) -> AgentProfileDTO {
+        let body = RecordAgentHeartbeatRequest()
+        let path = try routePath(
+            named: "heartbeat_agent",
+            replacements: [
+                "session_id": sessionID,
+                "agent_id": agentID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "agents", agentID, "heartbeat")
+        )
+        return try await post(
+            path: path,
+            body: body
+        )
+    }
+
+    public func recordAgentHeartbeatWithSnapshot(sessionID: String, agentID: String) async throws(APIError) -> AgentProfileSnapshotDTO {
+        let body = RecordAgentHeartbeatRequest()
+        let path = try routePath(
+            named: "heartbeat_agent",
+            replacements: [
+                "session_id": sessionID,
+                "agent_id": agentID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "agents", agentID, "heartbeat")
+        )
+        return try await post(
+            path: path + "?include_snapshot=true",
+            body: body
+        )
+    }
+
     public func claimIssue(
         sessionID: String,
         taskID: String,
@@ -1666,6 +1698,9 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         let status: String
         let actor: String
     }
+
+    /// Empty payload for `POST /workbench/sessions/{session_id}/agents/{agent_id}/heartbeat`.
+    private struct RecordAgentHeartbeatRequest: Encodable, Sendable {}
 
     /// Payload for `POST /workbench/sessions/{session_id}/validation-runs`.
     private struct RunValidationRequest: Encodable, Sendable {

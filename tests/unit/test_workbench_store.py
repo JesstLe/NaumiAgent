@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import aiosqlite
 import pytest
 
@@ -1239,4 +1241,51 @@ async def test_list_bids_for_snapshot_fetches_only_given_tasks(
     assert sorted(b.task_id for b in result) == ["t1", "t3"]
 
     assert await store.list_bids_for_snapshot("s", []) == []
+
+
+@pytest.mark.asyncio
+async def test_record_agent_heartbeat_updates_last_heartbeat_at(store: WorkbenchStore) -> None:
+    await store.upsert_agent_profile(
+        session_id="s",
+        agent_id="agent-a",
+        name="Agent A",
+        role="coder",
+    )
+    updated = await store.record_agent_heartbeat("s", "agent-a")
+    assert updated is not None
+    assert updated.last_heartbeat_at != ""
+    assert updated.id == "agent-a"
+
+
+@pytest.mark.asyncio
+async def test_record_agent_heartbeat_missing_agent_returns_none(store: WorkbenchStore) -> None:
+    assert await store.record_agent_heartbeat("s", "missing") is None
+
+
+@pytest.mark.asyncio
+async def test_get_agent_active_lease_returns_newest_active_lease(store: WorkbenchStore) -> None:
+    await store.upsert_agent_profile(
+        session_id="s",
+        agent_id="agent-a",
+        name="Agent A",
+        role="coder",
+    )
+    await store.create_lease(
+        session_id="s",
+        task_id="t1",
+        agent_id="agent-a",
+        expires_at="2026-06-27T08:00:00",
+        worktree_name="wt1",
+    )
+    await asyncio.sleep(1.1)
+    lease2 = await store.create_lease(
+        session_id="s",
+        task_id="t2",
+        agent_id="agent-a",
+        expires_at="2026-06-27T09:00:00",
+        worktree_name="wt2",
+    )
+    result = await store.get_agent_active_lease("s", "agent-a")
+    assert result is not None
+    assert result.task_id == lease2.task_id
 

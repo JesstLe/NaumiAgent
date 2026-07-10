@@ -795,6 +795,48 @@ public enum AppStrings {
             locale == .zhCN ? "并行上限" : "Parallel Limit"
         }
 
+        public static func agentStatusIdle(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "空闲" : "Idle"
+        }
+
+        public static func agentStatusBusy(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "忙碌" : "Busy"
+        }
+
+        public static func agentStatusStale(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "过期" : "Stale"
+        }
+
+        public static func agentStatusOffline(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "离线" : "Offline"
+        }
+
+        public static func lastHeartbeatLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "上次心跳" : "Last Heartbeat"
+        }
+
+        public static func currentIssueLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "当前任务" : "Current Issue"
+        }
+
+        public static func currentLeaseLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "当前租约" : "Current Lease"
+        }
+
+        public static func permissionsLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "权限" : "Permissions"
+        }
+
+        public static func noHeartbeat(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "无" : "None"
+        }
+
+        public static func permissionRiskWarning(_ locale: AppLocale) -> String {
+            locale == .zhCN
+                ? "警告：该智能体拥有高风险权限（写/删/执行/管理员）。"
+                : "Warning: this agent has high-risk permissions (write/delete/execute/admin)."
+        }
+
         public static func kindLabel(_ locale: AppLocale) -> String {
             locale == .zhCN ? "类型" : "Kind"
         }

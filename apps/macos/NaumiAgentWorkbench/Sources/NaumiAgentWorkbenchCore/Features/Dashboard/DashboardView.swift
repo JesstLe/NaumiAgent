@@ -28,12 +28,25 @@ public struct DashboardView: View {
         return ["Issues", "Agents", "Worktrees", "Validations", "Approvals", "Dependencies"]
     }
 
+    private func agentHeartbeatThresholds() -> AgentHeartbeatThresholds {
+        guard let capabilities = appState.capabilities else {
+            return .default
+        }
+        return AgentHeartbeatThresholds(
+            staleSeconds: capabilities.agentStaleThresholdSeconds,
+            offlineSeconds: capabilities.agentOfflineThresholdSeconds
+        )
+    }
+
     public var body: some View {
         Group {
             if let snapshot = appState.snapshot {
                 workbenchLayout(
                     snapshot: snapshot,
-                    presentation: DashboardSnapshotPresentation(snapshot: snapshot)
+                    presentation: DashboardSnapshotPresentation(
+                        snapshot: snapshot,
+                        thresholds: agentHeartbeatThresholds()
+                    )
                 )
             } else {
                 ScrollView {
@@ -568,13 +581,32 @@ public struct DashboardView: View {
         profile: AgentProfileDTO,
         fallback: DashboardAgentRow
     ) -> DashboardAgentRow {
-        DashboardAgentRow(
+        let derivedStatus = DashboardSnapshotPresentation.deriveActivityStatus(
+            profile: profile,
+            thresholds: agentHeartbeatThresholds()
+        )
+        return DashboardAgentRow(
             id: profile.id,
             name: profile.name.isEmpty ? fallback.name : profile.name,
             role: profile.role.isEmpty ? fallback.role : profile.role,
-            status: profile.status.isEmpty ? fallback.status : profile.status,
+            status: derivedStatus.rawValue,
             capabilityCount: profile.capabilities.count,
-            maxParallelTasks: profile.maxParallelTasks
+            maxParallelTasks: profile.maxParallelTasks,
+            permissions: profile.permissions,
+            lastHeartbeatAt: profile.lastHeartbeatAt,
+            currentIssue: profile.currentIssue.map { issue in
+                DashboardAgentCurrentIssue(
+                    taskID: issue.taskID,
+                    title: issue.task?.subject ?? issue.taskID
+                )
+            },
+            currentLease: profile.currentLease.map { lease in
+                DashboardAgentCurrentLease(
+                    leaseID: lease.id,
+                    taskID: lease.taskID,
+                    expiresAt: lease.expiresAt
+                )
+            }
         )
     }
 
@@ -697,6 +729,12 @@ public struct DashboardView: View {
 
     private func compactCanvasPill(_ agent: DashboardAgentRow, color: Color) -> some View {
         let isSelected = agent.id == selectedAgentID
+        let subtitle: String = {
+            if agent.status == AgentActivityStatus.busy.rawValue, let issue = agent.currentIssue {
+                return issue.title
+            }
+            return agent.status.isEmpty ? agent.role : agent.status
+        }()
 
         return HStack {
             Image(systemName: "person.fill")
@@ -706,7 +744,7 @@ public struct DashboardView: View {
                     .font(.caption)
                     .fontWeight(.medium)
                     .lineLimit(1)
-                Text(agent.status.isEmpty ? agent.role : agent.status)
+                Text(subtitle)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -968,6 +1006,10 @@ public struct DashboardView: View {
 
             inspectorDetail(AppStrings.Dashboard.roleLabel(appState.locale), agent.role)
             inspectorDetail(
+                AppStrings.Dashboard.permissionsLabel(appState.locale),
+                agent.permissions.isEmpty ? "-" : agent.permissions.joined(separator: ", ")
+            )
+            inspectorDetail(
                 AppStrings.Dashboard.capabilitiesLabel(appState.locale),
                 "\(agent.capabilityCount)"
             )
@@ -975,10 +1017,42 @@ public struct DashboardView: View {
                 AppStrings.Dashboard.maxParallelTasksLabel(appState.locale),
                 "\(agent.maxParallelTasks)"
             )
+            inspectorDetail(
+                AppStrings.Dashboard.lastHeartbeatLabel(appState.locale),
+                agent.lastHeartbeatAt.isEmpty
+                    ? AppStrings.Dashboard.noHeartbeat(appState.locale)
+                    : agent.lastHeartbeatAt
+            )
+
+            if let issue = agent.currentIssue {
+                inspectorDetail(
+                    AppStrings.Dashboard.currentIssueLabel(appState.locale),
+                    "\(issue.taskID): \(issue.title)"
+                )
+            }
+
+            if let lease = agent.currentLease {
+                inspectorDetail(
+                    AppStrings.Dashboard.currentLeaseLabel(appState.locale),
+                    "\(lease.leaseID) (\(lease.taskID))"
+                )
+            }
+
+            if agentHasRiskyPermission(agent) {
+                Text(AppStrings.Dashboard.permissionRiskWarning(appState.locale))
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(12)
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func agentHasRiskyPermission(_ agent: DashboardAgentRow) -> Bool {
+        let risky = Set(["write", "delete", "admin", "execute"])
+        return agent.permissions.contains { risky.contains($0.lowercased()) }
     }
 
     private func inspectorStateCard(
@@ -1408,7 +1482,10 @@ public struct DashboardView: View {
     // MARK: - Snapshot Content
 
     private func snapshotContent(snapshot: WorkbenchSnapshotDTO) -> some View {
-        let presentation = DashboardSnapshotPresentation(snapshot: snapshot)
+        let presentation = DashboardSnapshotPresentation(
+            snapshot: snapshot,
+            thresholds: agentHeartbeatThresholds()
+        )
 
         return VStack(alignment: .leading, spacing: 20) {
             if let mission = presentation.currentMission {
@@ -1761,6 +1838,10 @@ public struct DashboardView: View {
             return .red
         case "planning", "pending", "waiting":
             return .orange
+        case "stale":
+            return .orange
+        case "offline":
+            return .gray
         default:
             return .secondary
         }
