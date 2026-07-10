@@ -32,7 +32,9 @@ struct SettingsIntentLockSelectionCommandTests {
             scopeSummary: "阻塞 1 / 允许 1",
             riskLabel: "high",
             isActive: true,
-            createdAt: "2026-06-27T09:12:00"
+            createdBy: "Human",
+            createdAt: "2026-06-27T09:12:00",
+            updatedAt: "2026-06-27T09:12:00"
         )
     }
 }

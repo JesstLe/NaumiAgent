@@ -16,7 +16,13 @@ from naumi_agent import __version__
 from naumi_agent.api.deps import AuthDep, extract_api_key_from_connection
 from naumi_agent.api.schemas import SessionListResponse
 from naumi_agent.workbench.market import TaskMarket
-from naumi_agent.workbench.models import ApprovalState, DecisionKind, ParallelMode, RiskLevel
+from naumi_agent.workbench.models import (
+    ApprovalState,
+    DecisionKind,
+    DecisionStrength,
+    ParallelMode,
+    RiskLevel,
+)
 
 router = APIRouter(tags=["workbench"])
 LOCAL_DAEMON_BIND_HOST = "127.0.0.1"
@@ -50,6 +56,7 @@ WORKBENCH_SUPPORTED_ACTIONS = [
     "record_context_health",
     "upsert_agent_profile",
     "create_intent_lock",
+    "deactivate_intent_lock",
     "create_decision",
     "resolve_approval",
     "review_evidence",
@@ -123,6 +130,10 @@ WORKBENCH_ROUTE_TEMPLATES = {
     "intent_lock": (
         "/workbench/sessions/{session_id}/missions/{mission_id}"
         "/intent-locks/{lock_id}"
+    ),
+    "deactivate_intent_lock": (
+        "/workbench/sessions/{session_id}/missions/{mission_id}"
+        "/intent-locks/{lock_id}/deactivate"
     ),
     "decisions": "/workbench/sessions/{session_id}/missions/{mission_id}/decisions",
     "create_decision": (
@@ -220,6 +231,7 @@ class DecisionCreate(BaseModel):
     kind: DecisionKind = DecisionKind.ARCHITECTURE
     title: str
     content: str
+    strength: DecisionStrength = DecisionStrength.REQUIRED
 
 
 class ApprovalResolve(BaseModel):
@@ -1479,6 +1491,7 @@ async def create_decision(
             kind=body.kind,
             title=body.title,
             content=body.content,
+            strength=body.strength,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1562,6 +1575,43 @@ async def get_intent_lock(
     try:
         lock = await engine.workbench_service.get_intent_lock(
             session_id, mission_id, lock_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if lock is None:
+        raise HTTPException(status_code=404, detail="意图锁不存在")
+    return lock
+
+
+@router.post(
+    "/workbench/sessions/{session_id}/missions/{mission_id}/intent-locks/{lock_id}/deactivate"
+)
+async def deactivate_intent_lock(
+    session_id: str,
+    mission_id: str,
+    lock_id: str,
+    request: Request,
+    actor: str = "Human",
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    try:
+        session = await engine.session_store.load(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        session_loaded = await engine.load_session(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session_loaded:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        lock = await engine.workbench_service.deactivate_intent_lock(
+            session_id, mission_id, lock_id, actor
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

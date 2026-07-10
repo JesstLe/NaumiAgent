@@ -2413,6 +2413,50 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Deactivates an intent lock so it no longer blocks actions, then refreshes
+    /// the lock list and timeline so the governance panel reflects the change.
+    public func deactivateIntentLock(
+        missionID: String,
+        lockID: String,
+        actor: String = "Human"
+    ) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let lock = try await apiProvider.deactivateIntentLock(
+                sessionID: sessionID,
+                missionID: missionID,
+                lockID: lockID,
+                actor: actor
+            )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            // Optimistically mark the lock inactive locally before the refresh lands.
+            appState.intentLocks = appState.intentLocks.map { existing in
+                existing.id == lock.id ? lock : existing
+            }
+            var refreshError: APIError?
+            await refreshIntentLocks(missionID: missionID)
+            refreshError = refreshError ?? appState.lastError
+            await refreshEvents(limit: 50)
+            refreshError = refreshError ?? appState.lastError
+            appState.lastError = refreshError
+        } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
+        }
+    }
+
     /// Creates a decision for a mission and refreshes the decision list and
     /// timeline events on success.
     ///

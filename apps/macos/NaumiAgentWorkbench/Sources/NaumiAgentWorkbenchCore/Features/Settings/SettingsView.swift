@@ -13,6 +13,7 @@ public struct SettingsView: View {
     @State private var isRetryingHealth = false
     @State private var supervisedLogLines: [DaemonLogLine] = []
     @State private var supervisedActionInFlight = false
+    @State private var deactivatingLockID: String? = nil
 
     public init(
         appState: AppState,
@@ -197,6 +198,7 @@ public struct SettingsView: View {
                 intentLockPanel
                 decisionRecordsPanel(presentation: presentation)
                 intentLockRecordsPanel(presentation: presentation)
+                policyHitEventsPanel
             }
                 .frame(minWidth: 420, maxWidth: .infinity, alignment: .top)
 
@@ -672,23 +674,108 @@ public struct SettingsView: View {
             } else {
                 VStack(spacing: 8) {
                     ForEach(presentation.intentLocks) { row in
-                        Button {
-                            guard let command = SettingsIntentLockSelectionCommand(row: row) else {
-                                return
+                        intentLockRecordRow(row)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                guard let command = SettingsIntentLockSelectionCommand(row: row) else {
+                                    return
+                                }
+                                Task {
+                                    await daemonController.loadIntentLock(
+                                        missionID: command.missionID,
+                                        lockID: command.lockID
+                                    )
+                                }
                             }
-                            Task {
-                                await daemonController.loadIntentLock(
-                                    missionID: command.missionID,
-                                    lockID: command.lockID
-                                )
-                            }
-                        } label: {
-                            intentLockRecordRow(row)
-                        }
-                        .buttonStyle(.plain)
                     }
                 }
             }
+        }
+    }
+
+    private var policyHitEventsPanel: some View {
+        let locale = appState.locale
+        let hits = appState.timelineEvents.filter { $0.type == "policy.hit" }
+
+        return panel(title: AppStrings.Settings.policyHitHistorySection(locale)) {
+            if hits.isEmpty {
+                Text(AppStrings.Settings.policyHitEmpty(locale))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(hits, id: \.id) { event in
+                        policyHitEventRow(event)
+                    }
+                }
+            }
+        }
+    }
+
+    private func policyHitEventRow(_ event: EventDTO) -> some View {
+        let locale = appState.locale
+        let rule = stringPayload(event.payload, key: "rule")
+        let reason = stringPayload(event.payload, key: "reason")
+        let changedPaths = stringArrayPayload(event.payload, key: "changed_paths")
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .frame(width: 24, height: 24)
+                    .background(Color.red.opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(rule.isEmpty ? (locale == .zhCN ? "未知规则" : "Unknown Rule") : rule)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        Spacer()
+                        Text(event.timestamp)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 10) {
+                        Text(event.actor)
+                        Text("Lock: \(event.subjectID)")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 10) {
+                Text(AppStrings.Settings.policyHitReasonLabel(locale) + ": " + (reason.isEmpty ? "-" : reason))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(AppStrings.PolicyHit.blockedPathCountLabel(locale, count: changedPaths.count))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func stringPayload(_ payload: [String: JSONValue], key: String) -> String {
+        guard case .string(let value) = payload[key] else { return "" }
+        return value
+    }
+
+    private func stringArrayPayload(_ payload: [String: JSONValue], key: String) -> [String] {
+        guard case .array(let values) = payload[key] else { return [] }
+        return values.compactMap {
+            guard case .string(let value) = $0 else { return nil }
+            return value
         }
     }
 
@@ -754,6 +841,13 @@ public struct SettingsView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+                HStack {
+                    Text(AppStrings.Settings.decisionStrengthLabel(appState.locale) + ": " + row.strengthLabel)
+                        .font(.caption)
+                        .foregroundStyle(row.strength == "blocking" ? .red : (row.strength == "advisory" ? .secondary : .orange))
+                    Spacer()
+                }
             }
         }
         .padding(12)
@@ -767,34 +861,57 @@ public struct SettingsView: View {
     }
 
     private func intentLockRecordRow(_ row: SettingsIntentLockRow) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: row.isActive ? "lock.fill" : "lock.slash")
-                .foregroundStyle(row.isActive ? .orange : .secondary)
-                .frame(width: 24, height: 24)
-                .background((row.isActive ? Color.orange : Color.secondary).opacity(0.10))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: row.isActive ? "lock.fill" : "lock.slash")
+                    .foregroundStyle(row.isActive ? .orange : .secondary)
+                    .frame(width: 24, height: 24)
+                    .background((row.isActive ? Color.orange : Color.secondary).opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(row.rule)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                    Spacer()
-                    Text(row.riskLabel)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Color.orange.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(row.rule)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        Spacer()
+                        Text(row.riskLabel)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.orange.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
 
-                HStack(spacing: 10) {
-                    Text(row.scopeSummary)
-                    Text(row.createdAt)
+                    HStack(spacing: 10) {
+                        Text(row.scopeSummary)
+                        Text(row.createdAt)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                Text(AppStrings.Settings.intentLockCreatedByLabel(appState.locale) + ": " + row.createdBy)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if row.isActive {
+                    Button {
+                        deactivateIntentLock(row: row)
+                    } label: {
+                        if deactivatingLockID == row.id {
+                            Label(AppStrings.Settings.processingLabel(appState.locale), systemImage: "arrow.clockwise")
+                        } else {
+                            Label(AppStrings.Settings.deactivateIntentLockButton(appState.locale), systemImage: "lock.slash")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(deactivatingLockID == row.id || !appState.canPerformWrites)
+                }
             }
         }
         .padding(12)
@@ -807,6 +924,19 @@ public struct SettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
+    private func deactivateIntentLock(row: SettingsIntentLockRow) {
+        guard deactivatingLockID == nil else { return }
+        deactivatingLockID = row.id
+        Task {
+            await daemonController.deactivateIntentLock(
+                missionID: row.missionID,
+                lockID: row.id,
+                actor: "Human"
+            )
+            deactivatingLockID = nil
+        }
+    }
+
     @ViewBuilder
     private var selectedIntentLockPanel: some View {
         if let lock = appState.selectedIntentLock {
@@ -816,7 +946,17 @@ public struct SettingsView: View {
                     settingsRow(label: "Mission", value: lock.missionID)
                     settingsRow(
                         label: appState.locale == .zhCN ? "状态" : "Status",
-                        value: lock.active ? (appState.locale == .zhCN ? "生效中" : "Active") : (appState.locale == .zhCN ? "已停用" : "Inactive")
+                        value: lock.active
+                            ? AppStrings.Settings.intentLockStatusActive(appState.locale)
+                            : AppStrings.Settings.intentLockStatusInactive(appState.locale)
+                    )
+                    settingsRow(
+                        label: AppStrings.Settings.intentLockCreatedByLabel(appState.locale),
+                        value: lock.createdBy
+                    )
+                    settingsRow(
+                        label: AppStrings.Settings.intentLockUpdatedAtLabel(appState.locale),
+                        value: lock.updatedAt.isEmpty ? "-" : lock.updatedAt
                     )
                     settingsRow(label: appState.locale == .zhCN ? "需提案风险" : "Proposal Risk", value: lock.requireProposalForRisk)
                     Text(lock.rule)
@@ -824,6 +964,31 @@ public struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     pathSummary(title: appState.locale == .zhCN ? "阻塞路径" : "Blocked Paths", values: lock.blockedPaths)
                     pathSummary(title: appState.locale == .zhCN ? "允许路径" : "Allowed Paths", values: lock.allowedPaths)
+
+                    if lock.active {
+                        HStack {
+                            Spacer()
+                            Button {
+                                let row = SettingsIntentLockRow(
+                                    id: lock.id,
+                                    missionID: lock.missionID,
+                                    rule: lock.rule,
+                                    scopeSummary: "",
+                                    riskLabel: lock.requireProposalForRisk,
+                                    isActive: lock.active,
+                                    createdBy: lock.createdBy,
+                                    createdAt: lock.createdAt,
+                                    updatedAt: lock.updatedAt
+                                )
+                                deactivateIntentLock(row: row)
+                            } label: {
+                                Label(AppStrings.Settings.deactivateIntentLockButton(appState.locale), systemImage: "lock.slash")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(deactivatingLockID == lock.id || !appState.canPerformWrites)
+                        }
+                    }
                 }
             }
         }

@@ -62,6 +62,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var createIssueWithSnapshotResult: Result<IssueSnapshotDTO, APIError>?
     var createIntentLockResult: Result<IntentLockDTO, APIError>?
     var createIntentLockWithSnapshotResult: Result<IntentLockSnapshotDTO, APIError>?
+    var deactivateIntentLockResult: Result<IntentLockDTO, APIError>?
+    var deactivateIntentLockCallCount: Int = 0
+    var deactivateIntentLockHook: (@Sendable () async -> Void)?
     var fetchIntentLocksResult: Result<IntentLocksDTO, APIError>?
     var fetchIntentLockResult: Result<IntentLockDTO, APIError>?
     var createDecisionResult: Result<DecisionDTO, APIError>?
@@ -957,6 +960,22 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
             await createIntentLockWithSnapshotHook()
         }
         guard let result = createIntentLockWithSnapshotResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func deactivateIntentLock(
+        sessionID: String,
+        missionID: String,
+        lockID: String,
+        actor: String
+    ) async throws(APIError) -> IntentLockDTO {
+        deactivateIntentLockCallCount += 1
+        if let deactivateIntentLockHook {
+            await deactivateIntentLockHook()
+        }
+        guard let result = deactivateIntentLockResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -7835,6 +7854,75 @@ final class DaemonControllerTests {
         expectSelectedDetailsEmpty(appState)
     }
 
+    @Test @MainActor func deactivateIntentLockSuccessUpdatesLocalStateAndRefreshesLists() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let activeLock = makeIntentLock(id: "lock-001", missionID: "mission-001")
+        let inactiveLock = IntentLockDTO(
+            id: "lock-001",
+            sessionID: "sess-001",
+            missionID: "mission-001",
+            rule: "禁止修改 core 模块",
+            blockedPaths: ["src/core"],
+            allowedPaths: ["src/core/README.md"],
+            requireProposalForRisk: "high",
+            active: false,
+            createdAt: "2026-06-27T06:00:00"
+        )
+        appState.intentLocks = [activeLock]
+
+        let api = FakeWorkbenchAPIProvider()
+        let refreshedLocks = IntentLocksDTO(intentLocks: [inactiveLock], missionID: "mission-001")
+        let event = makeEvent(id: "evt-001", type: "intent_lock.deactivated", subjectID: "lock-001")
+        let events = WorkbenchEventsDTO(events: [event], limit: 50)
+
+        await api.setDeactivateIntentLockResult(.success(inactiveLock))
+        await api.setFetchIntentLocksResult(.success(refreshedLocks))
+        await api.setEventsResult(.success(events))
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.deactivateIntentLock(missionID: "mission-001", lockID: "lock-001", actor: "Human")
+
+        #expect(appState.intentLocks == [inactiveLock])
+        #expect(appState.timelineEvents == [event])
+        #expect(appState.lastError == nil)
+        #expect(await api.deactivateIntentLockCallCount == 1)
+    }
+
+    @Test @MainActor func deactivateIntentLockIgnoresResultAfterSelectedSessionChanges() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+
+        let activeLock = makeIntentLock(id: "lock-001", missionID: "mission-001")
+        appState.intentLocks = [activeLock]
+
+        let api = FakeWorkbenchAPIProvider()
+        let inactiveLock = IntentLockDTO(
+            id: "lock-001",
+            sessionID: "sess-001",
+            missionID: "mission-001",
+            rule: "禁止修改 core 模块",
+            blockedPaths: ["src/core"],
+            allowedPaths: ["src/core/README.md"],
+            requireProposalForRisk: "high",
+            active: false,
+            createdAt: "2026-06-27T06:00:00"
+        )
+        await api.setDeactivateIntentLockResult(.success(inactiveLock))
+        await api.setDeactivateIntentLockHook {
+            await MainActor.run {
+                appState.selectedSessionID = "sess-other"
+            }
+        }
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.deactivateIntentLock(missionID: "mission-001", lockID: "lock-001", actor: "Human")
+
+        #expect(appState.selectedSessionID == "sess-other")
+        #expect(appState.intentLocks == [activeLock])
+    }
+
     @Test @MainActor func createDecisionSuccessUsesIncludedSnapshotAndRefreshesLists() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -10669,6 +10757,14 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setFetchIntentLockHook(_ hook: (@Sendable () async -> Void)?) {
         fetchIntentLockHook = hook
+    }
+
+    fileprivate func setDeactivateIntentLockResult(_ result: Result<IntentLockDTO, APIError>) {
+        deactivateIntentLockResult = result
+    }
+
+    fileprivate func setDeactivateIntentLockHook(_ hook: (@Sendable () async -> Void)?) {
+        deactivateIntentLockHook = hook
     }
 
     fileprivate func setCreateDecisionResult(_ result: Result<DecisionDTO, APIError>) {
