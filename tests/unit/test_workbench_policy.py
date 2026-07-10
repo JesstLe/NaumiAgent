@@ -47,3 +47,36 @@ def test_high_risk_requires_proposal_even_without_path_match() -> None:
     assert not decision.allowed
     assert decision.requires_proposal
     assert "高风险任务先提交 proposal" in decision.reason
+
+
+def test_deactivated_intent_lock_no_longer_blocks_actions() -> None:
+    """A deactivated lock must not block — the user can turn off governance."""
+    decision = evaluate_intent_locks(
+        mission_id="m1",
+        changed_paths=["src/secret/api_keys.py"],
+        risk_level=RiskLevel.CRITICAL,
+        intent_locks=[
+            IntentLock(
+                id="lock-inactive",
+                session_id="s",
+                mission_id="m1",
+                rule="禁止修改密钥目录",
+                blocked_paths=["src/secret/"],
+                require_proposal_for_risk=RiskLevel.HIGH,
+                active=False,
+            )
+        ],
+    )
+
+    assert decision.allowed
+    assert not decision.requires_proposal
+
+
+def test_decision_strength_values_are_distinct() -> None:
+    from naumi_agent.workbench.models import DecisionStrength
+
+    assert DecisionStrength.ADVISORY.value == "advisory"
+    assert DecisionStrength.REQUIRED.value == "required"
+    assert DecisionStrength.BLOCKING.value == "blocking"
+    strengths = {DecisionStrength.ADVISORY, DecisionStrength.REQUIRED, DecisionStrength.BLOCKING}
+    assert len(strengths) == 3

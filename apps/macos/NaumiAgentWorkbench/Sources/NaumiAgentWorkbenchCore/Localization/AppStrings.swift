@@ -1506,6 +1506,50 @@ public enum AppStrings {
             locale == .zhCN ? "创建意图锁" : "Create Intent Lock"
         }
 
+        public static func deactivateIntentLockButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "停用意图锁" : "Deactivate Intent Lock"
+        }
+
+        public static func intentLockCreatedByLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "创建者" : "Created By"
+        }
+
+        public static func intentLockUpdatedAtLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "更新时间" : "Updated At"
+        }
+
+        public static func intentLockStatusActive(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "生效中" : "Active"
+        }
+
+        public static func intentLockStatusInactive(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "已停用" : "Inactive"
+        }
+
+        public static func decisionStrengthLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "决策强度" : "Decision Strength"
+        }
+
+        public static func policyHitHistorySection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "策略命中记录" : "Policy Hit History"
+        }
+
+        public static func policyHitEmpty(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无策略命中记录" : "No policy hits yet"
+        }
+
+        public static func policyHitReasonLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "命中原因" : "Reason"
+        }
+
+        public static func policyHitChangedPathsLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "受影响路径" : "Changed Paths"
+        }
+
+        public static func policyHitBlockedActionLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "被阻塞动作" : "Blocked Action"
+        }
+
         public static func processingLabel(_ locale: AppLocale) -> String {
             locale == .zhCN ? "处理中…" : "Processing…"
         }
@@ -1527,6 +1571,42 @@ public enum AppStrings {
 
         public static func critical(_ locale: AppLocale) -> String {
             locale == .zhCN ? "严重" : "Critical"
+        }
+    }
+
+    // MARK: - Decision Strength
+    public enum DecisionStrength {
+        public static func advisory(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "建议" : "Advisory"
+        }
+
+        public static func required(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "必须遵守" : "Required"
+        }
+
+        public static func blocking(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "阻断" : "Blocking"
+        }
+
+        public static func label(_ locale: AppLocale, for strength: String) -> String {
+            switch strength.lowercased() {
+            case "blocking":
+                return blocking(locale)
+            case "advisory":
+                return advisory(locale)
+            default:
+                return required(locale)
+            }
+        }
+    }
+
+    // MARK: - Policy Hit
+    public enum PolicyHit {
+        public static func blockedPathCountLabel(_ locale: AppLocale, count: Int) -> String {
+            if locale == .zhCN {
+                return count == 1 ? "\(count) 条路径" : "\(count) 条路径"
+            }
+            return count == 1 ? "\(count) path" : "\(count) paths"
         }
     }
 }

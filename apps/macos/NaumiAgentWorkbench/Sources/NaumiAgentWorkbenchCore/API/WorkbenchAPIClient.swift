@@ -1182,6 +1182,31 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         )
     }
 
+    public func deactivateIntentLock(
+        sessionID: String,
+        missionID: String,
+        lockID: String,
+        actor: String
+    ) async throws(APIError) -> IntentLockDTO {
+        struct EmptyRequest: Encodable {}
+        let path = try routePath(
+            named: "deactivate_intent_lock",
+            replacements: [
+                "session_id": sessionID,
+                "mission_id": missionID,
+                "lock_id": lockID,
+            ],
+            fallback: encodePath(
+                "workbench", "sessions", sessionID,
+                "missions", missionID, "intent-locks", lockID, "deactivate"
+            )
+        )
+        let encodedActor = actor.addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        ) ?? actor
+        return try await post(path: "\(path)?actor=\(encodedActor)", body: EmptyRequest())
+    }
+
     public func fetchDecisions(
         sessionID: String,
         missionID: String,

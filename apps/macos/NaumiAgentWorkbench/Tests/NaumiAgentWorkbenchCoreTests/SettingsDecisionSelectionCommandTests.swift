@@ -31,6 +31,8 @@ struct SettingsDecisionSelectionCommandTests {
             kind: "architecture",
             title: "采用本地 daemon 桥接",
             actor: "Planner-Agent",
+            strength: "required",
+            strengthLabel: "必须遵守",
             createdAt: "2026-06-27T09:18:00"
         )
     }

@@ -378,6 +378,14 @@ public protocol WorkbenchAPIProviding: Sendable {
         requireProposalForRisk: String
     ) async throws(APIError) -> IntentLockSnapshotDTO
 
+    /// Deactivates an intent lock so it no longer blocks actions.
+    func deactivateIntentLock(
+        sessionID: String,
+        missionID: String,
+        lockID: String,
+        actor: String
+    ) async throws(APIError) -> IntentLockDTO
+
     /// Fetches decisions for the given session and mission.
     func fetchDecisions(
         sessionID: String,

@@ -18,6 +18,7 @@ from naumi_agent.workbench.models import (
     ApprovalState,
     Decision,
     DecisionKind,
+    DecisionStrength,
     IntentLock,
     IssueBid,
     IssueMetadata,
@@ -85,6 +86,7 @@ class WorkbenchService:
             blocked_paths=cleaned_blocked,
             allowed_paths=cleaned_allowed,
             require_proposal_for_risk=require_proposal_for_risk,
+            created_by=actor,
         )
         await self._workbench_store.append_event(
             session_id=session_id,
@@ -98,6 +100,59 @@ class WorkbenchService:
             },
         )
         return self._intent_lock_to_dict(lock)
+
+    async def deactivate_intent_lock(
+        self, session_id: str, mission_id: str, lock_id: str, actor: str
+    ) -> dict[str, Any] | None:
+        """Deactivates an intent lock and records an audit event.
+
+        A deactivated lock no longer blocks actions (the policy evaluator skips
+        inactive locks). Returns ``None`` when the lock does not exist.
+        """
+        existing = await self._workbench_store.get_intent_lock(
+            session_id, mission_id, lock_id
+        )
+        if existing is None:
+            return None
+        lock = await self._workbench_store.deactivate_intent_lock(session_id, lock_id)
+        if lock is None:
+            return None
+        await self._workbench_store.append_event(
+            session_id=session_id,
+            type="intent_lock.deactivated",
+            actor=actor,
+            subject_id=lock.id,
+            payload={
+                "mission_id": mission_id,
+                "rule": lock.rule,
+            },
+        )
+        return self._intent_lock_to_dict(lock)
+
+    async def record_policy_hit(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        lock_id: str,
+        rule: str,
+        reason: str,
+        actor: str,
+        changed_paths: list[str],
+    ) -> None:
+        """Records a policy-hit audit event when an intent lock blocks an action."""
+        await self._workbench_store.append_event(
+            session_id=session_id,
+            type="policy.hit",
+            actor=actor,
+            subject_id=lock_id,
+            payload={
+                "mission_id": mission_id,
+                "rule": rule,
+                "reason": reason,
+                "changed_paths": list(changed_paths),
+            },
+        )
 
     @staticmethod
     def _intent_lock_to_dict(lock: IntentLock) -> dict[str, Any]:
@@ -135,6 +190,7 @@ class WorkbenchService:
         kind: DecisionKind,
         title: str,
         content: str,
+        strength: DecisionStrength = DecisionStrength.REQUIRED,
     ) -> dict[str, Any]:
         if not title or not title.strip():
             raise ValueError("决策标题不能为空")
@@ -148,6 +204,7 @@ class WorkbenchService:
             title=title.strip(),
             content=content.strip(),
             actor=actor.strip(),
+            strength=strength,
         )
         await self._workbench_store.append_event(
             session_id=session_id,
@@ -166,6 +223,7 @@ class WorkbenchService:
     def _decision_to_dict(decision: Decision) -> dict[str, Any]:
         data = asdict(decision)
         data["kind"] = data["kind"].value
+        data["strength"] = data["strength"].value
         return data
 
     async def list_decisions(

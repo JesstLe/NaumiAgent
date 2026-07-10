@@ -48,6 +48,19 @@ class DecisionKind(StrEnum):
     EXPERIMENT = "experiment"
 
 
+class DecisionStrength(StrEnum):
+    """How strongly a decision constrains downstream agent actions.
+
+    ADVISORY: a note/guideline agents should consider but may override.
+    REQUIRED: agents must comply; violating it blocks the action pending review.
+    BLOCKING: hard stop — the action cannot proceed until the decision is revised.
+    """
+
+    ADVISORY = "advisory"
+    REQUIRED = "required"
+    BLOCKING = "blocking"
+
+
 class FailureKind(StrEnum):
     LEASE_EXPIRED = "lease_expired"
     AGENT_TIMEOUT = "agent_timeout"
@@ -155,7 +168,9 @@ class IntentLock:
     allowed_paths: list[str] = field(default_factory=list)
     require_proposal_for_risk: RiskLevel = RiskLevel.HIGH
     active: bool = True
+    created_by: str = "Human"
     created_at: str = field(default_factory=now_iso)
+    updated_at: str = field(default_factory=now_iso)
 
 
 @dataclass
@@ -167,6 +182,7 @@ class Decision:
     title: str
     content: str
     actor: str
+    strength: DecisionStrength = DecisionStrength.REQUIRED
     created_at: str = field(default_factory=now_iso)
 
 

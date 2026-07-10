@@ -37,6 +37,7 @@ from naumi_agent.api.routes.workbench import (
     create_workbench_bid,
     create_workbench_mission,
     create_workbench_session,
+    deactivate_intent_lock,
     delete_worktree,
     expire_workbench_leases,
     get_agent_profile,
@@ -83,6 +84,7 @@ from naumi_agent.workbench.models import (
     ApprovalState,
     ContextHealth,
     DecisionKind,
+    DecisionStrength,
     Lease,
     LeaseState,
     Mission,
@@ -151,6 +153,8 @@ class _FakeWorkbenchService:
         self.registered_agent_profiles: list[dict] = []
         self.created_intent_locks: list[dict] = []
         self.created_decisions: list[dict] = []
+        self.deactivated_intent_locks: list[dict] = []
+        self.recorded_policy_hits: list[dict] = []
         self.recorded_context_health: list[dict] = []
         self.resolved_approvals: list[dict] = []
         self.run_validations: list[dict] = []
@@ -576,6 +580,7 @@ class _FakeWorkbenchService:
         kind: DecisionKind,
         title: str,
         content: str,
+        strength: DecisionStrength = DecisionStrength.REQUIRED,
     ):
         self.created_decisions.append(
             {
@@ -585,6 +590,7 @@ class _FakeWorkbenchService:
                 "kind": kind,
                 "title": title,
                 "content": content,
+                "strength": strength,
             }
         )
         if self._decision_error is not None:
@@ -597,8 +603,54 @@ class _FakeWorkbenchService:
             "title": title,
             "content": content,
             "actor": actor,
+            "strength": strength.value,
             "created_at": "2024-01-01T00:00:00",
         }
+
+    async def deactivate_intent_lock(
+        self, session_id: str, mission_id: str, lock_id: str, actor: str
+    ):
+        self.deactivated_intent_locks.append(
+            {"session_id": session_id, "mission_id": mission_id, "lock_id": lock_id, "actor": actor}
+        )
+        if lock_id == "missing-lock":
+            return None
+        return {
+            "id": lock_id,
+            "session_id": session_id,
+            "mission_id": mission_id,
+            "rule": "rule",
+            "blocked_paths": [],
+            "allowed_paths": [],
+            "require_proposal_for_risk": "high",
+            "active": False,
+            "created_by": actor,
+            "created_at": "2026-07-09T08:00:00",
+            "updated_at": "2026-07-09T08:05:00",
+        }
+
+    async def record_policy_hit(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        lock_id: str,
+        rule: str,
+        reason: str,
+        actor: str,
+        changed_paths: list[str],
+    ):
+        self.recorded_policy_hits.append(
+            {
+                "session_id": session_id,
+                "mission_id": mission_id,
+                "lock_id": lock_id,
+                "rule": rule,
+                "reason": reason,
+                "actor": actor,
+                "changed_paths": list(changed_paths),
+            }
+        )
 
     async def resolve_approval(
         self,
@@ -5426,6 +5478,7 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
         "record_context_health",
         "upsert_agent_profile",
         "create_intent_lock",
+        "deactivate_intent_lock",
         "create_decision",
         "resolve_approval",
         "review_evidence",
@@ -5507,6 +5560,10 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
         "intent_lock": (
             "/workbench/sessions/{session_id}/missions/{mission_id}"
             "/intent-locks/{lock_id}"
+        ),
+        "deactivate_intent_lock": (
+            "/workbench/sessions/{session_id}/missions/{mission_id}"
+            "/intent-locks/{lock_id}/deactivate"
         ),
         "decisions": (
             "/workbench/sessions/{session_id}/missions/{mission_id}/decisions"
@@ -6238,6 +6295,50 @@ async def test_create_intent_lock_endpoint_returns_created_lock() -> None:
 
 
 @pytest.mark.asyncio
+async def test_deactivate_intent_lock_endpoint_marks_inactive_and_records_audit() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await deactivate_intent_lock(
+        "sess-1",
+        "mission-1",
+        "lock-1",
+        _fake_request(engine),
+        actor="Human",
+        auth="test",
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.deactivated_intent_locks == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "mission-1",
+            "lock_id": "lock-1",
+            "actor": "Human",
+        }
+    ]
+    # A deactivated lock no longer blocks actions.
+    assert response["active"] is False
+    assert response["id"] == "lock-1"
+
+
+@pytest.mark.asyncio
+async def test_deactivate_intent_lock_endpoint_404_for_missing_lock() -> None:
+    engine = _FakeEngine(exists=True)
+
+    with pytest.raises(HTTPException) as exc:
+        await deactivate_intent_lock(
+            "sess-1",
+            "mission-1",
+            "missing-lock",
+            _fake_request(engine),
+            actor="Human",
+            auth="test",
+        )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_create_intent_lock_endpoint_can_return_fresh_snapshot() -> None:
     engine = _FakeEngine(exists=True)
     body = IntentLockCreate(
@@ -6391,6 +6492,7 @@ async def test_create_decision_endpoint_returns_created_decision() -> None:
             "kind": DecisionKind.ARCHITECTURE,
             "title": "采用 FastAPI",
             "content": "使用 FastAPI 承载 Workbench API",
+            "strength": DecisionStrength.REQUIRED,
         }
     ]
     assert response["id"] == "decision-1"
@@ -6474,6 +6576,7 @@ async def test_create_decision_endpoint_uses_default_actor_and_kind() -> None:
             "kind": DecisionKind.ARCHITECTURE,
             "title": "默认治理决策",
             "content": "未显式传 actor/kind 时使用产品默认值",
+            "strength": DecisionStrength.REQUIRED,
         }
     ]
     assert response["actor"] == "Human"

@@ -66,7 +66,9 @@ public struct SettingsDashboardPresentation: Equatable {
                 scopeSummary: SettingsDashboardPresentation.scopeSummary(for: $0, locale: appState.locale),
                 riskLabel: $0.requireProposalForRisk,
                 isActive: $0.active,
-                createdAt: $0.createdAt
+                createdBy: $0.createdBy,
+                createdAt: $0.createdAt,
+                updatedAt: $0.updatedAt
             )
         }
         self.decisions = appState.decisions.map {
@@ -76,6 +78,8 @@ public struct SettingsDashboardPresentation: Equatable {
                 kind: $0.kind,
                 title: $0.title,
                 actor: $0.actor,
+                strength: $0.strength,
+                strengthLabel: $0.strengthLabel(locale: appState.locale),
                 createdAt: $0.createdAt
             )
         }
@@ -228,7 +232,9 @@ public struct SettingsIntentLockRow: Equatable, Sendable, Identifiable {
     public let scopeSummary: String
     public let riskLabel: String
     public let isActive: Bool
+    public let createdBy: String
     public let createdAt: String
+    public let updatedAt: String
 
     public init(
         id: String,
@@ -237,7 +243,9 @@ public struct SettingsIntentLockRow: Equatable, Sendable, Identifiable {
         scopeSummary: String,
         riskLabel: String,
         isActive: Bool,
-        createdAt: String
+        createdBy: String,
+        createdAt: String,
+        updatedAt: String
     ) {
         self.id = id
         self.missionID = missionID
@@ -245,7 +253,9 @@ public struct SettingsIntentLockRow: Equatable, Sendable, Identifiable {
         self.scopeSummary = scopeSummary
         self.riskLabel = riskLabel
         self.isActive = isActive
+        self.createdBy = createdBy
         self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 
@@ -255,6 +265,8 @@ public struct SettingsDecisionRow: Equatable, Sendable, Identifiable {
     public let kind: String
     public let title: String
     public let actor: String
+    public let strength: String
+    public let strengthLabel: String
     public let createdAt: String
 
     public init(
@@ -263,6 +275,8 @@ public struct SettingsDecisionRow: Equatable, Sendable, Identifiable {
         kind: String,
         title: String,
         actor: String,
+        strength: String,
+        strengthLabel: String,
         createdAt: String
     ) {
         self.id = id
@@ -270,6 +284,8 @@ public struct SettingsDecisionRow: Equatable, Sendable, Identifiable {
         self.kind = kind
         self.title = title
         self.actor = actor
+        self.strength = strength
+        self.strengthLabel = strengthLabel
         self.createdAt = createdAt
     }
 }

@@ -15,6 +15,7 @@ from naumi_agent.workbench.models import (
     ContextHealth,
     Decision,
     DecisionKind,
+    DecisionStrength,
     FailureKind,
     IntentLock,
     IssueBid,
@@ -84,6 +85,7 @@ CREATE TABLE IF NOT EXISTS workbench_decisions (
     title TEXT NOT NULL,
     content TEXT NOT NULL,
     actor TEXT NOT NULL,
+    strength TEXT NOT NULL DEFAULT 'required',
     created_at TEXT NOT NULL
 )
 """
@@ -110,7 +112,9 @@ CREATE TABLE IF NOT EXISTS workbench_intent_locks (
     allowed_paths TEXT NOT NULL,
     require_proposal_for_risk TEXT NOT NULL,
     active INTEGER NOT NULL,
-    created_at TEXT NOT NULL
+    created_by TEXT NOT NULL DEFAULT 'Human',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 )
 """
 
@@ -225,8 +229,37 @@ class WorkbenchStore:
         await db.execute(_CREATE_FAILURES)
         await db.execute(_CREATE_APPROVALS)
         await db.execute(_CREATE_BIDS)
+        await self._migrate_columns(db)
         await db.commit()
         self._initialized = True
+
+    async def _migrate_columns(self, db: aiosqlite.Connection) -> None:
+        """Idempotently adds columns introduced after the initial schema.
+
+        SQLite's ``CREATE TABLE IF NOT EXISTS`` does not add new columns to an
+        existing table, so each additive migration checks ``PRAGMA table_info``
+        before issuing a ``ADD COLUMN`` with a safe default.
+        """
+        await self._ensure_column(
+            db, "workbench_decisions", "strength", "TEXT NOT NULL DEFAULT 'required'"
+        )
+        await self._ensure_column(
+            db, "workbench_intent_locks", "created_by", "TEXT NOT NULL DEFAULT 'Human'"
+        )
+        await self._ensure_column(
+            db, "workbench_intent_locks", "updated_at", "TEXT NOT NULL DEFAULT ''"
+        )
+
+    async def _ensure_column(
+        self, db: aiosqlite.Connection, table: str, column: str, definition: str
+    ) -> None:
+        cursor = await db.execute(f"PRAGMA table_info({table})")
+        rows = await cursor.fetchall()
+        existing = {row[1] for row in rows}
+        if column not in existing:
+            await db.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+            )
 
     async def create_mission(self, session_id: str, title: str, goal: str) -> Mission:
         now = now_iso()
@@ -544,6 +577,7 @@ class WorkbenchStore:
         title: str,
         content: str,
         actor: str,
+        strength: DecisionStrength = DecisionStrength.REQUIRED,
     ) -> Decision:
         decision = Decision(
             id=uuid.uuid4().hex[:12],
@@ -553,13 +587,15 @@ class WorkbenchStore:
             title=title.strip(),
             content=content.strip(),
             actor=actor.strip(),
+            strength=strength,
         )
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
             await db.execute(
                 """INSERT INTO workbench_decisions
-                   (id, session_id, mission_id, kind, title, content, actor, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, session_id, mission_id, kind, title, content, actor,
+                    strength, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     decision.id,
                     decision.session_id,
@@ -568,6 +604,7 @@ class WorkbenchStore:
                     decision.title,
                     decision.content,
                     decision.actor,
+                    decision.strength.value,
                     decision.created_at,
                 ),
             )
@@ -707,7 +744,9 @@ class WorkbenchStore:
         allowed_paths: list[str] | None = None,
         require_proposal_for_risk: RiskLevel = RiskLevel.HIGH,
         active: bool = True,
+        created_by: str = "Human",
     ) -> IntentLock:
+        now = now_iso()
         lock = IntentLock(
             id=uuid.uuid4().hex[:12],
             session_id=session_id,
@@ -717,14 +756,17 @@ class WorkbenchStore:
             allowed_paths=list(allowed_paths or []),
             require_proposal_for_risk=require_proposal_for_risk,
             active=active,
+            created_by=created_by,
+            created_at=now,
+            updated_at=now,
         )
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
             await db.execute(
                 """INSERT INTO workbench_intent_locks
                    (id, session_id, mission_id, rule, blocked_paths, allowed_paths,
-                    require_proposal_for_risk, active, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    require_proposal_for_risk, active, created_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     lock.id,
                     lock.session_id,
@@ -734,11 +776,41 @@ class WorkbenchStore:
                     json.dumps(lock.allowed_paths, ensure_ascii=False),
                     lock.require_proposal_for_risk.value,
                     1 if lock.active else 0,
+                    lock.created_by,
                     lock.created_at,
+                    lock.updated_at,
                 ),
             )
             await db.commit()
         return lock
+
+    async def deactivate_intent_lock(
+        self, session_id: str, lock_id: str
+    ) -> IntentLock | None:
+        """Marks an intent lock inactive so it no longer blocks actions.
+
+        Returns the updated lock, or ``None`` when no matching lock exists.
+        """
+        now = now_iso()
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            cursor = await db.execute(
+                """UPDATE workbench_intent_locks
+                   SET active = 0, updated_at = ?
+                   WHERE session_id = ? AND id = ?""",
+                (now, session_id, lock_id),
+            )
+            await db.commit()
+            if cursor.rowcount == 0:
+                return None
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_intent_locks
+                   WHERE session_id = ? AND id = ?""",
+                (session_id, lock_id),
+            )
+            row = await cursor.fetchone()
+        return _row_to_intent_lock(dict(row)) if row else None
 
     async def list_intent_locks(
         self,
@@ -1505,6 +1577,7 @@ def _row_to_decision(row: dict[str, Any]) -> Decision:
         title=row["title"],
         content=row["content"],
         actor=row["actor"],
+        strength=DecisionStrength(row.get("strength") or DecisionStrength.REQUIRED.value),
         created_at=row["created_at"],
     )
 
@@ -1531,7 +1604,9 @@ def _row_to_intent_lock(row: dict[str, Any]) -> IntentLock:
         allowed_paths=cast(list[str], json.loads(row["allowed_paths"])),
         require_proposal_for_risk=RiskLevel(row["require_proposal_for_risk"]),
         active=bool(row["active"]),
+        created_by=row.get("created_by") or "Human",
         created_at=row["created_at"],
+        updated_at=row.get("updated_at") or row["created_at"],
     )
 
 
