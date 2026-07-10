@@ -120,6 +120,7 @@ class AgentProfile:
     permissions: list[str] = field(default_factory=list)
     max_parallel_tasks: int = 1
     status: str = "idle"
+    last_heartbeat_at: str = ""
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
 

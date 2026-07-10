@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timedelta
 
 import aiosqlite
 import pytest
@@ -526,6 +527,9 @@ async def test_get_agent_profile_returns_single_profile(tmp_path) -> None:
         "permissions": ["read", "write"],
         "max_parallel_tasks": 2,
         "status": "busy",
+        "last_heartbeat_at": "",
+        "current_lease": None,
+        "current_issue": None,
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
     }
@@ -2558,3 +2562,138 @@ async def test_list_decisions_is_scoped_to_session_and_mission(tmp_path) -> None
 
     decisions = await service.list_decisions("s", "mission-1")
     assert [item["title"] for item in decisions] == ["决策 A"]
+
+
+@pytest.mark.asyncio
+async def test_record_agent_heartbeat_enriches_profile(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    await service.register_agent_profile(
+        session_id="s",
+        agent_id="agent-a",
+        name="Agent A",
+        role="coder",
+        status="idle",
+    )
+    profile = await service.record_agent_heartbeat("s", "agent-a")
+    assert profile is not None
+    assert profile["last_heartbeat_at"] != ""
+    assert profile["status"] == "idle"
+    assert profile["current_lease"] is None
+    assert profile["current_issue"] is None
+
+
+@pytest.mark.asyncio
+async def test_agent_profile_enrichment_includes_current_lease_and_issue(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    mission = await service.create_mission(session_id="s", title="M", goal="goal")
+    task = await task_store.create_task("实现功能")
+    await service.attach_issue(
+        session_id="s",
+        mission_id=mission.id,
+        task_id=task.id,
+        acceptance_criteria=["通过测试"],
+    )
+    await service.register_agent_profile(
+        session_id="s",
+        agent_id="agent-a",
+        name="Agent A",
+        role="coder",
+        status="idle",
+    )
+    lease = await workbench_store.create_lease(
+        session_id="s",
+        task_id=task.id,
+        agent_id="agent-a",
+        expires_at="2026-12-31T23:59:59",
+    )
+    await service.record_agent_heartbeat("s", "agent-a")
+
+    profile = await service.get_agent_profile("s", "agent-a")
+    assert profile is not None
+    assert profile["current_lease"]["id"] == lease.id
+    assert profile["current_issue"]["task_id"] == task.id
+    assert profile["status"] == "busy"
+
+
+@pytest.mark.asyncio
+async def test_agent_status_derived_from_heartbeat_age(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    await service.register_agent_profile(
+        session_id="s",
+        agent_id="agent-a",
+        name="Agent A",
+        role="coder",
+        status="idle",
+    )
+
+    fresh = datetime.now().isoformat(timespec="seconds")
+    stale = (datetime.now() - timedelta(seconds=400)).isoformat(timespec="seconds")
+    offline = (datetime.now() - timedelta(seconds=1000)).isoformat(timespec="seconds")
+
+    for heartbeat, expected in [(fresh, "idle"), (stale, "stale"), (offline, "offline")]:
+        async with aiosqlite.connect(workbench_store._db_path) as db:
+            await db.execute(
+                "UPDATE workbench_agent_profiles SET last_heartbeat_at = ? WHERE id = ?",
+                (heartbeat, "agent-a"),
+            )
+            await db.commit()
+        profile = await service.get_agent_profile("s", "agent-a")
+        assert profile is not None
+        assert profile["status"] == expected
+
+
+@pytest.mark.asyncio
+async def test_dashboard_snapshot_active_agents_counts_busy_only(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+
+    mission = await service.create_mission(session_id="s", title="M", goal="goal")
+    task = await task_store.create_task("实现功能")
+    await service.attach_issue(
+        session_id="s",
+        mission_id=mission.id,
+        task_id=task.id,
+        acceptance_criteria=["通过测试"],
+    )
+    await service.register_agent_profile(
+        session_id="s",
+        agent_id="busy-agent",
+        name="Busy",
+        role="coder",
+        status="idle",
+    )
+    await service.register_agent_profile(
+        session_id="s",
+        agent_id="idle-agent",
+        name="Idle",
+        role="coder",
+        status="idle",
+    )
+    await workbench_store.create_lease(
+        session_id="s",
+        task_id=task.id,
+        agent_id="busy-agent",
+        expires_at="2026-12-31T23:59:59",
+    )
+    await service.record_agent_heartbeat("s", "busy-agent")
+
+    snapshot = await service.dashboard_snapshot("s")
+    assert snapshot["summary"]["active_agents"] == 1
+    busy_profile = next(p for p in snapshot["agent_profiles"] if p["id"] == "busy-agent")
+    idle_profile = next(p for p in snapshot["agent_profiles"] if p["id"] == "idle-agent")
+    assert busy_profile["status"] == "busy"
+    assert idle_profile["status"] == "idle"

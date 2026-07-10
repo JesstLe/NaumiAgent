@@ -14,6 +14,8 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
     public let supportedActions: [String]
     public let routeTemplates: [String: String]
     public let allowedValidationCommands: [[String]]
+    public let agentStaleThresholdSeconds: Int
+    public let agentOfflineThresholdSeconds: Int
 
     public enum CodingKeys: String, CodingKey {
         case supportsDaemonManagement = "supports_daemon_management"
@@ -28,6 +30,8 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
         case supportedActions = "supported_actions"
         case routeTemplates = "route_templates"
         case allowedValidationCommands = "allowed_validation_commands"
+        case agentStaleThresholdSeconds = "agent_stale_threshold_seconds"
+        case agentOfflineThresholdSeconds = "agent_offline_threshold_seconds"
     }
 
     public init(
@@ -42,7 +46,9 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
         supportedResources: [String] = [],
         supportedActions: [String] = [],
         routeTemplates: [String: String] = [:],
-        allowedValidationCommands: [[String]] = []
+        allowedValidationCommands: [[String]] = [],
+        agentStaleThresholdSeconds: Int = 300,
+        agentOfflineThresholdSeconds: Int = 900
     ) {
         self.supportsDaemonManagement = supportsDaemonManagement
         self.supportsWorkspaceRegistry = supportsWorkspaceRegistry
@@ -56,6 +62,8 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
         self.supportedActions = supportedActions
         self.routeTemplates = routeTemplates
         self.allowedValidationCommands = allowedValidationCommands
+        self.agentStaleThresholdSeconds = agentStaleThresholdSeconds
+        self.agentOfflineThresholdSeconds = agentOfflineThresholdSeconds
     }
 
     public init(from decoder: Decoder) throws {
@@ -99,6 +107,14 @@ public struct CapabilitiesDTO: Decodable, Equatable, Sendable {
             [[String]].self,
             forKey: .allowedValidationCommands
         ) ?? []
+        agentStaleThresholdSeconds = try container.decodeIfPresent(
+            Int.self,
+            forKey: .agentStaleThresholdSeconds
+        ) ?? 300
+        agentOfflineThresholdSeconds = try container.decodeIfPresent(
+            Int.self,
+            forKey: .agentOfflineThresholdSeconds
+        ) ?? 900
     }
 
     /// Whether a command argv is permitted by the daemon's validation allowlist.

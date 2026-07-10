@@ -1,5 +1,29 @@
 import Foundation
 
+/// Thresholds used to classify an agent as stale or offline based on its last heartbeat.
+public struct AgentHeartbeatThresholds: Equatable, Sendable {
+    public let staleSeconds: Int
+    public let offlineSeconds: Int
+
+    public init(staleSeconds: Int, offlineSeconds: Int) {
+        self.staleSeconds = staleSeconds
+        self.offlineSeconds = offlineSeconds
+    }
+
+    public static let `default` = AgentHeartbeatThresholds(
+        staleSeconds: 300,
+        offlineSeconds: 900
+    )
+}
+
+/// Activity status derived from heartbeat age and current lease presence.
+public enum AgentActivityStatus: String, Equatable, Sendable {
+    case idle
+    case busy
+    case stale
+    case offline
+}
+
 /// Pure presentation model derived from ``WorkbenchSnapshotDTO``.
 /// Keeps SwiftUI-agnostic logic testable without View infrastructure.
 public struct DashboardSnapshotPresentation: Equatable, Sendable {
@@ -11,20 +35,42 @@ public struct DashboardSnapshotPresentation: Equatable, Sendable {
     public let failureRows: [DashboardFailureRow]
     public let recentEventRows: [DashboardEventRow]
 
-    public init(snapshot: WorkbenchSnapshotDTO) {
+    public init(
+        snapshot: WorkbenchSnapshotDTO,
+        thresholds: AgentHeartbeatThresholds = .default
+    ) {
         let currentMission = snapshot.missions.first.map {
             DashboardMissionSummary(id: $0.id, title: $0.title, status: $0.status)
         }
         self.currentMission = currentMission
 
         self.agentRows = Array(snapshot.agentProfiles.prefix(5)).map { profile in
-            DashboardAgentRow(
+            let derivedStatus = DashboardSnapshotPresentation.deriveActivityStatus(
+                profile: profile,
+                thresholds: thresholds
+            )
+            return DashboardAgentRow(
                 id: profile.id,
                 name: profile.name,
                 role: profile.role,
-                status: profile.status,
+                status: derivedStatus.rawValue,
                 capabilityCount: profile.capabilities.count,
-                maxParallelTasks: profile.maxParallelTasks
+                maxParallelTasks: profile.maxParallelTasks,
+                permissions: profile.permissions,
+                lastHeartbeatAt: profile.lastHeartbeatAt,
+                currentIssue: profile.currentIssue.map { issue in
+                    DashboardAgentCurrentIssue(
+                        taskID: issue.taskID,
+                        title: issue.task?.subject ?? issue.taskID
+                    )
+                },
+                currentLease: profile.currentLease.map { lease in
+                    DashboardAgentCurrentLease(
+                        leaseID: lease.id,
+                        taskID: lease.taskID,
+                        expiresAt: lease.expiresAt
+                    )
+                }
             )
         }
 
@@ -81,12 +127,32 @@ public struct DashboardSnapshotPresentation: Equatable, Sendable {
             mission: currentMission,
             tasks: snapshot.tasks,
             issues: snapshot.issues,
-            agentProfiles: snapshot.agentProfiles,
+            agentRows: self.agentRows,
             leases: snapshot.leases,
             failures: snapshot.failures,
             events: snapshot.events,
             taskByID: taskByID
         )
+    }
+
+    static func deriveActivityStatus(
+        profile: AgentProfileDTO,
+        thresholds: AgentHeartbeatThresholds
+    ) -> AgentActivityStatus {
+        guard !profile.lastHeartbeatAt.isEmpty else {
+            return AgentActivityStatus(rawValue: profile.status) ?? .idle
+        }
+        guard let heartbeat = ISO8601DateFormatter().date(from: profile.lastHeartbeatAt) else {
+            return .offline
+        }
+        let ageSeconds = Date().timeIntervalSince(heartbeat)
+        if ageSeconds > Double(thresholds.offlineSeconds) {
+            return .offline
+        }
+        if ageSeconds > Double(thresholds.staleSeconds) {
+            return .stale
+        }
+        return profile.currentLease != nil ? .busy : .idle
     }
 
     public func validationRerunCommand(validationRuns: [ValidationRunDTO]) -> DashboardValidationRerunCommand? {
@@ -162,7 +228,7 @@ public struct DashboardWorkbenchPresentation: Equatable, Sendable {
         mission: DashboardMissionSummary?,
         tasks: [TaskDTO],
         issues: [IssueDTO],
-        agentProfiles: [AgentProfileDTO],
+        agentRows: [DashboardAgentRow],
         leases: [LeaseDTO],
         failures: [FailureDTO],
         events: [EventDTO],
@@ -196,14 +262,15 @@ public struct DashboardWorkbenchPresentation: Equatable, Sendable {
                 )
             )
         }
-        if !agentProfiles.isEmpty {
+        if !agentRows.isEmpty {
+            let busyCount = agentRows.filter { $0.status == AgentActivityStatus.busy.rawValue }.count
             nodes.append(
                 DashboardCanvasNode(
                     id: "agents",
                     kind: .agents,
-                    title: "\(agentProfiles.count)",
+                    title: "\(agentRows.count)",
                     subtitle: "Agents",
-                    status: agentProfiles.first?.status ?? ""
+                    status: "\(busyCount) busy"
                 )
             )
         }
@@ -336,6 +403,56 @@ public struct DashboardAgentRow: Equatable, Sendable {
     public let status: String
     public let capabilityCount: Int
     public let maxParallelTasks: Int
+    public let permissions: [String]
+    public let lastHeartbeatAt: String
+    public let currentIssue: DashboardAgentCurrentIssue?
+    public let currentLease: DashboardAgentCurrentLease?
+
+    public init(
+        id: String,
+        name: String,
+        role: String,
+        status: String,
+        capabilityCount: Int,
+        maxParallelTasks: Int,
+        permissions: [String] = [],
+        lastHeartbeatAt: String = "",
+        currentIssue: DashboardAgentCurrentIssue? = nil,
+        currentLease: DashboardAgentCurrentLease? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.role = role
+        self.status = status
+        self.capabilityCount = capabilityCount
+        self.maxParallelTasks = maxParallelTasks
+        self.permissions = permissions
+        self.lastHeartbeatAt = lastHeartbeatAt
+        self.currentIssue = currentIssue
+        self.currentLease = currentLease
+    }
+}
+
+public struct DashboardAgentCurrentIssue: Equatable, Sendable {
+    public let taskID: String
+    public let title: String
+
+    public init(taskID: String, title: String) {
+        self.taskID = taskID
+        self.title = title
+    }
+}
+
+public struct DashboardAgentCurrentLease: Equatable, Sendable {
+    public let leaseID: String
+    public let taskID: String
+    public let expiresAt: String
+
+    public init(leaseID: String, taskID: String, expiresAt: String) {
+        self.leaseID = leaseID
+        self.taskID = taskID
+        self.expiresAt = expiresAt
+    }
 }
 
 public struct DashboardTaskRow: Equatable, Sendable {

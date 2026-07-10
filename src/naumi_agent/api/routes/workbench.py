@@ -55,6 +55,7 @@ WORKBENCH_SUPPORTED_ACTIONS = [
     "run_validation",
     "record_context_health",
     "upsert_agent_profile",
+    "heartbeat_agent",
     "create_intent_lock",
     "deactivate_intent_lock",
     "create_decision",
@@ -113,6 +114,7 @@ WORKBENCH_ROUTE_TEMPLATES = {
     "agents": "/workbench/sessions/{session_id}/agents",
     "agent": "/workbench/sessions/{session_id}/agents/{agent_id}",
     "upsert_agent_profile": "/workbench/sessions/{session_id}/agents/{agent_id}",
+    "heartbeat_agent": "/workbench/sessions/{session_id}/agents/{agent_id}/heartbeat",
     "approvals": "/workbench/sessions/{session_id}/approvals",
     "approval": "/workbench/sessions/{session_id}/approvals/{approval_id}",
     "resolve_approval": (
@@ -176,6 +178,8 @@ class WorkbenchCapabilitiesResponse(BaseModel):
     supported_actions: list[str]
     route_templates: dict[str, str]
     allowed_validation_commands: list[list[str]] = []
+    agent_stale_threshold_seconds: int = 300
+    agent_offline_threshold_seconds: int = 900
 
 
 class WorkbenchBootstrapResponse(BaseModel):
@@ -216,6 +220,12 @@ class AgentProfileUpsert(BaseModel):
     max_parallel_tasks: int = Field(default=1, ge=1)
     status: str = "idle"
     actor: str = "Human"
+
+
+class AgentHeartbeat(BaseModel):
+    """Empty heartbeat payload; the agent id is encoded in the URL path."""
+
+    pass
 
 
 class IntentLockCreate(BaseModel):
@@ -531,6 +541,8 @@ def _build_capabilities(
         supported_actions=WORKBENCH_SUPPORTED_ACTIONS,
         route_templates=WORKBENCH_ROUTE_TEMPLATES,
         allowed_validation_commands=allowed_commands,
+        agent_stale_threshold_seconds=300,
+        agent_offline_threshold_seconds=900,
     )
 
 
@@ -2105,6 +2117,50 @@ async def upsert_agent_profile(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not include_snapshot:
+        return profile
+
+    try:
+        snapshot = await _build_workbench_snapshot(engine, session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"agent_profile": profile, "snapshot": snapshot}
+
+
+@router.post("/workbench/sessions/{session_id}/agents/{agent_id}/heartbeat")
+async def record_agent_heartbeat(
+    session_id: str,
+    agent_id: str,
+    body: AgentHeartbeat,
+    request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    try:
+        session = await engine.session_store.load(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        session_loaded = await engine.load_session(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session_loaded:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        profile = await engine.workbench_service.record_agent_heartbeat(
+            session_id, agent_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if profile is None:
+        raise HTTPException(status_code=404, detail="智能体不存在")
     if not include_snapshot:
         return profile
 

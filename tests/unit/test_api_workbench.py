@@ -7,6 +7,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -16,6 +17,7 @@ from starlette.websockets import WebSocketDisconnect
 import naumi_agent.api.routes.workbench as workbench_routes
 from naumi_agent import __version__
 from naumi_agent.api.routes.workbench import (
+    AgentHeartbeat,
     AgentProfileUpsert,
     ApprovalResolve,
     BidCreate,
@@ -71,6 +73,7 @@ from naumi_agent.api.routes.workbench import (
     get_worktrees,
     keep_worktree,
     list_workbench_bids,
+    record_agent_heartbeat,
     release_workbench_lease,
     resolve_approval,
     upsert_agent_profile,
@@ -155,6 +158,7 @@ class _FakeWorkbenchService:
         self.created_decisions: list[dict] = []
         self.deactivated_intent_locks: list[dict] = []
         self.recorded_policy_hits: list[dict] = []
+        self.recorded_agent_heartbeats: list[dict] = []
         self.recorded_context_health: list[dict] = []
         self.resolved_approvals: list[dict] = []
         self.run_validations: list[dict] = []
@@ -531,6 +535,30 @@ class _FakeWorkbenchService:
             "permissions": ["read", "write"],
             "max_parallel_tasks": 2,
             "status": "busy",
+            "created_at": "2024-01-01T00:00:00",
+            "updated_at": "2024-01-01T00:00:00",
+        }
+
+    async def record_agent_heartbeat(
+        self, session_id: str, agent_id: str
+    ) -> dict[str, Any] | None:
+        self.recorded_agent_heartbeats.append(
+            {"session_id": session_id, "agent_id": agent_id}
+        )
+        if agent_id == "missing-agent":
+            return None
+        return {
+            "id": agent_id,
+            "session_id": session_id,
+            "name": "Backend Agent",
+            "role": "coder",
+            "capabilities": ["code", "test"],
+            "permissions": ["read", "write"],
+            "max_parallel_tasks": 2,
+            "status": "busy",
+            "last_heartbeat_at": "2024-01-01T00:00:00",
+            "current_lease": None,
+            "current_issue": None,
             "created_at": "2024-01-01T00:00:00",
             "updated_at": "2024-01-01T00:00:00",
         }
@@ -5477,6 +5505,7 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
         "run_validation",
         "record_context_health",
         "upsert_agent_profile",
+        "heartbeat_agent",
         "create_intent_lock",
         "deactivate_intent_lock",
         "create_decision",
@@ -5543,6 +5572,7 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
         "agents": "/workbench/sessions/{session_id}/agents",
         "agent": "/workbench/sessions/{session_id}/agents/{agent_id}",
         "upsert_agent_profile": "/workbench/sessions/{session_id}/agents/{agent_id}",
+        "heartbeat_agent": "/workbench/sessions/{session_id}/agents/{agent_id}/heartbeat",
         "approvals": "/workbench/sessions/{session_id}/approvals",
         "approval": "/workbench/sessions/{session_id}/approvals/{approval_id}",
         "resolve_approval": (
@@ -5581,6 +5611,8 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
         ["ruff"],
         ["swift", "test"],
     ]
+    assert response.agent_stale_threshold_seconds == 300
+    assert response.agent_offline_threshold_seconds == 900
 
 
 @pytest.mark.asyncio
@@ -9214,3 +9246,49 @@ def test_get_decision_route_returns_404_for_missing_decision() -> None:
             "decision_id": "missing-decision",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_record_agent_heartbeat_endpoint_records_and_returns_profile() -> None:
+    engine = _FakeEngine(exists=True)
+    body = AgentHeartbeat()
+
+    response = await record_agent_heartbeat(
+        "sess-1", "agent-1", body, _fake_request(engine), auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.recorded_agent_heartbeats == [
+        {"session_id": "sess-1", "agent_id": "agent-1"}
+    ]
+    assert response["id"] == "agent-1"
+    assert response["last_heartbeat_at"] == "2024-01-01T00:00:00"
+
+
+@pytest.mark.asyncio
+async def test_record_agent_heartbeat_endpoint_returns_404_for_missing_agent() -> None:
+    engine = _FakeEngine(exists=True)
+    body = AgentHeartbeat()
+
+    with pytest.raises(HTTPException) as exc:
+        await record_agent_heartbeat(
+            "sess-1", "missing-agent", body, _fake_request(engine), auth="test"
+        )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_record_agent_heartbeat_endpoint_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    body = AgentHeartbeat()
+
+    response = await record_agent_heartbeat(
+        "sess-1", "agent-1", body, _fake_request(engine), include_snapshot=True, auth="test"
+    )
+
+    assert engine.workbench_service.recorded_agent_heartbeats == [
+        {"session_id": "sess-1", "agent_id": "agent-1"}
+    ]
+    assert response["agent_profile"]["id"] == "agent-1"
+    assert "snapshot" in response

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -495,6 +496,81 @@ class WorkbenchService:
         data["risk_level"] = data["risk_level"].value
         return data
 
+    AGENT_STALE_THRESHOLD_SECONDS = 300
+    AGENT_OFFLINE_THRESHOLD_SECONDS = 900
+
+    def _derive_agent_status(
+        self,
+        last_heartbeat_at: str,
+        active_lease: Lease | None,
+        profile_status: str,
+    ) -> str:
+        """Derive agent activity status from heartbeat age and active lease.
+
+        Profiles that have never heartbeated keep their persisted status so
+        registration-time declarations remain visible until the first heartbeat
+        arrives.
+        """
+        if not last_heartbeat_at:
+            return profile_status
+        try:
+            heartbeat = datetime.fromisoformat(last_heartbeat_at)
+        except ValueError:
+            return profile_status
+        age_seconds = (datetime.now() - heartbeat).total_seconds()
+        if age_seconds > self.AGENT_OFFLINE_THRESHOLD_SECONDS:
+            return "offline"
+        if age_seconds > self.AGENT_STALE_THRESHOLD_SECONDS:
+            return "stale"
+        return "busy" if active_lease is not None else "idle"
+
+    async def _enrich_agent_profile(
+        self, profile: AgentProfile, session_id: str
+    ) -> dict[str, Any]:
+        """Return the profile dict enriched with derived status, current lease and issue."""
+        active_lease = await self._workbench_store.get_agent_active_lease(
+            session_id, profile.id
+        )
+        current_issue: dict[str, Any] | None = None
+        task: Any | None = None
+        if active_lease is not None:
+            issue = await self._workbench_store.get_issue(
+                session_id, active_lease.task_id
+            )
+            task = await self._task_store.get_task(active_lease.task_id)
+            if issue is not None:
+                current_issue = self._issue_to_dict(issue) | {
+                    "task": self._task_to_summary(task)
+                }
+        status = self._derive_agent_status(
+            profile.last_heartbeat_at, active_lease, profile.status
+        )
+        data = asdict(profile)
+        data["status"] = status
+        data["current_lease"] = (
+            self._lease_to_dict(active_lease, task=task) if active_lease else None
+        )
+        data["current_issue"] = current_issue
+        return data
+
+    async def record_agent_heartbeat(
+        self, session_id: str, agent_id: str
+    ) -> dict[str, Any] | None:
+        """Record a heartbeat and return the enriched agent profile."""
+        profile = await self._workbench_store.record_agent_heartbeat(
+            session_id, agent_id
+        )
+        if profile is None:
+            return None
+        await self._workbench_store.append_event(
+            session_id=session_id,
+            type="agent.heartbeat",
+            actor=agent_id,
+            subject_id=agent_id,
+            payload={"status": profile.status},
+        )
+        return await self._enrich_agent_profile(profile, session_id)
+
     async def register_agent_profile(
         self,
         *,
@@ -531,7 +607,7 @@ class WorkbenchService:
                 "permissions": profile.permissions,
             },
         )
-        return self._agent_profile_to_dict(profile)
+        return await self._enrich_agent_profile(profile, session_id)
 
     async def list_agent_profiles(
         self,
@@ -544,7 +620,8 @@ class WorkbenchService:
         )
         return {
             "agent_profiles": [
-                self._agent_profile_to_dict(profile) for profile in profiles
+                await self._enrich_agent_profile(profile, session_id)
+                for profile in profiles
             ],
             "status": status,
             "limit": limit,
@@ -556,7 +633,7 @@ class WorkbenchService:
         profile = await self._workbench_store.get_agent_profile(session_id, agent_id)
         if profile is None:
             return None
-        return self._agent_profile_to_dict(profile)
+        return await self._enrich_agent_profile(profile, session_id)
 
     @staticmethod
     def _agent_profile_to_dict(profile: AgentProfile) -> dict[str, Any]:
@@ -564,9 +641,13 @@ class WorkbenchService:
 
     async def dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
         tasks = await self._task_store.list_tasks()
-        agent_profiles = await self._workbench_store.list_agent_profiles(
+        raw_agent_profiles = await self._workbench_store.list_agent_profiles(
             session_id, limit=50
         )
+        agent_profiles = [
+            await self._enrich_agent_profile(profile, session_id)
+            for profile in raw_agent_profiles
+        ]
         events = await self._workbench_store.list_events(session_id, limit=50)
         failures = await self._workbench_store.list_failures(session_id)
         raw_validation_runs = await self._workbench_store.list_validation_runs(
@@ -626,9 +707,7 @@ class WorkbenchService:
                 approvals=approvals,
             ),
             "missions": missions,
-            "agent_profiles": [
-                self._agent_profile_to_dict(profile) for profile in agent_profiles
-            ],
+            "agent_profiles": agent_profiles,
             "intent_locks": intent_locks,
             "decisions": decisions,
             "tasks": [asdict(task) for task in tasks],
@@ -646,7 +725,7 @@ class WorkbenchService:
     def _snapshot_summary(
         *,
         missions: list[dict[str, Any]],
-        agent_profiles: list[AgentProfile],
+        agent_profiles: list[dict[str, Any]],
         tasks: list[Any],
         issues: list[dict[str, Any]],
         validation_runs: list[dict[str, Any]],
@@ -657,7 +736,7 @@ class WorkbenchService:
         return {
             "current_mission_title": missions[0]["title"] if missions else "",
             "active_agents": sum(
-                1 for profile in agent_profiles if profile.status != "idle"
+                1 for profile in agent_profiles if profile.get("status") != "idle"
             ),
             "open_issues": sum(
                 1

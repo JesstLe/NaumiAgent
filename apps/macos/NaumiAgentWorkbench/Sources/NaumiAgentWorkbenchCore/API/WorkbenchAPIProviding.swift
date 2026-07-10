@@ -240,6 +240,12 @@ public protocol WorkbenchAPIProviding: Sendable {
         actor: String
     ) async throws(APIError) -> AgentProfileSnapshotDTO
 
+    /// Records a heartbeat for the given agent.
+    func recordAgentHeartbeat(sessionID: String, agentID: String) async throws(APIError) -> AgentProfileDTO
+
+    /// Records a heartbeat and returns the backend's fresh authoritative snapshot.
+    func recordAgentHeartbeatWithSnapshot(sessionID: String, agentID: String) async throws(APIError) -> AgentProfileSnapshotDTO
+
     /// Claims an open issue for the given agent, creating a new lease.
     func claimIssue(
         sessionID: String,

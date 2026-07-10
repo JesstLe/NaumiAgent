@@ -40,6 +40,8 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var agentProfileResult: Result<AgentProfileDTO, APIError>?
     var registerAgentProfileResult: Result<AgentProfileDTO, APIError>?
     var registerAgentProfileWithSnapshotResult: Result<AgentProfileSnapshotDTO, APIError>?
+    var recordAgentHeartbeatResult: Result<AgentProfileDTO, APIError>?
+    var recordAgentHeartbeatWithSnapshotResult: Result<AgentProfileSnapshotDTO, APIError>?
     var claimIssueResult: Result<LeaseDTO, APIError>?
     var claimIssueWithSnapshotResult: Result<LeaseSnapshotDTO, APIError>?
     var fetchIssueBidsResult: IssueBidsDTO = IssueBidsDTO(bids: [], taskID: nil, agentID: nil, limit: 50)
@@ -690,6 +692,20 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     ) async throws(APIError) -> AgentProfileSnapshotDTO {
         registerAgentProfileWithSnapshotCallCount += 1
         guard let result = registerAgentProfileWithSnapshotResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func recordAgentHeartbeat(sessionID: String, agentID: String) async throws(APIError) -> AgentProfileDTO {
+        guard let result = recordAgentHeartbeatResult else {
+            throw .invalidResponse
+        }
+        return try result.get()
+    }
+
+    func recordAgentHeartbeatWithSnapshot(sessionID: String, agentID: String) async throws(APIError) -> AgentProfileSnapshotDTO {
+        guard let result = recordAgentHeartbeatWithSnapshotResult else {
             throw .invalidResponse
         }
         return try result.get()
@@ -10669,6 +10685,14 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setRegisterAgentProfileWithSnapshotResult(_ result: Result<AgentProfileSnapshotDTO, APIError>) {
         registerAgentProfileWithSnapshotResult = result
+    }
+
+    fileprivate func setRecordAgentHeartbeatResult(_ result: Result<AgentProfileDTO, APIError>) {
+        recordAgentHeartbeatResult = result
+    }
+
+    fileprivate func setRecordAgentHeartbeatWithSnapshotResult(_ result: Result<AgentProfileSnapshotDTO, APIError>) {
+        recordAgentHeartbeatWithSnapshotResult = result
     }
 
     fileprivate func setClaimIssueResult(_ result: Result<LeaseDTO, APIError>) {

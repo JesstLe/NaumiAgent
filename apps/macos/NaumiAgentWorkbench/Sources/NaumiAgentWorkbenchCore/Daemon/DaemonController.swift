@@ -1704,6 +1704,44 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Records a heartbeat for the given agent and refreshes the agent profile
+    /// list and snapshot from authoritative backend responses.
+    ///
+    /// Requires `appState.selectedSessionID` to be set.
+    public func recordAgentHeartbeat(agentID: String) async {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return
+        }
+
+        appState.lastError = nil
+        do {
+            let response = try await apiProvider.recordAgentHeartbeatWithSnapshot(
+                sessionID: sessionID,
+                agentID: agentID
+            )
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            applySnapshot(response.snapshot)
+            appState.selectedAgentProfile = response.agentProfile
+            var refreshError: APIError?
+            await refreshAgentProfiles()
+            refreshError = refreshError ?? appState.lastError
+            await refreshEvents(limit: 50)
+            refreshError = refreshError ?? appState.lastError
+            appState.lastError = refreshError
+        } catch {
+            guard appState.selectedSessionID == sessionID else {
+                return
+            }
+            appState.lastError = error
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
+        }
+    }
+
     /// Refreshes the paginated session list and writes it to `appState.sessions`.
     ///
     /// This method does not require a selected session. On success it updates
