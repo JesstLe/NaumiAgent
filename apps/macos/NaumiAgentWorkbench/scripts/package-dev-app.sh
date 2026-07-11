@@ -24,6 +24,7 @@ bundle_id="ai.naumi.workbench"
 bundle_version="${NAUMI_BUNDLE_VERSION:-1}"
 min_system_version="14.0"
 dist_dir="dist"
+app_icon_source="Resources/AppIcon.icns"
 include_fixtures=0
 open_after=0
 
@@ -52,6 +53,10 @@ if [[ ! -f "$build_bin" ]]; then
   echo "错误: 未找到 release 可执行文件 $build_bin" >&2
   exit 1
 fi
+if [[ ! -f "$app_icon_source" ]]; then
+  echo "错误: 未找到应用图标 $app_icon_source" >&2
+  exit 1
+fi
 
 app_dir="${dist_dir}/${app_name}.app"
 echo "==> 组装 app bundle: ${app_dir}"
@@ -59,6 +64,7 @@ rm -rf "$app_dir"
 mkdir -p "${app_dir}/Contents/MacOS" "${app_dir}/Contents/Resources"
 
 cp "$build_bin" "${app_dir}/Contents/MacOS/${app_name}"
+cp "$app_icon_source" "${app_dir}/Contents/Resources/AppIcon.icns"
 
 # Copy preview fixtures only when explicitly requested. Real mode does not need
 # them and keeping them out reduces bundle size and avoids showing fixture rows
@@ -84,6 +90,8 @@ cat > "${app_dir}/Contents/Info.plist" <<PLIST
   <string>${app_name}</string>
   <key>CFBundleDisplayName</key>
   <string>NaumiAgent Workbench</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>
