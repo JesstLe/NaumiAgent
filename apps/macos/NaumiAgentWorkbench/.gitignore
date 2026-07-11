@@ -10,3 +10,6 @@ DerivedData/
 
 # macOS
 .DS_Store
+
+# Packaging output (dev app bundles and zips)
+dist/
