@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from naumi_agent import __version__
+from naumi_agent.api.permission_broker import PermissionApprovalBroker
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 
@@ -24,11 +25,15 @@ def resolve_config_path() -> str:
 async def lifespan(app: FastAPI):
     config = AppConfig.from_yaml(resolve_config_path())
     engine = AgentEngine(config)
+    permission_broker = PermissionApprovalBroker()
+    engine.set_permission_confirmer(permission_broker.confirm)
     app.state.engine = engine
+    app.state.permission_broker = permission_broker
     app.state.config = config
     app.state.engine_lock = asyncio.Lock()
     app.state.started_at = datetime.now(UTC).replace(microsecond=0).isoformat()
     yield
+    await permission_broker.close()
     await engine.shutdown()
 
 

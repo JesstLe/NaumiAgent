@@ -21,6 +21,7 @@ class EventType(StrEnum):
     TOOL_CALL_DELTA = "tool_call_delta"
     TOOL_CALL_END = "tool_call_end"
     TOOL_CALL_ERROR = "tool_call_error"
+    PERMISSION_REQUEST = "permission_request"
 
     # 规划
     PLAN_CREATED = "plan_created"

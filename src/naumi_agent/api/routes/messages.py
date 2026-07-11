@@ -15,6 +15,8 @@ from naumi_agent.api.schemas import (
     MessageCreate,
     MessageListResponse,
     MessageResponse,
+    PermissionResolutionCreate,
+    PermissionResolutionResponse,
     SessionCreate,
     SessionListResponse,
     SessionResponse,
@@ -151,6 +153,26 @@ async def list_messages(
     )
 
 
+@router.post(
+    "/sessions/{session_id}/permissions/{call_id}/resolve",
+    response_model=PermissionResolutionResponse,
+)
+async def resolve_permission(
+    session_id: str,
+    call_id: str,
+    body: PermissionResolutionCreate,
+    request: Request,
+    auth: str = AuthDep,
+):
+    broker = getattr(request.app.state, "permission_broker", None)
+    if broker is None:
+        raise HTTPException(status_code=404, detail="未找到待确认的权限请求")
+    resolved = await broker.resolve(session_id, call_id, body.decision)
+    if not resolved:
+        raise HTTPException(status_code=404, detail="未找到待确认的权限请求")
+    return PermissionResolutionResponse(status="resolved")
+
+
 # --- SSE Stream ---
 
 
@@ -271,6 +293,34 @@ def _engine_event_to_stream_event(
     *,
     session_id: str,
 ) -> StreamEvent:
+    if event == "thinking_delta":
+        return StreamEvent(
+            type=EventType.THINKING_DELTA,
+            data={},
+            session_id=session_id,
+        )
+    if event == "thinking_end":
+        return StreamEvent(
+            type=EventType.THINKING_END,
+            data={},
+            session_id=session_id,
+        )
+    if event == "permission_bubble":
+        safe_fields = (
+            "agent_name",
+            "tool_name",
+            "call_id",
+            "status",
+            "reason",
+            "risk_level",
+            "requires_confirmation",
+        )
+        return StreamEvent(
+            type=EventType.PERMISSION_REQUEST,
+            data={field: data[field] for field in safe_fields if field in data},
+            session_id=session_id,
+        )
+
     event_type = {
         "turn_start": EventType.TURN_START,
         "thinking_start": EventType.THINKING_START,

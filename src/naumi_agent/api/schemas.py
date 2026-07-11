@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from naumi_agent.workbench.models import ParallelMode, RiskLevel
@@ -59,6 +61,14 @@ class MessageResponse(BaseModel):
 class MessageListResponse(BaseModel):
     messages: list[MessageResponse]
     total: int
+
+
+class PermissionResolutionCreate(BaseModel):
+    decision: Literal["allow", "deny", "bypass"]
+
+
+class PermissionResolutionResponse(BaseModel):
+    status: Literal["resolved"]
 
 
 class ToolInfo(BaseModel):

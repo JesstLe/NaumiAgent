@@ -2980,12 +2980,15 @@ class AgentEngine:
     ) -> str:
         """Ask the UI to confirm a tool execution that policy marked as sensitive."""
         reason = decision.reason or "该工具需要用户确认。"
+        risk_level = getattr(decision.risk_level, "value", str(decision.risk_level))
         await self._emit_permission_bubble(
             on_event,
             agent_name=agent_name,
             tool_name=tool_call.name,
+            call_id=tool_call.id,
             status="needs_confirmation",
             reason=reason,
+            risk_level=risk_level,
             requires_confirmation=True,
         )
         if self._permission_confirmer is None:
@@ -2997,9 +3000,10 @@ class AgentEngine:
             "call_id": tool_call.id,
             "arguments": arguments,
             "reason": reason,
-            "risk_level": getattr(decision.risk_level, "value", str(decision.risk_level)),
+            "risk_level": risk_level,
             "requires_confirmation": True,
             "permission_mode": self._permission_checker.mode.value,
+            "session_id": self._session.id if self._session else "",
         }
         try:
             raw_choice = await self._permission_confirmer(payload)
@@ -3009,8 +3013,10 @@ class AgentEngine:
                 on_event,
                 agent_name=agent_name,
                 tool_name=tool_call.name,
+                call_id=tool_call.id,
                 status="confirmation_error",
                 reason=str(e),
+                risk_level=risk_level,
                 requires_confirmation=True,
             )
             return "error"
@@ -3022,8 +3028,10 @@ class AgentEngine:
                 on_event,
                 agent_name=agent_name,
                 tool_name=tool_call.name,
+                call_id=tool_call.id,
                 status="bypass_enabled",
                 reason="用户已切换到 bypass 模式，本次工具继续执行。",
+                risk_level=risk_level,
                 requires_confirmation=False,
             )
             return "bypass"
@@ -3032,8 +3040,10 @@ class AgentEngine:
                 on_event,
                 agent_name=agent_name,
                 tool_name=tool_call.name,
+                call_id=tool_call.id,
                 status="confirmed",
                 reason="用户已允许本次工具执行。",
+                risk_level=risk_level,
                 requires_confirmation=False,
             )
             return "allow"
@@ -3042,8 +3052,10 @@ class AgentEngine:
             on_event,
             agent_name=agent_name,
             tool_name=tool_call.name,
+            call_id=tool_call.id,
             status="denied",
             reason="用户拒绝执行该工具。",
+            risk_level=risk_level,
             requires_confirmation=True,
         )
         return "deny"
@@ -3089,17 +3101,22 @@ class AgentEngine:
         *,
         agent_name: str | None,
         tool_name: str,
+        call_id: str = "",
         status: str,
         reason: str,
+        risk_level: str = "",
         requires_confirmation: bool,
     ) -> None:
         """Emit permission decisions visible to parent or top-level UI."""
         payload = {
             "agent_name": agent_name or "main",
             "tool_name": tool_name,
+            "call_id": call_id,
             "status": status,
             "reason": reason,
+            "risk_level": risk_level,
             "requires_confirmation": requires_confirmation,
+            "session_id": self._session.id if self._session else "",
             "timestamp": time.time(),
         }
         self._permission_bubble_history.append(payload)
