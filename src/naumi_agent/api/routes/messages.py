@@ -320,6 +320,16 @@ def _engine_event_to_stream_event(
             data={field: data[field] for field in safe_fields if field in data},
             session_id=session_id,
         )
+    if event == "tool_start":
+        call_id = data.get("call_id") or data.get("tool_call_id")
+        safe_data = {"name": str(data.get("name") or "tool")}
+        if call_id:
+            safe_data["call_id"] = str(call_id)
+        return StreamEvent(
+            type=EventType.TOOL_CALL_START,
+            data=safe_data,
+            session_id=session_id,
+        )
 
     event_type = {
         "turn_start": EventType.TURN_START,
