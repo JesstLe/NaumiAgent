@@ -4,6 +4,13 @@ import Testing
 
 struct WorkbenchShellPresentationTests {
 
+    @Test func chromePresentationUsesNaumiBranding() {
+        let presentation = WorkbenchChromePresentation()
+
+        #expect(presentation.brandTitle == "NaumiAgent Workbench")
+        #expect(presentation.showsBrandMark)
+    }
+
     @Test func shellUsesNativeMacWindowChrome() {
         let presentation = WorkbenchShellPresentation()
 

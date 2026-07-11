@@ -99,3 +99,16 @@ public struct WorkbenchShellViewport: Equatable, Sendable {
     public let scaledSize: CGSize
     public let containerSize: CGSize
 }
+
+public struct WorkbenchChromePresentation: Equatable, Sendable {
+    public let brandTitle: String
+    public let showsBrandMark: Bool
+
+    public init(
+        brandTitle: String = "NaumiAgent Workbench",
+        showsBrandMark: Bool = true
+    ) {
+        self.brandTitle = brandTitle
+        self.showsBrandMark = showsBrandMark
+    }
+}

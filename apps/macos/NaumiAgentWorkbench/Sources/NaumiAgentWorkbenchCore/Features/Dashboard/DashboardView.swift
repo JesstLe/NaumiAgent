@@ -175,8 +175,7 @@ public struct DashboardView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .workbenchSurface(.group, radius: WorkbenchComponentTheme.compactCornerRadius)
     }
 
     private func workbenchLeftRail(
@@ -280,7 +279,7 @@ public struct DashboardView: View {
             Spacer(minLength: 8)
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(WorkbenchComponentTheme.surface(.rail))
     }
 
     private func miniFilter(_ title: String, _ count: String, _ color: Color) -> some View {
@@ -292,9 +291,9 @@ public struct DashboardView: View {
         .font(.caption2)
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
-        .background(color.opacity(0.10))
+        .background(color == .secondary ? WorkbenchComponentTheme.surface(.group) : color.opacity(0.10))
         .foregroundStyle(color == .secondary ? .primary : color)
-        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .clipShape(RoundedRectangle(cornerRadius: WorkbenchComponentTheme.compactCornerRadius))
     }
 
     private func dashboardIssueRailRow(_ row: TaskMarketDesignIssue) -> some View {
@@ -343,12 +342,7 @@ public struct DashboardView: View {
             }
         }
         .padding(8)
-        .background(row.number == 3 ? Color.accentColor.opacity(0.10) : Color.clear)
-        .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(row.number == 3 ? Color.accentColor : Color.secondary.opacity(0.12), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .workbenchListRow(isSelected: row.number == 3)
     }
 
     private func railSectionTitle(_ title: String) -> some View {
@@ -380,8 +374,7 @@ public struct DashboardView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .workbenchSurface(.group, radius: WorkbenchComponentTheme.compactCornerRadius, showsBorder: false)
     }
 
     private func sharedCanvas(
@@ -410,7 +403,6 @@ public struct DashboardView: View {
             .frame(height: 54, alignment: .center)
 
             ZStack {
-                dottedCanvasBackground
                 canvasConnectors
 
                 if presentation.workbench.canvasNodes.isEmpty {
@@ -488,12 +480,11 @@ public struct DashboardView: View {
                 .padding(16)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .textBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .workbenchSurface(.canvas)
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(WorkbenchComponentTheme.surface(.canvas))
     }
 
     private func canvasIssueCard(_ row: TaskMarketDesignIssue, isSelected: Bool) -> some View {
@@ -525,12 +516,7 @@ public struct DashboardView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(8)
-        .background(isSelected ? Color.accentColor.opacity(0.10) : Color(nsColor: .windowBackgroundColor))
-        .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.22), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .workbenchListRow(isSelected: isSelected)
     }
 
     private func missionPresentation(_ mission: DashboardMissionSummary?) -> DashboardMissionSummary? {
@@ -756,24 +742,7 @@ public struct DashboardView: View {
                 .frame(width: 7, height: 7)
         }
         .padding(8)
-        .background(isSelected ? Color.accentColor.opacity(0.10) : Color(nsColor: .windowBackgroundColor))
-        .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(isSelected ? Color.accentColor : color.opacity(0.35), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 7))
-    }
-
-    private var dottedCanvasBackground: some View {
-        Canvas { context, size in
-            for x in stride(from: 12.0, through: size.width, by: 24.0) {
-                for y in stride(from: 12.0, through: size.height, by: 24.0) {
-                    let dot = Path(ellipseIn: CGRect(x: x, y: y, width: 2, height: 2))
-                    context.fill(dot, with: .color(Color.secondary.opacity(0.18)))
-                }
-            }
-        }
-        .allowsHitTesting(false)
+        .workbenchListRow(isSelected: isSelected, accent: color)
     }
 
     private var canvasConnectors: some View {
@@ -791,7 +760,7 @@ public struct DashboardView: View {
                 control1: CGPoint(x: size.width * 0.38, y: size.height * 0.74),
                 control2: CGPoint(x: size.width * 0.62, y: size.height * 0.52)
             )
-            context.stroke(path, with: .color(Color.accentColor.opacity(0.22)), lineWidth: 2)
+            context.stroke(path, with: .color(WorkbenchComponentTheme.connector), lineWidth: 1)
         }
         .allowsHitTesting(false)
     }
@@ -829,13 +798,7 @@ public struct DashboardView: View {
         }
         .padding(9)
         .frame(height: 88)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.accentColor : color(for: node.kind).opacity(0.28), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .shadow(color: .black.opacity(0.05), radius: 10, y: 4)
+        .workbenchListRow(isSelected: isSelected, accent: color(for: node.kind))
     }
 
     private func inspectorPanel(
@@ -890,8 +853,7 @@ public struct DashboardView: View {
                             )
                         }
                         .padding(12)
-                        .background(Color.secondary.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .workbenchSurface(.group)
                     } else {
                         emptyListLabel(AppStrings.Dashboard.noSelection(appState.locale))
                     }
@@ -945,7 +907,7 @@ public struct DashboardView: View {
             }
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(WorkbenchComponentTheme.surface(.rail))
     }
 
     private func worktreeInspectorCard(_ worktree: WorktreeDTO) -> some View {
@@ -969,8 +931,7 @@ public struct DashboardView: View {
             )
         }
         .padding(12)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .workbenchSurface(.group)
     }
 
     private func issueInspectorCard(_ issue: TaskMarketDesignIssue) -> some View {
@@ -993,8 +954,7 @@ public struct DashboardView: View {
             )
         }
         .padding(12)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .workbenchSurface(.group)
     }
 
     private func agentInspectorCard(_ agent: DashboardAgentRow) -> some View {
@@ -1047,8 +1007,7 @@ public struct DashboardView: View {
             }
         }
         .padding(12)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .workbenchSurface(.group)
     }
 
     private func agentHasRiskyPermission(_ agent: DashboardAgentRow) -> Bool {
@@ -1083,12 +1042,7 @@ public struct DashboardView: View {
                 .disabled(isDisabled)
         }
         .padding(12)
-        .background(tone.opacity(0.07))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(tone.opacity(0.25), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .workbenchSurface(.group)
     }
 
     private func rerunValidation(_ command: DashboardValidationRerunCommand) {
@@ -1162,10 +1116,7 @@ public struct DashboardView: View {
             .disabled(appState.selectedSessionID == nil || isRefreshingSnapshot)
         }
         .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
+        .workbenchSurface(.group)
     }
 
     private func refreshContext(_ command: DashboardContextRefreshCommand) {
@@ -1202,8 +1153,7 @@ public struct DashboardView: View {
             inspectorDetail(AppStrings.Dashboard.daemonPIDLabel(appState.locale), "\(status.pid)")
         }
         .padding(12)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .workbenchSurface(.group)
     }
 
     private func auditTrail(presentation: DashboardSnapshotPresentation) -> some View {
@@ -1226,15 +1176,14 @@ public struct DashboardView: View {
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
                         .frame(width: 210, alignment: .leading)
-                        .background(Color.secondary.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .workbenchSurface(.group, radius: WorkbenchComponentTheme.compactCornerRadius)
                     }
                 }
             }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(WorkbenchComponentTheme.surface(.rail))
     }
 
     private func iconName(for kind: DashboardCanvasNodeKind) -> String {
@@ -1403,8 +1352,7 @@ public struct DashboardView: View {
             }
         }
         .padding()
-        .background(Color.secondary.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .workbenchSurface(.group)
     }
 
     private func detailItem(label: String, value: String) -> some View {
@@ -1476,8 +1424,7 @@ public struct DashboardView: View {
         }
         .frame(maxWidth: .infinity)
         .padding()
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .workbenchSurface(.group)
     }
 
     // MARK: - Snapshot Content
@@ -1691,12 +1638,7 @@ public struct DashboardView: View {
             }
         }
         .padding(8)
-        .background(isSelected ? Color.accentColor.opacity(0.10) : Color.clear)
-        .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .workbenchListRow(isSelected: isSelected, accent: .red)
     }
 
     private func selectFailure(_ failure: DashboardFailureRow) {
@@ -1781,12 +1723,7 @@ public struct DashboardView: View {
             }
         }
         .padding(8)
-        .background(isSelected ? Color.accentColor.opacity(0.10) : Color.clear)
-        .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .workbenchListRow(isSelected: isSelected)
     }
 
     private func selectEvent(_ event: DashboardEventRow) {
@@ -1814,8 +1751,7 @@ public struct DashboardView: View {
             content()
         }
         .padding()
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .workbenchSurface(.group)
     }
 
     private func emptyListLabel(_ text: String) -> some View {
@@ -1863,8 +1799,7 @@ public struct DashboardView: View {
             }
         }
         .padding()
-        .background(Color.red.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .workbenchSurface(.group)
     }
 
     // MARK: - Empty State
