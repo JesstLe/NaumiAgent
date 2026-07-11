@@ -278,6 +278,24 @@ class TestMessageRoutes:
             "workbench_issue": {"task_id": "task-chat-1"}
         }
 
+    @pytest.mark.asyncio
+    async def test_list_messages_normalizes_empty_tool_call_content(self) -> None:
+        engine = _FakeEngine()
+        engine.session_store.messages = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "call-1"}],
+            }
+        ]
+        request = _fake_request(engine)
+
+        response = await list_messages("sess_1", request, page=1, page_size=50, auth="test")
+
+        assert response.total == 1
+        assert response.messages[0].role == "assistant"
+        assert response.messages[0].content == ""
+
     def test_engine_event_to_stream_event_normalizes_token(self) -> None:
         event = _engine_event_to_stream_event(
             "token",
