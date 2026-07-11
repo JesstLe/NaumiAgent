@@ -27,17 +27,22 @@ from naumi_agent.api.routes.workbench import (
     IntentLockCreate,
     IssueAttach,
     MissionCreate,
+    ProposalCreate,
+    ProposalResolve,
     ValidationRunCreate,
     WorkbenchSessionCreate,
     WorktreeKeep,
+    approve_workbench_proposal,
     attach_workbench_issue,
     claim_workbench_issue,
+    convert_workbench_proposal,
     create_context_health_snapshot,
     create_decision,
     create_intent_lock,
     create_validation_run,
     create_workbench_bid,
     create_workbench_mission,
+    create_workbench_proposal,
     create_workbench_session,
     deactivate_intent_lock,
     delete_worktree,
@@ -68,12 +73,15 @@ from naumi_agent.api.routes.workbench import (
     get_workbench_capabilities,
     get_workbench_event,
     get_workbench_events,
+    get_workbench_proposal,
     get_workbench_snapshot,
     get_worktree,
     get_worktrees,
     keep_worktree,
     list_workbench_bids,
+    list_workbench_proposals,
     record_agent_heartbeat,
+    reject_workbench_proposal,
     release_workbench_lease,
     resolve_approval,
     upsert_agent_profile,
@@ -158,6 +166,28 @@ class _FakeWorkbenchService:
         self.created_decisions: list[dict] = []
         self.deactivated_intent_locks: list[dict] = []
         self.recorded_policy_hits: list[dict] = []
+        self.created_proposals: list[dict] = []
+        self.listed_proposals: list[dict] = []
+        self.resolved_proposals: list[dict] = []
+        self.converted_proposals: list[dict] = []
+        self._get_proposal_result: dict | None = {
+            "id": "prop-1",
+            "session_id": "sess-1",
+            "mission_id": "m1",
+            "task_id": "t1",
+            "agent_id": "agent-a",
+            "title": "重构认证",
+            "impact_scope": "登录流程",
+            "intended_files": ["src/auth.py"],
+            "validation_plan": ["pytest"],
+            "risk_level": "high",
+            "questions": [],
+            "state": "open",
+            "decision_note": "",
+            "converted_issue_id": "",
+            "created_at": "2026-07-11T00:00:00",
+            "updated_at": "2026-07-11T00:00:00",
+        }
         self.recorded_agent_heartbeats: list[dict] = []
         self.recorded_context_health: list[dict] = []
         self.resolved_approvals: list[dict] = []
@@ -1424,6 +1454,100 @@ class _FakeWorkbenchService:
             "task_id": task_id,
             "agent_id": agent_id,
             "limit": limit,
+        }
+
+    async def create_proposal(self, **kwargs):
+        call = dict(kwargs)
+        self.created_proposals.append(call)
+        return {
+            "id": "prop-1",
+            "session_id": call["session_id"],
+            "mission_id": call["mission_id"],
+            "task_id": call["task_id"],
+            "agent_id": call["agent_id"],
+            "title": call["title"],
+            "impact_scope": call["impact_scope"],
+            "intended_files": call.get("intended_files", []),
+            "validation_plan": call.get("validation_plan", []),
+            "risk_level": call.get("risk_level").value,
+            "questions": call.get("questions", []),
+            "state": "open",
+            "decision_note": "",
+            "converted_issue_id": "",
+            "created_at": "2026-07-11T00:00:00",
+            "updated_at": "2026-07-11T00:00:00",
+        }
+
+    async def list_proposals(self, session_id, **kwargs):
+        self.listed_proposals.append({"session_id": session_id, **kwargs})
+        return {
+            "proposals": [
+                {
+                    "id": "prop-1",
+                    "session_id": session_id,
+                    "mission_id": kwargs.get("mission_id") or "m1",
+                    "task_id": kwargs.get("task_id") or "t1",
+                    "agent_id": "agent-a",
+                    "title": "重构认证",
+                    "impact_scope": "登录流程",
+                    "intended_files": ["src/auth.py"],
+                    "validation_plan": ["pytest"],
+                    "risk_level": "high",
+                    "questions": [],
+                    "state": kwargs.get("state") or "open",
+                    "decision_note": "",
+                    "converted_issue_id": "",
+                    "created_at": "2026-07-11T00:00:00",
+                    "updated_at": "2026-07-11T00:00:00",
+                }
+            ],
+            "mission_id": kwargs.get("mission_id"),
+            "task_id": kwargs.get("task_id"),
+            "state": kwargs.get("state"),
+            "limit": kwargs.get("limit", 50),
+        }
+
+    async def get_proposal(self, session_id, proposal_id):
+        return self._get_proposal_result
+
+    async def resolve_proposal(
+        self, session_id, proposal_id, *, approved, reviewer, decision_note=""
+    ):
+        self.resolved_proposals.append(
+            {
+                "session_id": session_id,
+                "proposal_id": proposal_id,
+                "approved": approved,
+                "reviewer": reviewer,
+                "decision_note": decision_note,
+            }
+        )
+        return {
+            "id": proposal_id,
+            "session_id": session_id,
+            "state": "approved" if approved else "rejected",
+            "decision_note": decision_note,
+            "mission_id": "m1",
+            "task_id": "t1",
+        }
+
+    async def convert_proposal(self, session_id, proposal_id, *, reviewer, decision_note=""):
+        self.converted_proposals.append(
+            {
+                "session_id": session_id,
+                "proposal_id": proposal_id,
+                "reviewer": reviewer,
+                "decision_note": decision_note,
+            }
+        )
+        return {
+            "id": proposal_id,
+            "session_id": session_id,
+            "state": "converted",
+            "converted_issue_id": "t1",
+            "decision_note": decision_note,
+            "mission_id": "m1",
+            "task_id": "t1",
         }
 
     async def get_lease(self, session_id: str, lease_id: str):
@@ -4226,6 +4350,214 @@ async def test_create_workbench_bid_endpoint_requires_existing_session() -> None
 
 
 @pytest.mark.asyncio
+async def test_create_proposal_endpoint_persists_and_returns_proposal() -> None:
+    engine = _FakeEngine(exists=True)
+    body = ProposalCreate(
+        mission_id="m1",
+        task_id="t1",
+        agent_id="agent-a",
+        title="重构认证模块",
+        impact_scope="影响登录与令牌签发",
+        intended_files=["src/auth.py"],
+        validation_plan=["pytest tests/auth"],
+        risk_level="high",
+        questions=["是否兼容旧令牌?"],
+    )
+
+    response = await create_workbench_proposal(
+        "sess-1", body, _fake_request(engine), auth="test"
+    )
+
+    assert engine.loaded == ["sess-1"]
+    assert engine.workbench_service.created_proposals == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "m1",
+            "task_id": "t1",
+            "agent_id": "agent-a",
+            "title": "重构认证模块",
+            "impact_scope": "影响登录与令牌签发",
+            "intended_files": ["src/auth.py"],
+            "validation_plan": ["pytest tests/auth"],
+            "risk_level": RiskLevel("high"),
+            "questions": ["是否兼容旧令牌?"],
+        }
+    ]
+    assert response["state"] == "open"
+    assert response["risk_level"] == "high"
+    assert response["intended_files"] == ["src/auth.py"]
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_endpoint_rejects_invalid_risk_level() -> None:
+    engine = _FakeEngine(exists=True)
+    body = ProposalCreate(
+        mission_id="m1",
+        task_id="t1",
+        agent_id="agent-a",
+        title="x",
+        impact_scope="y",
+        risk_level="bogus",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_workbench_proposal(
+            "sess-1", body, _fake_request(engine), auth="test"
+        )
+
+    assert exc.value.status_code == 400
+    assert "无效 risk_level" in exc.value.detail
+    assert engine.workbench_service.created_proposals == []
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_endpoint_can_return_fresh_snapshot() -> None:
+    engine = _FakeEngine(exists=True)
+    body = ProposalCreate(
+        mission_id="m1",
+        task_id="t1",
+        agent_id="agent-a",
+        title="需要审批的高风险改动",
+        impact_scope="核心调度",
+    )
+
+    response = await create_workbench_proposal(
+        "sess-1",
+        body,
+        _fake_request(engine),
+        include_snapshot=True,
+        auth="test",
+    )
+
+    assert response["proposal"]["state"] == "open"
+    assert response["snapshot"]["session_id"] == "sess-1"
+
+
+@pytest.mark.asyncio
+async def test_list_proposals_endpoint_delegates_filters() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await list_workbench_proposals(
+        "sess-1",
+        _fake_request(engine),
+        mission_id="m1",
+        task_id="t1",
+        state="open",
+        limit=25,
+        auth="test",
+    )
+
+    assert engine.workbench_service.listed_proposals == [
+        {
+            "session_id": "sess-1",
+            "mission_id": "m1",
+            "task_id": "t1",
+            "state": "open",
+            "limit": 25,
+        }
+    ]
+    assert response.mission_id == "m1"
+    assert response.state == "open"
+    assert len(response.proposals) == 1
+
+
+@pytest.mark.asyncio
+async def test_approve_proposal_endpoint_delegates_to_service() -> None:
+    engine = _FakeEngine(exists=True)
+    body = ProposalResolve(reviewer="Human", decision_note="同意执行")
+
+    response = await approve_workbench_proposal(
+        "sess-1", "prop-1", body, _fake_request(engine), auth="test"
+    )
+
+    assert engine.workbench_service.resolved_proposals == [
+        {
+            "session_id": "sess-1",
+            "proposal_id": "prop-1",
+            "approved": True,
+            "reviewer": "Human",
+            "decision_note": "同意执行",
+        }
+    ]
+    assert response["state"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_reject_proposal_endpoint_delegates_to_service() -> None:
+    engine = _FakeEngine(exists=True)
+    body = ProposalResolve(reviewer="Human", decision_note="风险过高")
+
+    response = await reject_workbench_proposal(
+        "sess-1", "prop-1", body, _fake_request(engine), auth="test"
+    )
+
+    assert engine.workbench_service.resolved_proposals[-1]["approved"] is False
+    assert response["state"] == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_convert_proposal_endpoint_creates_issue_and_marks_converted() -> None:
+    engine = _FakeEngine(exists=True)
+    body = ProposalResolve(reviewer="Human", decision_note="转为正式任务")
+
+    response = await convert_workbench_proposal(
+        "sess-1", "prop-1", body, _fake_request(engine), auth="test"
+    )
+
+    assert engine.workbench_service.converted_proposals == [
+        {
+            "session_id": "sess-1",
+            "proposal_id": "prop-1",
+            "reviewer": "Human",
+            "decision_note": "转为正式任务",
+        }
+    ]
+    assert response["state"] == "converted"
+    assert response["converted_issue_id"] == "t1"
+
+
+@pytest.mark.asyncio
+async def test_get_proposal_endpoint_returns_404_when_missing() -> None:
+    engine = _FakeEngine(exists=True)
+    engine.workbench_service._get_proposal_result = None
+
+    with pytest.raises(HTTPException) as exc:
+        await get_workbench_proposal(
+            "sess-1", "missing", _fake_request(engine), auth="test"
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Proposal not found"
+
+
+def test_proposal_routes_advertised_in_capabilities() -> None:
+    """Proposals must appear in the capabilities resource/action registry."""
+    from naumi_agent.api.routes.workbench import (
+        WORKBENCH_ROUTE_TEMPLATES,
+        WORKBENCH_SUPPORTED_ACTIONS,
+        WORKBENCH_SUPPORTED_RESOURCES,
+    )
+
+    assert "proposals" in WORKBENCH_SUPPORTED_RESOURCES
+    for action in (
+        "create_proposal",
+        "approve_proposal",
+        "reject_proposal",
+        "convert_proposal",
+    ):
+        assert action in WORKBENCH_SUPPORTED_ACTIONS
+    for template in (
+        "proposals",
+        "create_proposal",
+        "proposal",
+        "approve_proposal",
+        "reject_proposal",
+        "convert_proposal",
+    ):
+        assert template in WORKBENCH_ROUTE_TEMPLATES
+
+
+@pytest.mark.asyncio
 async def test_get_approvals_endpoint_requires_existing_session() -> None:
     engine = _FakeEngine(exists=False)
 
@@ -5574,6 +5906,7 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
         "approvals",
         "intent_locks",
         "decisions",
+        "proposals",
     ]
     assert response.supported_actions == [
         "create_session",
@@ -5590,6 +5923,10 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
         "create_intent_lock",
         "deactivate_intent_lock",
         "create_decision",
+        "create_proposal",
+        "approve_proposal",
+        "reject_proposal",
+        "convert_proposal",
         "resolve_approval",
         "review_evidence",
         "list_messages",
@@ -5685,6 +6022,18 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
         "decision": (
             "/workbench/sessions/{session_id}/missions/{mission_id}"
             "/decisions/{decision_id}"
+        ),
+        "proposals": "/workbench/sessions/{session_id}/proposals",
+        "create_proposal": "/workbench/sessions/{session_id}/proposals",
+        "proposal": "/workbench/sessions/{session_id}/proposals/{proposal_id}",
+        "approve_proposal": (
+            "/workbench/sessions/{session_id}/proposals/{proposal_id}/approve"
+        ),
+        "reject_proposal": (
+            "/workbench/sessions/{session_id}/proposals/{proposal_id}/reject"
+        ),
+        "convert_proposal": (
+            "/workbench/sessions/{session_id}/proposals/{proposal_id}/convert"
         ),
     }
     assert response.allowed_validation_commands == [

@@ -782,6 +782,57 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         return submitIssueBidResult
     }
 
+    func fetchProposals(
+        sessionID: String,
+        missionID: String?,
+        taskID: String?,
+        state: String?,
+        limit: Int
+    ) async throws(APIError) -> ProposalsDTO {
+        ProposalsDTO(
+            proposals: [],
+            missionID: missionID,
+            taskID: taskID,
+            state: state,
+            limit: limit
+        )
+    }
+
+    func fetchProposal(sessionID: String, proposalID: String) async throws(APIError) -> ProposalDTO {
+        throw .invalidResponse
+    }
+
+    func createProposal(
+        sessionID: String,
+        draft: ProposalDraft
+    ) async throws(APIError) -> ProposalDTO {
+        throw .invalidResponse
+    }
+
+    func approveProposal(
+        sessionID: String,
+        proposalID: String,
+        draft: ProposalResolveDraft
+    ) async throws(APIError) -> ProposalDTO {
+        throw .invalidResponse
+    }
+
+    func rejectProposal(
+        sessionID: String,
+        proposalID: String,
+        draft: ProposalResolveDraft
+    ) async throws(APIError) -> ProposalDTO {
+        throw .invalidResponse
+    }
+
+    func convertProposal(
+        sessionID: String,
+        proposalID: String,
+        draft: ProposalResolveDraft
+    ) async throws(APIError) -> ProposalDTO {
+        throw .invalidResponse
+    }
+
     func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
         guard let result = releaseLeaseResult else {
             throw .invalidResponse

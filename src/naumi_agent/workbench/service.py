@@ -20,6 +20,7 @@ from naumi_agent.workbench.models import (
     Decision,
     DecisionKind,
     DecisionStrength,
+    EventSeverity,
     IntentLock,
     IssueBid,
     IssueMetadata,
@@ -27,7 +28,9 @@ from naumi_agent.workbench.models import (
     LeaseState,
     Mission,
     ParallelMode,
+    ProposalState,
     RiskLevel,
+    WorkbenchProposal,
 )
 from naumi_agent.workbench.review_evidence import ReviewEvidenceCollector
 from naumi_agent.workbench.store import WorkbenchStore
@@ -695,6 +698,7 @@ class WorkbenchService:
         bids = await self._workbench_store.list_bids_for_snapshot(
             session_id, [task.id for task in tasks]
         )
+        proposals = await self._workbench_store.list_proposals_for_snapshot(session_id)
         return {
             "version": 1,
             "session_id": session_id,
@@ -714,6 +718,7 @@ class WorkbenchService:
             "issues": issues,
             "leases": leases,
             "bids": [self._bid_to_dict(bid) for bid in bids],
+            "proposals": [self._proposal_to_dict(p) for p in proposals],
             "failures": failures,
             "events": [self._event_to_dict(event, tasks_by_id) for event in events],
             "validation_runs": validation_runs,
@@ -850,6 +855,201 @@ class WorkbenchService:
             "agent_id": agent_id,
             "limit": limit,
         }
+
+    @staticmethod
+    def _proposal_to_dict(proposal: WorkbenchProposal) -> dict[str, Any]:
+        return {
+            "id": proposal.id,
+            "session_id": proposal.session_id,
+            "mission_id": proposal.mission_id,
+            "task_id": proposal.task_id,
+            "agent_id": proposal.agent_id,
+            "title": proposal.title,
+            "impact_scope": proposal.impact_scope,
+            "intended_files": list(proposal.intended_files),
+            "validation_plan": list(proposal.validation_plan),
+            "risk_level": proposal.risk_level.value,
+            "questions": list(proposal.questions),
+            "state": proposal.state.value,
+            "decision_note": proposal.decision_note,
+            "converted_issue_id": proposal.converted_issue_id,
+            "created_at": proposal.created_at,
+            "updated_at": proposal.updated_at,
+        }
+
+    async def create_proposal(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        task_id: str,
+        agent_id: str,
+        title: str,
+        impact_scope: str,
+        intended_files: list[str] | None = None,
+        validation_plan: list[str] | None = None,
+        risk_level: RiskLevel = RiskLevel.MEDIUM,
+        questions: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Persist a new proposal and emit a ``proposal.created`` audit event."""
+        proposal = await self._workbench_store.create_proposal(
+            session_id=session_id,
+            mission_id=mission_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            title=title,
+            impact_scope=impact_scope,
+            intended_files=intended_files,
+            validation_plan=validation_plan,
+            risk_level=risk_level,
+            questions=questions,
+        )
+        await self._workbench_store.append_event(
+            session_id=session_id,
+            type="proposal.created",
+            actor=agent_id,
+            subject_id=proposal.id,
+            payload={
+                "mission_id": mission_id,
+                "task_id": task_id,
+                "title": proposal.title,
+                "risk_level": proposal.risk_level.value,
+            },
+            severity=self._severity_for_risk(proposal.risk_level),
+        )
+        return self._proposal_to_dict(proposal)
+
+    async def list_proposals(
+        self,
+        session_id: str,
+        *,
+        mission_id: str | None = None,
+        task_id: str | None = None,
+        state: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        proposals = await self._workbench_store.list_proposals(
+            session_id,
+            mission_id=mission_id,
+            task_id=task_id,
+            state=state,
+            limit=limit,
+        )
+        return {
+            "proposals": [self._proposal_to_dict(p) for p in proposals],
+            "mission_id": mission_id,
+            "task_id": task_id,
+            "state": state,
+            "limit": limit,
+        }
+
+    async def get_proposal(
+        self, session_id: str, proposal_id: str
+    ) -> dict[str, Any] | None:
+        proposal = await self._workbench_store.get_proposal(session_id, proposal_id)
+        return self._proposal_to_dict(proposal) if proposal else None
+
+    async def resolve_proposal(
+        self,
+        session_id: str,
+        proposal_id: str,
+        *,
+        approved: bool,
+        reviewer: str,
+        decision_note: str = "",
+    ) -> dict[str, Any] | None:
+        """Approve or reject an OPEN proposal, emitting an audit event.
+
+        Returns the updated proposal dict, or ``None`` if no such proposal
+        exists. Resolving an already-decided proposal is idempotent: the
+        existing record is returned without a new event.
+        """
+        existing = await self._workbench_store.get_proposal(session_id, proposal_id)
+        if existing is None:
+            return None
+        target_state = ProposalState.APPROVED if approved else ProposalState.REJECTED
+        if existing.state is not ProposalState.OPEN:
+            return self._proposal_to_dict(existing)
+        proposal = await self._workbench_store.update_proposal_state(
+            session_id,
+            proposal_id,
+            state=target_state,
+            decision_note=decision_note,
+        )
+        event_type = "proposal.approved" if approved else "proposal.rejected"
+        await self._workbench_store.append_event(
+            session_id=session_id,
+            type=event_type,
+            actor=reviewer,
+            subject_id=proposal_id,
+            payload={
+                "mission_id": existing.mission_id,
+                "task_id": existing.task_id,
+                "decision_note": decision_note,
+            },
+            severity=EventSeverity.WARNING,
+        )
+        return self._proposal_to_dict(proposal) if proposal else None
+
+    async def convert_proposal(
+        self,
+        session_id: str,
+        proposal_id: str,
+        *,
+        reviewer: str,
+        decision_note: str = "",
+    ) -> dict[str, Any] | None:
+        """Convert an OPEN proposal into a tracked issue.
+
+        Creates an issue metadata record, marks the proposal as CONVERTED, and
+        emits a ``proposal.converted`` audit event. Returns the updated proposal
+        dict (including ``converted_issue_id``), or ``None`` if not found.
+        """
+        existing = await self._workbench_store.get_proposal(session_id, proposal_id)
+        if existing is None:
+            return None
+        if existing.state is not ProposalState.OPEN:
+            return self._proposal_to_dict(existing)
+        issue = await self._workbench_store.upsert_issue(
+            IssueMetadata(
+                session_id=session_id,
+                task_id=existing.task_id,
+                mission_id=existing.mission_id,
+                risk_level=existing.risk_level,
+                requires_human_approval=True,
+                acceptance_criteria=list(existing.validation_plan),
+                expected_artifacts=list(existing.intended_files),
+            )
+        )
+        proposal = await self._workbench_store.update_proposal_state(
+            session_id,
+            proposal_id,
+            state=ProposalState.CONVERTED,
+            decision_note=decision_note,
+            converted_issue_id=issue.task_id,
+        )
+        await self._workbench_store.append_event(
+            session_id=session_id,
+            type="proposal.converted",
+            actor=reviewer,
+            subject_id=proposal_id,
+            payload={
+                "mission_id": existing.mission_id,
+                "task_id": existing.task_id,
+                "issue_task_id": issue.task_id,
+                "decision_note": decision_note,
+            },
+            severity=EventSeverity.WARNING,
+        )
+        return self._proposal_to_dict(proposal) if proposal else None
+
+    @staticmethod
+    def _severity_for_risk(risk_level: RiskLevel) -> Any:
+        """Map a risk level to an audit-event severity."""
+        high_severity = {RiskLevel.HIGH, RiskLevel.CRITICAL}
+        if risk_level in high_severity:
+            return EventSeverity.WARNING
+        return EventSeverity.INFO
 
     async def list_events(
         self,

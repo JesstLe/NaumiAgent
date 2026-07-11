@@ -210,6 +210,50 @@ class EventSeverity(StrEnum):
     CRITICAL = "critical"
 
 
+class ProposalState(StrEnum):
+    """Lifecycle state of a human-governed proposal.
+
+    OPEN: awaiting human decision.
+    APPROVED: human approved; the work may proceed.
+    REJECTED: human rejected the proposal.
+    CONVERTED: proposal was converted into a tracked issue.
+    """
+
+    OPEN = "open"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    CONVERTED = "converted"
+
+
+@dataclass
+class WorkbenchProposal:
+    """A human-governed proposal created when direct execution is unsafe.
+
+    Instead of mutating state directly when an intent lock or risk level blocks
+    an action, an agent submits a proposal describing the intended impact scope,
+    the files it means to touch, its validation plan, the risk, and any open
+    questions for the human reviewer. A human then approves, rejects, or
+    converts the proposal into a tracked issue.
+    """
+
+    id: str
+    session_id: str
+    mission_id: str
+    task_id: str
+    agent_id: str
+    title: str
+    impact_scope: str
+    intended_files: list[str] = field(default_factory=list)
+    validation_plan: list[str] = field(default_factory=list)
+    risk_level: RiskLevel = RiskLevel.MEDIUM
+    questions: list[str] = field(default_factory=list)
+    state: ProposalState = ProposalState.OPEN
+    decision_note: str = ""
+    converted_issue_id: str = ""
+    created_at: str = field(default_factory=now_iso)
+    updated_at: str = field(default_factory=now_iso)
+
+
 @dataclass
 class WorkbenchEvent:
     session_id: str

@@ -25,8 +25,10 @@ from naumi_agent.workbench.models import (
     LeaseState,
     Mission,
     ParallelMode,
+    ProposalState,
     RiskLevel,
     WorkbenchEvent,
+    WorkbenchProposal,
     now_iso,
 )
 
@@ -212,6 +214,28 @@ CREATE TABLE IF NOT EXISTS workbench_bids (
 """
 
 
+_CREATE_PROPOSALS = """
+CREATE TABLE IF NOT EXISTS workbench_proposals (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    mission_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    impact_scope TEXT NOT NULL,
+    intended_files TEXT NOT NULL DEFAULT '[]',
+    validation_plan TEXT NOT NULL DEFAULT '[]',
+    risk_level TEXT NOT NULL DEFAULT 'medium',
+    questions TEXT NOT NULL DEFAULT '[]',
+    state TEXT NOT NULL DEFAULT 'open',
+    decision_note TEXT NOT NULL DEFAULT '',
+    converted_issue_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+"""
+
+
 class WorkbenchStore:
     """SQLite-backed state for the workbench dashboard."""
 
@@ -234,6 +258,7 @@ class WorkbenchStore:
         await db.execute(_CREATE_FAILURES)
         await db.execute(_CREATE_APPROVALS)
         await db.execute(_CREATE_BIDS)
+        await db.execute(_CREATE_PROPOSALS)
         await self._migrate_columns(db)
         await db.commit()
         self._initialized = True
@@ -1186,6 +1211,163 @@ class WorkbenchStore:
             rows = await cursor.fetchall()
         return [_row_to_bid(dict(row)) for row in rows]
 
+    async def create_proposal(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        task_id: str,
+        agent_id: str,
+        title: str,
+        impact_scope: str,
+        intended_files: list[str] | None = None,
+        validation_plan: list[str] | None = None,
+        risk_level: RiskLevel = RiskLevel.MEDIUM,
+        questions: list[str] | None = None,
+    ) -> WorkbenchProposal:
+        """Persist a new human-governed proposal."""
+        proposal = WorkbenchProposal(
+            id=uuid.uuid4().hex[:12],
+            session_id=session_id,
+            mission_id=mission_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            title=title,
+            impact_scope=impact_scope,
+            intended_files=list(intended_files or []),
+            validation_plan=list(validation_plan or []),
+            risk_level=risk_level,
+            questions=list(questions or []),
+        )
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                """INSERT INTO workbench_proposals
+                   (id, session_id, mission_id, task_id, agent_id, title,
+                    impact_scope, intended_files, validation_plan, risk_level,
+                    questions, state, decision_note, converted_issue_id,
+                    created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    proposal.id,
+                    proposal.session_id,
+                    proposal.mission_id,
+                    proposal.task_id,
+                    proposal.agent_id,
+                    proposal.title,
+                    proposal.impact_scope,
+                    json.dumps(proposal.intended_files, ensure_ascii=False),
+                    json.dumps(proposal.validation_plan, ensure_ascii=False),
+                    proposal.risk_level.value,
+                    json.dumps(proposal.questions, ensure_ascii=False),
+                    proposal.state.value,
+                    proposal.decision_note,
+                    proposal.converted_issue_id,
+                    proposal.created_at,
+                    proposal.updated_at,
+                ),
+            )
+            await db.commit()
+        return proposal
+
+    async def list_proposals(
+        self,
+        session_id: str,
+        *,
+        mission_id: str | None = None,
+        task_id: str | None = None,
+        state: str | None = None,
+        limit: int = 50,
+    ) -> list[WorkbenchProposal]:
+        """List proposals, optionally filtered by mission, task, and/or state."""
+        filters = ["session_id = ?"]
+        params: list[Any] = [session_id]
+        if mission_id is not None:
+            filters.append("mission_id = ?")
+            params.append(mission_id)
+        if task_id is not None:
+            filters.append("task_id = ?")
+            params.append(task_id)
+        if state is not None:
+            filters.append("state = ?")
+            params.append(state)
+        params.append(limit)
+        where_clause = " AND ".join(filters)
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                f"""SELECT * FROM workbench_proposals
+                   WHERE {where_clause}
+                   ORDER BY created_at DESC
+                   LIMIT ?""",
+                params,
+            )
+            rows = await cursor.fetchall()
+        return [_row_to_proposal(dict(row)) for row in rows]
+
+    async def get_proposal(
+        self, session_id: str, proposal_id: str
+    ) -> WorkbenchProposal | None:
+        """Fetch a single proposal by id."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_proposals
+                   WHERE session_id = ? AND id = ?""",
+                (session_id, proposal_id),
+            )
+            row = await cursor.fetchone()
+        return _row_to_proposal(dict(row)) if row else None
+
+    async def update_proposal_state(
+        self,
+        session_id: str,
+        proposal_id: str,
+        *,
+        state: ProposalState,
+        decision_note: str = "",
+        converted_issue_id: str = "",
+    ) -> WorkbenchProposal | None:
+        """Transition a proposal to a new state (approve/reject/convert).
+
+        Only OPEN proposals may be transitioned; resolving an already-decided
+        proposal is a no-op returning the current record unchanged.
+        """
+        existing = await self.get_proposal(session_id, proposal_id)
+        if existing is None:
+            return None
+        if existing.state is not ProposalState.OPEN:
+            return existing
+        now = now_iso()
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            cursor = await db.execute(
+                """UPDATE workbench_proposals
+                   SET state = ?, decision_note = ?, converted_issue_id = ?,
+                       updated_at = ?
+                   WHERE session_id = ? AND id = ? AND state = 'open'""",
+                (
+                    state.value,
+                    decision_note,
+                    converted_issue_id,
+                    now,
+                    session_id,
+                    proposal_id,
+                ),
+            )
+            await db.commit()
+            if cursor.rowcount == 0:
+                return await self.get_proposal(session_id, proposal_id)
+        return await self.get_proposal(session_id, proposal_id)
+
+    async def list_proposals_for_snapshot(
+        self, session_id: str
+    ) -> list[WorkbenchProposal]:
+        """Fetch all proposals for a snapshot (newest first)."""
+        return await self.list_proposals(session_id, limit=200)
+
     async def record_context_snapshot(
         self,
         *,
@@ -1715,6 +1897,27 @@ def _row_to_bid(row: dict[str, Any]) -> IssueBid:
         estimate_minutes=int(row["estimate_minutes"]),
         eta=row["eta"],
         note=row["note"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _row_to_proposal(row: dict[str, Any]) -> WorkbenchProposal:
+    return WorkbenchProposal(
+        id=row["id"],
+        session_id=row["session_id"],
+        mission_id=row["mission_id"],
+        task_id=row["task_id"],
+        agent_id=row["agent_id"],
+        title=row["title"],
+        impact_scope=row["impact_scope"],
+        intended_files=json.loads(row.get("intended_files") or "[]"),
+        validation_plan=json.loads(row.get("validation_plan") or "[]"),
+        risk_level=RiskLevel(row.get("risk_level") or "medium"),
+        questions=json.loads(row.get("questions") or "[]"),
+        state=ProposalState(row.get("state") or "open"),
+        decision_note=row.get("decision_note") or "",
+        converted_issue_id=row.get("converted_issue_id") or "",
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
