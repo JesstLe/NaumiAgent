@@ -109,10 +109,64 @@ class TaskStore:
         return self._session_id
 
     async def _ensure_table(self, db: aiosqlite.Connection) -> None:
-        if not self._initialized:
+        if self._initialized:
+            return
+        await self._migrate_legacy_task_schema(db)
+        await db.execute(_CREATE_TABLE)
+        await db.commit()
+        self._initialized = True
+
+    async def _migrate_legacy_task_schema(self, db: aiosqlite.Connection) -> None:
+        """Upgrade historical global task IDs without losing task rows."""
+        cursor = await db.execute("PRAGMA table_info(tasks)")
+        columns = await cursor.fetchall()
+        if not columns:
+            return
+
+        primary_key = [
+            str(column[1])
+            for column in sorted(columns, key=lambda column: int(column[5]))
+            if int(column[5]) > 0
+        ]
+        if primary_key == ["session_id", "id"]:
+            return
+
+        required_columns = {
+            "id",
+            "session_id",
+            "subject",
+            "description",
+            "status",
+            "active_form",
+            "owner",
+            "blocks",
+            "blocked_by",
+            "created_at",
+            "updated_at",
+        }
+        existing_columns = {str(column[1]) for column in columns}
+        missing_columns = required_columns - existing_columns
+        if missing_columns:
+            names = ", ".join(sorted(missing_columns))
+            raise RuntimeError(f"无法迁移 tasks 表，缺少字段: {names}")
+
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            await db.execute("ALTER TABLE tasks RENAME TO tasks__legacy_global_id")
             await db.execute(_CREATE_TABLE)
+            await db.execute(
+                """INSERT INTO tasks
+                    (id, session_id, subject, description, status, active_form,
+                     owner, blocks, blocked_by, created_at, updated_at)
+                    SELECT id, session_id, subject, description, status, active_form,
+                           owner, blocks, blocked_by, created_at, updated_at
+                    FROM tasks__legacy_global_id"""
+            )
+            await db.execute("DROP TABLE tasks__legacy_global_id")
             await db.commit()
-            self._initialized = True
+        except Exception:
+            await db.rollback()
+            raise
 
     async def _get_task(self, db: aiosqlite.Connection, task_id: str) -> Task | None:
         db.row_factory = aiosqlite.Row
