@@ -54,7 +54,7 @@ public final class WorkbenchRefreshCoordinator: Sendable {
         self.refreshInterval = refreshInterval
         self.eventStreamHealthProbeInterval = eventStreamHealthProbeInterval
         self.refreshOperation = refreshOperation
-        self.eventStreamHealthProbeIsAvailable = { true }
+        self.eventStreamHealthProbeIsAvailable = { false }
         self.eventStreamHealthProbeOperation = {}
     }
 
@@ -113,11 +113,16 @@ public final class WorkbenchRefreshCoordinator: Sendable {
 
     /// Starts an endless refresh loop that sleeps between ticks.
     ///
+    /// When the event stream is active it owns state delivery, so REST polling
+    /// pauses to avoid duplicating a full Workbench refresh on every tick. If
+    /// the event stream is unavailable, the loop falls back to REST polling.
     /// The loop respects task cancellation: as soon as the surrounding SwiftUI
     /// `.task` is cancelled, the sleep is interrupted and the loop exits.
     public func startPeriodicRefresh() async {
         while !Task.isCancelled {
-            _ = await refreshOnce()
+            if !eventStreamHealthProbeIsAvailable() {
+                _ = await refreshOnce()
+            }
 
             // Sleep until the next tick. Cancellation immediately ends the loop
             // without leaving multiple timers running.
