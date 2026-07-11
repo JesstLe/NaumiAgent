@@ -1383,6 +1383,10 @@ public enum AppStrings {
             locale == .zhCN ? "起始时间" : "Since"
         }
 
+        public static func severityLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "严重级别" : "Severity"
+        }
+
         public static func applyFilterButton(_ locale: AppLocale) -> String {
             locale == .zhCN ? "应用筛选" : "Apply Filter"
         }

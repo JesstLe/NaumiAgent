@@ -244,6 +244,7 @@ public final class DaemonController: Sendable {
         subjectID: String? = nil,
         actor: String? = nil,
         since: String? = nil,
+        severity: String? = nil,
         limit: Int = 50
     ) async {
         guard let activeEventStream else {
@@ -258,6 +259,7 @@ public final class DaemonController: Sendable {
                 subjectID: subjectID,
                 actor: actor,
                 since: since,
+                severity: severity,
                 limit: limit
             )
         } catch {
@@ -684,6 +686,9 @@ public final class DaemonController: Sendable {
                 subjectID: nil,
                 actor: nil,
                 since: nil,
+                severity: nil,
+                correlationID: nil,
+                parentEventID: nil,
                 limit: 50
             )
         }
@@ -861,6 +866,9 @@ public final class DaemonController: Sendable {
         subjectID: String? = nil,
         actor: String? = nil,
         since: String? = nil,
+        severity: String? = nil,
+        correlationID: String? = nil,
+        parentEventID: String? = nil,
         limit: Int
     ) async {
         guard let sessionID = appState.selectedSessionID else {
@@ -877,6 +885,9 @@ public final class DaemonController: Sendable {
                 subjectID: subjectID,
                 actor: actor,
                 since: since,
+                severity: severity,
+                correlationID: correlationID,
+                parentEventID: parentEventID,
                 limit: limit
             )
             guard appState.selectedSessionID == sessionID else {

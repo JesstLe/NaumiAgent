@@ -10,6 +10,9 @@ public struct EventDTO: Decodable, Equatable, Sendable {
     public let payload: [String: JSONValue]
     public let timestamp: String
     public let task: TaskDTO?
+    public let severity: String
+    public let correlationID: String?
+    public let parentEventID: String?
 
     public enum CodingKeys: String, CodingKey {
         case id
@@ -20,6 +23,9 @@ public struct EventDTO: Decodable, Equatable, Sendable {
         case payload
         case timestamp
         case task
+        case severity
+        case correlationID = "correlation_id"
+        case parentEventID = "parent_event_id"
     }
 
     public init(
@@ -30,7 +36,10 @@ public struct EventDTO: Decodable, Equatable, Sendable {
         subjectID: String,
         payload: [String: JSONValue],
         timestamp: String,
-        task: TaskDTO? = nil
+        task: TaskDTO? = nil,
+        severity: String = "info",
+        correlationID: String? = nil,
+        parentEventID: String? = nil
     ) {
         self.id = id
         self.sessionID = sessionID
@@ -40,6 +49,9 @@ public struct EventDTO: Decodable, Equatable, Sendable {
         self.payload = payload
         self.timestamp = timestamp
         self.task = task
+        self.severity = severity
+        self.correlationID = correlationID
+        self.parentEventID = parentEventID
     }
 
     public init(from decoder: Decoder) throws {
@@ -52,5 +64,9 @@ public struct EventDTO: Decodable, Equatable, Sendable {
         payload = try container.decodeIfPresent([String: JSONValue].self, forKey: .payload) ?? [:]
         timestamp = try container.decode(String.self, forKey: .timestamp)
         task = try container.decodeIfPresent(TaskDTO.self, forKey: .task)
+        // Backward compatible: older daemons omit severity/correlation/parent.
+        severity = try container.decodeIfPresent(String.self, forKey: .severity) ?? "info"
+        correlationID = try container.decodeIfPresent(String.self, forKey: .correlationID)
+        parentEventID = try container.decodeIfPresent(String.self, forKey: .parentEventID)
     }
 }
