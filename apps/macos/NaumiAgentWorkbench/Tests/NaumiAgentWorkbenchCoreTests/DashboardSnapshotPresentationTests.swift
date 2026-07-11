@@ -96,7 +96,7 @@ struct DashboardSnapshotPresentationTests {
         #expect(last.timestamp == "2026-06-27T05:40:00")
     }
 
-    @Test func workbenchPresentationKeepsSharedCanvasLandmarks() throws {
+    @Test func workbenchPresentationKeepsSharedCanvasLandmarksWithoutInventingValidation() throws {
         let snapshot = try loadZHSnapshot()
         let presentation = DashboardSnapshotPresentation(snapshot: snapshot)
 
@@ -110,7 +110,6 @@ struct DashboardSnapshotPresentationTests {
             .issue,
             .agents,
             .worktrees,
-            .validation,
             .failure,
             .approval
         ])

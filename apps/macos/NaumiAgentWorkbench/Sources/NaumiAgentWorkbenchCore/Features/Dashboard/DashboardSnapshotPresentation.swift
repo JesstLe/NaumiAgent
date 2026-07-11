@@ -131,6 +131,7 @@ public struct DashboardSnapshotPresentation: Equatable, Sendable {
             leases: snapshot.leases,
             failures: snapshot.failures,
             events: snapshot.events,
+            validationRuns: snapshot.validationRuns,
             taskByID: taskByID
         )
     }
@@ -232,6 +233,7 @@ public struct DashboardWorkbenchPresentation: Equatable, Sendable {
         leases: [LeaseDTO],
         failures: [FailureDTO],
         events: [EventDTO],
+        validationRuns: [ValidationRunDTO],
         taskByID: [String: TaskDTO]
     ) {
         leftMissionTitle = mission?.title
@@ -285,14 +287,19 @@ public struct DashboardWorkbenchPresentation: Equatable, Sendable {
                 )
             )
         }
-        if !tasks.isEmpty {
+        if !validationRuns.isEmpty {
+            let latestRun = validationRuns.max {
+                let lhs = $0.completedAt.isEmpty ? $0.startedAt : $0.completedAt
+                let rhs = $1.completedAt.isEmpty ? $1.startedAt : $1.completedAt
+                return lhs < rhs
+            }
             nodes.append(
                 DashboardCanvasNode(
                     id: "validation",
                     kind: .validation,
-                    title: "\(tasks.filter { $0.status == "completed" }.count)/\(tasks.count)",
+                    title: "\(validationRuns.filter { $0.status.lowercased() == "passed" }.count)/\(validationRuns.count)",
                     subtitle: "Validation Runs",
-                    status: "tracked"
+                    status: latestRun?.status ?? ""
                 )
             )
         }

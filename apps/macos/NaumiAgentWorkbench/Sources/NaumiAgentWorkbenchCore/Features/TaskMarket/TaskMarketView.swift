@@ -445,7 +445,7 @@ public struct TaskMarketView: View {
                 HStack {
                     riskBadge(issue.risk)
                     modeBadge(issue.parallelMode)
-                    Text(appState.locale == .zhCN ? "需要方案" : "Requires proposal")
+                    Text(issueStatusLabel(issue.status))
                         .font(.caption)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
@@ -751,24 +751,20 @@ public struct TaskMarketView: View {
             return row
         }
 
-        let criteriaSummary = loadedIssue.acceptanceCriteria
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: appState.locale == .zhCN ? "；" : "; ")
+        let loadedTask = loadedIssue.task
+            ?? appState.snapshot?.tasks.first { $0.id == loadedIssue.taskID }
         return TaskMarketDesignIssue(
             number: row.number,
             taskID: row.taskID,
             title: row.title,
-            detail: criteriaSummary.isEmpty ? row.detail : criteriaSummary,
+            detail: taskDetail(loadedTask, fallback: row.detail),
             parallelMode: loadedIssue.parallelMode,
             risk: normalizedRiskLabel(loadedIssue.riskLevel),
             dependency: row.dependency,
             bids: row.bids,
             lease: row.lease,
             worktree: loadedIssue.relatedWorktree.isEmpty ? row.worktree : loadedIssue.relatedWorktree,
-            status: loadedIssue.requiresHumanApproval
-                ? (appState.locale == .zhCN ? "需要人工审批" : "Requires approval")
-                : row.status,
+            status: loadedTask?.status ?? row.status,
             tag: row.tag
         )
     }
@@ -829,32 +825,103 @@ public struct TaskMarketView: View {
     }
 
     private func inspectorGrid(_ issue: TaskMarketDesignIssue) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
+        let evidence = TaskMarketInspectorPresentation(issue: issue, snapshot: appState.snapshot)
+        return Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 7) {
             GridRow {
                 inspectorLabel(appState.locale == .zhCN ? "目标" : "Mission")
                 Text(currentMissionTitle)
             }
             GridRow {
                 inspectorLabel(appState.locale == .zhCN ? "创建时间" : "Created")
-                Text(appState.locale == .zhCN ? "2026-06-27 09:14" : "Jun 27, 2026 09:14")
+                Text(evidence.createdAtLabel(locale: appState.locale))
             }
             GridRow {
                 inspectorLabel(appState.locale == .zhCN ? "上下文健康" : "Context Health")
-                StatusBadge(text: appState.locale == .zhCN ? "健康" : "Good", color: .green)
+                if let health = evidence.contextHealth {
+                    StatusBadge(text: contextHealthLabel(health), color: contextHealthColor(health))
+                } else {
+                    Text(appState.locale == .zhCN ? "未记录" : "Not recorded")
+                        .foregroundStyle(.secondary)
+                }
             }
             GridRow {
                 inspectorLabel(appState.locale == .zhCN ? "测试数" : "Tests")
-                Text("8")
+                Text("\(evidence.validationCount)")
             }
             GridRow {
-                inspectorLabel(appState.locale == .zhCN ? "风险摘要" : "Risk Summary")
-                Text(issue.risk == "High"
-                    ? (appState.locale == .zhCN ? "并发缺陷、租约丢失" : "Concurrency bugs, lost leases")
-                    : (appState.locale == .zhCN ? "影响面较低" : "Low blast radius")
-                )
+                inspectorLabel(appState.locale == .zhCN ? "验收标准" : "Acceptance")
+                Text(evidence.acceptanceCriteriaLabel(locale: appState.locale))
+                    .lineLimit(3)
             }
         }
         .font(.caption)
+    }
+
+    private func taskDetail(_ task: TaskDTO?, fallback: String) -> String {
+        guard let description = task?.description.trimmingCharacters(in: .whitespacesAndNewlines),
+              !description.isEmpty else {
+            return fallback
+        }
+        return description
+    }
+
+    private func issueStatusLabel(_ status: String) -> String {
+        switch (appState.locale, status.lowercased()) {
+        case (.zhCN, "pending"):
+            return "待处理"
+        case (.zhCN, "in_progress"):
+            return "进行中"
+        case (.zhCN, "completed"):
+            return "已完成"
+        case (.zhCN, "blocked"):
+            return "阻塞"
+        case (.enUS, "pending"):
+            return "Pending"
+        case (.enUS, "in_progress"):
+            return "In progress"
+        case (.enUS, "completed"):
+            return "Completed"
+        case (.enUS, "blocked"):
+            return "Blocked"
+        default:
+            return status
+        }
+    }
+
+    private func contextHealthLabel(_ health: String) -> String {
+        switch (appState.locale, health.lowercased()) {
+        case (.zhCN, "good"):
+            return "健康"
+        case (.zhCN, "stale"):
+            return "过期"
+        case (.zhCN, "overloaded"):
+            return "过载"
+        case (.zhCN, "conflicted"):
+            return "冲突"
+        case (.enUS, "good"):
+            return "Good"
+        case (.enUS, "stale"):
+            return "Stale"
+        case (.enUS, "overloaded"):
+            return "Overloaded"
+        case (.enUS, "conflicted"):
+            return "Conflicted"
+        default:
+            return health
+        }
+    }
+
+    private func contextHealthColor(_ health: String) -> Color {
+        switch health.lowercased() {
+        case "good":
+            return .green
+        case "stale":
+            return .yellow
+        case "overloaded", "conflicted":
+            return .red
+        default:
+            return .secondary
+        }
     }
 
     private func inspectorLabel(_ text: String) -> some View {
