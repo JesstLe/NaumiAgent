@@ -264,7 +264,7 @@ public enum AppStrings {
         }
 
         public static func startCommand(_ locale: AppLocale) -> String {
-            "naumi-agent api --host 127.0.0.1 --port 8765"
+            "naumi serve --host 127.0.0.1 --port 8765"
         }
 
         public static func copyCommandButton(_ locale: AppLocale) -> String {
@@ -1485,9 +1485,9 @@ public enum AppStrings {
 
         public static func networkFailure(_ locale: AppLocale) -> String {
             if locale == .zhCN {
-                return "无法连接本地 NaumiAgent 服务，请先启动：\nnaumi-agent api --host 127.0.0.1 --port 8765"
+                return "无法连接本地 NaumiAgent 服务，请先启动：\nnaumi serve --host 127.0.0.1 --port 8765"
             }
-            return "Cannot reach the local NaumiAgent service. Start it with:\nnaumi-agent api --host 127.0.0.1 --port 8765"
+            return "Cannot reach the local NaumiAgent service. Start it with:\nnaumi serve --host 127.0.0.1 --port 8765"
         }
 
         public static func capabilityUnavailable(_ locale: AppLocale, capability: String) -> String {

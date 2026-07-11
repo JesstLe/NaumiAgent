@@ -70,7 +70,7 @@ struct DaemonProcessControllerTests {
 
     @Test func launchArgumentsIncludeHostAndPort() {
         let config = DaemonLaunchConfiguration(host: "127.0.0.1")
-        #expect(config.launchArguments(forPort: 8765) == ["api", "--host", "127.0.0.1", "--port", "8765"])
+        #expect(config.launchArguments(forPort: 8765) == ["serve", "--host", "127.0.0.1", "--port", "8765"])
     }
 
     @Test func endpointURLUsesHostAndPort() {
@@ -106,7 +106,7 @@ struct DaemonProcessControllerTests {
 
         #expect(appState.supervisedDaemonState == .running)
         #expect(spawner.capturedExecutable == "/usr/local/bin/naumi-agent")
-        #expect(spawner.capturedArguments == ["api", "--host", "127.0.0.1", "--port", "8766"])
+        #expect(spawner.capturedArguments == ["serve", "--host", "127.0.0.1", "--port", "8766"])
         let status = try #require(appState.supervisedDaemonStatus)
         #expect(status.port == 8766)
         #expect(status.endpoint.absoluteString == "http://127.0.0.1:8766/api/v1/")

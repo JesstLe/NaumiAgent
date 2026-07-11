@@ -207,6 +207,6 @@ struct DaemonHealthPresentationTests {
             lastHealthCheckAt: nil,
             connectionLog: []
         )
-        #expect(presentation.startCommand == "naumi-agent api --host 127.0.0.1 --port 8765")
+        #expect(presentation.startCommand == "naumi serve --host 127.0.0.1 --port 8765")
     }
 }
