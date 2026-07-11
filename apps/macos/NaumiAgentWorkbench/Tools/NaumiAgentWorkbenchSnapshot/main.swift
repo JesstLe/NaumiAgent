@@ -35,6 +35,9 @@ struct WorkbenchSnapshotTool {
                 fixtureName: options.fixtureName
             )
             state.currentRoute = route
+            if route == .chat {
+                state.activeChatExecution = WorkbenchPreviewLoader.previewChatExecution(locale: options.locale)
+            }
 
             let environment = AppEnvironment(appState: state)
             let imageData = try render(

@@ -84,6 +84,7 @@ public final class AppState: Sendable {
 
     public var sessions: [SessionDTO] = []
     public var chatMessages: [ChatMessageDTO] = []
+    public var activeChatExecution: ChatExecutionPresentation? = nil
     public var snapshot: WorkbenchSnapshotDTO? = nil
     public var timelineEvents: [EventDTO] = []
     public var validationRuns: [ValidationRunDTO] = []

@@ -37,6 +37,61 @@ final class WorkbenchAPIClientTests {
         MockURLProtocol.requestHandler = nil
     }
 
+    @Test func streamEventDecoderParsesSSEDataLines() throws {
+        let event = try WorkbenchAPIClient.streamEvent(
+            from: "data: {\"id\":\"event-2\",\"type\":\"token_delta\",\"data\":{\"token\":\"正式答复\"},\"timestamp\":\"2026-07-12T00:00:01+00:00\",\"session_id\":\"sess/中文\",\"turn\":1}"
+        )
+
+        #expect(event?.type == .tokenDelta)
+        #expect(event?.sessionID == "sess/中文")
+        #expect(event?.data["token"] == .string("正式答复"))
+        #expect(try WorkbenchAPIClient.streamEvent(from: "event: message") == nil)
+    }
+
+    @Test func terminalChatEventRequiresFinalAgentStatus() {
+        let responseEnd = ChatStreamEvent(id: "event-response-end", type: .agentEnd, data: [:])
+        let finalEnd = ChatStreamEvent(
+            id: "event-final-end",
+            type: .agentEnd,
+            data: ["status": .string("completed")]
+        )
+        let failure = ChatStreamEvent(id: "event-error", type: .agentError, data: [:])
+
+        #expect(!responseEnd.terminatesChatStream)
+        #expect(finalEnd.terminatesChatStream)
+        #expect(failure.terminatesChatStream)
+    }
+
+    @Test func resolveChatPermissionUsesScopedConfirmationRoute() async throws {
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/sessions/sess%2F%E4%B8%AD%E6%96%87/permissions/call%20id/resolve" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            guard let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData(),
+                  let json = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  json["decision"] as? String == "allow" else {
+                fatalError("Unexpected request body")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data("{\"status\":\"resolved\"}".utf8))
+        }
+
+        let client = makeClient()
+        try await client.resolveChatPermission(
+            sessionID: "sess/中文",
+            callID: "call id",
+            decision: .allow
+        )
+    }
+
     @Test func fetchCapabilities() async throws {
         let json = Data(
             """

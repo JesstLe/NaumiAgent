@@ -119,24 +119,35 @@ public struct ChatView: View {
             ScrollViewReader { reader in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        if appState.chatMessages.isEmpty {
+                        if displayedChatMessages.isEmpty {
                             Text(AppStrings.Chat.emptyMessages(appState.locale))
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, minHeight: 520, alignment: .center)
                         } else {
-                            ForEach(appState.chatMessages, id: \.id) { message in
+                            ForEach(displayedChatMessages, id: \.id) { message in
                                 messageBubble(message)
                                     .id(message.id)
                             }
                         }
+
+                        if let execution = appState.activeChatExecution {
+                            executionCard(execution)
+                                .id(execution.id)
+                        }
                     }
                     .padding(22)
                 }
-                .onChange(of: appState.chatMessages.count) { _, _ in
-                    guard let lastID = appState.chatMessages.last?.id else { return }
+                .onChange(of: displayedChatMessages.count) { _, _ in
+                    guard let lastID = displayedChatMessages.last?.id else { return }
                     withAnimation(.easeOut(duration: 0.18)) {
                         reader.scrollTo(lastID, anchor: .bottom)
+                    }
+                }
+                .onChange(of: appState.activeChatExecution) { _, execution in
+                    guard let execution else { return }
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        reader.scrollTo(execution.id, anchor: .bottom)
                     }
                 }
             }
@@ -268,6 +279,10 @@ public struct ChatView: View {
         return true
     }
 
+    private var displayedChatMessages: [ChatMessageDTO] {
+        ChatMessagePresentation.displayMessages(from: appState.chatMessages)
+    }
+
     private var isHighRiskIssue: Bool {
         let lowered = riskLevel.lowercased()
         return lowered == "high" || lowered == "critical"
@@ -387,6 +402,183 @@ public struct ChatView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+    }
+
+    private func executionCard(_ execution: ChatExecutionPresentation) -> some View {
+        SwiftUI.TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: executionSymbol(for: execution.stage))
+                        .font(.title3)
+                        .foregroundStyle(executionColor(for: execution.stage))
+                        .frame(width: 24)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(AppStrings.Chat.executionStage(appState.locale, stage: execution.stage))
+                            .font(.callout)
+                            .fontWeight(.semibold)
+                        Text(executionElapsed(execution, now: timeline.date))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if execution.stage != .completed, execution.stage != .failed {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                if let toolName = execution.activeToolName {
+                    Label(
+                        AppStrings.Chat.executionTool(appState.locale, toolName: toolName),
+                        systemImage: "terminal"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                if let summary = execution.toolResultSummary {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(AppStrings.Chat.subtaskResult(appState.locale))
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                        Text(summary)
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                if !execution.partialResponse.isEmpty {
+                    Text(execution.partialResponse)
+                        .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+
+                if let failure = execution.failureMessage {
+                    Label(failure, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let permission = execution.permission {
+                    Divider()
+                    permissionControls(permission, execution: execution)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: 520, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(executionColor(for: execution.stage).opacity(0.32), lineWidth: 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func permissionControls(
+        _ permission: ChatPermissionRequest,
+        execution: ChatExecutionPresentation
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(AppStrings.Chat.permissionRequired(appState.locale))
+                    .font(.callout)
+                    .fontWeight(.semibold)
+                Spacer()
+                Text(AppStrings.Chat.permissionRisk(appState.locale, level: permission.riskLevel))
+                    .font(.caption)
+                    .foregroundStyle(executionColor(for: .awaitingApproval))
+            }
+
+            Text(permission.reason)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                if execution.isResolvingPermission {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(AppStrings.Chat.resolvingApproval(appState.locale))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button {
+                        resolvePermission(.allow)
+                    } label: {
+                        Label(AppStrings.Chat.allowOnce(appState.locale), systemImage: "checkmark")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .help(AppStrings.Chat.allowOnce(appState.locale))
+
+                    Button {
+                        resolvePermission(.deny)
+                    } label: {
+                        Label(AppStrings.Chat.deny(appState.locale), systemImage: "xmark")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .help(AppStrings.Chat.deny(appState.locale))
+                }
+            }
+        }
+    }
+
+    private func resolvePermission(_ decision: ChatPermissionDecision) {
+        Task {
+            await daemonController.resolveActiveChatPermission(decision)
+        }
+    }
+
+    private func executionElapsed(_ execution: ChatExecutionPresentation, now: Date) -> String {
+        let finishedAt = execution.completedAt ?? now
+        let seconds = max(Int(finishedAt.timeIntervalSince(execution.startedAt)), 0)
+        return AppStrings.Chat.executionElapsed(appState.locale, seconds: seconds)
+    }
+
+    private func executionSymbol(for stage: ChatExecutionStage) -> String {
+        switch stage {
+        case .preparing:
+            return "arrow.triangle.2.circlepath"
+        case .analyzing:
+            return "sparkles"
+        case .runningTool:
+            return "terminal"
+        case .awaitingApproval:
+            return "hand.raised.fill"
+        case .composing:
+            return "text.cursor"
+        case .creatingLinkedIssue:
+            return "checklist"
+        case .completed:
+            return "checkmark.circle.fill"
+        case .failed:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private func executionColor(for stage: ChatExecutionStage) -> Color {
+        switch stage {
+        case .awaitingApproval:
+            return .orange
+        case .failed:
+            return .red
+        case .completed:
+            return .green
+        case .composing:
+            return .blue
+        default:
+            return .accentColor
+        }
     }
 
     private func panel<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {

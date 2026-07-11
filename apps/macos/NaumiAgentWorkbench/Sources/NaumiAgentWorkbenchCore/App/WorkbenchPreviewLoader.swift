@@ -155,6 +155,42 @@ public enum WorkbenchPreviewLoader {
         ]
     }
 
+    /// A deterministic in-flight execution for visual QA of the Chat page.
+    /// It is built from the same safe event reducer used by a live SSE turn.
+    public static func previewChatExecution(locale: AppLocale) -> ChatExecutionPresentation {
+        let summary = locale == .zhCN
+            ? "Planner-Agent 已整理验证范围。"
+            : "Planner-Agent prepared the validation scope."
+        let reason = locale == .zhCN
+            ? "将运行本地验证命令。"
+            : "A local validation command will run."
+
+        let delegated = ChatExecutionPresentation(id: "preview-chat-execution").applying(
+            ChatStreamEvent(
+                id: "preview-delegate-end",
+                type: .toolCallEnd,
+                data: [
+                    "name": .string("delegate_task"),
+                    "status": .string("success"),
+                    "content": .string(summary),
+                ]
+            )
+        )
+        return delegated.applying(
+            ChatStreamEvent(
+                id: "preview-permission",
+                type: .permissionRequest,
+                data: [
+                    "call_id": .string("preview-call-1"),
+                    "tool_name": .string("bash_run"),
+                    "reason": .string(reason),
+                    "risk_level": .string("medium"),
+                    "status": .string("needs_confirmation"),
+                ]
+            )
+        )
+    }
+
     private static func resolveFixtureURL(
         for locale: AppLocale,
         fixtureDirectory: URL?,
