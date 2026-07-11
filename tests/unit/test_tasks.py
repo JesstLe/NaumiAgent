@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from naumi_agent.tasks.commands import run_todo_command
@@ -41,6 +43,68 @@ class TestTaskModel:
 
 
 class TestTaskStore:
+    @pytest.mark.asyncio
+    async def test_legacy_global_task_id_schema_is_migrated_before_creating_task(
+        self,
+        tmp_path,
+    ) -> None:
+        db_path = tmp_path / "legacy_tasks.db"
+        with sqlite3.connect(db_path) as db:
+            db.execute(
+                """CREATE TABLE tasks (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    active_form TEXT,
+                    owner TEXT,
+                    blocks TEXT NOT NULL DEFAULT '[]',
+                    blocked_by TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )"""
+            )
+            db.execute(
+                """INSERT INTO tasks
+                   (id, session_id, subject, description, status, active_form,
+                    owner, blocks, blocked_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "1",
+                    "legacy-session",
+                    "旧任务",
+                    "",
+                    "pending",
+                    None,
+                    None,
+                    "[]",
+                    "[]",
+                    "2026-07-12T00:00:00",
+                    "2026-07-12T00:00:00",
+                ),
+            )
+
+        new_session = TaskStore(str(db_path))
+        new_session.set_session("new-session")
+
+        created = await new_session.create_task(subject="新会话任务")
+
+        assert created.id == "1"
+        legacy_session = TaskStore(str(db_path))
+        legacy_session.set_session("legacy-session")
+        assert [task.subject for task in await legacy_session.list_tasks()] == ["旧任务"]
+        with sqlite3.connect(db_path) as db:
+            primary_key = [
+                row[1]
+                for row in sorted(
+                    db.execute("PRAGMA table_info(tasks)").fetchall(),
+                    key=lambda row: row[5],
+                )
+                if row[5] > 0
+            ]
+        assert primary_key == ["session_id", "id"]
+
     @pytest.mark.asyncio
     async def test_create_task(self, store: TaskStore) -> None:
         task = await store.create_task(subject="读取配置文件")
