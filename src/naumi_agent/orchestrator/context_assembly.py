@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from naumi_agent.background.models import BackgroundStatus
@@ -26,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 HARNESS_CONTEXT_MARKER = "<naumi_harness_context>"
 _MAX_LINES_PER_SECTION = 8
+Clock = Callable[[], datetime]
 
 
 @dataclass(frozen=True)
@@ -47,10 +50,14 @@ class HarnessContextInput:
 class HarnessContextAssembler:
     """Build a compact, current-state snapshot for the model."""
 
+    def __init__(self, clock: Clock | None = None) -> None:
+        self._clock = clock or _local_now
+
     async def assemble(self, data: HarnessContextInput) -> str:
         sections = [
             "## Harness 状态快照",
             "这是每轮自动生成的运行环境快照，用来帮助你选择下一步工具和恢复长期任务。",
+            self._environment_section(),
             self._tool_section(data.tool_registry),
             self._skill_section(data.skill_loader),
             await self._task_section(data.task_store),
@@ -63,6 +70,19 @@ class HarnessContextAssembler:
         ]
         body = "\n\n".join(section for section in sections if section.strip())
         return f"{HARNESS_CONTEXT_MARKER}\n{body}\n{HARNESS_CONTEXT_MARKER}"
+
+    def _environment_section(self) -> str:
+        current = self._clock()
+        if current.tzinfo is None or current.utcoffset() is None:
+            current = current.astimezone()
+        offset = _format_utc_offset(current.utcoffset())
+        zone_name = current.tzname() or f"UTC{offset}"
+        return (
+            "### 当前环境\n"
+            f"- 当前本地时间：{current.isoformat(timespec='seconds')}\n"
+            f"- 时区：{zone_name} (UTC{offset})\n"
+            "- 时间问题：以上是本轮可信时间；可直接回答，无需调用工具或公网 API。"
+        )
 
     def _tool_section(self, registry: ToolRegistry) -> str:
         names = sorted(registry.names)
@@ -247,3 +267,14 @@ def _format_worktree_record(record: WorktreeRecord) -> str:
         f"dirty={record.dirty_files} commits={record.commits_ahead}{task} "
         f"path={record.path}"
     )
+
+
+def _local_now() -> datetime:
+    return datetime.now().astimezone()
+
+
+def _format_utc_offset(offset: timedelta | None) -> str:
+    total_minutes = int((offset or timedelta()).total_seconds() / 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    hours, minutes = divmod(abs(total_minutes), 60)
+    return f"{sign}{hours:02d}:{minutes:02d}"
