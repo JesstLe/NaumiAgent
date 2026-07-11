@@ -711,6 +711,9 @@ class _FakeWorkbenchService:
         subject_id: str | None = None,
         actor: str | None = None,
         since: str | None = None,
+        severity: str | None = None,
+        correlation_id: str | None = None,
+        parent_event_id: str | None = None,
         limit: int = 50,
     ):
         if self._list_events_error is not None:
@@ -722,6 +725,9 @@ class _FakeWorkbenchService:
                 "subject_id": subject_id,
                 "actor": actor,
                 "since": since,
+                "severity": severity,
+                "correlation_id": correlation_id,
+                "parent_event_id": parent_event_id,
                 "limit": limit,
             }
         )
@@ -735,12 +741,18 @@ class _FakeWorkbenchService:
                     "subject_id": subject_id or "mission-1",
                     "payload": {"title": "Mac 工作台"},
                     "timestamp": "2024-01-01T00:00:00",
+                    "severity": severity or "info",
+                    "correlation_id": correlation_id,
+                    "parent_event_id": parent_event_id,
                 }
             ],
             "event_type": event_type,
             "subject_id": subject_id,
             "actor": actor,
             "since": since,
+            "severity": severity,
+            "correlation_id": correlation_id,
+            "parent_event_id": parent_event_id,
             "limit": limit,
         }
 
@@ -2056,6 +2068,9 @@ async def test_get_events_endpoint_returns_events_and_limit() -> None:
             "subject_id": None,
             "actor": None,
             "since": None,
+            "severity": None,
+            "correlation_id": None,
+            "parent_event_id": None,
             "limit": 25,
         }
     ]
@@ -2069,14 +2084,53 @@ async def test_get_events_endpoint_returns_events_and_limit() -> None:
                 "subject_id": "mission-1",
                 "payload": {"title": "Mac 工作台"},
                 "timestamp": "2024-01-01T00:00:00",
+                "severity": "info",
+                "correlation_id": None,
+                "parent_event_id": None,
             }
         ],
         "event_type": None,
         "subject_id": None,
         "actor": None,
         "since": None,
+        "severity": None,
+        "correlation_id": None,
+        "parent_event_id": None,
         "limit": 25,
     }
+
+
+@pytest.mark.asyncio
+async def test_get_events_endpoint_forwards_severity_and_correlation_filters() -> None:
+    engine = _FakeEngine(exists=True)
+
+    response = await get_workbench_events(
+        "sess-1",
+        _fake_request(engine),
+        event_type="issue.created",
+        severity="warning",
+        correlation_id="corr-1",
+        parent_event_id="evt-parent",
+        limit=10,
+        auth="test",
+    )
+
+    assert engine.workbench_service.listed_events == [
+        {
+            "session_id": "sess-1",
+            "event_type": "issue.created",
+            "subject_id": None,
+            "actor": None,
+            "since": None,
+            "severity": "warning",
+            "correlation_id": "corr-1",
+            "parent_event_id": "evt-parent",
+            "limit": 10,
+        }
+    ]
+    assert response.severity == "warning"
+    assert response.correlation_id == "corr-1"
+    assert response.parent_event_id == "evt-parent"
 
 
 @pytest.mark.asyncio
@@ -2132,6 +2186,9 @@ async def test_get_events_endpoint_forwards_filters_and_returns_them() -> None:
             "subject_id": "task-2",
             "actor": "Planner-Agent",
             "since": "2026-06-27T10:00:00+00:00",
+            "severity": None,
+            "correlation_id": None,
+            "parent_event_id": None,
             "limit": 25,
         }
     ]
@@ -2145,12 +2202,18 @@ async def test_get_events_endpoint_forwards_filters_and_returns_them() -> None:
                 "subject_id": "task-2",
                 "payload": {"title": "Mac 工作台"},
                 "timestamp": "2024-01-01T00:00:00",
+                "severity": "info",
+                "correlation_id": None,
+                "parent_event_id": None,
             }
         ],
         "event_type": "issue.created",
         "subject_id": "task-2",
         "actor": "Planner-Agent",
         "since": "2026-06-27T10:00:00+00:00",
+        "severity": None,
+        "correlation_id": None,
+        "parent_event_id": None,
         "limit": 25,
     }
 
@@ -2181,6 +2244,9 @@ def test_get_events_route_accepts_type_query_alias() -> None:
             "subject_id": "task-2",
             "actor": "Planner-Agent",
             "since": "2026-06-27T10:00:00+00:00",
+            "severity": None,
+            "correlation_id": None,
+            "parent_event_id": None,
             "limit": 7,
         }
     ]
@@ -2358,6 +2424,9 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
             "subject_id": None,
             "actor": None,
             "since": None,
+            "severity": None,
+            "correlation_id": None,
+            "parent_event_id": None,
             "limit": 50,
         },
         {
@@ -2366,6 +2435,9 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
             "subject_id": "task-2",
             "actor": "Planner-Agent",
             "since": "2026-06-27T10:00:00+00:00",
+            "severity": None,
+            "correlation_id": None,
+            "parent_event_id": None,
             "limit": 7,
         }
     ]
@@ -2380,6 +2452,9 @@ def test_workbench_event_stream_refreshes_audit_events() -> None:
             "subject_id": "task-2",
             "payload": {"title": "Mac 工作台"},
             "timestamp": "2024-01-01T00:00:00",
+            "severity": "info",
+            "correlation_id": None,
+            "parent_event_id": None,
         },
     }
     assert complete_message == {"type": "refresh_complete", "count": 1}
@@ -2423,6 +2498,9 @@ async def test_workbench_event_stream_sends_initial_audit_events_on_connect() ->
             "subject_id": None,
             "actor": None,
             "since": None,
+            "severity": None,
+            "correlation_id": None,
+            "parent_event_id": None,
             "limit": 50,
         }
     ]
@@ -2439,6 +2517,9 @@ async def test_workbench_event_stream_sends_initial_audit_events_on_connect() ->
                 "subject_id": "mission-1",
                 "payload": {"title": "Mac 工作台"},
                 "timestamp": "2024-01-01T00:00:00",
+                "severity": "info",
+                "correlation_id": None,
+                "parent_event_id": None,
             },
         },
         {"type": "refresh_complete", "count": 1},

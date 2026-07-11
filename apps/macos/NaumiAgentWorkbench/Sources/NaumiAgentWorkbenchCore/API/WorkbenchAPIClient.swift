@@ -185,6 +185,9 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         subjectID: String? = nil,
         actor: String? = nil,
         since: String? = nil,
+        severity: String? = nil,
+        correlationID: String? = nil,
+        parentEventID: String? = nil,
         limit: Int
     ) async throws(APIError) -> WorkbenchEventsDTO {
         var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
@@ -199,6 +202,15 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         }
         if let since, !since.isEmpty {
             queryItems.append(URLQueryItem(name: "since", value: since))
+        }
+        if let severity, !severity.isEmpty {
+            queryItems.append(URLQueryItem(name: "severity", value: severity))
+        }
+        if let correlationID, !correlationID.isEmpty {
+            queryItems.append(URLQueryItem(name: "correlation_id", value: correlationID))
+        }
+        if let parentEventID, !parentEventID.isEmpty {
+            queryItems.append(URLQueryItem(name: "parent_event_id", value: parentEventID))
         }
         let path = try routePath(
             named: "events",

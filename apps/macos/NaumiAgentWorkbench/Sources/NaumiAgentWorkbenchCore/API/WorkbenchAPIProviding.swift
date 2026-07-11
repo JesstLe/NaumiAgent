@@ -50,6 +50,9 @@ public protocol WorkbenchAPIProviding: Sendable {
         subjectID: String?,
         actor: String?,
         since: String?,
+        severity: String?,
+        correlationID: String?,
+        parentEventID: String?,
         limit: Int
     ) async throws(APIError) -> WorkbenchEventsDTO
 

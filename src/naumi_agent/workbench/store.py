@@ -16,6 +16,7 @@ from naumi_agent.workbench.models import (
     Decision,
     DecisionKind,
     DecisionStrength,
+    EventSeverity,
     FailureKind,
     IntentLock,
     IssueBid,
@@ -99,7 +100,10 @@ CREATE TABLE IF NOT EXISTS workbench_audit_events (
     actor TEXT NOT NULL,
     subject_id TEXT NOT NULL,
     payload TEXT NOT NULL,
-    timestamp TEXT NOT NULL
+    timestamp TEXT NOT NULL,
+    correlation_id TEXT,
+    parent_event_id TEXT,
+    severity TEXT NOT NULL DEFAULT 'info'
 )
 """
 
@@ -255,6 +259,15 @@ class WorkbenchStore:
             "workbench_agent_profiles",
             "last_heartbeat_at",
             "TEXT NOT NULL DEFAULT ''",
+        )
+        await self._ensure_column(
+            db, "workbench_audit_events", "correlation_id", "TEXT"
+        )
+        await self._ensure_column(
+            db, "workbench_audit_events", "parent_event_id", "TEXT"
+        )
+        await self._ensure_column(
+            db, "workbench_audit_events", "severity", "TEXT NOT NULL DEFAULT 'info'"
         )
 
     async def _ensure_column(
@@ -699,6 +712,9 @@ class WorkbenchStore:
         actor: str,
         subject_id: str,
         payload: dict[str, Any] | None = None,
+        correlation_id: str | None = None,
+        parent_event_id: str | None = None,
+        severity: EventSeverity = EventSeverity.INFO,
     ) -> WorkbenchEvent:
         event = WorkbenchEvent(
             session_id=session_id,
@@ -706,13 +722,17 @@ class WorkbenchStore:
             actor=actor,
             subject_id=subject_id,
             payload=payload or {},
+            correlation_id=correlation_id,
+            parent_event_id=parent_event_id,
+            severity=severity,
         )
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
             await db.execute(
                 """INSERT INTO workbench_audit_events
-                   (id, session_id, type, actor, subject_id, payload, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (id, session_id, type, actor, subject_id, payload, timestamp,
+                    correlation_id, parent_event_id, severity)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     event.id,
                     event.session_id,
@@ -721,6 +741,9 @@ class WorkbenchStore:
                     event.subject_id,
                     json.dumps(event.payload, ensure_ascii=False),
                     event.timestamp,
+                    event.correlation_id,
+                    event.parent_event_id,
+                    event.severity.value,
                 ),
             )
             await db.commit()
@@ -734,6 +757,9 @@ class WorkbenchStore:
         subject_id: str | None = None,
         actor: str | None = None,
         since: str | None = None,
+        severity: str | None = None,
+        correlation_id: str | None = None,
+        parent_event_id: str | None = None,
     ) -> list[WorkbenchEvent]:
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
@@ -752,6 +778,15 @@ class WorkbenchStore:
             if since is not None:
                 filters.append("timestamp > ?")
                 params.append(since)
+            if severity is not None:
+                filters.append("severity = ?")
+                params.append(severity)
+            if correlation_id is not None:
+                filters.append("correlation_id = ?")
+                params.append(correlation_id)
+            if parent_event_id is not None:
+                filters.append("parent_event_id = ?")
+                params.append(parent_event_id)
             params.append(limit)
             where_clause = " AND ".join(filters)
             cursor = await db.execute(
@@ -1634,6 +1669,9 @@ def _row_to_event(row: dict[str, Any]) -> WorkbenchEvent:
         subject_id=row["subject_id"],
         payload=cast(dict[str, Any], json.loads(row["payload"])),
         timestamp=row["timestamp"],
+        correlation_id=row.get("correlation_id"),
+        parent_event_id=row.get("parent_event_id"),
+        severity=EventSeverity(row.get("severity") or "info"),
     )
 
 

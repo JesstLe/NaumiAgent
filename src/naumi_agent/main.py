@@ -33,6 +33,8 @@ from naumi_agent.ui.code_excerpt import (
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
 from naumi_agent.ui.keybindings import build_keybindings, render_keybinding_help
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
+from naumi_agent.workbench.export import export_audit_events
+from naumi_agent.workbench.store import WorkbenchStore
 
 suppress_startup_import_warnings()
 
@@ -84,6 +86,11 @@ app = typer.Typer(
     help="NaumiAgent — 通用智能 Agent",
     no_args_is_help=True,
 )
+workbench_app = typer.Typer(
+    name="workbench",
+    help="Workbench 治理与审计命令",
+)
+app.add_typer(workbench_app, name="workbench")
 console = Console()
 
 
@@ -4503,6 +4510,52 @@ def _check_api_key(config: AppConfig) -> None:
 
 def cli() -> None:
     app()
+
+
+@workbench_app.command("export-audit")
+def export_audit(
+    session_id: str = typer.Option(..., "--session-id", "-s", help="会话 ID"),
+    output: Path = typer.Option(..., "--output", "-o", help="输出文件路径"),
+    event_type: str | None = typer.Option(None, "--event-type", "-t", help="事件类型"),
+    actor: str | None = typer.Option(None, "--actor", "-a", help="执行者"),
+    subject_id: str | None = typer.Option(None, "--subject-id", help="对象 ID"),
+    severity: str | None = typer.Option(None, "--severity", help="严重级别"),
+    correlation_id: str | None = typer.Option(None, "--correlation-id", help="关联 ID"),
+    parent_event_id: str | None = typer.Option(None, "--parent-event-id", help="父事件 ID"),
+    since: str | None = typer.Option(None, "--since", help="起始时间 ISO 字符串"),
+    fmt: str = typer.Option("json", "--format", help="输出格式: json 或 ndjson"),
+    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+) -> None:
+    """导出审计事件到本地文件，并自动脱敏."""
+    resolved = _resolve_config_path(config)
+    cfg = AppConfig.from_yaml(resolved)
+
+    async def _run() -> dict[str, Any]:
+        store = WorkbenchStore(cfg.memory.session_db_path)
+        return await export_audit_events(
+            store,
+            session_id,
+            str(output),
+            event_type=event_type,
+            subject_id=subject_id,
+            actor=actor,
+            severity=severity,
+            correlation_id=correlation_id,
+            parent_event_id=parent_event_id,
+            since=since,
+            fmt=fmt,
+        )
+
+    try:
+        result = asyncio.run(_run())
+    except Exception as e:
+        console.print(f"[red]导出失败: {e}[/red]")
+        raise typer.Exit(code=1) from e
+
+    console.print(
+        f"[green]已导出 {result['count']} 条事件到 {result['output_path']} "
+        f"(格式: {result['format']})[/green]"
+    )
 
 
 if __name__ == "__main__":

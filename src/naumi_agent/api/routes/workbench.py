@@ -283,6 +283,9 @@ class WorkbenchEventsResponse(BaseModel):
     subject_id: str | None
     actor: str | None
     since: str | None
+    severity: str | None
+    correlation_id: str | None
+    parent_event_id: str | None
     limit: int
 
 
@@ -745,6 +748,9 @@ async def get_workbench_events(
     subject_id: Annotated[str | None, Query()] = None,
     actor: Annotated[str | None, Query()] = None,
     since: Annotated[str | None, Query()] = None,
+    severity: Annotated[str | None, Query()] = None,
+    correlation_id: Annotated[str | None, Query()] = None,
+    parent_event_id: Annotated[str | None, Query()] = None,
     auth: str = AuthDep,
 ):
     engine = request.app.state.engine
@@ -767,6 +773,9 @@ async def get_workbench_events(
             subject_id=subject_id,
             actor=actor,
             since=since,
+            severity=severity,
+            correlation_id=correlation_id,
+            parent_event_id=parent_event_id,
             limit=limit,
         )
     except ValueError as exc:
@@ -780,6 +789,9 @@ async def get_workbench_events(
         subject_id=result["subject_id"],
         actor=result["actor"],
         since=result["since"],
+        severity=result["severity"],
+        correlation_id=result["correlation_id"],
+        parent_event_id=result["parent_event_id"],
         limit=result["limit"],
     )
 
@@ -887,6 +899,9 @@ async def websocket_workbench_events(websocket: WebSocket, session_id: str):
                 subject_id=data.get("subject_id"),
                 actor=data.get("actor"),
                 since=data.get("since"),
+                severity=data.get("severity"),
+                correlation_id=data.get("correlation_id"),
+                parent_event_id=data.get("parent_event_id"),
                 limit=limit,
             )
     except WebSocketDisconnect:
@@ -934,6 +949,9 @@ async def _send_workbench_event_refresh(
     subject_id: str | None,
     actor: str | None,
     since: str | None,
+    severity: str | None = None,
+    correlation_id: str | None = None,
+    parent_event_id: str | None = None,
     limit: int,
 ) -> None:
     try:
@@ -943,6 +961,9 @@ async def _send_workbench_event_refresh(
             subject_id=subject_id,
             actor=actor,
             since=since,
+            severity=severity,
+            correlation_id=correlation_id,
+            parent_event_id=parent_event_id,
             limit=limit,
         )
     except (RuntimeError, ValueError) as exc:

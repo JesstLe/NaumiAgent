@@ -289,6 +289,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         subjectID: String?,
         actor: String?,
         since: String?,
+        severity: String?,
+        correlationID: String?,
+        parentEventID: String?,
         limit: Int
     ) async throws(APIError) -> WorkbenchEventsDTO {
         await recordPreWarmRequest()
@@ -297,6 +300,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
             subjectID: subjectID,
             actor: actor,
             since: since,
+            severity: severity,
             limit: limit
         ))
         if let fetchEventsHook {
@@ -1207,6 +1211,7 @@ struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
         subjectID: String?,
         actor: String?,
         since: String?,
+        severity: String?,
         limit: Int
     ) async throws(APIError) {
         try await recorder.recordRefreshRequest(
@@ -1214,6 +1219,7 @@ struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
             subjectID: subjectID,
             actor: actor,
             since: since,
+            severity: severity,
             limit: limit
         )
     }
@@ -1232,6 +1238,7 @@ struct FakeWorkbenchEventRefreshRequest: Equatable, Sendable {
     let subjectID: String?
     let actor: String?
     let since: String?
+    let severity: String?
     let limit: Int
 }
 
@@ -1259,6 +1266,7 @@ actor FakeWorkbenchEventStreamRecorder {
         subjectID: String?,
         actor: String?,
         since: String?,
+        severity: String?,
         limit: Int
     ) throws(APIError) {
         refreshRequests.append(FakeWorkbenchEventRefreshRequest(
@@ -1266,6 +1274,7 @@ actor FakeWorkbenchEventStreamRecorder {
             subjectID: subjectID,
             actor: actor,
             since: since,
+            severity: severity,
             limit: limit
         ))
         try refreshResult.get()
@@ -2863,6 +2872,7 @@ final class DaemonControllerTests {
                     subjectID: "task-001",
                     actor: "Backend-Agent",
                     since: "2026-06-27T10:00:00+00:00",
+                    severity: nil,
                     limit: 25
                 )
             ]
@@ -2904,6 +2914,7 @@ final class DaemonControllerTests {
                 subjectID: nil,
                 actor: nil,
                 since: nil,
+                severity: nil,
                 limit: 10
             ),
         ])
@@ -2952,6 +2963,7 @@ final class DaemonControllerTests {
                 subjectID: nil,
                 actor: nil,
                 since: nil,
+                severity: nil,
                 limit: 10
             ),
         ])
@@ -5474,6 +5486,7 @@ final class DaemonControllerTests {
                 subjectID: "task-001",
                 actor: "Backend-Agent",
                 since: "2026-06-27T05:00:00",
+                severity: nil,
                 limit: 25
             )
         ])
@@ -5522,6 +5535,7 @@ final class DaemonControllerTests {
                 subjectID: nil,
                 actor: nil,
                 since: nil,
+                severity: nil,
                 limit: 50
             )
         ])
@@ -5561,6 +5575,7 @@ final class DaemonControllerTests {
                 subjectID: nil,
                 actor: nil,
                 since: nil,
+                severity: nil,
                 limit: 50
             )
         ])

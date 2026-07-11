@@ -227,6 +227,7 @@ final class WorkbenchEventClientTests {
             subjectID: "task-001",
             actor: "Backend-Agent",
             since: "2026-06-27T10:00:00+00:00",
+            severity: "warning",
             limit: 25
         )
 
@@ -246,6 +247,7 @@ final class WorkbenchEventClientTests {
         #expect(json["subject_id"] as? String == "task-001")
         #expect(json["actor"] as? String == "Backend-Agent")
         #expect(json["since"] as? String == "2026-06-27T10:00:00+00:00")
+        #expect(json["severity"] as? String == "warning")
         #expect(json["limit"] as? Int == 25)
     }
 

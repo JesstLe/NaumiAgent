@@ -203,6 +203,13 @@ class Approval:
     updated_at: str = field(default_factory=now_iso)
 
 
+class EventSeverity(StrEnum):
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    CRITICAL = "critical"
+
+
 @dataclass
 class WorkbenchEvent:
     session_id: str
@@ -212,6 +219,9 @@ class WorkbenchEvent:
     payload: dict[str, Any] = field(default_factory=dict)
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     timestamp: str = field(default_factory=now_iso)
+    correlation_id: str | None = None
+    parent_event_id: str | None = None
+    severity: EventSeverity = EventSeverity.INFO
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

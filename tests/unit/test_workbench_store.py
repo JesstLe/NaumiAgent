@@ -1115,6 +1115,66 @@ async def test_list_events_filters_by_type_subject_id_actor_and_returns_newest_f
 
 
 @pytest.mark.asyncio
+async def test_append_and_list_events_use_severity_correlation_and_parent(
+    store: WorkbenchStore,
+) -> None:
+    from naumi_agent.workbench.models import EventSeverity
+
+    info_event = await store.append_event(
+        session_id="s",
+        type="issue.created",
+        actor="Planner-Agent",
+        subject_id="task-1",
+        payload={"detail": "A"},
+        severity=EventSeverity.INFO,
+    )
+    warning_event = await store.append_event(
+        session_id="s",
+        type="lease.claimed",
+        actor="Builder-Agent",
+        subject_id="task-1",
+        payload={"detail": "B"},
+        severity=EventSeverity.WARNING,
+        correlation_id="corr-1",
+        parent_event_id=info_event.id,
+    )
+    critical_event = await store.append_event(
+        session_id="s",
+        type="approval.resolved",
+        actor="Human",
+        subject_id="approval-1",
+        payload={"state": "approved"},
+        severity=EventSeverity.CRITICAL,
+    )
+
+    by_severity = await store.list_events("s", severity="warning", limit=50)
+    assert [e.id for e in by_severity] == [warning_event.id]
+
+    critical_only = await store.list_events("s", severity="critical", limit=50)
+    assert [e.id for e in critical_only] == [critical_event.id]
+
+    by_correlation = await store.list_events(
+        "s", correlation_id="corr-1", limit=50
+    )
+    assert [e.id for e in by_correlation] == [warning_event.id]
+
+    by_parent = await store.list_events(
+        "s", parent_event_id=info_event.id, limit=50
+    )
+    assert [e.id for e in by_parent] == [warning_event.id]
+
+    all_events = await store.list_events("s", limit=50)
+    assert all(e.severity for e in all_events)
+    assert info_event.severity is EventSeverity.INFO
+    assert warning_event.severity is EventSeverity.WARNING
+    assert critical_event.severity is EventSeverity.CRITICAL
+    assert warning_event.correlation_id == "corr-1"
+    assert warning_event.parent_event_id == info_event.id
+    assert info_event.correlation_id is None
+    assert info_event.parent_event_id is None
+
+
+@pytest.mark.asyncio
 async def test_list_events_filters_by_since_timestamp(store: WorkbenchStore) -> None:
     event_a = await store.append_event(
         session_id="s",

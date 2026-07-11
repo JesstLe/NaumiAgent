@@ -776,6 +776,7 @@ class WorkbenchService:
     @classmethod
     def _event_to_dict(cls, event: Any, tasks_by_id: dict[str, Any]) -> dict[str, Any]:
         data = event.to_dict()
+        data["severity"] = event.severity.value
         task_id = cls._event_task_id(event, tasks_by_id)
         if task_id is not None:
             data["task"] = cls._task_to_summary(tasks_by_id.get(task_id))
@@ -857,6 +858,9 @@ class WorkbenchService:
         subject_id: str | None = None,
         actor: str | None = None,
         since: str | None = None,
+        severity: str | None = None,
+        correlation_id: str | None = None,
+        parent_event_id: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
         events = await self._workbench_store.list_events(
@@ -865,6 +869,9 @@ class WorkbenchService:
             subject_id=subject_id,
             actor=actor,
             since=since,
+            severity=severity,
+            correlation_id=correlation_id,
+            parent_event_id=parent_event_id,
             limit=limit,
         )
         tasks = await self._task_store.list_tasks()
@@ -875,6 +882,9 @@ class WorkbenchService:
             "subject_id": subject_id,
             "actor": actor,
             "since": since,
+            "severity": severity,
+            "correlation_id": correlation_id,
+            "parent_event_id": parent_event_id,
             "limit": limit,
         }
 
