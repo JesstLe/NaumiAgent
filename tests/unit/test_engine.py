@@ -334,6 +334,7 @@ class TestAutoMemoryExtraction:
         assert "用户偏好" in entry.content
         assert entry.metadata["source"] == "auto_extract"
         assert entry.metadata["session_id"] == engine._session.id
+        assert entry.metadata["scope"] == "global"
 
     @pytest.mark.asyncio
     async def test_non_completed_turn_does_not_store_memory(
@@ -2100,9 +2101,31 @@ class TestRun:
 
 class TestMemoryInjection:
     @pytest.mark.asyncio
+    async def test_injection_uses_current_session_scope(self, engine: AgentEngine) -> None:
+        from naumi_agent.memory.session import Session
+
+        engine._session = Session(title="scoped memory")
+        with patch.object(
+            engine.long_term_memory,
+            "recall_for_session",
+            new_callable=AsyncMock,
+            return_value=[],
+        ) as recall_for_session:
+            await engine._inject_relevant_memories("检查当前项目")
+
+        recall_for_session.assert_awaited_once_with(
+            "检查当前项目",
+            session_id=engine._session.id,
+            top_k=3,
+            min_relevance=0.4,
+        )
+
+    @pytest.mark.asyncio
     async def test_injects_relevant_memories(self, engine: AgentEngine) -> None:
         from naumi_agent.memory.long_term import MemoryEntry, MemorySearchResult
+        from naumi_agent.memory.session import Session
 
+        engine._session = Session(title="relevant memories")
         fake_results = [
             MemorySearchResult(
                 entry=MemoryEntry(
@@ -2114,7 +2137,7 @@ class TestMemoryInjection:
         ]
 
         with patch.object(
-            engine.long_term_memory, "recall",
+            engine.long_term_memory, "recall_for_session",
             new_callable=AsyncMock, return_value=fake_results,
         ):
             await engine._inject_relevant_memories("写一个 Python 脚本")
@@ -2129,8 +2152,11 @@ class TestMemoryInjection:
 
     @pytest.mark.asyncio
     async def test_no_injection_when_empty(self, engine: AgentEngine) -> None:
+        from naumi_agent.memory.session import Session
+
+        engine._session = Session(title="empty memories")
         with patch.object(
-            engine.long_term_memory, "recall",
+            engine.long_term_memory, "recall_for_session",
             new_callable=AsyncMock, return_value=[],
         ):
             await engine._inject_relevant_memories("hello")
@@ -2144,7 +2170,9 @@ class TestMemoryInjection:
     @pytest.mark.asyncio
     async def test_injection_replaces_previous(self, engine: AgentEngine) -> None:
         from naumi_agent.memory.long_term import MemoryEntry, MemorySearchResult
+        from naumi_agent.memory.session import Session
 
+        engine._session = Session(title="replacement memories")
         engine._messages.append({"role": "system", "content": "## 相关记忆\n- old"})
 
         fake_results = [
@@ -2158,7 +2186,7 @@ class TestMemoryInjection:
         ]
 
         with patch.object(
-            engine.long_term_memory, "recall",
+            engine.long_term_memory, "recall_for_session",
             new_callable=AsyncMock, return_value=fake_results,
         ):
             await engine._inject_relevant_memories("query")
@@ -2172,8 +2200,11 @@ class TestMemoryInjection:
 
     @pytest.mark.asyncio
     async def test_injection_failure_does_not_crash(self, engine: AgentEngine) -> None:
+        from naumi_agent.memory.session import Session
+
+        engine._session = Session(title="failed memories")
         with patch.object(
-            engine.long_term_memory, "recall",
+            engine.long_term_memory, "recall_for_session",
             new_callable=AsyncMock, side_effect=RuntimeError("db down"),
         ):
             await engine._inject_relevant_memories("query")  # Should not raise
@@ -2191,13 +2222,13 @@ class TestMemoryInjection:
                 return_value=mock_response,
             ),
             patch.object(
-                engine.long_term_memory, "recall",
+                engine.long_term_memory, "recall_for_session",
                 new_callable=AsyncMock, return_value=[],
-            ) as mock_recall,
+            ) as mock_recall_for_session,
         ):
             await engine.run("do something")
 
-        mock_recall.assert_called_once()
+        mock_recall_for_session.assert_awaited_once()
 
 
 class TestPlanInjection:
