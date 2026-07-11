@@ -65,10 +65,12 @@ public struct WorkspaceSwitcherPresentation: Equatable {
         }
 
         // Recent sessions: registry order for the selected workspace, resolved
-        // against the live sessions list, with the active one flagged.
+        // against the live sessions list, with the active one flagged. A fresh
+        // install has no local history yet, so expose the daemon's latest
+        // sessions instead of leaving the selector unusable.
         let recentIDs = registry.selectedEntry?.recentSessionIDs ?? []
         let sessionByID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        self.recentSessions = recentIDs.compactMap { id in
+        let registeredSessions: [SessionRailItem] = recentIDs.compactMap { id in
             guard let session = sessionByID[id] else { return nil }
             return SessionRailItem(
                 id: session.id,
@@ -76,5 +78,19 @@ public struct WorkspaceSwitcherPresentation: Equatable {
                 isSelected: session.id == selectedSessionID
             )
         }
+        let registeredIDs = Set(registeredSessions.map(\.id))
+        let latestDaemonSessions = sessions
+            .filter { !registeredIDs.contains($0.id) }
+            .map { session in
+                SessionRailItem(
+                    id: session.id,
+                    title: session.title ?? session.id,
+                    isSelected: session.id == selectedSessionID
+                )
+            }
+        self.recentSessions = Array(
+            (registeredSessions + latestDaemonSessions)
+                .prefix(WorkspaceRegistry.recentSessionLimit)
+        )
     }
 }

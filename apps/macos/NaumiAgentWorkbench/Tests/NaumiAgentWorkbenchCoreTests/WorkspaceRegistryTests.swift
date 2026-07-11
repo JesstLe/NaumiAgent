@@ -95,7 +95,7 @@ struct WorkspaceRegistryTests {
         )
         #expect(presentation.activeWorkspaceTitle == "ws")
         #expect(presentation.activeSessionTitle == "Alpha")
-        #expect(presentation.recentSessions.map(\.id) == ["sess-1", "sess-3"])
+        #expect(presentation.recentSessions.map(\.id) == ["sess-1", "sess-3", "sess-2"])
         #expect(presentation.recentSessions.first?.isSelected == true)
     }
 
@@ -113,6 +113,23 @@ struct WorkspaceRegistryTests {
             activeWorkspaceLabel: nil
         )
         #expect(presentation.recentSessions.map(\.id) == ["sess-1"])
+    }
+
+    @Test func switcherPresentationFallsBackToLiveSessionsWhenRegistryIsEmpty() {
+        let sessions = [
+            makeSession(id: "sess-1", title: "Alpha"),
+            makeSession(id: "sess-2", title: "Beta")
+        ]
+
+        let presentation = WorkspaceSwitcherPresentation(
+            registry: .empty,
+            sessions: sessions,
+            selectedSessionID: "sess-2",
+            activeWorkspaceLabel: "ws"
+        )
+
+        #expect(presentation.recentSessions.map(\.id) == ["sess-1", "sess-2"])
+        #expect(presentation.recentSessions.last?.isSelected == true)
     }
 
     // MARK: - Helpers

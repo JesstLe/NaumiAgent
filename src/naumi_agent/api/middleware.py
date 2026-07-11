@@ -49,13 +49,23 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         client_id = request.client.host if request.client else "unknown"
+        configured_rpm = getattr(
+            getattr(getattr(request.app, "state", None), "config", None),
+            "api",
+            None,
+        )
+        requests_per_minute = getattr(configured_rpm, "rate_limit_rpm", self._rpm)
+        try:
+            rpm = max(int(requests_per_minute), 1)
+        except (TypeError, ValueError):
+            rpm = self._rpm
         now = time.time()
 
         if client_id not in self._buckets:
             self._buckets[client_id] = []
         self._buckets[client_id] = [t for t in self._buckets[client_id] if now - t < 60]
 
-        if len(self._buckets[client_id]) >= self._rpm:
+        if len(self._buckets[client_id]) >= rpm:
             return JSONResponse(
                 status_code=429,
                 content={"error": "Rate limit exceeded"},

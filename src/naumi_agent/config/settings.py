@@ -68,7 +68,7 @@ class APIConfig(BaseSettings):
     workers: int = 1
     api_keys: list[str] = Field(default_factory=list)
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
-    rate_limit_rpm: int = 60
+    rate_limit_rpm: int = 300
 
 
 class HooksConfig(BaseSettings):

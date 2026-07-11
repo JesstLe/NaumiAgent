@@ -55,6 +55,9 @@ class WorkbenchService:
         self._workspace_root = workspace_root
         self._review_evidence_collector = review_evidence_collector
 
+    def _tasks_for_session(self, session_id: str) -> TaskStore:
+        return self._task_store.scoped(session_id)
+
     async def create_mission(self, *, session_id: str, title: str, goal: str) -> Mission:
         mission = await self._workbench_store.create_mission(session_id, title, goal)
         await self._workbench_store.append_event(
@@ -285,7 +288,7 @@ class WorkbenchService:
                 "title": approval.title,
             },
         )
-        task = await self._task_store.get_task(approval.task_id)
+        task = await self._tasks_for_session(session_id).get_task(approval.task_id)
         return self._approval_to_dict(approval) | {"task": self._task_to_summary(task)}
 
     @staticmethod
@@ -309,7 +312,7 @@ class WorkbenchService:
             task_id=task_id,
             limit=limit,
         )
-        tasks = await self._task_store.list_tasks()
+        tasks = await self._tasks_for_session(session_id).list_tasks()
         tasks_by_id = {task.id: task for task in tasks}
         return [
             self._approval_to_dict(approval)
@@ -323,7 +326,7 @@ class WorkbenchService:
         approval = await self._workbench_store.get_approval(session_id, approval_id)
         if approval is None:
             return None
-        task = await self._task_store.get_task(approval.task_id)
+        task = await self._tasks_for_session(session_id).get_task(approval.task_id)
         return self._approval_to_dict(approval) | {"task": self._task_to_summary(task)}
 
     async def get_review_evidence(
@@ -364,7 +367,7 @@ class WorkbenchService:
         risk_level: RiskLevel = RiskLevel.MEDIUM,
     ) -> dict[str, Any]:
         mission_id = await self._require_mission(session_id, mission_id)
-        task = await self._task_store.get_task(task_id)
+        task = await self._tasks_for_session(session_id).get_task(task_id)
         if task is None:
             raise ValueError(f"任务 #{task_id} 不存在")
 
@@ -412,7 +415,7 @@ class WorkbenchService:
             if item and item.strip()
         ]
 
-        task = await self._task_store.create_task(
+        task = await self._tasks_for_session(session_id).create_task(
             subject=cleaned_title,
             description=cleaned_description,
             blocked_by=cleaned_blockers,
@@ -462,7 +465,7 @@ class WorkbenchService:
             risk_level=risk_level,
             limit=limit,
         )
-        tasks = await self._task_store.list_tasks()
+        tasks = await self._tasks_for_session(session_id).list_tasks()
         tasks_by_id = {task.id: task for task in tasks}
         if task_status is not None:
             matching_task_ids = {
@@ -488,7 +491,7 @@ class WorkbenchService:
         issue = await self._workbench_store.get_issue(session_id, task_id)
         if issue is None:
             return None
-        task = await self._task_store.get_task(task_id)
+        task = await self._tasks_for_session(session_id).get_task(task_id)
         return self._issue_to_dict(issue) | {"task": self._task_to_summary(task)}
 
     @staticmethod
@@ -540,7 +543,7 @@ class WorkbenchService:
             issue = await self._workbench_store.get_issue(
                 session_id, active_lease.task_id
             )
-            task = await self._task_store.get_task(active_lease.task_id)
+            task = await self._tasks_for_session(session_id).get_task(active_lease.task_id)
             if issue is not None:
                 current_issue = self._issue_to_dict(issue) | {
                     "task": self._task_to_summary(task)
@@ -643,7 +646,7 @@ class WorkbenchService:
         return asdict(profile)
 
     async def dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
-        tasks = await self._task_store.list_tasks()
+        tasks = await self._tasks_for_session(session_id).list_tasks()
         raw_agent_profiles = await self._workbench_store.list_agent_profiles(
             session_id, limit=50
         )
@@ -1074,7 +1077,7 @@ class WorkbenchService:
             parent_event_id=parent_event_id,
             limit=limit,
         )
-        tasks = await self._task_store.list_tasks()
+        tasks = await self._tasks_for_session(session_id).list_tasks()
         tasks_by_id = {task.id: task for task in tasks}
         return {
             "events": [self._event_to_dict(event, tasks_by_id) for event in events],
@@ -1092,7 +1095,7 @@ class WorkbenchService:
         event = await self._workbench_store.get_event(session_id, event_id)
         if event is None:
             return None
-        tasks = await self._task_store.list_tasks()
+        tasks = await self._tasks_for_session(session_id).list_tasks()
         return self._event_to_dict(event, {task.id: task for task in tasks})
 
     async def list_validation_runs(
@@ -1105,7 +1108,7 @@ class WorkbenchService:
         runs = await self._workbench_store.list_validation_runs(
             session_id, task_id=task_id, status=status, limit=limit
         )
-        tasks = await self._task_store.list_tasks()
+        tasks = await self._tasks_for_session(session_id).list_tasks()
         tasks_by_id = {task.id: task for task in tasks}
         return [
             run | {"task": self._task_to_summary(tasks_by_id.get(run["task_id"]))}
@@ -1120,7 +1123,7 @@ class WorkbenchService:
         run = await self._workbench_store.get_validation_run(session_id, run_id)
         if run is None:
             return None
-        task = await self._task_store.get_task(run["task_id"])
+        task = await self._tasks_for_session(session_id).get_task(run["task_id"])
         return run | {"task": self._task_to_summary(task)}
 
     async def list_context_snapshots(
@@ -1134,7 +1137,7 @@ class WorkbenchService:
         snapshots = await self._workbench_store.list_context_snapshots(
             session_id, task_id=task_id, agent_id=agent_id, health=health, limit=limit
         )
-        tasks = await self._task_store.list_tasks()
+        tasks = await self._tasks_for_session(session_id).list_tasks()
         tasks_by_id = {task.id: task for task in tasks}
         return [
             snapshot | {
@@ -1154,7 +1157,7 @@ class WorkbenchService:
         )
         if snapshot is None:
             return None
-        task = await self._task_store.get_task(snapshot["task_id"])
+        task = await self._tasks_for_session(session_id).get_task(snapshot["task_id"])
         return snapshot | {"task": self._task_to_summary(task)}
 
     async def record_context_health(
@@ -1219,7 +1222,7 @@ class WorkbenchService:
             },
         )
 
-        task = await self._task_store.get_task(task_id)
+        task = await self._tasks_for_session(session_id).get_task(task_id)
         return snapshot | {"task": self._task_to_summary(task)}
 
     async def list_failures(
@@ -1233,7 +1236,7 @@ class WorkbenchService:
         failures = await self._workbench_store.list_failures(
             session_id, task_id=task_id, status=status, kind=kind, limit=limit
         )
-        tasks = await self._task_store.list_tasks()
+        tasks = await self._tasks_for_session(session_id).list_tasks()
         tasks_by_id = {task.id: task for task in tasks}
         return [
             failure | {"task": self._task_to_summary(tasks_by_id.get(failure["task_id"]))}
@@ -1248,7 +1251,7 @@ class WorkbenchService:
         failure = await self._workbench_store.get_failure(session_id, failure_id)
         if failure is None:
             return None
-        task = await self._task_store.get_task(failure["task_id"])
+        task = await self._tasks_for_session(session_id).get_task(failure["task_id"])
         return failure | {"task": self._task_to_summary(task)}
 
     async def list_leases(
@@ -1263,7 +1266,7 @@ class WorkbenchService:
             session_id, state=state, task_id=task_id, agent_id=agent_id, limit=limit
         )
         state_value = state.value if isinstance(state, LeaseState) else state
-        tasks = await self._task_store.list_tasks()
+        tasks = await self._tasks_for_session(session_id).list_tasks()
         tasks_by_id = {task.id: task for task in tasks}
         return {
             "leases": [
@@ -1280,7 +1283,7 @@ class WorkbenchService:
         lease = await self._workbench_store.get_lease(session_id, lease_id)
         if lease is None:
             return None
-        task = await self._task_store.get_task(lease.task_id)
+        task = await self._tasks_for_session(session_id).get_task(lease.task_id)
         return self._lease_to_dict(lease, task=task)
 
     async def list_missions(

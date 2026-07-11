@@ -1617,6 +1617,7 @@ final class DaemonControllerTests {
         #expect(appState.connectionState == .connected)
         #expect(appState.daemonStatus == status)
         #expect(appState.selectedWorkspace == "NaumiAgent")
+        #expect(appState.workspaceRegistry.selectedEntry?.recentSessionIDs == ["sess-workspace"])
     }
 
     @Test @MainActor func refreshConnectionSkipsEventStreamWhenCapabilityDisabled() async throws {
