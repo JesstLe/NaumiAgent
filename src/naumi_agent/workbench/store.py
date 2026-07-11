@@ -32,6 +32,50 @@ from naumi_agent.workbench.models import (
     now_iso,
 )
 
+# Payload keys that likely carry secrets and must never be persisted in audit
+# events. Matching is case-insensitive substring so it catches ``api_key``,
+# ``authorization``, ``bearer_token``, etc.
+_SENSITIVE_PAYLOAD_KEYS = (
+    "token",
+    "api_key",
+    "apikey",
+    "secret",
+    "password",
+    "credential",
+    "bearer",
+    "auth",
+    "authorization",
+    "private_key",
+)
+
+
+def _is_sensitive_payload_key(key: str) -> bool:
+    """True when a payload key likely holds a secret."""
+    lower = key.lower()
+    return any(term in lower for term in _SENSITIVE_PAYLOAD_KEYS)
+
+
+def _redact_payload(value: Any) -> Any:
+    """Recursively replace sensitive-looking values with a redaction marker."""
+    if isinstance(value, dict):
+        return {
+            key: "[REDACTED]" if _is_sensitive_payload_key(key) else _redact_payload(val)
+            for key, val in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_payload(item) for item in value]
+    return value
+
+
+def redact_event_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of an audit-event payload with secrets redacted.
+
+    Used at ``append_event`` time so secrets never reach SQLite, and at export
+    time for defense-in-depth.
+    """
+    return _redact_payload(payload)  # type: ignore[return-value]
+
+
 _CREATE_MISSIONS = """
 CREATE TABLE IF NOT EXISTS workbench_missions (
     id TEXT PRIMARY KEY,
@@ -746,7 +790,7 @@ class WorkbenchStore:
             type=type,
             actor=actor,
             subject_id=subject_id,
-            payload=payload or {},
+            payload=redact_event_payload(payload or {}),
             correlation_id=correlation_id,
             parent_event_id=parent_event_id,
             severity=severity,

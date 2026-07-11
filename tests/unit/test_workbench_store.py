@@ -9,6 +9,7 @@ from naumi_agent.workbench.models import (
     ApprovalState,
     ContextHealth,
     DecisionKind,
+    EventSeverity,
     FailureKind,
     LeaseState,
     ParallelMode,
@@ -1467,5 +1468,70 @@ async def test_convert_proposal_records_converted_issue_id(store: WorkbenchStore
     assert fetched is not None
     assert fetched.state is ProposalState.CONVERTED
     assert fetched.intended_files == ["src/new.py"]
+
+
+@pytest.mark.asyncio
+async def test_append_event_redacts_secrets_in_payload(store: WorkbenchStore) -> None:
+    from naumi_agent.workbench.store import redact_event_payload
+
+    event = await store.append_event(
+        session_id="s",
+        type="daemon.connected",
+        actor="Workbench",
+        subject_id="daemon",
+        payload={
+            "message": "连接成功",
+            "token": "sk-super-secret",
+            "api_key": "key-abc",
+            "nested": {"password": "hunter2", "ok": 1},
+            "items": [{"secret": "s", "name": "a"}],
+            "authorization": "Bearer xyz",
+        },
+        severity=EventSeverity.INFO,
+    )
+
+    # The in-memory event must already be redacted.
+    assert event.payload["token"] == "[REDACTED]"
+    assert event.payload["api_key"] == "[REDACTED]"
+    assert event.payload["authorization"] == "[REDACTED]"
+    assert event.payload["message"] == "连接成功"
+    assert event.payload["nested"]["password"] == "[REDACTED]"
+    assert event.payload["nested"]["ok"] == 1
+    assert event.payload["items"][0]["secret"] == "[REDACTED]"
+    assert event.payload["items"][0]["name"] == "a"
+
+    # The persisted row must also be redacted (never stored in plaintext).
+    persisted = await store.get_event("s", event.id)
+    assert persisted is not None
+    assert persisted.payload["token"] == "[REDACTED]"
+    assert persisted.payload["api_key"] == "[REDACTED]"
+
+    # The redactor helper is reusable and leaves non-sensitive values alone.
+    assert redact_event_payload({"title": "x", "count": 3}) == {
+        "title": "x",
+        "count": 3,
+    }
+
+
+@pytest.mark.asyncio
+async def test_append_event_redacts_secrets_regardless_of_severity(
+    store: WorkbenchStore,
+) -> None:
+    for severity in (
+        EventSeverity.INFO,
+        EventSeverity.WARNING,
+        EventSeverity.ERROR,
+        EventSeverity.CRITICAL,
+    ):
+        event = await store.append_event(
+            session_id="s",
+            type="daemon.connected",
+            actor="Workbench",
+            subject_id="daemon",
+            payload={"bearer_token": "leak"},
+            severity=severity,
+        )
+        assert event.payload["bearer_token"] == "[REDACTED]", severity
+
 
 

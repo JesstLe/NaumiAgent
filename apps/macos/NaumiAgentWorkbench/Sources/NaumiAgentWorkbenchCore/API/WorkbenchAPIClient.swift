@@ -7,6 +7,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     public var baseURL: URL
     public let session: URLSession
     private var bearerToken: String?
+    private var tokenProvider: LocalAuthTokenProviding?
     private var routeTemplates: [String: String]
 
     /// - Parameters:
@@ -43,6 +44,12 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         }
         self.bearerToken = newBearerToken
         self.routeTemplates = [:]
+    }
+
+    /// Installs a Keychain-backed token provider so each request reads the
+    /// current token on demand. The token is never logged or surfaced in the UI.
+    public func setTokenProvider(_ provider: LocalAuthTokenProviding?) {
+        self.tokenProvider = provider
     }
 
     public func fetchDaemonStatus() async throws(APIError) -> DaemonStatusDTO {
@@ -1685,7 +1692,10 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
 
     private func performRequest<T: Decodable & Sendable>(_ request: URLRequest) async throws(APIError) -> T {
         var request = request
-        if let token = bearerToken, !token.isEmpty {
+        // Prefer a live Keychain-backed provider so token rotation takes effect
+        // without a reconnect; fall back to the connection-time bearer token.
+        let token = tokenProvider?.currentToken() ?? bearerToken
+        if let token, !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
