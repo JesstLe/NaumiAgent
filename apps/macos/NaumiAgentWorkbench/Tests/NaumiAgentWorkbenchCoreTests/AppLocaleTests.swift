@@ -2,6 +2,9 @@ import Testing
 import Foundation
 @testable import NaumiAgentWorkbenchCore
 
+/// Locale persistence touches the process-wide `UserDefaults`, so these tests
+/// must run serially to avoid one test's `persist()` clobbering another's.
+@Suite(.serialized)
 struct AppLocaleTests {
 
     @Test

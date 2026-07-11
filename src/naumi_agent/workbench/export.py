@@ -7,44 +7,17 @@ from pathlib import Path
 from typing import Any
 
 from naumi_agent.workbench.models import EventSeverity
-from naumi_agent.workbench.store import WorkbenchStore
-
-_SENSITIVE_KEYS = {
-    "token",
-    "api_key",
-    "apikey",
-    "secret",
-    "password",
-    "credential",
-    "bearer",
-    "auth",
-    "authorization",
-    "private_key",
-}
-
-
-def _is_sensitive_key(key: str) -> bool:
-    """True when a payload key likely holds a secret."""
-    lower = key.lower()
-    return any(term in lower for term in _SENSITIVE_KEYS)
-
-
-def _redact_value(value: Any) -> Any:
-    """Recursively redact values for sensitive-looking keys."""
-    if isinstance(value, dict):
-        return {
-            key: "[REDACTED]" if _is_sensitive_key(key) else _redact_value(val)
-            for key, val in value.items()
-        }
-    if isinstance(value, list):
-        return [_redact_value(item) for item in value]
-    return value
+from naumi_agent.workbench.store import WorkbenchStore, redact_event_payload
 
 
 def redact_event(event_dict: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of an event dict with payload secrets redacted."""
+    """Return a copy of an event dict with payload secrets redacted.
+
+    Reuses the store-level redactor so the export path and the persistence path
+    share identical secret-masking logic.
+    """
     result = dict(event_dict)
-    result["payload"] = _redact_value(result.get("payload", {}))
+    result["payload"] = redact_event_payload(result.get("payload", {}))
     return result
 
 
