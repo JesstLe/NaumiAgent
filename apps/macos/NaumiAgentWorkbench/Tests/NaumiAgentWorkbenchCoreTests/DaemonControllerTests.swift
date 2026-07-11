@@ -12,6 +12,8 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var createSessionResult: Result<SessionDTO, APIError>?
     var createWorkbenchSessionResult: Result<WorkbenchBootstrapDTO, APIError>?
     var sendMessageResult: Result<ChatMessageDTO, APIError>?
+    var streamMessageResult: Result<Void, APIError> = .success(())
+    var streamEvents: [ChatStreamEvent] = []
     var messagesResult: Result<ChatMessageListDTO, APIError>?
     var eventsResult: Result<WorkbenchEventsDTO, APIError>?
     var eventResult: Result<EventDTO, APIError>?
@@ -88,6 +90,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var createDecisionWithSnapshotHook: (@Sendable () async -> Void)?
     var runValidationWithSnapshotHook: (@Sendable () async -> Void)?
     var sendMessageHook: (@Sendable () async -> Void)?
+    var streamMessageHook: (@Sendable () async -> Void)?
     var fetchMessagesHook: (@Sendable () async -> Void)?
     var fetchEventsHook: (@Sendable () async -> Void)?
     var fetchEventHook: (@Sendable () async -> Void)?
@@ -136,6 +139,8 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var runValidationCallCount: Int = 0
     var runValidationWithSnapshotCallCount: Int = 0
     var fetchMessagesCallCount: Int = 0
+    private(set) var streamMessageCalls: [StreamMessageCall] = []
+    private(set) var permissionResolutionCalls: [PermissionResolutionCall] = []
     var createdSessions: [[String: String?]] = []
     var createdMissions: [[String: String]] = []
     var issueRequests: [[String: String?]] = []
@@ -266,6 +271,33 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
             throw .invalidResponse
         }
         return try result.get()
+    }
+
+    func streamMessage(
+        sessionID: String,
+        content: String,
+        onEvent: @escaping @Sendable (ChatStreamEvent) async -> Void
+    ) async throws(APIError) {
+        streamMessageCalls.append(StreamMessageCall(sessionID: sessionID, content: content))
+        if let streamMessageHook {
+            await streamMessageHook()
+        }
+        try streamMessageResult.get()
+        for event in streamEvents {
+            await onEvent(event)
+        }
+    }
+
+    func resolveChatPermission(
+        sessionID: String,
+        callID: String,
+        decision: ChatPermissionDecision
+    ) async throws(APIError) {
+        permissionResolutionCalls.append(PermissionResolutionCall(
+            sessionID: sessionID,
+            callID: callID,
+            decision: decision
+        ))
     }
 
     func fetchMessages(
@@ -1175,6 +1207,8 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     }
 }
 
+extension FakeWorkbenchAPIProvider: ChatStreamingProviding {}
+
 actor FakeWorkbenchEventProvider: WorkbenchEventProviding, WorkbenchEventStreamTemplateConfiguring {
     private var continuation: AsyncThrowingStream<WorkbenchEventStreamMessage, Error>.Continuation?
     private let streamRecorder = FakeWorkbenchEventStreamRecorder()
@@ -1291,6 +1325,17 @@ struct FakeWorkbenchEventRefreshRequest: Equatable, Sendable {
     let since: String?
     let severity: String?
     let limit: Int
+}
+
+struct StreamMessageCall: Equatable, Sendable {
+    let sessionID: String
+    let content: String
+}
+
+struct PermissionResolutionCall: Equatable, Sendable {
+    let sessionID: String
+    let callID: String
+    let decision: ChatPermissionDecision
 }
 
 struct FetchIssueBidsCall: Equatable, Sendable {
@@ -10066,6 +10111,82 @@ final class DaemonControllerTests {
         #expect(await api.fetchedEvents.isEmpty)
     }
 
+    @Test @MainActor func sendDailyMessageStreamsVisibleAnswerAndRefreshesCanonicalHistory() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let persistedMessages = [
+            ChatMessageDTO(
+                id: "msg-user",
+                role: "user",
+                content: "请给出进度",
+                timestamp: "2026-07-12T08:00:00",
+                metadata: [:]
+            ),
+            ChatMessageDTO(
+                id: "msg-assistant",
+                role: "assistant",
+                content: "目前进度正常。",
+                timestamp: "2026-07-12T08:00:02",
+                metadata: [:]
+            ),
+        ]
+        let api = FakeWorkbenchAPIProvider()
+        await api.setMessagesResult(.success(ChatMessageListDTO(
+            messages: persistedMessages,
+            total: persistedMessages.count
+        )))
+        await api.setStreamEvents([
+            ChatStreamEvent(
+                id: "event-thinking",
+                type: .thinkingDelta,
+                data: ["content": .string("private model reasoning")]
+            ),
+            ChatStreamEvent(
+                id: "event-token",
+                type: .tokenDelta,
+                data: ["token": .string("目前进度正常。")]
+            ),
+            ChatStreamEvent(id: "event-end", type: .agentEnd, data: [:]),
+        ])
+
+        let controller = DaemonController(appState: appState, apiProvider: api)
+        await controller.sendDailyMessage(content: "请给出进度", issueDraft: nil)
+
+        #expect(await api.streamMessageCalls == [
+            StreamMessageCall(sessionID: "sess-001", content: "请给出进度"),
+        ])
+        #expect(appState.chatMessages == persistedMessages)
+        #expect(appState.activeChatExecution == nil)
+        #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func resolveActiveChatPermissionCallsOnlyScopedApprovalEndpoint() async throws {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        appState.activeChatExecution = ChatExecutionPresentation(id: "run-1").applying(
+            ChatStreamEvent(
+                id: "permission-1",
+                type: .permissionRequest,
+                data: [
+                    "call_id": .string("call-1"),
+                    "tool_name": .string("bash_run"),
+                    "reason": .string("命令执行需要确认。"),
+                    "risk_level": .string("medium"),
+                    "status": .string("needs_confirmation"),
+                ]
+            )
+        )
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+
+        await controller.resolveActiveChatPermission(.allow)
+
+        #expect(await api.permissionResolutionCalls == [
+            PermissionResolutionCall(sessionID: "sess-001", callID: "call-1", decision: .allow),
+        ])
+        #expect(appState.lastError == nil)
+    }
+
     @Test @MainActor func refreshChatMessagesIgnoresHistoryAfterSelectedSessionChanges() async throws {
         let appState = AppState()
         appState.selectedSessionID = "sess-001"
@@ -10511,6 +10632,18 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setSendMessageHook(_ hook: (@Sendable () async -> Void)?) {
         sendMessageHook = hook
+    }
+
+    fileprivate func setStreamEvents(_ events: [ChatStreamEvent]) {
+        streamEvents = events
+    }
+
+    fileprivate func setStreamMessageResult(_ result: Result<Void, APIError>) {
+        streamMessageResult = result
+    }
+
+    fileprivate func setStreamMessageHook(_ hook: (@Sendable () async -> Void)?) {
+        streamMessageHook = hook
     }
 
     fileprivate func setMessagesResult(_ result: Result<ChatMessageListDTO, APIError>) {

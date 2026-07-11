@@ -1868,6 +1868,7 @@ public final class DaemonController: Sendable {
     private func clearSessionScopedState() {
         appState.snapshot = nil
         appState.chatMessages = []
+        appState.activeChatExecution = nil
         appState.timelineEvents = []
         appState.validationRuns = []
         appState.contextSnapshots = []
@@ -1936,6 +1937,21 @@ public final class DaemonController: Sendable {
             timestamp: Self.nowISO8601(),
             metadata: [:]
         )
+        appState.chatMessages.append(localUserMessage)
+
+        if issueDraft == nil, let streamingProvider = apiProvider as? any ChatStreamingProviding {
+            await sendStreamedDailyMessage(
+                content: trimmedContent,
+                sessionID: sessionID,
+                streamingProvider: streamingProvider
+            )
+            return
+        }
+
+        appState.activeChatExecution = ChatExecutionPresentation(
+            id: "chat-\(UUID().uuidString)",
+            stage: issueDraft == nil ? .preparing : .creatingLinkedIssue
+        )
 
         do {
             let response = try await apiProvider.sendMessage(
@@ -1946,8 +1962,8 @@ public final class DaemonController: Sendable {
             guard appState.selectedSessionID == sessionID else {
                 return
             }
-            appState.chatMessages.append(localUserMessage)
             appState.chatMessages.append(response)
+            appState.activeChatExecution = nil
 
             if issueDraft != nil {
                 if let snapshot = workbenchSnapshot(from: response, expectedSessionID: sessionID) {
@@ -1969,10 +1985,108 @@ public final class DaemonController: Sendable {
                 return
             }
             appState.lastError = error
+            appState.activeChatExecution = appState.activeChatExecution?.failing(
+                with: AppStrings.Chat.executionFailed(appState.locale)
+            )
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
             }
         }
+    }
+
+    /// Resolves the permission request shown on the active streamed chat turn.
+    public func resolveActiveChatPermission(_ decision: ChatPermissionDecision) async {
+        guard let sessionID = appState.selectedSessionID,
+              let execution = appState.activeChatExecution,
+              let permission = execution.permission else {
+            appState.lastError = .invalidResponse
+            return
+        }
+        guard let streamingProvider = apiProvider as? any ChatStreamingProviding else {
+            appState.lastError = .invalidResponse
+            appState.activeChatExecution = execution.failing(
+                with: AppStrings.Chat.executionFailed(appState.locale)
+            )
+            return
+        }
+
+        appState.lastError = nil
+        appState.activeChatExecution = execution.resolvingPermission()
+        do {
+            try await streamingProvider.resolveChatPermission(
+                sessionID: sessionID,
+                callID: permission.callID,
+                decision: decision
+            )
+        } catch {
+            guard appState.selectedSessionID == sessionID,
+                  appState.activeChatExecution?.id == execution.id else {
+                return
+            }
+            appState.lastError = error
+            appState.activeChatExecution = execution.failing(
+                with: AppStrings.Chat.executionFailed(appState.locale)
+            )
+        }
+    }
+
+    private func sendStreamedDailyMessage(
+        content: String,
+        sessionID: String,
+        streamingProvider: any ChatStreamingProviding
+    ) async {
+        let executionID = "chat-\(UUID().uuidString)"
+        appState.activeChatExecution = ChatExecutionPresentation(id: executionID)
+
+        do {
+            try await streamingProvider.streamMessage(
+                sessionID: sessionID,
+                content: content
+            ) { [weak self] event in
+                await self?.applyChatStreamEvent(
+                    event,
+                    expectedSessionID: sessionID,
+                    executionID: executionID
+                )
+            }
+            guard appState.selectedSessionID == sessionID,
+                  appState.activeChatExecution?.id == executionID else {
+                return
+            }
+
+            await refreshChatMessages()
+            guard appState.selectedSessionID == sessionID,
+                  appState.lastError == nil else {
+                return
+            }
+            appState.activeChatExecution = nil
+        } catch {
+            guard appState.selectedSessionID == sessionID,
+                  appState.activeChatExecution?.id == executionID else {
+                return
+            }
+            appState.lastError = error
+            appState.activeChatExecution = appState.activeChatExecution?.failing(
+                with: AppStrings.Chat.executionFailed(appState.locale)
+            )
+            if error == .sessionUnavailable {
+                clearUnavailableSelectedSession()
+            }
+        }
+    }
+
+    private func applyChatStreamEvent(
+        _ event: ChatStreamEvent,
+        expectedSessionID: String,
+        executionID: String
+    ) {
+        guard appState.selectedSessionID == expectedSessionID,
+              event.sessionID.isEmpty || event.sessionID == expectedSessionID,
+              let execution = appState.activeChatExecution,
+              execution.id == executionID else {
+            return
+        }
+        appState.activeChatExecution = execution.applying(event)
     }
 
     private func workbenchSnapshot(

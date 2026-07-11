@@ -139,6 +139,16 @@ final class WorkbenchPreviewLoaderTests {
         }
     }
 
+    @Test func previewChatExecutionShowsApprovalStateWithoutToolArguments() {
+        let execution = WorkbenchPreviewLoader.previewChatExecution(locale: .zhCN)
+
+        #expect(execution.stage == .awaitingApproval)
+        #expect(execution.permission?.toolName == "bash_run")
+        #expect(execution.permission?.reason == "将运行本地验证命令。")
+        #expect(execution.partialResponse.isEmpty)
+        #expect(execution.toolResultSummary == "Planner-Agent 已整理验证范围。")
+    }
+
     private func fixtureDirectory() -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

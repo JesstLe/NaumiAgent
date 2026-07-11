@@ -3,7 +3,7 @@ import Foundation
 /// REST client for the NaumiAgent Workbench Kernel.
 ///
 /// SwiftUI 不直接读写 SQLite / 跑 git / pytest；所有业务状态通过此 client 访问本地 API。
-public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRouteTemplateConfiguring {
+public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRouteTemplateConfiguring, ChatStreamingProviding {
     public var baseURL: URL
     public let session: URLSession
     private var bearerToken: String?
@@ -165,6 +165,89 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             path: path,
             body: body
         )
+    }
+
+    /// Sends a normal chat turn and forwards safe server events as they arrive.
+    /// Linked-issue turns remain synchronous so task creation stays atomic.
+    public func streamMessage(
+        sessionID: String,
+        content: String,
+        onEvent: @escaping @Sendable (ChatStreamEvent) async -> Void
+    ) async throws(APIError) {
+        let path = try routePath(
+            named: "send_message",
+            replacements: ["session_id": sessionID],
+            fallback: encodePath("sessions", sessionID, "messages")
+        )
+        guard let url = url(for: path) else {
+            throw .invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request = authenticated(request)
+
+        do {
+            let encoder = JSONEncoder()
+            encoder.keyEncodingStrategy = .convertToSnakeCase
+            request.httpBody = try encoder.encode(
+                SendMessageRequest(content: content, stream: true, workbenchIssue: nil)
+            )
+        } catch {
+            throw .decodingFailed(String(describing: error))
+        }
+
+        let bytes: URLSession.AsyncBytes
+        do {
+            let response: URLResponse
+            (bytes, response) = try await session.bytes(for: request)
+            try validateStreamResponse(response)
+        } catch let error as APIError {
+            throw error
+        } catch {
+            throw .networkFailure(error.localizedDescription)
+        }
+
+        do {
+            for try await line in bytes.lines {
+                guard let event = try Self.streamEvent(from: line) else { continue }
+                await onEvent(event)
+                if event.terminatesChatStream {
+                    return
+                }
+            }
+        } catch let error as DecodingError {
+            throw .decodingFailed(String(describing: error))
+        } catch let error as APIError {
+            throw error
+        } catch {
+            throw .networkFailure(error.localizedDescription)
+        }
+    }
+
+    static func streamEvent(from line: String) throws -> ChatStreamEvent? {
+        guard line.hasPrefix("data:") else { return nil }
+        let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        guard !payload.isEmpty else { return nil }
+        return try JSONDecoder().decode(ChatStreamEvent.self, from: Data(payload.utf8))
+    }
+
+    /// Resolves one server-issued permission request without exposing tool arguments.
+    public func resolveChatPermission(
+        sessionID: String,
+        callID: String,
+        decision: ChatPermissionDecision
+    ) async throws(APIError) {
+        let path = encodePath("sessions", sessionID, "permissions", callID, "resolve")
+        let response: PermissionResolutionResponse = try await post(
+            path: path,
+            body: PermissionResolutionRequest(decision: decision.rawValue)
+        )
+        guard response.status == "resolved" else {
+            throw .invalidResponse
+        }
     }
 
     public func fetchMessages(
@@ -1691,13 +1774,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     }
 
     private func performRequest<T: Decodable & Sendable>(_ request: URLRequest) async throws(APIError) -> T {
-        var request = request
-        // Prefer a live Keychain-backed provider so token rotation takes effect
-        // without a reconnect; fall back to the connection-time bearer token.
-        let token = tokenProvider?.currentToken() ?? bearerToken
-        if let token, !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
+        let request = authenticated(request)
 
         let data: Data
         let response: URLResponse
@@ -1731,6 +1808,29 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         }
     }
 
+    private func authenticated(_ request: URLRequest) -> URLRequest {
+        var request = request
+        // Prefer a live Keychain-backed provider so token rotation takes effect
+        // without a reconnect; fall back to the connection-time bearer token.
+        let token = tokenProvider?.currentToken() ?? bearerToken
+        if let token, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
+    private func validateStreamResponse(_ response: URLResponse) throws(APIError) {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw .invalidResponse
+        }
+        if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+            throw .authFailed
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw .httpStatus(httpResponse.statusCode)
+        }
+    }
+
     /// Payload for `POST /sessions`.
     private struct CreateSessionRequest: Encodable, Sendable {
         let title: String?
@@ -1743,6 +1843,14 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         let content: String
         let stream: Bool
         let workbenchIssue: ChatIssueDraftDTO?
+    }
+
+    private struct PermissionResolutionRequest: Encodable, Sendable {
+        let decision: String
+    }
+
+    private struct PermissionResolutionResponse: Decodable, Sendable {
+        let status: String
     }
 
     private struct ErrorDetailResponse: Decodable {

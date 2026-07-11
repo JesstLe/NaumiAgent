@@ -176,6 +176,100 @@ public enum AppStrings {
         public static func noMission(_ locale: AppLocale) -> String {
             locale == .zhCN ? "暂无 Mission" : "No Mission"
         }
+
+        public static func executionFailed(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "本次对话未能完成。" : "This conversation could not be completed."
+        }
+
+        public static func executionStage(_ locale: AppLocale, stage: ChatExecutionStage) -> String {
+            switch (locale, stage) {
+            case (.zhCN, .preparing):
+                return "正在准备"
+            case (.zhCN, .analyzing):
+                return "正在分析请求"
+            case (.zhCN, .runningTool):
+                return "正在执行工具"
+            case (.zhCN, .awaitingApproval):
+                return "等待你的确认"
+            case (.zhCN, .composing):
+                return "正在生成答复"
+            case (.zhCN, .creatingLinkedIssue):
+                return "正在创建关联任务"
+            case (.zhCN, .completed):
+                return "答复已完成"
+            case (.zhCN, .failed):
+                return "对话未完成"
+            case (.enUS, .preparing):
+                return "Preparing"
+            case (.enUS, .analyzing):
+                return "Analyzing request"
+            case (.enUS, .runningTool):
+                return "Running tool"
+            case (.enUS, .awaitingApproval):
+                return "Waiting for your approval"
+            case (.enUS, .composing):
+                return "Writing response"
+            case (.enUS, .creatingLinkedIssue):
+                return "Creating linked issue"
+            case (.enUS, .completed):
+                return "Response complete"
+            case (.enUS, .failed):
+                return "Conversation incomplete"
+            }
+        }
+
+        public static func executionElapsed(_ locale: AppLocale, seconds: Int) -> String {
+            locale == .zhCN ? "已处理 \(seconds) 秒" : "Processing for \(seconds)s"
+        }
+
+        public static func executionTool(_ locale: AppLocale, toolName: String) -> String {
+            locale == .zhCN ? "正在运行 \(toolName)" : "Running \(toolName)"
+        }
+
+        public static func subtaskResult(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "子任务结果" : "Subtask result"
+        }
+
+        public static func permissionRequired(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "此操作需要你的确认" : "This action needs your approval"
+        }
+
+        public static func permissionRisk(_ locale: AppLocale, level: String) -> String {
+            switch (locale, level.lowercased()) {
+            case (.zhCN, "low"):
+                return "风险：低"
+            case (.zhCN, "medium"):
+                return "风险：中"
+            case (.zhCN, "high"):
+                return "风险：高"
+            case (.zhCN, "critical"):
+                return "风险：严重"
+            case (.zhCN, _):
+                return "风险：\(level)"
+            case (.enUS, "low"):
+                return "Risk: Low"
+            case (.enUS, "medium"):
+                return "Risk: Medium"
+            case (.enUS, "high"):
+                return "Risk: High"
+            case (.enUS, "critical"):
+                return "Risk: Critical"
+            case (.enUS, _):
+                return "Risk: \(level)"
+            }
+        }
+
+        public static func allowOnce(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "允许一次" : "Allow once"
+        }
+
+        public static func deny(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "拒绝" : "Deny"
+        }
+
+        public static func resolvingApproval(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "正在提交确认" : "Submitting approval"
+        }
     }
 
     // MARK: - Global Status
