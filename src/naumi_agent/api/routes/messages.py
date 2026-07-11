@@ -141,7 +141,7 @@ async def list_messages(
             MessageResponse(
                 id=str(m.get("id") or f"msg-{start + index + 1}"),
                 role=m.get("role", "unknown"),
-                content=m.get("content", ""),
+                content=str(m.get("content") or ""),
                 timestamp=m.get("timestamp", ""),
                 metadata=m.get("metadata", {}),
             )
