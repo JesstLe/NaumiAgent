@@ -225,6 +225,42 @@ class LongTermMemory:
 
         使用综合评分：relevance * recency_weight * access_weight.
         """
+        return await self._recall(
+            query,
+            category=category,
+            top_k=top_k,
+            min_relevance=min_relevance,
+        )
+
+    async def recall_for_session(
+        self,
+        query: str,
+        *,
+        session_id: str,
+        top_k: int = 5,
+        min_relevance: float = 0.5,
+    ) -> list[MemorySearchResult]:
+        """Recall only memories safe to inject into one active session."""
+        normalized_session_id = session_id.strip()
+        if not normalized_session_id:
+            return []
+        return await self._recall(
+            query,
+            category=None,
+            top_k=top_k,
+            min_relevance=min_relevance,
+            session_id=normalized_session_id,
+        )
+
+    async def _recall(
+        self,
+        query: str,
+        *,
+        category: str | None,
+        top_k: int,
+        min_relevance: float,
+        session_id: str | None = None,
+    ) -> list[MemorySearchResult]:
         self._ensure_initialized()
 
         count = self._collection.count()
@@ -240,8 +276,10 @@ class LongTermMemory:
             ]}
         else:
             where_filter = {"status": "active"}
-        # Over-fetch for scoring/reranking, then trim to top_k
-        fetch_k = min(top_k * 3, count)
+        # Session filtering must inspect every active candidate before ranking,
+        # otherwise a relevant current-session record can be hidden behind
+        # unrelated memories from other conversations.
+        fetch_k = count if session_id is not None else min(top_k * 3, count)
 
         results = self._collection.query(
             query_texts=[query],
@@ -286,6 +324,8 @@ class LongTermMemory:
                 access_count=int(meta.get("access_count", "0")),
                 status=meta.get("status", "active"),
             )
+            if session_id is not None and not _is_visible_in_session(entry, session_id):
+                continue
             result = MemorySearchResult(entry=entry, relevance=relevance)
             scored.append((composite, result))
 
@@ -517,6 +557,19 @@ class LongTermMemory:
             })
 
         return json.dumps(items, ensure_ascii=False, indent=2)
+
+
+def _is_visible_in_session(entry: MemoryEntry, session_id: str) -> bool:
+    """Return whether an entry is safe for automatic session injection."""
+    scope = str(entry.metadata.get("scope", "")).strip().lower()
+    source_session_id = str(entry.metadata.get("session_id", "")).strip()
+    if scope == "session":
+        return source_session_id == session_id
+    if scope == "global":
+        return entry.category == "preference"
+    if source_session_id:
+        return source_session_id == session_id
+    return entry.category == "preference"
 
 
 def _recency_score(timestamp: str, now: datetime) -> float:

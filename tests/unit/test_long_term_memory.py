@@ -190,6 +190,63 @@ class TestDeduplication:
 
 class TestRetrievalScoring:
     @pytest.mark.asyncio
+    async def test_recall_for_session_keeps_current_memories_and_global_preferences(
+        self,
+        memory,
+    ):
+        await _store(
+            memory,
+            "NaumiAgent 当前会话项目事实",
+            id="current-fact",
+            metadata={"scope": "session", "session_id": "current"},
+        )
+        await _store(
+            memory,
+            "NaumiAgent 其他会话决策",
+            id="other-decision",
+            category="decision",
+            metadata={"scope": "session", "session_id": "other"},
+        )
+        await _store(
+            memory,
+            "NaumiAgent 全局用户偏好",
+            id="global-preference",
+            category="preference",
+            metadata={"scope": "global"},
+        )
+        await _store(
+            memory,
+            "NaumiAgent 旧版当前会话事实",
+            id="legacy-current",
+            metadata={"source": "auto_extract", "session_id": "current"},
+        )
+        await _store(
+            memory,
+            "NaumiAgent 旧版其他会话决策",
+            id="legacy-other",
+            category="decision",
+            metadata={"source": "auto_extract", "session_id": "other"},
+        )
+        await _store(
+            memory,
+            "NaumiAgent 未声明作用域事实",
+            id="unscoped-fact",
+        )
+
+        results = await memory.recall_for_session(
+            "NaumiAgent",
+            session_id="current",
+            top_k=6,
+            min_relevance=0.0,
+        )
+
+        assert {result.entry.id for result in results} == {
+            "current-fact",
+            "global-preference",
+            "legacy-current",
+        }
+
+    @pytest.mark.asyncio
     async def test_recall_empty_collection(self, memory):
         results = await memory.recall("anything")
         assert results == []

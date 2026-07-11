@@ -1037,9 +1037,15 @@ class AgentEngine:
 
     async def _inject_relevant_memories(self, user_message: str) -> None:
         """自动召回与用户消息相关的长期记忆，注入到上下文中."""
+        session_id = self._session.id if self._session else ""
+        if not session_id:
+            return
         try:
-            results = await self.long_term_memory.recall(
-                user_message, top_k=3, min_relevance=0.4,
+            results = await self.long_term_memory.recall_for_session(
+                user_message,
+                session_id=session_id,
+                top_k=3,
+                min_relevance=0.4,
             )
         except Exception as e:
             logger.debug("Memory recall for injection failed: %s", e)
@@ -1075,6 +1081,7 @@ class AgentEngine:
 
         session_id = self._session.id if self._session else ""
         for candidate in candidates:
+            scope = "global" if candidate.category == "preference" else "session"
             entry = MemoryEntry(
                 id="",
                 content=candidate.content,
@@ -1083,6 +1090,7 @@ class AgentEngine:
                     "source": "auto_extract",
                     "reason": candidate.reason,
                     "session_id": session_id,
+                    "scope": scope,
                 },
             )
             try:
