@@ -7,6 +7,7 @@ struct ChatMessagePresentationTests {
         let messages = [
             ChatMessageDTO(id: "system", role: "system", content: "Internal instruction", timestamp: ""),
             ChatMessageDTO(id: "user", role: "user", content: "你好", timestamp: ""),
+            ChatMessageDTO(id: "tool", role: "tool", content: "Internal tool output", timestamp: ""),
             ChatMessageDTO(id: "assistant", role: "assistant", content: "你好，有什么可以帮你？", timestamp: ""),
         ]
 

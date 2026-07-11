@@ -102,6 +102,9 @@ public final class DaemonController: Sendable {
             } else {
                 await refreshSnapshot(clearSessionScopedStateOnFailure: true)
             }
+            if let sessionID = appState.selectedSessionID {
+                recordSelectedSessionInRegistry(sessionID)
+            }
             if appState.selectedSessionID != nil, appState.snapshot != nil {
                 await refreshChatMessages()
                 await refreshWorkbenchListsAfterConnection()

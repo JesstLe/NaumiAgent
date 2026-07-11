@@ -283,6 +283,37 @@ async def test_create_issue_creates_backing_task_and_issue_metadata(tmp_path) ->
 
 
 @pytest.mark.asyncio
+async def test_dashboard_snapshot_keeps_issue_backing_task_after_service_restart(tmp_path) -> None:
+    database_path = str(tmp_path / "sessions.db")
+    initial_tasks = TaskStore(database_path)
+    initial_tasks.set_session("s")
+    initial_service = WorkbenchService(
+        task_store=initial_tasks,
+        workbench_store=WorkbenchStore(database_path),
+    )
+    mission = await initial_service.create_mission(
+        session_id="s",
+        title="持久化任务",
+        goal="服务重启后仍显示关联任务",
+    )
+    issue = await initial_service.create_issue(
+        session_id="s",
+        mission_id=mission.id,
+        title="重启后仍可见",
+        description="workbench task persistence regression",
+    )
+
+    restarted_service = WorkbenchService(
+        task_store=TaskStore(database_path),
+        workbench_store=WorkbenchStore(database_path),
+    )
+    snapshot = await restarted_service.dashboard_snapshot("s")
+
+    assert [task["id"] for task in snapshot["tasks"]] == [issue["task_id"]]
+    assert snapshot["issues"][0]["task"]["subject"] == "重启后仍可见"
+
+
+@pytest.mark.asyncio
 async def test_get_mission_returns_json_friendly_mission(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")

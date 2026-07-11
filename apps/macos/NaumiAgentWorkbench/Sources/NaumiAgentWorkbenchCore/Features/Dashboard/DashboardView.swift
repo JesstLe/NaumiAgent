@@ -232,7 +232,7 @@ public struct DashboardView: View {
                 railRow(
                     icon: "checkmark.circle",
                     title: AppStrings.Dashboard.validationRunsLabel(appState.locale),
-                    subtitle: "\(presentation.taskRows.count)",
+                    subtitle: "\(appState.validationRuns.count)",
                     color: .green
                 )
             }

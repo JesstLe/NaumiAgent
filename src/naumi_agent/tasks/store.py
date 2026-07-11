@@ -104,6 +104,12 @@ class TaskStore:
     def set_session(self, session_id: str) -> None:
         self._session_id = session_id
 
+    def scoped(self, session_id: str) -> TaskStore:
+        """Return an independent view of this database bound to one session."""
+        scoped_store = TaskStore(self._db_path)
+        scoped_store.set_session(session_id)
+        return scoped_store
+
     @property
     def session_id(self) -> str:
         return self._session_id
