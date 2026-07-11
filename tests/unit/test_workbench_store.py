@@ -12,6 +12,7 @@ from naumi_agent.workbench.models import (
     FailureKind,
     LeaseState,
     ParallelMode,
+    ProposalState,
     RiskLevel,
 )
 from naumi_agent.workbench.store import WorkbenchStore
@@ -1348,4 +1349,123 @@ async def test_get_agent_active_lease_returns_newest_active_lease(store: Workben
     result = await store.get_agent_active_lease("s", "agent-a")
     assert result is not None
     assert result.task_id == lease2.task_id
+
+
+@pytest.mark.asyncio
+async def test_create_and_list_proposals_persists_and_filters(store: WorkbenchStore) -> None:
+    proposal_a = await store.create_proposal(
+        session_id="s",
+        mission_id="m1",
+        task_id="t1",
+        agent_id="agent-a",
+        title="重构认证模块",
+        impact_scope="影响登录与令牌签发",
+        intended_files=["src/auth.py", "src/token.py"],
+        validation_plan=["pytest tests/auth", "手动回归登录"],
+        risk_level=RiskLevel.HIGH,
+        questions=["是否需要兼容旧令牌?"],
+    )
+    proposal_b = await store.create_proposal(
+        session_id="s",
+        mission_id="m1",
+        task_id="t2",
+        agent_id="agent-b",
+        title="低风险文档更新",
+        impact_scope="仅 README",
+        risk_level=RiskLevel.LOW,
+    )
+    other = await store.create_proposal(
+        session_id="s2",
+        mission_id="m1",
+        task_id="t1",
+        agent_id="agent-c",
+        title="其他会话",
+        impact_scope="无关",
+    )
+
+    assert proposal_a.state is ProposalState.OPEN
+    assert proposal_a.risk_level is RiskLevel.HIGH
+    assert proposal_a.intended_files == ["src/auth.py", "src/token.py"]
+    assert proposal_a.questions == ["是否需要兼容旧令牌?"]
+
+    all_session = await store.list_proposals("s", limit=50)
+    # Newest first; both share the same second-granularity timestamp so compare
+    # as a set rather than asserting an exact order.
+    assert {p.id for p in all_session} == {proposal_a.id, proposal_b.id}
+
+    by_task = await store.list_proposals("s", task_id="t1", limit=50)
+    assert [p.id for p in by_task] == [proposal_a.id]
+
+    by_mission = await store.list_proposals(
+        "s", mission_id="m1", limit=50
+    )
+    assert {p.id for p in by_mission} == {proposal_a.id, proposal_b.id}
+
+    other_only = await store.list_proposals("s2", limit=50)
+    assert [p.id for p in other_only] == [other.id]
+
+
+@pytest.mark.asyncio
+async def test_update_proposal_state_transitions_and_is_idempotent(
+    store: WorkbenchStore,
+) -> None:
+    proposal = await store.create_proposal(
+        session_id="s",
+        mission_id="m1",
+        task_id="t1",
+        agent_id="agent-a",
+        title="高风险改动",
+        impact_scope="核心调度",
+        risk_level=RiskLevel.CRITICAL,
+    )
+
+    updated = await store.update_proposal_state(
+        "s", proposal.id, state=ProposalState.APPROVED, decision_note="同意"
+    )
+    assert updated is not None
+    assert updated.state is ProposalState.APPROVED
+    assert updated.decision_note == "同意"
+
+    # Resolving an already-decided proposal returns it unchanged (idempotent).
+    again = await store.update_proposal_state(
+        "s", proposal.id, state=ProposalState.REJECTED
+    )
+    assert again is not None
+    assert again.state is ProposalState.APPROVED
+
+    # Unknown proposal id returns None.
+    missing = await store.update_proposal_state(
+        "s", "nope", state=ProposalState.APPROVED
+    )
+    assert missing is None
+
+
+@pytest.mark.asyncio
+async def test_convert_proposal_records_converted_issue_id(store: WorkbenchStore) -> None:
+    proposal = await store.create_proposal(
+        session_id="s",
+        mission_id="m1",
+        task_id="t1",
+        agent_id="agent-a",
+        title="转为正式 issue",
+        impact_scope="新增模块",
+        intended_files=["src/new.py"],
+        validation_plan=["pytest tests/new"],
+        risk_level=RiskLevel.MEDIUM,
+    )
+    converted = await store.update_proposal_state(
+        "s",
+        proposal.id,
+        state=ProposalState.CONVERTED,
+        converted_issue_id="t1",
+    )
+    assert converted is not None
+    assert converted.state is ProposalState.CONVERTED
+    assert converted.converted_issue_id == "t1"
+
+    fetched = await store.get_proposal("s", proposal.id)
+    assert fetched is not None
+    assert fetched.state is ProposalState.CONVERTED
+    assert fetched.intended_files == ["src/new.py"]
+
 

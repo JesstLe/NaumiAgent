@@ -14,6 +14,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
     public let issues: [IssueDTO]
     public let leases: [LeaseDTO]
     public let bids: [IssueBidDTO]
+    public let proposals: [ProposalDTO]
     public let failures: [FailureDTO]
     public let events: [EventDTO]
     public let validationRuns: [ValidationRunDTO]
@@ -32,6 +33,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         case issues
         case leases
         case bids
+        case proposals
         case failures
         case events
         case validationRuns = "validation_runs"
@@ -51,6 +53,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         issues: [IssueDTO],
         leases: [LeaseDTO] = [],
         bids: [IssueBidDTO] = [],
+        proposals: [ProposalDTO] = [],
         failures: [FailureDTO],
         events: [EventDTO],
         validationRuns: [ValidationRunDTO] = [],
@@ -68,6 +71,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         self.issues = issues
         self.leases = leases
         self.bids = bids
+        self.proposals = proposals
         self.failures = failures
         self.events = events
         self.validationRuns = validationRuns
@@ -88,6 +92,7 @@ public struct WorkbenchSnapshotDTO: Decodable, Equatable, Sendable {
         issues = try container.decode([IssueDTO].self, forKey: .issues)
         leases = try container.decodeIfPresent([LeaseDTO].self, forKey: .leases) ?? []
         bids = try container.decodeIfPresent([IssueBidDTO].self, forKey: .bids) ?? []
+        proposals = try container.decodeIfPresent([ProposalDTO].self, forKey: .proposals) ?? []
         failures = try container.decode([FailureDTO].self, forKey: .failures)
         events = try container.decode([EventDTO].self, forKey: .events)
         validationRuns = try container.decodeIfPresent([ValidationRunDTO].self, forKey: .validationRuns) ?? []

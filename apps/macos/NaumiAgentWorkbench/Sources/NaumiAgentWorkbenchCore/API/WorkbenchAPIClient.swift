@@ -925,6 +925,103 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         )
     }
 
+    public func fetchProposals(
+        sessionID: String,
+        missionID: String?,
+        taskID: String?,
+        state: String?,
+        limit: Int
+    ) async throws(APIError) -> ProposalsDTO {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let missionID, !missionID.isEmpty {
+            queryItems.append(URLQueryItem(name: "mission_id", value: missionID))
+        }
+        if let taskID, !taskID.isEmpty {
+            queryItems.append(URLQueryItem(name: "task_id", value: taskID))
+        }
+        if let state, !state.isEmpty {
+            queryItems.append(URLQueryItem(name: "state", value: state))
+        }
+        let path = try routePath(
+            named: "proposals",
+            replacements: ["session_id": sessionID],
+            fallback: encodePath("workbench", "sessions", sessionID, "proposals")
+        )
+        return try await get(path: path, queryItems: queryItems)
+    }
+
+    public func fetchProposal(sessionID: String, proposalID: String) async throws(APIError) -> ProposalDTO {
+        let path = try routePath(
+            named: "proposal",
+            replacements: [
+                "session_id": sessionID,
+                "proposal_id": proposalID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "proposals", proposalID)
+        )
+        return try await get(path: path)
+    }
+
+    public func createProposal(
+        sessionID: String,
+        draft: ProposalDraft
+    ) async throws(APIError) -> ProposalDTO {
+        let path = try routePath(
+            named: "create_proposal",
+            replacements: ["session_id": sessionID],
+            fallback: encodePath("workbench", "sessions", sessionID, "proposals")
+        )
+        return try await post(path: path, body: draft)
+    }
+
+    public func approveProposal(
+        sessionID: String,
+        proposalID: String,
+        draft: ProposalResolveDraft
+    ) async throws(APIError) -> ProposalDTO {
+        let path = try routePath(
+            named: "approve_proposal",
+            replacements: [
+                "session_id": sessionID,
+                "proposal_id": proposalID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "proposals", proposalID, "approve")
+        )
+        return try await post(path: path, body: draft)
+    }
+
+    public func rejectProposal(
+        sessionID: String,
+        proposalID: String,
+        draft: ProposalResolveDraft
+    ) async throws(APIError) -> ProposalDTO {
+        let path = try routePath(
+            named: "reject_proposal",
+            replacements: [
+                "session_id": sessionID,
+                "proposal_id": proposalID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "proposals", proposalID, "reject")
+        )
+        return try await post(path: path, body: draft)
+    }
+
+    public func convertProposal(
+        sessionID: String,
+        proposalID: String,
+        draft: ProposalResolveDraft
+    ) async throws(APIError) -> ProposalDTO {
+        let path = try routePath(
+            named: "convert_proposal",
+            replacements: [
+                "session_id": sessionID,
+                "proposal_id": proposalID,
+            ],
+            fallback: encodePath("workbench", "sessions", sessionID, "proposals", proposalID, "convert")
+        )
+        return try await post(path: path, body: draft)
+    }
+
     public func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO {
         let path = try routePath(
             named: "release_lease",

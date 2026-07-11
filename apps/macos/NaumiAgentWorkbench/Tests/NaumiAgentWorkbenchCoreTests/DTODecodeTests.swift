@@ -300,6 +300,159 @@ struct DTODecodeTests {
         #expect(event.payload["meta"] == .object(["source": .string("pytest")]))
     }
 
+    @Test func decodeEventSeverityAndCorrelationFields() throws {
+        let data = Data(
+            """
+            {
+              "id": "evt-sev",
+              "session_id": "sess-1",
+              "type": "proposal.created",
+              "actor": "Builder-Agent",
+              "subject_id": "prop-1",
+              "payload": {"title": "高风险改动"},
+              "timestamp": "2026-07-11T00:00:00",
+              "severity": "warning",
+              "correlation_id": "corr-1",
+              "parent_event_id": "evt-parent"
+            }
+            """.utf8
+        )
+
+        let event = try JSONDecoder().decode(EventDTO.self, from: data)
+
+        #expect(event.severity == "warning")
+        #expect(event.correlationID == "corr-1")
+        #expect(event.parentEventID == "evt-parent")
+    }
+
+    @Test func decodeEventFallsBackToDefaultSeverityWhenAbsent() throws {
+        let data = Data(
+            """
+            {
+              "id": "evt-old",
+              "session_id": "sess-1",
+              "type": "mission.created",
+              "actor": "Human",
+              "subject_id": "mission-1",
+              "payload": {},
+              "timestamp": "2026-06-27T06:00:00"
+            }
+            """.utf8
+        )
+
+        let event = try JSONDecoder().decode(EventDTO.self, from: data)
+
+        #expect(event.severity == "info")
+        #expect(event.correlationID == nil)
+        #expect(event.parentEventID == nil)
+    }
+
+    @Test func decodeProposal() throws {
+        let data = Data(
+            """
+            {
+              "id": "prop-1",
+              "session_id": "sess-1",
+              "mission_id": "m1",
+              "task_id": "t1",
+              "agent_id": "agent-a",
+              "title": "重构认证模块",
+              "impact_scope": "影响登录与令牌签发",
+              "intended_files": ["src/auth.py", "src/token.py"],
+              "validation_plan": ["pytest tests/auth"],
+              "risk_level": "high",
+              "questions": ["是否兼容旧令牌?"],
+              "state": "open",
+              "decision_note": "",
+              "converted_issue_id": "",
+              "created_at": "2026-07-11T00:00:00",
+              "updated_at": "2026-07-11T00:00:00"
+            }
+            """.utf8
+        )
+
+        let proposal = try JSONDecoder().decode(ProposalDTO.self, from: data)
+
+        #expect(proposal.id == "prop-1")
+        #expect(proposal.title == "重构认证模块")
+        #expect(proposal.impactScope == "影响登录与令牌签发")
+        #expect(proposal.intendedFiles == ["src/auth.py", "src/token.py"])
+        #expect(proposal.validationPlan == ["pytest tests/auth"])
+        #expect(proposal.riskLevel == "high")
+        #expect(proposal.questions == ["是否兼容旧令牌?"])
+        #expect(proposal.state == "open")
+    }
+
+    @Test func decodeProposalsEnvelope() throws {
+        let data = Data(
+            """
+            {
+              "proposals": [
+                {
+                  "id": "prop-1",
+                  "session_id": "sess-1",
+                  "mission_id": "m1",
+                  "task_id": "t1",
+                  "agent_id": "agent-a",
+                  "title": "高风险改动",
+                  "impact_scope": "核心调度",
+                  "state": "open",
+                  "risk_level": "critical",
+                  "created_at": "2026-07-11T00:00:00",
+                  "updated_at": "2026-07-11T00:00:00"
+                }
+              ],
+              "mission_id": "m1",
+              "task_id": null,
+              "state": "open",
+              "limit": 50
+            }
+            """.utf8
+        )
+
+        let envelope = try JSONDecoder().decode(ProposalsDTO.self, from: data)
+
+        #expect(envelope.proposals.count == 1)
+        #expect(envelope.proposals.first?.riskLevel == "critical")
+        #expect(envelope.missionID == "m1")
+        #expect(envelope.state == "open")
+        #expect(envelope.limit == 50)
+    }
+
+    @Test func decodeSnapshotIncludesProposals() throws {
+        let data = Data(
+            """
+            {
+              "session_id": "sess-1",
+              "missions": [],
+              "tasks": [],
+              "issues": [],
+              "failures": [],
+              "events": [],
+              "proposals": [
+                {
+                  "id": "prop-1",
+                  "session_id": "sess-1",
+                  "mission_id": "m1",
+                  "task_id": "t1",
+                  "agent_id": "agent-a",
+                  "title": "高风险改动",
+                  "impact_scope": "核心调度",
+                  "state": "open",
+                  "created_at": "2026-07-11T00:00:00",
+                  "updated_at": "2026-07-11T00:00:00"
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let snapshot = try JSONDecoder().decode(WorkbenchSnapshotDTO.self, from: data)
+
+        #expect(snapshot.proposals.count == 1)
+        #expect(snapshot.proposals.first?.title == "高风险改动")
+    }
+
     // MARK: - Helpers
 
     private func loadFixture(named: String) throws -> Data {

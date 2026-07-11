@@ -43,6 +43,7 @@ WORKBENCH_SUPPORTED_RESOURCES = [
     "approvals",
     "intent_locks",
     "decisions",
+    "proposals",
 ]
 WORKBENCH_SUPPORTED_ACTIONS = [
     "create_session",
@@ -59,6 +60,10 @@ WORKBENCH_SUPPORTED_ACTIONS = [
     "create_intent_lock",
     "deactivate_intent_lock",
     "create_decision",
+    "create_proposal",
+    "approve_proposal",
+    "reject_proposal",
+    "convert_proposal",
     "resolve_approval",
     "review_evidence",
     "list_messages",
@@ -144,6 +149,18 @@ WORKBENCH_ROUTE_TEMPLATES = {
     "decision": (
         "/workbench/sessions/{session_id}/missions/{mission_id}"
         "/decisions/{decision_id}"
+    ),
+    "proposals": "/workbench/sessions/{session_id}/proposals",
+    "create_proposal": "/workbench/sessions/{session_id}/proposals",
+    "proposal": "/workbench/sessions/{session_id}/proposals/{proposal_id}",
+    "approve_proposal": (
+        "/workbench/sessions/{session_id}/proposals/{proposal_id}/approve"
+    ),
+    "reject_proposal": (
+        "/workbench/sessions/{session_id}/proposals/{proposal_id}/reject"
+    ),
+    "convert_proposal": (
+        "/workbench/sessions/{session_id}/proposals/{proposal_id}/convert"
     ),
 }
 logger = logging.getLogger(__name__)
@@ -264,6 +281,23 @@ class BidCreate(BaseModel):
     note: str = ""
 
 
+class ProposalCreate(BaseModel):
+    mission_id: str
+    task_id: str
+    agent_id: str
+    title: str = Field(min_length=1)
+    impact_scope: str = Field(min_length=1)
+    intended_files: list[str] = Field(default_factory=list)
+    validation_plan: list[str] = Field(default_factory=list)
+    risk_level: str = "medium"
+    questions: list[str] = Field(default_factory=list)
+
+
+class ProposalResolve(BaseModel):
+    reviewer: str = "Human"
+    decision_note: str = ""
+
+
 
 class WorktreeKeep(BaseModel):
     actor: str = "Human"
@@ -348,6 +382,14 @@ class BidsResponse(BaseModel):
     bids: list[dict[str, Any]]
     task_id: str | None
     agent_id: str | None
+    limit: int
+
+
+class ProposalsResponse(BaseModel):
+    proposals: list[dict[str, Any]]
+    mission_id: str | None
+    task_id: str | None
+    state: str | None
     limit: int
 
 
@@ -1863,6 +1905,281 @@ async def create_workbench_bid(
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return BidsResponse(bids=[bid], task_id=task_id, agent_id=None, limit=50)
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/proposals",
+    response_model=ProposalsResponse,
+    response_model_exclude_none=True,
+)
+async def list_workbench_proposals(
+    session_id: str,
+    request: Request,
+    mission_id: Annotated[str | None, Query()] = None,
+    task_id: Annotated[str | None, Query()] = None,
+    state: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    auth: str = AuthDep,
+):
+    """List proposals for a session, optionally filtered."""
+    engine = request.app.state.engine
+    try:
+        session = await engine.session_store.load(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        result = await engine.workbench_service.list_proposals(
+            session_id,
+            mission_id=mission_id,
+            task_id=task_id,
+            state=state,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return ProposalsResponse(
+        proposals=result["proposals"],
+        mission_id=mission_id,
+        task_id=task_id,
+        state=state,
+        limit=limit,
+    )
+
+
+@router.post(
+    "/workbench/sessions/{session_id}/proposals",
+    response_model_exclude_none=True,
+    status_code=201,
+)
+async def create_workbench_proposal(
+    session_id: str,
+    body: ProposalCreate,
+    request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
+    auth: str = AuthDep,
+):
+    """Create a proposal. Used when direct execution is blocked by policy."""
+    engine = request.app.state.engine
+    try:
+        session = await engine.session_store.load(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        session_loaded = await engine.load_session(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session_loaded:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        risk_level = RiskLevel(body.risk_level)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"无效 risk_level: {body.risk_level}") from exc
+    try:
+        proposal = await engine.workbench_service.create_proposal(
+            session_id=session_id,
+            mission_id=body.mission_id,
+            task_id=body.task_id,
+            agent_id=body.agent_id,
+            title=body.title,
+            impact_scope=body.impact_scope,
+            intended_files=body.intended_files,
+            validation_plan=body.validation_plan,
+            risk_level=risk_level,
+            questions=body.questions,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not include_snapshot:
+        return proposal
+
+    try:
+        snapshot = await _build_workbench_snapshot(engine, session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"proposal": proposal, "snapshot": snapshot}
+
+
+@router.get(
+    "/workbench/sessions/{session_id}/proposals/{proposal_id}",
+    response_model_exclude_none=True,
+)
+async def get_workbench_proposal(
+    session_id: str,
+    proposal_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    """Fetch a single proposal by id."""
+    engine = request.app.state.engine
+    try:
+        session = await engine.session_store.load(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        proposal = await engine.workbench_service.get_proposal(session_id, proposal_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    return proposal
+
+
+async def _resolve_workbench_proposal(
+    session_id: str,
+    proposal_id: str,
+    body: ProposalResolve,
+    request: Request,
+    *,
+    approved: bool,
+    include_snapshot: bool,
+):
+    """Shared resolve helper for approve/reject proposal routes."""
+    engine = request.app.state.engine
+    try:
+        session = await engine.session_store.load(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        session_loaded = await engine.load_session(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session_loaded:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        proposal = await engine.workbench_service.resolve_proposal(
+            session_id,
+            proposal_id,
+            approved=approved,
+            reviewer=body.reviewer,
+            decision_note=body.decision_note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if not include_snapshot:
+        return proposal
+
+    try:
+        snapshot = await _build_workbench_snapshot(engine, session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"proposal": proposal, "snapshot": snapshot}
+
+
+@router.post(
+    "/workbench/sessions/{session_id}/proposals/{proposal_id}/approve",
+    response_model_exclude_none=True,
+)
+async def approve_workbench_proposal(
+    session_id: str,
+    proposal_id: str,
+    body: ProposalResolve,
+    request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
+    auth: str = AuthDep,
+):
+    """Approve an OPEN proposal so the gated work may proceed."""
+    return await _resolve_workbench_proposal(
+        session_id,
+        proposal_id,
+        body,
+        request,
+        approved=True,
+        include_snapshot=include_snapshot,
+    )
+
+
+@router.post(
+    "/workbench/sessions/{session_id}/proposals/{proposal_id}/reject",
+    response_model_exclude_none=True,
+)
+async def reject_workbench_proposal(
+    session_id: str,
+    proposal_id: str,
+    body: ProposalResolve,
+    request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
+    auth: str = AuthDep,
+):
+    """Reject an OPEN proposal."""
+    return await _resolve_workbench_proposal(
+        session_id,
+        proposal_id,
+        body,
+        request,
+        approved=False,
+        include_snapshot=include_snapshot,
+    )
+
+
+@router.post(
+    "/workbench/sessions/{session_id}/proposals/{proposal_id}/convert",
+    response_model_exclude_none=True,
+)
+async def convert_workbench_proposal(
+    session_id: str,
+    proposal_id: str,
+    body: ProposalResolve,
+    request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
+    auth: str = AuthDep,
+):
+    """Convert an OPEN proposal into a tracked issue."""
+    engine = request.app.state.engine
+    try:
+        session = await engine.session_store.load(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        session_loaded = await engine.load_session(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session_loaded:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        proposal = await engine.workbench_service.convert_proposal(
+            session_id,
+            proposal_id,
+            reviewer=body.reviewer,
+            decision_note=body.decision_note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if not include_snapshot:
+        return proposal
+
+    try:
+        snapshot = await _build_workbench_snapshot(engine, session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"proposal": proposal, "snapshot": snapshot}
 
 
 @router.post("/workbench/sessions/{session_id}/leases/{lease_id}/release")

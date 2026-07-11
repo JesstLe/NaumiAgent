@@ -282,6 +282,45 @@ public protocol WorkbenchAPIProviding: Sendable {
         draft: IssueBidDraft
     ) async throws(APIError) -> IssueBidsDTO
 
+    /// Lists proposals for a session, optionally filtered.
+    func fetchProposals(
+        sessionID: String,
+        missionID: String?,
+        taskID: String?,
+        state: String?,
+        limit: Int
+    ) async throws(APIError) -> ProposalsDTO
+
+    /// Fetches a single proposal by id.
+    func fetchProposal(sessionID: String, proposalID: String) async throws(APIError) -> ProposalDTO
+
+    /// Creates a new proposal and returns it.
+    func createProposal(
+        sessionID: String,
+        draft: ProposalDraft
+    ) async throws(APIError) -> ProposalDTO
+
+    /// Approves an open proposal and returns the updated record.
+    func approveProposal(
+        sessionID: String,
+        proposalID: String,
+        draft: ProposalResolveDraft
+    ) async throws(APIError) -> ProposalDTO
+
+    /// Rejects an open proposal and returns the updated record.
+    func rejectProposal(
+        sessionID: String,
+        proposalID: String,
+        draft: ProposalResolveDraft
+    ) async throws(APIError) -> ProposalDTO
+
+    /// Converts an open proposal into a tracked issue and returns the updated record.
+    func convertProposal(
+        sessionID: String,
+        proposalID: String,
+        draft: ProposalResolveDraft
+    ) async throws(APIError) -> ProposalDTO
+
     /// Releases an existing lease, returning the updated lease record.
     func releaseLease(sessionID: String, leaseID: String) async throws(APIError) -> LeaseDTO
 
