@@ -3,7 +3,7 @@ import Foundation
 /// Configuration for launching a local NaumiAgent daemon process.
 ///
 /// The app does not bundle a Python runtime; it supervises an existing
-/// `naumi-agent` binary found on the user's machine. All network surfaces stay
+/// `naumi` binary found on the user's machine. All network surfaces stay
 /// on the loopback interface.
 public struct DaemonLaunchConfiguration: Equatable, Sendable {
     /// Optional explicit path to the `naumi-agent` binary. When `nil`, the
@@ -13,7 +13,7 @@ public struct DaemonLaunchConfiguration: Equatable, Sendable {
     public var portRange: ClosedRange<Int>
     /// Last-used port, persisted so the app prefers the same port next time.
     public var preferredPort: Int?
-    /// Extra CLI arguments appended after `api --host <h> --port <p>`.
+    /// Extra CLI arguments appended after `serve --host <h> --port <p>`.
     public var extraArgs: [String]
 
     public init(
@@ -34,7 +34,7 @@ public struct DaemonLaunchConfiguration: Equatable, Sendable {
 
     /// Builds the argv for the daemon subcommand on a chosen port.
     public func launchArguments(forPort port: Int) -> [String] {
-        ["api", "--host", host, "--port", String(port)] + extraArgs
+        ["serve", "--host", host, "--port", String(port)] + extraArgs
     }
 
     /// HTTP base URL the daemon is expected to serve on for the given port.
@@ -43,10 +43,10 @@ public struct DaemonLaunchConfiguration: Equatable, Sendable {
     }
 }
 
-/// Resolves the `naumi-agent` executable path. Abstracted so tests can supply a
+/// Resolves the `naumi` executable path. Abstracted so tests can supply a
 /// deterministic binary location without touching the real `PATH`.
 public protocol DaemonCommandResolving: Sendable {
-    /// Returns an absolute path to the `naumi-agent` binary, or `nil` when it
+    /// Returns an absolute path to the `naumi` binary, or `nil` when it
     /// cannot be found. `hint` overrides the search when it points to an
     /// existing executable.
     func resolve(executablePath hint: String?) -> String
@@ -66,14 +66,14 @@ public struct DaemonCommandResolver: DaemonCommandResolving {
         }
         // Fall back to the bare command name so a later exec reports a clear
         // error instead of hiding that resolution failed.
-        return hint?.isEmpty == false ? hint! : "naumi-agent"
+        return hint?.isEmpty == false ? hint! : "naumi"
     }
 
     private func searchPath(fileManager: FileManager) -> String? {
         guard let path = ProcessInfo.processInfo.environment["PATH"] else { return nil }
         for directory in path.split(separator: ":", omittingEmptySubsequences: true) {
             let candidate = URL(fileURLWithPath: String(directory))
-                .appendingPathComponent("naumi-agent").path
+                .appendingPathComponent("naumi").path
             if fileManager.isExecutableFile(atPath: candidate) {
                 return candidate
             }
