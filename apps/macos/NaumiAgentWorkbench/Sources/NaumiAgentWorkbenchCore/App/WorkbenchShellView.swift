@@ -204,8 +204,19 @@ private struct TopNavigationBar: View {
 
     var body: some View {
         @Bindable var appState = appState
+        let chrome = WorkbenchChromePresentation()
 
         HStack(spacing: 12) {
+            HStack(spacing: 7) {
+                if chrome.showsBrandMark {
+                    NaumiBrandMark(size: 19)
+                }
+                Text(chrome.brandTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .frame(width: 194, alignment: .leading)
+
             Picker("", selection: $appState.currentRoute) {
                 ForEach(shellPresentation.navigationRoutes) { route in
                     Label(route.displayName(locale: appState.locale), systemImage: route.systemImage)
@@ -214,7 +225,7 @@ private struct TopNavigationBar: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(minWidth: 460, idealWidth: 620, maxWidth: 740)
+            .frame(minWidth: 420, idealWidth: 560, maxWidth: 680)
             .layoutPriority(2)
 
             #if DEBUG
@@ -234,18 +245,16 @@ private struct TopNavigationBar: View {
 
             Spacer(minLength: 12)
 
-            Button {
+            WorkbenchIconButton(
+                systemImage: "arrow.clockwise",
+                help: AppStrings.ConnectionControl.refreshButtonHelp(appState.locale)
+            ) {
                 if !appState.isPreviewFixture {
                     Task {
                         await daemonController.refreshConnection()
                     }
                 }
-            } label: {
-                Image(systemName: "arrow.clockwise")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help(AppStrings.ConnectionControl.refreshButtonHelp(appState.locale))
             .disabled(appState.connectionState == .connecting)
 
             Button {
@@ -613,4 +622,3 @@ struct ConnectionSetupSheet: View {
         }
     }
 }
-

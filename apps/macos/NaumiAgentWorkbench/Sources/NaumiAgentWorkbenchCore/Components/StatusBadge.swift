@@ -11,14 +11,6 @@ public struct StatusBadge: View {
     }
 
     public var body: some View {
-        Text(text)
-            .font(.caption)
-            .fontWeight(.medium)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(color.opacity(0.15))
-            .foregroundStyle(color)
-            .clipShape(Capsule())
+        WorkbenchStatusChip(text: text, color: color)
     }
 }
-
