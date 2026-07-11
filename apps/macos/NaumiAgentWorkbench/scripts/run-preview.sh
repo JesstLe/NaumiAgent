@@ -20,8 +20,14 @@ esac
 
 bundle_dir="${TMPDIR:-/tmp}/NaumiAgentWorkbenchPreview.app"
 bundle_id="ai.naumi.workbench.preview"
+app_icon_source="Resources/AppIcon.icns"
 
 swift build
+
+if [[ ! -f "$app_icon_source" ]]; then
+  echo "错误: 未找到应用图标 $app_icon_source" >&2
+  exit 1
+fi
 
 if pgrep -f "$bundle_dir/Contents/MacOS/NaumiAgentWorkbench" >/dev/null 2>&1; then
   pkill -f "$bundle_dir/Contents/MacOS/NaumiAgentWorkbench" || true
@@ -31,6 +37,7 @@ fi
 rm -rf "$bundle_dir"
 mkdir -p "$bundle_dir/Contents/MacOS" "$bundle_dir/Contents/Resources/Fixtures"
 cp ".build/debug/NaumiAgentWorkbench" "$bundle_dir/Contents/MacOS/NaumiAgentWorkbench"
+cp "$app_icon_source" "$bundle_dir/Contents/Resources/AppIcon.icns"
 cp Fixtures/workbench_snapshot_*.json "$bundle_dir/Contents/Resources/Fixtures/"
 
 cat > "$bundle_dir/Contents/Info.plist" <<'PLIST'
@@ -45,6 +52,8 @@ cat > "$bundle_dir/Contents/Info.plist" <<'PLIST'
   <string>__BUNDLE_ID__</string>
   <key>CFBundleName</key>
   <string>NaumiAgentWorkbenchPreview</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>

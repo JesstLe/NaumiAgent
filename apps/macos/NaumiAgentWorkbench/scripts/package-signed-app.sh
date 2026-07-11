@@ -29,6 +29,7 @@ min_system_version="14.0"
 signing_identity="${NAUMI_SIGNING_IDENTITY:-}"
 include_fixtures="${NAUMI_INCLUDE_FIXTURES:-0}"
 dist_dir="dist"
+app_icon_source="Resources/AppIcon.icns"
 
 if [[ -z "$signing_identity" ]]; then
   echo "错误: 必须设置 NAUMI_SIGNING_IDENTITY 环境变量" >&2
@@ -52,12 +53,17 @@ if [[ ! -f "$build_bin" ]]; then
   echo "错误: 未找到 release 可执行文件 $build_bin" >&2
   exit 1
 fi
+if [[ ! -f "$app_icon_source" ]]; then
+  echo "错误: 未找到应用图标 $app_icon_source" >&2
+  exit 1
+fi
 
 app_dir="${dist_dir}/${app_name}.app"
 echo "==> 组装 app bundle: ${app_dir}"
 rm -rf "$app_dir"
 mkdir -p "${app_dir}/Contents/MacOS" "${app_dir}/Contents/Resources"
 cp "$build_bin" "${app_dir}/Contents/MacOS/${app_name}"
+cp "$app_icon_source" "${app_dir}/Contents/Resources/AppIcon.icns"
 
 if [[ "$include_fixtures" == "1" ]]; then
   echo "==> 包含预览 fixture"
@@ -79,6 +85,8 @@ cat > "${app_dir}/Contents/Info.plist" <<PLIST
   <string>${app_name}</string>
   <key>CFBundleDisplayName</key>
   <string>NaumiAgent Workbench</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleVersion</key>
