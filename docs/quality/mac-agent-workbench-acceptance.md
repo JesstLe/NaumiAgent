@@ -99,6 +99,35 @@ events
 apps/macos/NaumiAgentWorkbench/scripts/test.sh --filter "DesignPresentation"
 ```
 
+### 3.10 本地闭环冒烟（M20）
+
+一个真实本地流程必须为所有主要页面产生可见的真实数据：
+
+```
+创建 session
+  -> 创建 mission
+  -> 创建 issue
+  -> claim lease
+  -> 记录 context health
+  -> 运行 validation（通过）
+  -> 创建 + 审批 proposal（M16）
+  -> 刷新 dashboard snapshot
+  -> 列出 approvals / events / proposals
+```
+
+约束：
+
+- snapshot 必须包含 mission、issue、lease、validation_run、proposal。
+- 审计事件必须包含 `mission.created`、`issue.claimed`、`proposal.created`、`proposal.approved`。
+- 非白名单校验命令被拒绝（中文错误）。
+- 整个流程仅依赖 `127.0.0.1` 本地状态，不需要外网或 LLM API key。
+
+验证：
+
+```bash
+pytest tests/e2e/test_mac_workbench_local_loop.py -q
+```
+
 ## 4. 非功能验收
 
 ### 4.1 安全
@@ -131,11 +160,19 @@ pytest tests/unit/test_workbench_models.py \
   tests/unit/test_workbench_context_health.py \
   tests/unit/test_workbench_validation.py \
   tests/unit/test_workbench_service.py \
+  tests/unit/test_workbench_export.py \
   tests/unit/test_api_workbench.py \
   tests/unit/test_worktree.py \
   tests/unit/test_engine.py -q
 cd frontend/terminal-ui && npm test -- protocol.test.js state.test.js components.test.js
 pytest tests/e2e/test_ui_scenarios.py -q
+pytest tests/e2e/test_mac_workbench_local_loop.py -q
+```
+
+单一发布门（ruff + 后端 + 本地闭环冒烟 + Swift 测试 + 开发打包）：
+
+```bash
+apps/macos/NaumiAgentWorkbench/scripts/verify-dev-build.sh
 ```
 
 ## 6. 人工验收问题
