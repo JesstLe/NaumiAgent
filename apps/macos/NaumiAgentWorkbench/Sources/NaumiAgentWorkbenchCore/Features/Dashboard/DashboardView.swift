@@ -78,7 +78,8 @@ public struct DashboardView: View {
         let layout = WorkbenchScaledPageLayout.dashboard
         let market = TaskMarketDesignPresentation(
             snapshot: snapshot,
-            policy: RealDataPolicy(isPreviewFixture: appState.isPreviewFixture)
+            policy: RealDataPolicy(isPreviewFixture: appState.isPreviewFixture),
+            locale: appState.locale
         )
 
         return ScaledWorkbenchPage(layout: layout) {

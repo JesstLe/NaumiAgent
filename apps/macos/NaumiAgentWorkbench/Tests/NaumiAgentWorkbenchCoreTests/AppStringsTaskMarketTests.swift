@@ -53,6 +53,14 @@ struct AppStringsTaskMarketTests {
         #expect(AppStrings.TaskMarket.attachIssueSectionTitle(.zhCN) == "挂载已有任务")
         #expect(AppStrings.TaskMarket.attachIssueSubmitButton(.zhCN) == "挂载为 Issue")
         #expect(AppStrings.TaskMarket.processingLabel(.zhCN) == "处理中…")
+        #expect(AppStrings.TaskMarket.riskLevelLabel("critical", .zhCN) == "严重")
+        #expect(AppStrings.TaskMarket.riskLevelLabel("high", .zhCN) == "高")
+        #expect(AppStrings.TaskMarket.riskLevelLabel("medium", .zhCN) == "中")
+        #expect(AppStrings.TaskMarket.riskLevelLabel("low", .zhCN) == "低")
+        #expect(AppStrings.TaskMarket.requiresProposalLabel(.zhCN) == "需要提案")
+        #expect(AppStrings.TaskMarket.leasedLabel(.zhCN) == "已租用")
+        #expect(AppStrings.TaskMarket.blockedLabel(.zhCN, count: 1) == "被 1 个任务阻塞")
+        #expect(AppStrings.TaskMarket.leaseExpiresLabel(.zhCN, expiry: "10:00") == "过期于 10:00")
     }
 
     @Test func coreTaskMarketStringsEnUS() {

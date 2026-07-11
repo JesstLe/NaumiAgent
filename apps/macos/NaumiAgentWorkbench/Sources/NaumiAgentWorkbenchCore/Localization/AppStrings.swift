@@ -1104,6 +1104,39 @@ public enum AppStrings {
             locale == .zhCN ? "处理中…" : "Processing…"
         }
 
+        public static func riskLevelLabel(_ risk: String, _ locale: AppLocale) -> String {
+            switch risk.lowercased() {
+            case "critical":
+                return locale == .zhCN ? "严重" : "Critical"
+            case "high":
+                return locale == .zhCN ? "高" : "High"
+            case "medium":
+                return locale == .zhCN ? "中" : "Medium"
+            case "low":
+                return locale == .zhCN ? "低" : "Low"
+            default:
+                return risk
+            }
+        }
+
+        public static func requiresProposalLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "需要提案" : "Requires proposal"
+        }
+
+        public static func leasedLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "已租用" : "Leased"
+        }
+
+        public static func blockedLabel(_ locale: AppLocale, count: Int) -> String {
+            locale == .zhCN
+                ? "被 \(count) 个任务阻塞"
+                : "Blocked by \(count) task\(count == 1 ? "" : "s")"
+        }
+
+        public static func leaseExpiresLabel(_ locale: AppLocale, expiry: String) -> String {
+            locale == .zhCN ? "过期于 \(expiry)" : "Expires \(expiry)"
+        }
+
     }
 
     // MARK: - Worktrees

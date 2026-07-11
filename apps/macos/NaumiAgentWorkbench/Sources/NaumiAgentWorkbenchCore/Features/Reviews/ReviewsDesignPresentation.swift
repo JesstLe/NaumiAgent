@@ -42,7 +42,8 @@ public struct ReviewsDesignPresentation: Equatable, Sendable {
         approvals: [ApprovalDTO],
         validationRuns: [ValidationRunDTO],
         snapshot: WorkbenchSnapshotDTO?,
-        policy: RealDataPolicy = .real
+        policy: RealDataPolicy = .real,
+        locale: AppLocale = .default
     ) {
         self.policy = policy
 
@@ -106,7 +107,7 @@ public struct ReviewsDesignPresentation: Equatable, Sendable {
                         agent: approval.requester,
                         worktree: issue?.relatedWorktree ?? "",
                         time: approval.updatedAt.isEmpty ? "" : String(approval.updatedAt.suffix(5)),
-                        risk: issue.map { Self.normalizedRisk($0.riskLevel) } ?? "",
+                        risk: issue.map { AppStrings.TaskMarket.riskLevelLabel($0.riskLevel, locale) } ?? "",
                         tone: Self.tone(forRisk: issue?.riskLevel ?? "")
                     )
                 }

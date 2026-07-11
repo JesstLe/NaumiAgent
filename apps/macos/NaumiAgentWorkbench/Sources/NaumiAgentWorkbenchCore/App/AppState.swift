@@ -112,10 +112,21 @@ public final class AppState: Sendable {
     public var selectedIntentLock: IntentLockDTO? = nil
     public var selectedApproval: ApprovalDTO? = nil
     public var lastError: APIError? = nil
-    public var locale: AppLocale = .default
+    public var locale: AppLocale = .default {
+        didSet {
+            // Persist the user's locale choice so it survives relaunch.
+            if oldValue != locale {
+                locale.persist()
+            }
+        }
+    }
     public var isPreviewFixture: Bool = false
 
-    public init() {}
+    public init() {
+        // Restore the previously chosen locale on first launch; defaults to
+        // Chinese (zh-CN) when no stored value exists.
+        locale = AppLocale.storedOrDefault()
+    }
 
     public enum ConnectionState: String, Equatable, Sendable, CaseIterable {
         case disconnected

@@ -38,7 +38,8 @@ public struct TaskMarketView: View {
         let presentation = TaskMarketDesignPresentation(
             snapshot: appState.snapshot,
             refreshedLeases: appState.leases,
-            policy: RealDataPolicy(isPreviewFixture: appState.isPreviewFixture)
+            policy: RealDataPolicy(isPreviewFixture: appState.isPreviewFixture),
+            locale: appState.locale
         )
         let selectedRow = presentation.rows.first { $0.taskID == selectedTaskID }
             ?? presentation.selectedIssue

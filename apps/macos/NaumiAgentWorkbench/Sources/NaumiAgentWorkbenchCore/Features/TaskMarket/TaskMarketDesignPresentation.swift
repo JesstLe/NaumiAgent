@@ -17,7 +17,8 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
     public init(
         snapshot: WorkbenchSnapshotDTO?,
         refreshedLeases: [LeaseDTO] = [],
-        policy: RealDataPolicy = .real
+        policy: RealDataPolicy = .real,
+        locale: AppLocale = .default
     ) {
         self.policy = policy
         let liveRows = snapshot.map { TaskMarketSnapshotPresentation(snapshot: $0).rows } ?? []
@@ -28,12 +29,12 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
                 title: row.subject,
                 detail: Self.detail(for: row.subject),
                 parallelMode: row.parallelMode,
-                risk: Self.normalizedRisk(row.riskLevel),
-                dependency: Self.dependencyLabel(for: row),
+                risk: AppStrings.TaskMarket.riskLevelLabel(row.riskLevel, locale),
+                dependency: Self.dependencyLabel(for: row, locale: locale),
                 bids: row.bidCount,
-                lease: Self.leaseLabel(for: row),
+                lease: Self.leaseLabel(for: row, locale: locale),
                 worktree: row.worktreeLabel ?? "-",
-                status: Self.status(for: row),
+                status: Self.status(for: row, locale: locale),
                 tag: Self.tag(for: row.subject)
             )
         }
@@ -78,47 +79,34 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
         }
     }
 
-    private static func normalizedRisk(_ risk: String) -> String {
-        switch risk.lowercased() {
-        case "critical":
-            return "Critical"
-        case "high":
-            return "High"
-        case "medium":
-            return "Medium"
-        case "low":
-            return "Low"
-        default:
-            return risk
-        }
-    }
-
-    private static func status(for row: TaskMarketIssueRow) -> String {
+    private static func status(for row: TaskMarketIssueRow, locale: AppLocale) -> String {
         if row.dependencyCount > 0 {
-            return "Blocked"
+            return AppStrings.TaskMarket.blockedLabel(locale, count: row.dependencyCount)
         }
         switch row.leaseState {
         case .claimed:
-            return "Leased"
+            return AppStrings.TaskMarket.leasedLabel(locale)
         case .open:
-            return "Requires proposal"
+            return AppStrings.TaskMarket.requiresProposalLabel(locale)
         }
     }
 
     /// Real dependency label derived from the task's `blocked_by` count.
-    private static func dependencyLabel(for row: TaskMarketIssueRow) -> String {
+    private static func dependencyLabel(for row: TaskMarketIssueRow, locale: AppLocale) -> String {
         guard row.dependencyCount > 0 else { return "-" }
-        return row.dependencyCount == 1 ? "Blocked by 1 task" : "Blocked by \(row.dependencyCount) tasks"
+        return AppStrings.TaskMarket.blockedLabel(locale, count: row.dependencyCount)
     }
 
     /// Real lease label: the active lease's expiry, or "Requires proposal" when open.
-    private static func leaseLabel(for row: TaskMarketIssueRow) -> String {
+    private static func leaseLabel(for row: TaskMarketIssueRow, locale: AppLocale) -> String {
         switch row.leaseState {
         case .claimed:
             let expiry = row.leaseExpiresAt ?? ""
-            return expiry.isEmpty ? "Leased" : "Expires \(expiry)"
+            return expiry.isEmpty
+                ? AppStrings.TaskMarket.leasedLabel(locale)
+                : AppStrings.TaskMarket.leaseExpiresLabel(locale, expiry: expiry)
         case .open:
-            return "Requires proposal"
+            return AppStrings.TaskMarket.requiresProposalLabel(locale)
         }
     }
 
