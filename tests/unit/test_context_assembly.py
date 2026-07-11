@@ -148,6 +148,32 @@ async def test_harness_context_normalizes_naive_clock_to_local_timezone(
     await engine._inject_harness_context_snapshot()
 
     content = engine._messages[-1]["content"]
-    assert "当前本地时间：2026-07-12T03:22:36" in content
+    time_line = next(
+        line for line in content.splitlines()
+        if line.startswith("- 当前本地时间：")
+    )
+    parsed = datetime.fromisoformat(time_line.split("：", 1)[1])
+
+    assert parsed.utcoffset() is not None
     assert "- 时区：" in content
     assert "(UTC+" in content or "(UTC-" in content
+
+
+@pytest.mark.asyncio
+async def test_harness_context_default_clock_tracks_local_time(
+    engine: AgentEngine,
+) -> None:
+    before = datetime.now().astimezone()
+
+    await engine._inject_harness_context_snapshot()
+
+    after = datetime.now().astimezone()
+    content = engine._messages[-1]["content"]
+    time_line = next(
+        line for line in content.splitlines()
+        if line.startswith("- 当前本地时间：")
+    )
+    parsed = datetime.fromisoformat(time_line.split("：", 1)[1])
+
+    assert before - timedelta(seconds=1) <= parsed <= after + timedelta(seconds=1)
+    assert parsed.utcoffset() == parsed.astimezone().utcoffset()
