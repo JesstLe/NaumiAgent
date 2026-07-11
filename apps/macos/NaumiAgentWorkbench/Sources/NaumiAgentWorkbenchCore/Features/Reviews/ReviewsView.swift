@@ -27,7 +27,8 @@ public struct ReviewsView: View {
             approvals: appState.approvals,
             validationRuns: appState.validationRuns,
             snapshot: appState.snapshot,
-            policy: RealDataPolicy(isPreviewFixture: appState.isPreviewFixture)
+            policy: RealDataPolicy(isPreviewFixture: appState.isPreviewFixture),
+            locale: appState.locale
         )
         // In real mode, merge live review evidence (real diff/files/notes) so
         // the page never shows fixture rows. Preview mode keeps the fixtures.
