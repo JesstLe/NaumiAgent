@@ -125,7 +125,7 @@ public struct HTTPDaemonHealthChecker: DaemonHealthChecking {
                 request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
             }
             do {
-                let (response, _) = try await session.data(for: request)
+                let (_, response) = try await session.data(for: request)
                 if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
                     return true
                 }
