@@ -359,6 +359,24 @@ class TestMessageRoutes:
             "requires_confirmation": True,
         }
 
+    def test_tool_start_stream_omits_raw_arguments(self) -> None:
+        event = _engine_event_to_stream_event(
+            "tool_start",
+            {
+                "name": "bash_run",
+                "tool_call_id": "call-1",
+                "args": '{"command": "echo $API_KEY"}',
+                "argument_chars": 26,
+            },
+            session_id="sess_1",
+        )
+
+        assert event.type == EventType.TOOL_CALL_START
+        assert event.data == {
+            "name": "bash_run",
+            "call_id": "call-1",
+        }
+
     def test_thinking_delta_stream_omits_internal_content(self) -> None:
         event = _engine_event_to_stream_event(
             "thinking_delta",
