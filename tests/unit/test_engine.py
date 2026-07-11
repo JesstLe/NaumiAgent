@@ -638,6 +638,9 @@ class TestToolExecution:
         self,
         engine: AgentEngine,
     ) -> None:
+        from naumi_agent.memory.session import Session
+
+        engine._session = Session(title="permission bubble")
         events: list[tuple[str, dict[str, object]]] = []
 
         async def on_event(event: str, data: dict[str, object]) -> None:
@@ -652,6 +655,9 @@ class TestToolExecution:
         assert bubbles[0]["agent_name"] == "main"
         assert bubbles[0]["tool_name"] == "bash_run"
         assert bubbles[0]["status"] == "needs_confirmation"
+        assert bubbles[0]["call_id"] == "x"
+        assert bubbles[0]["session_id"] == engine._session.id
+        assert bubbles[0]["risk_level"] == "low"
 
     @pytest.mark.asyncio
     async def test_bypass_mode_runs_confirmation_tool(self, engine: AgentEngine) -> None:

@@ -7,7 +7,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+import naumi_agent.api.routes.messages as message_routes
 from naumi_agent import __version__
+from naumi_agent.api.permission_broker import PermissionApprovalBroker
 from naumi_agent.api.routes.messages import (
     _engine_event_to_stream_event,
     _stream_response,
@@ -128,6 +130,30 @@ def _fake_request(engine: _FakeEngine):
 
 
 class TestMessageRoutes:
+    @pytest.mark.asyncio
+    async def test_permission_resolution_route_unblocks_matching_request(self) -> None:
+        broker = PermissionApprovalBroker(timeout_seconds=1)
+        waiting = asyncio.create_task(
+            broker.confirm({"session_id": "sess_1", "call_id": "call_1"})
+        )
+        await asyncio.sleep(0)
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(permission_broker=broker))
+        )
+        route = getattr(message_routes, "resolve_permission", None)
+
+        assert route is not None
+        response = await route(
+            "sess_1",
+            "call_1",
+            SimpleNamespace(decision="allow"),
+            request,
+            auth="test",
+        )
+
+        assert response.status == "resolved"
+        assert await waiting == "allow"
+
     @pytest.mark.asyncio
     async def test_send_message_loads_requested_session(self) -> None:
         engine = _FakeEngine()
@@ -305,3 +331,40 @@ class TestMessageRoutes:
 
         assert event.type == EventType.TOKEN_DELTA
         assert event.data == {"token": "hi"}
+
+    def test_permission_bubble_becomes_sanitized_stream_request(self) -> None:
+        event = _engine_event_to_stream_event(
+            "permission_bubble",
+            {
+                "agent_name": "main",
+                "tool_name": "bash_run",
+                "call_id": "call-1",
+                "status": "needs_confirmation",
+                "reason": "命令执行需要确认。",
+                "risk_level": "medium",
+                "requires_confirmation": True,
+                "arguments": {"command": "echo $API_KEY"},
+            },
+            session_id="sess_1",
+        )
+
+        assert event.type == EventType.PERMISSION_REQUEST
+        assert event.data == {
+            "agent_name": "main",
+            "tool_name": "bash_run",
+            "call_id": "call-1",
+            "status": "needs_confirmation",
+            "reason": "命令执行需要确认。",
+            "risk_level": "medium",
+            "requires_confirmation": True,
+        }
+
+    def test_thinking_delta_stream_omits_internal_content(self) -> None:
+        event = _engine_event_to_stream_event(
+            "thinking_delta",
+            {"content": "内部推理不应离开引擎"},
+            session_id="sess_1",
+        )
+
+        assert event.type == EventType.THINKING_DELTA
+        assert event.data == {}
