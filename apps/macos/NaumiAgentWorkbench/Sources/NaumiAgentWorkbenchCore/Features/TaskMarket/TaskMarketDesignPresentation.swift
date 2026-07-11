@@ -22,20 +22,32 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
     ) {
         self.policy = policy
         let liveRows = snapshot.map { TaskMarketSnapshotPresentation(snapshot: $0).rows } ?? []
+        let tasksByID = Dictionary(uniqueKeysWithValues: snapshot?.tasks.map { ($0.id, $0) } ?? [])
         let mappedLiveRows = liveRows.enumerated().map { index, row in
-            TaskMarketDesignIssue(
+            let status = policy.canUseDesignFillers
+                ? Self.status(for: row, locale: locale)
+                : row.status
+            return TaskMarketDesignIssue(
                 number: index + 1,
                 taskID: row.taskID,
                 title: row.subject,
-                detail: Self.detail(for: row.subject),
+                detail: Self.detail(
+                    taskDescription: tasksByID[row.taskID]?.description,
+                    subject: row.subject,
+                    canUseDesignFallback: policy.canUseDesignFillers
+                ),
                 parallelMode: row.parallelMode,
                 risk: AppStrings.TaskMarket.riskLevelLabel(row.riskLevel, locale),
                 dependency: Self.dependencyLabel(for: row, locale: locale),
                 bids: row.bidCount,
                 lease: Self.leaseLabel(for: row, locale: locale),
                 worktree: row.worktreeLabel ?? "-",
-                status: Self.status(for: row, locale: locale),
-                tag: Self.tag(for: row.subject)
+                status: status,
+                tag: Self.tag(
+                    for: row.subject,
+                    status: status,
+                    canUseDesignFallback: policy.canUseDesignFillers
+                )
             )
         }
 
@@ -55,12 +67,14 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
         } else {
             // Real mode: live snapshot rows only, never padded with fixtures.
             rows = mappedLiveRows
-            filters = TaskMarketDesignFilters.reference
+            filters = TaskMarketDesignFilters.live(
+                rows: liveRows,
+                contextSnapshots: snapshot?.contextSnapshots ?? []
+            )
             // No persisted bid model exists yet (see M08); never fabricate bids.
             bids = []
         }
 
-        let tasksByID = Dictionary(uniqueKeysWithValues: snapshot?.tasks.map { ($0.id, $0) } ?? [])
         if refreshedLeases.isEmpty {
             let liveLeases = Self.activeLeases(from: snapshot?.leases ?? [], tasksByID: tasksByID)
             if policy.canUseDesignFillers {
@@ -110,14 +124,30 @@ public struct TaskMarketDesignPresentation: Equatable, Sendable {
         }
     }
 
-    private static func detail(for subject: String) -> String {
+    private static func detail(
+        taskDescription: String?,
+        subject: String,
+        canUseDesignFallback: Bool
+    ) -> String {
+        if let taskDescription = taskDescription?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !taskDescription.isEmpty {
+            return taskDescription
+        }
+        guard canUseDesignFallback else { return "-" }
         if subject.contains("API") {
             return "Create persistent snapshot endpoints for workbench state."
         }
         return "Implement task lease system with heartbeat and expiry."
     }
 
-    private static func tag(for subject: String) -> String {
+    private static func tag(
+        for subject: String,
+        status: String,
+        canUseDesignFallback: Bool
+    ) -> String {
+        guard canUseDesignFallback else {
+            return status.isEmpty ? "-" : status
+        }
         if subject.contains("API") {
             return "backend"
         }
@@ -304,6 +334,55 @@ public struct TaskMarketDesignFilters: Equatable, Sendable {
             TaskMarketDesignFilter(label: "Conflicted", count: 2, tone: "red")
         ]
     )
+
+    static func live(
+        rows: [TaskMarketIssueRow],
+        contextSnapshots: [ContextSnapshotDTO]
+    ) -> TaskMarketDesignFilters {
+        func countRisk(_ risk: String) -> Int {
+            rows.filter { $0.riskLevel.lowercased() == risk }.count
+        }
+        func countMode(_ mode: String) -> Int {
+            rows.filter { $0.parallelMode.lowercased() == mode }.count
+        }
+        func countHealth(_ health: String) -> Int {
+            contextSnapshots.filter { $0.health.lowercased() == health }.count
+        }
+
+        return TaskMarketDesignFilters(
+            riskLevels: [
+                TaskMarketDesignFilter(label: "Critical", count: countRisk("critical"), tone: "red"),
+                TaskMarketDesignFilter(label: "High", count: countRisk("high"), tone: "orange"),
+                TaskMarketDesignFilter(label: "Medium", count: countRisk("medium"), tone: "yellow"),
+                TaskMarketDesignFilter(label: "Low", count: countRisk("low"), tone: "green"),
+            ],
+            parallelModes: [
+                TaskMarketDesignFilter(label: "exclusive", count: countMode("exclusive"), tone: "blue"),
+                TaskMarketDesignFilter(label: "cooperative", count: countMode("cooperative"), tone: "green"),
+                TaskMarketDesignFilter(label: "competitive", count: countMode("competitive"), tone: "orange"),
+                TaskMarketDesignFilter(label: "exploratory", count: countMode("exploratory"), tone: "purple"),
+            ],
+            dependencyStates: [
+                TaskMarketDesignFilter(label: "All", count: rows.count, tone: "gray"),
+                TaskMarketDesignFilter(
+                    label: "No Dependencies",
+                    count: rows.filter { $0.dependencyCount == 0 }.count,
+                    tone: "green"
+                ),
+                TaskMarketDesignFilter(
+                    label: "Blocked",
+                    count: rows.filter(\.isBlocked).count,
+                    tone: "red"
+                ),
+            ],
+            contextHealth: [
+                TaskMarketDesignFilter(label: "All", count: contextSnapshots.count, tone: "gray"),
+                TaskMarketDesignFilter(label: "Good", count: countHealth("good"), tone: "green"),
+                TaskMarketDesignFilter(label: "Stale", count: countHealth("stale"), tone: "yellow"),
+                TaskMarketDesignFilter(label: "Conflicted", count: countHealth("conflicted"), tone: "red"),
+            ]
+        )
+    }
 }
 
 public struct TaskMarketDesignFilter: Equatable, Sendable {

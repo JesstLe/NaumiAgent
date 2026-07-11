@@ -808,6 +808,10 @@ public struct DashboardView: View {
         let selectedAgent = selectedAgentPresentation(rows: presentation.agentRows)
         let selectedIssue = selectedIssuePresentation(rows: market.rows)
         let selectedWorktree = selectedWorktreePresentation()
+        let runtimeEvidence = DashboardRuntimeEvidencePresentation(
+            validationRuns: appState.validationRuns,
+            contextSnapshots: appState.contextSnapshots
+        )
 
         return VStack(alignment: .leading, spacing: 14) {
             snapshotFreshnessStrip
@@ -865,12 +869,8 @@ public struct DashboardView: View {
                     let validationCommand = presentation.validationRerunCommand(validationRuns: appState.validationRuns)
                     inspectorStateCard(
                         title: AppStrings.Dashboard.validationStateTitle(appState.locale),
-                        tone: .red,
-                        lines: [
-                            appState.locale == .zhCN ? "最近运行：#23 (09:36)" : "Latest Run: #23 (09:36)",
-                            appState.locale == .zhCN ? "结果：pytest failed" : "Result: pytest failed",
-                            appState.locale == .zhCN ? "测试：12 失败，3 通过" : "Tests: 12 failed, 3 passed"
-                        ],
+                        tone: runtimeEvidenceColor(for: runtimeEvidence.latestValidationRun?.status),
+                        lines: runtimeEvidence.validationLines(locale: appState.locale),
                         buttonTitle: isRerunningValidation
                             ? AppStrings.Dashboard.runningValidationLabel(appState.locale)
                             : AppStrings.Dashboard.rerunValidationButton(appState.locale),
@@ -885,12 +885,8 @@ public struct DashboardView: View {
                     let contextCommand = presentation.contextRefreshCommand()
                     inspectorStateCard(
                         title: AppStrings.Dashboard.contextHealthTitle(appState.locale),
-                        tone: .orange,
-                        lines: [
-                            appState.locale == .zhCN ? "整体：过期" : "Overall: Stale",
-                            appState.locale == .zhCN ? "已分析文件：18" : "Files Analyzed: 18",
-                            appState.locale == .zhCN ? "更新：18 分钟前" : "Last Updated: 18m ago"
-                        ],
+                        tone: runtimeEvidenceColor(for: runtimeEvidence.latestContextSnapshot?.health),
+                        lines: runtimeEvidence.contextLines(locale: appState.locale),
                         buttonTitle: isRefreshingContext
                             ? AppStrings.Dashboard.refreshingContextLabel(appState.locale)
                             : AppStrings.Dashboard.refreshContextButton(appState.locale),
@@ -1782,6 +1778,11 @@ public struct DashboardView: View {
         default:
             return .secondary
         }
+    }
+
+    private func runtimeEvidenceColor(for status: String?) -> Color {
+        guard let status, !status.isEmpty else { return .secondary }
+        return statusColor(for: status)
     }
 
     // MARK: - Error Card
