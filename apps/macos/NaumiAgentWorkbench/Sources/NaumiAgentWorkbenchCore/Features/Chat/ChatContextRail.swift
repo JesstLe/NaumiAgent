@@ -75,7 +75,7 @@ public struct ChatContextRail: View {
                     taskTitlesByID: titles
                 )
                 if summaries.isEmpty {
-                    Text(locale == .zhCN ? "暂无开放问题" : "No open issues")
+                    Text(AppStrings.Chat.noOpenIssues(locale))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 } else {
@@ -110,7 +110,7 @@ public struct ChatContextRail: View {
 
             group(AppStrings.Chat.recentRuns(locale)) {
                 if runs.isEmpty {
-                    Text(locale == .zhCN ? "暂无运行记录" : "No runs yet")
+                    Text(AppStrings.Chat.noRuns(locale))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 } else {

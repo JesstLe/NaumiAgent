@@ -29,7 +29,7 @@ public enum ChatPresentation {
     public static func roleLabel(for role: String, locale: AppLocale) -> String {
         switch role {
         case "user":
-            return locale == .zhCN ? "你" : "You"
+            return AppStrings.Chat.userRole(locale)
         case "assistant":
             return "NaumiAgent"
         default:

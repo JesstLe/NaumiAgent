@@ -13,12 +13,12 @@ struct ChatInspector: View {
                 inspectorSection(AppStrings.Chat.environmentSection(appState.locale)) {
                     valueRow(
                         icon: "server.rack",
-                        title: appState.locale == .zhCN ? "本地服务" : "Local service",
+                        title: AppStrings.Chat.localService(appState.locale),
                         value: appState.daemonStatus?.status ?? appState.connectionState.rawValue
                     )
                     valueRow(
                         icon: "folder",
-                        title: appState.locale == .zhCN ? "工作区" : "Workspace",
+                        title: AppStrings.Chat.workspace(appState.locale),
                         value: environment?.workspaceName ?? workspaceName
                     )
                     if let git = environment?.git, git.available {
@@ -36,17 +36,17 @@ struct ChatInspector: View {
                     if let git = environment?.git, git.available {
                         actionRow(
                             icon: "doc.badge.ellipsis",
-                            title: appState.locale == .zhCN ? "修改文件" : "Changed files",
+                            title: AppStrings.Chat.changedFiles(appState.locale),
                             value: "\(git.changedFiles)",
                             action: onReview
                         )
                         valueRow(
                             icon: "plus.forwardslash.minus",
-                            title: appState.locale == .zhCN ? "增删行" : "Line changes",
+                            title: AppStrings.Chat.lineChanges(appState.locale),
                             value: "+\(git.additions)  -\(git.deletions)"
                         )
                     } else {
-                        emptyRow(appState.locale == .zhCN ? "不是 Git 工作区" : "Not a Git workspace")
+                        emptyRow(AppStrings.Chat.notGitWorkspace(appState.locale))
                     }
                 }
 
@@ -57,18 +57,18 @@ struct ChatInspector: View {
                         valueRow(icon: "externaldrive", title: worktree.name, value: worktree.status)
                         valueRow(
                             icon: "arrow.up.right",
-                            title: appState.locale == .zhCN ? "领先提交" : "Commits ahead",
+                            title: AppStrings.Chat.commitsAhead(appState.locale),
                             value: "\(environment?.git.ahead ?? worktree.commitsAhead)"
                         )
                         if let behind = environment?.git.behind, behind > 0 {
                             valueRow(
                                 icon: "arrow.down.left",
-                                title: appState.locale == .zhCN ? "落后提交" : "Commits behind",
+                                title: AppStrings.Chat.commitsBehind(appState.locale),
                                 value: "\(behind)"
                             )
                         }
                     } else {
-                        emptyRow(appState.locale == .zhCN ? "暂无工作区" : "No worktree")
+                        emptyRow(AppStrings.Chat.noWorktree(appState.locale))
                     }
                 }
 
@@ -101,13 +101,13 @@ struct ChatInspector: View {
                     }
                     actionRow(
                         icon: "checklist",
-                        title: appState.locale == .zhCN ? "开放问题" : "Open issues",
+                        title: AppStrings.Chat.openIssuesLabel(appState.locale),
                         value: "\(appState.issues.count)",
                         action: onIssues
                     )
                     valueRow(
                         icon: "checkmark.shield",
-                        title: appState.locale == .zhCN ? "待审批" : "Approvals",
+                        title: AppStrings.Chat.approvalsLabel(appState.locale),
                         value: "\(appState.approvals.count)"
                     )
                     if let run = appState.selectedChatRun {
