@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 
@@ -59,3 +60,15 @@ def test_setup_script_passes_multiline_python_as_one_argument() -> None:
 
     assert "$verifyCode = @'" in script
     assert "run python -c $verifyCode" in script
+
+
+def test_terminal_ui_npm_scripts_do_not_depend_on_shell_glob_expansion() -> None:
+    package_path = (
+        Path(__file__).resolve().parents[2] / "frontend" / "terminal-ui" / "package.json"
+    )
+    scripts = json.loads(package_path.read_text(encoding="utf-8"))["scripts"]
+
+    assert "*" not in scripts["check"]
+    assert "*" not in scripts["test"]
+    assert scripts["check"] == "node scripts/check-syntax.js"
+    assert scripts["test"] == "node scripts/run-tests.js"

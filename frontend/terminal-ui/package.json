@@ -8,8 +8,8 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/*.js src/components/*.js test/*.js test/fixtures/*.js",
-    "test": "node --test test/*.test.js"
+    "check": "node scripts/check-syntax.js",
+    "test": "node scripts/run-tests.js"
   },
   "engines": {
     "node": ">=20"

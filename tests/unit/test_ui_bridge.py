@@ -229,7 +229,7 @@ def test_bridge_resolve_config_path_falls_back_to_repo_config() -> None:
 
     assert resolved.name in {"config.yaml", "config.yaml.example"}
     assert resolved.exists()
-    assert resolved.parent.name == "NaumiAgent"
+    assert resolved.parent.name.casefold() == "naumiagent"
 
 
 def test_protocol_decodes_strict_jsonl() -> None:
@@ -374,6 +374,14 @@ def test_bridge_status_payload_exposes_runtime_slash_commands() -> None:
     assert "/tasks" in command_names
     assert "/scan-full" in command_names
     assert "/btemplate-list" in command_names
+
+
+def test_bridge_status_payload_can_omit_static_slash_commands() -> None:
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+
+    payload = bridge.status_payload(include_slash_commands=False)
+
+    assert "slash_commands" not in payload
 
 
 @pytest.mark.asyncio
