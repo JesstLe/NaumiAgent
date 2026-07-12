@@ -14,6 +14,8 @@ from naumi_agent.api.permission_broker import PermissionApprovalBroker
 from naumi_agent.api.routes.messages import (
     _engine_event_to_stream_event,
     _stream_response,
+    add_chat_source,
+    cancel_chat_run,
     get_chat_environment,
     list_chat_runs,
     list_messages,
@@ -73,6 +75,7 @@ class _FakeEngine:
             dashboard_snapshot=self._dashboard_snapshot,
         )
         self.created_issues: list[dict] = []
+        self.turn_contexts: list[str] = []
         self.workspace_root = "."
         self.background_runner = SimpleNamespace(
             store=SimpleNamespace(list_tasks=lambda: [])
@@ -82,13 +85,15 @@ class _FakeEngine:
         self.loaded.append(session_id)
         return True
 
-    async def run(self, content: str):
+    async def run(self, content: str, turn_context: str = ""):
         self.ran.append(content)
+        self.turn_contexts.append(turn_context)
         usage = SimpleNamespace(turns=1, total_cost_usd=0.01)
         return SimpleNamespace(status="completed", response="ok", usage=usage)
 
-    async def run_streaming(self, content: str, on_event):
+    async def run_streaming(self, content: str, on_event, turn_context: str = ""):
         self.ran.append(content)
+        self.turn_contexts.append(turn_context)
         await on_event("token", {"content": "你"})
         usage = SimpleNamespace(turns=1, total_cost_usd=0.01)
         return SimpleNamespace(status="completed", response="你", usage=usage)
@@ -316,6 +321,132 @@ class TestMessageRoutes:
             await get_chat_environment("missing", request, auth="test")
 
         assert exc.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_cancel_chat_run_stops_agent_and_persists_cancelled_state(
+        self, tmp_path
+    ) -> None:
+        class SlowEngine(_FakeEngine):
+            async def run_streaming(
+                self, content: str, on_event, turn_context: str = ""
+            ):
+                await on_event("turn_start", {})
+                await asyncio.Event().wait()
+
+        engine = SlowEngine()
+        store = ChatRunStore(tmp_path / "chat-runs.db")
+        request = _fake_request(engine, store)
+        stream = _stream_response(engine, "sess_1", "hello", request)
+        first = json.loads((await anext(stream)).removeprefix("data: "))
+        run_id = first["data"]["run_id"]
+
+        response = await cancel_chat_run(
+            "sess_1", run_id, request, auth="test"
+        )
+        remaining = [chunk async for chunk in stream]
+
+        assert response.status == "cancellation_requested"
+        assert remaining == []
+        run = await store.get_run("sess_1", run_id)
+        assert run is not None
+        assert run.status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_add_chat_source_accepts_only_existing_workspace_file(
+        self, tmp_path
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        source = workspace / "spec.md"
+        source.write_text("spec", encoding="utf-8")
+        engine = _FakeEngine()
+        engine.workspace_root = workspace
+        request = _fake_request(engine, ChatRunStore(tmp_path / "chat-runs.db"))
+
+        response = await add_chat_source(
+            "sess_1",
+            SimpleNamespace(path=str(source), kind="file", title="Product spec"),
+            request,
+            auth="test",
+        )
+
+        assert response.path == "spec.md"
+        assert response.title == "Product spec"
+
+        with pytest.raises(Exception) as exc:
+            await add_chat_source(
+                "sess_1",
+                SimpleNamespace(
+                    path=str(tmp_path / "outside.md"),
+                    kind="file",
+                    title="outside",
+                ),
+                request,
+                auth="test",
+            )
+        assert exc.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_message_sources_are_injected_without_rewriting_user_text(
+        self, tmp_path
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        source_path = workspace / "spec.md"
+        source_path.write_text("Acceptance: chat keeps three columns.", encoding="utf-8")
+        engine = _FakeEngine()
+        engine.workspace_root = workspace
+        store = ChatRunStore(tmp_path / "chat-runs.db")
+        source = await store.add_source(
+            session_id="sess_1",
+            kind="file",
+            title="spec.md",
+            path="spec.md",
+        )
+        request = _fake_request(engine, store)
+
+        await send_message(
+            "sess_1",
+            MessageCreate(
+                content="Check the design",
+                stream=False,
+                source_ids=[source.id],
+            ),
+            request,
+            auth="test",
+        )
+
+        assert engine.ran == ["Check the design"]
+        assert "Acceptance: chat keeps three columns." in engine.turn_contexts[0]
+
+    @pytest.mark.asyncio
+    async def test_existing_issue_is_linked_into_turn_context(self, tmp_path) -> None:
+        engine = _FakeEngine()
+        engine.workbench_store = SimpleNamespace(
+            get_issue=lambda _session_id, _task_id: _async_value(
+                SimpleNamespace(
+                    task_id="task-1",
+                    mission_id="mission-1",
+                    risk_level="high",
+                    acceptance_criteria=["tests pass"],
+                )
+            )
+        )
+        request = _fake_request(engine, ChatRunStore(tmp_path / "chat-runs.db"))
+
+        response = await send_message(
+            "sess_1",
+            MessageCreate(
+                content="Continue this issue",
+                stream=False,
+                linked_issue_id="task-1",
+            ),
+            request,
+            auth="test",
+        )
+
+        assert "task_id: task-1" in engine.turn_contexts[0]
+        assert response.metadata["linked_issue"] == {"task_id": "task-1"}
 
     @pytest.mark.asyncio
     async def test_list_messages_preserves_metadata_for_chat_history(self) -> None:

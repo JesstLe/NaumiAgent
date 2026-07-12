@@ -4,6 +4,7 @@ struct ChatRunTimeline: View {
     let execution: ChatExecutionPresentation
     let locale: AppLocale
     let onPermissionDecision: (ChatPermissionDecision) -> Void
+    let onReview: () -> Void
 
     var body: some View {
         SwiftUI.TimelineView(.periodic(from: .now, by: 1)) { timeline in
@@ -15,7 +16,9 @@ struct ChatRunTimeline: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    if execution.stage != .completed, execution.stage != .failed {
+                    if execution.stage != .completed,
+                       execution.stage != .failed,
+                       execution.stage != .cancelled {
                         ProgressView().controlSize(.small)
                     }
                 }
@@ -27,7 +30,11 @@ struct ChatRunTimeline: View {
                 }
 
                 ForEach(execution.artifacts) { artifact in
-                    ChatArtifactView(artifact: artifact, locale: locale)
+                    ChatArtifactView(
+                        artifact: artifact,
+                        locale: locale,
+                        onReview: onReview
+                    )
                 }
 
                 if !execution.partialResponse.isEmpty {
@@ -151,6 +158,7 @@ struct ChatRunTimeline: View {
         switch step.status {
         case .completed: "checkmark.circle.fill"
         case .failed: "xmark.circle.fill"
+        case .cancelled: "stop.circle.fill"
         case .awaitingApproval: "hand.raised.fill"
         case .running:
             switch step.kind {
@@ -166,6 +174,7 @@ struct ChatRunTimeline: View {
         switch status {
         case .completed: .green
         case .failed: .red
+        case .cancelled: .secondary
         case .awaitingApproval: .orange
         case .running: .accentColor
         }

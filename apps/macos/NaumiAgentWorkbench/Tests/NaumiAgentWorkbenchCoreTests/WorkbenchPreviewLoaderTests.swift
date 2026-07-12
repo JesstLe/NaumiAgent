@@ -63,6 +63,7 @@ final class WorkbenchPreviewLoaderTests {
         #expect(appState.chatEnvironment?.git.changedFiles == 6)
         #expect(appState.chatEnvironment?.processes.count == 1)
         #expect(appState.chatEnvironment?.sources.count == 1)
+        #expect(appState.chatRuns.count == 1)
     }
 
     @Test func applyEnglishFixtureIntoAppState() throws {

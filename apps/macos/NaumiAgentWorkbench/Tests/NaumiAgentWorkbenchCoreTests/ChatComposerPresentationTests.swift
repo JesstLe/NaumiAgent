@@ -18,6 +18,7 @@ struct ChatComposerPresentationTests {
     @Test func createIssueExpandsDetailsOnlyInCreateMode() {
         #expect(ChatComposerMode.createIssue.showsIssueDetails)
         #expect(!ChatComposerMode.chat.showsIssueDetails)
+        #expect(ChatComposerMode.linkIssue.showsIssuePicker)
     }
 
     @Test func emptyDraftCannotSend() {

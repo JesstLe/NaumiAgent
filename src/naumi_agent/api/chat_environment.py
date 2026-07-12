@@ -162,10 +162,22 @@ class ChatEnvironmentCollector:
         return processes
 
     async def _collect_sources(self, session_id: str) -> list[SourceEnvironment]:
-        sources: list[SourceEnvironment] = []
+        sources = [
+            SourceEnvironment(
+                id=source.id,
+                kind=source.kind,
+                title=source.title,
+                path=source.path,
+                run_id="",
+                created_at=source.created_at,
+            )
+            for source in await self._chat_run_store.list_sources(session_id)
+        ]
+        source_ids = {source.id for source in sources}
+        source_paths = {source.path for source in sources}
         for run in await self._chat_run_store.list_runs(session_id, limit=50):
             for artifact in run.artifacts:
-                if artifact.kind not in _SOURCE_KINDS:
+                if artifact.kind not in _SOURCE_KINDS or artifact.id in source_ids:
                     continue
                 raw_path = artifact.summary.get("path") or artifact.metadata.get("path")
                 if not isinstance(raw_path, str) or not raw_path:
@@ -177,7 +189,7 @@ class ChatEnvironmentCollector:
                     else (self._workspace_root / path).resolve()
                 )
                 relative_path = self._relative_path(resolved)
-                if relative_path is None:
+                if relative_path is None or relative_path in source_paths:
                     continue
                 sources.append(
                     SourceEnvironment(
@@ -189,6 +201,7 @@ class ChatEnvironmentCollector:
                         created_at=artifact.created_at,
                     )
                 )
+                source_paths.add(relative_path)
         return sources
 
     def _relative_path(self, path: Path) -> str | None:

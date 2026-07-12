@@ -3,8 +3,10 @@ import Foundation
 public enum ChatComposerMode: String, CaseIterable, Equatable, Sendable {
     case chat
     case createIssue
+    case linkIssue
 
     public var showsIssueDetails: Bool { self == .createIssue }
+    public var showsIssuePicker: Bool { self == .linkIssue }
 }
 
 public enum ChatComposerPrimaryAction: Equatable, Sendable {

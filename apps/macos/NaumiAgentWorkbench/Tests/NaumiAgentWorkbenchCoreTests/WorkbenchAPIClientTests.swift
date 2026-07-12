@@ -989,6 +989,67 @@ final class WorkbenchAPIClientTests {
         #expect(environment.git.branch == "main")
     }
 
+    @Test func addChatSourcePostsWorkspacePath() async throws {
+        let json = Data(
+            """
+            {"id":"source-1","kind":"file","title":"spec.md","path":"docs/spec.md","run_id":"","created_at":"2026-07-12T10:00:00Z"}
+            """.utf8
+        )
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/sessions/sess%2F1/sources" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST",
+                  let body = request.httpBody ?? request.httpBodyStream?.httpBodyStreamData(),
+                  let object = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  object["path"] as? String == "/repo/docs/spec.md" else {
+                fatalError("Unexpected request")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let source = try await makeClient().addChatSource(
+            sessionID: "sess/1",
+            path: "/repo/docs/spec.md",
+            kind: "file",
+            title: "spec.md"
+        )
+
+        #expect(source.path == "docs/spec.md")
+    }
+
+    @Test func cancelChatRunUsesScopedPOSTRoute() async throws {
+        let json = Data("{\"status\":\"cancellation_requested\"}".utf8)
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/sessions/sess%2Fa/runs/run%2F1/cancel" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            guard request.httpMethod == "POST" else {
+                fatalError("Unexpected method: \(String(describing: request.httpMethod))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let response = try await makeClient().cancelChatRun(
+            sessionID: "sess/a",
+            runID: "run/1"
+        )
+
+        #expect(response.status == "cancellation_requested")
+    }
+
     @Test func fetchEvents() async throws {
         let json = Data(
             """

@@ -3,6 +3,7 @@ import SwiftUI
 struct ChatArtifactView: View {
     let artifact: ChatArtifactPresentation
     let locale: AppLocale
+    let onReview: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -26,6 +27,11 @@ struct ChatArtifactView: View {
                         .lineSpacing(2)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if artifact.kind == .fileChange {
+                    Button(AppStrings.Navigation.reviews(locale), action: onReview)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                 }
             }
         }

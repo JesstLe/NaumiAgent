@@ -14,6 +14,7 @@ struct AppStringsChatTests {
         #expect(AppStrings.Chat.permissionRisk(.zhCN, level: "medium") == "风险：中")
         #expect(AppStrings.Chat.allowOnce(.zhCN) == "允许一次")
         #expect(AppStrings.Chat.deny(.zhCN) == "拒绝")
+        #expect(AppStrings.Chat.executionStage(.zhCN, stage: .cancelled) == "已取消")
     }
 
     @Test func executionStringsSupportEnglish() {
@@ -25,6 +26,7 @@ struct AppStringsChatTests {
         #expect(AppStrings.Chat.permissionRisk(.enUS, level: "medium") == "Risk: Medium")
         #expect(AppStrings.Chat.allowOnce(.enUS) == "Allow once")
         #expect(AppStrings.Chat.deny(.enUS) == "Deny")
+        #expect(AppStrings.Chat.executionStage(.enUS, stage: .cancelled) == "Cancelled")
     }
 
     @Test func composerAndInspectorStringsAreBilingual() {

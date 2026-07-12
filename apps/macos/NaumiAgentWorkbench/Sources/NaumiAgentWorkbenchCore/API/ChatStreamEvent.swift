@@ -123,3 +123,13 @@ public protocol ChatStreamingProviding: Sendable {
         decision: ChatPermissionDecision
     ) async throws(APIError)
 }
+
+public protocol ChatContextStreamingProviding: Sendable {
+    func streamMessage(
+        sessionID: String,
+        content: String,
+        sourceIDs: [String],
+        linkedIssueID: String?,
+        onEvent: @escaping @Sendable (ChatStreamEvent) async -> Void
+    ) async throws(APIError)
+}

@@ -9,6 +9,8 @@ public struct ChatContextRail: View {
     let tasks: [TaskDTO]
     let runs: [ChatRunDTO]
     let locale: AppLocale
+    let onIssueSelect: (String) -> Void
+    let onRunSelect: (String) -> Void
 
     public init(
         sessionID: String?,
@@ -18,7 +20,9 @@ public struct ChatContextRail: View {
         issues: [IssueDTO],
         tasks: [TaskDTO] = [],
         runs: [ChatRunDTO] = [],
-        locale: AppLocale
+        locale: AppLocale,
+        onIssueSelect: @escaping (String) -> Void = { _ in },
+        onRunSelect: @escaping (String) -> Void = { _ in }
     ) {
         self.sessionID = sessionID
         self.connectionText = connectionText
@@ -28,6 +32,8 @@ public struct ChatContextRail: View {
         self.tasks = tasks
         self.runs = runs
         self.locale = locale
+        self.onIssueSelect = onIssueSelect
+        self.onRunSelect = onRunSelect
     }
 
     public var body: some View {
@@ -74,23 +80,29 @@ public struct ChatContextRail: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(summaries.prefix(6)) { issue in
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(riskColor(issue.riskLevel))
-                                .frame(width: 6, height: 6)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(issue.title)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .lineLimit(1)
-                                Text(issue.status)
+                        Button {
+                            onIssueSelect(issue.id)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill(riskColor(issue.riskLevel))
+                                    .frame(width: 6, height: 6)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(issue.title)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .lineLimit(1)
+                                    Text(issue.status)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(issue.riskLevel)
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
-                            Spacer()
-                            Text(issue.riskLevel)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         .padding(.vertical, 3)
                     }
                 }
@@ -103,21 +115,27 @@ public struct ChatContextRail: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(runs.prefix(4)) { run in
-                        HStack(spacing: 8) {
-                            Image(systemName: run.status == "completed"
-                                ? "checkmark.circle.fill"
-                                : "clock")
-                                .foregroundStyle(run.status == "completed" ? .green : .secondary)
-                                .frame(width: 14)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(run.steps.last?.summary ?? run.status)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .lineLimit(1)
-                                Text(run.status)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                        Button {
+                            onRunSelect(run.id)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: run.status == "completed"
+                                    ? "checkmark.circle.fill"
+                                    : "clock")
+                                    .foregroundStyle(run.status == "completed" ? .green : .secondary)
+                                    .frame(width: 14)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(run.steps.last?.summary ?? run.status)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .lineLimit(1)
+                                    Text(run.status)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         .padding(.vertical, 2)
                     }
                 }

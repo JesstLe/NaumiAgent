@@ -18,6 +18,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var chatRunsResult: Result<ChatRunsDTO, APIError>?
     var chatRunResult: Result<ChatRunDTO, APIError>?
     var chatEnvironmentResult: Result<ChatEnvironmentDTO, APIError>?
+    var addChatSourceResult: Result<ChatSourceReferenceDTO, APIError>?
     var eventsResult: Result<WorkbenchEventsDTO, APIError>?
     var eventResult: Result<EventDTO, APIError>?
     var validationRunsResult: Result<ValidationRunsDTO, APIError>?
@@ -145,7 +146,9 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var fetchChatRunsCallCount: Int = 0
     var fetchChatEnvironmentCallCount: Int = 0
     private(set) var streamMessageCalls: [StreamMessageCall] = []
+    private(set) var contextualStreamCalls: [(sourceIDs: [String], linkedIssueID: String?)] = []
     private(set) var permissionResolutionCalls: [PermissionResolutionCall] = []
+    private(set) var cancelledChatRuns: [(sessionID: String, runID: String)] = []
     var createdSessions: [[String: String?]] = []
     var createdMissions: [[String: String]] = []
     var issueRequests: [[String: String?]] = []
@@ -293,6 +296,31 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         }
     }
 
+    func streamMessage(
+        sessionID: String,
+        content: String,
+        sourceIDs: [String],
+        linkedIssueID: String?,
+        onEvent: @escaping @Sendable (ChatStreamEvent) async -> Void
+    ) async throws(APIError) {
+        contextualStreamCalls.append((sourceIDs, linkedIssueID))
+        try await streamMessage(
+            sessionID: sessionID,
+            content: content,
+            onEvent: onEvent
+        )
+    }
+
+    func addChatSource(
+        sessionID: String,
+        path: String,
+        kind: String,
+        title: String
+    ) async throws(APIError) -> ChatSourceReferenceDTO {
+        guard let addChatSourceResult else { throw .invalidResponse }
+        return try addChatSourceResult.get()
+    }
+
     func resolveChatPermission(
         sessionID: String,
         callID: String,
@@ -334,6 +362,14 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     ) async throws(APIError) -> ChatRunDTO {
         guard let chatRunResult else { throw .invalidResponse }
         return try chatRunResult.get()
+    }
+
+    func cancelChatRun(
+        sessionID: String,
+        runID: String
+    ) async throws(APIError) -> ChatRunCancelDTO {
+        cancelledChatRuns.append((sessionID, runID))
+        return ChatRunCancelDTO(status: "cancellation_requested")
     }
 
     func fetchChatEnvironment(
@@ -1236,7 +1272,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     }
 }
 
-extension FakeWorkbenchAPIProvider: ChatStreamingProviding, ChatRunProviding, ChatEnvironmentProviding {}
+extension FakeWorkbenchAPIProvider: ChatStreamingProviding, ChatContextStreamingProviding, ChatRunProviding, ChatEnvironmentProviding, ChatSourceProviding {}
 
 actor FakeWorkbenchEventProvider: WorkbenchEventProviding, WorkbenchEventStreamTemplateConfiguring {
     private var continuation: AsyncThrowingStream<WorkbenchEventStreamMessage, Error>.Continuation?
@@ -10293,6 +10329,56 @@ final class DaemonControllerTests {
         #expect(appState.chatEnvironment == environment)
         #expect(await api.fetchChatRunsCallCount == 1)
         #expect(await api.fetchChatEnvironmentCallCount == 1)
+    }
+
+    @Test @MainActor func cancelActiveChatRunUsesServerRunIDAndUpdatesPresentation() async {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        appState.activeChatExecution = ChatExecutionPresentation(id: "local-run")
+            .applying(
+                ChatStreamEvent(
+                    id: "evt-1",
+                    type: .turnStart,
+                    data: ["run_id": .string("server-run")]
+                )
+            )
+        let api = FakeWorkbenchAPIProvider()
+        let controller = DaemonController(appState: appState, apiProvider: api)
+
+        await controller.cancelActiveChatRun()
+
+        #expect(appState.activeChatExecution?.stage == .cancelled)
+        let calls = await api.cancelledChatRuns
+        #expect(calls.count == 1)
+        #expect(calls.first?.sessionID == "sess-001")
+        #expect(calls.first?.runID == "server-run")
+    }
+
+    @Test @MainActor func contextualChatUsesSourceAndExistingIssueIDs() async {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        let api = FakeWorkbenchAPIProvider()
+        await api.setMessagesResult(.success(ChatMessageListDTO(messages: [], total: 0)))
+        await api.setStreamEvents([
+            ChatStreamEvent(
+                id: "evt-end",
+                type: .agentEnd,
+                data: ["status": .string("completed")]
+            )
+        ])
+        let controller = DaemonController(appState: appState, apiProvider: api)
+
+        await controller.sendDailyMessage(
+            content: "Continue",
+            issueDraft: nil,
+            sourceIDs: ["source-1"],
+            linkedIssueID: "task-1"
+        )
+
+        let calls = await api.contextualStreamCalls
+        #expect(calls.count == 1)
+        #expect(calls.first?.sourceIDs == ["source-1"])
+        #expect(calls.first?.linkedIssueID == "task-1")
     }
 
     @Test @MainActor func refreshChatMessagesIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {

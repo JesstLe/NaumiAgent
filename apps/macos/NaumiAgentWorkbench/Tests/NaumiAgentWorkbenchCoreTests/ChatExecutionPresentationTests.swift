@@ -4,6 +4,60 @@ import Testing
 
 @Suite("Chat execution presentation")
 struct ChatExecutionPresentationTests {
+
+    @Test func streamEventCapturesServerRunIDAndCanBecomeCancelled() {
+        let execution = ChatExecutionPresentation(id: "local-run")
+            .applying(
+                ChatStreamEvent(
+                    id: "evt-1",
+                    type: .turnStart,
+                    data: ["run_id": .string("server-run")]
+                )
+            )
+            .cancelling()
+
+        #expect(execution.serverRunID == "server-run")
+        #expect(execution.stage == .cancelled)
+        #expect(execution.completedAt != nil)
+    }
+
+    @Test func persistedRunRestoresStableTimelineAndArtifacts() {
+        let run = ChatRunDTO(
+            id: "run-1",
+            sessionID: "sess-1",
+            userMessageID: "msg-1",
+            status: "completed",
+            startedAt: "2026-07-12T10:00:00Z",
+            updatedAt: "2026-07-12T10:00:02Z",
+            completedAt: "2026-07-12T10:00:02Z",
+            steps: [
+                ChatRunStepDTO(
+                    sequence: 1,
+                    stage: "tool",
+                    status: "completed",
+                    summary: "运行测试",
+                    eventID: "evt-1"
+                )
+            ],
+            artifacts: [
+                ChatArtifactDTO(
+                    id: "artifact-1",
+                    kind: "validation",
+                    title: "pytest",
+                    summary: ["result": .string("12 passed")],
+                    status: "success"
+                )
+            ]
+        )
+
+        let execution = ChatExecutionPresentation.restoring(run)
+
+        #expect(execution.id == "run-1")
+        #expect(execution.serverRunID == "run-1")
+        #expect(execution.stage == .completed)
+        #expect(execution.steps.first?.title == "运行测试")
+        #expect(execution.artifacts.first?.kind == .validation)
+    }
     @Test func permissionUpdatesReplaceTheToolStepWithTheSameCallID() {
         let initial = ChatExecutionPresentation(id: "run-1")
         let started = initial.applying(
