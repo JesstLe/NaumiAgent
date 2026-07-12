@@ -77,9 +77,21 @@ class _FakeEngine:
         self.created_issues: list[dict] = []
         self.turn_contexts: list[str] = []
         self.workspace_root = "."
+        self._runtime_mode = "default"
+        self.runtime_mode_transitions: list[str] = []
         self.background_runner = SimpleNamespace(
             store=SimpleNamespace(list_tasks=lambda: [])
         )
+
+    @property
+    def runtime_mode(self):
+        return SimpleNamespace(value=self._runtime_mode)
+
+    def set_runtime_mode(self, mode):
+        value = getattr(mode, "value", mode)
+        self._runtime_mode = str(value)
+        self.runtime_mode_transitions.append(self._runtime_mode)
+        return SimpleNamespace(value=self._runtime_mode)
 
     async def load_session(self, session_id: str) -> bool:
         self.loaded.append(session_id)
@@ -189,6 +201,21 @@ class TestMessageRoutes:
         assert engine.loaded == ["sess_1"]
         assert engine.ran == ["hello"]
         assert response.content == "ok"
+
+    @pytest.mark.asyncio
+    async def test_send_message_scopes_runtime_mode_to_one_turn(self) -> None:
+        engine = _FakeEngine()
+        request = _fake_request(engine)
+
+        await send_message(
+            "sess_1",
+            MessageCreate(content="inspect only", stream=False, runtime_mode="plan"),
+            request,
+            auth="test",
+        )
+
+        assert engine.runtime_mode_transitions == ["plan", "default"]
+        assert engine.runtime_mode.value == "default"
 
     @pytest.mark.asyncio
     async def test_send_message_can_create_workbench_issue_from_chat(self) -> None:

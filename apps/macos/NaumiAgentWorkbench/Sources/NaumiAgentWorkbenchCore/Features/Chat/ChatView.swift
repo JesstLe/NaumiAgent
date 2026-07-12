@@ -6,20 +6,6 @@ public struct ChatView: View {
     let appState: AppState
     let daemonController: DaemonController
 
-    @State private var draftMessage = ""
-    @State private var composerMode: ChatComposerMode = .chat
-    @State private var selectedMissionID = ""
-    @State private var issueTitle = ""
-    @State private var issueDescription = ""
-    @State private var acceptanceCriteria = ""
-    @State private var parallelMode = "exclusive"
-    @State private var riskLevel = "medium"
-    @State private var linkedIssueID = ""
-    @State private var selectedSources: [ChatSourceReferenceDTO] = []
-    @State private var isSending = false
-    @State private var sendError: APIError? = nil
-    @State private var sendTask: Task<Void, Never>? = nil
-
     public init(appState: AppState, daemonController: DaemonController) {
         self.appState = appState
         self.daemonController = daemonController
@@ -31,7 +17,7 @@ public struct ChatView: View {
                 sessionID: appState.selectedSessionID,
                 connectionText: appState.connectionState.displayName(locale: appState.locale),
                 missions: appState.missions,
-                selectedMissionID: $selectedMissionID,
+                selectedMissionID: composerBinding(\.selectedMissionID),
                 issues: appState.issues,
                 tasks: appState.snapshot?.tasks ?? [],
                 runs: appState.chatRuns,
@@ -57,27 +43,28 @@ public struct ChatView: View {
                 }
             ) {
                 ChatComposer(
-                    draft: $draftMessage,
-                    mode: $composerMode,
-                    selectedMissionID: $selectedMissionID,
-                    issueTitle: $issueTitle,
-                    issueDescription: $issueDescription,
-                    acceptanceCriteria: $acceptanceCriteria,
-                    parallelMode: $parallelMode,
-                    riskLevel: $riskLevel,
-                    linkedIssueID: $linkedIssueID,
+                    draft: composerBinding(\.draftMessage),
+                    mode: composerBinding(\.mode),
+                    selectedMissionID: composerBinding(\.selectedMissionID),
+                    issueTitle: composerBinding(\.issueTitle),
+                    issueDescription: composerBinding(\.issueDescription),
+                    acceptanceCriteria: composerBinding(\.acceptanceCriteria),
+                    parallelMode: composerBinding(\.parallelMode),
+                    riskLevel: composerBinding(\.riskLevel),
+                    linkedIssueID: composerBinding(\.linkedIssueID),
+                    runtimeMode: composerBinding(\.runtimeMode),
                     missions: appState.missions,
                     issues: appState.issues,
-                    sources: selectedSources,
+                    sources: appState.chatComposerState.selectedSources,
                     locale: appState.locale,
-                    isSending: isSending,
-                    errorMessage: sendError?.localizedMessage(locale: appState.locale),
+                    isSending: appState.isChatSending,
+                    errorMessage: appState.chatSendError?.localizedMessage(locale: appState.locale),
                     disabledReason: sendDisabledReason,
                     canSend: canSend,
                     onPrimaryAction: performPrimaryAction,
                     onAddSource: chooseSource,
                     onRemoveSource: { sourceID in
-                        selectedSources.removeAll { $0.id == sourceID }
+                        appState.chatComposerState.selectedSources.removeAll { $0.id == sourceID }
                     }
                 )
             }
@@ -111,9 +98,15 @@ public struct ChatView: View {
         .onChange(of: appState.missions) { _, _ in
             ensureSelectedMission()
         }
-        .onDisappear {
-            sendTask?.cancel()
-        }
+    }
+
+    private func composerBinding<Value>(
+        _ keyPath: WritableKeyPath<ChatComposerSessionState, Value>
+    ) -> Binding<Value> {
+        Binding(
+            get: { appState.chatComposerState[keyPath: keyPath] },
+            set: { appState.chatComposerState[keyPath: keyPath] = $0 }
+        )
     }
 
     private var displayedChatMessages: [ChatMessageDTO] {
@@ -127,43 +120,53 @@ public struct ChatView: View {
     }
 
     private var canSend: Bool {
-        guard ChatComposerPresentation.canSend(draft: draftMessage, isSending: isSending) else {
+        guard ChatComposerPresentation.canSend(
+            draft: appState.chatComposerState.draftMessage,
+            isSending: appState.isChatSending
+        ) else {
             return false
         }
-        if composerMode == .createIssue {
+        if appState.chatComposerState.mode == .createIssue {
             guard currentMissionID != nil else { return false }
             if isHighRiskIssue && acceptanceCriteriaLines.isEmpty { return false }
         }
-        if composerMode == .linkIssue, linkedIssueID.isEmpty { return false }
+        if appState.chatComposerState.mode == .linkIssue,
+           appState.chatComposerState.linkedIssueID.isEmpty { return false }
         return true
     }
 
     private var sendDisabledReason: String? {
-        let hasMessage = !draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasMessage = !appState.chatComposerState.draftMessage
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard hasMessage else { return nil }
-        if composerMode == .createIssue && currentMissionID == nil {
+        if appState.chatComposerState.mode == .createIssue && currentMissionID == nil {
             return AppStrings.Chat.issueNeedsMission(appState.locale)
         }
-        if composerMode == .createIssue && isHighRiskIssue && acceptanceCriteriaLines.isEmpty {
+        if appState.chatComposerState.mode == .createIssue
+            && isHighRiskIssue && acceptanceCriteriaLines.isEmpty {
             return AppStrings.Chat.highRiskNeedsCriteria(appState.locale)
         }
-        if composerMode == .linkIssue && linkedIssueID.isEmpty {
+        if appState.chatComposerState.mode == .linkIssue
+            && appState.chatComposerState.linkedIssueID.isEmpty {
             return AppStrings.Chat.issueNeedsSelection(appState.locale)
         }
         return nil
     }
 
     private var currentMissionID: String? {
-        if !selectedMissionID.isEmpty { return selectedMissionID }
+        if !appState.chatComposerState.selectedMissionID.isEmpty {
+            return appState.chatComposerState.selectedMissionID
+        }
         return appState.selectedMission?.id ?? appState.missions.first?.id
     }
 
     private var isHighRiskIssue: Bool {
-        riskLevel == "high" || riskLevel == "critical"
+        appState.chatComposerState.riskLevel == "high"
+            || appState.chatComposerState.riskLevel == "critical"
     }
 
     private var acceptanceCriteriaLines: [String] {
-        acceptanceCriteria
+        appState.chatComposerState.acceptanceCriteria
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -171,8 +174,8 @@ public struct ChatView: View {
 
     private func performPrimaryAction() {
         let presentation = ChatComposerPresentation(
-            isSending: isSending,
-            hasError: sendError != nil
+            isSending: appState.isChatSending,
+            hasError: appState.chatSendError != nil
         )
         switch presentation.primaryAction {
         case .send, .retry:
@@ -183,55 +186,25 @@ public struct ChatView: View {
     }
 
     private func sendMessage() {
-        let trimmedMessage = draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedMessage = appState.chatComposerState.draftMessage
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedMessage.isEmpty else { return }
 
         let draft = issueDraft(for: trimmedMessage)
-        sendTask?.cancel()
-        sendError = nil
-        isSending = true
-
-        sendTask = Task { @MainActor in
-            await daemonController.sendDailyMessage(
-                content: trimmedMessage,
-                issueDraft: draft,
-                sourceIDs: selectedSources.map(\.id),
-                linkedIssueID: composerMode == .linkIssue ? linkedIssueID : nil
-            )
-            guard !Task.isCancelled else {
-                isSending = false
-                sendTask = nil
-                return
-            }
-
-            isSending = false
-            sendTask = nil
-            if appState.lastError == nil {
-                draftMessage = ""
-                if draft != nil {
-                    issueTitle = ""
-                    issueDescription = ""
-                    acceptanceCriteria = ""
-                    composerMode = .chat
-                }
-                selectedSources = []
-                if composerMode == .linkIssue {
-                    linkedIssueID = ""
-                    composerMode = .chat
-                }
-            } else {
-                sendError = appState.lastError
-            }
-        }
+        daemonController.beginDailyMessage(
+            content: trimmedMessage,
+            issueDraft: draft,
+            sourceIDs: appState.chatComposerState.selectedSources.map(\.id),
+            linkedIssueID: appState.chatComposerState.mode == .linkIssue
+                ? appState.chatComposerState.linkedIssueID
+                : nil,
+            runtimeMode: appState.chatComposerState.runtimeMode
+        )
     }
 
     private func cancelSending() {
-        let activeTask = sendTask
-        sendTask = nil
-        isSending = false
         Task { @MainActor in
             await daemonController.cancelActiveChatRun()
-            activeTask?.cancel()
         }
     }
 
@@ -240,27 +213,33 @@ public struct ChatView: View {
     }
 
     private func issueDraft(for message: String) -> ChatIssueDraftDTO? {
-        guard composerMode == .createIssue, let missionID = currentMissionID else { return nil }
+        guard appState.chatComposerState.mode == .createIssue,
+              let missionID = currentMissionID else { return nil }
 
-        let title = issueTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let description = issueDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = appState.chatComposerState.issueTitle
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let description = appState.chatComposerState.issueDescription
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         return ChatIssueDraftDTO(
             missionID: missionID,
             title: title.isEmpty ? String(message.prefix(36)) : title,
             description: description.isEmpty ? message : description,
             acceptanceCriteria: acceptanceCriteriaLines,
-            parallelMode: parallelMode,
-            riskLevel: riskLevel
+            parallelMode: appState.chatComposerState.parallelMode,
+            riskLevel: appState.chatComposerState.riskLevel
         )
     }
 
     private func ensureSelectedMission() {
-        if selectedMissionID.isEmpty, let first = appState.missions.first {
-            selectedMissionID = first.id
+        if appState.chatComposerState.selectedMissionID.isEmpty,
+           let first = appState.missions.first {
+            appState.chatComposerState.selectedMissionID = first.id
         }
-        if !selectedMissionID.isEmpty,
-           !appState.missions.contains(where: { $0.id == selectedMissionID }) {
-            selectedMissionID = appState.missions.first?.id ?? ""
+        if !appState.chatComposerState.selectedMissionID.isEmpty,
+           !appState.missions.contains(where: {
+               $0.id == appState.chatComposerState.selectedMissionID
+           }) {
+            appState.chatComposerState.selectedMissionID = appState.missions.first?.id ?? ""
         }
     }
 
@@ -278,8 +257,8 @@ public struct ChatView: View {
             guard let source = await daemonController.addChatSource(path: url.path) else {
                 return
             }
-            if !selectedSources.contains(where: { $0.id == source.id }) {
-                selectedSources.append(source)
+            if !appState.chatComposerState.selectedSources.contains(where: { $0.id == source.id }) {
+                appState.chatComposerState.selectedSources.append(source)
             }
         }
     }

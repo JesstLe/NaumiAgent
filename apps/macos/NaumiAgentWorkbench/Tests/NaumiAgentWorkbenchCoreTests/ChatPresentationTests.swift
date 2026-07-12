@@ -28,6 +28,47 @@ struct ChatPresentationTests {
         #expect(ChatPresentation.style(forRole: "custom") == .document)
     }
 
+    @Test func scrollSignalChangesForMessagesAndStreamingOutput() {
+        let message = ChatMessageDTO(
+            id: "message-1",
+            role: "user",
+            content: "开始",
+            timestamp: "2026-07-13T08:00:00Z",
+            metadata: [:]
+        )
+        let execution = ChatExecutionPresentation(id: "run-1")
+        let initial = ChatConversationScrollSignal(
+            messages: [message],
+            execution: execution
+        )
+        let streamed = ChatConversationScrollSignal(
+            messages: [message],
+            execution: execution.applying(
+                ChatStreamEvent(
+                    id: "token-1",
+                    type: .tokenDelta,
+                    data: ["token": .string("正在继续")]
+                )
+            )
+        )
+        let withAnotherMessage = ChatConversationScrollSignal(
+            messages: [
+                message,
+                ChatMessageDTO(
+                    id: "message-2",
+                    role: "assistant",
+                    content: "完成",
+                    timestamp: "2026-07-13T08:00:02Z",
+                    metadata: [:]
+                ),
+            ],
+            execution: nil
+        )
+
+        #expect(initial != streamed)
+        #expect(streamed != withAnotherMessage)
+    }
+
     private func issue(id: String, risk: String) -> IssueDTO {
         IssueDTO(
             sessionID: "session",

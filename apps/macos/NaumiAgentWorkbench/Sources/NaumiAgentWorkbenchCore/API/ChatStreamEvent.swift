@@ -114,6 +114,7 @@ public protocol ChatStreamingProviding: Sendable {
     func streamMessage(
         sessionID: String,
         content: String,
+        runtimeMode: ChatRuntimeMode,
         onEvent: @escaping @Sendable (ChatStreamEvent) async -> Void
     ) async throws(APIError)
 
@@ -130,6 +131,7 @@ public protocol ChatContextStreamingProviding: Sendable {
         content: String,
         sourceIDs: [String],
         linkedIssueID: String?,
+        runtimeMode: ChatRuntimeMode,
         onEvent: @escaping @Sendable (ChatStreamEvent) async -> Void
     ) async throws(APIError)
 }

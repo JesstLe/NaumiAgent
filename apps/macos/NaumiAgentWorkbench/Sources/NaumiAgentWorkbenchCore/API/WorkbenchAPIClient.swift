@@ -140,12 +140,14 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     public func sendMessage(
         sessionID: String,
         content: String,
-        workbenchIssue: ChatIssueDraftDTO?
+        workbenchIssue: ChatIssueDraftDTO?,
+        runtimeMode: ChatRuntimeMode = .default
     ) async throws(APIError) -> ChatMessageDTO {
         let body = SendMessageRequest(
             content: content,
             stream: false,
-            workbenchIssue: workbenchIssue
+            workbenchIssue: workbenchIssue,
+            runtimeMode: runtimeMode
         )
         let path: String
         if workbenchIssue == nil {
@@ -172,6 +174,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
     public func streamMessage(
         sessionID: String,
         content: String,
+        runtimeMode: ChatRuntimeMode = .default,
         onEvent: @escaping @Sendable (ChatStreamEvent) async -> Void
     ) async throws(APIError) {
         try await streamMessage(
@@ -179,6 +182,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             content: content,
             sourceIDs: [],
             linkedIssueID: nil,
+            runtimeMode: runtimeMode,
             onEvent: onEvent
         )
     }
@@ -188,6 +192,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         content: String,
         sourceIDs: [String],
         linkedIssueID: String?,
+        runtimeMode: ChatRuntimeMode = .default,
         onEvent: @escaping @Sendable (ChatStreamEvent) async -> Void
     ) async throws(APIError) {
         let path = try routePath(
@@ -214,7 +219,8 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
                     stream: true,
                     workbenchIssue: nil,
                     sourceIDs: sourceIDs,
-                    linkedIssueID: linkedIssueID
+                    linkedIssueID: linkedIssueID,
+                    runtimeMode: runtimeMode
                 )
             )
         } catch {
@@ -1910,6 +1916,7 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         let workbenchIssue: ChatIssueDraftDTO?
         var sourceIDs: [String] = []
         var linkedIssueID: String? = nil
+        var runtimeMode: ChatRuntimeMode = .default
     }
 
     private struct AddChatSourceRequest: Encodable, Sendable {

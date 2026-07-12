@@ -9,6 +9,38 @@ public enum ChatComposerMode: String, CaseIterable, Equatable, Sendable {
     public var showsIssuePicker: Bool { self == .linkIssue }
 }
 
+public enum ChatRuntimeMode: String, CaseIterable, Equatable, Sendable, Codable {
+    case `default`
+    case plan
+    case bypass
+}
+
+public struct ChatComposerSessionState: Equatable, Sendable {
+    public var draftMessage = ""
+    public var mode: ChatComposerMode = .chat
+    public var selectedMissionID = ""
+    public var issueTitle = ""
+    public var issueDescription = ""
+    public var acceptanceCriteria = ""
+    public var parallelMode = "exclusive"
+    public var riskLevel = "medium"
+    public var linkedIssueID = ""
+    public var selectedSources: [ChatSourceReferenceDTO] = []
+    public var runtimeMode: ChatRuntimeMode = .default
+
+    public init() {}
+
+    public mutating func resetAfterSuccessfulSubmission() {
+        draftMessage = ""
+        mode = .chat
+        issueTitle = ""
+        issueDescription = ""
+        acceptanceCriteria = ""
+        linkedIssueID = ""
+        selectedSources = []
+    }
+}
+
 public enum ChatComposerPrimaryAction: Equatable, Sendable {
     case send
     case stop

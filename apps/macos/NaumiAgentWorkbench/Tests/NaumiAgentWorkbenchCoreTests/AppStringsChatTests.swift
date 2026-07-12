@@ -13,6 +13,8 @@ struct AppStringsChatTests {
         #expect(AppStrings.Chat.permissionRequired(.zhCN) == "此操作需要你的确认")
         #expect(AppStrings.Chat.permissionRisk(.zhCN, level: "medium") == "风险：中")
         #expect(AppStrings.Chat.allowOnce(.zhCN) == "允许一次")
+        #expect(AppStrings.Chat.bypassAndRun(.zhCN) == "Bypass 并执行")
+        #expect(AppStrings.Chat.runtimeMode(.zhCN, mode: .plan) == "规划模式")
         #expect(AppStrings.Chat.deny(.zhCN) == "拒绝")
         #expect(AppStrings.Chat.executionStage(.zhCN, stage: .cancelled) == "已取消")
     }
@@ -25,6 +27,8 @@ struct AppStringsChatTests {
         #expect(AppStrings.Chat.permissionRequired(.enUS) == "This action needs your approval")
         #expect(AppStrings.Chat.permissionRisk(.enUS, level: "medium") == "Risk: Medium")
         #expect(AppStrings.Chat.allowOnce(.enUS) == "Allow once")
+        #expect(AppStrings.Chat.bypassAndRun(.enUS) == "Bypass and run")
+        #expect(AppStrings.Chat.runtimeMode(.enUS, mode: .bypass) == "Bypass")
         #expect(AppStrings.Chat.deny(.enUS) == "Deny")
         #expect(AppStrings.Chat.executionStage(.enUS, stage: .cancelled) == "Cancelled")
     }
