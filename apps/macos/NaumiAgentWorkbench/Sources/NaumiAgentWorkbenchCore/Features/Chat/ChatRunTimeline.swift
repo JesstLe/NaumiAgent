@@ -147,9 +147,8 @@ struct ChatRunTimeline: View {
 
     private func localizedStepTitle(_ step: ChatExecutionStep) -> String {
         switch step.kind {
-        case .analysis: locale == .zhCN ? "分析请求" : "Analyze request"
-        case .response: locale == .zhCN ? "整理回复" : "Compose response"
-        case .linkedIssue: locale == .zhCN ? "创建关联任务" : "Create linked issue"
+        case .analysis, .response, .linkedIssue:
+            AppStrings.Chat.executionStep(locale, kind: step.kind)
         case .tool: step.title
         }
     }

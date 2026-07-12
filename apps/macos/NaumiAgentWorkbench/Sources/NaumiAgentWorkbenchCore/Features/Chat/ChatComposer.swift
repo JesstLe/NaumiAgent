@@ -77,7 +77,8 @@ struct ChatComposer: View {
                                 Image(systemName: "xmark")
                             }
                             .buttonStyle(.plain)
-                            .help(locale == .zhCN ? "移除来源" : "Remove source")
+                            .help(AppStrings.Chat.removeSource(locale))
+                            .accessibilityLabel(AppStrings.Chat.removeSource(locale))
                         }
                     }
                 }

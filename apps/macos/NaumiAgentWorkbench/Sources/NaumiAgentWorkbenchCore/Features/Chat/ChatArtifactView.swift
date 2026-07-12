@@ -40,13 +40,7 @@ struct ChatArtifactView: View {
     }
 
     private var title: String {
-        switch artifact.kind {
-        case .command: locale == .zhCN ? "命令结果" : "Command result"
-        case .task: locale == .zhCN ? "任务" : "Task"
-        case .validation: locale == .zhCN ? "验证结果" : "Validation"
-        case .fileChange: locale == .zhCN ? "文件变更" : "File changes"
-        case .subagent: locale == .zhCN ? "子 Agent 结果" : "Subagent result"
-        }
+        AppStrings.Chat.artifactTitle(locale, kind: artifact.kind)
     }
 
     private var symbol: String {

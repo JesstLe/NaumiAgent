@@ -36,6 +36,8 @@ struct AppStringsChatTests {
         #expect(AppStrings.Chat.environmentSection(.zhCN) == "环境信息")
         #expect(AppStrings.Chat.backgroundProcessesSection(.zhCN) == "后台进程")
         #expect(AppStrings.Chat.sourcesSection(.zhCN) == "来源")
+        #expect(AppStrings.Chat.copyMessage(.zhCN) == "复制消息")
+        #expect(AppStrings.Chat.changedFiles(.zhCN) == "修改文件")
 
         #expect(AppStrings.Chat.addSource(.enUS) == "Add source")
         #expect(AppStrings.Chat.taskLinkage(.enUS) == "Task linkage")
@@ -43,5 +45,7 @@ struct AppStringsChatTests {
         #expect(AppStrings.Chat.environmentSection(.enUS) == "Environment")
         #expect(AppStrings.Chat.backgroundProcessesSection(.enUS) == "Background processes")
         #expect(AppStrings.Chat.sourcesSection(.enUS) == "Sources")
+        #expect(AppStrings.Chat.copyMessage(.enUS) == "Copy message")
+        #expect(AppStrings.Chat.changedFiles(.enUS) == "Changed files")
     }
 }

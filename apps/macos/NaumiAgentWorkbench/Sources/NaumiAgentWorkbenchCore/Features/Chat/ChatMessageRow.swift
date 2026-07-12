@@ -1,9 +1,11 @@
+import AppKit
 import SwiftUI
 
 public struct ChatMessageRow: View {
     let message: ChatMessageDTO
     let locale: AppLocale
     let showsLinkedIssue: Bool
+    @State private var isHovering = false
 
     public init(message: ChatMessageDTO, locale: AppLocale, showsLinkedIssue: Bool = false) {
         self.message = message
@@ -38,6 +40,16 @@ public struct ChatMessageRow: View {
                     .font(.caption)
                     .foregroundStyle(.green)
                 }
+                if isHovering {
+                    Button(action: copyMessage) {
+                        Image(systemName: "doc.on.doc")
+                            .frame(width: 16, height: 16)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help(AppStrings.Chat.copyMessage(locale))
+                    .accessibilityLabel(AppStrings.Chat.copyMessage(locale))
+                }
             }
             .padding(style == .compactBubble ? 12 : 0)
             .frame(maxWidth: style == .compactBubble ? 520 : .infinity, alignment: .leading)
@@ -53,5 +65,11 @@ public struct ChatMessageRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: style == .compactBubble ? .trailing : .leading)
+        .onHover { isHovering = $0 }
+    }
+
+    private func copyMessage() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(message.content, forType: .string)
     }
 }

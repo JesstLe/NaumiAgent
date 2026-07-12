@@ -203,6 +203,99 @@ public enum AppStrings {
             locale == .zhCN ? "暂无来源" : "No sources"
         }
 
+        public static func removeSource(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "移除来源" : "Remove source"
+        }
+
+        public static func copyMessage(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "复制消息" : "Copy message"
+        }
+
+        public static func userRole(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "你" : "You"
+        }
+
+        public static func noOpenIssues(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无开放问题" : "No open issues"
+        }
+
+        public static func noRuns(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无运行记录" : "No runs yet"
+        }
+
+        public static func localService(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "本地服务" : "Local service"
+        }
+
+        public static func workspace(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "工作区" : "Workspace"
+        }
+
+        public static func changedFiles(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "修改文件" : "Changed files"
+        }
+
+        public static func lineChanges(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "增删行" : "Line changes"
+        }
+
+        public static func notGitWorkspace(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "不是 Git 工作区" : "Not a Git workspace"
+        }
+
+        public static func commitsAhead(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "领先提交" : "Commits ahead"
+        }
+
+        public static func commitsBehind(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "落后提交" : "Commits behind"
+        }
+
+        public static func noWorktree(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无工作区" : "No worktree"
+        }
+
+        public static func openIssuesLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "开放问题" : "Open issues"
+        }
+
+        public static func approvalsLabel(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "待审批" : "Approvals"
+        }
+
+        public static func artifactTitle(
+            _ locale: AppLocale,
+            kind: ChatArtifactKind
+        ) -> String {
+            switch (locale, kind) {
+            case (.zhCN, .command): "命令结果"
+            case (.zhCN, .task): "任务"
+            case (.zhCN, .validation): "验证结果"
+            case (.zhCN, .fileChange): "文件变更"
+            case (.zhCN, .subagent): "子 Agent 结果"
+            case (.enUS, .command): "Command result"
+            case (.enUS, .task): "Task"
+            case (.enUS, .validation): "Validation"
+            case (.enUS, .fileChange): "File changes"
+            case (.enUS, .subagent): "Subagent result"
+            }
+        }
+
+        public static func executionStep(
+            _ locale: AppLocale,
+            kind: ChatExecutionStepKind
+        ) -> String {
+            switch (locale, kind) {
+            case (.zhCN, .analysis): "分析请求"
+            case (.zhCN, .response): "整理回复"
+            case (.zhCN, .linkedIssue): "创建关联任务"
+            case (.enUS, .analysis): "Analyze request"
+            case (.enUS, .response): "Compose response"
+            case (.enUS, .linkedIssue): "Create linked issue"
+            case (_, .tool): "Tool"
+            }
+        }
+
         public static func recentRuns(_ locale: AppLocale) -> String {
             locale == .zhCN ? "最近运行" : "Recent runs"
         }
