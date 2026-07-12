@@ -17,6 +17,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var messagesResult: Result<ChatMessageListDTO, APIError>?
     var chatRunsResult: Result<ChatRunsDTO, APIError>?
     var chatRunResult: Result<ChatRunDTO, APIError>?
+    var chatEnvironmentResult: Result<ChatEnvironmentDTO, APIError>?
     var eventsResult: Result<WorkbenchEventsDTO, APIError>?
     var eventResult: Result<EventDTO, APIError>?
     var validationRunsResult: Result<ValidationRunsDTO, APIError>?
@@ -142,6 +143,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     var runValidationWithSnapshotCallCount: Int = 0
     var fetchMessagesCallCount: Int = 0
     var fetchChatRunsCallCount: Int = 0
+    var fetchChatEnvironmentCallCount: Int = 0
     private(set) var streamMessageCalls: [StreamMessageCall] = []
     private(set) var permissionResolutionCalls: [PermissionResolutionCall] = []
     var createdSessions: [[String: String?]] = []
@@ -332,6 +334,14 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     ) async throws(APIError) -> ChatRunDTO {
         guard let chatRunResult else { throw .invalidResponse }
         return try chatRunResult.get()
+    }
+
+    func fetchChatEnvironment(
+        sessionID: String
+    ) async throws(APIError) -> ChatEnvironmentDTO {
+        fetchChatEnvironmentCallCount += 1
+        guard let chatEnvironmentResult else { throw .invalidResponse }
+        return try chatEnvironmentResult.get()
     }
 
     func fetchEvents(
@@ -1226,7 +1236,7 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     }
 }
 
-extension FakeWorkbenchAPIProvider: ChatStreamingProviding, ChatRunProviding {}
+extension FakeWorkbenchAPIProvider: ChatStreamingProviding, ChatRunProviding, ChatEnvironmentProviding {}
 
 actor FakeWorkbenchEventProvider: WorkbenchEventProviding, WorkbenchEventStreamTemplateConfiguring {
     private var continuation: AsyncThrowingStream<WorkbenchEventStreamMessage, Error>.Continuation?
@@ -10257,14 +10267,32 @@ final class DaemonControllerTests {
             completedAt: "2026-07-12T08:00:02Z"
         )
         let api = FakeWorkbenchAPIProvider()
+        let environment = ChatEnvironmentDTO(
+            sessionID: "sess-001",
+            workspaceRoot: "/repo",
+            workspaceName: "repo",
+            git: ChatGitEnvironmentDTO(
+                available: true,
+                branch: "main",
+                changedFiles: 2,
+                additions: 7,
+                deletions: 1,
+                ahead: 0,
+                behind: 0,
+                dirty: true
+            )
+        )
         await api.setMessagesResult(.success(ChatMessageListDTO(messages: [], total: 0)))
         await api.setChatRunsResult(.success(ChatRunsDTO(runs: [run], total: 1)))
+        await api.setChatEnvironmentResult(.success(environment))
 
         let controller = DaemonController(appState: appState, apiProvider: api)
         await controller.refreshChatMessages()
 
         #expect(appState.chatRuns == [run])
+        #expect(appState.chatEnvironment == environment)
         #expect(await api.fetchChatRunsCallCount == 1)
+        #expect(await api.fetchChatEnvironmentCallCount == 1)
     }
 
     @Test @MainActor func refreshChatMessagesIgnoresSessionUnavailableAfterSelectedSessionChanges() async throws {
@@ -10696,6 +10724,12 @@ extension FakeWorkbenchAPIProvider {
 
     fileprivate func setChatRunsResult(_ result: Result<ChatRunsDTO, APIError>) {
         chatRunsResult = result
+    }
+
+    fileprivate func setChatEnvironmentResult(
+        _ result: Result<ChatEnvironmentDTO, APIError>
+    ) {
+        chatEnvironmentResult = result
     }
 
     fileprivate func setFetchMessagesHook(_ hook: (@Sendable () async -> Void)?) {

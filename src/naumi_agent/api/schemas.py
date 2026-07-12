@@ -103,6 +103,44 @@ class ChatRunListResponse(BaseModel):
     total: int
 
 
+class ChatGitEnvironmentResponse(BaseModel):
+    available: bool = False
+    branch: str = ""
+    changed_files: int = 0
+    additions: int = 0
+    deletions: int = 0
+    ahead: int = 0
+    behind: int = 0
+    dirty: bool = False
+
+
+class ChatBackgroundProcessResponse(BaseModel):
+    id: str
+    command: str
+    pid: int | None = None
+    status: str
+    started_at: str = ""
+    cwd: str
+
+
+class ChatSourceReferenceResponse(BaseModel):
+    id: str
+    kind: str
+    title: str
+    path: str
+    run_id: str
+    created_at: str
+
+
+class ChatEnvironmentResponse(BaseModel):
+    session_id: str
+    workspace_root: str
+    workspace_name: str
+    git: ChatGitEnvironmentResponse
+    processes: list[ChatBackgroundProcessResponse] = Field(default_factory=list)
+    sources: list[ChatSourceReferenceResponse] = Field(default_factory=list)
+
+
 class PermissionResolutionCreate(BaseModel):
     decision: Literal["allow", "deny", "bypass"]
 

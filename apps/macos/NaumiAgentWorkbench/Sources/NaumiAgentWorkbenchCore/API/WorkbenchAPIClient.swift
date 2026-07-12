@@ -3,7 +3,7 @@ import Foundation
 /// REST client for the NaumiAgent Workbench Kernel.
 ///
 /// SwiftUI 不直接读写 SQLite / 跑 git / pytest；所有业务状态通过此 client 访问本地 API。
-public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRouteTemplateConfiguring, ChatStreamingProviding, ChatRunProviding {
+public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRouteTemplateConfiguring, ChatStreamingProviding, ChatRunProviding, ChatEnvironmentProviding {
     public var baseURL: URL
     public let session: URLSession
     private var bearerToken: String?
@@ -285,6 +285,12 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         runID: String
     ) async throws(APIError) -> ChatRunDTO {
         try await get(path: encodePath("sessions", sessionID, "runs", runID))
+    }
+
+    public func fetchChatEnvironment(
+        sessionID: String
+    ) async throws(APIError) -> ChatEnvironmentDTO {
+        try await get(path: encodePath("sessions", sessionID, "environment"))
     }
 
     public func fetchEvents(

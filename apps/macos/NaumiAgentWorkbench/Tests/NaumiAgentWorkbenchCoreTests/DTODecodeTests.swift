@@ -4,6 +4,51 @@ import Testing
 
 struct DTODecodeTests {
 
+    @Test func decodeChatEnvironmentUsesRealWorkspaceState() throws {
+        let data = Data(
+            """
+            {
+              "session_id": "sess-1",
+              "workspace_root": "/repo",
+              "workspace_name": "repo",
+              "git": {
+                "available": true,
+                "branch": "codex/chat",
+                "changed_files": 3,
+                "additions": 21,
+                "deletions": 4,
+                "ahead": 2,
+                "behind": 1,
+                "dirty": true
+              },
+              "processes": [{
+                "id": "bg_0001",
+                "command": "swift run",
+                "pid": 123,
+                "status": "running",
+                "started_at": "2026-07-12T10:00:00Z",
+                "cwd": "."
+              }],
+              "sources": [{
+                "id": "source-1",
+                "kind": "source",
+                "title": "ChatView.swift",
+                "path": "Sources/ChatView.swift",
+                "run_id": "run-1",
+                "created_at": "2026-07-12T10:01:00Z"
+              }]
+            }
+            """.utf8
+        )
+
+        let environment = try JSONDecoder().decode(ChatEnvironmentDTO.self, from: data)
+
+        #expect(environment.git.additions == 21)
+        #expect(environment.git.deletions == 4)
+        #expect(environment.processes.first?.command == "swift run")
+        #expect(environment.sources.first?.path == "Sources/ChatView.swift")
+    }
+
     @Test func decodeZHSnapshot() throws {
         let data = try loadFixture(named: "workbench_snapshot_zh")
         let snapshot = try JSONDecoder().decode(WorkbenchSnapshotDTO.self, from: data)

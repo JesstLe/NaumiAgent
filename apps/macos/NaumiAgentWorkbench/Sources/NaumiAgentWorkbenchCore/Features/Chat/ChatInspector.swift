@@ -15,22 +15,34 @@ struct ChatInspector: View {
                     valueRow(
                         icon: "folder",
                         title: appState.locale == .zhCN ? "工作区" : "Workspace",
-                        value: workspaceName
+                        value: environment?.workspaceName ?? workspaceName
                     )
-                    if let branch = activeWorktree?.branch, !branch.isEmpty {
-                        valueRow(icon: "point.3.connected.trianglepath.dotted", title: "Git", value: branch)
+                    if let git = environment?.git, git.available {
+                        valueRow(
+                            icon: "point.3.connected.trianglepath.dotted",
+                            title: "Git",
+                            value: git.branch
+                        )
                     }
                 }
 
                 Divider()
 
                 inspectorSection(AppStrings.Chat.changesSection(appState.locale)) {
-                    let dirtyFiles = appState.worktrees.reduce(0) { $0 + $1.dirtyFiles }
-                    valueRow(
-                        icon: "doc.badge.ellipsis",
-                        title: appState.locale == .zhCN ? "修改文件" : "Changed files",
-                        value: "\(dirtyFiles)"
-                    )
+                    if let git = environment?.git, git.available {
+                        valueRow(
+                            icon: "doc.badge.ellipsis",
+                            title: appState.locale == .zhCN ? "修改文件" : "Changed files",
+                            value: "\(git.changedFiles)"
+                        )
+                        valueRow(
+                            icon: "plus.forwardslash.minus",
+                            title: appState.locale == .zhCN ? "增删行" : "Line changes",
+                            value: "+\(git.additions)  -\(git.deletions)"
+                        )
+                    } else {
+                        emptyRow(appState.locale == .zhCN ? "不是 Git 工作区" : "Not a Git workspace")
+                    }
                 }
 
                 Divider()
@@ -41,10 +53,33 @@ struct ChatInspector: View {
                         valueRow(
                             icon: "arrow.up.right",
                             title: appState.locale == .zhCN ? "领先提交" : "Commits ahead",
-                            value: "\(worktree.commitsAhead)"
+                            value: "\(environment?.git.ahead ?? worktree.commitsAhead)"
                         )
+                        if let behind = environment?.git.behind, behind > 0 {
+                            valueRow(
+                                icon: "arrow.down.left",
+                                title: appState.locale == .zhCN ? "落后提交" : "Commits behind",
+                                value: "\(behind)"
+                            )
+                        }
                     } else {
                         emptyRow(appState.locale == .zhCN ? "暂无工作区" : "No worktree")
+                    }
+                }
+
+                Divider()
+
+                inspectorSection(AppStrings.Chat.backgroundProcessesSection(appState.locale)) {
+                    if let processes = environment?.processes, !processes.isEmpty {
+                        ForEach(processes.prefix(4)) { process in
+                            valueRow(
+                                icon: process.status == "running" ? "terminal.fill" : "terminal",
+                                title: process.command,
+                                value: process.pid.map(String.init) ?? process.status
+                            )
+                        }
+                    } else {
+                        emptyRow(AppStrings.Chat.noBackgroundProcesses(appState.locale))
                     }
                 }
 
@@ -65,6 +100,18 @@ struct ChatInspector: View {
                         value: "\(appState.approvals.count)"
                     )
                 }
+
+                Divider()
+
+                inspectorSection(AppStrings.Chat.sourcesSection(appState.locale)) {
+                    if let sources = environment?.sources, !sources.isEmpty {
+                        ForEach(sources.prefix(5)) { source in
+                            valueRow(icon: "doc.text", title: source.title, value: source.path)
+                        }
+                    } else {
+                        emptyRow(AppStrings.Chat.noSources(appState.locale))
+                    }
+                }
             }
             .workbenchSurface(.group)
             .padding(14)
@@ -74,6 +121,10 @@ struct ChatInspector: View {
 
     private var activeWorktree: WorktreeDTO? {
         appState.selectedWorktree ?? appState.worktrees.first
+    }
+
+    private var environment: ChatEnvironmentDTO? {
+        appState.chatEnvironment
     }
 
     private var selectedMission: MissionDTO? {

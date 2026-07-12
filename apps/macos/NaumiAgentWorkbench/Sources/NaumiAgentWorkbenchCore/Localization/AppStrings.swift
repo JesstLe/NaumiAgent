@@ -179,6 +179,22 @@ public enum AppStrings {
             locale == .zhCN ? "关联对象" : "Linked objects"
         }
 
+        public static func backgroundProcessesSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "后台进程" : "Background processes"
+        }
+
+        public static func sourcesSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "来源" : "Sources"
+        }
+
+        public static func noBackgroundProcesses(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无受管进程" : "No managed processes"
+        }
+
+        public static func noSources(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "暂无来源" : "No sources"
+        }
+
         public static func recentRuns(_ locale: AppLocale) -> String {
             locale == .zhCN ? "最近运行" : "Recent runs"
         }

@@ -964,6 +964,31 @@ final class WorkbenchAPIClientTests {
         #expect(history.runs.first?.id == "run-1")
     }
 
+    @Test func fetchChatEnvironmentEncodesSessionPath() async throws {
+        let json = Data(
+            """
+            {"session_id":"sess/a","workspace_root":"/repo","workspace_name":"repo","git":{"available":true,"branch":"main","changed_files":0,"additions":0,"deletions":0,"ahead":0,"behind":0,"dirty":false},"processes":[],"sources":[]}
+            """.utf8
+        )
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/sessions/sess%2Fa/environment" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let environment = try await makeClient().fetchChatEnvironment(sessionID: "sess/a")
+
+        #expect(environment.workspaceName == "repo")
+        #expect(environment.git.branch == "main")
+    }
+
     @Test func fetchEvents() async throws {
         let json = Data(
             """

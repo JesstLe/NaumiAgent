@@ -104,6 +104,10 @@ public enum WorkbenchPreviewLoader {
         appState.sessions = [previewSession(from: snapshot, locale: locale)]
         appState.chatMessages = previewChatMessages(locale: locale)
         appState.activeChatExecution = previewChatExecution(locale: locale)
+        appState.chatEnvironment = previewChatEnvironment(
+            sessionID: snapshot.sessionID,
+            locale: locale
+        )
         appState.missions = snapshot.missions
         appState.agentProfiles = snapshot.agentProfiles
         appState.validationRuns = previewValidationRuns(from: snapshot, locale: locale)
@@ -131,6 +135,47 @@ public enum WorkbenchPreviewLoader {
             supportsCloudSync: false,
             supportedLocales: [AppLocale.zhCN.rawValue, AppLocale.enUS.rawValue],
             protocolVersion: 1
+        )
+    }
+
+    public static func previewChatEnvironment(
+        sessionID: String,
+        locale: AppLocale
+    ) -> ChatEnvironmentDTO {
+        ChatEnvironmentDTO(
+            sessionID: sessionID,
+            workspaceRoot: "/Users/demo/NaumiAgent",
+            workspaceName: "NaumiAgent",
+            git: ChatGitEnvironmentDTO(
+                available: true,
+                branch: "codex/mac-workbench-mvp",
+                changedFiles: 6,
+                additions: 148,
+                deletions: 23,
+                ahead: 2,
+                behind: 0,
+                dirty: true
+            ),
+            processes: [
+                ChatBackgroundProcessDTO(
+                    id: "bg-preview-1",
+                    command: "naumi serve --host 127.0.0.1 --port 8765",
+                    pid: 4242,
+                    status: "running",
+                    startedAt: "2026-07-12T08:00:00Z",
+                    cwd: "."
+                )
+            ],
+            sources: [
+                ChatSourceReferenceDTO(
+                    id: "source-preview-1",
+                    kind: "source",
+                    title: locale == .zhCN ? "产品问题清单" : "Product issue report",
+                    path: "docs/naumi_agent_issues_report.md",
+                    runID: "run-preview-1",
+                    createdAt: "2026-07-12T08:01:00Z"
+                )
+            ]
         )
     }
 

@@ -32,10 +32,14 @@ struct AppStringsChatTests {
         #expect(AppStrings.Chat.taskLinkage(.zhCN) == "任务联动")
         #expect(AppStrings.Chat.stopButton(.zhCN) == "停止")
         #expect(AppStrings.Chat.environmentSection(.zhCN) == "环境信息")
+        #expect(AppStrings.Chat.backgroundProcessesSection(.zhCN) == "后台进程")
+        #expect(AppStrings.Chat.sourcesSection(.zhCN) == "来源")
 
         #expect(AppStrings.Chat.addSource(.enUS) == "Add source")
         #expect(AppStrings.Chat.taskLinkage(.enUS) == "Task linkage")
         #expect(AppStrings.Chat.stopButton(.enUS) == "Stop")
         #expect(AppStrings.Chat.environmentSection(.enUS) == "Environment")
+        #expect(AppStrings.Chat.backgroundProcessesSection(.enUS) == "Background processes")
+        #expect(AppStrings.Chat.sourcesSection(.enUS) == "Sources")
     }
 }
