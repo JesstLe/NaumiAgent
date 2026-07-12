@@ -7,6 +7,7 @@ public enum ChatMessagePresentation {
     public static func displayMessages(from messages: [ChatMessageDTO]) -> [ChatMessageDTO] {
         messages.filter { message in
             !["system", "tool"].contains(message.role)
+                && !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 }
