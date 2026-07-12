@@ -103,6 +103,10 @@ public enum WorkbenchPreviewLoader {
 
         appState.sessions = [previewSession(from: snapshot, locale: locale)]
         appState.chatMessages = previewChatMessages(locale: locale)
+        appState.chatRuns = previewChatRuns(
+            sessionID: snapshot.sessionID,
+            locale: locale
+        )
         appState.activeChatExecution = previewChatExecution(locale: locale)
         appState.chatEnvironment = previewChatEnvironment(
             sessionID: snapshot.sessionID,
@@ -177,6 +181,33 @@ public enum WorkbenchPreviewLoader {
                 )
             ]
         )
+    }
+
+    public static func previewChatRuns(
+        sessionID: String,
+        locale: AppLocale
+    ) -> [ChatRunDTO] {
+        [
+            ChatRunDTO(
+                id: "run-preview-complete",
+                sessionID: sessionID,
+                userMessageID: "preview-chat-user-0",
+                assistantMessageID: "preview-chat-assistant-0",
+                status: "completed",
+                startedAt: "2026-07-12T07:55:00Z",
+                updatedAt: "2026-07-12T07:55:04Z",
+                completedAt: "2026-07-12T07:55:04Z",
+                steps: [
+                    ChatRunStepDTO(
+                        sequence: 1,
+                        stage: "response",
+                        status: "completed",
+                        summary: locale == .zhCN ? "已整理风险摘要" : "Risk summary complete",
+                        eventID: "event-preview-complete"
+                    )
+                ]
+            )
+        ]
     }
 
     public static func previewChatMessages(locale: AppLocale) -> [ChatMessageDTO] {

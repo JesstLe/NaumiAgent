@@ -163,6 +163,14 @@ public enum AppStrings {
             locale == .zhCN ? "仅对话" : "Chat only"
         }
 
+        public static func linkExistingIssue(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "关联现有 Issue" : "Link existing issue"
+        }
+
+        public static func issueNeedsSelection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "请选择要关联的 Issue" : "Select an issue to link"
+        }
+
         public static func environmentSection(_ locale: AppLocale) -> String {
             locale == .zhCN ? "环境信息" : "Environment"
         }
@@ -251,6 +259,8 @@ public enum AppStrings {
                 return "答复已完成"
             case (.zhCN, .failed):
                 return "对话未完成"
+            case (.zhCN, .cancelled):
+                return "已取消"
             case (.enUS, .preparing):
                 return "Preparing"
             case (.enUS, .analyzing):
@@ -267,6 +277,8 @@ public enum AppStrings {
                 return "Response complete"
             case (.enUS, .failed):
                 return "Conversation incomplete"
+            case (.enUS, .cancelled):
+                return "Cancelled"
             }
         }
 

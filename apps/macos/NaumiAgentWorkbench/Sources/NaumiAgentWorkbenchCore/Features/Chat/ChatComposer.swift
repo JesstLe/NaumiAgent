@@ -9,14 +9,19 @@ struct ChatComposer: View {
     @Binding var acceptanceCriteria: String
     @Binding var parallelMode: String
     @Binding var riskLevel: String
+    @Binding var linkedIssueID: String
 
     let missions: [MissionDTO]
+    let issues: [IssueDTO]
+    let sources: [ChatSourceReferenceDTO]
     let locale: AppLocale
     let isSending: Bool
     let errorMessage: String?
     let disabledReason: String?
     let canSend: Bool
     let onPrimaryAction: () -> Void
+    let onAddSource: () -> Void
+    let onRemoveSource: (String) -> Void
 
     var body: some View {
         let presentation = ChatComposerPresentation(
@@ -46,6 +51,38 @@ struct ChatComposer: View {
                 )
             }
 
+            if mode.showsIssuePicker, !issues.isEmpty {
+                Picker(AppStrings.Chat.linkExistingIssue(locale), selection: $linkedIssueID) {
+                    ForEach(issues, id: \.taskID) { issue in
+                        Text(issue.task?.subject ?? issue.taskID).tag(issue.taskID)
+                    }
+                }
+                .pickerStyle(.menu)
+                .controlSize(.small)
+            }
+
+            if !sources.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(sources) { source in
+                        HStack(spacing: 7) {
+                            Image(systemName: source.kind == "screenshot" ? "photo" : "doc")
+                                .foregroundStyle(.secondary)
+                            Text(source.title)
+                                .font(.caption)
+                                .lineLimit(1)
+                            Spacer()
+                            Button {
+                                onRemoveSource(source.id)
+                            } label: {
+                                Image(systemName: "xmark")
+                            }
+                            .buttonStyle(.plain)
+                            .help(locale == .zhCN ? "移除来源" : "Remove source")
+                        }
+                    }
+                }
+            }
+
             HStack(spacing: 8) {
                 Menu {
                     Button {
@@ -58,6 +95,14 @@ struct ChatComposer: View {
                     } label: {
                         Label(AppStrings.Chat.createIssueToggle(locale), systemImage: "checklist")
                     }
+                    Button {
+                        mode = .linkIssue
+                        if linkedIssueID.isEmpty {
+                            linkedIssueID = issues.first?.taskID ?? ""
+                        }
+                    } label: {
+                        Label(AppStrings.Chat.linkExistingIssue(locale), systemImage: "link.badge.plus")
+                    }
                 } label: {
                     Label(
                         mode == .chat
@@ -69,6 +114,14 @@ struct ChatComposer: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
                 .help(AppStrings.Chat.taskLinkage(locale))
+
+                Button(action: onAddSource) {
+                    Image(systemName: "paperclip")
+                }
+                .buttonStyle(.plain)
+                .disabled(sources.count >= 3)
+                .help(AppStrings.Chat.addSource(locale))
+                .accessibilityLabel(AppStrings.Chat.addSource(locale))
 
                 if !missions.isEmpty {
                     Picker(AppStrings.Chat.missionSection(locale), selection: $selectedMissionID) {

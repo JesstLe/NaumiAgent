@@ -10,6 +10,7 @@ public enum ChatExecutionStage: Equatable, Sendable {
     case creatingLinkedIssue
     case completed
     case failed
+    case cancelled
 }
 
 public enum ChatExecutionStepKind: Equatable, Sendable {
@@ -24,6 +25,7 @@ public enum ChatExecutionStepStatus: Equatable, Sendable {
     case awaitingApproval
     case completed
     case failed
+    case cancelled
 }
 
 public struct ChatExecutionStep: Equatable, Sendable, Identifiable {
@@ -97,6 +99,7 @@ public struct ChatExecutionPresentation: Equatable, Sendable, Identifiable {
     public private(set) var isResolvingPermission: Bool
     public private(set) var steps: [ChatExecutionStep]
     public private(set) var artifacts: [ChatArtifactPresentation]
+    public private(set) var serverRunID: String?
 
     public init(
         id: String,
@@ -115,10 +118,14 @@ public struct ChatExecutionPresentation: Equatable, Sendable, Identifiable {
         self.isResolvingPermission = false
         self.steps = []
         self.artifacts = []
+        self.serverRunID = nil
     }
 
     public func applying(_ event: ChatStreamEvent, at date: Date = Date()) -> Self {
         var next = self
+        if let runID = event.stringValue(for: "run_id"), !runID.isEmpty {
+            next.serverRunID = runID
+        }
 
         switch event.type {
         case .turnStart, .thinkingStart, .thinkingDelta, .thinkingEnd:
@@ -257,6 +264,109 @@ public struct ChatExecutionPresentation: Equatable, Sendable, Identifiable {
         next.isResolvingPermission = false
         next.completedAt = date
         return next
+    }
+
+    public func cancelling(at date: Date = Date()) -> Self {
+        var next = self
+        next.stage = .cancelled
+        next.activeToolName = nil
+        next.permission = nil
+        next.isResolvingPermission = false
+        next.completedAt = date
+        for index in next.steps.indices where next.steps[index].status == .running {
+            next.steps[index].status = .cancelled
+            next.steps[index].completedAt = date
+        }
+        return next
+    }
+
+    public static func restoring(_ run: ChatRunDTO) -> Self {
+        let formatter = ISO8601DateFormatter()
+        let startedAt = formatter.date(from: run.startedAt) ?? Date()
+        var restored = ChatExecutionPresentation(
+            id: run.id,
+            stage: restoredStage(status: run.status, steps: run.steps),
+            startedAt: startedAt
+        )
+        restored.serverRunID = run.id
+        if !run.completedAt.isEmpty {
+            restored.completedAt = formatter.date(from: run.completedAt)
+        }
+        restored.steps = run.steps.map { step in
+            ChatExecutionStep(
+                id: "\(step.sequence)-\(step.eventID)",
+                kind: restoredStepKind(step.stage),
+                status: restoredStepStatus(step.status),
+                title: step.summary,
+                detail: step.detail.isEmpty ? nil : step.detail,
+                startedAt: formatter.date(from: step.startedAt) ?? startedAt,
+                completedAt: formatter.date(from: step.completedAt)
+            )
+        }
+        restored.artifacts = run.artifacts.compactMap(restoredArtifact)
+        return restored
+    }
+
+    private static func restoredStage(
+        status: String,
+        steps: [ChatRunStepDTO]
+    ) -> ChatExecutionStage {
+        switch status {
+        case "completed": return .completed
+        case "failed": return .failed
+        case "cancelled": return .cancelled
+        default:
+            switch steps.last?.stage {
+            case "approval": return .awaitingApproval
+            case "tool", "subagent": return .runningTool
+            case "response": return .composing
+            default: return .analyzing
+            }
+        }
+    }
+
+    private static func restoredStepKind(_ stage: String) -> ChatExecutionStepKind {
+        switch stage {
+        case "tool", "approval", "subagent": return .tool
+        case "response": return .response
+        case "linked_issue": return .linkedIssue
+        default: return .analysis
+        }
+    }
+
+    private static func restoredStepStatus(_ status: String) -> ChatExecutionStepStatus {
+        switch status {
+        case "completed": return .completed
+        case "failed": return .failed
+        case "cancelled": return .cancelled
+        case "awaiting_approval", "needs_confirmation": return .awaitingApproval
+        default: return .running
+        }
+    }
+
+    private static func restoredArtifact(
+        _ artifact: ChatArtifactDTO
+    ) -> ChatArtifactPresentation? {
+        let kind: ChatArtifactKind
+        switch artifact.kind {
+        case "command": kind = .command
+        case "task", "linked_issue": kind = .task
+        case "validation": kind = .validation
+        case "file_change": kind = .fileChange
+        case "subagent": kind = .subagent
+        default: return nil
+        }
+        let summary = artifact.summary.values.compactMap { value -> String? in
+            guard case .string(let text) = value else { return nil }
+            return text
+        }.joined(separator: " · ")
+        return ChatArtifactPresentation(
+            id: artifact.id,
+            kind: kind,
+            title: artifact.title,
+            summary: summary,
+            status: artifact.status
+        )
     }
 
     private mutating func applyPermissionEvent(_ event: ChatStreamEvent, at date: Date) {

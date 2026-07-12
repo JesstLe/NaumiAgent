@@ -132,7 +132,16 @@ public struct ChatRunsDTO: Decodable, Equatable, Sendable {
     }
 }
 
+public struct ChatRunCancelDTO: Decodable, Equatable, Sendable {
+    public let status: String
+
+    public init(status: String) {
+        self.status = status
+    }
+}
+
 public protocol ChatRunProviding: Sendable {
     func fetchChatRuns(sessionID: String, limit: Int) async throws(APIError) -> ChatRunsDTO
     func fetchChatRun(sessionID: String, runID: String) async throws(APIError) -> ChatRunDTO
+    func cancelChatRun(sessionID: String, runID: String) async throws(APIError) -> ChatRunCancelDTO
 }

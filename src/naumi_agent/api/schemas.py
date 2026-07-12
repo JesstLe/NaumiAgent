@@ -48,6 +48,8 @@ class MessageCreate(BaseModel):
     content: str
     stream: bool = True
     workbench_issue: WorkbenchIssueFromMessage | None = None
+    source_ids: list[str] = Field(default_factory=list, max_length=3)
+    linked_issue_id: str | None = None
 
 
 class MessageResponse(BaseModel):
@@ -128,8 +130,14 @@ class ChatSourceReferenceResponse(BaseModel):
     kind: str
     title: str
     path: str
-    run_id: str
+    run_id: str = ""
     created_at: str
+
+
+class ChatSourceCreate(BaseModel):
+    path: str
+    kind: Literal["file", "screenshot"] = "file"
+    title: str = ""
 
 
 class ChatEnvironmentResponse(BaseModel):
@@ -139,6 +147,10 @@ class ChatEnvironmentResponse(BaseModel):
     git: ChatGitEnvironmentResponse
     processes: list[ChatBackgroundProcessResponse] = Field(default_factory=list)
     sources: list[ChatSourceReferenceResponse] = Field(default_factory=list)
+
+
+class ChatRunCancelResponse(BaseModel):
+    status: Literal["cancellation_requested", "already_finished"]
 
 
 class PermissionResolutionCreate(BaseModel):

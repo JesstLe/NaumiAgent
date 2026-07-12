@@ -1805,7 +1805,7 @@ class AgentEngine:
             usage=self._usage,
         )
 
-    async def run(self, task: str) -> AgentResult:
+    async def run(self, task: str, turn_context: str = "") -> AgentResult:
         """执行任务 — 自适应规划 + ReAct 主循环."""
         self._ensure_system_prompt()
 
@@ -1824,7 +1824,10 @@ class AgentEngine:
                 error="用户输入已被 hook 拦截。",
             )
         task = hooked_task
+        self._remove_turn_context_messages()
         self._append_message({"role": "user", "content": task})
+        if turn_context:
+            self._append_message({"role": "system", "content": turn_context})
         await self._inject_relevant_memories(task)
         tools = self._get_openai_tools_cached()
 
@@ -1869,6 +1872,7 @@ class AgentEngine:
         self,
         task: str,
         on_event: EventCallback,
+        turn_context: str = "",
     ) -> AgentResult:
         """执行任务 — 流式 ReAct 主循环，通过回调实时推送事件."""
         perf_start = time.perf_counter()
@@ -1979,7 +1983,10 @@ class AgentEngine:
             )
             return AgentResult(status="error", error=message)
         task = hooked_task
+        self._remove_turn_context_messages()
         self._append_message({"role": "user", "content": task})
+        if turn_context:
+            self._append_message({"role": "system", "content": turn_context})
         phase_start = time.perf_counter()
         await self._inject_relevant_memories(task)
         await emit_perf_phase("memory_recall", "记忆召回", phase_start)
@@ -2053,6 +2060,19 @@ class AgentEngine:
             result.task_summary = format_task_list(tasks)
 
         return result
+
+    def _remove_turn_context_messages(self) -> None:
+        marker = "<naumi_turn_context>"
+        self._messages = [
+            message
+            for message in self._messages
+            if marker not in str(message.get("content", ""))
+        ]
+        self._full_history = [
+            message
+            for message in self._full_history
+            if marker not in str(message.get("content", ""))
+        ]
 
     async def _run_orchestrated(
         self, plan: Any, tools: list[dict[str, Any]] | None

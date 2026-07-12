@@ -6,22 +6,25 @@ import asyncio
 import uuid
 from dataclasses import asdict
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from naumi_agent.api.chat_environment import ChatEnvironmentCollector
-from naumi_agent.api.chat_runs import ChatRunRecord, ChatRunStore
+from naumi_agent.api.chat_runs import ChatRunRecord, ChatRunStore, SourceReferenceRecord
 from naumi_agent.api.deps import AuthDep
 from naumi_agent.api.schemas import (
     ChatArtifactResponse,
     ChatBackgroundProcessResponse,
     ChatEnvironmentResponse,
     ChatGitEnvironmentResponse,
+    ChatRunCancelResponse,
     ChatRunListResponse,
     ChatRunResponse,
     ChatRunStepResponse,
+    ChatSourceCreate,
     ChatSourceReferenceResponse,
     MessageCreate,
     MessageListResponse,
@@ -99,6 +102,16 @@ async def send_message(
     session = await engine.session_store.load(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    if body.source_ids or body.linked_issue_id:
+        turn_context, source_records, linked_issue = await _build_turn_context(
+            engine=engine,
+            store=_chat_run_store(request),
+            session_id=session_id,
+            source_ids=body.source_ids,
+            linked_issue_id=body.linked_issue_id,
+        )
+    else:
+        turn_context, source_records, linked_issue = "", [], None
 
     has_issue_draft = body.workbench_issue is not None
     explicit_stream = "stream" in body.model_fields_set
@@ -109,7 +122,15 @@ async def send_message(
 
     if body.stream:
         return StreamingResponse(
-            _stream_response(engine, session_id, body.content, request),
+            _stream_response(
+                engine,
+                session_id,
+                body.content,
+                request,
+                turn_context=turn_context,
+                source_records=source_records,
+                linked_issue=linked_issue,
+            ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -117,11 +138,13 @@ async def send_message(
     async with _engine_lock(request):
         if not await engine.load_session(session_id):
             raise HTTPException(status_code=404, detail="Session not found")
-        result = await engine.run(body.content)
+        result = await engine.run(body.content, turn_context=turn_context)
         workbench_metadata = await _create_workbench_issue_from_message(
             engine, session_id, body
         )
     metadata = {"turns": result.usage.turns, "cost_usd": result.usage.total_cost_usd}
+    if linked_issue is not None:
+        metadata["linked_issue"] = {"task_id": linked_issue.task_id}
     metadata.update(workbench_metadata)
     return MessageResponse(
         id=uuid.uuid4().hex[:12],
@@ -231,6 +254,73 @@ async def get_chat_environment(
 
 
 @router.post(
+    "/sessions/{session_id}/sources",
+    response_model=ChatSourceReferenceResponse,
+    status_code=201,
+)
+async def add_chat_source(
+    session_id: str,
+    body: ChatSourceCreate,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    if not await engine.session_store.load(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    workspace_root = Path(engine.workspace_root).expanduser().resolve()
+    requested = Path(body.path).expanduser()
+    resolved = (
+        requested.resolve()
+        if requested.is_absolute()
+        else (workspace_root / requested).resolve()
+    )
+    try:
+        relative_path = str(resolved.relative_to(workspace_root))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="来源必须位于当前工作区内") from exc
+    if not resolved.is_file():
+        raise HTTPException(status_code=400, detail="来源文件不存在或不是普通文件")
+    source = await _chat_run_store(request).add_source(
+        session_id=session_id,
+        kind=body.kind,
+        title=body.title.strip() or resolved.name,
+        path=relative_path,
+    )
+    return ChatSourceReferenceResponse(
+        id=source.id,
+        kind=source.kind,
+        title=source.title,
+        path=source.path,
+        created_at=source.created_at,
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/runs/{run_id}/cancel",
+    response_model=ChatRunCancelResponse,
+)
+async def cancel_chat_run(
+    session_id: str,
+    run_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    active = _active_chat_run_tasks(request)
+    entry = active.get(run_id)
+    if entry is not None:
+        active_session_id, task = entry
+        if active_session_id != session_id:
+            raise HTTPException(status_code=404, detail="Chat run not found")
+        task.cancel()
+        return ChatRunCancelResponse(status="cancellation_requested")
+
+    run = await _chat_run_store(request).get_run(session_id, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Chat run not found")
+    return ChatRunCancelResponse(status="already_finished")
+
+
+@router.post(
     "/sessions/{session_id}/permissions/{call_id}/resolve",
     response_model=PermissionResolutionResponse,
 )
@@ -253,7 +343,16 @@ async def resolve_permission(
 # --- SSE Stream ---
 
 
-async def _stream_response(engine, session_id: str, content: str, request: Request):
+async def _stream_response(
+    engine,
+    session_id: str,
+    content: str,
+    request: Request,
+    *,
+    turn_context: str = "",
+    source_records: list[SourceReferenceRecord] | None = None,
+    linked_issue=None,
+):
     queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
     store = getattr(request.app.state, "chat_run_store", None)
     run = (
@@ -265,6 +364,32 @@ async def _stream_response(engine, session_id: str, content: str, request: Reque
         else None
     )
     step_sequences: dict[str, int] = {}
+    if run is not None:
+        for source in source_records or []:
+            await store.append_artifact(
+                run.id,
+                kind="source",
+                title=source.title,
+                summary={"path": source.path},
+                status="ready",
+                artifact_id=f"{run.id}-{source.id}",
+                metadata={"source_id": source.id},
+            )
+        if linked_issue is not None:
+            await store.append_artifact(
+                run.id,
+                kind="task",
+                title=linked_issue.task_id,
+                summary={
+                    "task_id": linked_issue.task_id,
+                    "mission_id": linked_issue.mission_id,
+                    "risk_level": linked_issue.risk_level.value
+                    if hasattr(linked_issue.risk_level, "value")
+                    else str(linked_issue.risk_level),
+                },
+                status="linked",
+                artifact_id=f"{run.id}-issue-{linked_issue.task_id}",
+            )
 
     async def on_event(event: str, data: dict[str, Any]) -> None:
         stream_event = _engine_event_to_stream_event(event, data, session_id=session_id)
@@ -278,7 +403,11 @@ async def _stream_response(engine, session_id: str, content: str, request: Reque
             async with _engine_lock(request):
                 if not await engine.load_session(session_id):
                     raise RuntimeError("Session not found")
-                result = await engine.run_streaming(content, on_event)
+                result = await engine.run_streaming(
+                    content,
+                    on_event,
+                    turn_context=turn_context,
+                )
                 terminal_event = StreamEvent(
                     type=EventType.AGENT_END,
                     data={
@@ -295,6 +424,10 @@ async def _stream_response(engine, session_id: str, content: str, request: Reque
                     )
                     await store.finish_run(run.id, status=result.status)
                 await queue.put(terminal_event)
+        except asyncio.CancelledError:
+            if run is not None:
+                await store.finish_run(run.id, status="cancelled")
+            raise
         except Exception as exc:
             error_event = StreamEvent(
                 type=EventType.AGENT_ERROR,
@@ -306,8 +439,12 @@ async def _stream_response(engine, session_id: str, content: str, request: Reque
                 await _persist_stream_event(store, run.id, error_event, step_sequences)
                 await store.finish_run(run.id, status="failed")
             await queue.put(error_event)
+        finally:
+            await queue.put(None)
 
     agent_task = asyncio.create_task(run_agent())
+    if run is not None:
+        _active_chat_run_tasks(request)[run.id] = (session_id, agent_task)
     try:
         while True:
             try:
@@ -320,10 +457,14 @@ async def _stream_response(engine, session_id: str, content: str, request: Reque
             if agent_task.done() and queue.empty():
                 break
     finally:
+        if not agent_task.done():
+            agent_task.cancel()
         try:
             await agent_task
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             pass
+        if run is not None:
+            _active_chat_run_tasks(request).pop(run.id, None)
 
 
 # --- Helpers ---
@@ -356,6 +497,72 @@ def _chat_run_store(request: Request) -> ChatRunStore:
     if store is None:
         raise HTTPException(status_code=503, detail="Chat run store unavailable")
     return store
+
+
+def _active_chat_run_tasks(
+    request: Request,
+) -> dict[str, tuple[str, asyncio.Task[None]]]:
+    active = getattr(request.app.state, "active_chat_run_tasks", None)
+    if active is None:
+        active = {}
+        request.app.state.active_chat_run_tasks = active
+    return active
+
+
+async def _build_turn_context(
+    *,
+    engine,
+    store: ChatRunStore,
+    session_id: str,
+    source_ids: list[str],
+    linked_issue_id: str | None = None,
+) -> tuple[str, list[SourceReferenceRecord], object | None]:
+    by_id = {source.id: source for source in await store.list_sources(session_id)}
+    sources: list[SourceReferenceRecord] = []
+    sections = ["<naumi_turn_context>"]
+    workspace_root = Path(engine.workspace_root).expanduser().resolve()
+    if source_ids:
+        sections.append("## 用户选择的本轮来源")
+    for source_id in source_ids:
+        source = by_id.get(source_id)
+        if source is None:
+            raise HTTPException(status_code=400, detail="来源不存在或不属于当前会话")
+        path = (workspace_root / source.path).resolve()
+        try:
+            path.relative_to(workspace_root)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="来源路径越界") from exc
+        if not path.is_file():
+            raise HTTPException(status_code=400, detail="来源文件已不存在")
+        content = path.read_text(encoding="utf-8", errors="replace")[:20000]
+        sections.extend(
+            [
+                f"### {source.title}",
+                f"路径：{source.path}",
+                "```text",
+                content,
+                "```",
+            ]
+        )
+        sources.append(source)
+    linked_issue = None
+    if linked_issue_id:
+        linked_issue = await engine.workbench_store.get_issue(
+            session_id, linked_issue_id
+        )
+        if linked_issue is None:
+            raise HTTPException(status_code=400, detail="关联 Issue 不存在")
+        sections.extend(
+            [
+                "## 用户关联的现有 Issue",
+                f"- task_id: {linked_issue.task_id}",
+                f"- mission_id: {linked_issue.mission_id}",
+                f"- risk_level: {linked_issue.risk_level}",
+                f"- acceptance_criteria: {linked_issue.acceptance_criteria}",
+            ]
+        )
+    sections.append("<naumi_turn_context>")
+    return "\n".join(sections), sources, linked_issue
 
 
 def _chat_run_to_response(run: ChatRunRecord) -> ChatRunResponse:

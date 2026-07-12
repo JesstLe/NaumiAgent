@@ -1939,7 +1939,12 @@ public final class DaemonController: Sendable {
     ///
     /// If no session is selected, a lightweight chat session is created first so
     /// first-run users can talk to the app before creating a Mission.
-    public func sendDailyMessage(content: String, issueDraft: ChatIssueDraftDTO?) async {
+    public func sendDailyMessage(
+        content: String,
+        issueDraft: ChatIssueDraftDTO?,
+        sourceIDs: [String] = [],
+        linkedIssueID: String? = nil
+    ) async {
         let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedContent.isEmpty else {
             return
@@ -1974,7 +1979,9 @@ public final class DaemonController: Sendable {
             await sendStreamedDailyMessage(
                 content: trimmedContent,
                 sessionID: sessionID,
-                streamingProvider: streamingProvider
+                streamingProvider: streamingProvider,
+                sourceIDs: sourceIDs,
+                linkedIssueID: linkedIssueID
             )
             return
         }
@@ -2061,23 +2068,90 @@ public final class DaemonController: Sendable {
         }
     }
 
+    /// Requests cancellation for the active server run and updates the local
+    /// timeline immediately. Closing the client stream remains the fallback
+    /// before the daemon has emitted a stable run id.
+    public func cancelActiveChatRun() async {
+        guard let sessionID = appState.selectedSessionID,
+              let execution = appState.activeChatExecution else {
+            return
+        }
+
+        appState.activeChatExecution = execution.cancelling()
+        guard let runID = execution.serverRunID,
+              let runProvider = apiProvider as? any ChatRunProviding else {
+            return
+        }
+
+        do {
+            _ = try await runProvider.cancelChatRun(
+                sessionID: sessionID,
+                runID: runID
+            )
+        } catch {
+            guard appState.selectedSessionID == sessionID else { return }
+            appState.lastError = error
+        }
+    }
+
+    public func addChatSource(path: String, kind: String = "file") async -> ChatSourceReferenceDTO? {
+        guard let sessionID = appState.selectedSessionID else {
+            appState.lastError = .missingSelectedSession
+            return nil
+        }
+        guard let sourceProvider = apiProvider as? any ChatSourceProviding else {
+            appState.lastError = .invalidResponse
+            return nil
+        }
+        do {
+            let source = try await sourceProvider.addChatSource(
+                sessionID: sessionID,
+                path: path,
+                kind: kind,
+                title: URL(fileURLWithPath: path).lastPathComponent
+            )
+            guard appState.selectedSessionID == sessionID else { return nil }
+            await refreshChatMessages()
+            return source
+        } catch {
+            guard appState.selectedSessionID == sessionID else { return nil }
+            appState.lastError = error
+            return nil
+        }
+    }
+
     private func sendStreamedDailyMessage(
         content: String,
         sessionID: String,
-        streamingProvider: any ChatStreamingProviding
+        streamingProvider: any ChatStreamingProviding,
+        sourceIDs: [String],
+        linkedIssueID: String?
     ) async {
         let executionID = "chat-\(UUID().uuidString)"
         appState.activeChatExecution = ChatExecutionPresentation(id: executionID)
 
         do {
-            try await streamingProvider.streamMessage(
-                sessionID: sessionID,
-                content: content
-            ) { [weak self] event in
+            let eventHandler: @Sendable (ChatStreamEvent) async -> Void = { [weak self] event in
                 await self?.applyChatStreamEvent(
                     event,
                     expectedSessionID: sessionID,
                     executionID: executionID
+                )
+            }
+            if (!sourceIDs.isEmpty || linkedIssueID != nil),
+               let contextProvider = apiProvider as? any ChatContextStreamingProviding {
+                try await contextProvider.streamMessage(
+                    sessionID: sessionID,
+                    content: content,
+                    sourceIDs: sourceIDs,
+                    linkedIssueID: linkedIssueID,
+                    onEvent: eventHandler
+                )
+            } else {
+                try await streamingProvider.streamMessage(
+                    sessionID: sessionID,
+                    content: content,
+                    onEvent: eventHandler
                 )
             }
             guard appState.selectedSessionID == sessionID,

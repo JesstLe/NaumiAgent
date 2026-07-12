@@ -3,7 +3,7 @@ import Foundation
 /// REST client for the NaumiAgent Workbench Kernel.
 ///
 /// SwiftUI 不直接读写 SQLite / 跑 git / pytest；所有业务状态通过此 client 访问本地 API。
-public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRouteTemplateConfiguring, ChatStreamingProviding, ChatRunProviding, ChatEnvironmentProviding {
+public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRouteTemplateConfiguring, ChatStreamingProviding, ChatContextStreamingProviding, ChatRunProviding, ChatEnvironmentProviding, ChatSourceProviding {
     public var baseURL: URL
     public let session: URLSession
     private var bearerToken: String?
@@ -174,6 +174,22 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         content: String,
         onEvent: @escaping @Sendable (ChatStreamEvent) async -> Void
     ) async throws(APIError) {
+        try await streamMessage(
+            sessionID: sessionID,
+            content: content,
+            sourceIDs: [],
+            linkedIssueID: nil,
+            onEvent: onEvent
+        )
+    }
+
+    public func streamMessage(
+        sessionID: String,
+        content: String,
+        sourceIDs: [String],
+        linkedIssueID: String?,
+        onEvent: @escaping @Sendable (ChatStreamEvent) async -> Void
+    ) async throws(APIError) {
         let path = try routePath(
             named: "send_message",
             replacements: ["session_id": sessionID],
@@ -193,7 +209,13 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
             let encoder = JSONEncoder()
             encoder.keyEncodingStrategy = .convertToSnakeCase
             request.httpBody = try encoder.encode(
-                SendMessageRequest(content: content, stream: true, workbenchIssue: nil)
+                SendMessageRequest(
+                    content: content,
+                    stream: true,
+                    workbenchIssue: nil,
+                    sourceIDs: sourceIDs,
+                    linkedIssueID: linkedIssueID
+                )
             )
         } catch {
             throw .decodingFailed(String(describing: error))
@@ -291,6 +313,25 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         sessionID: String
     ) async throws(APIError) -> ChatEnvironmentDTO {
         try await get(path: encodePath("sessions", sessionID, "environment"))
+    }
+
+    public func addChatSource(
+        sessionID: String,
+        path: String,
+        kind: String,
+        title: String
+    ) async throws(APIError) -> ChatSourceReferenceDTO {
+        try await post(
+            path: encodePath("sessions", sessionID, "sources"),
+            body: AddChatSourceRequest(path: path, kind: kind, title: title)
+        )
+    }
+
+    public func cancelChatRun(
+        sessionID: String,
+        runID: String
+    ) async throws(APIError) -> ChatRunCancelDTO {
+        try await post(path: encodePath("sessions", sessionID, "runs", runID, "cancel"))
     }
 
     public func fetchEvents(
@@ -1867,6 +1908,14 @@ public actor WorkbenchAPIClient: Sendable, WorkbenchAPIProviding, WorkbenchRoute
         let content: String
         let stream: Bool
         let workbenchIssue: ChatIssueDraftDTO?
+        var sourceIDs: [String] = []
+        var linkedIssueID: String? = nil
+    }
+
+    private struct AddChatSourceRequest: Encodable, Sendable {
+        let path: String
+        let kind: String
+        let title: String
     }
 
     private struct PermissionResolutionRequest: Encodable, Sendable {

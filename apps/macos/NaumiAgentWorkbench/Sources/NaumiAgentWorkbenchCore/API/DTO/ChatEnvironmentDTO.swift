@@ -132,3 +132,12 @@ public struct ChatEnvironmentDTO: Decodable, Equatable, Sendable {
 public protocol ChatEnvironmentProviding: Sendable {
     func fetchChatEnvironment(sessionID: String) async throws(APIError) -> ChatEnvironmentDTO
 }
+
+public protocol ChatSourceProviding: Sendable {
+    func addChatSource(
+        sessionID: String,
+        path: String,
+        kind: String,
+        title: String
+    ) async throws(APIError) -> ChatSourceReferenceDTO
+}

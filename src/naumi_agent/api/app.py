@@ -32,6 +32,7 @@ async def lifespan(app: FastAPI):
     app.state.engine = engine
     runtime_dir = Path(config.memory.session_db_path).expanduser().resolve().parent
     app.state.chat_run_store = ChatRunStore(runtime_dir / "chat-runs.db")
+    app.state.active_chat_run_tasks = {}
     app.state.permission_broker = permission_broker
     app.state.config = config
     app.state.engine_lock = asyncio.Lock()

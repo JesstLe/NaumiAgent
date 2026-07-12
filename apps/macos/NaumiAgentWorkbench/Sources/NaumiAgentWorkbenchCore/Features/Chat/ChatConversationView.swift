@@ -5,6 +5,7 @@ struct ChatConversationView<Composer: View>: View {
     let execution: ChatExecutionPresentation?
     let locale: AppLocale
     let onPermissionDecision: (ChatPermissionDecision) -> Void
+    let onReview: () -> Void
     @ViewBuilder let composer: () -> Composer
 
     var body: some View {
@@ -35,7 +36,8 @@ struct ChatConversationView<Composer: View>: View {
                             ChatRunTimeline(
                                 execution: execution,
                                 locale: locale,
-                                onPermissionDecision: onPermissionDecision
+                                onPermissionDecision: onPermissionDecision,
+                                onReview: onReview
                             )
                             .id(execution.id)
                         }

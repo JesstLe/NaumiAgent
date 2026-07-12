@@ -2,6 +2,10 @@ import SwiftUI
 
 struct ChatInspector: View {
     let appState: AppState
+    let onReview: () -> Void
+    let onMission: (String) -> Void
+    let onIssues: () -> Void
+    let onSource: (ChatSourceReferenceDTO) -> Void
 
     var body: some View {
         ScrollView {
@@ -30,10 +34,11 @@ struct ChatInspector: View {
 
                 inspectorSection(AppStrings.Chat.changesSection(appState.locale)) {
                     if let git = environment?.git, git.available {
-                        valueRow(
+                        actionRow(
                             icon: "doc.badge.ellipsis",
                             title: appState.locale == .zhCN ? "修改文件" : "Changed files",
-                            value: "\(git.changedFiles)"
+                            value: "\(git.changedFiles)",
+                            action: onReview
                         )
                         valueRow(
                             icon: "plus.forwardslash.minus",
@@ -87,18 +92,27 @@ struct ChatInspector: View {
 
                 inspectorSection(AppStrings.Chat.linkedObjectsSection(appState.locale)) {
                     if let mission = selectedMission {
-                        valueRow(icon: "scope", title: "Mission", value: mission.title)
+                        actionRow(
+                            icon: "scope",
+                            title: "Mission",
+                            value: mission.title,
+                            action: { onMission(mission.id) }
+                        )
                     }
-                    valueRow(
+                    actionRow(
                         icon: "checklist",
                         title: appState.locale == .zhCN ? "开放问题" : "Open issues",
-                        value: "\(appState.issues.count)"
+                        value: "\(appState.issues.count)",
+                        action: onIssues
                     )
                     valueRow(
                         icon: "checkmark.shield",
                         title: appState.locale == .zhCN ? "待审批" : "Approvals",
                         value: "\(appState.approvals.count)"
                     )
+                    if let run = appState.selectedChatRun {
+                        valueRow(icon: "clock", title: run.id, value: run.status)
+                    }
                 }
 
                 Divider()
@@ -106,7 +120,12 @@ struct ChatInspector: View {
                 inspectorSection(AppStrings.Chat.sourcesSection(appState.locale)) {
                     if let sources = environment?.sources, !sources.isEmpty {
                         ForEach(sources.prefix(5)) { source in
-                            valueRow(icon: "doc.text", title: source.title, value: source.path)
+                            actionRow(
+                                icon: "doc.text",
+                                title: source.title,
+                                value: source.path,
+                                action: { onSource(source) }
+                            )
                         }
                     } else {
                         emptyRow(AppStrings.Chat.noSources(appState.locale))
@@ -166,6 +185,19 @@ struct ChatInspector: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
+    }
+
+    private func actionRow(
+        icon: String,
+        title: String,
+        value: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            valueRow(icon: icon, title: title, value: value)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func emptyRow(_ text: String) -> some View {

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Codex-grade daily chat surface backed by the real Workbench session.
@@ -13,6 +14,8 @@ public struct ChatView: View {
     @State private var acceptanceCriteria = ""
     @State private var parallelMode = "exclusive"
     @State private var riskLevel = "medium"
+    @State private var linkedIssueID = ""
+    @State private var selectedSources: [ChatSourceReferenceDTO] = []
     @State private var isSending = false
     @State private var sendError: APIError? = nil
     @State private var sendTask: Task<Void, Never>? = nil
@@ -32,7 +35,13 @@ public struct ChatView: View {
                 issues: appState.issues,
                 tasks: appState.snapshot?.tasks ?? [],
                 runs: appState.chatRuns,
-                locale: appState.locale
+                locale: appState.locale,
+                onIssueSelect: { taskID in
+                    ChatNavigationCommand.issue(taskID: taskID).apply(to: appState)
+                },
+                onRunSelect: { runID in
+                    ChatNavigationCommand.run(id: runID).apply(to: appState)
+                }
             )
             .frame(width: 280)
 
@@ -40,9 +49,12 @@ public struct ChatView: View {
 
             ChatConversationView(
                 messages: displayedChatMessages,
-                execution: appState.activeChatExecution,
+                execution: displayedExecution,
                 locale: appState.locale,
-                onPermissionDecision: resolvePermission
+                onPermissionDecision: resolvePermission,
+                onReview: {
+                    ChatNavigationCommand.review.apply(to: appState)
+                }
             ) {
                 ChatComposer(
                     draft: $draftMessage,
@@ -53,20 +65,39 @@ public struct ChatView: View {
                     acceptanceCriteria: $acceptanceCriteria,
                     parallelMode: $parallelMode,
                     riskLevel: $riskLevel,
+                    linkedIssueID: $linkedIssueID,
                     missions: appState.missions,
+                    issues: appState.issues,
+                    sources: selectedSources,
                     locale: appState.locale,
                     isSending: isSending,
                     errorMessage: sendError?.localizedMessage(locale: appState.locale),
                     disabledReason: sendDisabledReason,
                     canSend: canSend,
-                    onPrimaryAction: performPrimaryAction
+                    onPrimaryAction: performPrimaryAction,
+                    onAddSource: chooseSource,
+                    onRemoveSource: { sourceID in
+                        selectedSources.removeAll { $0.id == sourceID }
+                    }
                 )
             }
             .frame(width: 800)
 
             Divider()
 
-            ChatInspector(appState: appState)
+            ChatInspector(
+                appState: appState,
+                onReview: { ChatNavigationCommand.review.apply(to: appState) },
+                onMission: { id in
+                    ChatNavigationCommand.mission(id: id).apply(to: appState)
+                },
+                onIssues: {
+                    if let issue = appState.issues.first {
+                        ChatNavigationCommand.issue(taskID: issue.taskID).apply(to: appState)
+                    }
+                },
+                onSource: openSource
+            )
                 .frame(width: 360)
         }
         .frame(width: 1440, height: 858, alignment: .topLeading)
@@ -89,6 +120,12 @@ public struct ChatView: View {
         ChatMessagePresentation.displayMessages(from: appState.chatMessages)
     }
 
+    private var displayedExecution: ChatExecutionPresentation? {
+        if let active = appState.activeChatExecution { return active }
+        guard let run = appState.selectedChatRun else { return nil }
+        return ChatExecutionPresentation.restoring(run)
+    }
+
     private var canSend: Bool {
         guard ChatComposerPresentation.canSend(draft: draftMessage, isSending: isSending) else {
             return false
@@ -97,6 +134,7 @@ public struct ChatView: View {
             guard currentMissionID != nil else { return false }
             if isHighRiskIssue && acceptanceCriteriaLines.isEmpty { return false }
         }
+        if composerMode == .linkIssue, linkedIssueID.isEmpty { return false }
         return true
     }
 
@@ -108,6 +146,9 @@ public struct ChatView: View {
         }
         if composerMode == .createIssue && isHighRiskIssue && acceptanceCriteriaLines.isEmpty {
             return AppStrings.Chat.highRiskNeedsCriteria(appState.locale)
+        }
+        if composerMode == .linkIssue && linkedIssueID.isEmpty {
+            return AppStrings.Chat.issueNeedsSelection(appState.locale)
         }
         return nil
     }
@@ -151,7 +192,12 @@ public struct ChatView: View {
         isSending = true
 
         sendTask = Task { @MainActor in
-            await daemonController.sendDailyMessage(content: trimmedMessage, issueDraft: draft)
+            await daemonController.sendDailyMessage(
+                content: trimmedMessage,
+                issueDraft: draft,
+                sourceIDs: selectedSources.map(\.id),
+                linkedIssueID: composerMode == .linkIssue ? linkedIssueID : nil
+            )
             guard !Task.isCancelled else {
                 isSending = false
                 sendTask = nil
@@ -168,6 +214,11 @@ public struct ChatView: View {
                     acceptanceCriteria = ""
                     composerMode = .chat
                 }
+                selectedSources = []
+                if composerMode == .linkIssue {
+                    linkedIssueID = ""
+                    composerMode = .chat
+                }
             } else {
                 sendError = appState.lastError
             }
@@ -175,9 +226,13 @@ public struct ChatView: View {
     }
 
     private func cancelSending() {
-        sendTask?.cancel()
+        let activeTask = sendTask
         sendTask = nil
         isSending = false
+        Task { @MainActor in
+            await daemonController.cancelActiveChatRun()
+            activeTask?.cancel()
+        }
     }
 
     private func resolvePermission(_ decision: ChatPermissionDecision) {
@@ -207,6 +262,37 @@ public struct ChatView: View {
            !appState.missions.contains(where: { $0.id == selectedMissionID }) {
             selectedMissionID = appState.missions.first?.id ?? ""
         }
+    }
+
+    private func chooseSource() {
+        guard !appState.isPreviewFixture else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if let root = appState.chatEnvironment?.workspaceRoot, !root.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: root, isDirectory: true)
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { @MainActor in
+            guard let source = await daemonController.addChatSource(path: url.path) else {
+                return
+            }
+            if !selectedSources.contains(where: { $0.id == source.id }) {
+                selectedSources.append(source)
+            }
+        }
+    }
+
+    private func openSource(_ source: ChatSourceReferenceDTO) {
+        guard let workspaceRoot = appState.chatEnvironment?.workspaceRoot,
+              let command = ChatSourceOpenCommand(
+                source: source,
+                workspaceRoot: workspaceRoot
+              ) else {
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([command.fileURL])
     }
 }
 

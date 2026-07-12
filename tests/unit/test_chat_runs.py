@@ -77,3 +77,21 @@ async def test_run_store_upserts_same_step_sequence(tmp_path):
     assert len(restored.steps) == 1
     assert restored.steps[0].stage == "approval"
     assert restored.steps[0].status == "awaiting_approval"
+
+
+@pytest.mark.asyncio
+async def test_source_references_persist_and_remain_session_isolated(tmp_path):
+    db_path = tmp_path / "chat-runs.db"
+    store = ChatRunStore(db_path)
+    source = await store.add_source(
+        session_id="s1",
+        kind="file",
+        title="spec.md",
+        path="docs/spec.md",
+    )
+
+    restored = await ChatRunStore(db_path).list_sources("s1")
+
+    assert [item.id for item in restored] == [source.id]
+    assert restored[0].path == "docs/spec.md"
+    assert await store.list_sources("s2") == []

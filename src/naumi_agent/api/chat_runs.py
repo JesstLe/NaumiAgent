@@ -51,6 +51,17 @@ class ChatRunRecord:
     artifacts: list[ChatArtifactRecord] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class SourceReferenceRecord:
+    id: str
+    session_id: str
+    kind: str
+    title: str
+    path: str
+    created_at: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 class ChatRunStore:
     """SQLite store with session isolation and idempotent step sequencing."""
 
@@ -100,6 +111,72 @@ class ChatRunStore:
             )
             await db.commit()
         return record
+
+    async def add_source(
+        self,
+        *,
+        session_id: str,
+        kind: str,
+        title: str,
+        path: str,
+        source_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SourceReferenceRecord:
+        source = SourceReferenceRecord(
+            id=source_id or uuid.uuid4().hex[:12],
+            session_id=session_id,
+            kind=kind,
+            title=title,
+            path=path,
+            created_at=_now_iso(),
+            metadata=metadata or {},
+        )
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            await db.execute(
+                """
+                INSERT INTO chat_sources (
+                    id, session_id, kind, title, path, created_at, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    source.id,
+                    source.session_id,
+                    source.kind,
+                    source.title,
+                    source.path,
+                    source.created_at,
+                    json.dumps(source.metadata, ensure_ascii=False),
+                ),
+            )
+            await db.commit()
+        return source
+
+    async def list_sources(self, session_id: str) -> list[SourceReferenceRecord]:
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                SELECT * FROM chat_sources
+                WHERE session_id = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (session_id,),
+            )
+            rows = await cursor.fetchall()
+            return [
+                SourceReferenceRecord(
+                    id=row["id"],
+                    session_id=row["session_id"],
+                    kind=row["kind"],
+                    title=row["title"],
+                    path=row["path"],
+                    created_at=row["created_at"],
+                    metadata=json.loads(row["metadata_json"]),
+                )
+                for row in rows
+            ]
 
     async def append_step(
         self,
@@ -348,6 +425,17 @@ class ChatRunStore:
                     metadata_json TEXT NOT NULL DEFAULT '{}',
                     FOREIGN KEY(run_id) REFERENCES chat_runs(id) ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS chat_sources (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}'
+                );
+                CREATE INDEX IF NOT EXISTS idx_chat_sources_session_created
+                    ON chat_sources(session_id, created_at DESC);
                 """
             )
             await db.commit()
