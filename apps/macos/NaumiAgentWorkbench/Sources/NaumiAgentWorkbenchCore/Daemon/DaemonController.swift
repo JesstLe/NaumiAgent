@@ -846,6 +846,20 @@ public final class DaemonController: Sendable {
                 return
             }
             appState.chatMessages = response.messages
+            if let runProvider = apiProvider as? any ChatRunProviding {
+                let runResponse = try await runProvider.fetchChatRuns(
+                    sessionID: sessionID,
+                    limit: 50
+                )
+                guard appState.selectedSessionID == sessionID else {
+                    return
+                }
+                appState.chatRuns = runResponse.runs
+                appState.selectedChatRun = runResponse.runs.first
+            } else {
+                appState.chatRuns = []
+                appState.selectedChatRun = nil
+            }
         } catch {
             guard appState.selectedSessionID == sessionID else {
                 return
@@ -1871,6 +1885,8 @@ public final class DaemonController: Sendable {
     private func clearSessionScopedState() {
         appState.snapshot = nil
         appState.chatMessages = []
+        appState.chatRuns = []
+        appState.selectedChatRun = nil
         appState.activeChatExecution = nil
         appState.timelineEvents = []
         appState.validationRuns = []

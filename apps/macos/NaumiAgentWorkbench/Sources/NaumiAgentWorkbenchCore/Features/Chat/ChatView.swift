@@ -31,6 +31,7 @@ public struct ChatView: View {
                 selectedMissionID: $selectedMissionID,
                 issues: appState.issues,
                 tasks: appState.snapshot?.tasks ?? [],
+                runs: appState.chatRuns,
                 locale: appState.locale
             )
             .frame(width: 280)

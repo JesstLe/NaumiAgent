@@ -453,6 +453,52 @@ struct DTODecodeTests {
         #expect(snapshot.proposals.first?.title == "高风险改动")
     }
 
+    @Test func decodeChatRunsIncludesOrderedStepsAndArtifacts() throws {
+        let data = Data(
+            """
+            {
+              "runs": [{
+                "id": "run-1",
+                "session_id": "sess-1",
+                "user_message_id": "msg-1",
+                "assistant_message_id": "msg-2",
+                "status": "completed",
+                "started_at": "2026-07-12T08:00:00Z",
+                "updated_at": "2026-07-12T08:00:02Z",
+                "completed_at": "2026-07-12T08:00:02Z",
+                "steps": [{
+                  "sequence": 1,
+                  "stage": "tool",
+                  "status": "completed",
+                  "summary": "delegate_task",
+                  "detail": "UI-PING",
+                  "event_id": "event-1",
+                  "started_at": "2026-07-12T08:00:00Z",
+                  "completed_at": "2026-07-12T08:00:01Z",
+                  "metadata": {}
+                }],
+                "artifacts": [{
+                  "id": "artifact-1",
+                  "kind": "subagent",
+                  "title": "delegate_task",
+                  "summary": {"text": "UI-PING"},
+                  "status": "success",
+                  "created_at": "2026-07-12T08:00:01Z",
+                  "metadata": {}
+                }]
+              }],
+              "total": 1
+            }
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(ChatRunsDTO.self, from: data)
+
+        #expect(response.total == 1)
+        #expect(response.runs[0].steps[0].sequence == 1)
+        #expect(response.runs[0].artifacts[0].summary["text"] == .string("UI-PING"))
+    }
+
     // MARK: - Helpers
 
     private func loadFixture(named: String) throws -> Data {

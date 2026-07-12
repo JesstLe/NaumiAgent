@@ -938,6 +938,32 @@ final class WorkbenchAPIClientTests {
         #expect(history.messages[0].metadata["source"] == .string("chat"))
     }
 
+    @Test func fetchChatRunsEncodesSessionAndLoadsHistory() async throws {
+        let json = Data(
+            """
+            {"runs":[{"id":"run-1","session_id":"sess/中文","user_message_id":"msg-1","assistant_message_id":"msg-2","status":"completed","started_at":"2026-07-12T08:00:00Z","updated_at":"2026-07-12T08:00:02Z","completed_at":"2026-07-12T08:00:02Z","steps":[],"artifacts":[]}],"total":1}
+            """.utf8
+        )
+
+        MockURLProtocol.requestHandler = { request in
+            guard request.url?.absoluteString == "http://127.0.0.1:8765/api/v1/sessions/sess%2F%E4%B8%AD%E6%96%87/runs?limit=50" else {
+                fatalError("Unexpected URL: \(String(describing: request.url))")
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, json)
+        }
+
+        let history = try await makeClient().fetchChatRuns(sessionID: "sess/中文", limit: 50)
+
+        #expect(history.total == 1)
+        #expect(history.runs.first?.id == "run-1")
+    }
+
     @Test func fetchEvents() async throws {
         let json = Data(
             """

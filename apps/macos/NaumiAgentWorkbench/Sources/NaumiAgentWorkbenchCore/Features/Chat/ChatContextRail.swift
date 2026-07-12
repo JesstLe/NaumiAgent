@@ -7,6 +7,7 @@ public struct ChatContextRail: View {
     @Binding var selectedMissionID: String
     let issues: [IssueDTO]
     let tasks: [TaskDTO]
+    let runs: [ChatRunDTO]
     let locale: AppLocale
 
     public init(
@@ -16,6 +17,7 @@ public struct ChatContextRail: View {
         selectedMissionID: Binding<String>,
         issues: [IssueDTO],
         tasks: [TaskDTO] = [],
+        runs: [ChatRunDTO] = [],
         locale: AppLocale
     ) {
         self.sessionID = sessionID
@@ -24,6 +26,7 @@ public struct ChatContextRail: View {
         _selectedMissionID = selectedMissionID
         self.issues = issues
         self.tasks = tasks
+        self.runs = runs
         self.locale = locale
     }
 
@@ -89,6 +92,33 @@ public struct ChatContextRail: View {
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 3)
+                    }
+                }
+            }
+
+            group(AppStrings.Chat.recentRuns(locale)) {
+                if runs.isEmpty {
+                    Text(locale == .zhCN ? "暂无运行记录" : "No runs yet")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(runs.prefix(4)) { run in
+                        HStack(spacing: 8) {
+                            Image(systemName: run.status == "completed"
+                                ? "checkmark.circle.fill"
+                                : "clock")
+                                .foregroundStyle(run.status == "completed" ? .green : .secondary)
+                                .frame(width: 14)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(run.steps.last?.summary ?? run.status)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .lineLimit(1)
+                                Text(run.status)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
                     }
                 }
             }

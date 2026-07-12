@@ -179,6 +179,10 @@ public enum AppStrings {
             locale == .zhCN ? "关联对象" : "Linked objects"
         }
 
+        public static func recentRuns(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "最近运行" : "Recent runs"
+        }
+
         public static func sending(_ locale: AppLocale) -> String {
             locale == .zhCN ? "发送中" : "Sending"
         }
