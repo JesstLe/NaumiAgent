@@ -147,6 +147,38 @@ public enum AppStrings {
             locale == .zhCN ? "发送" : "Send"
         }
 
+        public static func stopButton(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "停止" : "Stop"
+        }
+
+        public static func addSource(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "添加来源" : "Add source"
+        }
+
+        public static func taskLinkage(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "任务联动" : "Task linkage"
+        }
+
+        public static func chatOnly(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "仅对话" : "Chat only"
+        }
+
+        public static func environmentSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "环境信息" : "Environment"
+        }
+
+        public static func changesSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "变更" : "Changes"
+        }
+
+        public static func workspaceSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "本地工作区" : "Local workspace"
+        }
+
+        public static func linkedObjectsSection(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "关联对象" : "Linked objects"
+        }
+
         public static func sending(_ locale: AppLocale) -> String {
             locale == .zhCN ? "发送中" : "Sending"
         }

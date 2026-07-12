@@ -6,6 +6,7 @@ public struct ChatContextRail: View {
     let missions: [MissionDTO]
     @Binding var selectedMissionID: String
     let issues: [IssueDTO]
+    let tasks: [TaskDTO]
     let locale: AppLocale
 
     public init(
@@ -14,6 +15,7 @@ public struct ChatContextRail: View {
         missions: [MissionDTO],
         selectedMissionID: Binding<String>,
         issues: [IssueDTO],
+        tasks: [TaskDTO] = [],
         locale: AppLocale
     ) {
         self.sessionID = sessionID
@@ -21,6 +23,7 @@ public struct ChatContextRail: View {
         self.missions = missions
         _selectedMissionID = selectedMissionID
         self.issues = issues
+        self.tasks = tasks
         self.locale = locale
     }
 
@@ -57,7 +60,11 @@ public struct ChatContextRail: View {
             }
 
             group(AppStrings.GlobalStatus.openIssues(locale)) {
-                let summaries = ChatPresentation.issueSummaries(from: issues)
+                let titles = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0.subject) })
+                let summaries = ChatPresentation.issueSummaries(
+                    from: issues,
+                    taskTitlesByID: titles
+                )
                 if summaries.isEmpty {
                     Text(locale == .zhCN ? "暂无开放问题" : "No open issues")
                         .font(.callout)

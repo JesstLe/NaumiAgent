@@ -26,4 +26,16 @@ struct AppStringsChatTests {
         #expect(AppStrings.Chat.allowOnce(.enUS) == "Allow once")
         #expect(AppStrings.Chat.deny(.enUS) == "Deny")
     }
+
+    @Test func composerAndInspectorStringsAreBilingual() {
+        #expect(AppStrings.Chat.addSource(.zhCN) == "添加来源")
+        #expect(AppStrings.Chat.taskLinkage(.zhCN) == "任务联动")
+        #expect(AppStrings.Chat.stopButton(.zhCN) == "停止")
+        #expect(AppStrings.Chat.environmentSection(.zhCN) == "环境信息")
+
+        #expect(AppStrings.Chat.addSource(.enUS) == "Add source")
+        #expect(AppStrings.Chat.taskLinkage(.enUS) == "Task linkage")
+        #expect(AppStrings.Chat.stopButton(.enUS) == "Stop")
+        #expect(AppStrings.Chat.environmentSection(.enUS) == "Environment")
+    }
 }

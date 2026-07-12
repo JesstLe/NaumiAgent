@@ -15,10 +15,13 @@ struct ChatPresentationTests {
             issue(id: "high", risk: "high"),
         ]
 
-        let summaries = ChatPresentation.issueSummaries(from: issues)
+        let summaries = ChatPresentation.issueSummaries(
+            from: issues,
+            taskTitlesByID: ["critical": "关键任务"]
+        )
 
         #expect(summaries.map(\.id) == ["critical", "high", "medium", "low"])
-        #expect(summaries.map(\.title) == ["critical", "high", "medium", "low"])
+        #expect(summaries.map(\.title) == ["关键任务", "high", "medium", "low"])
     }
 
     @Test func unknownRolesRemainReadableDocuments() {

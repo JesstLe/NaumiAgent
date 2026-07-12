@@ -37,12 +37,15 @@ public enum ChatPresentation {
         }
     }
 
-    public static func issueSummaries(from issues: [IssueDTO]) -> [ChatIssueSummary] {
+    public static func issueSummaries(
+        from issues: [IssueDTO],
+        taskTitlesByID: [String: String] = [:]
+    ) -> [ChatIssueSummary] {
         issues
             .map { issue in
                 ChatIssueSummary(
                     id: issue.taskID,
-                    title: issue.task?.subject ?? issue.taskID,
+                    title: issue.task?.subject ?? taskTitlesByID[issue.taskID] ?? issue.taskID,
                     riskLevel: issue.riskLevel,
                     status: issue.task?.status ?? "pending",
                     owner: issue.task?.owner
