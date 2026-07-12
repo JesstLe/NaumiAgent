@@ -283,7 +283,7 @@ class JsonlEngineBridge:
                 },
             )
 
-    def status_payload(self) -> dict[str, Any]:
+    def status_payload(self, *, include_slash_commands: bool = True) -> dict[str, Any]:
         """Build the footer/status payload consumed by the terminal UI."""
         usage = self.engine.usage
         try:
@@ -299,12 +299,11 @@ class JsonlEngineBridge:
         except Exception:
             budget = {}
         workspace_root = Path(getattr(self.engine, "workspace_root", Path.cwd()))
-        return {
+        payload = {
             "mode": str(getattr(self.engine.runtime_mode, "value", self.engine.runtime_mode)),
             "permission_mode": str(
                 getattr(self.engine.permission_mode, "value", self.engine.permission_mode)
             ),
-            "slash_commands": _slash_command_payload(),
             "session_id": str(getattr(getattr(self.engine, "_session", None), "id", "")),
             "model": model,
             "workspace_root": str(workspace_root),
@@ -323,6 +322,9 @@ class JsonlEngineBridge:
             "git": _git_snapshot(workspace_root),
             "config_path": self.config_path,
         }
+        if include_slash_commands:
+            payload["slash_commands"] = _slash_command_payload()
+        return payload
 
     def _task_activity_payload(self) -> dict[str, int]:
         """Return compact task/activity counts for persistent footer rendering."""
@@ -388,7 +390,10 @@ class JsonlEngineBridge:
 
         if event_type == ClientEventType.HELLO:
             await self.emit(ServerEventType.ACK, {"event": event_type}, request_id=request_id)
-            await self.emit(ServerEventType.STATUS, self.status_payload())
+            await self.emit(
+                ServerEventType.STATUS,
+                self.status_payload(include_slash_commands=False),
+            )
             return
 
         if event_type == ClientEventType.PING:
@@ -905,14 +910,16 @@ class JsonlEngineBridge:
 
         if event in {
             "run_started",
-            "turn_start",
             "tool_end",
             "task_snapshot",
             "permission_bubble",
             "context_compacted",
             "error",
         }:
-            await self.emit(ServerEventType.STATUS, self.status_payload())
+            await self.emit(
+                ServerEventType.STATUS,
+                self.status_payload(include_slash_commands=False),
+            )
 
     async def confirm_permission(self, payload: dict[str, Any]) -> str:
         request_id = (
