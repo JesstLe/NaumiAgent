@@ -22,9 +22,11 @@ public struct ChatMessageRow: View {
             }
 
             VStack(alignment: .leading, spacing: 7) {
-                Text(ChatPresentation.roleLabel(for: message.role, locale: locale))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                if style == .document {
+                    Text(ChatPresentation.roleLabel(for: message.role, locale: locale))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
 
                 Text(message.content)
                     .font(.system(size: 14))
@@ -64,7 +66,10 @@ public struct ChatMessageRow: View {
                 Spacer(minLength: 72)
             }
         }
-        .frame(maxWidth: .infinity, alignment: style == .compactBubble ? .trailing : .leading)
+        .frame(
+            maxWidth: .infinity,
+            alignment: style == .compactBubble ? .trailing : .leading
+        )
         .onHover { isHovering = $0 }
     }
 

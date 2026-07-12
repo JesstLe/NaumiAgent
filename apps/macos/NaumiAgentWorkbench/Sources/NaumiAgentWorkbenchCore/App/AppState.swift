@@ -88,6 +88,9 @@ public final class AppState: Sendable {
     public var selectedChatRun: ChatRunDTO? = nil
     public var chatEnvironment: ChatEnvironmentDTO? = nil
     public var activeChatExecution: ChatExecutionPresentation? = nil
+    public var chatComposerState = ChatComposerSessionState()
+    public var isChatSending = false
+    public var chatSendError: APIError? = nil
     public var snapshot: WorkbenchSnapshotDTO? = nil
     public var timelineEvents: [EventDTO] = []
     public var validationRuns: [ValidationRunDTO] = []

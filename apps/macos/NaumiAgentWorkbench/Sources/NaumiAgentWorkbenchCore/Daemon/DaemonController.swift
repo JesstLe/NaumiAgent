@@ -1,6 +1,12 @@
 import Foundation
 import Observation
 
+public enum ChatSubmissionOutcome: Equatable, Sendable {
+    case succeeded
+    case failed(APIError)
+    case cancelled
+}
+
 /// Orchestrates the connection to the local NaumiAgent daemon.
 ///
 /// This controller refreshes connection state against an already-running
@@ -18,6 +24,7 @@ public final class DaemonController: Sendable {
     public let reconnectPolicy: EventStreamReconnectPolicy
     private var eventStreamTask: Task<Void, Never>?
     private var activeEventStream: (any WorkbenchEventStreaming)?
+    private var chatSendTask: Task<Void, Never>?
 
     /// Whether a Workbench event stream is currently connected and probeable.
     public var hasActiveEventStream: Bool {
@@ -1939,15 +1946,17 @@ public final class DaemonController: Sendable {
     ///
     /// If no session is selected, a lightweight chat session is created first so
     /// first-run users can talk to the app before creating a Mission.
+    @discardableResult
     public func sendDailyMessage(
         content: String,
         issueDraft: ChatIssueDraftDTO?,
         sourceIDs: [String] = [],
-        linkedIssueID: String? = nil
-    ) async {
+        linkedIssueID: String? = nil,
+        runtimeMode: ChatRuntimeMode = .default
+    ) async -> ChatSubmissionOutcome {
         let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedContent.isEmpty else {
-            return
+            return .failed(.invalidResponse)
         }
 
         if appState.selectedSessionID == nil {
@@ -1962,7 +1971,7 @@ public final class DaemonController: Sendable {
             if appState.lastError == nil {
                 appState.lastError = .missingSelectedSession
             }
-            return
+            return .failed(appState.lastError ?? .missingSelectedSession)
         }
 
         appState.lastError = nil
@@ -1976,14 +1985,14 @@ public final class DaemonController: Sendable {
         appState.chatMessages.append(localUserMessage)
 
         if issueDraft == nil, let streamingProvider = apiProvider as? any ChatStreamingProviding {
-            await sendStreamedDailyMessage(
+            return await sendStreamedDailyMessage(
                 content: trimmedContent,
                 sessionID: sessionID,
                 streamingProvider: streamingProvider,
                 sourceIDs: sourceIDs,
-                linkedIssueID: linkedIssueID
+                linkedIssueID: linkedIssueID,
+                runtimeMode: runtimeMode
             )
-            return
         }
 
         appState.activeChatExecution = ChatExecutionPresentation(
@@ -1995,10 +2004,11 @@ public final class DaemonController: Sendable {
             let response = try await apiProvider.sendMessage(
                 sessionID: sessionID,
                 content: trimmedContent,
-                workbenchIssue: issueDraft
+                workbenchIssue: issueDraft,
+                runtimeMode: runtimeMode
             )
             guard appState.selectedSessionID == sessionID else {
-                return
+                return .cancelled
             }
             appState.chatMessages.append(response)
             appState.activeChatExecution = nil
@@ -2006,21 +2016,28 @@ public final class DaemonController: Sendable {
             if issueDraft != nil {
                 if let snapshot = workbenchSnapshot(from: response, expectedSessionID: sessionID) {
                     applySnapshot(snapshot)
-                    return
+                    return .succeeded
                 }
                 await refreshSnapshot()
                 guard appState.selectedSessionID != nil else {
-                    return
+                    return .cancelled
                 }
                 await refreshIssues(missionID: issueDraft?.missionID)
                 guard appState.selectedSessionID != nil else {
-                    return
+                    return .cancelled
                 }
                 await refreshEvents(limit: 50)
             }
+            if let error = appState.lastError {
+                return .failed(error)
+            }
+            return .succeeded
         } catch {
+            if Task.isCancelled {
+                return .cancelled
+            }
             guard appState.selectedSessionID == sessionID else {
-                return
+                return .cancelled
             }
             appState.lastError = error
             appState.activeChatExecution = appState.activeChatExecution?.failing(
@@ -2029,6 +2046,44 @@ public final class DaemonController: Sendable {
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
             }
+            return .failed(error)
+        }
+    }
+
+    /// Starts a chat turn owned by the controller rather than the current view.
+    /// Navigation can replace `ChatView` without cancelling the live stream.
+    public func beginDailyMessage(
+        content: String,
+        issueDraft: ChatIssueDraftDTO?,
+        sourceIDs: [String] = [],
+        linkedIssueID: String? = nil,
+        runtimeMode: ChatRuntimeMode = .default
+    ) {
+        guard !appState.isChatSending else { return }
+
+        appState.isChatSending = true
+        appState.chatSendError = nil
+        chatSendTask = Task { [weak self] in
+            guard let self else { return }
+            let outcome = await self.sendDailyMessage(
+                content: content,
+                issueDraft: issueDraft,
+                sourceIDs: sourceIDs,
+                linkedIssueID: linkedIssueID,
+                runtimeMode: runtimeMode
+            )
+
+            self.appState.isChatSending = false
+            switch outcome {
+            case .succeeded:
+                self.appState.chatSendError = nil
+                self.appState.chatComposerState.resetAfterSuccessfulSubmission()
+            case .failed(let error):
+                self.appState.chatSendError = error
+            case .cancelled:
+                self.appState.chatSendError = nil
+            }
+            self.chatSendTask = nil
         }
     }
 
@@ -2078,10 +2133,14 @@ public final class DaemonController: Sendable {
         }
 
         appState.activeChatExecution = execution.cancelling()
-        guard let runID = execution.serverRunID,
-              let runProvider = apiProvider as? any ChatRunProviding else {
-            return
+        defer {
+            chatSendTask?.cancel()
+            chatSendTask = nil
+            appState.isChatSending = false
+            appState.chatSendError = nil
         }
+        guard let runID = execution.serverRunID,
+              let runProvider = apiProvider as? any ChatRunProviding else { return }
 
         do {
             _ = try await runProvider.cancelChatRun(
@@ -2125,8 +2184,9 @@ public final class DaemonController: Sendable {
         sessionID: String,
         streamingProvider: any ChatStreamingProviding,
         sourceIDs: [String],
-        linkedIssueID: String?
-    ) async {
+        linkedIssueID: String?,
+        runtimeMode: ChatRuntimeMode
+    ) async -> ChatSubmissionOutcome {
         let executionID = "chat-\(UUID().uuidString)"
         appState.activeChatExecution = ChatExecutionPresentation(id: executionID)
 
@@ -2145,30 +2205,41 @@ public final class DaemonController: Sendable {
                     content: content,
                     sourceIDs: sourceIDs,
                     linkedIssueID: linkedIssueID,
+                    runtimeMode: runtimeMode,
                     onEvent: eventHandler
                 )
             } else {
                 try await streamingProvider.streamMessage(
                     sessionID: sessionID,
                     content: content,
+                    runtimeMode: runtimeMode,
                     onEvent: eventHandler
                 )
             }
             guard appState.selectedSessionID == sessionID,
                   appState.activeChatExecution?.id == executionID else {
-                return
+                return .cancelled
             }
 
             await refreshChatMessages()
             guard appState.selectedSessionID == sessionID,
                   appState.lastError == nil else {
-                return
+                if appState.selectedSessionID != sessionID {
+                    return .cancelled
+                }
+                return .failed(appState.lastError ?? .invalidResponse)
             }
             appState.activeChatExecution = nil
+            return .succeeded
         } catch {
+            if Task.isCancelled {
+                appState.lastError = nil
+                appState.activeChatExecution = appState.activeChatExecution?.cancelling()
+                return .cancelled
+            }
             guard appState.selectedSessionID == sessionID,
                   appState.activeChatExecution?.id == executionID else {
-                return
+                return .cancelled
             }
             appState.lastError = error
             appState.activeChatExecution = appState.activeChatExecution?.failing(
@@ -2177,6 +2248,7 @@ public final class DaemonController: Sendable {
             if error == .sessionUnavailable {
                 clearUnavailableSelectedSession()
             }
+            return .failed(error)
         }
     }
 

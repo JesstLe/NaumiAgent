@@ -99,7 +99,8 @@ final class PreviewWorkbenchAPIProvider: WorkbenchAPIProviding {
     func sendMessage(
         sessionID: String,
         content: String,
-        workbenchIssue: ChatIssueDraftDTO?
+        workbenchIssue: ChatIssueDraftDTO?,
+        runtimeMode: ChatRuntimeMode = .default
     ) async throws(APIError) -> ChatMessageDTO {
         ChatMessageDTO(
             id: "preview-message",

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ChatComposer: View {
+    @FocusState private var isDraftFocused: Bool
     @Binding var draft: String
     @Binding var mode: ChatComposerMode
     @Binding var selectedMissionID: String
@@ -10,6 +11,7 @@ struct ChatComposer: View {
     @Binding var parallelMode: String
     @Binding var riskLevel: String
     @Binding var linkedIssueID: String
+    @Binding var runtimeMode: ChatRuntimeMode
 
     let missions: [MissionDTO]
     let issues: [IssueDTO]
@@ -39,6 +41,7 @@ struct ChatComposer: View {
             .font(.system(size: 14))
             .lineLimit(3...8)
             .disabled(!presentation.isEditorEnabled)
+            .focused($isDraftFocused)
 
             if mode.showsIssueDetails {
                 ChatIssueDraftPanel(
@@ -150,6 +153,27 @@ struct ChatComposer: View {
 
                 Spacer()
 
+                Menu {
+                    ForEach(ChatRuntimeMode.allCases, id: \.self) { option in
+                        Button {
+                            runtimeMode = option
+                        } label: {
+                            Label(
+                                AppStrings.Chat.runtimeMode(locale, mode: option),
+                                systemImage: runtimeModeSymbol(option)
+                            )
+                        }
+                    }
+                } label: {
+                    Label(
+                        AppStrings.Chat.runtimeMode(locale, mode: runtimeMode),
+                        systemImage: runtimeModeSymbol(runtimeMode)
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help(AppStrings.Chat.runtimeModeHelp(locale, mode: runtimeMode))
+
                 Button(action: onPrimaryAction) {
                     Image(systemName: primarySymbol(presentation.primaryAction))
                         .font(.system(size: 13, weight: .semibold))
@@ -171,6 +195,21 @@ struct ChatComposer: View {
                 .stroke(WorkbenchComponentTheme.border, lineWidth: 1)
         }
         .clipShape(RoundedRectangle(cornerRadius: WorkbenchComponentTheme.cornerRadius))
+        .onAppear {
+            focusDraftAfterLayout()
+        }
+        .onChange(of: isSending) { wasSending, isSending in
+            if wasSending, !isSending {
+                focusDraftAfterLayout()
+            }
+        }
+    }
+
+    private func focusDraftAfterLayout() {
+        Task { @MainActor in
+            await Task.yield()
+            isDraftFocused = true
+        }
     }
 
     private func primarySymbol(_ action: ChatComposerPrimaryAction) -> String {
@@ -178,6 +217,14 @@ struct ChatComposer: View {
         case .send: "arrow.up"
         case .stop: "stop.fill"
         case .retry: "arrow.clockwise"
+        }
+    }
+
+    private func runtimeModeSymbol(_ mode: ChatRuntimeMode) -> String {
+        switch mode {
+        case .default: "checkmark.shield"
+        case .plan: "doc.text.magnifyingglass"
+        case .bypass: "exclamationmark.shield"
         }
     }
 

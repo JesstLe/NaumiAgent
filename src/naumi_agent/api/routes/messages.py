@@ -130,6 +130,7 @@ async def send_message(
                 turn_context=turn_context,
                 source_records=source_records,
                 linked_issue=linked_issue,
+                runtime_mode=body.runtime_mode,
             ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
@@ -138,10 +139,15 @@ async def send_message(
     async with _engine_lock(request):
         if not await engine.load_session(session_id):
             raise HTTPException(status_code=404, detail="Session not found")
-        result = await engine.run(body.content, turn_context=turn_context)
-        workbench_metadata = await _create_workbench_issue_from_message(
-            engine, session_id, body
-        )
+        previous_runtime_mode = engine.runtime_mode
+        engine.set_runtime_mode(body.runtime_mode)
+        try:
+            result = await engine.run(body.content, turn_context=turn_context)
+            workbench_metadata = await _create_workbench_issue_from_message(
+                engine, session_id, body
+            )
+        finally:
+            engine.set_runtime_mode(previous_runtime_mode)
     metadata = {"turns": result.usage.turns, "cost_usd": result.usage.total_cost_usd}
     if linked_issue is not None:
         metadata["linked_issue"] = {"task_id": linked_issue.task_id}
@@ -352,6 +358,7 @@ async def _stream_response(
     turn_context: str = "",
     source_records: list[SourceReferenceRecord] | None = None,
     linked_issue=None,
+    runtime_mode: str = "default",
 ):
     queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
     store = getattr(request.app.state, "chat_run_store", None)
@@ -403,11 +410,16 @@ async def _stream_response(
             async with _engine_lock(request):
                 if not await engine.load_session(session_id):
                     raise RuntimeError("Session not found")
-                result = await engine.run_streaming(
-                    content,
-                    on_event,
-                    turn_context=turn_context,
-                )
+                previous_runtime_mode = engine.runtime_mode
+                engine.set_runtime_mode(runtime_mode)
+                try:
+                    result = await engine.run_streaming(
+                        content,
+                        on_event,
+                        turn_context=turn_context,
+                    )
+                finally:
+                    engine.set_runtime_mode(previous_runtime_mode)
                 terminal_event = StreamEvent(
                     type=EventType.AGENT_END,
                     data={

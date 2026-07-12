@@ -420,6 +420,35 @@ public enum AppStrings {
             locale == .zhCN ? "允许一次" : "Allow once"
         }
 
+        public static func bypassAndRun(_ locale: AppLocale) -> String {
+            locale == .zhCN ? "Bypass 并执行" : "Bypass and run"
+        }
+
+        public static func runtimeMode(_ locale: AppLocale, mode: ChatRuntimeMode) -> String {
+            switch (locale, mode) {
+            case (.zhCN, .default): "默认权限"
+            case (.zhCN, .plan): "规划模式"
+            case (.zhCN, .bypass): "Bypass"
+            case (.enUS, .default): "Default"
+            case (.enUS, .plan): "Plan"
+            case (.enUS, .bypass): "Bypass"
+            }
+        }
+
+        public static func runtimeModeHelp(
+            _ locale: AppLocale,
+            mode: ChatRuntimeMode
+        ) -> String {
+            switch (locale, mode) {
+            case (.zhCN, .default): "按安全策略逐次确认高风险操作"
+            case (.zhCN, .plan): "只分析和规划，不执行写入操作"
+            case (.zhCN, .bypass): "跳过逐次确认；危险命令硬限制仍然生效"
+            case (.enUS, .default): "Confirm high-risk actions according to policy"
+            case (.enUS, .plan): "Analyze and plan without write operations"
+            case (.enUS, .bypass): "Skip per-action approval; hard safety limits still apply"
+            }
+        }
+
         public static func deny(_ locale: AppLocale) -> String {
             locale == .zhCN ? "拒绝" : "Deny"
         }

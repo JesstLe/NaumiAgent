@@ -33,7 +33,8 @@ public protocol WorkbenchAPIProviding: Sendable {
     func sendMessage(
         sessionID: String,
         content: String,
-        workbenchIssue: ChatIssueDraftDTO?
+        workbenchIssue: ChatIssueDraftDTO?,
+        runtimeMode: ChatRuntimeMode
     ) async throws(APIError) -> ChatMessageDTO
 
     /// Fetches persisted chat messages for the selected session.

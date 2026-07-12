@@ -270,7 +270,8 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     func sendMessage(
         sessionID: String,
         content: String,
-        workbenchIssue: ChatIssueDraftDTO?
+        workbenchIssue: ChatIssueDraftDTO?,
+        runtimeMode: ChatRuntimeMode = .default
     ) async throws(APIError) -> ChatMessageDTO {
         if let sendMessageHook {
             await sendMessageHook()
@@ -284,9 +285,14 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
     func streamMessage(
         sessionID: String,
         content: String,
+        runtimeMode: ChatRuntimeMode = .default,
         onEvent: @escaping @Sendable (ChatStreamEvent) async -> Void
     ) async throws(APIError) {
-        streamMessageCalls.append(StreamMessageCall(sessionID: sessionID, content: content))
+        streamMessageCalls.append(StreamMessageCall(
+            sessionID: sessionID,
+            content: content,
+            runtimeMode: runtimeMode
+        ))
         if let streamMessageHook {
             await streamMessageHook()
         }
@@ -301,12 +307,14 @@ actor FakeWorkbenchAPIProvider: WorkbenchAPIProviding, WorkbenchRouteTemplateCon
         content: String,
         sourceIDs: [String],
         linkedIssueID: String?,
+        runtimeMode: ChatRuntimeMode = .default,
         onEvent: @escaping @Sendable (ChatStreamEvent) async -> Void
     ) async throws(APIError) {
         contextualStreamCalls.append((sourceIDs, linkedIssueID))
         try await streamMessage(
             sessionID: sessionID,
             content: content,
+            runtimeMode: runtimeMode,
             onEvent: onEvent
         )
     }
@@ -1337,6 +1345,24 @@ actor FakeWorkbenchEventProvider: WorkbenchEventProviding, WorkbenchEventStreamT
     }
 }
 
+private actor AsyncTestGate {
+    private var isOpen = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func open() {
+        isOpen = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
 struct FakeWorkbenchEventStream: WorkbenchEventStreaming {
     let stream: AsyncThrowingStream<WorkbenchEventStreamMessage, Error>
     let recorder: FakeWorkbenchEventStreamRecorder
@@ -1395,6 +1421,17 @@ struct FakeWorkbenchEventRefreshRequest: Equatable, Sendable {
 struct StreamMessageCall: Equatable, Sendable {
     let sessionID: String
     let content: String
+    let runtimeMode: ChatRuntimeMode
+
+    init(
+        sessionID: String,
+        content: String,
+        runtimeMode: ChatRuntimeMode = .default
+    ) {
+        self.sessionID = sessionID
+        self.content = content
+        self.runtimeMode = runtimeMode
+    }
 }
 
 struct PermissionResolutionCall: Equatable, Sendable {
@@ -10224,6 +10261,55 @@ final class DaemonControllerTests {
         #expect(appState.chatMessages == persistedMessages)
         #expect(appState.activeChatExecution == nil)
         #expect(appState.lastError == nil)
+    }
+
+    @Test @MainActor func beginDailyMessageSurvivesRouteChangesAndFinishesCanonicalHistory() async {
+        let appState = AppState()
+        appState.selectedSessionID = "sess-001"
+        appState.chatComposerState.draftMessage = "继续完成当前工作"
+        let persistedMessages = [
+            ChatMessageDTO(
+                id: "msg-user",
+                role: "user",
+                content: "继续完成当前工作",
+                timestamp: "2026-07-13T08:00:00Z",
+                metadata: [:]
+            ),
+            ChatMessageDTO(
+                id: "msg-assistant",
+                role: "assistant",
+                content: "已经完成。",
+                timestamp: "2026-07-13T08:00:02Z",
+                metadata: [:]
+            ),
+        ]
+        let gate = AsyncTestGate()
+        let api = FakeWorkbenchAPIProvider()
+        await api.setMessagesResult(.success(ChatMessageListDTO(
+            messages: persistedMessages,
+            total: persistedMessages.count
+        )))
+        await api.setStreamMessageHook { await gate.wait() }
+        await api.setStreamEvents([
+            ChatStreamEvent(id: "event-end", type: .agentEnd, data: [:]),
+        ])
+        let controller = DaemonController(appState: appState, apiProvider: api)
+
+        controller.beginDailyMessage(
+            content: appState.chatComposerState.draftMessage,
+            issueDraft: nil,
+            runtimeMode: .bypass
+        )
+        await waitUntil { appState.isChatSending }
+        appState.currentRoute = .taskMarket
+        await gate.open()
+        await waitUntil { !appState.isChatSending }
+
+        #expect(appState.currentRoute == .taskMarket)
+        #expect(appState.chatMessages == persistedMessages)
+        #expect(appState.chatComposerState.draftMessage.isEmpty)
+        #expect(appState.lastError == nil)
+        #expect(await api.streamMessageCalls.first?.runtimeMode == .bypass)
     }
 
     @Test @MainActor func resolveActiveChatPermissionCallsOnlyScopedApprovalEndpoint() async throws {

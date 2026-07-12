@@ -779,6 +779,7 @@ final class WorkbenchAPIClientTests {
             let body = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
             guard body?["content"] as? String == "现在进度怎么样？",
                   body?["stream"] as? Bool == false,
+                  body?["runtime_mode"] as? String == "bypass",
                   body?["workbench_issue"] == nil else {
                 fatalError("Unexpected body: \(String(describing: body))")
             }
@@ -797,7 +798,8 @@ final class WorkbenchAPIClientTests {
         let message = try await client.sendMessage(
             sessionID: "sess/中文",
             content: "现在进度怎么样？",
-            workbenchIssue: nil
+            workbenchIssue: nil,
+            runtimeMode: .bypass
         )
 
         #expect(message.id == "msg-chat-template")

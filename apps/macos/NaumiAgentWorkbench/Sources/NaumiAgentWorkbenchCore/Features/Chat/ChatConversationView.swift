@@ -1,5 +1,15 @@
 import SwiftUI
 
+struct ChatConversationScrollSignal: Equatable {
+    let messageIDs: [String]
+    let execution: ChatExecutionPresentation?
+
+    init(messages: [ChatMessageDTO], execution: ChatExecutionPresentation?) {
+        messageIDs = messages.map(\.id)
+        self.execution = execution
+    }
+}
+
 struct ChatConversationView<Composer: View>: View {
     let messages: [ChatMessageDTO]
     let execution: ChatExecutionPresentation?
@@ -7,8 +17,14 @@ struct ChatConversationView<Composer: View>: View {
     let onPermissionDecision: (ChatPermissionDecision) -> Void
     let onReview: () -> Void
     @ViewBuilder let composer: () -> Composer
+    private let bottomAnchorID = "chat-conversation-bottom"
 
     var body: some View {
+        let scrollSignal = ChatConversationScrollSignal(
+            messages: messages,
+            execution: execution
+        )
+
         VStack(spacing: 0) {
             ScrollViewReader { reader in
                 ScrollView {
@@ -41,6 +57,10 @@ struct ChatConversationView<Composer: View>: View {
                             )
                             .id(execution.id)
                         }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomAnchorID)
                     }
                     .frame(maxWidth: 760)
                     .padding(.horizontal, 28)
@@ -48,17 +68,12 @@ struct ChatConversationView<Composer: View>: View {
                     .padding(.bottom, 136)
                     .frame(maxWidth: .infinity)
                 }
-                .onChange(of: messages.count) { _, _ in
-                    guard let lastID = messages.last?.id else { return }
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        reader.scrollTo(lastID, anchor: .bottom)
-                    }
+                .defaultScrollAnchor(.bottom)
+                .onAppear {
+                    scrollToBottom(reader, animated: false)
                 }
-                .onChange(of: execution) { _, execution in
-                    guard let execution else { return }
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        reader.scrollTo(execution.id, anchor: .bottom)
-                    }
+                .onChange(of: scrollSignal) { _, _ in
+                    scrollToBottom(reader, animated: true)
                 }
             }
             .overlay(alignment: .bottom) {
@@ -69,6 +84,19 @@ struct ChatConversationView<Composer: View>: View {
             }
         }
         .background(WorkbenchComponentTheme.surface(.canvas))
+    }
+
+    private func scrollToBottom(_ reader: ScrollViewProxy, animated: Bool) {
+        Task { @MainActor in
+            await Task.yield()
+            if animated {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    reader.scrollTo(bottomAnchorID, anchor: .bottom)
+                }
+            } else {
+                reader.scrollTo(bottomAnchorID, anchor: .bottom)
+            }
+        }
     }
 
     private func hasLinkedIssue(_ message: ChatMessageDTO) -> Bool {

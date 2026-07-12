@@ -125,6 +125,17 @@ struct ChatRunTimeline: View {
                     .tint(.green)
 
                     Button {
+                        onPermissionDecision(.bypass)
+                    } label: {
+                        Label(
+                            AppStrings.Chat.bypassAndRun(locale),
+                            systemImage: "exclamationmark.shield"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+
+                    Button {
                         onPermissionDecision(.deny)
                     } label: {
                         Label(AppStrings.Chat.deny(locale), systemImage: "xmark")
