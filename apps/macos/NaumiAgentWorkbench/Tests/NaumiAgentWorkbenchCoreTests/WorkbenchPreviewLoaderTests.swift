@@ -60,6 +60,9 @@ final class WorkbenchPreviewLoaderTests {
         #expect(appState.worktrees.map(\.name) == ["wt-api-client", "wt-review-risk", "wt-validation-card"])
         #expect(appState.approvals.count == 2)
         #expect(appState.activeChatExecution?.stage == .awaitingApproval)
+        #expect(appState.chatEnvironment?.git.changedFiles == 6)
+        #expect(appState.chatEnvironment?.processes.count == 1)
+        #expect(appState.chatEnvironment?.sources.count == 1)
     }
 
     @Test func applyEnglishFixtureIntoAppState() throws {

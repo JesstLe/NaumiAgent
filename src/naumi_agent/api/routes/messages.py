@@ -4,19 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from dataclasses import asdict
 from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from naumi_agent.api.chat_environment import ChatEnvironmentCollector
 from naumi_agent.api.chat_runs import ChatRunRecord, ChatRunStore
 from naumi_agent.api.deps import AuthDep
 from naumi_agent.api.schemas import (
     ChatArtifactResponse,
+    ChatBackgroundProcessResponse,
+    ChatEnvironmentResponse,
+    ChatGitEnvironmentResponse,
     ChatRunListResponse,
     ChatRunResponse,
     ChatRunStepResponse,
+    ChatSourceReferenceResponse,
     MessageCreate,
     MessageListResponse,
     MessageResponse,
@@ -190,6 +196,38 @@ async def get_chat_run(
     if run is None:
         raise HTTPException(status_code=404, detail="Chat run not found")
     return _chat_run_to_response(run)
+
+
+@router.get(
+    "/sessions/{session_id}/environment",
+    response_model=ChatEnvironmentResponse,
+)
+async def get_chat_environment(
+    session_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    if not await engine.session_store.load(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    snapshot = await ChatEnvironmentCollector(
+        workspace_root=engine.workspace_root,
+        background_store=engine.background_runner.store,
+        chat_run_store=_chat_run_store(request),
+    ).collect(session_id=session_id)
+    return ChatEnvironmentResponse(
+        session_id=snapshot.session_id,
+        workspace_root=snapshot.workspace_root,
+        workspace_name=snapshot.workspace_name,
+        git=ChatGitEnvironmentResponse(**asdict(snapshot.git)),
+        processes=[
+            ChatBackgroundProcessResponse(**asdict(process))
+            for process in snapshot.processes
+        ],
+        sources=[
+            ChatSourceReferenceResponse(**asdict(source)) for source in snapshot.sources
+        ],
+    )
 
 
 @router.post(

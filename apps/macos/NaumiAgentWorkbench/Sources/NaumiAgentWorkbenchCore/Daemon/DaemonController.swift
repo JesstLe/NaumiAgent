@@ -860,6 +860,17 @@ public final class DaemonController: Sendable {
                 appState.chatRuns = []
                 appState.selectedChatRun = nil
             }
+            if let environmentProvider = apiProvider as? any ChatEnvironmentProviding {
+                let environment = try? await environmentProvider.fetchChatEnvironment(
+                    sessionID: sessionID
+                )
+                guard appState.selectedSessionID == sessionID else {
+                    return
+                }
+                appState.chatEnvironment = environment
+            } else {
+                appState.chatEnvironment = nil
+            }
         } catch {
             guard appState.selectedSessionID == sessionID else {
                 return
@@ -1887,6 +1898,7 @@ public final class DaemonController: Sendable {
         appState.chatMessages = []
         appState.chatRuns = []
         appState.selectedChatRun = nil
+        appState.chatEnvironment = nil
         appState.activeChatExecution = nil
         appState.timelineEvents = []
         appState.validationRuns = []

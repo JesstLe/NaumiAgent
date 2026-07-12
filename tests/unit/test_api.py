@@ -14,6 +14,7 @@ from naumi_agent.api.permission_broker import PermissionApprovalBroker
 from naumi_agent.api.routes.messages import (
     _engine_event_to_stream_event,
     _stream_response,
+    get_chat_environment,
     list_chat_runs,
     list_messages,
     send_message,
@@ -72,6 +73,10 @@ class _FakeEngine:
             dashboard_snapshot=self._dashboard_snapshot,
         )
         self.created_issues: list[dict] = []
+        self.workspace_root = "."
+        self.background_runner = SimpleNamespace(
+            store=SimpleNamespace(list_tasks=lambda: [])
+        )
 
     async def load_session(self, session_id: str) -> bool:
         self.loaded.append(session_id)
@@ -133,6 +138,10 @@ def _fake_request(engine: _FakeEngine, chat_run_store=None):
         chat_run_store=chat_run_store,
     )
     return SimpleNamespace(app=SimpleNamespace(state=state))
+
+
+async def _async_value(value):
+    return value
 
 
 class TestMessageRoutes:
@@ -296,6 +305,17 @@ class TestMessageRoutes:
         assert len(response.runs) == 1
         assert response.runs[0].status == "completed"
         assert response.runs[0].steps[-1].stage == "response"
+
+    @pytest.mark.asyncio
+    async def test_chat_environment_requires_existing_session(self, tmp_path) -> None:
+        engine = _FakeEngine()
+        engine.session_store.load = lambda _session_id: _async_value(None)
+        request = _fake_request(engine, ChatRunStore(tmp_path / "chat-runs.db"))
+
+        with pytest.raises(Exception) as exc:
+            await get_chat_environment("missing", request, auth="test")
+
+        assert exc.value.status_code == 404
 
     @pytest.mark.asyncio
     async def test_list_messages_preserves_metadata_for_chat_history(self) -> None:
