@@ -33,6 +33,24 @@ uv sync --extra dev
 pip install -e ".[dev]"
 ```
 
+### Windows 初始化
+
+Windows 原生开发使用 Python/uv/Node.js，并通过 Git for Windows Bash 保持 Agent 的 Bash 命令语义。先用隐藏输入保存 Kimi 密钥到当前 Windows 用户环境：
+
+```powershell
+$kimiKey = Read-Host "Kimi API Key" -MaskInput
+[Environment]::SetEnvironmentVariable("NAUMI_MODELS__API_KEY", $kimiKey, "User")
+Remove-Variable kimiKey
+```
+
+重新打开 PowerShell，然后运行幂等初始化脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/windows/setup.ps1
+```
+
+脚本会检查 Python 3.12+、uv、Node.js 20+ 与 Git Bash，创建 `.venv` 和无密钥的本地 `config.yaml`，并验证配置。若 Git Bash 不在标准 Git for Windows 目录，可设置 `NAUMI_GIT_BASH` 指向 `bin\bash.exe`。脚本不会覆盖已有 `config.yaml`。
+
 ### 配置
 
 ```bash
