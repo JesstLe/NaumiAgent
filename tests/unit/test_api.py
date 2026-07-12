@@ -9,10 +9,12 @@ from fastapi.testclient import TestClient
 
 import naumi_agent.api.routes.messages as message_routes
 from naumi_agent import __version__
+from naumi_agent.api.chat_runs import ChatRunStore
 from naumi_agent.api.permission_broker import PermissionApprovalBroker
 from naumi_agent.api.routes.messages import (
     _engine_event_to_stream_event,
     _stream_response,
+    list_chat_runs,
     list_messages,
     send_message,
 )
@@ -124,8 +126,12 @@ class _FakeEngine:
         }
 
 
-def _fake_request(engine: _FakeEngine):
-    state = SimpleNamespace(engine=engine, engine_lock=asyncio.Lock())
+def _fake_request(engine: _FakeEngine, chat_run_store=None):
+    state = SimpleNamespace(
+        engine=engine,
+        engine_lock=asyncio.Lock(),
+        chat_run_store=chat_run_store,
+    )
     return SimpleNamespace(app=SimpleNamespace(state=state))
 
 
@@ -275,6 +281,21 @@ class TestMessageRoutes:
         assert events[0]["type"] == "token_delta"
         assert events[0]["data"]["token"] == "你"
         assert events[-1]["type"] == "agent_end"
+
+    @pytest.mark.asyncio
+    async def test_stream_response_persists_run_and_list_endpoint(self, tmp_path) -> None:
+        engine = _FakeEngine()
+        store = ChatRunStore(tmp_path / "chat-runs.db")
+        request = _fake_request(engine, store)
+
+        async for _ in _stream_response(engine, "sess_1", "hello", request):
+            pass
+
+        response = await list_chat_runs("sess_1", request, limit=50, auth="test")
+
+        assert len(response.runs) == 1
+        assert response.runs[0].status == "completed"
+        assert response.runs[0].steps[-1].stage == "response"
 
     @pytest.mark.asyncio
     async def test_list_messages_preserves_metadata_for_chat_history(self) -> None:

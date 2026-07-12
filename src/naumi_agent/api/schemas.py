@@ -63,6 +63,46 @@ class MessageListResponse(BaseModel):
     total: int
 
 
+class ChatRunStepResponse(BaseModel):
+    sequence: int
+    stage: str
+    status: str
+    summary: str
+    detail: str = ""
+    event_id: str = ""
+    started_at: str
+    completed_at: str = ""
+    metadata: dict = Field(default_factory=dict)
+
+
+class ChatArtifactResponse(BaseModel):
+    id: str
+    kind: str
+    title: str
+    summary: dict = Field(default_factory=dict)
+    status: str
+    created_at: str
+    metadata: dict = Field(default_factory=dict)
+
+
+class ChatRunResponse(BaseModel):
+    id: str
+    session_id: str
+    user_message_id: str
+    assistant_message_id: str = ""
+    status: str
+    started_at: str
+    updated_at: str
+    completed_at: str = ""
+    steps: list[ChatRunStepResponse] = Field(default_factory=list)
+    artifacts: list[ChatArtifactResponse] = Field(default_factory=list)
+
+
+class ChatRunListResponse(BaseModel):
+    runs: list[ChatRunResponse]
+    total: int
+
+
 class PermissionResolutionCreate(BaseModel):
     decision: Literal["allow", "deny", "bypass"]
 
