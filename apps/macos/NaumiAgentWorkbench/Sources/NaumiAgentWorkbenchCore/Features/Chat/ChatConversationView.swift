@@ -32,8 +32,12 @@ struct ChatConversationView<Composer: View>: View {
                         }
 
                         if let execution {
-                            executionTimeline(execution)
-                                .id(execution.id)
+                            ChatRunTimeline(
+                                execution: execution,
+                                locale: locale,
+                                onPermissionDecision: onPermissionDecision
+                            )
+                            .id(execution.id)
                         }
                     }
                     .frame(maxWidth: 760)
@@ -63,141 +67,6 @@ struct ChatConversationView<Composer: View>: View {
             }
         }
         .background(WorkbenchComponentTheme.surface(.canvas))
-    }
-
-    private func executionTimeline(_ execution: ChatExecutionPresentation) -> some View {
-        SwiftUI.TimelineView(.periodic(from: .now, by: 1)) { timeline in
-            HStack(alignment: .top, spacing: 14) {
-                VStack(spacing: 5) {
-                    Circle()
-                        .fill(executionColor(execution.stage))
-                        .frame(width: 8, height: 8)
-                    Rectangle()
-                        .fill(WorkbenchComponentTheme.border)
-                        .frame(width: 1)
-                }
-                .frame(width: 14)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 8) {
-                        Text(AppStrings.Chat.executionStage(locale, stage: execution.stage))
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(elapsed(execution, now: timeline.date))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        if execution.stage != .completed, execution.stage != .failed {
-                            ProgressView().controlSize(.small)
-                        }
-                    }
-
-                    if let toolName = execution.activeToolName {
-                        Label(
-                            AppStrings.Chat.executionTool(locale, toolName: toolName),
-                            systemImage: "terminal"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-
-                    if let summary = execution.toolResultSummary {
-                        Text(summary)
-                            .font(.system(size: 13))
-                            .lineSpacing(2)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    if !execution.partialResponse.isEmpty {
-                        Text(execution.partialResponse)
-                            .font(.system(size: 14))
-                            .lineSpacing(3)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    if let failure = execution.failureMessage {
-                        Label(failure, systemImage: "exclamationmark.triangle.fill")
-                            .font(.callout)
-                            .foregroundStyle(.red)
-                    }
-
-                    if let permission = execution.permission {
-                        permissionCard(permission, execution: execution)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func permissionCard(
-        _ permission: ChatPermissionRequest,
-        execution: ChatExecutionPresentation
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack {
-                Label(
-                    AppStrings.Chat.permissionRequired(locale),
-                    systemImage: "hand.raised.fill"
-                )
-                .font(.system(size: 12, weight: .semibold))
-                Spacer()
-                Text(AppStrings.Chat.permissionRisk(locale, level: permission.riskLevel))
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
-
-            Text(permission.reason)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if execution.isResolvingPermission {
-                HStack(spacing: 7) {
-                    ProgressView().controlSize(.small)
-                    Text(AppStrings.Chat.resolvingApproval(locale))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                HStack(spacing: 8) {
-                    Button {
-                        onPermissionDecision(.allow)
-                    } label: {
-                        Label(AppStrings.Chat.allowOnce(locale), systemImage: "checkmark")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.green)
-
-                    Button {
-                        onPermissionDecision(.deny)
-                    } label: {
-                        Label(AppStrings.Chat.deny(locale), systemImage: "xmark")
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                }
-                .controlSize(.small)
-            }
-        }
-        .padding(12)
-        .workbenchSurface(.group)
-    }
-
-    private func elapsed(_ execution: ChatExecutionPresentation, now: Date) -> String {
-        let finishedAt = execution.completedAt ?? now
-        let seconds = max(Int(finishedAt.timeIntervalSince(execution.startedAt)), 0)
-        return AppStrings.Chat.executionElapsed(locale, seconds: seconds)
-    }
-
-    private func executionColor(_ stage: ChatExecutionStage) -> Color {
-        switch stage {
-        case .awaitingApproval: .orange
-        case .failed: .red
-        case .completed: .green
-        case .composing: .blue
-        default: .accentColor
-        }
     }
 
     private func hasLinkedIssue(_ message: ChatMessageDTO) -> Bool {

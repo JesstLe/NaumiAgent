@@ -59,6 +59,7 @@ final class WorkbenchPreviewLoaderTests {
         #expect(appState.worktrees.count == 3)
         #expect(appState.worktrees.map(\.name) == ["wt-api-client", "wt-review-risk", "wt-validation-card"])
         #expect(appState.approvals.count == 2)
+        #expect(appState.activeChatExecution?.stage == .awaitingApproval)
     }
 
     @Test func applyEnglishFixtureIntoAppState() throws {

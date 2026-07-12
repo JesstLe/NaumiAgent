@@ -103,6 +103,7 @@ public enum WorkbenchPreviewLoader {
 
         appState.sessions = [previewSession(from: snapshot, locale: locale)]
         appState.chatMessages = previewChatMessages(locale: locale)
+        appState.activeChatExecution = previewChatExecution(locale: locale)
         appState.missions = snapshot.missions
         appState.agentProfiles = snapshot.agentProfiles
         appState.validationRuns = previewValidationRuns(from: snapshot, locale: locale)
