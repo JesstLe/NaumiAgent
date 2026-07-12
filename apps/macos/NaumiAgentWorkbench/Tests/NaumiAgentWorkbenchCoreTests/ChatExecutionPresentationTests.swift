@@ -4,6 +4,38 @@ import Testing
 
 @Suite("Chat execution presentation")
 struct ChatExecutionPresentationTests {
+    @Test func permissionUpdatesReplaceTheToolStepWithTheSameCallID() {
+        let initial = ChatExecutionPresentation(id: "run-1")
+        let started = initial.applying(
+            ChatStreamEvent(
+                id: "event-start",
+                type: .toolCallStart,
+                data: ["name": .string("bash_run"), "call_id": .string("call-1")]
+            )
+        )
+        let waiting = started.applying(
+            ChatStreamEvent(
+                id: "event-permission",
+                type: .permissionRequest,
+                data: [
+                    "call_id": .string("call-1"),
+                    "tool_name": .string("bash_run"),
+                    "status": .string("needs_confirmation"),
+                ]
+            )
+        )
+
+        #expect(waiting.steps.filter { $0.id == "call-1" }.count == 1)
+        #expect(waiting.steps.first?.status == .awaitingApproval)
+    }
+
+    @Test func completedRunUsesCompactElapsedSummary() {
+        let summary = ChatRunSummary(stage: .completed, seconds: 727)
+
+        #expect(summary.isCollapsedByDefault)
+        #expect(summary.seconds == 727)
+    }
+
     @Test func permissionRequestUsesSafeFieldsOnly() {
         let initial = ChatExecutionPresentation(id: "run-1")
         let next = initial.applying(
