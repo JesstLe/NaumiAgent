@@ -10,8 +10,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from naumi_agent.api.chat_runs import ChatRunRecord, ChatRunStore
 from naumi_agent.api.deps import AuthDep
 from naumi_agent.api.schemas import (
+    ChatArtifactResponse,
+    ChatRunListResponse,
+    ChatRunResponse,
+    ChatRunStepResponse,
     MessageCreate,
     MessageListResponse,
     MessageResponse,
@@ -153,6 +158,40 @@ async def list_messages(
     )
 
 
+@router.get(
+    "/sessions/{session_id}/runs",
+    response_model=ChatRunListResponse,
+)
+async def list_chat_runs(
+    session_id: str,
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+    auth: str = AuthDep,
+):
+    store = _chat_run_store(request)
+    runs = await store.list_runs(session_id, limit=limit)
+    return ChatRunListResponse(
+        runs=[_chat_run_to_response(run) for run in runs],
+        total=len(runs),
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/runs/{run_id}",
+    response_model=ChatRunResponse,
+)
+async def get_chat_run(
+    session_id: str,
+    run_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    run = await _chat_run_store(request).get_run(session_id, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Chat run not found")
+    return _chat_run_to_response(run)
+
+
 @router.post(
     "/sessions/{session_id}/permissions/{call_id}/resolve",
     response_model=PermissionResolutionResponse,
@@ -178,24 +217,31 @@ async def resolve_permission(
 
 async def _stream_response(engine, session_id: str, content: str, request: Request):
     queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
+    store = getattr(request.app.state, "chat_run_store", None)
+    run = (
+        await store.start_run(
+            session_id=session_id,
+            user_message_id=f"msg-{uuid.uuid4().hex[:12]}",
+        )
+        if store is not None
+        else None
+    )
+    step_sequences: dict[str, int] = {}
 
     async def on_event(event: str, data: dict[str, Any]) -> None:
-        await queue.put(_engine_event_to_stream_event(event, data, session_id=session_id))
+        stream_event = _engine_event_to_stream_event(event, data, session_id=session_id)
+        if run is not None:
+            stream_event = _stream_event_with_run_id(stream_event, run.id)
+            await _persist_stream_event(store, run.id, stream_event, step_sequences)
+        await queue.put(stream_event)
 
     async def run_agent() -> None:
-        async with _engine_lock(request):
-            if not await engine.load_session(session_id):
-                await queue.put(
-                    StreamEvent(
-                        type=EventType.AGENT_ERROR,
-                        data={"message": "Session not found"},
-                        session_id=session_id,
-                    )
-                )
-                return
-            result = await engine.run_streaming(content, on_event)
-            await queue.put(
-                StreamEvent(
+        try:
+            async with _engine_lock(request):
+                if not await engine.load_session(session_id):
+                    raise RuntimeError("Session not found")
+                result = await engine.run_streaming(content, on_event)
+                terminal_event = StreamEvent(
                     type=EventType.AGENT_END,
                     data={
                         "status": result.status,
@@ -204,7 +250,24 @@ async def _stream_response(engine, session_id: str, content: str, request: Reque
                     },
                     session_id=session_id,
                 )
+                if run is not None:
+                    terminal_event = _stream_event_with_run_id(terminal_event, run.id)
+                    await _persist_stream_event(
+                        store, run.id, terminal_event, step_sequences
+                    )
+                    await store.finish_run(run.id, status=result.status)
+                await queue.put(terminal_event)
+        except Exception as exc:
+            error_event = StreamEvent(
+                type=EventType.AGENT_ERROR,
+                data={"message": str(exc) or "本次对话未能完成。"},
+                session_id=session_id,
             )
+            if run is not None:
+                error_event = _stream_event_with_run_id(error_event, run.id)
+                await _persist_stream_event(store, run.id, error_event, step_sequences)
+                await store.finish_run(run.id, status="failed")
+            await queue.put(error_event)
 
     agent_task = asyncio.create_task(run_agent())
     try:
@@ -248,6 +311,160 @@ def _engine_lock(request: Request):
         lock = asyncio.Lock()
         request.app.state.engine_lock = lock
     return lock
+
+
+def _chat_run_store(request: Request) -> ChatRunStore:
+    store = getattr(request.app.state, "chat_run_store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="Chat run store unavailable")
+    return store
+
+
+def _chat_run_to_response(run: ChatRunRecord) -> ChatRunResponse:
+    return ChatRunResponse(
+        id=run.id,
+        session_id=run.session_id,
+        user_message_id=run.user_message_id,
+        assistant_message_id=run.assistant_message_id,
+        status=run.status,
+        started_at=run.started_at,
+        updated_at=run.updated_at,
+        completed_at=run.completed_at,
+        steps=[
+            ChatRunStepResponse(
+                sequence=step.sequence,
+                stage=step.stage,
+                status=step.status,
+                summary=step.summary,
+                detail=step.detail,
+                event_id=step.event_id,
+                started_at=step.started_at,
+                completed_at=step.completed_at,
+                metadata=step.metadata,
+            )
+            for step in run.steps
+        ],
+        artifacts=[
+            ChatArtifactResponse(
+                id=artifact.id,
+                kind=artifact.kind,
+                title=artifact.title,
+                summary=artifact.summary,
+                status=artifact.status,
+                created_at=artifact.created_at,
+                metadata=artifact.metadata,
+            )
+            for artifact in run.artifacts
+        ],
+    )
+
+
+def _stream_event_with_run_id(event: StreamEvent, run_id: str) -> StreamEvent:
+    return StreamEvent(
+        id=event.id,
+        type=event.type,
+        data={**event.data, "run_id": run_id},
+        timestamp=event.timestamp,
+        session_id=event.session_id,
+        turn=event.turn,
+    )
+
+
+async def _persist_stream_event(
+    store: ChatRunStore,
+    run_id: str,
+    event: StreamEvent,
+    step_sequences: dict[str, int],
+) -> None:
+    step_key, stage, status, summary, detail = _stream_step_fields(event)
+    if step_key is not None:
+        sequence = step_sequences.setdefault(step_key, len(step_sequences) + 1)
+        await store.append_step(
+            run_id,
+            sequence=sequence,
+            stage=stage,
+            status=status,
+            summary=summary,
+            detail=detail,
+            event_id=event.id,
+        )
+
+    if event.type == EventType.TOOL_CALL_END and event.data.get("name") == "delegate_task":
+        content = str(event.data.get("content") or "")
+        if content:
+            call_id = str(event.data.get("call_id") or event.id)
+            await store.append_artifact(
+                run_id,
+                artifact_id=f"subagent-{call_id}",
+                kind="subagent",
+                title="delegate_task",
+                summary={"text": _compact_public_text(content)},
+                status=str(event.data.get("status") or "success"),
+            )
+
+
+def _stream_step_fields(
+    event: StreamEvent,
+) -> tuple[str | None, str, str, str, str]:
+    if event.type in {
+        EventType.TURN_START,
+        EventType.THINKING_START,
+        EventType.THINKING_DELTA,
+        EventType.THINKING_END,
+    }:
+        return "analysis", "analysis", "running", "分析请求", ""
+    if event.type in {
+        EventType.TOOL_CALL_START,
+        EventType.TOOL_CALL_END,
+        EventType.TOOL_CALL_ERROR,
+        EventType.PERMISSION_REQUEST,
+    }:
+        name = str(event.data.get("tool_name") or event.data.get("name") or "tool")
+        call_id = str(event.data.get("call_id") or event.id)
+        if event.type == EventType.PERMISSION_REQUEST:
+            permission_status = str(event.data.get("status") or "")
+            if permission_status == "needs_confirmation":
+                return (
+                    f"tool:{call_id}",
+                    "approval",
+                    "awaiting_approval",
+                    name,
+                    str(event.data.get("reason") or ""),
+                )
+            if permission_status in {"denied", "confirmation_error"}:
+                return f"tool:{call_id}", "approval", "failed", name, ""
+            return f"tool:{call_id}", "tool", "running", name, ""
+        if event.type == EventType.TOOL_CALL_END:
+            detail = (
+                _compact_public_text(str(event.data.get("content") or ""))
+                if name == "delegate_task"
+                else ""
+            )
+            return f"tool:{call_id}", "tool", "completed", name, detail
+        if event.type == EventType.TOOL_CALL_ERROR:
+            return f"tool:{call_id}", "tool", "failed", name, ""
+        return f"tool:{call_id}", "tool", "running", name, ""
+    if event.type in {EventType.AGENT_START, EventType.TOKEN_DELTA}:
+        return "response", "response", "running", "生成答复", ""
+    if event.type == EventType.AGENT_END:
+        status = str(event.data.get("status") or "completed")
+        return "response", "response", status, "生成答复", ""
+    if event.type == EventType.AGENT_ERROR:
+        return (
+            "response",
+            "response",
+            "failed",
+            "生成答复",
+            str(event.data.get("message") or ""),
+        )
+    return None, "", "", "", ""
+
+
+def _compact_public_text(content: str, maximum_length: int = 420) -> str:
+    normalized = content.strip()
+    if len(normalized) <= maximum_length:
+        return normalized
+    return f"{normalized[:maximum_length]}..."
 
 
 async def _create_workbench_issue_from_message(
