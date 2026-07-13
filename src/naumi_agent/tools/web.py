@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
+import html as html_mod
 import ipaddress
+import json
 import logging
-from typing import Any
-from urllib.parse import urlparse, urlunparse
+import os
+import re
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse, urlunparse
 
 import httpx
 from markdownify import markdownify as md
 from readability import Document
 
 from naumi_agent.tools.base import Tool, ToolMetadata
+
+if TYPE_CHECKING:
+    from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +30,36 @@ MAX_FETCH_CHARS = 120_000
 DEFAULT_FETCH_CHARS = 30_000
 BLOCKED_HOSTNAMES = {"localhost"}
 BLOCKED_HOST_SUFFIXES = (".localhost", ".local")
+SEARCH_PROVIDER_NAMES = {
+    "brave": "Brave",
+    "duckduckgo": "DuckDuckGo",
+    "browser": "浏览器搜索",
+}
+
+
+class SearchStatus(StrEnum):
+    """搜索提供方返回的标准状态。"""
+
+    SUCCESS = "success"
+    EMPTY = "empty"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class SearchItem:
+    title: str
+    url: str
+    snippet: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class SearchOutcome:
+    status: SearchStatus
+    provider: str
+    items: tuple[SearchItem, ...] = ()
+    code: str = ""
+    message: str = ""
 
 
 class WebToolInputError(ValueError):
@@ -79,7 +119,10 @@ def _normalize_public_http_url(raw_url: str) -> str:
 
 
 class WebSearchTool(Tool):
-    """使用搜索引擎搜索信息（Brave Search API 或 DuckDuckGo fallback）."""
+    """固定路由搜索，并在直连搜索不可用时至多回退一次浏览器。"""
+
+    def __init__(self, browser_runtime: BrowserRuntime | None = None) -> None:
+        self._browser_runtime = browser_runtime
 
     @property
     def name(self) -> str:
@@ -87,13 +130,13 @@ class WebSearchTool(Tool):
 
     @property
     def description(self) -> str:
-        return "搜索网络信息，返回相关结果列表。"
+        return "搜索网络信息；无需 API Key，必要时会自动回退到浏览器搜索。"
 
     @property
     def metadata(self) -> ToolMetadata:
         return ToolMetadata(
             read_only=True,
-            concurrency_safe=True,
+            concurrency_safe=self._browser_runtime is None,
             user_facing_name="网络搜索",
             search_hint="web search internet brave duckduckgo current information",
         )
@@ -114,8 +157,6 @@ class WebSearchTool(Tool):
         }
 
     async def execute(self, *, query: str, max_results: int = 5, **kwargs: Any) -> str:
-        import os
-
         query = query.strip()
         if not query:
             return "搜索失败：query 不能为空。"
@@ -125,38 +166,75 @@ class WebSearchTool(Tool):
             minimum=1,
             maximum=MAX_SEARCH_RESULTS,
         )
-        brave_api_key = os.environ.get("BRAVE_SEARCH_API_KEY")
-
+        attempts: list[SearchOutcome] = []
+        brave_api_key = os.environ.get("BRAVE_SEARCH_API_KEY", "").strip()
         if brave_api_key:
-            return await self._brave_search(query, safe_max_results, brave_api_key)
-        return await self._ddg_search(query, safe_max_results)
+            attempts.append(await self._brave_search(query, safe_max_results, brave_api_key))
+            if attempts[-1].status is SearchStatus.SUCCESS:
+                return self._format_success(attempts[-1], attempts)
 
-    async def _brave_search(self, query: str, max_results: int, api_key: str) -> str:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                "https://api.search.brave.com/res/v1/web/search",
-                params={"q": query, "count": max_results},
-                headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
-                timeout=10,
+        attempts.append(await self._ddg_search(query, safe_max_results))
+        if attempts[-1].status is SearchStatus.SUCCESS:
+            return self._format_success(attempts[-1], attempts)
+
+        if self._browser_runtime is not None:
+            attempts.append(await self._browser_search(query, safe_max_results))
+            if attempts[-1].status is SearchStatus.SUCCESS:
+                return self._format_success(attempts[-1], attempts)
+
+        return self._format_failure(attempts)
+
+    async def _brave_search(self, query: str, max_results: int, api_key: str) -> SearchOutcome:
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://api.search.brave.com/res/v1/web/search",
+                    params={"q": query, "count": max_results},
+                    headers={
+                        "X-Subscription-Token": api_key,
+                        "Accept": "application/json",
+                    },
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+            items = tuple(
+                SearchItem(
+                    title=str(item.get("title", "")).strip(),
+                    url=str(item.get("url", "")).strip(),
+                    snippet=str(item.get("description", "")).strip(),
+                )
+                for item in data.get("web", {}).get("results", [])[:max_results]
+                if item.get("title") and item.get("url")
             )
-            resp.raise_for_status()
-            data = resp.json()
-
-        results = []
-        for item in data.get("web", {}).get("results", [])[:max_results]:
-            results.append(
-                f"### [{item.get('title', '')}]({item.get('url', '')})\n"
-                f"{item.get('description', '')}\n"
+            return SearchOutcome(
+                status=SearchStatus.SUCCESS if items else SearchStatus.EMPTY,
+                provider="brave",
+                items=items,
+                code="no_results" if not items else "",
+            )
+        except httpx.HTTPStatusError as exc:
+            code = (
+                "authentication"
+                if exc.response.status_code in {401, 403}
+                else f"http_{exc.response.status_code}"
+            )
+            return SearchOutcome(
+                status=SearchStatus.UNAVAILABLE,
+                provider="brave",
+                code=code,
+                message="Brave Search API unavailable",
+            )
+        except Exception as exc:
+            return SearchOutcome(
+                status=SearchStatus.UNAVAILABLE,
+                provider="brave",
+                code=type(exc).__name__,
+                message=str(exc),
             )
 
-        if not results:
-            return "未找到搜索结果。"
-        return "\n---\n".join(results)
-
-    async def _ddg_search(self, query: str, max_results: int) -> str:
-        import html as html_mod
-        import re
-
+    async def _ddg_search(self, query: str, max_results: int) -> SearchOutcome:
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
@@ -167,39 +245,171 @@ class WebSearchTool(Tool):
                 )
                 resp.raise_for_status()
 
-            page = resp.text
-
             link_pattern = re.compile(
                 r'<a[^>]*href="([^"]+)"[^>]*class=[\'"]result-link[\'"][^>]*>(.*?)</a>',
                 re.DOTALL,
             )
-            snippet_pattern = re.compile(
-                r"class=['\"]result-snippet['\"]>(.*?)</td>", re.DOTALL
-            )
+            snippet_pattern = re.compile(r"class=['\"]result-snippet['\"]>(.*?)</td>", re.DOTALL)
 
-            links = link_pattern.findall(page)
-            snippets = snippet_pattern.findall(page)
+            links = link_pattern.findall(resp.text)
+            snippets = snippet_pattern.findall(resp.text)
 
-            results = []
-            for i, (url, raw_title) in enumerate(links[:max_results]):
+            items: list[SearchItem] = []
+            for index, (url, raw_title) in enumerate(links[:max_results]):
                 title = html_mod.unescape(re.sub(r"<[^>]+>", "", raw_title).strip())
                 snippet = ""
-                if i < len(snippets):
-                    snippet = html_mod.unescape(
-                        re.sub(r"<[^>]+>", "", snippets[i]).strip()
-                    )
-                results.append(f"### [{title}]({url})\n{snippet}\n")
+                if index < len(snippets):
+                    snippet = html_mod.unescape(re.sub(r"<[^>]+>", "", snippets[index]).strip())
+                normalized_url = self._normalize_ddg_url(url)
+                if title and normalized_url:
+                    items.append(SearchItem(title, normalized_url, snippet))
 
-            if not results:
-                return "未找到搜索结果。可设置 BRAVE_SEARCH_API_KEY 提升搜索质量。"
-            return "\n---\n".join(results)
-        except httpx.HTTPStatusError as e:
-            return (
-                f"搜索失败（HTTP {e.response.status_code}）。"
-                "可设置 BRAVE_SEARCH_API_KEY 提升稳定性。"
+            return SearchOutcome(
+                status=SearchStatus.SUCCESS if items else SearchStatus.EMPTY,
+                provider="duckduckgo",
+                items=tuple(items),
+                code="no_results" if not items else "",
             )
-        except Exception as e:
-            return f"搜索失败: {type(e).__name__}: {e}"
+        except httpx.HTTPStatusError as exc:
+            return SearchOutcome(
+                status=SearchStatus.UNAVAILABLE,
+                provider="duckduckgo",
+                code=f"http_{exc.response.status_code}",
+                message="DuckDuckGo Lite unavailable",
+            )
+        except Exception as exc:
+            return SearchOutcome(
+                status=SearchStatus.UNAVAILABLE,
+                provider="duckduckgo",
+                code=type(exc).__name__,
+                message=str(exc),
+            )
+
+    @staticmethod
+    def _format_success(outcome: SearchOutcome, attempts: list[SearchOutcome]) -> str:
+        provider_name = SEARCH_PROVIDER_NAMES.get(outcome.provider, outcome.provider)
+        lines = [f"搜索来源：{provider_name}"]
+        if len(attempts) > 1:
+            previous = "、".join(
+                SEARCH_PROVIDER_NAMES.get(item.provider, item.provider) for item in attempts[:-1]
+            )
+            lines.append(f"已自动回退：{previous} 不可用。")
+        rendered = [
+            f"### [{item.title}]({item.url})\n{item.snippet}".rstrip() for item in outcome.items
+        ]
+        return "\n\n".join(lines) + "\n\n" + "\n\n---\n\n".join(rendered)
+
+    @staticmethod
+    def _format_failure(attempts: list[SearchOutcome]) -> str:
+        names = "、".join(
+            SEARCH_PROVIDER_NAMES.get(item.provider, item.provider) for item in attempts
+        )
+        details = "；".join(
+            f"{SEARCH_PROVIDER_NAMES.get(item.provider, item.provider)}: "
+            f"{item.code or item.status.value}"
+            for item in attempts
+        )
+        return (
+            f"搜索失败：已尝试 {names or '可用搜索方式'}，当前均不可用。"
+            f"\n诊断：{details or '未配置可用搜索方式'}。"
+            "\n请勿在本轮重复调用 web_search；可以稍后重试，或配置 "
+            "BRAVE_SEARCH_API_KEY 提升搜索稳定性。"
+        )
+
+    @staticmethod
+    def _normalize_ddg_url(raw_url: str) -> str:
+        url = html_mod.unescape(raw_url).strip()
+        if url.startswith("//"):
+            url = "https:" + url
+        parsed = urlparse(url)
+        redirected = parse_qs(parsed.query).get("uddg")
+        if redirected:
+            url = unquote(redirected[0])
+            parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return ""
+        return url
+
+    async def _browser_search(self, query: str, max_results: int) -> SearchOutcome:
+        runtime = self._browser_runtime
+        if runtime is None:
+            return SearchOutcome(
+                status=SearchStatus.UNAVAILABLE,
+                provider="browser",
+                code="not_configured",
+            )
+
+        started_here = not runtime.is_running()
+
+        async def run() -> SearchOutcome:
+            if started_here:
+                await runtime.start({"source": "managed", "headless": True})
+            search_url = f"https://www.bing.com/search?q={quote_plus(query)}"
+            await runtime.goto(search_url)
+            expression = f"""
+                return Array.from(document.querySelectorAll('li.b_algo'))
+                    .slice(0, {max_results})
+                    .map((item) => {{
+                        const link = item.querySelector('h2 a');
+                        const snippet = item.querySelector('.b_caption p');
+                        return {{
+                            title: link?.textContent?.trim() || '',
+                            url: link?.href || '',
+                            snippet: snippet?.textContent?.trim() || ''
+                        }};
+                    }});
+            """
+            evaluated = await runtime.evaluate(expression)
+            if evaluated.get("isError"):
+                return SearchOutcome(
+                    status=SearchStatus.FAILED,
+                    provider="browser",
+                    code="evaluate",
+                    message=str(evaluated.get("result", "")),
+                )
+            raw_items = json.loads(str(evaluated.get("result", "[]")))
+            seen_urls: set[str] = set()
+            items: list[SearchItem] = []
+            for item in raw_items if isinstance(raw_items, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                title = str(item.get("title", "")).strip()
+                url = str(item.get("url", "")).strip()
+                snippet = str(item.get("snippet", "")).strip()
+                parsed = urlparse(url)
+                if (
+                    title
+                    and parsed.scheme in {"http", "https"}
+                    and parsed.netloc
+                    and url not in seen_urls
+                ):
+                    seen_urls.add(url)
+                    items.append(SearchItem(title, url, snippet))
+                if len(items) >= max_results:
+                    break
+            return SearchOutcome(
+                status=SearchStatus.SUCCESS if items else SearchStatus.EMPTY,
+                provider="browser",
+                items=tuple(items),
+                code="no_results" if not items else "",
+            )
+
+        try:
+            timeout = float(os.environ.get("NAUMI_BROWSER_SEARCH_TIMEOUT", "30"))
+            return await asyncio.wait_for(run(), timeout=max(5.0, min(timeout, 60.0)))
+        except Exception as exc:
+            return SearchOutcome(
+                status=SearchStatus.UNAVAILABLE,
+                provider="browser",
+                code=type(exc).__name__,
+                message=str(exc),
+            )
+        finally:
+            if started_here:
+                try:
+                    await runtime.stop()
+                except Exception:
+                    logger.warning("browser search cleanup failed", exc_info=True)
 
 
 class WebFetchTool(Tool):
@@ -273,8 +483,7 @@ class WebFetchTool(Tool):
 
             if len(result) > safe_max_length:
                 result = (
-                    result[:safe_max_length]
-                    + f"\n\n...（已截断，原始长度 {len(result)} 字符）"
+                    result[:safe_max_length] + f"\n\n...（已截断，原始长度 {len(result)} 字符）"
                 )
 
             return result
@@ -286,5 +495,5 @@ class WebFetchTool(Tool):
             return f"抓取失败: {type(e).__name__}: {e}"
 
 
-def create_web_tools() -> list[Tool]:
-    return [WebSearchTool(), WebFetchTool()]
+def create_web_tools(browser_runtime: BrowserRuntime | None = None) -> list[Tool]:
+    return [WebSearchTool(browser_runtime), WebFetchTool()]

@@ -1,8 +1,14 @@
 """网络工具测试."""
 
+import json
+from unittest.mock import AsyncMock, Mock
+
 import pytest
 
 from naumi_agent.tools.web import (
+    SearchItem,
+    SearchOutcome,
+    SearchStatus,
     WebFetchTool,
     WebSearchTool,
     _clamp_int,
@@ -74,3 +80,143 @@ class TestWebTools:
         output = await WebSearchTool().execute(query="  ")
 
         assert "query 不能为空" in output
+
+    @pytest.mark.asyncio
+    async def test_search_without_key_uses_keyless_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+        tool = WebSearchTool()
+        tool._ddg_search = AsyncMock(
+            return_value=SearchOutcome(
+                status=SearchStatus.SUCCESS,
+                provider="duckduckgo",
+                items=(SearchItem("结果", "https://example.com", "摘要"),),
+            )
+        )
+
+        output = await tool.execute(query="naumi agent")
+
+        assert "搜索来源：DuckDuckGo" in output
+        assert "[结果](https://example.com)" in output
+
+    @pytest.mark.asyncio
+    async def test_invalid_brave_key_falls_back_to_keyless_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "invalid")
+        tool = WebSearchTool()
+        tool._brave_search = AsyncMock(
+            return_value=SearchOutcome(
+                status=SearchStatus.UNAVAILABLE,
+                provider="brave",
+                code="authentication",
+                message="Brave credentials rejected",
+            )
+        )
+        tool._ddg_search = AsyncMock(
+            return_value=SearchOutcome(
+                status=SearchStatus.SUCCESS,
+                provider="duckduckgo",
+                items=(SearchItem("结果", "https://example.com", ""),),
+            )
+        )
+
+        output = await tool.execute(query="naumi agent")
+
+        assert "搜索来源：DuckDuckGo" in output
+        assert "已自动回退" in output
+        tool._brave_search.assert_awaited_once()
+        tool._ddg_search.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_direct_search_failure_uses_browser_once_and_closes_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+        runtime = AsyncMock()
+        runtime.is_running = Mock(return_value=False)
+        runtime.evaluate.return_value = {
+            "isError": False,
+            "result": json.dumps(
+                [
+                    {
+                        "title": "Browser result",
+                        "url": "https://example.com/browser",
+                        "snippet": "Browser snippet",
+                    }
+                ]
+            ),
+        }
+        tool = WebSearchTool(runtime)
+        tool._ddg_search = AsyncMock(
+            return_value=SearchOutcome(
+                status=SearchStatus.UNAVAILABLE,
+                provider="duckduckgo",
+                code="timeout",
+                message="timed out",
+            )
+        )
+
+        output = await tool.execute(query="naumi agent")
+
+        assert "搜索来源：浏览器搜索" in output
+        runtime.start.assert_awaited_once_with({"source": "managed", "headless": True})
+        runtime.goto.assert_awaited_once()
+        runtime.evaluate.assert_awaited_once()
+        runtime.stop.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_search_route_exhaustion_does_not_retry_browser(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+        runtime = AsyncMock()
+        runtime.is_running = Mock(return_value=False)
+        runtime.goto.side_effect = TimeoutError("browser timeout")
+        tool = WebSearchTool(runtime)
+        tool._ddg_search = AsyncMock(
+            return_value=SearchOutcome(
+                status=SearchStatus.FAILED,
+                provider="duckduckgo",
+                code="parser",
+                message="parser failed",
+            )
+        )
+
+        output = await tool.execute(query="naumi agent")
+
+        assert "搜索失败" in output
+        assert "DuckDuckGo、浏览器搜索" in output
+        assert "请勿在本轮重复调用 web_search" in output
+        runtime.goto.assert_awaited_once()
+        runtime.stop.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_browser_fallback_preserves_existing_browser_session(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+        runtime = AsyncMock()
+        runtime.is_running = Mock(return_value=True)
+        runtime.evaluate.return_value = {
+            "isError": False,
+            "result": json.dumps(
+                [{"title": "结果", "url": "https://example.com", "snippet": ""}]
+            ),
+        }
+        tool = WebSearchTool(runtime)
+        tool._ddg_search = AsyncMock(
+            return_value=SearchOutcome(
+                status=SearchStatus.UNAVAILABLE,
+                provider="duckduckgo",
+                code="timeout",
+            )
+        )
+
+        output = await tool.execute(query="naumi agent")
+
+        assert "搜索来源：浏览器搜索" in output
+        assert tool.metadata.concurrency_safe is False
+        runtime.start.assert_not_awaited()
+        runtime.stop.assert_not_awaited()

@@ -50,6 +50,51 @@ def _expand_home(path: str) -> Path:
     return p
 
 
+def find_system_browser_executable() -> Path | None:
+    """Find a user-installed Chrome/Edge/Chromium executable."""
+    configured = os.environ.get("BROWSER_CHROME_BINARY", "").strip()
+    if configured:
+        path = Path(configured).expanduser()
+        return path if path.is_file() else None
+
+    home = Path.home()
+    system = platform.system()
+    if system == "Darwin":
+        candidates = [
+            Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+        ]
+    elif system == "Windows":
+        program_files = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        program_files_x86 = Path(
+            os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        )
+        local_app = Path(
+            os.environ.get("LOCALAPPDATA", str(home / "AppData" / "Local"))
+        )
+        candidates = [
+            program_files / "Google/Chrome/Application/chrome.exe",
+            program_files_x86 / "Google/Chrome/Application/chrome.exe",
+            local_app / "Google/Chrome/Application/chrome.exe",
+            program_files / "Microsoft/Edge/Application/msedge.exe",
+            program_files_x86 / "Microsoft/Edge/Application/msedge.exe",
+            local_app / "Microsoft/Edge/Application/msedge.exe",
+        ]
+    else:
+        candidates = [
+            Path(path)
+            for name in (
+                "google-chrome",
+                "google-chrome-stable",
+                "chromium",
+                "chromium-browser",
+                "microsoft-edge",
+            )
+            if (path := shutil.which(name))
+        ]
+    return next((path for path in candidates if path.is_file()), None)
+
+
 class ChromeLauncher:
     def __init__(self, *, cdp_port: int = DEFAULT_CDP_PORT, **_kwargs: Any) -> None:
         env_binary = os.environ.get("BROWSER_CHROME_BINARY", "")
@@ -89,20 +134,16 @@ class ChromeLauncher:
                 "profile_dir": str(home / ".config" / "google-chrome"),
             }
         if system == "Windows":
-            program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
             local_app = os.environ.get(
                 "LOCALAPPDATA", str(home / "AppData" / "Local")
             )
+            binary = find_system_browser_executable()
+            edge = binary is not None and "edge" in str(binary).lower()
             return {
-                "binary": str(
-                    Path(program_files)
-                    / "Google"
-                    / "Chrome"
-                    / "Application"
-                    / "chrome.exe"
-                ),
+                "binary": str(binary) if binary else None,
                 "profile_dir": str(
-                    Path(local_app) / "Google" / "Chrome" / "User Data"
+                    Path(local_app)
+                    / ("Microsoft/Edge/User Data" if edge else "Google/Chrome/User Data")
                 ),
             }
         return {"binary": None, "profile_dir": None}

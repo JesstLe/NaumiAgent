@@ -115,6 +115,25 @@ def _two_safe_tool_response() -> ModelResponse:
 
 
 @pytest.mark.asyncio
+async def test_shutdown_continues_after_browser_cleanup_failure(tmp_path: Path) -> None:
+    engine = AgentEngine(
+        AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+    )
+    engine._browser_session.stop = AsyncMock(
+        side_effect=RuntimeError("browser cleanup failed")
+    )
+    mcp_manager = MagicMock()
+    mcp_manager.disconnect_all = AsyncMock()
+    engine._mcp_manager = mcp_manager
+    engine.session_store.close = AsyncMock()
+
+    await engine.shutdown()
+
+    mcp_manager.disconnect_all.assert_awaited_once()
+    engine.session_store.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_react_loop_executes_safe_tool_calls_concurrently(tmp_path) -> None:
     engine = AgentEngine(AppConfig(
         memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),

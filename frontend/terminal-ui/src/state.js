@@ -553,7 +553,9 @@ export function reduceServerEvent(state, record) {
       }
       const errorRequestId = String(record.request_id ?? "");
       const hasActiveRunActivity = Boolean(state.activeRunActivity);
-      const matchesActiveRun = matchesActiveRunActivity(state, errorRequestId);
+      const activeRunRequestId = String(state.activeRunActivity?.requestId ?? "").trim();
+      const matchesActiveRun = Boolean(errorRequestId.trim() && activeRunRequestId)
+        && matchesActiveRunActivity(state, errorRequestId);
       const isCorrelatedCancelError = Boolean(state.cancelRequestId)
         && state.cancelRequestId === errorRequestId;
       if (!hasActiveRunActivity || matchesActiveRun || isCorrelatedCancelError) {

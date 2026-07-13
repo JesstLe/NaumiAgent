@@ -530,7 +530,7 @@ class AgentEngine:
         for tool in create_sandbox_tools():
             self._tool_registry.register(tool)
         try:
-            for tool in create_web_tools():
+            for tool in create_web_tools(self._browser_session):
                 self._tool_registry.register(tool)
         except Exception:
             pass  # web tools optional (may need API keys)
@@ -936,6 +936,21 @@ class AgentEngine:
         self.task_store.set_session("")
         self._permission_checker.reset_counts()
 
+    async def _shutdown_component(
+        self,
+        name: str,
+        operation: Callable[[], Awaitable[Any]],
+    ) -> None:
+        try:
+            await operation()
+        except Exception as exc:
+            logger.warning(
+                "Engine shutdown component failed [%s]: %s: %s",
+                name,
+                type(exc).__name__,
+                exc,
+            )
+
     async def shutdown(self) -> None:
         """释放资源（关闭数据库连接、浏览器、MCP 连接等）."""
         self._advance_session_authorization_generation()
@@ -944,8 +959,18 @@ class AgentEngine:
             source="shutdown",
         )
         if hasattr(self, "subagent_manager"):
-            await self.subagent_manager.stop_reaper()
-            self.subagent_manager.destroy_all_dynamic()
+            await self._shutdown_component(
+                "subagent_reaper",
+                self.subagent_manager.stop_reaper,
+            )
+            try:
+                self.subagent_manager.destroy_all_dynamic()
+            except Exception as exc:
+                logger.warning(
+                    "Engine shutdown component failed [subagents]: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
             try:
                 from naumi_agent.tools.analysis import clear_analysis_subagent_manager
 
@@ -959,15 +984,37 @@ class AgentEngine:
                         run["id"], reason="Engine shutdown"
                     )
         if hasattr(self, "background_runner"):
-            await self.background_runner.shutdown()
+            await self._shutdown_component(
+                "background_runner",
+                self.background_runner.shutdown,
+            )
         if hasattr(self, "scheduler_runner"):
-            await self.scheduler_runner.shutdown()
-        await self._browser_session.stop()
+            await self._shutdown_component(
+                "scheduler_runner",
+                self.scheduler_runner.shutdown,
+            )
+        await self._shutdown_component(
+            "browser",
+            self._browser_session.stop,
+        )
         if self._mcp_manager:
-            await self._mcp_manager.disconnect_all()
+            await self._shutdown_component(
+                "mcp",
+                self._mcp_manager.disconnect_all,
+            )
         if hasattr(self, "task_store"):
-            self.task_store.set_session("")
-        await self.session_store.close()
+            try:
+                self.task_store.set_session("")
+            except Exception as exc:
+                logger.warning(
+                    "Engine shutdown component failed [task_store]: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+        await self._shutdown_component(
+            "session_store",
+            self.session_store.close,
+        )
 
     async def reload_tools(self, domain: str = "tools") -> dict[str, Any]:
         """热重载指定域的模块并重新注册工具.

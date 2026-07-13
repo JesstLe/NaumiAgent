@@ -691,6 +691,15 @@ class JsonlEngineBridge:
                     request_id=request_id,
                     details=_receipt_reference(self._active_completion_receipt),
                 )
+                await self.emit(
+                    ServerEventType.RUN_COMPLETED,
+                    {
+                        "status": "failed",
+                        "response": "",
+                        "error": message,
+                    },
+                    request_id=request_id,
+                )
             finally:
                 if self._active_run_context.get("request_id") == request_id:
                     self._active_run_context = {}

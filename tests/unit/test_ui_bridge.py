@@ -1823,6 +1823,15 @@ async def test_bridge_presents_model_404_without_raw_provider_traceback(
     }
     assert "AnthropicException" not in writer.getvalue()
     assert not [record for record in caplog.records if record.levelno >= 40]
+    completed = next(
+        record for record in _records(writer) if record["type"] == "run/completed"
+    )
+    assert completed["request_id"] == "submit-failed"
+    assert completed["payload"] == {
+        "status": "failed",
+        "response": "",
+        "error": error["payload"]["message"],
+    }
 
 
 @pytest.mark.asyncio

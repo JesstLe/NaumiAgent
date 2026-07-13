@@ -20,6 +20,7 @@ def test_setup_script_checks_required_runtimes() -> None:
     assert 'Require-Command "node"' in script
     assert "Resolve-GitBash" in script
     assert "uv.Source sync --python 3.12 --extra dev" in script
+    assert "uv.Source run playwright install chromium" in script
     assert (
         "uv.Source tool install --editable --force --python 3.12 $repoRoot"
         in script
