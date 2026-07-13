@@ -41,6 +41,14 @@ class _Engine:
                 expires_at=None,
                 source_request_id="perm-1",
             ),
+            SimpleNamespace(
+                grant_id="grant-browser",
+                session_id="session-1",
+                tool_family="browser",
+                created_at="2026-07-13T00:00:00+00:00",
+                expires_at="2026-07-13T01:00:00+00:00",
+                source_request_id="perm-2",
+            ),
         )
 
 
@@ -87,6 +95,9 @@ def test_permission_panel_includes_active_session_grants() -> None:
 
     rendered = render_permission_panel_snapshot(snapshot)
 
-    assert snapshot.grants[0]["grant_id"] == "grant-shell"
+    assert [grant["grant_id"] for grant in snapshot.grants] == ["grant-shell", "grant-browser"]
     assert "有效授权" in rendered
-    assert "grant-shell shell [session]" in rendered
+    assert "grant-shell shell [本会话]" in rendered
+    assert "grant-browser browser [有效至 2026-07-13T01:00:00+00:00]" in rendered
+    assert "[session]" not in rendered
+    assert "[until" not in rendered
