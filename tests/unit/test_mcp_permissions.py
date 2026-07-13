@@ -24,16 +24,23 @@ class TestMCPToolPermissions:
         decision = checker.check("mcp__tool_x", {"arg": "val"})
         assert decision.allowed
 
-    def test_mcp_tool_allowed_bypass(self):
+    def test_mcp_tool_bypass_skips_all_permission_checks(self):
         checker = PermissionChecker(mode=PermissionMode.BYPASS)
-        decision = checker.check("mcp__anything", {})
-        assert decision.allowed
+        decisions = [
+            checker.check("mcp__anything", {}),
+            checker.check("mcp__terminal__run", {"cmd": "rm -rf /"}),
+            checker.check("mcp__terminal__run", {"directory": "/etc"}),
+        ]
+
+        assert all(decision.allowed for decision in decisions)
+        assert all(not decision.requires_confirmation for decision in decisions)
+        assert checker.get_call_counts() == {}
 
     @pytest.mark.parametrize(
         "mode",
-        [PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
+        [PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
     )
-    def test_opaque_mcp_tool_requires_high_risk_double_confirmation(self, mode):
+    def test_opaque_mcp_tool_requires_one_high_risk_confirmation(self, mode):
         checker = PermissionChecker(mode=mode)
 
         decision = checker.check("mcp__anything", {"query": "test"})
@@ -42,7 +49,7 @@ class TestMCPToolPermissions:
         assert decision.outcome is PermissionOutcome.CONFIRM
         assert decision.risk_level is PermissionRiskLevel.HIGH
         assert decision.requires_confirmation
-        assert decision.requires_double_confirm
+        assert decision.requires_double_confirm is False
         assert decision.allow_session_grant is False
 
     def test_mcp_tool_matching_a_builtin_name_remains_opaque(self):
@@ -63,7 +70,7 @@ class TestMCPToolPermissions:
     )
     @pytest.mark.parametrize(
         "mode",
-        [PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
+        [PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
     )
     def test_mcp_tool_blocks_dangerous_common_argument_aliases(
         self, mode, args, expected_code
@@ -90,7 +97,7 @@ class TestMCPToolPermissions:
     def test_mcp_dynamic_command_aliases_block_mainstream_shell_syntax(
         self, command, argument_name
     ):
-        checker = PermissionChecker(mode=PermissionMode.BYPASS)
+        checker = PermissionChecker(mode=PermissionMode.MODERATE)
 
         decision = checker.check("mcp__terminal__run", {argument_name: command})
 

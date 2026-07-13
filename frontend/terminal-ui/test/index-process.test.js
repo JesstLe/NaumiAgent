@@ -56,7 +56,7 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
     const debugEvents = readDebugEvents(app.debugLogPath);
     assert(debugEvents.some((record) => record.event === "input.chunk"));
     assert(debugEvents.some((record) => record.event === "protocol.send" && record.payload.record.type === "submit"));
-    assert(debugEvents.some((record) => record.event === "protocol.send" && record.payload.record.type === "permission_response" && record.payload.record.payload.choice === "allow"));
+    assert(debugEvents.some((record) => record.event === "protocol.send" && record.payload.record.type === "permission_response" && record.payload.record.payload.choice === "allow_once"));
     assert(debugEvents.some((record) => record.event === "protocol.send" && record.payload.record.type === "receipt/request"));
     assert(debugEvents.some((record) => record.event === "protocol.receive.record" && record.payload.type === "ui/message"));
     assert(debugEvents.some((record) => record.event === "render.screen"));
@@ -1175,7 +1175,7 @@ test("terminal UI permission modal wins over agent page action keys", async () =
         && record.payload.record.type === "permission_response",
     );
     assert(permission);
-    assert.equal(permission.payload.record.payload.choice, "allow");
+    assert.equal(permission.payload.record.payload.choice, "allow_once");
     assert.equal(await stopTerminalUi(app), 0);
   } finally {
     forceKill(app);

@@ -161,8 +161,8 @@ def _policy_for_tool(tool_name: str) -> dict[str, str]:
             "source": "unknown_tool",
             "risk": PermissionRiskLevel.HIGH.value,
             "modes": "-",
-            "confirmation": "未知工具会被拒绝",
-            "bypass": "无规则，不应静默放行",
+            "confirmation": "其他模式未知工具会被拒绝",
+            "bypass": "bypass 全权限放行",
         }
 
     return {
@@ -203,12 +203,8 @@ def _risk_for_rule(rule: PermissionRule) -> PermissionRiskLevel:
     return PermissionRiskLevel.LOW
 
 
-def _bypass_scope(rule: PermissionRule) -> str:
-    if PermissionMode.BYPASS not in rule.allowed_modes:
-        return "bypass 不在规则允许模式"
-    if rule.requires_confirmation:
-        return "bypass 允许；跳过逐次确认和路径沙箱，危险命令仍拦截"
-    return "bypass 允许；路径沙箱放宽，危险命令仍拦截"
+def _bypass_scope(_rule: PermissionRule) -> str:
+    return "bypass 全权限放行；不执行确认、路径、命令与次数检查"
 
 
 def _render_permission_item(item: dict[str, Any]) -> str:
