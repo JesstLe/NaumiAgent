@@ -62,6 +62,7 @@ async def run_doctor(
         _check_config(config),
         api_key_check,
         provider_check,
+        _check_search_readiness(),
         _check_workspace(root),
         _check_git(root),
         _check_command("ripgrep", "rg", ["rg", "--version"]),
@@ -180,6 +181,41 @@ def _check_model_provider(config: AppConfig) -> DoctorCheck:
         "model provider",
         "pass",
         f"provider: {provider}；默认模型: {model}",
+    )
+
+
+def _check_search_readiness(
+    *,
+    direct_search_available: bool = True,
+    browser_fallback_available: bool = True,
+) -> DoctorCheck:
+    """Report search capability separately from the required model credentials."""
+    if os.getenv("BRAVE_SEARCH_API_KEY", "").strip():
+        return DoctorCheck(
+            "网络搜索",
+            "pass",
+            "已增强：检测到 Brave Search 凭据；失败时仍会自动回退。",
+        )
+    if direct_search_available:
+        fallback = "，并支持浏览器自动回退" if browser_fallback_available else ""
+        return DoctorCheck(
+            "网络搜索",
+            "pass",
+            f"可用（零配置）：免 Key 直连搜索{fallback}。",
+            "BRAVE_SEARCH_API_KEY 仅用于提升质量和稳定性，不是安装必需项。",
+        )
+    if browser_fallback_available:
+        return DoctorCheck(
+            "网络搜索",
+            "warn",
+            "受限：免 Key 直连不可用，仅可使用浏览器回退。",
+            "检查网络后重试；也可选配 BRAVE_SEARCH_API_KEY。",
+        )
+    return DoctorCheck(
+        "网络搜索",
+        "warn",
+        "受限：当前没有可用的直连搜索或浏览器回退。",
+        "检查网络和浏览器依赖；也可选配 BRAVE_SEARCH_API_KEY。",
     )
 
 

@@ -42,7 +42,9 @@ curl -sSL https://raw.githubusercontent.com/JesstLe/NaumiAgent/main/scripts/inst
 naumi
 ```
 
-首次启动会进入交互式引导，询问 API Key、模型提供商、工作区和权限模式，自动生成不含密钥的 `config.yaml`。模型密钥保存在系统凭据库中；已经设置 `NAUMI_MODELS__API_KEY` 的环境不会重复保存。
+首次启动会进入交互式引导，询问模型 API Key、模型提供商、工作区和权限模式，自动生成不含密钥的 `config.yaml`。模型密钥保存在系统凭据库中；已经设置 `NAUMI_MODELS__API_KEY` 的环境不会重复保存。
+
+网络搜索默认无需搜索引擎 API Key：系统会依次尝试免 Key 搜索，并在失败时自动回退到浏览器搜索。`BRAVE_SEARCH_API_KEY` 只是可选增强项，用于提升结果质量和稳定性，不会阻塞首次安装或基本搜索。
 
 需要更换 provider、模型或过期密钥时，运行：
 
