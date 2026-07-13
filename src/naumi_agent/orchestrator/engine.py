@@ -103,6 +103,17 @@ _REPEATED_TOOL_CALL_MESSAGE = (
 )
 _DEFAULT_COMPACTION_RESERVED_TOKENS = 20_000
 
+
+def _budget_percentage(
+    used: int | float,
+    limit: int | float | None,
+) -> float | None:
+    if limit is None:
+        return None
+    if limit == 0:
+        return 100.0
+    return round(float(used) / float(limit) * 100, 1)
+
 _TASK_EVENT_TOOLS = {
     "delegate_task",
     "todo_write",
@@ -408,6 +419,7 @@ class AgentEngine:
         self._budget_tracker = BudgetTracker(
             TokenBudget(
                 max_input_tokens=config.safety.max_input_tokens,
+                max_output_tokens=config.safety.max_output_tokens,
                 max_usd=config.safety.max_budget_usd,
             )
         )
@@ -2205,23 +2217,29 @@ class AgentEngine:
             await self._emit_task_snapshot(on_event, source="todo_reconciliation")
 
     def _check_budget(self) -> AgentResult | None:
-        if self._permission_checker.mode == PermissionMode.BYPASS:
-            return None
         if not self._budget_tracker.is_exceeded():
             return None
 
         summary = self._budget_tracker.get_summary()
         budget = self._budget_tracker.budget
         reasons: list[str] = []
-        if summary.total_input_tokens > budget.max_input_tokens:
+        if budget.max_input_tokens is not None and (
+            budget.max_input_tokens == 0
+            or summary.total_input_tokens > budget.max_input_tokens
+        ):
             reasons.append(
                 f"输入 token {summary.total_input_tokens:,}/{budget.max_input_tokens:,}"
             )
-        if summary.total_output_tokens > budget.max_output_tokens:
+        if budget.max_output_tokens is not None and (
+            budget.max_output_tokens == 0
+            or summary.total_output_tokens > budget.max_output_tokens
+        ):
             reasons.append(
                 f"输出 token {summary.total_output_tokens:,}/{budget.max_output_tokens:,}"
             )
-        if summary.total_cost_usd > budget.max_usd:
+        if budget.max_usd is not None and (
+            budget.max_usd == 0 or summary.total_cost_usd > budget.max_usd
+        ):
             reasons.append(f"费用 ${summary.total_cost_usd:.4f}/${budget.max_usd:.2f}")
 
         detail = "，".join(reasons) if reasons else "已超过配置上限"
@@ -3954,7 +3972,12 @@ class AgentEngine:
     def _compute_context_budget(self, model: str) -> tuple[int, int]:
         """计算可用于会话构建的上下文预算（保留输出缓冲区）。"""
         context_window = self._router.get_context_window(model)
-        hard_cap = min(context_window, self._config.safety.max_input_tokens)
+        cumulative_limit = self._config.safety.max_input_tokens
+        hard_cap = (
+            context_window
+            if cumulative_limit is None
+            else min(context_window, cumulative_limit)
+        )
         if hard_cap <= 0:
             return 0, 0
 
@@ -3974,13 +3997,34 @@ class AgentEngine:
     def get_budget_info(self) -> dict[str, Any]:
         """Return budget consumption info."""
         summary = self._budget_tracker.get_summary()
+        budget = self._budget_tracker.budget
+        cost_percentage = _budget_percentage(summary.total_cost_usd, budget.max_usd)
+        input_percentage = _budget_percentage(
+            summary.total_input_tokens,
+            budget.max_input_tokens,
+        )
+        output_percentage = _budget_percentage(
+            summary.total_output_tokens,
+            budget.max_output_tokens,
+        )
+        active_percentages = [
+            percentage
+            for percentage in (cost_percentage, input_percentage, output_percentage)
+            if percentage is not None
+        ]
         return {
-            "max_usd": self._budget_tracker.budget.max_usd,
+            "enabled": budget.enabled,
             "used_usd": summary.total_cost_usd,
+            "max_usd": budget.max_usd,
             "remaining_usd": summary.remaining_usd,
-            "percentage": round(
-                summary.total_cost_usd / self._budget_tracker.budget.max_usd * 100, 1
-            ) if self._budget_tracker.budget.max_usd > 0 else 0,
+            "cost_percentage": cost_percentage,
+            "input_tokens": summary.total_input_tokens,
+            "max_input_tokens": budget.max_input_tokens,
+            "input_percentage": input_percentage,
+            "output_tokens": summary.total_output_tokens,
+            "max_output_tokens": budget.max_output_tokens,
+            "output_percentage": output_percentage,
+            "percentage": max(active_percentages) if active_percentages else None,
         }
 
     @staticmethod

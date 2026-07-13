@@ -667,6 +667,21 @@ class TestContextVisualPayloads:
 
 
 class TestContextBudget:
+    def test_compute_context_budget_uses_model_window_when_runtime_budget_is_unlimited(
+        self,
+        engine: AgentEngine,
+        mock_router: MagicMock,
+    ) -> None:
+        engine._router = mock_router
+        engine._config.memory.compaction_reserved_tokens = 20_000
+        mock_router.get_context_window.return_value = 120_000
+        mock_router.get_max_output.return_value = 8_000
+
+        budget, reserve = engine._compute_context_budget("model-x")
+
+        assert budget == 112_000
+        assert reserve == 8_000
+
     def test_compute_context_budget_reserves_output_tokens(
         self,
         engine: AgentEngine,
@@ -3047,6 +3062,7 @@ class TestSubagentVisualization:
 
 class TestBudgetCheck:
     def test_budget_exceeded_returns_stop_result(self, engine: AgentEngine) -> None:
+        engine._budget_tracker.budget = TokenBudget(max_input_tokens=500_000)
         engine._budget_tracker._total_input = 999_999_999
         result = engine._check_budget()
         assert result is not None
@@ -3054,11 +3070,56 @@ class TestBudgetCheck:
         assert "预算已耗尽" in result.response
         assert "输入 token" in result.response
 
-    def test_bypass_mode_tracks_budget_without_stopping(self) -> None:
-        config = AppConfig(safety=SafetyConfig(permission_mode="bypass"))
+    def test_explicit_budget_applies_in_bypass_mode(self) -> None:
+        config = AppConfig(
+            safety=SafetyConfig(permission_mode="bypass", max_budget_usd=0)
+        )
         engine = AgentEngine(config)
-        engine._budget_tracker._total_input = 999_999_999
+        result = engine._check_budget()
+
+        assert result is not None
+        assert result.status == "budget_exceeded"
+
+    def test_default_engine_budget_is_unlimited(self, engine: AgentEngine) -> None:
+        info = engine.get_budget_info()
+
+        assert info == {
+            "enabled": False,
+            "used_usd": 0.0,
+            "max_usd": None,
+            "remaining_usd": None,
+            "cost_percentage": None,
+            "input_tokens": 0,
+            "max_input_tokens": None,
+            "input_percentage": None,
+            "output_tokens": 0,
+            "max_output_tokens": None,
+            "output_percentage": None,
+            "percentage": None,
+        }
         assert engine._check_budget() is None
+        json.dumps(info, allow_nan=False)
+
+    def test_budget_status_uses_highest_active_percentage(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        engine._budget_tracker.budget = TokenBudget(
+            max_input_tokens=1_000,
+            max_output_tokens=100,
+            max_usd=2.0,
+        )
+        engine._budget_tracker._total_input = 500
+        engine._budget_tracker._total_output = 80
+        engine._budget_tracker._total_cost = 0.5
+
+        info = engine.get_budget_info()
+
+        assert info["cost_percentage"] == 25.0
+        assert info["input_percentage"] == 50.0
+        assert info["output_percentage"] == 80.0
+        assert info["percentage"] == 80.0
+        json.dumps(info, allow_nan=False)
 
     @pytest.mark.asyncio
     async def test_react_loop_stops_after_budget_exceeded(self, engine: AgentEngine) -> None:
