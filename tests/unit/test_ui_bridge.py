@@ -371,6 +371,29 @@ def test_protocol_contract_ui_message_fields_match_python_messages() -> None:
 
 
 def test_protocol_normalizes_known_client_event_payloads() -> None:
+    task_submit = normalize_client_record({
+        "id": "task-submit-1",
+        "type": ClientEventType.TASK_SUBMIT,
+        "payload": {
+            "text": "实现登录流程",
+            "mission_id": " mission-1 ",
+            "title": " 登录任务 ",
+            "acceptance_criteria": ["测试通过", "", 42],
+            "blocked_by": ["1", "", 2],
+            "parallel_mode": "COOPERATIVE",
+            "risk_level": "HIGH",
+        },
+    })
+    assert task_submit["payload"] == {
+        "text": "实现登录流程",
+        "mission_id": "mission-1",
+        "title": "登录任务",
+        "acceptance_criteria": ["测试通过", "42"],
+        "blocked_by": ["1", "2"],
+        "parallel_mode": "cooperative",
+        "risk_level": "high",
+    }
+
     task_record = normalize_client_record({
         "id": 42,
         "type": ClientEventType.TASK_PANEL,
@@ -418,6 +441,18 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
         normalize_client_record({
             "type": ClientEventType.PERMISSION_RESPONSE,
             "payload": {"request_id": "perm-1", "choice": "maybe"},
+        })
+
+    with pytest.raises(ValueError, match="任务内容不能为空"):
+        normalize_client_record({
+            "type": ClientEventType.TASK_SUBMIT,
+            "payload": {"text": "  "},
+        })
+
+    with pytest.raises(ValueError, match="并行模式无效"):
+        normalize_client_record({
+            "type": ClientEventType.TASK_SUBMIT,
+            "payload": {"text": "任务", "parallel_mode": "invalid"},
         })
 
 
