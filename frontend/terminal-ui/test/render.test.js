@@ -346,3 +346,19 @@ test("resize anchor keeps follow mode pinned to the latest output", () => {
   assert.equal(state.followTail, true);
   assert.equal(state.scrollOffset, 0);
 });
+
+test("resize anchor clamps the offset when its message disappeared", () => {
+  const state = createInitialState();
+  state.messages = [{ kind: "assistant", id: "remaining", content: "仍然存在" }];
+  detachTimeline(state, 200);
+
+  const offset = restoreViewportAnchor(
+    state,
+    { messageId: "removed", messageIndex: 99 },
+    80,
+    14,
+  );
+
+  assert.equal(offset, 0);
+  assert.equal(state.followTail, true);
+});

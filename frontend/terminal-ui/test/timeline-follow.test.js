@@ -129,3 +129,17 @@ test("session replay resets detached timeline state", () => {
   assert.equal(state.unreadOutputCount, 0);
   assert.deepEqual(state.unreadOutputKeys, {});
 });
+
+test("timeline transitions normalize numeric state restored as strings", () => {
+  const state = createInitialState();
+  state.followTail = false;
+  state.scrollOffset = "6";
+  state.unreadOutputCount = "1";
+  state.unreadOutputKeys = { "assistant:old": true };
+
+  scrollTimeline(state, -2);
+  markTimelineOutput(state, assistantToken(2), "assistant-new");
+
+  assert.equal(state.scrollOffset, 4);
+  assert.equal(state.unreadOutputCount, 2);
+});

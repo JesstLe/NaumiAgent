@@ -124,15 +124,22 @@ export function restoreViewportAnchor(state, anchor, width, height, env = {}) {
   }
 
   const layout = renderViewportLayout(state, width, height, env);
+  const maxOffset = Math.max(0, layout.totalBodyLines - layout.bodyHeight);
   const targetIndex = findAnchorSegmentIndex(layout.segments, anchor);
   if (targetIndex < 0) {
-    return Math.max(0, Number(state.scrollOffset) || 0);
+    const fallbackOffset = Math.min(maxOffset, Math.max(0, Number(state.scrollOffset) || 0));
+    if (fallbackOffset === 0) {
+      jumpTimelineToLatest(state);
+    } else {
+      state.followTail = false;
+      state.scrollOffset = fallbackOffset;
+    }
+    return state.scrollOffset;
   }
 
   const anchorSegmentStart = layout.segments
     .slice(0, targetIndex)
     .reduce((total, segment) => total + segment.lines.length, 0);
-  const maxOffset = Math.max(0, layout.totalBodyLines - layout.bodyHeight);
   const nextOffset = Math.min(
     maxOffset,
     Math.max(0, layout.totalBodyLines - layout.bodyHeight - anchorSegmentStart),
