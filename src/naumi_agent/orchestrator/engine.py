@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -44,7 +45,11 @@ from naumi_agent.orchestrator.tool_batches import (
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permission_grants import PermissionGrant, PermissionGrantStore
-from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
+from naumi_agent.safety.permissions import (
+    PermissionChecker,
+    PermissionMode,
+    PermissionOutcome,
+)
 from naumi_agent.scheduler import SchedulerRunner, SchedulerStore, create_scheduler_tools
 from naumi_agent.skills.loader import SkillLoader
 from naumi_agent.skills.tool import create_skill_tools
@@ -432,8 +437,11 @@ class AgentEngine:
         self.emitter = EventEmitter()
         self.hooks = HookManager()
         self._session: Session | None = None
-        self._session_transition_epochs: dict[str, int] = {}
+        self._session_authorization_generation = 0
+        self._session_transition_epochs: dict[str, set[int]] = {}
+        self._session_transition_tokens: dict[int, str] = {}
         self._next_session_transition_epoch = 0
+        self._session_transition_lock = asyncio.Lock()
         self._openai_tools_cache_key: tuple[tuple[str, int], ...] = ()
         self._openai_tools_cache: list[dict[str, Any]] | None = None
         self._browser_session = BrowserRuntime(
@@ -903,6 +911,7 @@ class AgentEngine:
         return self._security_auditor
 
     def reset(self) -> None:
+        self._advance_session_authorization_generation()
         self._messages.clear()
         self._full_history.clear()
         self._usage = AgentUsage()
@@ -917,6 +926,7 @@ class AgentEngine:
 
     async def shutdown(self) -> None:
         """释放资源（关闭数据库连接、浏览器、MCP 连接等）."""
+        self._advance_session_authorization_generation()
         self._clear_permission_grants(
             reason="引擎关闭时撤销了权限授权。",
             source="shutdown",
@@ -1002,28 +1012,63 @@ class AgentEngine:
 
     # --- 会话持久化 ---
 
+    def _advance_session_authorization_generation(self) -> None:
+        """Invalidate authorization captured before a real session transition."""
+        self._session_authorization_generation += 1
+
     def _begin_active_session_transition(self, session_id: str) -> int | None:
-        """Synchronously fence tool calls for an active session transition."""
+        """Fence one operation without letting another operation clear it."""
         if not session_id or self._session is None or self._session.id != session_id:
             return None
         self._next_session_transition_epoch += 1
         epoch = self._next_session_transition_epoch
-        self._session_transition_epochs[session_id] = epoch
+        self._session_transition_epochs.setdefault(session_id, set()).add(epoch)
+        self._session_transition_tokens[epoch] = session_id
         return epoch
+
+    def _move_session_transition(self, epoch: int | None, session_id: str) -> None:
+        """Move a queued operation's fence to the session it will now leave."""
+        if epoch is None:
+            return
+        previous_session_id = self._session_transition_tokens.get(epoch)
+        if previous_session_id == session_id:
+            return
+        if previous_session_id:
+            epochs = self._session_transition_epochs.get(previous_session_id)
+            if epochs is not None:
+                epochs.discard(epoch)
+                if not epochs:
+                    del self._session_transition_epochs[previous_session_id]
+        if session_id:
+            self._session_transition_epochs.setdefault(session_id, set()).add(epoch)
+            self._session_transition_tokens[epoch] = session_id
+        else:
+            self._session_transition_tokens.pop(epoch, None)
 
     def _finish_session_transition(self, session_id: str, epoch: int | None) -> None:
         """Clear only the transition barrier established by this operation."""
-        if (
-            epoch is not None
-            and self._session_transition_epochs.get(session_id) == epoch
-        ):
-            del self._session_transition_epochs[session_id]
+        if epoch is None:
+            return
+        owned_session_id = self._session_transition_tokens.pop(epoch, None)
+        if not owned_session_id:
+            return
+        epochs = self._session_transition_epochs.get(owned_session_id)
+        if epochs is not None:
+            epochs.discard(epoch)
+            if not epochs:
+                del self._session_transition_epochs[owned_session_id]
 
     def _is_session_transitioning(self, session_id: str) -> bool:
-        return bool(session_id) and session_id in self._session_transition_epochs
+        return bool(session_id) and bool(self._session_transition_epochs.get(session_id))
 
-    def _is_tool_call_session_active(self, session_id: str) -> bool:
+    def _is_tool_call_session_active(
+        self,
+        session_id: str,
+        authorization_generation: int,
+    ) -> bool:
         """Return whether a tool call still belongs to an executable session."""
+        if authorization_generation != self._session_authorization_generation:
+            return False
         if not session_id:
             return self._session is None
         return (
@@ -1073,6 +1118,7 @@ class AgentEngine:
                 default_prompt,
             ),
         )
+        self._advance_session_authorization_generation()
         return self._session
 
     async def load_session(self, session_id: str) -> bool:
@@ -1080,33 +1126,51 @@ class AgentEngine:
 
         清理不完整的工具调用序列，避免 LLM API 拒绝续接。
         """
-        previous_session_id = self._session.id if self._session is not None else ""
+        initial_session_id = self._session.id if self._session is not None else ""
         transition_epoch = (
-            self._begin_active_session_transition(previous_session_id)
-            if previous_session_id and previous_session_id != session_id
+            self._begin_active_session_transition(initial_session_id)
+            if initial_session_id and initial_session_id != session_id
             else None
         )
         try:
-            session = await self.session_store.load(session_id)
-            if session is None:
-                return False
-            if previous_session_id and previous_session_id != session.id:
-                self._revoke_permission_grants_for_session(
-                    previous_session_id,
-                    reason="切换到其他会话时撤销了权限授权。",
-                    source="session_load",
+            async with self._session_transition_lock:
+                previous_session_id = self._session.id if self._session is not None else ""
+                if previous_session_id and previous_session_id != session_id:
+                    if transition_epoch is None:
+                        transition_epoch = self._begin_active_session_transition(
+                            previous_session_id
+                        )
+                    else:
+                        self._move_session_transition(
+                            transition_epoch,
+                            previous_session_id,
+                        )
+                elif transition_epoch is not None:
+                    self._finish_session_transition("", transition_epoch)
+                    transition_epoch = None
+
+                session = await self.session_store.load(session_id)
+                if session is None:
+                    return False
+                if previous_session_id != session.id:
+                    if previous_session_id:
+                        self._revoke_permission_grants_for_session(
+                            previous_session_id,
+                            reason="切换到其他会话时撤销了权限授权。",
+                            source="session_load",
+                        )
+                    self._advance_session_authorization_generation()
+                self._session = session
+                cleaned_messages = self._sanitize_messages(session.messages)
+                self._messages = cleaned_messages
+                self._full_history = list(cleaned_messages)
+                self._usage = AgentUsage(
+                    total_input_tokens=session.total_tokens,
+                    total_cost_usd=session.total_cost_usd,
                 )
-            self._session = session
-            cleaned_messages = self._sanitize_messages(session.messages)
-            self._messages = cleaned_messages
-            self._full_history = list(cleaned_messages)
-            self._usage = AgentUsage(
-                total_input_tokens=session.total_tokens,
-                total_cost_usd=session.total_cost_usd,
-            )
-            return True
+                return True
         finally:
-            self._finish_session_transition(previous_session_id, transition_epoch)
+            self._finish_session_transition("", transition_epoch)
 
     @staticmethod
     def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1175,26 +1239,40 @@ class AgentEngine:
         """Delete one session and invalidate its scoped runtime state."""
         transition_epoch = self._begin_active_session_transition(session_id)
         try:
-            deleted = await self.session_store.delete(session_id)
-            if not deleted:
-                return False
+            async with self._session_transition_lock:
+                active_session_id = self._session.id if self._session is not None else ""
+                if active_session_id == session_id:
+                    if transition_epoch is None:
+                        transition_epoch = self._begin_active_session_transition(
+                            session_id
+                        )
+                    else:
+                        self._move_session_transition(transition_epoch, session_id)
+                elif transition_epoch is not None:
+                    self._finish_session_transition("", transition_epoch)
+                    transition_epoch = None
 
-            self._revoke_permission_grants_for_session(
-                session_id,
-                reason="删除会话时撤销了权限授权。",
-                source="session_deletion",
-            )
-            if self._session is not None and self._session.id == session_id:
-                self._messages.clear()
-                self._full_history.clear()
-                self._usage = AgentUsage()
-                self._budget_tracker.reset()
-                self._session = None
-                self.task_store.set_session("")
-                self._permission_checker.reset_counts()
-            return True
+                deleted = await self.session_store.delete(session_id)
+                if not deleted:
+                    return False
+
+                self._revoke_permission_grants_for_session(
+                    session_id,
+                    reason="删除会话时撤销了权限授权。",
+                    source="session_deletion",
+                )
+                if self._session is not None and self._session.id == session_id:
+                    self._advance_session_authorization_generation()
+                    self._messages.clear()
+                    self._full_history.clear()
+                    self._usage = AgentUsage()
+                    self._budget_tracker.reset()
+                    self._session = None
+                    self.task_store.set_session("")
+                    self._permission_checker.reset_counts()
+                return True
         finally:
-            self._finish_session_transition(session_id, transition_epoch)
+            self._finish_session_transition("", transition_epoch)
 
     async def archive_session(self, session_id: str) -> bool:
         """归档指定会话."""
@@ -3146,6 +3224,7 @@ class AgentEngine:
             return ToolResult(call_id=tc.id, status="error", content=str(e))
 
         session_id = self._session.id if self._session else ""
+        authorization_generation = self._session_authorization_generation
         transition_block = await self._block_transitioning_tool_call(
             tool_call=tc,
             session_id=session_id,
@@ -3253,7 +3332,7 @@ class AgentEngine:
         )
         if transition_block is not None:
             return transition_block
-        if not decision.allowed:
+        if decision.outcome is PermissionOutcome.BLOCK:
             logger.warning("Tool %s blocked: %s", tc.name, decision.reason)
             await self._emit_permission_bubble(
                 on_event,
@@ -3270,16 +3349,19 @@ class AgentEngine:
                 content=f"权限拒绝：{decision.reason}",
             )
         session_grant_applies = (
-            decision.requires_confirmation
+            decision.outcome is PermissionOutcome.CONFIRM
             and decision.allow_session_grant
             and bool(session_id)
-            and self._is_tool_call_session_active(session_id)
+            and self._is_tool_call_session_active(
+                session_id,
+                authorization_generation,
+            )
             and self._permission_grant_store.allows(
                 session_id,
                 decision.tool_family,
             )
         )
-        if decision.requires_confirmation and not session_grant_applies:
+        if decision.outcome is PermissionOutcome.CONFIRM and not session_grant_applies:
             logger.info("Tool %s requires confirmation", tc.name)
             confirmation = await self._confirm_tool_execution(
                 on_event,
@@ -3288,6 +3370,7 @@ class AgentEngine:
                 arguments=args,
                 decision=decision,
                 session_id=session_id,
+                authorization_generation=authorization_generation,
             )
             if confirmation != "allow_once":
                 if confirmation == "unavailable":
@@ -3308,7 +3391,10 @@ class AgentEngine:
                 else:
                     content = "权限拒绝：用户已拒绝执行该工具。"
                 return ToolResult(call_id=tc.id, status="error", content=content)
-            if not self._is_tool_call_session_active(session_id):
+            if not self._is_tool_call_session_active(
+                session_id,
+                authorization_generation,
+            ):
                 await self._emit_permission_bubble(
                     on_event,
                     agent_name=agent_name,
@@ -3338,7 +3424,10 @@ class AgentEngine:
         )
         if transition_block is not None:
             return transition_block
-        if not self._is_tool_call_session_active(session_id):
+        if not self._is_tool_call_session_active(
+            session_id,
+            authorization_generation,
+        ):
             await self._emit_permission_bubble(
                 on_event,
                 agent_name=agent_name,
@@ -3392,6 +3481,7 @@ class AgentEngine:
         arguments: dict[str, Any],
         decision: Any,
         session_id: str,
+        authorization_generation: int,
     ) -> str:
         """Ask the UI to confirm a tool execution that policy marked as sensitive."""
         reason = decision.reason or "该工具需要用户确认。"
@@ -3480,7 +3570,10 @@ class AgentEngine:
                     session_id=session_id,
                 )
                 return "grant_rejected_no_session"
-            if not self._is_tool_call_session_active(session_id):
+            if not self._is_tool_call_session_active(
+                session_id,
+                authorization_generation,
+            ):
                 await self._emit_permission_bubble(
                     on_event,
                     agent_name=agent_name,
