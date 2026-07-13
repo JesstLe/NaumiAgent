@@ -22,47 +22,51 @@ def format_completion_receipt_markdown(
         "failed": "失败",
         "cancelled": "已取消",
     }[receipt.outcome]
-    passed = sum(item.status == "passed" for item in receipt.validations)
-    failed = sum(item.status == "failed" for item in receipt.validations)
+    task_changes = tuple(item for item in receipt.changes if item.scope != "background")
+    background_changes = tuple(item for item in receipt.changes if item.scope == "background")
     lines = [
         f"## 完成回执 · {outcome}",
         "",
         _plain(receipt.summary),
-        "",
-        (
-            f"- 改动 **{len(receipt.changes)}** · "
-            f"验证 **{passed}/{len(receipt.validations)}**（失败 {failed}） · "
-            f"审批 **{len(receipt.approvals)}** · 风险 **{len(receipt.risks)}**"
-        ),
-        f"- {_git_summary(receipt)}",
     ]
     if receipt.validations:
-        lines.extend(["", "### 验证"])
-        for item in receipt.validations[:4]:
+        lines.append("")
+        for item in receipt.validations[:2]:
             counts = _validation_counts(item)
             suffix = f" · {counts}" if counts else ""
             lines.append(
-                f"- {'通过' if item.status == 'passed' else '失败'} · "
+                f"- 验证{'通过' if item.status == 'passed' else '失败'} · "
                 f"{_code(item.command)}{suffix}"
             )
-    else:
-        lines.extend(["", "- 验证：未记录验证命令"])
+        if len(receipt.validations) > 2:
+            lines.append(f"- 另有 {len(receipt.validations) - 2} 项验证")
+    elif task_changes:
+        lines.extend(["", "- 未验证：本轮任务改动尚无验证证据"])
 
-    if receipt.changes:
-        lines.extend(["", "### 文件改动"])
-        for item in receipt.changes[:5]:
-            stats = _change_stats(item.additions, item.deletions)
-            source = f" · 来源 {_plain(item.source_tool)}" if item.source_tool else ""
-            lines.append(
-                f"- {_change_status(item.status)} · {_code(item.path)}"
-                f"{f' · {stats}' if stats else ''}{source}"
-            )
+    if task_changes:
+        lines.append(f"- 影响：{_change_summary(task_changes)}")
+    if background_changes:
+        lines.append(f"- 工作区另有 {len(background_changes)} 项运行时变化")
 
-    if receipt.approvals:
-        lines.extend(["", "### 审批"])
-        for item in receipt.approvals[:3]:
+    reviewable_changes = tuple(
+        item
+        for item in task_changes
+        if item.status not in {"removed_untracked", "restored"}
+    )
+    if not receipt.git_state.available and receipt.outcome != "completed":
+        lines.append(f"- {_git_summary(receipt)}")
+    elif receipt.git_state.available and (
+        reviewable_changes or receipt.git_state.behind
+    ):
+        lines.append(f"- {_git_summary(receipt)}")
+
+    actionable_approvals = tuple(
+        item for item in receipt.approvals if item.decision in {"denied", "error"}
+    )
+    if actionable_approvals:
+        for item in actionable_approvals[:3]:
             lines.append(
-                f"- {_plain(item.tool_name)} · {_approval_label(item.decision)}"
+                f"- 审批：{_plain(item.tool_name)} · {_approval_label(item.decision)}"
             )
     for item in receipt.unverified[:3]:
         lines.append(f"- 未验证：{_plain(item)}")
@@ -103,18 +107,9 @@ def _validation_counts(item: Any) -> str:
         parts.append(f"失败 {item.failed}")
     if item.skipped:
         parts.append(f"跳过 {item.skipped}")
-    if not parts and item.exit_code is not None:
+    if not parts and item.exit_code is not None and item.scope != "文件系统":
         parts.append(f"退出码 {item.exit_code}")
     return " · ".join(parts)
-
-
-def _change_stats(additions: int, deletions: int) -> str:
-    parts = []
-    if additions:
-        parts.append(f"+{additions}")
-    if deletions:
-        parts.append(f"-{deletions}")
-    return " ".join(parts)
 
 
 def _change_status(status: str) -> str:
@@ -123,10 +118,25 @@ def _change_status(status: str) -> str:
         "added": "新增",
         "deleted": "删除",
         "renamed": "重命名",
-        "untracked": "未跟踪",
+        "untracked": "新增",
+        "copied": "复制",
         "conflicted": "冲突",
         "restored": "还原",
+        "removed_untracked": "删除",
     }.get(status, _plain(status or "变化"))
+
+
+def _change_summary(changes: tuple[Any, ...]) -> str:
+    order = ("删除", "新增", "修改", "重命名", "还原", "冲突")
+    counts: dict[str, int] = {}
+    for item in changes:
+        label = _change_status(item.status)
+        counts[label] = counts.get(label, 0) + 1
+    labels = sorted(
+        counts,
+        key=lambda label: order.index(label) if label in order else len(order),
+    )
+    return " · ".join(f"{label} {counts[label]} 个文件" for label in labels)
 
 
 def _approval_label(decision: str) -> str:

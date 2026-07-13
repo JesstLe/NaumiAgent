@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import time
@@ -33,6 +34,10 @@ _FILE_MUTATION_TOOLS = frozenset(
         "delete",
     }
 )
+_DELETE_TOOLS = frozenset({"file_delete", "delete"})
+_SUCCESS_STATUSES = frozenset({"success", "succeeded", "completed"})
+_BACKGROUND_CHANGE_PATHS = frozenset({".naumi/terminal-ui-debug.jsonl"})
+_BACKGROUND_CHANGE_PREFIXES = ("data/debug-runs/",)
 _TERMINAL_APPROVALS = {
     "confirmed": "allowed_once",
     "session_granted": "allowed_session",
@@ -44,7 +49,11 @@ _SECRET_NAME = re.compile(
     r"(?:token|secret|password|passwd|api[_-]?key|authorization|cookie)",
     re.IGNORECASE,
 )
-_EXIT_CODE = re.compile(r"\[exit code:\s*(-?\d+)\]", re.IGNORECASE)
+_SHELL_WRAPPER_EXIT_CODE = re.compile(r"^退出码:\s*(-?\d+)\s*$", re.MULTILINE)
+_FALLBACK_EXIT_CODE = re.compile(
+    r"(?:\[exit\s+code:\s*|exit\s+code:\s*)(-?\d+)\]?",
+    re.IGNORECASE,
+)
 _PYTEST_COUNT = {
     "passed": re.compile(r"\b(\d+)\s+passed\b", re.IGNORECASE),
     "failed": re.compile(r"\b(\d+)\s+failed\b", re.IGNORECASE),
@@ -66,6 +75,7 @@ class _ToolObservation:
     name: str
     arguments: dict[str, Any]
     command: str = ""
+    delete_targets: tuple[str, ...] = ()
 
 
 class RunReceiptBuilder:
@@ -88,6 +98,7 @@ class RunReceiptBuilder:
         self._probe = GitWorkspaceProbe(workspace_root)
         self._tools: dict[str, _ToolObservation] = {}
         self._path_tools: dict[str, str] = {}
+        self._path_tool_prefixes: dict[str, str] = {}
         self._validations: list[ReceiptValidation] = []
         self._approvals: dict[str, ReceiptApproval] = {}
         self._failed_tools: list[tuple[str, str]] = []
@@ -123,6 +134,7 @@ class RunReceiptBuilder:
         after_git = await self._probe.capture()
         delta = diff_run_changes(self._before_git, after_git)
         changes = tuple(self._attribute_change(change) for change in delta.changes)
+        task_changes = tuple(change for change in changes if change.scope == "task")
         validations = tuple(self._validations)
         approvals = tuple(self._approvals.values())
         unverified = list(delta.warnings)
@@ -130,13 +142,14 @@ class RunReceiptBuilder:
 
         failed_validations = [item for item in validations if item.status == "failed"]
         denied_approvals = [item for item in approvals if item.decision in {"denied", "error"}]
-        if changes and not validations:
-            unverified.append("检测到文件改动，但本轮未运行验证命令。")
+        changes_unverified = _changes_need_validation(task_changes, validations)
+        if changes_unverified:
+            unverified.append("检测到任务改动，但缺少对应的验证证据。")
             risks.append(
                 ReceiptRisk(
                     code="changes_unverified",
                     level="medium",
-                    message="文件改动尚未经过真实验证。",
+                    message="任务改动尚未经过对应的真实验证。",
                 )
             )
         if failed_validations:
@@ -175,17 +188,19 @@ class RunReceiptBuilder:
         unverified_tuple = _unique(unverified)
         outcome = _derive_outcome(
             requested_status,
-            changes=changes,
+            changes=task_changes,
             validations=validations,
             unverified=unverified_tuple,
             risks=tuple(risks),
+            changes_unverified=changes_unverified,
         )
         actions = _next_actions(
             outcome=outcome,
-            changes=changes,
+            changes=task_changes,
             validations=validations,
             approvals=approvals,
             git_dirty=delta.git_state.dirty,
+            changes_unverified=changes_unverified,
         )
         completed_at = _now_iso()
         return CompletionReceipt.from_dict(
@@ -219,16 +234,29 @@ class RunReceiptBuilder:
         name = str(data.get("name") or data.get("tool_name") or "tool").strip()
         arguments = _parse_arguments(data.get("args"))
         command = str(arguments.get("command") or "").strip()
-        self._tools[call_id] = _ToolObservation(
+        delete_targets = _delete_targets(
+            self.workspace_root,
             name=name,
             arguments=arguments,
             command=command,
         )
+        self._tools[call_id] = _ToolObservation(
+            name=name,
+            arguments=arguments,
+            command=command,
+            delete_targets=delete_targets,
+        )
         if name in _FILE_MUTATION_TOOLS:
             raw_path = arguments.get("path") or arguments.get("file_path")
-            relative_path = _relative_workspace_path(self.workspace_root, raw_path)
+            relative_path = (
+                _relative_workspace_delete_path(self.workspace_root, raw_path)
+                if name in _DELETE_TOOLS
+                else _relative_workspace_path(self.workspace_root, raw_path)
+            )
             if relative_path:
                 self._path_tools[relative_path] = name
+        for relative_path in delete_targets:
+            self._path_tool_prefixes[relative_path] = name
 
     def _observe_tool_end(self, data: dict[str, Any]) -> None:
         call_id = str(data.get("call_id") or data.get("tool_call_id") or "").strip()
@@ -241,6 +269,8 @@ class RunReceiptBuilder:
         status = str(data.get("status") or "unknown").strip().lower()
         content = str(data.get("content") or "")[:50_000]
         evidence_ref = f"run:{self.run_id}:tool:{call_id or observed.name}"
+        succeeded = _tool_succeeded(status, content, has_command=bool(observed.command))
+        recorded_evidence = False
         if observed.command and _is_validation_command(observed.command):
             self._validations.append(
                 _validation_from_tool(
@@ -250,9 +280,23 @@ class RunReceiptBuilder:
                     evidence_ref=evidence_ref,
                 )
             )
-            self._evidence_refs.append(evidence_ref)
-        elif status not in {"success", "succeeded", "completed"}:
+            recorded_evidence = True
+        if observed.delete_targets and succeeded:
+            for relative_path in observed.delete_targets:
+                self._validations.append(
+                    _delete_postcondition(
+                        self.workspace_root,
+                        relative_path=relative_path,
+                        evidence_ref=evidence_ref,
+                    )
+                )
+            recorded_evidence = True
+        if not succeeded and not (
+            observed.command and _is_validation_command(observed.command)
+        ):
             self._failed_tools.append((call_id, observed.name))
+            recorded_evidence = True
+        if recorded_evidence:
             self._evidence_refs.append(evidence_ref)
 
     def _observe_permission(self, data: dict[str, Any]) -> None:
@@ -274,7 +318,16 @@ class RunReceiptBuilder:
 
     def _attribute_change(self, change: ReceiptChange) -> ReceiptChange:
         source_tool = self._path_tools.get(change.path, "")
-        return replace(change, source_tool=source_tool)
+        if not source_tool:
+            matching_prefixes = [
+                prefix
+                for prefix in self._path_tool_prefixes
+                if change.path == prefix or change.path.startswith(f"{prefix}/")
+            ]
+            if matching_prefixes:
+                source_tool = self._path_tool_prefixes[max(matching_prefixes, key=len)]
+        scope = "task" if source_tool or not _is_background_change(change.path) else "background"
+        return replace(change, source_tool=source_tool, scope=scope)
 
 
 def _derive_outcome(
@@ -284,6 +337,7 @@ def _derive_outcome(
     validations: tuple[ReceiptValidation, ...],
     unverified: tuple[str, ...],
     risks: tuple[ReceiptRisk, ...],
+    changes_unverified: bool,
 ) -> str:
     normalized = requested_status.strip().lower()
     if normalized == "cancelled":
@@ -292,7 +346,7 @@ def _derive_outcome(
         return "failed"
     if any(item.status == "failed" for item in validations):
         return "partial"
-    if changes and not validations:
+    if changes_unverified:
         return "partial"
     if unverified or any(item.level in {"high", "critical"} for item in risks):
         return "partial"
@@ -306,8 +360,14 @@ def _next_actions(
     validations: tuple[ReceiptValidation, ...],
     approvals: tuple[ReceiptApproval, ...],
     git_dirty: bool,
+    changes_unverified: bool,
 ) -> tuple[ReceiptAction, ...]:
     actions: list[ReceiptAction] = []
+    reviewable_changes = tuple(
+        change
+        for change in changes
+        if change.status not in {"removed_untracked", "restored"}
+    )
     if any(item.status == "failed" for item in validations):
         actions.append(
             ReceiptAction(
@@ -324,7 +384,7 @@ def _next_actions(
                 kind="request_approval",
             )
         )
-    if changes and not validations:
+    if changes_unverified:
         actions.append(
             ReceiptAction(
                 id="run-validation",
@@ -332,7 +392,7 @@ def _next_actions(
                 kind="run_validation",
             )
         )
-    if changes:
+    if reviewable_changes:
         actions.append(
             ReceiptAction(
                 id="review-changes",
@@ -348,7 +408,7 @@ def _next_actions(
                 kind="continue_run",
             )
         )
-    if changes and git_dirty:
+    if reviewable_changes and git_dirty:
         actions.append(
             ReceiptAction(
                 id="commit-changes",
@@ -359,6 +419,24 @@ def _next_actions(
     return tuple(actions)
 
 
+def _changes_need_validation(
+    changes: tuple[ReceiptChange, ...],
+    validations: tuple[ReceiptValidation, ...],
+) -> bool:
+    if not changes:
+        return False
+    reviewable_changes = tuple(
+        change
+        for change in changes
+        if change.status not in {"removed_untracked", "restored"}
+    )
+    if reviewable_changes and not any(
+        validation.scope != "文件系统" for validation in validations
+    ):
+        return True
+    return not reviewable_changes and not validations
+
+
 def _validation_from_tool(
     *,
     command: str,
@@ -366,9 +444,9 @@ def _validation_from_tool(
     content: str,
     evidence_ref: str,
 ) -> ReceiptValidation:
-    exit_match = _EXIT_CODE.search(content)
-    exit_code = int(exit_match.group(1)) if exit_match else (
-        0 if tool_status in {"success", "succeeded", "completed"} else 1
+    reported_exit_code = _reported_exit_code(content)
+    exit_code = reported_exit_code if reported_exit_code is not None else (
+        0 if tool_status in _SUCCESS_STATUSES else 1
     )
     counts = _validation_counts(content)
     return ReceiptValidation(
@@ -379,6 +457,23 @@ def _validation_from_tool(
         passed=counts[0],
         failed=counts[1],
         skipped=counts[2],
+        log_ref=evidence_ref,
+    )
+
+
+def _delete_postcondition(
+    workspace_root: Path,
+    *,
+    relative_path: str,
+    evidence_ref: str,
+) -> ReceiptValidation:
+    candidate = workspace_root / relative_path
+    absent = not candidate.exists() and not candidate.is_symlink()
+    return ReceiptValidation(
+        command=f"路径已不存在: {candidate}",
+        scope="文件系统",
+        status="passed" if absent else "failed",
+        exit_code=0 if absent else 1,
         log_ref=evidence_ref,
     )
 
@@ -480,6 +575,124 @@ def _command_tokens(command: str) -> list[str]:
         return command.split()
 
 
+def _tool_succeeded(status: str, content: str, *, has_command: bool) -> bool:
+    if status not in _SUCCESS_STATUSES:
+        return False
+    if not has_command:
+        return True
+    reported_exit_code = _reported_exit_code(content)
+    if reported_exit_code is not None:
+        return reported_exit_code == 0
+    normalized = content.lstrip()
+    return not normalized.startswith("错误：") and "已超时并终止" not in normalized
+
+
+def _reported_exit_code(content: str) -> int | None:
+    wrapper_match = _SHELL_WRAPPER_EXIT_CODE.search(content)
+    if wrapper_match is not None:
+        return int(wrapper_match.group(1))
+    fallback_matches = _FALLBACK_EXIT_CODE.findall(content)
+    return int(fallback_matches[-1]) if fallback_matches else None
+
+
+def _delete_targets(
+    workspace_root: Path,
+    *,
+    name: str,
+    arguments: dict[str, Any],
+    command: str,
+) -> tuple[str, ...]:
+    targets: list[str] = []
+    if name in _DELETE_TOOLS:
+        raw_path = arguments.get("path") or arguments.get("file_path")
+        relative_path = _relative_workspace_delete_path(workspace_root, raw_path)
+        if relative_path and relative_path != ".":
+            targets.append(relative_path)
+    if name == "bash_run" and command:
+        targets.extend(
+            _literal_rm_targets(
+                workspace_root,
+                command=command,
+                cwd=arguments.get("cwd"),
+            )
+        )
+    return tuple(dict.fromkeys(targets))
+
+
+def _literal_rm_targets(
+    workspace_root: Path,
+    *,
+    command: str,
+    cwd: Any,
+) -> tuple[str, ...]:
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        return ()
+
+    base = workspace_root
+    relative_cwd = _relative_workspace_path(workspace_root, cwd)
+    if relative_cwd:
+        base = workspace_root / relative_cwd
+
+    redirections = {">", ">>", "<", "<<"}
+    controls = {"&&", "||", ";", "|", "&", *redirections}
+    unsafe_literal_chars = frozenset("*$?[]{}\u0060")
+    targets: list[str] = []
+    index = 0
+    at_command_start = True
+    while index < len(tokens):
+        token = tokens[index]
+        if token in controls:
+            at_command_start = True
+            index += 1
+            continue
+        if not at_command_start or Path(token).name != "rm":
+            at_command_start = False
+            index += 1
+            continue
+
+        index += 1
+        options_finished = False
+        while index < len(tokens) and tokens[index] not in controls:
+            candidate_token = tokens[index]
+            if (
+                candidate_token.isdigit()
+                and index + 1 < len(tokens)
+                and tokens[index + 1] in redirections
+            ):
+                index += 1
+                continue
+            if candidate_token == "--" and not options_finished:
+                options_finished = True
+                index += 1
+                continue
+            if not options_finished and candidate_token.startswith("-"):
+                index += 1
+                continue
+            if not any(char in candidate_token for char in unsafe_literal_chars):
+                requested = Path(candidate_token).expanduser()
+                absolute = requested if requested.is_absolute() else base / requested
+                relative_path = _relative_workspace_delete_path(
+                    workspace_root,
+                    str(absolute),
+                )
+                if relative_path and relative_path != ".":
+                    targets.append(relative_path)
+            index += 1
+        at_command_start = True
+    return tuple(dict.fromkeys(targets))
+
+
+def _is_background_change(path: str) -> bool:
+    return path in _BACKGROUND_CHANGE_PATHS or any(
+        path.startswith(prefix) for prefix in _BACKGROUND_CHANGE_PREFIXES
+    )
+
+
 def _parse_arguments(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return dict(value)
@@ -499,6 +712,20 @@ def _relative_workspace_path(workspace_root: Path, value: Any) -> str:
     candidate = requested if requested.is_absolute() else workspace_root / requested
     try:
         return candidate.resolve().relative_to(workspace_root).as_posix()
+    except (OSError, ValueError):
+        return ""
+
+
+def _relative_workspace_delete_path(workspace_root: Path, value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    requested = Path(value).expanduser()
+    candidate = requested if requested.is_absolute() else workspace_root / requested
+    try:
+        normalized = Path(os.path.abspath(candidate))
+        parent = normalized.parent.resolve()
+        lexical_candidate = parent / normalized.name
+        return lexical_candidate.relative_to(workspace_root).as_posix()
     except (OSError, ValueError):
         return ""
 

@@ -115,11 +115,71 @@ class TestNaumiApp:
         )
 
         assert "完成回执 · 部分完成" in rendered
-        assert "`src/example.py`" in rendered
+        assert "影响：修改 1 个文件" in rendered
         assert "pytest tests/unit/test_example.py -q" in rendered
-        assert "bash_run · 仅本次允许" in rendered
+        assert "bash_run" not in rendered
         assert "风险：1 项验证失败" in rendered
         assert "下一步：重试失败验证" in rendered
+
+    def test_completed_delete_receipt_is_compact_and_task_focused(self) -> None:
+        rendered = format_completion_receipt_markdown(
+            {
+                "schema_version": 1,
+                "receipt_id": "receipt-delete",
+                "run_id": "run-delete",
+                "outcome": "completed",
+                "summary": "已删除 `/workspace/test` 目录及其所有内容。",
+                "changes": [
+                    {
+                        "path": f"test/file-{index}.txt",
+                        "status": "removed_untracked",
+                        "scope": "task",
+                    }
+                    for index in range(6)
+                ]
+                + [
+                    {
+                        "path": ".naumi/terminal-ui-debug.jsonl",
+                        "status": "modified",
+                        "scope": "background",
+                    }
+                ],
+                "validations": [
+                    {
+                        "command": "路径已不存在: /workspace/test",
+                        "scope": "文件系统",
+                        "status": "passed",
+                        "exit_code": 0,
+                    }
+                ],
+                "unverified": [],
+                "approvals": [
+                    {
+                        "call_id": "delete-1",
+                        "tool_name": "bash_run",
+                        "decision": "bypass",
+                    }
+                ],
+                "risks": [],
+                "git_state": {
+                    "available": True,
+                    "branch": "main",
+                    "dirty": True,
+                },
+                "next_actions": [],
+                "duration_ms": 6300,
+            }
+        )
+
+        assert "完成回执 · 已完成" in rendered
+        assert "验证通过 · `路径已不存在: /workspace/test`" in rendered
+        assert "影响：删除 6 个文件" in rendered
+        assert "工作区另有 1 项运行时变化" in rendered
+        assert "验证 **1/1**" not in rendered
+        assert "未记录验证命令" not in rendered
+        assert "bash_run" not in rendered
+        assert "test/file-0.txt" not in rendered
+
     def test_app_creation(self) -> None:
         config = AppConfig()
         engine = AgentEngine(config)
