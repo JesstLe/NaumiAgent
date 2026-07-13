@@ -1,5 +1,9 @@
 """工具系统单元测试."""
 
+import shlex
+import sys
+from pathlib import Path
+
 import pytest
 
 from naumi_agent.tools.base import ToolRegistry
@@ -275,11 +279,106 @@ class TestBashRunTool:
 
     async def test_command_timeout(self, bash_tool: BashRunTool) -> None:
         result = await bash_tool.execute(command="sleep 10", timeout=1)
-        assert "timed out" in result
+        assert "超过 1 秒未完成" in result
 
     async def test_command_failure(self, bash_tool: BashRunTool) -> None:
         result = await bash_tool.execute(command="exit 1")
         assert "exit code: 1" in result
+
+    async def test_large_output_keeps_full_log_and_tail_marker(self, tmp_path) -> None:
+        output_dir = tmp_path / "shell-output"
+        tool = BashRunTool(workspace_root=tmp_path, output_dir=output_dir)
+        script = "import sys; sys.stdout.write('H' * 60000 + 'TAIL_MARKER')"
+
+        result = await tool.execute(command=_python_command(script))
+
+        assert "TAIL_MARKER" in result
+        assert "完整输出:" in result
+        log_path = _output_path_from_result(result)
+        assert log_path.read_text(encoding="utf-8").endswith("TAIL_MARKER")
+        assert log_path.stat().st_size == 60011
+
+    async def test_timeout_preserves_output_written_before_termination(self, tmp_path) -> None:
+        tool = BashRunTool(workspace_root=tmp_path, output_dir=tmp_path / "shell-output")
+        script = (
+            "import sys,time; "
+            "sys.stdout.write('BEFORE_TIMEOUT\\n'); sys.stdout.flush(); time.sleep(10)"
+        )
+
+        result = await tool.execute(command=_python_command(script), timeout=1)
+
+        assert "BEFORE_TIMEOUT" in result
+        assert result.startswith("Shell 命令已超时并终止。")
+        assert "超过 1 秒未完成" in result
+        assert "exit code" not in result
+
+    async def test_explicit_cwd_can_run_outside_workspace_after_permission(self, tmp_path) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        tool = BashRunTool(workspace_root=workspace, output_dir=tmp_path / "shell-output")
+
+        result = await tool.execute(command="pwd", cwd=str(tmp_path))
+
+        assert f"工作目录: {tmp_path}" in result
+        assert "工作目录必须位于工作区内" not in result
+
+    async def test_rejects_non_positive_timeout(self, tmp_path) -> None:
+        tool = BashRunTool(workspace_root=tmp_path, output_dir=tmp_path / "shell-output")
+
+        result = await tool.execute(command="printf should-not-run", timeout=0)
+
+        assert "超时时间必须是正整数" in result
+        assert "should-not-run" not in result
+
+    async def test_reports_output_log_allocation_failure(self, tmp_path) -> None:
+        output_dir = tmp_path / "not-a-directory"
+        output_dir.write_text("occupied", encoding="utf-8")
+        tool = BashRunTool(workspace_root=tmp_path, output_dir=output_dir)
+
+        result = await tool.execute(command="printf should-not-run")
+
+        assert "无法创建 Shell 输出日志" in result
+        assert "should-not-run" not in result
+
+    async def test_summary_failure_preserves_log_path(self, tmp_path, monkeypatch) -> None:
+        output_dir = tmp_path / "shell-output"
+        tool = BashRunTool(workspace_root=tmp_path, output_dir=output_dir)
+
+        def fail_to_summarize(artifact) -> None:
+            artifact.stream.flush()
+            artifact.stream.close()
+            raise OSError("simulated read failure")
+
+        monkeypatch.setattr(tool._output_store, "summarize", fail_to_summarize)
+
+        result = await tool.execute(command="printf diagnostic-evidence")
+
+        logs = list(output_dir.glob("shell-*.log"))
+        assert "输出日志读取失败" in result
+        assert len(logs) == 1
+        assert str(logs[0]) in result
+        assert logs[0].read_text(encoding="utf-8") == "diagnostic-evidence"
+
+    async def test_nonzero_exit_keeps_command_output(self, tmp_path) -> None:
+        tool = BashRunTool(workspace_root=tmp_path, output_dir=tmp_path / "shell-output")
+
+        result = await tool.execute(command="printf failure-detail; exit 7")
+
+        assert "failure-detail" in result
+        assert "exit code: 7" in result
+
+    async def test_stdout_and_stderr_keep_emission_order(self, tmp_path) -> None:
+        tool = BashRunTool(workspace_root=tmp_path, output_dir=tmp_path / "shell-output")
+        script = (
+            "import sys; "
+            "sys.stdout.write('OUT_ONE\\n'); sys.stdout.flush(); "
+            "sys.stderr.write('ERR_TWO\\n'); sys.stderr.flush(); "
+            "sys.stdout.write('OUT_THREE\\n'); sys.stdout.flush()"
+        )
+
+        result = await tool.execute(command=_python_command(script))
+
+        assert result.index("OUT_ONE") < result.index("ERR_TWO") < result.index("OUT_THREE")
 
     async def test_default_cwd_uses_workspace_root(self, tmp_path) -> None:
         tool = BashRunTool(workspace_root=tmp_path)
@@ -314,3 +413,13 @@ class TestYamlValidateTool:
 
         assert tool.metadata.read_only
         assert tool.metadata.path_argument_names == ("file_path",)
+
+
+def _python_command(script: str) -> str:
+    return f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
+
+
+def _output_path_from_result(result: str) -> Path:
+    prefix = "- 完整输出: "
+    line = next(item for item in result.splitlines() if item.startswith(prefix))
+    return Path(line.removeprefix(prefix).strip())

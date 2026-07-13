@@ -533,7 +533,10 @@ class AgentEngine:
         self._register_skills()
 
     def _register_builtin_tools(self) -> None:
-        for tool in create_builtin_tools(self.workspace_root):
+        for tool in create_builtin_tools(
+            self.workspace_root,
+            shell_output_dir=self.workspace_root / ".naumi" / "shell-output",
+        ):
             self._tool_registry.register(tool)
         for tool in create_browser_tools(self._browser_session):
             self._tool_registry.register(tool)

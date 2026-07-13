@@ -37,7 +37,7 @@
 
 新增一个只负责前台 Shell 输出的轻量存储组件：
 
-- 输出目录由 Engine 注入，生产环境位于 runtime data directory 下，不污染工作区。
+- 输出目录由 Engine 注入，生产环境位于工作区 `.naumi/shell-output/`，并由 Git 忽略；这样现有 `file_read`/`read` 可以直接恢复日志，同时不会污染版本控制。
 - 使用不可预测且独占创建的 `shell-<timestamp>-<random>.log` 文件名，权限为仅当前用户可读写。
 - 只管理本目录内、符合命名规则的普通文件；清理时拒绝符号链接和目录外路径。
 - 小于等于 50,000 字节的输出在生成结果后删除。
@@ -46,7 +46,7 @@
 
 ### BashRunTool Execution
 
-1. 校验命令、超时和工作目录；工作目录必须位于 workspace root 内。
+1. 校验命令、超时和工作目录；路径授权仍由 `PermissionChecker` 统一处理，使 `default` 保持边界、`bypass` 保持真正全权限。
 2. 分配受管日志，以二进制写模式传给 subprocess；stderr 合并到 stdout，以保留发生顺序。
 3. 等待命令结束；超时或取消时沿用现有进程树回收。
 4. 根据日志字节数生成结果：
@@ -58,12 +58,12 @@
 
 ### Wiring
 
-`create_builtin_tools()` 新增可选 `shell_output_dir`，Engine 显式传入 `runtime_data_dir / "shell-output"`。直接构造 `BashRunTool` 的测试和扩展仍可使用安全的默认临时目录。
+`create_builtin_tools()` 新增可选 `shell_output_dir`，Engine 显式传入 `workspace_root / ".naumi" / "shell-output"`。直接构造 `BashRunTool` 的测试和扩展仍可使用安全的默认临时目录。
 
 ## Error Handling
 
 - 空命令、非整数或非正超时返回中文参数错误，不启动进程。
-- `cwd` 不存在、不是目录或逃逸 workspace 时返回中文错误。
+- `cwd` 不存在或不是目录时返回中文错误；是否允许工作区外路径由权限模式决定，工具不得削弱 `bypass`。
 - 日志创建失败时不执行命令，避免回退到不可恢复的内存截断。
 - 日志读取失败时保留文件并返回路径和错误，不伪装为无输出。
 - 进程启动失败时删除空日志；删除失败不覆盖原始启动错误。
@@ -103,4 +103,3 @@ Shell 命令执行完成。
 - 自动把超过阻塞预算的命令迁移到 `background_run`。
 - 持久 Shell 会话及 `write_stdin`。
 - 精确的只读命令分类与无确认并发执行。
-
