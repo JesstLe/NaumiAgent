@@ -17,6 +17,7 @@ from typing import Any
 from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
+from naumi_agent.inspector import RuntimeInspectorService
 from naumi_agent.mcp.client import MCPClientManager, MCPServerConfig, setup_mcp_servers
 from naumi_agent.memory.auto_extract import extract_memory_candidates
 from naumi_agent.memory.compactor import ContextCompactor
@@ -493,6 +494,7 @@ class AgentEngine:
             storage_dir=self._worktree_storage_dir,
             task_store=self.task_store,
         )
+        self.runtime_inspector = RuntimeInspectorService(self)
 
         self._mcp_manager: MCPClientManager | None = None
 
@@ -1928,7 +1930,12 @@ class AgentEngine:
         )
 
         async def recorded_event(event: str, data: dict[str, Any]) -> None:
-            public_data = {**data, "run_id": recorder.run_id}
+            public_data = {
+                **data,
+                "run_id": recorder.run_id,
+                "session_id": session.id,
+            }
+            self.runtime_inspector.observe(event, public_data)
             await recorder.observe(event, public_data)
             await on_event(event, public_data)
 
@@ -1940,16 +1947,28 @@ class AgentEngine:
             )
         except asyncio.CancelledError:
             receipt = await recorder.finish("cancelled", "运行已由用户取消。")
+            self.runtime_inspector.observe(
+                "completion_receipt",
+                {**receipt.to_dict(), "session_id": session.id},
+            )
             await on_event("completion_receipt", receipt.to_dict())
             raise
         except Exception as exc:
             receipt = await recorder.finish("failed", self._format_error(exc))
+            self.runtime_inspector.observe(
+                "completion_receipt",
+                {**receipt.to_dict(), "session_id": session.id},
+            )
             await on_event("completion_receipt", receipt.to_dict())
             raise
 
         summary = result.response or result.error or "本轮运行已结束。"
         receipt = await recorder.finish(result.status, summary)
         result.receipt = receipt
+        self.runtime_inspector.observe(
+            "completion_receipt",
+            {**receipt.to_dict(), "session_id": session.id},
+        )
         await on_event("completion_receipt", receipt.to_dict())
         return result
 
