@@ -101,6 +101,14 @@ class TestCodeExecuteTool:
             ("print(1)", "python", 61, "timeout 必须在"),
             ("print(1)", "python", True, "timeout 必须是整数秒"),
         ],
+        ids=[
+            "empty-code",
+            "code-too-long",
+            "unsupported-language",
+            "timeout-too-low",
+            "timeout-too-high",
+            "timeout-not-integer",
+        ],
     )
     def test_normalize_execution_inputs_rejects_invalid_values(
         self,

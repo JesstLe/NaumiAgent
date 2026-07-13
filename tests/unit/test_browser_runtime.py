@@ -171,11 +171,11 @@ class TestExpandHome:
 
     def test_no_tilde(self) -> None:
         result = _expand_home("/absolute/path")
-        assert str(result) == "/absolute/path"
+        assert result == Path("/absolute/path")
 
     def test_relative_path(self) -> None:
         result = _expand_home("relative/path")
-        assert str(result) == "relative/path"
+        assert result == Path("relative/path")
 
 
 class TestChromeLauncher:

@@ -44,6 +44,7 @@ class MemoryConfig(BaseSettings):
     vector_db_path: str = "data/chroma"
     compaction_threshold: float = 0.75
     compaction_reserved_tokens: int = 20_000
+    long_term_enabled: bool = True
 
 
 class SafetyConfig(BaseSettings):

@@ -6,6 +6,7 @@ import { once } from "node:events";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { stripAnsi } from "../src/ansi.js";
 
 test("terminal UI process handles submit, mode switch, permission, and tool rendering", async () => {
@@ -114,7 +115,7 @@ test("terminal UI process keeps explicit plan mode across status refreshes", asy
 
 test("terminal UI process talks to the Python JSONL bridge fixture", async () => {
   const app = launchTerminalUi(null, {
-    bridgeCommandJson: ["uv", "run", "python", "test/fixtures/python-bridge-fixture.py"],
+    bridgeCommandJson: [pythonExecutable(), "test/fixtures/python-bridge-fixture.py"],
   });
   const output = collectOutput(app);
 
@@ -126,7 +127,7 @@ test("terminal UI process talks to the Python JSONL bridge fixture", async () =>
     await waitForOutput(output, "mode: bypass");
 
     app.stdin.write("python bridge e2e\n");
-    await waitForOutput(output, "Python bridge 收到: python bridge e2e");
+    await waitForOutput(output, "Python bridge 收到: python bridge e2e", 7000);
     await waitForOutput(output, "permission: file_write");
 
     app.stdin.write("y");
@@ -629,18 +630,18 @@ test("terminal UI process toggles reasoning display through bridge protocol", as
 function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
   const debugLogPath = path.join(tmpdir(), `naumi-terminal-ui-debug-${Date.now()}-${Math.random()}.jsonl`);
   const fakeBridge = fixtureName
-    ? new URL(`./fixtures/${fixtureName}`, import.meta.url).pathname
+    ? fileURLToPath(new URL(`./fixtures/${fixtureName}`, import.meta.url))
     : "";
   const bridgeArgs = options.bridgeCommandJson
     ? ["--bridge-command-json", JSON.stringify(options.bridgeCommandJson)]
     : options.bridgeMode === "json"
       ? ["--bridge-command-json", JSON.stringify([process.execPath, fakeBridge])]
-      : ["--bridge-command", `${process.execPath} ${fakeBridge}`];
+      : ["--bridge-command", `"${process.execPath}" "${fakeBridge}"`];
   const child = spawn(
     process.execPath,
     ["src/index.js", ...bridgeArgs],
     {
-      cwd: new URL("..", import.meta.url).pathname,
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
@@ -652,6 +653,23 @@ function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
   );
   child.debugLogPath = debugLogPath;
   return child;
+}
+
+function pythonExecutable() {
+  const configured = process.env.NAUMI_TEST_PYTHON;
+  if (configured) {
+    return configured;
+  }
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const virtualenvPython = path.join(
+    repoRoot,
+    ".venv",
+    process.platform === "win32" ? "Scripts/python.exe" : "bin/python",
+  );
+  if (fs.existsSync(virtualenvPython)) {
+    return virtualenvPython;
+  }
+  return process.platform === "win32" ? "python" : "python3";
 }
 
 function collectOutput(child) {

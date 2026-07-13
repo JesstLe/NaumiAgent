@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from naumi_agent.hooks.hook_manager import HookContext
+from naumi_agent.runtime.shell import create_shell_process, terminate_process_tree
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ def create_shell_hook_runner(config: ShellHookConfig) -> Any:
     回调接收 HookContext，执行子进程，并将 stdout 解析回 context。
     """
     async def runner(ctx: HookContext) -> None:
+        proc: asyncio.subprocess.Process | None = None
         env = dict(os.environ)
         env["NAUMI_HOOK_POINT"] = ctx.point.value
         env["NAUMI_AGENT_NAME"] = ctx.agent_name
@@ -82,7 +84,7 @@ def create_shell_hook_runner(config: ShellHookConfig) -> Any:
         )
 
         try:
-            proc = await asyncio.create_subprocess_shell(
+            proc = await create_shell_process(
                 config.command,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
@@ -94,7 +96,8 @@ def create_shell_hook_runner(config: ShellHookConfig) -> Any:
                 timeout=config.timeout,
             )
         except TimeoutError:
-            proc.kill()
+            if proc is not None:
+                await terminate_process_tree(proc)
             logger.warning(
                 "Shell hook timed out (%ds): %s", config.timeout, config.command,
             )
