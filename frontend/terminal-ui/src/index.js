@@ -46,6 +46,7 @@ import {
   splitShellLike,
 } from "./protocol.js";
 import {
+  handleAgentControlKey,
   handleSubmitText,
   handleRuntimeInspectorKey,
   hasTaskPanelFocus,
@@ -230,12 +231,16 @@ function handleBridgeLine(line) {
     setUiSnapshot(uiStateStore, previousSessionId, previousSnapshot);
     restoreUiSnapshot(state.currentSessionId);
     if (state.inspector.open) requestRuntimeInspectorSnapshot();
+    if (state.agents.open) requestAgentControlSnapshot();
   }
   if (record.type === "session/replayed") {
     resetHistorySearch(state);
     jumpTimelineToLatest(state);
     if (state.inspector.open && state.currentSessionId === previousSessionId) {
       requestRuntimeInspectorSnapshot();
+    }
+    if (state.agents.open && state.currentSessionId === previousSessionId) {
+      requestAgentControlSnapshot();
     }
   }
   if (!(record.type === "ui/message" && record.payload?.type === "thinking" && !state.showReasoning)) {
@@ -264,6 +269,13 @@ function handleBridgeLine(line) {
       send("inspector/request", {
         open: true,
         known_revision: action.knownRevision ?? state.inspector.revision,
+        session_id: action.sessionId ?? state.currentSessionId,
+      });
+    }
+    if (action.type === "refresh_agents") {
+      send("agents/request", {
+        open: true,
+        known_revision: action.knownRevision ?? state.agents.revision,
         session_id: action.sessionId ?? state.currentSessionId,
       });
     }
@@ -349,6 +361,30 @@ function handleSingleKeyInput(chunk) {
       send("permission_response", { request_id: state.permission.requestId, choice: "bypass" });
       return;
     }
+    if (
+      state.agents?.open
+      && [
+        "x",
+        "r",
+        "[",
+        "]",
+        "\r",
+        "\n",
+        INPUT_KEYS.up,
+        INPUT_KEYS.upAlt,
+        INPUT_KEYS.down,
+        INPUT_KEYS.downAlt,
+        INPUT_KEYS.left,
+        INPUT_KEYS.leftAlt,
+        INPUT_KEYS.right,
+        INPUT_KEYS.rightAlt,
+      ].includes(chunk)
+    ) return;
+  }
+  if (state.agents?.open && handleAgentControlKey(state, chunk, send)) {
+    persistUiSnapshot();
+    scheduleRedraw();
+    return;
   }
   if (chunk === INPUT_KEYS.ctrlI) {
     toggleRuntimeInspector(state, send);
@@ -652,6 +688,15 @@ function requestRuntimeInspectorSnapshot() {
   send("inspector/request", {
     open: true,
     known_revision: state.inspector.revision,
+    session_id: String(state.currentSessionId || ""),
+  });
+}
+
+function requestAgentControlSnapshot() {
+  state.agents.loading = true;
+  send("agents/request", {
+    open: true,
+    known_revision: state.agents.revision,
     session_id: String(state.currentSessionId || ""),
   });
 }

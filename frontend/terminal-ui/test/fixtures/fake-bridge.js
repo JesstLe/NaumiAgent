@@ -8,6 +8,9 @@ let showReasoning = false;
 let sessionId = "session-fake-1";
 let activeRun = null;
 let inspectorOpen = false;
+let agentsOpen = false;
+let agentStopped = false;
+let agentPermissionSent = false;
 
 attachJsonlLineReader(process.stdin, (line) => {
   if (!line.trim()) return;
@@ -61,6 +64,46 @@ attachJsonlLineReader(process.stdin, (line) => {
         changed_tabs: { tools: snapshot.tools },
       });
     }, 40);
+    return;
+  }
+
+  if (record.type === "agents/request") {
+    agentsOpen = payload.open !== false;
+    if (!agentsOpen) {
+      emit("ack", { event: "agents/request", open: false, revision: agentStopped ? 2 : 1 }, record.id);
+      return;
+    }
+    emit("agents/snapshot", agentControlSnapshot(agentStopped ? 2 : 1), record.id);
+    if (process.env.NAUMI_TEST_AGENT_PERMISSION === "1" && !agentPermissionSent) {
+      agentPermissionSent = true;
+      setTimeout(() => {
+        emit("permission/request", {
+          tool_name: "agent_sensitive_tool",
+          reason: "验证 Agent 页面权限优先级。",
+        }, "agent-perm-1");
+      }, 40);
+    }
+    return;
+  }
+
+  if (record.type === "agents/stop") {
+    if (payload.task_id !== "task-agent-1") {
+      emit("agents/action", {
+        task_id: payload.task_id,
+        accepted: false,
+        code: "not_found",
+        message: "未找到 Agent 执行。",
+      }, record.id);
+      return;
+    }
+    agentStopped = true;
+    emit("agents/action", {
+      task_id: "task-agent-1",
+      accepted: true,
+      code: "accepted",
+      message: "已请求停止 Agent 执行。",
+    }, record.id);
+    emit("agents/snapshot", agentControlSnapshot(2));
     return;
   }
 
@@ -484,5 +527,71 @@ function inspectorSnapshot(revision) {
       next_actions: [],
       warnings: [],
     },
+  };
+}
+
+function agentControlSnapshot(revision) {
+  const stopped = revision > 1;
+  return {
+    schema_version: 1,
+    session_id: sessionId,
+    revision,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    summary: {
+      total_agents: 1,
+      active_agents: stopped ? 0 : 1,
+      attention_agents: 0,
+      stoppable_executions: stopped ? 0 : 1,
+      pending_messages: 1,
+    },
+    agents: [{
+      name: "coder",
+      description: "真实编程 Agent",
+      kind: "preset",
+      state: stopped ? "idle" : "running",
+      task_count: 1,
+      model_tier: "capable",
+      capabilities: ["代码"],
+      tools: ["file_read"],
+      permission_level: "moderate",
+      age_ms: 500,
+      heartbeat_age_ms: 100,
+    }],
+    executions: [{
+      task_id: "task-agent-1",
+      session_id: sessionId,
+      agent_name: "coder",
+      description: "验证 Agent 控制中心",
+      status: stopped ? "cancelled" : "running",
+      phase: stopped ? "finished" : "running_tool",
+      started_at: 1,
+      finished_at: stopped ? 2 : null,
+      elapsed_ms: 1000,
+      heartbeat_age_ms: 100,
+      current_tool: stopped ? "" : "file_read",
+      recent_tools: ["file_read"],
+      total_tokens: 42,
+      total_cost_usd: 0.01,
+      turns: 2,
+      error: stopped ? "用户请求停止子 Agent。" : "",
+      stop_supported: !stopped,
+      stop_requested: stopped,
+    }],
+    team_messages: [{
+      sender: "coder",
+      recipient: "reviewer",
+      topic: "review",
+      priority: "high",
+      timestamp: 1,
+      content: "请检查实现",
+    }],
+    blackboard: [{
+      key: "team/review",
+      author: "coder",
+      version: 1,
+      timestamp: 1,
+      value_summary: "ready",
+    }],
+    warnings: [],
   };
 }
