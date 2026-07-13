@@ -279,7 +279,11 @@ def _parse_opencode_provider(
         if base_value is not None
         else None
     )
-    auth = _parse_opencode_auth(options, f"{path}.options")
+    auth = _parse_opencode_auth(
+        options,
+        f"{path}.options",
+        api_format=api_format,
+    )
     headers = _parse_headers(options.pop("headers", {}), f"{path}.options.headers")
     request_timeout = _optional_positive_int(options, "timeout", f"{path}.options")
     chunk_timeout = _optional_positive_int(options, "chunkTimeout", f"{path}.options")
@@ -363,10 +367,20 @@ def _parse_native_auth(raw: Any, path: str) -> ProviderAuthSpec:
     return _build_auth(auth_type, source, ref, header, scheme, path)
 
 
-def _parse_opencode_auth(options: dict[str, Any], path: str) -> ProviderAuthSpec:
+def _parse_opencode_auth(
+    options: dict[str, Any],
+    path: str,
+    *,
+    api_format: APIFormat | None,
+) -> ProviderAuthSpec:
     source, ref = _parse_secret_source(options, path)
-    auth_type = AuthType.BEARER if source else AuthType.NONE
-    return _build_auth(auth_type, source, ref, None, None, path)
+    if source and api_format is APIFormat.ANTHROPIC_MESSAGES:
+        auth_type = AuthType.API_KEY_HEADER
+        header = "X-API-Key"
+    else:
+        auth_type = AuthType.BEARER if source else AuthType.NONE
+        header = None
+    return _build_auth(auth_type, source, ref, header, None, path)
 
 
 def _parse_secret_source(
