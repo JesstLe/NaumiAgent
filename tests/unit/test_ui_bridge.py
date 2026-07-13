@@ -21,6 +21,8 @@ from naumi_agent.model.router import StreamChunk
 from naumi_agent.orchestrator.engine import AgentEngine, AgentResult, AgentRuntimeMode, AgentUsage
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.safety.permissions import PermissionMode
+from naumi_agent.tasks.models import TaskStatus
+from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.base import ToolCall, ToolResult
 from naumi_agent.ui import bridge as ui_bridge
 from naumi_agent.ui.bridge import JsonlEngineBridge, resolve_config_path
@@ -41,6 +43,8 @@ from naumi_agent.ui.protocol import (
     make_envelope,
     normalize_client_record,
 )
+from naumi_agent.workbench.service import WorkbenchService
+from naumi_agent.workbench.store import WorkbenchStore
 
 
 class _ReconfigurableStream:
@@ -246,6 +250,111 @@ class _FailingFakeEngine(_FakeEngine):
         )
 
 
+class _FakeTaskStore:
+    def __init__(self) -> None:
+        self.session_id = ""
+        self.updates: list[tuple[str, TaskStatus]] = []
+
+    def set_session(self, session_id: str) -> None:
+        self.session_id = session_id
+
+    def scoped(self, session_id: str) -> _FakeTaskStore:
+        self.session_id = session_id
+        return self
+
+    async def update_task(
+        self,
+        task_id: str,
+        status: TaskStatus | None = None,
+        **_: Any,
+    ) -> Any:
+        if status is not None:
+            self.updates.append((task_id, status))
+        return SimpleNamespace(id=task_id, status=status)
+
+
+class _FakeWorkbenchService:
+    def __init__(self, missions: list[dict[str, Any]] | None = None) -> None:
+        self.missions = list(missions or [])
+        self.created_missions: list[dict[str, str]] = []
+        self.created_issues: list[dict[str, Any]] = []
+
+    async def list_missions(self, session_id: str, **_: Any) -> dict[str, Any]:
+        return {"missions": self.missions, "session_id": session_id}
+
+    async def create_mission(self, *, session_id: str, title: str, goal: str) -> Any:
+        mission = {"id": "mission-auto", "session_id": session_id, "title": title, "goal": goal}
+        self.missions.append(mission)
+        self.created_missions.append(mission)
+        return SimpleNamespace(**mission)
+
+    async def create_issue(self, **kwargs: Any) -> dict[str, Any]:
+        self.created_issues.append(kwargs)
+        return {
+            "task_id": "1",
+            "mission_id": kwargs["mission_id"],
+            "risk_level": str(kwargs["risk_level"]),
+            "parallel_mode": str(kwargs["parallel_mode"]),
+            "acceptance_criteria": kwargs["acceptance_criteria"],
+            "task": {"id": "1", "subject": kwargs["title"], "status": "pending"},
+        }
+
+    async def dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
+        return {"version": 1, "session_id": session_id, "issues": [{"task_id": "1"}]}
+
+
+class _TaskSubmitFakeEngine(_FakeEngine):
+    def __init__(self, missions: list[dict[str, Any]] | None = None) -> None:
+        super().__init__()
+        self.task_store = _FakeTaskStore()
+        self.workbench_service = _FakeWorkbenchService(missions)
+        self.turn_contexts: list[str] = []
+
+    async def get_or_create_session(self, title: str | None = None) -> Any:
+        self._session = SimpleNamespace(id="session-task", title=title or "任务会话")
+        return self._session
+
+    async def run_streaming(
+        self,
+        task: str,
+        on_event: Any,
+        turn_context: str = "",
+    ) -> AgentResult:
+        self.turn_contexts.append(turn_context)
+        await on_event("response_start", {})
+        await on_event("token", {"content": f"执行: {task}"})
+        await on_event("response_end", {})
+        return AgentResult(status="completed", response="完成", usage=self.usage)
+
+
+class _FailingTaskSubmitEngine(_TaskSubmitFakeEngine):
+    async def run_streaming(
+        self,
+        task: str,
+        on_event: Any,
+        turn_context: str = "",
+    ) -> AgentResult:
+        self.turn_contexts.append(turn_context)
+        raise RuntimeError("private task failure")
+
+
+class _SlowTaskSubmitEngine(_TaskSubmitFakeEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+
+    async def run_streaming(
+        self,
+        task: str,
+        on_event: Any,
+        turn_context: str = "",
+    ) -> AgentResult:
+        self.turn_contexts.append(turn_context)
+        self.started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
 class _FakeBackgroundRunner:
     def __init__(self) -> None:
         self.cancelled: list[str] = []
@@ -371,6 +480,29 @@ def test_protocol_contract_ui_message_fields_match_python_messages() -> None:
 
 
 def test_protocol_normalizes_known_client_event_payloads() -> None:
+    task_submit = normalize_client_record({
+        "id": "task-submit-1",
+        "type": ClientEventType.TASK_SUBMIT,
+        "payload": {
+            "text": "实现登录流程",
+            "mission_id": " mission-1 ",
+            "title": " 登录任务 ",
+            "acceptance_criteria": ["测试通过", "", 42],
+            "blocked_by": ["1", "", 2],
+            "parallel_mode": "COOPERATIVE",
+            "risk_level": "HIGH",
+        },
+    })
+    assert task_submit["payload"] == {
+        "text": "实现登录流程",
+        "mission_id": "mission-1",
+        "title": "登录任务",
+        "acceptance_criteria": ["测试通过", "42"],
+        "blocked_by": ["1", "2"],
+        "parallel_mode": "cooperative",
+        "risk_level": "high",
+    }
+
     task_record = normalize_client_record({
         "id": 42,
         "type": ClientEventType.TASK_PANEL,
@@ -418,6 +550,18 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
         normalize_client_record({
             "type": ClientEventType.PERMISSION_RESPONSE,
             "payload": {"request_id": "perm-1", "choice": "maybe"},
+        })
+
+    with pytest.raises(ValueError, match="任务内容不能为空"):
+        normalize_client_record({
+            "type": ClientEventType.TASK_SUBMIT,
+            "payload": {"text": "  "},
+        })
+
+    with pytest.raises(ValueError, match="并行模式无效"):
+        normalize_client_record({
+            "type": ClientEventType.TASK_SUBMIT,
+            "payload": {"text": "任务", "parallel_mode": "invalid"},
         })
 
 
@@ -742,6 +886,243 @@ async def test_bridge_streams_engine_events_as_ui_messages() -> None:
         for record in records
     )
     assert any(record["type"] == "runtime/status" for record in records)
+
+
+@pytest.mark.asyncio
+async def test_bridge_task_submit_creates_issue_and_executes_with_task_context() -> None:
+    engine = _TaskSubmitFakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "task-submit-1",
+        "type": ClientEventType.TASK_SUBMIT,
+        "payload": {
+            "text": "实现登录流程并补测试",
+            "acceptance_criteria": ["定向测试通过"],
+            "parallel_mode": "cooperative",
+            "risk_level": "high",
+        },
+    })
+    assert bridge._run_task is not None
+    await bridge._run_task
+
+    assert engine.task_store.session_id == "session-task"
+    assert len(engine.workbench_service.created_missions) == 1
+    assert engine.workbench_service.created_issues[0]["mission_id"] == "mission-auto"
+    assert engine.task_store.updates == [
+        ("1", TaskStatus.IN_PROGRESS),
+        ("1", TaskStatus.COMPLETED),
+    ]
+    assert "task_id: 1" in engine.turn_contexts[0]
+    records = _records(writer)
+    task_created = next(record for record in records if record["type"] == "task/created")
+    assert task_created["request_id"] == "task-submit-1"
+    assert task_created["payload"]["task"]["id"] == "1"
+    assert task_created["payload"]["task"]["status"] == "in_progress"
+    assert task_created["payload"]["mission"]["id"] == "mission-auto"
+    assert next(
+        record for record in records if record["type"] == "run/started"
+    )["payload"] == {
+        "task": "实现登录流程并补测试",
+        "task_id": "1",
+        "mission_id": "mission-auto",
+        "intent": "task",
+    }
+    completed = next(record for record in records if record["type"] == "run/completed")
+    assert completed["request_id"] == "task-submit-1"
+    assert completed["payload"]["task_id"] == "1"
+    assert completed["payload"]["status"] == "completed"
+    assert len([
+        record for record in records if record["type"] == "workbench/snapshot"
+    ]) == 2
+
+
+@pytest.mark.asyncio
+async def test_bridge_task_submit_rejects_ambiguous_missions_without_issue() -> None:
+    engine = _TaskSubmitFakeEngine([
+        {"id": "mission-1", "title": "前端", "status": "planning"},
+        {"id": "mission-2", "title": "后端", "status": "active"},
+    ])
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "task-submit-ambiguous",
+        "type": ClientEventType.TASK_SUBMIT,
+        "payload": {"text": "实现登录流程"},
+    })
+
+    assert bridge._run_task is None
+    assert engine.workbench_service.created_issues == []
+    error = next(record for record in _records(writer) if record["type"] == "error")
+    assert error["request_id"] == "task-submit-ambiguous"
+    assert error["payload"]["code"] == "mission_required"
+    assert "mission-1" in error["payload"]["message"]
+    assert "mission-2" in error["payload"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_bridge_task_submit_ignores_terminal_missions_when_auto_resolving() -> None:
+    engine = _TaskSubmitFakeEngine([
+        {"id": "mission-closed", "title": "旧任务", "status": "completed"},
+        {"id": "mission-open", "title": "当前任务", "status": "active"},
+    ])
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "task-submit-open-mission",
+        "type": ClientEventType.TASK_SUBMIT,
+        "payload": {"text": "继续当前目标"},
+    })
+    assert bridge._run_task is not None
+    await bridge._run_task
+
+    assert engine.workbench_service.created_issues[0]["mission_id"] == "mission-open"
+
+
+@pytest.mark.asyncio
+async def test_bridge_task_submit_rejects_explicit_terminal_mission() -> None:
+    engine = _TaskSubmitFakeEngine([
+        {"id": "mission-closed", "title": "旧任务", "status": "cancelled"},
+    ])
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "task-submit-closed-mission",
+        "type": ClientEventType.TASK_SUBMIT,
+        "payload": {
+            "text": "错误挂载",
+            "mission_id": "mission-closed",
+        },
+    })
+
+    assert bridge._run_task is None
+    assert engine.workbench_service.created_issues == []
+    error = next(record for record in _records(writer) if record["type"] == "error")
+    assert error["payload"]["code"] == "mission_closed"
+    assert "已结束" in error["payload"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_bridge_task_submit_uses_explicit_owned_mission() -> None:
+    engine = _TaskSubmitFakeEngine([
+        {"id": "mission-1", "title": "前端", "status": "planning"},
+        {"id": "mission-2", "title": "后端", "status": "active"},
+    ])
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "task-submit-explicit",
+        "type": ClientEventType.TASK_SUBMIT,
+        "payload": {"text": "实现 API", "mission_id": "mission-2"},
+    })
+    assert bridge._run_task is not None
+    await bridge._run_task
+
+    assert engine.workbench_service.created_missions == []
+    assert engine.workbench_service.created_issues[0]["mission_id"] == "mission-2"
+
+
+@pytest.mark.asyncio
+async def test_bridge_task_submit_failure_blocks_backing_task() -> None:
+    engine = _FailingTaskSubmitEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "task-submit-failed",
+        "type": ClientEventType.TASK_SUBMIT,
+        "payload": {"text": "失败任务"},
+    })
+    assert bridge._run_task is not None
+    await bridge._run_task
+
+    assert engine.task_store.updates == [
+        ("1", TaskStatus.IN_PROGRESS),
+        ("1", TaskStatus.BLOCKED),
+    ]
+    error = next(record for record in _records(writer) if record["type"] == "error")
+    assert error["request_id"] == "task-submit-failed"
+    assert error["payload"]["code"] == "run_failed"
+    assert error["payload"]["task_id"] == "1"
+    assert error["payload"]["mission_id"] == "mission-auto"
+    assert error["payload"]["intent"] == "task"
+    assert error["payload"]["task_status"] == "blocked"
+    assert len([
+        record for record in _records(writer) if record["type"] == "workbench/snapshot"
+    ]) == 2
+
+
+@pytest.mark.asyncio
+async def test_bridge_shutdown_blocks_active_workbench_task() -> None:
+    engine = _SlowTaskSubmitEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "task-submit-cancel",
+        "type": ClientEventType.TASK_SUBMIT,
+        "payload": {"text": "长任务"},
+    })
+    await engine.started.wait()
+    await bridge.shutdown()
+
+    assert engine.task_store.updates == [
+        ("1", TaskStatus.IN_PROGRESS),
+        ("1", TaskStatus.BLOCKED),
+    ]
+    assert bridge._run_task is not None
+    assert bridge._run_task.done()
+    assert len([
+        record for record in _records(writer) if record["type"] == "workbench/snapshot"
+    ]) == 2
+
+
+@pytest.mark.asyncio
+async def test_bridge_task_submit_persists_real_workbench_graph(tmp_path: Path) -> None:
+    database = tmp_path / "task-submit.db"
+    engine = _TaskSubmitFakeEngine()
+    engine.task_store = TaskStore(database)
+    engine.workbench_store = WorkbenchStore(database)
+    engine.workbench_service = WorkbenchService(
+        task_store=engine.task_store,
+        workbench_store=engine.workbench_store,
+        workspace_root=str(tmp_path),
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "task-submit-real-store",
+        "type": ClientEventType.TASK_SUBMIT,
+        "payload": {"text": "真实数据库任务", "acceptance_criteria": ["记录可追溯"]},
+    })
+    assert bridge._run_task is not None
+    await bridge._run_task
+
+    missions = (await engine.workbench_service.list_missions("session-task"))["missions"]
+    assert len(missions) == 1
+    task = await engine.task_store.scoped("session-task").get_task("1")
+    assert task is not None
+    assert task.status == TaskStatus.COMPLETED
+    issue = await engine.workbench_store.get_issue("session-task", "1")
+    assert issue is not None
+    assert issue.mission_id == missions[0]["id"]
+    assert issue.acceptance_criteria == ["记录可追溯"]
+    events = await engine.workbench_store.list_events("session-task")
+    assert {event.type for event in events} >= {"mission.created", "issue.created"}
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 from collections.abc import Callable
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
@@ -16,6 +17,7 @@ from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
 from naumi_agent.log_setup import setup_logging
+from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNoticeMessage
 from naumi_agent.ui.protocol import (
     ClientEventType,
@@ -26,8 +28,17 @@ from naumi_agent.ui.protocol import (
     normalize_client_record,
     ui_message_payload,
 )
+from naumi_agent.workbench.models import ParallelMode, RiskLevel
 
 logger = logging.getLogger(__name__)
+
+_TERMINAL_MISSION_STATUSES = frozenset({
+    "completed",
+    "cancelled",
+    "canceled",
+    "closed",
+    "archived",
+})
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
@@ -82,6 +93,41 @@ def _start_stdin_line_reader(
     ).start()
     return queue
 _EXIT_COMMANDS = {"/q", "/quit", "/exit", "exit"}
+
+
+def _task_title(text: str) -> str:
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "新任务")
+    return first_line[:80]
+
+
+def _public_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if is_dataclass(value):
+        return asdict(value)
+    if hasattr(value, "__dict__"):
+        return dict(vars(value))
+    return {}
+
+
+def _task_turn_context(
+    *,
+    task_id: str,
+    mission_id: str,
+    title: str,
+    payload: dict[str, Any],
+) -> str:
+    criteria = list(payload.get("acceptance_criteria") or [])
+    criteria_text = "；".join(criteria) if criteria else "未单独指定"
+    return "\n".join([
+        "[Workbench task context - trusted runtime fact]",
+        f"task_id: {task_id}",
+        f"mission_id: {mission_id}",
+        f"title: {title}",
+        f"parallel_mode: {payload.get('parallel_mode') or 'exclusive'}",
+        f"risk_level: {payload.get('risk_level') or 'medium'}",
+        f"acceptance_criteria: {criteria_text}",
+    ])
 
 
 def _present_run_error(exc: Exception) -> tuple[str, str]:
@@ -502,6 +548,10 @@ class JsonlEngineBridge:
             await self.submit(str(payload.get("text", "")), request_id=request_id)
             return
 
+        if event_type == ClientEventType.TASK_SUBMIT:
+            await self.submit_task(payload, request_id=request_id)
+            return
+
         if event_type == ClientEventType.RESUME:
             await self.resume_session(payload, request_id=request_id)
             return
@@ -605,6 +655,219 @@ class JsonlEngineBridge:
                 await self.emit(ServerEventType.STATUS, self.status_payload())
 
         self._run_task = asyncio.create_task(run())
+
+    async def submit_task(self, payload: dict[str, Any], *, request_id: str) -> None:
+        """Create one Workbench issue and execute it in the active conversation."""
+        if self._run_task is not None and not self._run_task.done():
+            await self.emit_error(
+                "当前任务仍在执行，请等待完成后再创建任务。",
+                code="run_in_progress",
+                request_id=request_id,
+            )
+            return
+
+        text = str(payload.get("text") or "").strip("\n")
+        title = str(payload.get("title") or "").strip() or _task_title(text)
+        session = await self.engine.get_or_create_session(title=title)
+        session_id = str(session.id)
+        task_store = self.engine.task_store.scoped(session_id)
+        task_store.set_session(session_id)
+        service = getattr(self.engine, "workbench_service", None)
+        if service is None:
+            await self.emit_error(
+                "Workbench 服务暂不可用。",
+                code="workbench_unavailable",
+                request_id=request_id,
+            )
+            return
+
+        mission = await self._resolve_task_mission(
+            service,
+            session_id=session_id,
+            mission_id=str(payload.get("mission_id") or ""),
+            title=title,
+            goal=text,
+            request_id=request_id,
+        )
+        if mission is None:
+            return
+        mission_data = _public_mapping(mission)
+        mission_id = str(mission_data.get("id") or "")
+        try:
+            issue = await service.create_issue(
+                session_id=session_id,
+                mission_id=mission_id,
+                title=title,
+                description=text,
+                blocked_by=list(payload.get("blocked_by") or []),
+                acceptance_criteria=list(payload.get("acceptance_criteria") or []),
+                parallel_mode=ParallelMode(str(payload.get("parallel_mode") or "exclusive")),
+                risk_level=RiskLevel(str(payload.get("risk_level") or "medium")),
+            )
+        except (RuntimeError, ValueError) as exc:
+            await self.emit_error(str(exc), code="task_create_failed", request_id=request_id)
+            return
+
+        task_data = dict(issue.get("task") or {})
+        task_id = str(task_data.get("id") or issue.get("task_id") or "")
+        await task_store.update_task(task_id, status=TaskStatus.IN_PROGRESS)
+        task_data["status"] = TaskStatus.IN_PROGRESS.value
+        snapshot = await service.dashboard_snapshot(session_id)
+        context = _task_turn_context(
+            task_id=task_id,
+            mission_id=mission_id,
+            title=title,
+            payload=payload,
+        )
+        await self.emit(
+            ServerEventType.USER_MESSAGE,
+            {"content": text, "intent": "task", "task_id": task_id},
+            request_id=request_id,
+        )
+        await self.emit(
+            ServerEventType.TASK_CREATED,
+            {
+                "mission": mission_data,
+                "issue": issue,
+                "task": task_data,
+                "workbench_snapshot": snapshot,
+            },
+            request_id=request_id,
+        )
+        await self.emit(ServerEventType.WORKBENCH_SNAPSHOT, snapshot, request_id=request_id)
+        await self.emit(
+            ServerEventType.RUN_STARTED,
+            {"task": text, "task_id": task_id, "mission_id": mission_id, "intent": "task"},
+            request_id=request_id,
+        )
+        await self.emit(ServerEventType.STATUS, self.status_payload())
+
+        async def run() -> None:
+            try:
+                result = await self.engine.run_streaming(
+                    text,
+                    self.handle_engine_event,
+                    turn_context=context,
+                )
+                final_status = (
+                    TaskStatus.COMPLETED
+                    if result.status == "completed"
+                    else TaskStatus.BLOCKED
+                )
+                await task_store.update_task(task_id, status=final_status)
+                final_snapshot = await service.dashboard_snapshot(session_id)
+                await self.emit(
+                    ServerEventType.WORKBENCH_SNAPSHOT,
+                    final_snapshot,
+                    request_id=request_id,
+                )
+                await self.emit(
+                    ServerEventType.RUN_COMPLETED,
+                    {
+                        "status": result.status,
+                        "response": result.response or "",
+                        "error": result.error or "",
+                        "task_id": task_id,
+                        "mission_id": mission_id,
+                        "intent": "task",
+                    },
+                    request_id=request_id,
+                )
+            except asyncio.CancelledError:
+                await task_store.update_task(task_id, status=TaskStatus.BLOCKED)
+                cancelled_snapshot = await service.dashboard_snapshot(session_id)
+                await self.emit(
+                    ServerEventType.WORKBENCH_SNAPSHOT,
+                    cancelled_snapshot,
+                    request_id=request_id,
+                )
+                raise
+            except Exception as exc:
+                await task_store.update_task(task_id, status=TaskStatus.BLOCKED)
+                failed_snapshot = await service.dashboard_snapshot(session_id)
+                await self.emit(
+                    ServerEventType.WORKBENCH_SNAPSHOT,
+                    failed_snapshot,
+                    request_id=request_id,
+                )
+                message, code = _present_run_error(exc)
+                await self.emit_error(
+                    message,
+                    code=code,
+                    request_id=request_id,
+                    details={
+                        "task_id": task_id,
+                        "mission_id": mission_id,
+                        "intent": "task",
+                        "task_status": TaskStatus.BLOCKED.value,
+                    },
+                )
+            finally:
+                await self.emit(ServerEventType.STATUS, self.status_payload())
+
+        self._run_task = asyncio.create_task(run())
+
+    async def _resolve_task_mission(
+        self,
+        service: Any,
+        *,
+        session_id: str,
+        mission_id: str,
+        title: str,
+        goal: str,
+        request_id: str,
+    ) -> Any | None:
+        response = await service.list_missions(session_id)
+        missions = list(response.get("missions") or [])
+        if mission_id:
+            match = next(
+                (
+                    mission
+                    for mission in missions
+                    if str(_public_mapping(mission).get("id")) == mission_id
+                ),
+                None,
+            )
+            if match is None:
+                await self.emit_error(
+                    f"Mission 不存在或不属于当前会话: {mission_id}",
+                    code="mission_not_found",
+                    request_id=request_id,
+                )
+                return None
+            status = str(_public_mapping(match).get("status") or "").strip().lower()
+            if status in _TERMINAL_MISSION_STATUSES:
+                await self.emit_error(
+                    f"Mission 已结束，不能创建新任务: {mission_id}",
+                    code="mission_closed",
+                    request_id=request_id,
+                )
+                return None
+            return match
+        open_missions = [
+            mission
+            for mission in missions
+            if str(_public_mapping(mission).get("status") or "").strip().lower()
+            not in _TERMINAL_MISSION_STATUSES
+        ]
+        if len(open_missions) == 1:
+            return open_missions[0]
+        if not open_missions:
+            return await service.create_mission(
+                session_id=session_id,
+                title=title[:80],
+                goal=goal,
+            )
+        candidates = "、".join(
+            f"{data.get('id')}({data.get('title') or '未命名'})"
+            for data in (_public_mapping(mission) for mission in open_missions[:8])
+        )
+        await self.emit_error(
+            f"当前会话有多个 Mission，请指定 mission_id。可选: {candidates}",
+            code="mission_required",
+            request_id=request_id,
+        )
+        return None
 
     async def resume_session(self, payload: dict[str, Any], *, request_id: str) -> None:
         """Load a persisted session and replay it as typed UI messages."""
@@ -1046,10 +1309,14 @@ class JsonlEngineBridge:
         *,
         code: str = "error",
         request_id: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
+        payload = {"message": message, "code": code}
+        if details:
+            payload.update(details)
         await self.emit(
             ServerEventType.ERROR,
-            {"message": message, "code": code},
+            payload,
             request_id=request_id,
         )
 

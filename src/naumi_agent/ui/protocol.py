@@ -25,6 +25,7 @@ class ClientEventType(StrEnum):
 
     HELLO = "hello"
     SUBMIT = "submit"
+    TASK_SUBMIT = "task_submit"
     SET_MODE = "set_mode"
     CYCLE_MODE = "cycle_mode"
     SET_REASONING = "set_reasoning"
@@ -53,6 +54,7 @@ class ServerEventType(StrEnum):
     ERROR = "error"
     PONG = "pong"
     USER_MESSAGE = "user/message"
+    TASK_CREATED = "task/created"
     UI_MESSAGE = "ui/message"
     ENGINE_EVENT = "engine/event"
     RUN_STARTED = "run/started"
@@ -164,6 +166,44 @@ def _normalize_client_payload(
     if event_type == ClientEventType.SUBMIT:
         return {"text": str(payload.get("text") or "")}
 
+    if event_type == ClientEventType.TASK_SUBMIT:
+        text = str(payload.get("text") or "")
+        if not text.strip():
+            raise ValueError("任务内容不能为空。")
+        if len(text) > 200_000:
+            raise ValueError("任务内容不能超过 200000 个字符。")
+        title = str(payload.get("title") or "").strip()
+        if len(title) > 200:
+            raise ValueError("任务标题不能超过 200 个字符。")
+        parallel_mode = str(payload.get("parallel_mode") or "exclusive").strip().lower()
+        if parallel_mode not in {"exclusive", "cooperative", "competitive", "exploratory"}:
+            raise ValueError(
+                "并行模式无效，可用值: "
+                "exclusive / cooperative / competitive / exploratory。"
+            )
+        risk_level = str(payload.get("risk_level") or "medium").strip().lower()
+        if risk_level not in {"low", "medium", "high", "critical"}:
+            raise ValueError("风险等级无效，可用值: low / medium / high / critical。")
+        return {
+            "text": text,
+            "mission_id": str(payload.get("mission_id") or "").strip(),
+            "title": title,
+            "acceptance_criteria": _normalize_text_list(
+                payload.get("acceptance_criteria"),
+                field="acceptance_criteria",
+                max_items=20,
+                max_chars=500,
+            ),
+            "blocked_by": _normalize_text_list(
+                payload.get("blocked_by"),
+                field="blocked_by",
+                max_items=50,
+                max_chars=128,
+            ),
+            "parallel_mode": parallel_mode,
+            "risk_level": risk_level,
+        }
+
     if event_type == ClientEventType.SET_MODE:
         return {"mode": str(payload.get("mode") or "").strip().lower()}
 
@@ -241,6 +281,30 @@ def _bounded_int(raw: Any, default: int, *, lower: int, upper: int) -> int:
     except (TypeError, ValueError):
         value = default
     return max(lower, min(value, upper))
+
+
+def _normalize_text_list(
+    raw: Any,
+    *,
+    field: str,
+    max_items: int,
+    max_chars: int,
+) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"{field} 必须是数组。")
+    if len(raw) > max_items:
+        raise ValueError(f"{field} 最多包含 {max_items} 项。")
+    normalized: list[str] = []
+    for value in raw:
+        text = str(value).strip()
+        if not text:
+            continue
+        if len(text) > max_chars:
+            raise ValueError(f"{field} 单项不能超过 {max_chars} 个字符。")
+        normalized.append(text)
+    return normalized
 
 
 def _to_bool(raw: Any) -> bool:

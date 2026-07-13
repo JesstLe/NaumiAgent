@@ -12,7 +12,9 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/history", description: "查看历史会话列表" },
   { command: "/load", aliases: ["/l"], description: "加载会话并继续对话" },
   { command: "/resume", aliases: ["/r"], description: "继续最近一次对话" },
-  { command: "/tasks", aliases: ["/task"], description: "显示/更新任务面板（支持 list/open/cancel/refresh）" },
+  { command: "/task", description: "创建任务、切换任务输入，或按 ID 打开任务" },
+  { command: "/tasks", description: "显示/更新任务面板（支持 list/open/cancel/refresh）" },
+  { command: "/chat", description: "切换为普通对话输入" },
   { command: "/permissions", description: "显示待确认权限面板" },
   { command: "/doctor", description: "运行环境诊断" },
   { command: "/mode", description: "切换 runtime 模式 default / plan / bypass" },
@@ -40,7 +42,6 @@ const SLASH_COMMAND_ALIAS_HINTS = Object.freeze({
   "/help": ["/h"],
   "/resume": ["/r"],
   "/load": ["/l"],
-  "/tasks": ["/task"],
   "/clear": ["/c"],
   "/model": ["/m"],
   "/usage": ["/u"],
@@ -96,9 +97,6 @@ function normalizeSlashCommandList(rawCommands) {
   }
   if (normalized.has("/load") && !normalized.get("/load").aliases.includes("/l")) {
     normalized.get("/load").aliases.push("/l");
-  }
-  if (normalized.has("/tasks") && !normalized.get("/tasks").aliases.includes("/task")) {
-    normalized.get("/tasks").aliases.push("/task");
   }
   if (normalized.has("/clear") && !normalized.get("/clear").aliases.includes("/c")) {
     normalized.get("/clear").aliases.push("/c");
@@ -156,6 +154,8 @@ export function createInitialState() {
     inputHistory: [],
     inputHistoryCursor: null,
     inputHistoryDraft: "",
+    composerIntent: "chat",
+    activeTaskSubmission: null,
     historySearch: {
       open: false,
       query: "",
@@ -259,6 +259,29 @@ export function reduceServerEvent(state, record) {
       }
       state.running = true;
       break;
+    case "task/created":
+      {
+        const message = acceptUserMessage(state, record.request_id);
+        const taskId = String(payload.task?.id ?? payload.issue?.task_id ?? "");
+        const missionId = String(payload.mission?.id ?? payload.issue?.mission_id ?? "");
+        if (message) {
+          message.intent = "task";
+          message.taskId = taskId;
+          message.missionId = missionId;
+          message.taskStatus = String(payload.task?.status ?? "in_progress");
+        }
+        state.activeTaskSubmission = {
+          requestId: String(record.request_id ?? ""),
+          taskId,
+          missionId,
+          state: "running",
+        };
+        state.composerIntent = "chat";
+        if (payload.workbench_snapshot && typeof payload.workbench_snapshot === "object") {
+          state.workbench = payload.workbench_snapshot;
+        }
+      }
+      break;
     case "ui/message":
       handleUiMessage(state, payload);
       break;
@@ -276,6 +299,18 @@ export function reduceServerEvent(state, record) {
       break;
     case "run/completed":
       state.running = false;
+      if (payload.intent === "task" && state.activeTaskSubmission) {
+        const taskState = payload.status === "completed" ? "completed" : "blocked";
+        state.activeTaskSubmission.state = taskState;
+        const taskMessage = state.messages.find(
+          (message) => message.kind === "user"
+            && message.taskId === String(payload.task_id ?? state.activeTaskSubmission.taskId),
+        );
+        if (taskMessage) {
+          taskMessage.taskStatus = taskState;
+          clearRenderCache(state.renderCache);
+        }
+      }
       if (state.currentTurnStartedAtMs && state.currentTurnFirstTokenAtMs) {
         state.lastFirstTokenLatencyMs = state.currentTurnFirstTokenAtMs - state.currentTurnStartedAtMs;
       } else {
@@ -312,6 +347,22 @@ export function reduceServerEvent(state, record) {
       return [{ type: "session_replayed", sessionId: state.currentSessionId }];
     case "error":
       state.running = false;
+      if (
+        payload.intent === "task"
+        && state.activeTaskSubmission
+        && state.activeTaskSubmission.requestId === String(record.request_id ?? "")
+      ) {
+        const taskState = payload.task_status === "completed" ? "completed" : "blocked";
+        state.activeTaskSubmission.state = taskState;
+        const taskId = String(payload.task_id ?? state.activeTaskSubmission.taskId);
+        const taskMessage = state.messages.find(
+          (message) => message.kind === "user" && message.taskId === taskId,
+        );
+        if (taskMessage) {
+          taskMessage.taskStatus = taskState;
+          clearRenderCache(state.renderCache);
+        }
+      }
       failUserMessage(state, record.request_id, {
         code: payload.code ?? "error",
         message: payload.message ?? "发送失败。",
@@ -726,6 +777,7 @@ export function handleTodoPrepare(state, message) {
 }
 
 export function handleSubmitText(state, text, send) {
+  const commandText = String(text ?? "").trim();
   if (text === "/folds") {
     showFoldList(state);
     return;
@@ -752,6 +804,29 @@ export function handleSubmitText(state, text, send) {
   if (text.startsWith("/load ")) {
     send("resume", { session_id: text.slice(6).trim() });
     return;
+  }
+  if (commandText === "/chat") {
+    setComposerIntent(state, "chat");
+    return;
+  }
+  if (commandText === "/task") {
+    setComposerIntent(state, "task");
+    return;
+  }
+  if (commandText === "/task create") {
+    pushSystemMessage(state, "任务输入", "请在 /task create 后填写任务内容。", "warning");
+    return;
+  }
+  if (commandText.startsWith("/task create ")) {
+    return submitTaskMessage(state, commandText.slice("/task create ".length).trim(), send);
+  }
+  const taskDetail = commandText.match(/^\/task\s+#?(\d+)$/);
+  if (taskDetail) {
+    handleTasksCommand(state, `/tasks detail ${taskDetail[1]}`, send);
+    return;
+  }
+  if (commandText.startsWith("/task ")) {
+    return submitTaskMessage(state, commandText.slice("/task ".length).trim(), send);
   }
   if (text === "/tasks" || text.startsWith("/tasks ")) {
     handleTasksCommand(state, text, send);
@@ -794,10 +869,47 @@ export function handleSubmitText(state, text, send) {
     showDebugInfo(state);
     return;
   }
+  if (state.composerIntent === "task") {
+    return submitTaskMessage(state, text, send);
+  }
   return submitUserMessage(state, text, send);
 }
 
+export function toggleComposerIntent(state) {
+  return setComposerIntent(state, state.composerIntent === "task" ? "chat" : "task");
+}
+
+function setComposerIntent(state, intent) {
+  const next = intent === "task" ? "task" : "chat";
+  state.composerIntent = next;
+  pushSystemMessage(
+    state,
+    "输入模式",
+    next === "task"
+      ? "已切换到任务模式。下一条普通输入会创建 Workbench 任务。"
+      : "已切换到对话模式。普通输入不会创建新任务。",
+    "info",
+  );
+  return next;
+}
+
 export function submitUserMessage(state, text, send, existingMessage = null) {
+  return submitMessage(state, text, send, existingMessage, {
+    eventType: "submit",
+    intent: "chat",
+    payload: {},
+  });
+}
+
+export function submitTaskMessage(state, text, send, taskDraft = {}, existingMessage = null) {
+  return submitMessage(state, text, send, existingMessage, {
+    eventType: "task_submit",
+    intent: "task",
+    payload: taskDraft,
+  });
+}
+
+function submitMessage(state, text, send, existingMessage, submission) {
   const content = String(text ?? "");
   const requestId = `submit-${state.nextSubmitId++}`;
   const message = existingMessage ?? {
@@ -813,12 +925,15 @@ export function submitUserMessage(state, text, send, existingMessage = null) {
   message.errorCode = "";
   message.errorMessage = "";
   message.localOutbox = true;
+  message.intent = submission.intent;
+  message.submitType = submission.eventType;
+  message.taskDraft = submission.intent === "task" ? { ...submission.payload } : null;
   if (!existingMessage) {
     state.messages.push(message);
   }
 
   try {
-    send("submit", { text: content }, { id: requestId });
+    send(submission.eventType, { text: content, ...submission.payload }, { id: requestId });
   } catch (error) {
     failUserMessage(state, requestId, {
       code: "transport_write_failed",
@@ -846,6 +961,9 @@ export function retryUserMessage(state, send, requestId = "") {
       "warning",
     );
     return null;
+  }
+  if (message.submitType === "task_submit" || message.intent === "task") {
+    return submitTaskMessage(state, message.content, send, message.taskDraft ?? {}, message);
   }
   return submitUserMessage(state, message.content, send, message);
 }
@@ -982,9 +1100,13 @@ export function createUiSnapshot(state) {
     foldCursor: state.foldCursor,
     scrollOffset: state.scrollOffset,
     outbox: serializeUserOutbox(state.messages),
+    activeTaskSubmission: sanitizeActiveTaskSubmission(state.activeTaskSubmission),
     composer: {
       text: truncateInputText(state.input),
       cursor: getInputCursor(state),
+      intent: state.composerIntent === "task" && String(state.input ?? "").trim()
+        ? "task"
+        : "chat",
       preferredColumn: Number.isFinite(state.inputPreferredColumn)
         ? Math.max(0, Number(state.inputPreferredColumn))
         : null,
@@ -1001,11 +1123,13 @@ export function applyUiSnapshot(state, snapshot) {
   state.unreadOutputCount = 0;
   state.unreadOutputKeys = {};
   restoreUserOutbox(state, safeSnapshot.outbox);
+  state.activeTaskSubmission = sanitizeActiveTaskSubmission(safeSnapshot.activeTaskSubmission);
   const composer = safeSnapshot.composer && typeof safeSnapshot.composer === "object"
     ? safeSnapshot.composer
     : {};
   const text = truncateInputText(typeof composer.text === "string" ? composer.text : "");
   setInputText(state, text, Number(composer.cursor));
+  state.composerIntent = composer.intent === "task" && text.trim() ? "task" : "chat";
   state.inputPreferredColumn = composer.preferredColumn !== null
     && composer.preferredColumn !== undefined
     && Number.isFinite(Number(composer.preferredColumn))
@@ -1026,6 +1150,9 @@ function serializeUserOutbox(messages) {
       attempt: Math.max(1, Math.floor(Number(message.attempt) || 1)),
       errorCode: boundedText(message.errorCode, MAX_OUTBOX_ERROR_CHARS),
       errorMessage: boundedText(message.errorMessage, MAX_OUTBOX_ERROR_CHARS),
+      submitType: message.submitType === "task_submit" ? "task_submit" : "submit",
+      intent: message.intent === "task" ? "task" : "chat",
+      taskDraft: message.intent === "task" ? sanitizeTaskDraft(message.taskDraft) : null,
     }));
 }
 
@@ -1051,6 +1178,9 @@ function restoreUserOutbox(state, rawOutbox) {
         ? "上次发送未获得 Bridge 确认。"
         : entry.errorMessage,
       localOutbox: true,
+      submitType: entry.submitType,
+      intent: entry.intent,
+      taskDraft: entry.taskDraft,
     });
     const submitId = entry.requestId.match(/^submit-(\d+)$/)?.[1];
     if (submitId) {
@@ -1075,7 +1205,51 @@ function sanitizeOutboxEntry(value) {
     attempt: Math.max(1, Math.floor(Number(value.attempt) || 1)),
     errorCode: boundedText(value.errorCode, MAX_OUTBOX_ERROR_CHARS),
     errorMessage: boundedText(value.errorMessage, MAX_OUTBOX_ERROR_CHARS),
+    submitType: value.submitType === "task_submit" ? "task_submit" : "submit",
+    intent: value.submitType === "task_submit" || value.intent === "task" ? "task" : "chat",
+    taskDraft: value.submitType === "task_submit" || value.intent === "task"
+      ? sanitizeTaskDraft(value.taskDraft)
+      : null,
   };
+}
+
+function sanitizeTaskDraft(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const parallelMode = ["exclusive", "cooperative", "competitive", "exploratory"]
+    .includes(source.parallel_mode) ? source.parallel_mode : "exclusive";
+  const riskLevel = ["low", "medium", "high", "critical"]
+    .includes(source.risk_level) ? source.risk_level : "medium";
+  return {
+    mission_id: boundedText(source.mission_id, 200).trim(),
+    title: boundedText(source.title, 200).trim(),
+    acceptance_criteria: boundedTextList(source.acceptance_criteria, 20, 500),
+    blocked_by: boundedTextList(source.blocked_by, 50, 128),
+    parallel_mode: parallelMode,
+    risk_level: riskLevel,
+  };
+}
+
+function sanitizeActiveTaskSubmission(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const requestId = typeof value.requestId === "string"
+    ? boundedText(value.requestId, 200).trim()
+    : "";
+  const taskId = typeof value.taskId === "string"
+    ? boundedText(value.taskId, 200).trim()
+    : "";
+  const missionId = typeof value.missionId === "string"
+    ? boundedText(value.missionId, 200).trim()
+    : "";
+  const state = ["creating", "running", "completed", "blocked"].includes(value.state)
+    ? value.state
+    : "";
+  if (!requestId || !taskId || !state) return null;
+  return { requestId, taskId, missionId, state };
+}
+
+function boundedTextList(value, maxItems, maxChars) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, maxItems).map((item) => boundedText(item, maxChars).trim()).filter(Boolean);
 }
 
 function boundedText(value, maxChars) {
@@ -1316,7 +1490,9 @@ function parseTaskCommand(raw, fallbackLimit = 12) {
   for (const rawToken of tokens) {
     const [key, rawValue] = rawToken.includes("=") ? rawToken.split("=", 2) : ["", rawToken];
     const value = normalizeTaskFilterToken(rawValue);
-    if (key === "limit") {
+    if (command === "detail" && !key && !detailId) {
+      detailId = String(rawValue ?? "").trim();
+    } else if (key === "limit") {
       limit = parseTaskPanelLimit(value, limit);
     } else if (!key && /^\d+$/.test(value)) {
       limit = parseTaskPanelLimit(value, limit);
@@ -1324,7 +1500,7 @@ function parseTaskCommand(raw, fallbackLimit = 12) {
       source = value;
     } else if ((key === "status" || !key) && statuses.has(value)) {
       status = value;
-    } else if (key === "detail" || key === "detail_id" || (command === "detail" && !key && !detailId)) {
+    } else if (key === "detail" || key === "detail_id") {
       detailId = String(rawValue ?? "").trim();
     }
   }

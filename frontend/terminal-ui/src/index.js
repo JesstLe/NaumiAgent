@@ -61,6 +61,7 @@ import {
   createUiSnapshot,
   applyUiSnapshot,
   failQueuedUserMessages,
+  toggleComposerIntent,
 } from "./state.js";
 import { captureViewportAnchor, renderScreen, restoreViewportAnchor } from "./render.js";
 import {
@@ -315,6 +316,12 @@ function handleSingleKeyInput(chunk) {
   }
   if (chunk === INPUT_KEYS.ctrlR) {
     openHistorySearch(state);
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.ctrlT) {
+    toggleComposerIntent(state);
+    persistUiSnapshot();
     scheduleRedraw();
     return;
   }

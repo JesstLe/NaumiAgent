@@ -25,6 +25,7 @@ export const INPUT_KEYS = {
   ctrlE: "\x05",
   ctrlL: "\x0c",
   ctrlR: "\x12",
+  ctrlT: "\x14",
   escape: "\x1b",
   tab: "\t",
 };
