@@ -1020,6 +1020,43 @@ test("terminal UI process restores project history and accepts search without se
   }
 });
 
+test("terminal UI process controls agents through the Python JSONL bridge", async () => {
+  const app = launchTerminalUi(null, {
+    bridgeCommandJson: [pythonExecutable(), "test/fixtures/python-bridge-fixture.py"],
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    app.stdin.write("/agents\n");
+    await waitForLatestScreen(output, "Agent Control Center", 7000);
+    await waitForLatestScreen(output, "Python Bridge 编程 Agent", 7000);
+    app.stdin.write("\t");
+    await waitForLatestScreen(output, "[执行]");
+    await waitForLatestScreen(output, "python-agent-task");
+    app.stdin.write("x");
+    await waitForLatestScreen(output, "确认停止 python-agent-task");
+    app.stdin.write("y");
+    await waitForLatestScreen(output, "cancelled", 7000);
+
+    const events = readDebugEvents(app.debugLogPath);
+    const requests = events.filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "agents/request",
+    );
+    const stops = events.filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "agents/stop",
+    );
+    assert.equal(requests.length, 1);
+    assert.equal(stops.length, 1);
+    assert.equal(stops[0].payload.record.payload.task_id, "python-agent-task");
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process keeps inspector live without stealing drafts or permission keys", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);
