@@ -23,6 +23,8 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
     app.stdin.write("生成一个展示页面\n");
     await waitForOutput(output, "permission: bash_run");
     await waitForOutput(output, "需要确认");
+    await waitForLatestScreen(output, "执行过程");
+    await waitForLatestScreen(output, "等待权限");
 
     app.stdin.write("y");
     await waitForOutput(output, "准备 file_write");
@@ -31,6 +33,8 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
     await waitForOutput(output, "路径: showcase/index.html");
     await waitForOutput(output, "+new");
     await waitForOutput(output, "已折叠");
+    await waitForLatestScreen(output, "已完成");
+    assert.equal(countLatestScreen(output, "执行过程"), 1);
 
     app.stdin.write("/expand 1\n");
     await waitForOutput(output, "+line 64");

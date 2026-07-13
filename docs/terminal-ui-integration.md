@@ -130,6 +130,7 @@ naumi chat --tui
 - assistant streaming 增量渲染。
 - thinking 折叠为一行摘要。
 - 工具调用使用独立卡片，支持 running/success/error。
+- 每次运行使用一条 `run_activity` 卡聚合后端阶段、工具计数、权限等待和终态；完成后同一张收据移动到时间线末尾，独立工具卡仍保留证据。
 - `tool_prepare` 使用 activity card 展示准备阶段；最终 tool card 会保留 prepare 摘要，避免快速工具事件被 viewport 吞掉。
 - background runtime notification、subagent、team、hook、context compact、recovery、error 事件使用结构化事件卡片渲染，不再裸露 JSON。
 - tool card、permission footer、todo footer、status footer、Markdown/diff 已拆成轻量组件层。

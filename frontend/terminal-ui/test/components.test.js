@@ -13,6 +13,7 @@ import {
 } from "../src/components/footer.js";
 import { Message } from "../src/components/message.js";
 import { ActivityCard } from "../src/components/activity-card.js";
+import { RunActivityCard } from "../src/components/run-activity-card.js";
 import { PermissionCard } from "../src/components/permission-card.js";
 import { parsePermissionPanel, PermissionPanel } from "../src/components/permission-panel.js";
 import { ToolCard } from "../src/components/tool-card.js";
@@ -321,6 +322,52 @@ test("activity card renders live operation details within width", () => {
   assert(plain.includes("2.4s"));
   assert(plain.includes("路径: showcase/index.html"));
   assert(card.every((item) => visibleWidth(item) <= 72));
+});
+
+test("run activity card states phase, tool counts, and outcome within width", () => {
+  const activity = {
+    status: "running",
+    phase: "awaiting_permission",
+    phaseLabel: "等待权限",
+    turn: 2,
+    model: "model-a",
+    permissionCount: 1,
+    toolCalls: {
+      a: { status: "success" },
+      b: { status: "error" },
+      c: { status: "running" },
+    },
+    perfPhases: [{ label: "记忆召回", durationMs: 42 }],
+  };
+
+  const running = RunActivityCard({ activity }).render({ width: 64 }).map(stripAnsi);
+  activity.status = "completed";
+  activity.phase = "completed";
+  activity.phaseLabel = "执行完成";
+  activity.durationMs = 1250;
+  const completed = RunActivityCard({ activity }).render({ width: 64 }).map(stripAnsi);
+  activity.status = "failed";
+  activity.phase = "failed";
+  activity.phaseLabel = "执行失败";
+  const failed = RunActivityCard({ activity }).render({ width: 64 }).map(stripAnsi);
+  activity.status = "cancelled";
+  activity.phase = "cancelled";
+  activity.phaseLabel = "运行取消";
+  activity.durationMs = 1200;
+  const cancelled = RunActivityCard({ activity }).render({ width: 64 }).map(stripAnsi);
+
+  assert.match(running.join("\n"), /等待权限/);
+  assert.match(running.join("\n"), /工具 2\/3/);
+  assert.match(running.join("\n"), /失败 1/);
+  assert.match(running.join("\n"), /权限请求 1/);
+  assert.match(completed.join("\n"), /已完成/);
+  assert.match(completed.join("\n"), /耗时 1\.3s/);
+  assert.match(failed.join("\n"), /失败 · 执行失败/);
+  assert.match(cancelled.join("\n"), /已取消/);
+  assert(running.every((line) => visibleWidth(line) <= 64));
+  assert(completed.every((line) => visibleWidth(line) <= 64));
+  assert(failed.every((line) => visibleWidth(line) <= 64));
+  assert(cancelled.every((line) => visibleWidth(line) <= 64));
 });
 
 test("permission card renders confirmation path as a structured dialog", () => {
