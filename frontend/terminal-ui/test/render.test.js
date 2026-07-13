@@ -191,7 +191,7 @@ test("tool card renders diff output inside a bounded card", () => {
   assert(card.every((line) => visibleWidth(line) <= 80));
 });
 
-test("footer truncates status without overflowing terminal width", () => {
+test("footer wraps complete status fields without ellipsis", () => {
   const state = createInitialState();
   state.mode = "bypass";
   state.status = {
@@ -207,6 +207,10 @@ test("footer truncates status without overflowing terminal width", () => {
 
   assert(footer.every((line) => visibleWidth(line) <= 72));
   assert(stripAnsi(footer[0]).includes("mode: bypass"));
+  const plain = footer.map(stripAnsi).join("\n");
+  assert.match(plain, /预算: \$0\.3000\/\$5\.00/);
+  assert.match(plain, /main\*/);
+  assert.doesNotMatch(plain, /…/);
 });
 
 test("footer renders unlimited budget without inventing a zero cap", () => {

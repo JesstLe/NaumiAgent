@@ -40,9 +40,6 @@ test("terminal UI welcome consumes identity from the real Python JSONL Bridge", 
     await waitForLatestScreen(output, "NaumiAgent v0.1.214", 7000);
     await waitForLatestScreen(output, "模型 python-fixture-capable", 7000);
     await waitForLatestScreen(output, "模式 default · 权限 moderate", 7000);
-    app.stdin.write("\x1b[105;5u");
-    await waitForLatestScreen(output, "Runtime Inspector", 7000);
-    app.stdin.write("\t\x1b[C\x1b[C");
     await waitForLatestScreen(output, "预算: 不限", 7000);
     assert.equal(await stopTerminalUi(app), 0);
   } finally {

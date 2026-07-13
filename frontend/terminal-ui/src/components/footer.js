@@ -5,7 +5,6 @@ import {
   compactText,
   formatContext,
   shortPath,
-  truncateAnsi,
   visibleWidth,
   wrapAnsiLine,
 } from "../ansi.js";
@@ -129,9 +128,37 @@ export function StatusFooter({ state, env = {} }) {
         formatBudgetStatus(budget),
       ];
       if (git.branch) parts.push(`${git.branch}${git.dirty ? "*" : ""}`);
-      return wrapAnsiLine(color(ANSI.dim, truncateAnsi(parts.join(" | "), ctx.width)), ctx.width);
+      return packStatusParts(parts, ctx.width).map((line) => color(ANSI.dim, line));
     },
   };
+}
+
+function packStatusParts(parts, width) {
+  const safeWidth = Math.max(1, Math.floor(Number(width) || 1));
+  const lines = [];
+  let current = "";
+  for (const value of parts) {
+    const part = String(value ?? "").trim();
+    if (!part) continue;
+    const candidate = current ? `${current} | ${part}` : part;
+    if (visibleWidth(candidate) <= safeWidth) {
+      current = candidate;
+      continue;
+    }
+    if (current) {
+      lines.push(current);
+      current = "";
+    }
+    const wrapped = wrapAnsiLine(part, safeWidth);
+    if (wrapped.length <= 1) {
+      current = wrapped[0] ?? part;
+      continue;
+    }
+    lines.push(...wrapped.slice(0, -1));
+    current = wrapped.at(-1) ?? "";
+  }
+  if (current) lines.push(current);
+  return lines;
 }
 
 export function PromptFooter({ state }) {
