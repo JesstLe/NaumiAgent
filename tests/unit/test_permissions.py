@@ -8,6 +8,7 @@ import pytest
 from naumi_agent.safety.permissions import (
     PermissionChecker,
     PermissionMode,
+    PermissionOutcome,
     PermissionReasonCode,
     PermissionRiskLevel,
 )
@@ -137,14 +138,14 @@ class TestPermissionChecker:
             assert result.risk_level == PermissionRiskLevel.HIGH
             assert "高风险模式" in result.reason
 
-    def test_bypass_skips_dangerous_command_filter(self) -> None:
+    def test_bypass_cannot_skip_dangerous_command_filter(self) -> None:
         checker = PermissionChecker(PermissionMode.BYPASS)
         result = checker.check(
             "bash_run",
             {"command": "rm -rf /Users/lv/Workspace/showcase-page && echo done"},
         )
-        assert result.allowed
-        assert not result.requires_confirmation
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
 
     def test_safe_commands(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
@@ -223,6 +224,69 @@ class TestPermissionChecker:
         result = checker.check("bash_run", {"command": "echo test"})
         assert result.allowed
         assert not result.requires_confirmation
+
+    def test_shell_confirmation_is_medium_and_session_grantable(self, tmp_path) -> None:
+        checker = PermissionChecker(
+            PermissionMode.MODERATE,
+            allowed_dirs=[str(tmp_path)],
+            workspace_root=str(tmp_path),
+        )
+
+        decision = checker.check(
+            "bash_run",
+            {"command": "git status", "cwd": str(tmp_path)},
+        )
+
+        assert decision.outcome is PermissionOutcome.CONFIRM
+        assert decision.risk_level is PermissionRiskLevel.MEDIUM
+        assert decision.tool_family == "shell"
+        assert decision.allow_session_grant is True
+        assert decision.requires_double_confirm is False
+
+    def test_dangerous_command_remains_blocked_in_bypass(self, tmp_path) -> None:
+        checker = PermissionChecker(
+            PermissionMode.BYPASS,
+            allowed_dirs=[str(tmp_path)],
+            workspace_root=str(tmp_path),
+        )
+
+        decision = checker.check(
+            "bash_run",
+            {"command": "sudo rm -rf /", "cwd": str(tmp_path)},
+        )
+
+        assert decision.outcome is PermissionOutcome.BLOCK
+        assert decision.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_path_violation_remains_blocked_in_bypass(self, tmp_path) -> None:
+        checker = PermissionChecker(
+            PermissionMode.BYPASS,
+            allowed_dirs=[str(tmp_path)],
+            workspace_root=str(tmp_path),
+        )
+
+        decision = checker.check("file_read", {"path": str(tmp_path.parent / "outside.txt")})
+
+        assert decision.outcome is PermissionOutcome.BLOCK
+        assert decision.code is PermissionReasonCode.PATH_OUTSIDE_SANDBOX
+
+    def test_destructive_metadata_requires_double_confirmation_in_bypass(self) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        decision = checker.check(
+            "self_modify",
+            {
+                "target_file": "tools/example.py",
+                "new_content": "x = 1\n",
+                "description": "example",
+            },
+            tool=SelfModifyTool(),
+        )
+
+        assert decision.outcome is PermissionOutcome.CONFIRM
+        assert decision.risk_level is PermissionRiskLevel.HIGH
+        assert decision.requires_double_confirm is True
+        assert decision.allow_session_grant is False
 
     def test_task_tracking_tools_allowed_without_confirmation(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
