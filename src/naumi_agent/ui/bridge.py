@@ -70,6 +70,13 @@ def _challenge_error_message(status: str) -> str:
     }
     return messages.get(status, "确认令牌无效，请重新发起二次确认。")
 
+
+def _backend_choices_error_message(kind: str) -> str:
+    if kind == "missing":
+        return "后端权限选择缺失，系统已拒绝本次操作。"
+    return "后端权限选择为空或无效，系统已拒绝本次操作。"
+
+
 _SLASH_ALIAS_MAP: dict[str, str] = {
     "/h": "/help",
     "/r": "/resume",
@@ -1371,9 +1378,26 @@ class JsonlEngineBridge:
         request_id = call_id or f"perm-{uuid4().hex}"
         loop = asyncio.get_running_loop()
         future: asyncio.Future[str] = loop.create_future()
-        choices = tuple(str(choice).strip().lower() for choice in payload.get("choices") or ())
+        if "choices" not in payload:
+            await self.emit_error(
+                _backend_choices_error_message("missing"),
+                code="permission_choices_missing",
+                request_id=request_id,
+            )
+            return "deny"
+        raw_choices = payload["choices"]
+        choices = (
+            tuple(str(choice).strip().lower() for choice in raw_choices)
+            if isinstance(raw_choices, (list, tuple, set, frozenset))
+            else ()
+        )
         if not choices:
-            choices = ("allow_once", "deny", "grant_session")
+            await self.emit_error(
+                _backend_choices_error_message("empty"),
+                code="permission_choices_empty",
+                request_id=request_id,
+            )
+            return "deny"
         requires_double_confirm = bool(payload.get("requires_double_confirm"))
         if requires_double_confirm:
             choices = tuple(choice for choice in choices if choice != "grant_session")
@@ -1433,13 +1457,16 @@ class JsonlEngineBridge:
 
         if choice == "confirm":
             token = str(payload.get("confirmation_token") or "").strip()
-            challenge_status = self._permission_challenges.consume(
-                token,
-                permission_id,
-                pending.session_id,
-                pending.call_id,
-            )
-            if not pending.challenge_token or challenge_status != "valid":
+            if not pending.challenge_token or token != pending.challenge_token:
+                challenge_status = "mismatch"
+            else:
+                challenge_status = self._permission_challenges.consume(
+                    token,
+                    permission_id,
+                    pending.session_id,
+                    pending.call_id,
+                )
+            if challenge_status != "valid":
                 await self.emit_error(
                     _challenge_error_message(challenge_status),
                     code=f"permission_challenge_{challenge_status}",

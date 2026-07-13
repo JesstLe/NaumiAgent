@@ -88,5 +88,5 @@ def test_permission_panel_includes_active_session_grants() -> None:
     rendered = render_permission_panel_snapshot(snapshot)
 
     assert snapshot.grants[0]["grant_id"] == "grant-shell"
-    assert "Active grants" in rendered
+    assert "有效授权" in rendered
     assert "grant-shell shell [session]" in rendered

@@ -104,7 +104,8 @@ class PermissionChallengeStore:
         return len(self._challenges)
 
     def issue(self, request_id: str, session_id: str, call_id: str) -> str:
-        """Issue one unguessable, request-bound challenge token."""
+        """Replace any live request challenge with one unguessable token."""
+        self.discard_request(request_id)
         token = secrets.token_urlsafe()
         while token in self._challenges:
             token = secrets.token_urlsafe()

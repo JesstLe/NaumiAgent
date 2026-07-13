@@ -90,7 +90,7 @@ def render_permission_panel_snapshot(snapshot: PermissionPanelSnapshot) -> str:
     else:
         lines.append("\033[2m  暂无待确认权限\033[0m")
 
-    lines.extend(["", "\033[1mActive grants\033[0m"])
+    lines.extend(["", "\033[1m有效授权\033[0m"])
     if snapshot.grants:
         for grant in snapshot.grants:
             lines.append(_render_grant(grant))
