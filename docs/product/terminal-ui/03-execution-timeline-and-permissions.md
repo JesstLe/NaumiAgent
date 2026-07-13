@@ -1,5 +1,24 @@
 # 03 执行时间线与权限
 
+## 实施状态（2026-07-13）
+
+已完成“运行内安全取消”切片：
+
+- 新增 `run_cancel -> ack -> run/cancelled` JSONL 生命周期，取消请求与目标提交使用独立 request ID 关联。
+- 运行中第一次 `Ctrl+C` 只请求取消当前 run，状态栏显示“运行: 正在停止”，时间线给出可行动反馈；第二次才强制退出 UI。
+- 空闲时 `Ctrl+C` 保持退出语义；取消完成后 Terminal UI、Bridge、会话和 Composer 均继续可用。
+- Bridge 直接取消其持有的唯一 `_run_task` 并 await 终止，不在前端模拟取消，也不改造 AgentEngine 为第二条执行路径。
+- Workbench 任务取消后，现有 cancellation 分支把 backing Task 从 `in_progress` 置为 `blocked`、刷新真实快照，并在 `run/cancelled` 返回任务与 Mission 身份。
+- 普通对话取消不会伪造失败；权限卡、live tool prepare 和 pending cancellation 表现状态在终态事件中统一清理。
+- 空闲取消返回 `no_active_run` 且无副作用；取消后继续提交的真实 Bridge 测试和取消后执行 `/doctor` 的双进程测试均通过。
+- 定向验证：Terminal reducer/组件/协议/进程 133 项、Python Bridge 49 项、Ruff 全部通过。
+
+本模块仍未整体完成。下一切片优先实现后端驱动的 `activity_group` 运行阶段聚合，随后完善高风险权限二次确认与 bypass 范围/撤销。
+
+权威实现计划与边界见：
+
+- `docs/superpowers/plans/2026-07-13-terminal-run-cancel.md`
+
 ## 1. 目标
 
 把“发送中然后突然回复”升级为可理解、可控制、可恢复的执行体验。用户能看到 Agent 正处于规划、调用工具、等待权限、验证还是整理结果，但不会看到内部推理原文或敏感工具参数。
