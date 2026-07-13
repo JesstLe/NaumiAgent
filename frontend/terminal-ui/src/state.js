@@ -827,6 +827,9 @@ export function applyUiSnapshot(state, snapshot) {
   state.folds = sanitizeFolds(safeSnapshot.folds);
   state.foldCursor = Number.isFinite(Number(safeSnapshot.foldCursor)) ? Math.max(0, Number(safeSnapshot.foldCursor)) : 0;
   state.scrollOffset = Number.isFinite(Number(safeSnapshot.scrollOffset)) ? Math.max(0, Number(safeSnapshot.scrollOffset)) : 0;
+  state.followTail = state.scrollOffset === 0;
+  state.unreadOutputCount = 0;
+  state.unreadOutputKeys = {};
   const composer = safeSnapshot.composer && typeof safeSnapshot.composer === "object"
     ? safeSnapshot.composer
     : {};
