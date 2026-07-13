@@ -336,6 +336,50 @@ async def test_stream_uses_catalog_openai_responses_transport(
 
 
 @pytest.mark.asyncio
+async def test_responses_stream_registration_failure_is_sanitized_before_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+    leaked = "registry-internal-secret"
+
+    async def fake_acompletion(**_kwargs: Any):
+        nonlocal called
+        called = True
+        return _completion_stream()
+
+    def fail_registration(_model_cost: dict[str, Any]) -> None:
+        raise RuntimeError(leaked)
+
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.get_model_info",
+        lambda _model: {},
+    )
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.acompletion",
+        fake_acompletion,
+    )
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.register_model",
+        fail_registration,
+    )
+    router = ModelRouter(
+        ModelConfig(provider="vendor", default_model="chat"),
+        catalog=_responses_catalog(),
+    )
+
+    with pytest.raises(ProviderRuntimeError, match="无法启用 Responses 原生流式") as error:
+        _ = [
+            chunk
+            async for chunk in router.stream(
+                [{"role": "user", "content": "hello"}]
+            )
+        ]
+
+    assert leaked not in str(error.value)
+    assert called is False
+
+
+@pytest.mark.asyncio
 async def test_unsupported_catalog_format_fails_before_litellm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

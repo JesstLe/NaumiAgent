@@ -241,15 +241,20 @@ class ModelRouter:
         with self._native_stream_registration_lock:
             if registry_model in self._registered_native_stream_models:
                 return
-            litellm.register_model(
-                {
-                    registry_model: {
-                        "litellm_provider": "openai",
-                        "mode": "responses",
-                        "supports_native_streaming": True,
+            try:
+                litellm.register_model(
+                    {
+                        registry_model: {
+                            "litellm_provider": "openai",
+                            "mode": "responses",
+                            "supports_native_streaming": True,
+                        }
                     }
-                }
-            )
+                )
+            except Exception:
+                raise ProviderRuntimeError(
+                    f'provider "{provider.id}" 无法启用 Responses 原生流式。'
+                ) from None
             self._registered_native_stream_models.add(registry_model)
 
     def _resolve_max_tokens(self, model: str, requested: int | None) -> int:
