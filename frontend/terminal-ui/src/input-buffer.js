@@ -24,6 +24,9 @@ export const INPUT_KEYS = {
   ctrlA: "\x01",
   ctrlE: "\x05",
   ctrlL: "\x0c",
+  ctrlR: "\x12",
+  escape: "\x1b",
+  tab: "\t",
 };
 
 const BRACKETED_PASTE_START = "\x1b[200~";

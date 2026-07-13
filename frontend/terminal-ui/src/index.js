@@ -20,6 +20,16 @@ import {
   tokenizeInputChunk,
 } from "./input-buffer.js";
 import {
+  acceptHistorySearch,
+  appendHistorySearchQuery,
+  backspaceHistorySearchQuery,
+  cancelHistorySearch,
+  cycleHistorySearch,
+  moveHistorySearchSelection,
+  openHistorySearch,
+  resetHistorySearch,
+} from "./history-search.js";
+import {
   attachJsonlLineReader,
   createEventSender,
   normalizeServerRecord,
@@ -50,11 +60,19 @@ import {
   markTimelineOutput,
   scrollTimeline,
 } from "./timeline-follow.js";
-import { getUiSnapshot, loadUiStateStore, saveUiStateStore, setUiSnapshot } from "./ui-state-store.js";
+import {
+  getProjectInputHistory,
+  getUiSnapshot,
+  loadUiStateStore,
+  saveUiStateStore,
+  setProjectInputHistory,
+  setUiSnapshot,
+} from "./ui-state-store.js";
 
 const args = parseArgs(process.argv.slice(2));
 const state = createInitialState();
 const uiStateStore = loadUiStateStore(process.cwd());
+state.inputHistory = getProjectInputHistory(uiStateStore);
 const debugLog = createDebugLog({ cwd: process.cwd(), env: process.env });
 state.frontendDebugLogPath = debugLog?.path ?? "";
 
@@ -62,6 +80,7 @@ let bridge = null;
 let send = null;
 let redrawTimer = null;
 let uiSnapshotTimer = null;
+let inputEscapeTimer = null;
 let quitting = false;
 let viewportWidth = null;
 let viewportHeight = null;
@@ -191,6 +210,7 @@ function handleBridgeLine(line) {
     restoreUiSnapshot(state.currentSessionId);
   }
   if (record.type === "session/replayed") {
+    resetHistorySearch(state);
     jumpTimelineToLatest(state);
   }
   if (!(record.type === "ui/message" && record.payload?.type === "thinking" && !state.showReasoning)) {
@@ -220,6 +240,10 @@ function handleBridgeLine(line) {
 function handleKeyInput(chunk) {
   const previousInput = state.input;
   const previousCursor = state.inputCursor;
+  if (inputEscapeTimer) {
+    clearTimeout(inputEscapeTimer);
+    inputEscapeTimer = null;
+  }
   const tokens = tokenizeInputChunk(chunk, inputTokenizer);
   debugLog?.log("input.chunk", {
     chars: String(chunk),
@@ -231,11 +255,23 @@ function handleKeyInput(chunk) {
   });
   for (const token of tokens) {
     if (token.type === "paste") {
-      insertInputText(state, token.value);
+      if (state.historySearch?.open) {
+        appendHistorySearchQuery(state, token.value);
+      } else {
+        insertInputText(state, token.value);
+      }
       scheduleRedraw();
       continue;
     }
     handleSingleKeyInput(token.value);
+  }
+  if (inputTokenizer.pendingEscape === INPUT_KEYS.escape) {
+    inputEscapeTimer = setTimeout(() => {
+      inputEscapeTimer = null;
+      if (inputTokenizer.pendingEscape !== INPUT_KEYS.escape) return;
+      inputTokenizer.pendingEscape = "";
+      handleSingleKeyInput(INPUT_KEYS.escape);
+    }, 30);
   }
   if (state.input !== previousInput || state.inputCursor !== previousCursor) {
     scheduleUiSnapshotPersist();
@@ -246,6 +282,7 @@ function handleSingleKeyInput(chunk) {
   if (chunk === "\u0003") exit();
   if (state.permission) {
     const key = chunk.toLowerCase();
+    if (chunk === INPUT_KEYS.ctrlR) return;
     if (chunk === INPUT_KEYS.shiftTab) {
       send("permission_response", { request_id: state.permission.requestId, choice: "bypass" });
       return;
@@ -262,6 +299,15 @@ function handleSingleKeyInput(chunk) {
       send("permission_response", { request_id: state.permission.requestId, choice: "bypass" });
       return;
     }
+  }
+  if (state.historySearch?.open && handleHistorySearchKey(chunk)) {
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.ctrlR) {
+    openHistorySearch(state);
+    scheduleRedraw();
+    return;
   }
   if (chunk === INPUT_KEYS.shiftTab) {
     send("cycle_mode", {});
@@ -399,10 +445,31 @@ function submitComposer() {
   const text = state.input;
   handleSubmitText(state, text, send);
   rememberSubmittedInput(state, text);
+  setProjectInputHistory(uiStateStore, state.inputHistory);
   clearInput(state);
   jumpTimelineToLatest(state);
   persistUiSnapshot();
   scheduleRedraw();
+  return true;
+}
+
+function handleHistorySearchKey(chunk) {
+  if (chunk === INPUT_KEYS.ctrlR) return cycleHistorySearch(state) || true;
+  if (chunk === INPUT_KEYS.escape) return cancelHistorySearch(state);
+  if (chunk === INPUT_KEYS.up) return moveHistorySearchSelection(state, "newer") || true;
+  if (chunk === INPUT_KEYS.down || chunk === INPUT_KEYS.tab) {
+    return moveHistorySearchSelection(state, "older") || true;
+  }
+  if (chunk === "\r" || chunk === "\n" || chunk === INPUT_KEYS.ctrlEnter) {
+    return acceptHistorySearch(state) || true;
+  }
+  if (chunk === "\u007f" || chunk === "\b") {
+    return backspaceHistorySearchQuery(state) || true;
+  }
+  if (chunk >= " " && chunk !== "\x7f") {
+    appendHistorySearchQuery(state, chunk);
+    return true;
+  }
   return true;
 }
 
@@ -481,6 +548,7 @@ function handleTaskPanelFocusedKey(chunk) {
 }
 
 function restoreUiSnapshot(sessionId) {
+  resetHistorySearch(state);
   applyUiSnapshot(state, getUiSnapshot(uiStateStore, sessionId));
 }
 
