@@ -2,6 +2,7 @@
 # 复制为 config.yaml 并填入实际值
 
 models:
+  provider: "kimi"
   default_model: "openai/kimi-for-coding"
   fast_model: "openai/kimi-for-coding"
   reasoning_model: "openai/kimi-for-coding"

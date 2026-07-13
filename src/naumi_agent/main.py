@@ -24,6 +24,7 @@ from rich.syntax import Syntax
 from rich.text import Text
 
 from naumi_agent.cli.slash_router import execute_slash_command
+from naumi_agent.config.configurator import ConfigurationError, configure_project
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.log_setup import suppress_startup_import_warnings
 from naumi_agent.ui.code_excerpt import (
@@ -336,6 +337,93 @@ def _capture_tui_launch_noise() -> Any:
     finally:
         for name, level in previous_levels.items():
             logging.getLogger(name).setLevel(level)
+
+
+@app.command("configure")
+def configure_command(
+    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    provider: str | None = typer.Option(
+        None,
+        "--provider",
+        help="模型提供商：kimi、openai、anthropic 或 custom",
+    ),
+    default_model: str | None = typer.Option(None, "--model", help="默认模型覆盖"),
+    fast_model: str | None = typer.Option(None, "--fast-model", help="快速模型覆盖"),
+    reasoning_model: str | None = typer.Option(
+        None,
+        "--reasoning-model",
+        help="推理模型覆盖",
+    ),
+    api_base: str | None = typer.Option(None, "--api-base", help="API Base 覆盖"),
+    workspace: Path | None = typer.Option(None, "--workspace", help="工作区目录"),
+    permission_mode: str | None = typer.Option(
+        None,
+        "--permission-mode",
+        help="权限模式：strict、moderate、relaxed 或 bypass",
+    ),
+    api_key_stdin: bool = typer.Option(
+        False,
+        "--api-key-stdin",
+        help="从标准输入读取模型密钥，避免进入命令历史",
+    ),
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        help="禁用所有提示，用于自动化",
+    ),
+) -> None:
+    """安全更新模型、凭据、工作区和权限配置."""
+    selected_provider = provider
+    if not selected_provider:
+        if non_interactive:
+            console.print("[red]非交互模式必须指定 --provider。[/red]")
+            raise typer.Exit(2)
+        selected_provider = typer.prompt(
+            "模型提供商 (kimi/openai/anthropic/custom)",
+            default="kimi",
+        )
+
+    if selected_provider.strip().lower() == "custom" and not non_interactive:
+        default_model = default_model or typer.prompt("默认模型")
+        api_base = api_base or typer.prompt("API Base")
+        fast_model = fast_model or typer.prompt("快速模型", default=default_model)
+        reasoning_model = reasoning_model or typer.prompt(
+            "推理模型",
+            default=default_model,
+        )
+
+    api_key: str | None = None
+    if api_key_stdin:
+        api_key = sys.stdin.readline().rstrip("\r\n")
+        if not api_key:
+            console.print("[red]标准输入中没有模型 API Key。[/red]")
+            raise typer.Exit(2)
+    elif not non_interactive and typer.confirm("是否更新模型 API Key？", default=True):
+        api_key = typer.prompt("模型 API Key", hide_input=True)
+
+    try:
+        result = configure_project(
+            config,
+            provider=selected_provider,
+            api_key=api_key,
+            default_model=default_model,
+            fast_model=fast_model,
+            reasoning_model=reasoning_model,
+            api_base=api_base,
+            workspace=workspace,
+            permission_mode=permission_mode,
+        )
+    except ConfigurationError as exc:
+        console.print(f"[red]配置失败：{exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    credential_status = "已更新" if result.credential_updated else "保持现有来源"
+    console.print("[green]配置已安全更新。[/green]")
+    console.print(f"  Provider: {result.provider}")
+    console.print(f"  默认模型: {result.default_model}")
+    console.print(f"  API Base: {result.api_base}")
+    console.print(f"  系统凭据: {credential_status}")
+    console.print(f"  配置文件: {result.config_path}")
 
 
 @app.command()

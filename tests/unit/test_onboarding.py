@@ -32,6 +32,7 @@ def test_build_config_never_serializes_model_api_key(tmp_path: Path) -> None:
     )
 
     assert "api_key" not in config["models"]
+    assert config["models"]["provider"] == "custom"
 
 
 def test_build_config_limits_default_permissions_to_workspace(tmp_path: Path) -> None:

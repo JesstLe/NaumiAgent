@@ -44,6 +44,14 @@ naumi
 
 首次启动会进入交互式引导，询问 API Key、模型提供商、工作区和权限模式，自动生成不含密钥的 `config.yaml`。模型密钥保存在系统凭据库中；已经设置 `NAUMI_MODELS__API_KEY` 的环境不会重复保存。
 
+需要更换 provider、模型或过期密钥时，运行：
+
+```bash
+naumi configure
+```
+
+自动化环境可使用 `--non-interactive --provider <name>`，并通过环境变量复用现有凭据；需要更新密钥时使用 `--api-key-stdin` 从标准输入传入，避免密钥进入 shell history。
+
 #### 本地开发安装
 
 ```bash
@@ -89,6 +97,7 @@ export NAUMI_MODELS__API_KEY=your-key
 
 ```yaml
 models:
+  provider: "kimi"
   default_model: "openai/kimi-for-coding"
   fast_model: "openai/kimi-for-coding"
   reasoning_model: "openai/kimi-for-coding"
