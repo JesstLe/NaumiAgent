@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import {
   attachJsonlLineReader,
   createEventSender,
+  normalizeBudgetStatus,
   normalizeServerRecord,
   parseArgs,
   parseBridgeCommandJson,
@@ -11,6 +12,45 @@ import {
   PROTOCOL_VERSION,
   splitShellLike,
 } from "../src/protocol.js";
+
+test("normalizes nullable budget without inventing zero", () => {
+  assert.deepEqual(
+    normalizeBudgetStatus({
+      enabled: false,
+      used_usd: 0.0123,
+      max_usd: null,
+      remaining_usd: null,
+      percentage: null,
+      input_tokens: 42,
+      max_input_tokens: null,
+      output_tokens: 8,
+      max_output_tokens: null,
+    }),
+    {
+      enabled: false,
+      used_usd: 0.0123,
+      max_usd: null,
+      remaining_usd: null,
+      cost_percentage: null,
+      input_tokens: 42,
+      max_input_tokens: null,
+      input_percentage: null,
+      output_tokens: 8,
+      max_output_tokens: null,
+      output_percentage: null,
+      percentage: null,
+    },
+  );
+});
+
+test("nullable budget rejects coercible and non-finite limits", () => {
+  for (const max_usd of ["5", {}, -1, Number.POSITIVE_INFINITY]) {
+    assert.throws(
+      () => normalizeBudgetStatus({ enabled: true, max_usd }),
+      /max_usd/,
+    );
+  }
+});
 
 test("parseArgs supports config and bridge command", () => {
   assert.deepEqual(parseArgs([

@@ -14,9 +14,17 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class TokenBudget:
-    max_input_tokens: int = 500_000
-    max_output_tokens: int = 50_000
-    max_usd: float = 5.0
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
+    max_usd: float | None = None
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether at least one cumulative budget limit is active."""
+        return any(
+            limit is not None
+            for limit in (self.max_input_tokens, self.max_output_tokens, self.max_usd)
+        )
 
 
 @dataclass(frozen=True)
@@ -33,7 +41,7 @@ class BudgetSummary:
     total_input_tokens: int
     total_output_tokens: int
     total_cost_usd: float
-    remaining_usd: float
+    remaining_usd: float | None
     model_breakdown: dict[str, dict[str, float]]
 
 
@@ -76,10 +84,18 @@ class BudgetTracker:
 
     def is_exceeded(self) -> bool:
         return (
-            self._total_input > self.budget.max_input_tokens
-            or self._total_output > self.budget.max_output_tokens
-            or self._total_cost > self.budget.max_usd
+            self._is_limit_exceeded(self._total_input, self.budget.max_input_tokens)
+            or self._is_limit_exceeded(self._total_output, self.budget.max_output_tokens)
+            or self._is_limit_exceeded(self._total_cost, self.budget.max_usd)
         )
+
+    @staticmethod
+    def _is_limit_exceeded(total: int | float, limit: int | float | None) -> bool:
+        if limit is None:
+            return False
+        if limit == 0:
+            return True
+        return total > limit
 
     @property
     def total_input_tokens(self) -> int:
@@ -94,7 +110,9 @@ class BudgetTracker:
         return self._total_cost
 
     @property
-    def remaining_usd(self) -> float:
+    def remaining_usd(self) -> float | None:
+        if self.budget.max_usd is None:
+            return None
         return max(0, self.budget.max_usd - self._total_cost)
 
     def reset(self) -> None:
@@ -113,10 +131,11 @@ class BudgetTracker:
             breakdown[r.model]["output"] += r.output_tokens
             breakdown[r.model]["cost"] += r.cost_usd
 
+        remaining_usd = self.remaining_usd
         return BudgetSummary(
             total_input_tokens=self.total_input_tokens,
             total_output_tokens=self.total_output_tokens,
             total_cost_usd=round(self.total_cost_usd, 6),
-            remaining_usd=round(self.remaining_usd, 4),
+            remaining_usd=round(remaining_usd, 4) if remaining_usd is not None else None,
             model_breakdown=breakdown,
         )

@@ -19,7 +19,7 @@ attachJsonlLineReader(process.stdin, (line) => {
       workspace_root: "/Users/lv/Workspace/NaumiAgent",
       usage: { total_tokens: 0 },
       context: { used: 0, window: 256000, percentage: 0 },
-      budget: { used_usd: 0, max_usd: 5 },
+      budget: { enabled: false, used_usd: 0, max_usd: null, percentage: null },
       git: { branch: "main", dirty: true },
     });
     return;

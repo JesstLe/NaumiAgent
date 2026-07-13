@@ -290,6 +290,18 @@ class TestNaumiApp:
             assert "mode: plan" in str(status.render())
 
     @pytest.mark.asyncio
+    async def test_startup_status_renders_unlimited_budget(self) -> None:
+        engine = AgentEngine(AppConfig())
+        app = NaumiApp(engine)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause(0.1)
+            status = app.query_one(StatusBar)
+            rendered = str(status.render())
+
+            assert "预算: 不限 · 已用 $0.0000" in rendered
+            assert "/$0.00" not in rendered
+
+    @pytest.mark.asyncio
     async def test_todo_bar_is_hidden_until_it_has_open_tasks(self) -> None:
         engine = AgentEngine(AppConfig())
         app = NaumiApp(engine)

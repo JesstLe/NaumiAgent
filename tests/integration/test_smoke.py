@@ -6,8 +6,9 @@ import os
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from naumi_agent.config.settings import AppConfig
+from naumi_agent.config.settings import AppConfig, SafetyConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -88,8 +89,18 @@ class TestSmokeConfig:
     def test_default_config(self) -> None:
         config = AppConfig()
         assert config.models.default_model == "claude-sonnet-4-6"
-        assert config.safety.max_budget_usd == 5.0
-        assert config.safety.max_turns == 30
+        assert config.safety.max_budget_usd is None
+        assert config.safety.max_input_tokens is None
+        assert config.safety.max_output_tokens is None
+        assert config.safety.max_turns == 50
+
+    @pytest.mark.parametrize(
+        "field",
+        ("max_budget_usd", "max_input_tokens", "max_output_tokens"),
+    )
+    def test_negative_budget_limits_are_rejected(self, field: str) -> None:
+        with pytest.raises(ValidationError):
+            SafetyConfig(**{field: -1})
 
     def test_yaml_config(self) -> None:
         os.environ["NAUMI_MODELS__API_KEY"] = "test-key"

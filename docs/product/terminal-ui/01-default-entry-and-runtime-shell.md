@@ -10,6 +10,7 @@
 - `frontend/terminal-ui/src/index.js` 会进入 alternate screen、隐藏光标并生成 Bridge 子进程。
 - 默认 Bridge 依赖 `uv run python -m naumi_agent.ui.bridge`，已支持外部 bridge command 覆盖。
 - 新 Terminal UI 已具备渲染层专用启动欢迎页：进程启动立即显示响应式 NAUMI，Bridge ready 后展示权威版本、工作区、模型与权限模式；首条 chat/task 提交后收起，不写入消息、会话或 UI snapshot。
+- Bridge 的预算对象保留可空上限；默认状态显示“预算: 不限 · 已用 $…”，只有用户显式配置数值时才显示有限上限。`bypass` 只改变工具权限，不改变预算执行。
 - 仍未完成的是启动前依赖诊断、ready 超时恢复选择、安装态资源解析和旧入口迁移；这些不由欢迎页伪装为完成。
 
 ## 3. 目标命令面
@@ -74,3 +75,4 @@
 3. 任意退出路径都恢复光标、颜色和输入模式。
 4. `naumi chat --classic` 与 `naumi ui --legacy` 可明确回退。
 5. 入口改造不改变其他非交互 CLI 子命令。
+6. 默认不限预算和显式有限预算在 Footer、Runtime Inspector 与兼容 UI 中含义一致，不出现 `$0.00` 伪上限。

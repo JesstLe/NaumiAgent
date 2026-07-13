@@ -86,21 +86,6 @@ class TestTierDetection:
         assert tier == "capable"
 
 
-class TestBudgetDetection:
-    def test_fast_low_budget(self, factory: DynamicAgentFactory) -> None:
-        budget = factory._detect_budget("short task", "fast")
-        assert budget < 0.10
-
-    def test_reasoning_high_budget(self, factory: DynamicAgentFactory) -> None:
-        budget = factory._detect_budget("complex task", "reasoning")
-        assert budget >= 0.25
-
-    def test_long_task_more_budget(self, factory: DynamicAgentFactory) -> None:
-        short = factory._detect_budget("short", "capable")
-        long = factory._detect_budget("x" * 3000, "capable")
-        assert long > short
-
-
 class TestCreateConfig:
     def test_basic_config(self, factory: DynamicAgentFactory) -> None:
         config = factory.create_config(
@@ -111,8 +96,20 @@ class TestCreateConfig:
         assert len(config.capabilities) > 0
         assert config.system_prompt != ""
         assert config.model_tier in ("fast", "capable", "reasoning")
-        assert config.max_turns > 0
-        assert config.max_budget_usd > 0
+        assert config.max_turns == 50
+        assert config.max_budget_usd is None
+
+    def test_dynamic_agent_defaults_to_unlimited_budget_and_fifty_turns(
+        self,
+        factory: DynamicAgentFactory,
+    ) -> None:
+        config = factory.create_config(
+            name="worker",
+            task_description="实现完整后端",
+        )
+
+        assert config.max_budget_usd is None
+        assert config.max_turns == 50
 
     def test_explicit_overrides(self, factory: DynamicAgentFactory) -> None:
         config = factory.create_config(

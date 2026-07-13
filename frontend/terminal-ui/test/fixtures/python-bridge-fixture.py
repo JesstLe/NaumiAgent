@@ -78,9 +78,12 @@ class FakeRuntimeInspector:
                     "context_used": 21,
                     "context_window": 256000,
                     "context_percentage": 0.01,
+                    "budget_enabled": False,
                     "budget_used_usd": 0.02,
-                    "budget_max_usd": 5.0,
-                    "budget_percentage": 0.4,
+                    "budget_max_usd": None,
+                    "budget_percentage": None,
+                    "budget_max_input_tokens": None,
+                    "budget_max_output_tokens": None,
                     "input_tokens": 21,
                     "output_tokens": 8,
                     "turns": 1,
@@ -262,7 +265,20 @@ class FakeEngine:
         return {"used": 21, "window": 256000, "percentage": 0.01}
 
     def get_budget_info(self) -> dict[str, Any]:
-        return {"used_usd": 0.02, "max_usd": 5.0, "percentage": 0.4}
+        return {
+            "enabled": False,
+            "used_usd": 0.02,
+            "max_usd": None,
+            "remaining_usd": None,
+            "cost_percentage": None,
+            "input_tokens": 21,
+            "max_input_tokens": None,
+            "input_percentage": None,
+            "output_tokens": 8,
+            "max_output_tokens": None,
+            "output_percentage": None,
+            "percentage": None,
+        }
 
     def get_recent_permission_bubbles(self, limit: int = 8) -> list[dict[str, Any]]:
         return [
