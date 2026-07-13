@@ -80,6 +80,23 @@ def _kimi_chat_catalog():
     )
 
 
+def _anthropic_catalog():
+    return parse_provider_catalog_json(
+        json.dumps(
+            {
+                "providers": {
+                    "vendor": {
+                        "apiFormat": "anthropic_messages",
+                        "baseURL": "https://anthropic.vendor.example/v1",
+                        "auth": {"type": "none"},
+                        "models": {"chat": {"upstreamId": "vendor/model-v2"}},
+                    }
+                }
+            }
+        )
+    )
+
+
 def _completion_response(content: str = "adapter-ok") -> SimpleNamespace:
     return SimpleNamespace(
         choices=[
@@ -226,6 +243,72 @@ async def test_legacy_call_keeps_existing_model_and_base_kwargs(
 
 
 @pytest.mark.asyncio
+async def test_call_uses_catalog_openai_responses_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_acompletion(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return _completion_response("responses-ok")
+
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.get_model_info",
+        lambda _model: {},
+    )
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.acompletion",
+        fake_acompletion,
+    )
+    router = ModelRouter(
+        ModelConfig(provider="vendor", default_model="chat"),
+        catalog=_responses_catalog(),
+    )
+
+    response = await router.call([{"role": "user", "content": "hello"}])
+
+    assert captured["model"] == "openai/responses/vendor/model-v2"
+    assert captured["api_base"] == "https://responses.vendor.example/v1"
+    assert response.content == "responses-ok"
+    assert response.model == "chat"
+
+
+@pytest.mark.asyncio
+async def test_stream_uses_catalog_openai_responses_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_acompletion(**kwargs: Any):
+        captured.update(kwargs)
+        return _completion_stream()
+
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.get_model_info",
+        lambda _model: {},
+    )
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.acompletion",
+        fake_acompletion,
+    )
+    router = ModelRouter(
+        ModelConfig(provider="vendor", default_model="chat"),
+        catalog=_responses_catalog(),
+    )
+
+    chunks = [
+        chunk
+        async for chunk in router.stream(
+            [{"role": "user", "content": "hello"}]
+        )
+    ]
+
+    assert captured["model"] == "openai/responses/vendor/model-v2"
+    assert captured["api_base"] == "https://responses.vendor.example/v1"
+    assert [chunk.token for chunk in chunks] == ["stream-ok"]
+
+
+@pytest.mark.asyncio
 async def test_unsupported_catalog_format_fails_before_litellm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -246,10 +329,10 @@ async def test_unsupported_catalog_format_fails_before_litellm(
     )
     router = ModelRouter(
         ModelConfig(provider="vendor", default_model="chat"),
-        catalog=_responses_catalog(),
+        catalog=_anthropic_catalog(),
     )
 
-    with pytest.raises(ProviderRuntimeError, match="适配器尚未实现"):
+    with pytest.raises(ProviderRuntimeError, match="anthropic_messages.*尚未实现"):
         await router.call([{"role": "user", "content": "hello"}])
 
     assert called is False

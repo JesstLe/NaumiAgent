@@ -14,7 +14,7 @@ from naumi_agent.config.settings import ModelConfig, ModelMeta
 from naumi_agent.model.catalog import ProviderCatalog
 from naumi_agent.model.provider_runtime import (
     ProviderRuntimeError,
-    build_openai_chat_transport,
+    build_provider_transport,
 )
 from naumi_agent.model.targets import (
     ModelResolutionError,
@@ -218,7 +218,7 @@ class ModelRouter:
         if self._catalog is None:
             raise ProviderRuntimeError("catalog 模型缺少 catalog 来源。")
 
-        transport = build_openai_chat_transport(
+        transport = build_provider_transport(
             target,
             catalog_source=self._catalog.source,
         )
