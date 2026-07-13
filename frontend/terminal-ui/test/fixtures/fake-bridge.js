@@ -6,6 +6,7 @@ let sequence = 1;
 let mode = "default";
 let showReasoning = false;
 let sessionId = "session-fake-1";
+let activeRun = null;
 
 attachJsonlLineReader(process.stdin, (line) => {
   if (!line.trim()) return;
@@ -47,6 +48,12 @@ attachJsonlLineReader(process.stdin, (line) => {
       parallel_mode: payload.parallel_mode ?? "exclusive",
       risk_level: payload.risk_level ?? "medium",
     };
+    activeRun = {
+      requestId: record.id,
+      intent: "task",
+      taskId: "41",
+      missionId: "mission-1",
+    };
     emit("user/message", { content: text, intent: "task", task_id: "41" }, record.id);
     emit("task/created", {
       mission,
@@ -64,6 +71,7 @@ attachJsonlLineReader(process.stdin, (line) => {
     emitUi({ type: "assistant_stream", phase: "token", content: "任务已创建，正在执行。" });
     emitUi({ type: "assistant_stream", phase: "end" });
     setTimeout(() => {
+      if (activeRun?.requestId !== record.id) return;
       const completedTask = { ...task, status: "completed" };
       emit("workbench/snapshot", workbenchSnapshot(mission, completedTask, issue), record.id);
       emit("run/completed", {
@@ -72,6 +80,7 @@ attachJsonlLineReader(process.stdin, (line) => {
         mission_id: "mission-1",
         intent: "task",
       }, record.id);
+      activeRun = null;
     }, 120);
     return;
   }
@@ -81,6 +90,7 @@ attachJsonlLineReader(process.stdin, (line) => {
       process.stdout.write('{"type":"unknown/server","payload":{}}\n');
       return;
     }
+    activeRun = { requestId: record.id, intent: "chat" };
     emit("run/started", {}, record.id);
     emit("user/message", { content: payload.text ?? "" }, record.id);
     emitUi({ type: "assistant_stream", phase: "start" });
@@ -101,6 +111,32 @@ attachJsonlLineReader(process.stdin, (line) => {
       tool_name: "bash_run",
       reason: "需要启动本地预览服务。",
     }, "perm-1");
+    return;
+  }
+
+  if (record.type === "run_cancel") {
+    if (!activeRun) {
+      emit("error", { code: "no_active_run", message: "当前没有正在运行的任务。" }, record.id);
+      return;
+    }
+    const target = activeRun;
+    activeRun = null;
+    emit("ack", {
+      event: "run_cancel",
+      status: "accepted",
+      target_request_id: target.requestId,
+    }, record.id);
+    emit("run/cancelled", {
+      status: "cancelled",
+      target_request_id: target.requestId,
+      intent: target.intent,
+      ...(target.taskId ? {
+        task_id: target.taskId,
+        mission_id: target.missionId,
+        task_status: "blocked",
+      } : {}),
+      reason: payload.reason || "用户取消了当前运行。",
+    }, record.id);
     return;
   }
 
@@ -136,6 +172,7 @@ attachJsonlLineReader(process.stdin, (line) => {
         content_length: 640,
       });
       emit("run/completed", {});
+      activeRun = null;
     }, 30);
     return;
   }

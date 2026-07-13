@@ -141,6 +141,16 @@ test("composer prompt states chat or task intent in text", () => {
   assert.match(task, /^task > /);
 });
 
+test("status footer states cancellation without relying on color", () => {
+  const state = createInitialState();
+  state.running = true;
+  state.cancelPending = true;
+
+  const rendered = Footer({ state }).render({ width: 120 }).map(stripAnsi).join("\n");
+
+  assert.match(rendered, /运行: 正在停止/);
+});
+
 test("new output footer appears only while detached with unread output", () => {
   const state = createInitialState();
   detachTimeline(state, 10);
