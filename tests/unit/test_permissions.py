@@ -156,6 +156,15 @@ class TestPermissionChecker:
             pytest.param("rm -r -f /", id="separate-short-options"),
             pytest.param("rm --recursive --force /", id="long-options"),
             pytest.param("sudo -n rm -fr /", id="sudo-wrapper"),
+            pytest.param("bash -c 'rm -fr /'", id="bash-c-wrapper"),
+            pytest.param("sh -c 'rm -r -f /'", id="sh-c-wrapper"),
+            pytest.param(
+                "sudo bash -c 'rm --recursive --force /'",
+                id="sudo-bash-c-wrapper",
+            ),
+            pytest.param("env SAFE=1 rm -fr /", id="env-assignment-wrapper"),
+            pytest.param("command rm -fr /", id="command-wrapper"),
+            pytest.param("/bin/rm -fr /", id="absolute-rm-wrapper"),
             pytest.param("printf safe; rm -fr /", id="second-command-after-semicolon"),
             pytest.param(
                 "printf safe && rm --recursive --force /",
@@ -179,6 +188,7 @@ class TestPermissionChecker:
             pytest.param("rm -f ./file", id="force-only-local-file"),
             pytest.param("rm -r ./build", id="recursive-only-local-directory"),
             pytest.param("echo 'rm -rf /'", id="quoted-text-not-command"),
+            pytest.param("bash -c \"echo 'rm -rf /'\"", id="quoted-rm-in-shell-payload"),
         ],
     )
     def test_bypass_allows_safe_rm_neighbors(self, command: str) -> None:

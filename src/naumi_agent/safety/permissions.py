@@ -825,6 +825,8 @@ COMMON_PATH_ARGUMENT_NAMES = (
 
 COMMON_COMMAND_ARGUMENT_NAMES = ("command", "cmd", "shell", "script")
 SHELL_COMMAND_SEPARATORS = frozenset({";", "&&", "||", "|", "&"})
+SHELL_EXECUTABLES = frozenset({"sh", "bash", "zsh"})
+MAX_SHELL_COMMAND_RECURSION = 3
 SUDO_OPTIONS_WITH_VALUE = frozenset(
     {
         "-C",
@@ -1159,8 +1161,14 @@ class PermissionChecker:
         return PermissionDecision(allowed=True)
 
     @staticmethod
-    def _contains_destructive_rm_command(command: str) -> bool | None:
+    def _contains_destructive_rm_command(
+        command: str,
+        recursion_depth: int = 0,
+    ) -> bool | None:
         """Return None when shell tokenization fails so callers can use literal fallback."""
+        if recursion_depth >= MAX_SHELL_COMMAND_RECURSION:
+            return True
+
         try:
             lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
             lexer.commenters = ""
@@ -1169,22 +1177,44 @@ class PermissionChecker:
         except ValueError:
             return None
 
+        malformed_payload = False
         simple_command: list[str] = []
         for token in [*tokens, ";"]:
             if token in SHELL_COMMAND_SEPARATORS:
-                if PermissionChecker._is_destructive_rm_simple_command(simple_command):
+                destructive = PermissionChecker._is_destructive_rm_simple_command(
+                    simple_command,
+                    recursion_depth=recursion_depth,
+                )
+                if destructive:
                     return True
+                malformed_payload = malformed_payload or destructive is None
                 simple_command = []
             else:
                 simple_command.append(token)
-        return False
+        return None if malformed_payload else False
 
     @staticmethod
-    def _is_destructive_rm_simple_command(tokens: list[str]) -> bool:
+    def _is_destructive_rm_simple_command(
+        tokens: list[str],
+        *,
+        recursion_depth: int,
+    ) -> bool | None:
         """Detect a recursive, forced rm targeting an absolute path."""
-        rm_arguments = PermissionChecker._rm_arguments_at_command_position(tokens)
-        if rm_arguments is None:
+        command_index = PermissionChecker._unwrap_command_position(tokens)
+        if command_index is None:
             return False
+
+        command = tokens[command_index]
+        command_basename = os.path.basename(command)
+        if command_basename in SHELL_EXECUTABLES:
+            return PermissionChecker._contains_destructive_shell_payload(
+                tokens[command_index + 1 :],
+                recursion_depth=recursion_depth,
+            )
+        if command_basename != "rm":
+            return False
+
+        rm_arguments = tokens[command_index + 1 :]
 
         recursive = False
         force = False
@@ -1209,30 +1239,87 @@ class PermissionChecker:
         return any(PermissionChecker._is_dangerous_rm_target(target) for target in targets)
 
     @staticmethod
-    def _rm_arguments_at_command_position(tokens: list[str]) -> list[str] | None:
-        """Return rm arguments when rm starts a simple command or follows sudo options."""
+    def _unwrap_command_position(tokens: list[str]) -> int | None:
+        """Return the executable position after the supported shell wrappers."""
         if not tokens:
             return None
 
         command_index = 0
-        if tokens[command_index] == "sudo":
-            command_index += 1
-            while command_index < len(tokens):
-                option = tokens[command_index]
-                if option == "--":
-                    command_index += 1
-                    break
-                if option == "-" or not option.startswith("-"):
-                    break
-                if option in SUDO_OPTIONS_WITH_VALUE:
-                    command_index += 1
-                    if command_index >= len(tokens):
-                        return None
-                command_index += 1
+        while command_index < len(tokens):
+            wrapper = os.path.basename(tokens[command_index])
+            if wrapper == "sudo":
+                command_index = PermissionChecker._skip_sudo_options(tokens, command_index + 1)
+            elif wrapper == "env":
+                command_index = PermissionChecker._skip_env_assignments(tokens, command_index + 1)
+            elif wrapper == "command":
+                command_index = PermissionChecker._skip_command_options(tokens, command_index + 1)
+            else:
+                return command_index
+            if command_index is None:
+                return None
+        return None
 
-        if command_index >= len(tokens) or tokens[command_index] != "rm":
-            return None
-        return tokens[command_index + 1 :]
+    @staticmethod
+    def _skip_sudo_options(tokens: list[str], command_index: int) -> int | None:
+        """Skip the limited sudo option forms needed to find its command."""
+        while command_index < len(tokens):
+            option = tokens[command_index]
+            if option == "--":
+                return command_index + 1
+            if option == "-" or not option.startswith("-"):
+                return command_index
+            if option in SUDO_OPTIONS_WITH_VALUE:
+                command_index += 1
+                if command_index >= len(tokens):
+                    return None
+            command_index += 1
+        return None
+
+    @staticmethod
+    def _skip_env_assignments(tokens: list[str], command_index: int) -> int | None:
+        """Skip env flags and NAME=VALUE assignments without parsing shell syntax."""
+        while command_index < len(tokens):
+            token = tokens[command_index]
+            if token == "--":
+                return command_index + 1
+            if token.startswith("-") and token != "-":
+                command_index += 1
+                continue
+            if "=" in token and not token.startswith("="):
+                command_index += 1
+                continue
+            return command_index
+        return None
+
+    @staticmethod
+    def _skip_command_options(tokens: list[str], command_index: int) -> int | None:
+        """Skip command's options before its delegated executable."""
+        while command_index < len(tokens):
+            option = tokens[command_index]
+            if option == "--":
+                return command_index + 1
+            if option == "-" or not option.startswith("-"):
+                return command_index
+            command_index += 1
+        return None
+
+    @staticmethod
+    def _contains_destructive_shell_payload(
+        arguments: list[str],
+        *,
+        recursion_depth: int,
+    ) -> bool | None:
+        """Inspect a shell -c payload with a deliberately bounded recursion depth."""
+        try:
+            command_index = arguments.index("-c")
+        except ValueError:
+            return False
+        if command_index + 1 >= len(arguments):
+            return False
+        return PermissionChecker._contains_destructive_rm_command(
+            arguments[command_index + 1],
+            recursion_depth=recursion_depth + 1,
+        )
 
     @staticmethod
     def _is_dangerous_rm_target(target: str) -> bool:
