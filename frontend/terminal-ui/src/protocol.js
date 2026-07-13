@@ -118,6 +118,17 @@ function normalizeServerPayload(type, payload) {
       workbench_snapshot: normalizeObject(payload.workbench_snapshot),
     };
   }
+  if (type === "run/cancelled") {
+    return {
+      ...payload,
+      target_request_id: String(payload.target_request_id ?? ""),
+      intent: payload.intent === "task" ? "task" : "chat",
+      task_id: String(payload.task_id ?? ""),
+      mission_id: String(payload.mission_id ?? ""),
+      task_status: String(payload.task_status ?? ""),
+      reason: String(payload.reason ?? ""),
+    };
+  }
   if (type === "ui/message") {
     const messageType = String(payload.type ?? "");
     if (!messageType) {

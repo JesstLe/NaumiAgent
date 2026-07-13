@@ -480,6 +480,13 @@ def test_protocol_contract_ui_message_fields_match_python_messages() -> None:
 
 
 def test_protocol_normalizes_known_client_event_payloads() -> None:
+    run_cancel = normalize_client_record({
+        "id": "cancel-1",
+        "type": "run_cancel",
+        "payload": {"reason": " 用户请求停止 ", "ignored": "value"},
+    })
+    assert run_cancel["payload"] == {"reason": "用户请求停止"}
+
     task_submit = normalize_client_record({
         "id": "task-submit-1",
         "type": ClientEventType.TASK_SUBMIT,
@@ -562,6 +569,12 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
         normalize_client_record({
             "type": ClientEventType.TASK_SUBMIT,
             "payload": {"text": "任务", "parallel_mode": "invalid"},
+        })
+
+    with pytest.raises(ValueError, match="取消原因不能超过 500 个字符"):
+        normalize_client_record({
+            "type": "run_cancel",
+            "payload": {"reason": "x" * 501},
         })
 
 
@@ -1457,6 +1470,123 @@ async def test_bridge_rejects_second_submit_with_correlated_error_and_no_echo() 
 
     engine.release_run.set()
     await bridge._run_task
+
+
+@pytest.mark.asyncio
+async def test_bridge_rejects_run_cancel_without_active_run() -> None:
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "cancel-idle",
+        "type": ClientEventType.RUN_CANCEL,
+        "payload": {"reason": "用户按下 Ctrl+C"},
+    })
+
+    records = _records(writer)
+    assert records[-1]["type"] == "error"
+    assert records[-1]["request_id"] == "cancel-idle"
+    assert records[-1]["payload"]["code"] == "no_active_run"
+    assert engine.shutdown_called is False
+
+
+@pytest.mark.asyncio
+async def test_bridge_cancels_active_run_and_remains_usable() -> None:
+    engine = _SlowFakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "submit-long",
+        "type": ClientEventType.SUBMIT,
+        "payload": {"text": "长任务"},
+    })
+    await asyncio.sleep(0)
+
+    await bridge.handle_client_record({
+        "id": "cancel-long",
+        "type": ClientEventType.RUN_CANCEL,
+        "payload": {"reason": "用户按下 Ctrl+C"},
+    })
+
+    records = _records(writer)
+    accepted = next(
+        record for record in records
+        if record["type"] == "ack" and record.get("request_id") == "cancel-long"
+    )
+    assert accepted["payload"] == {
+        "event": "run_cancel",
+        "status": "accepted",
+        "target_request_id": "submit-long",
+    }
+    cancelled = next(record for record in records if record["type"] == "run/cancelled")
+    assert cancelled["payload"] == {
+        "status": "cancelled",
+        "target_request_id": "submit-long",
+        "intent": "chat",
+        "reason": "用户按下 Ctrl+C",
+    }
+    assert bridge._run_task is not None
+    assert bridge._run_task.done()
+    assert engine.shutdown_called is False
+
+    engine.release_run.set()
+    await bridge.handle_client_record({
+        "id": "submit-after-cancel",
+        "type": ClientEventType.SUBMIT,
+        "payload": {"text": "继续使用"},
+    })
+    assert bridge._run_task is not None
+    await bridge._run_task
+    assert any(
+        record["type"] == "run/completed"
+        and record.get("request_id") == "submit-after-cancel"
+        for record in _records(writer)
+    )
+
+
+@pytest.mark.asyncio
+async def test_bridge_cancel_blocks_active_workbench_task_and_returns_identity() -> None:
+    engine = _SlowTaskSubmitEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "task-submit-cancelled",
+        "type": ClientEventType.TASK_SUBMIT,
+        "payload": {"text": "可取消任务"},
+    })
+    await engine.started.wait()
+
+    await bridge.handle_client_record({
+        "id": "cancel-task",
+        "type": ClientEventType.RUN_CANCEL,
+        "payload": {},
+    })
+
+    assert engine.task_store.updates == [
+        ("1", TaskStatus.IN_PROGRESS),
+        ("1", TaskStatus.BLOCKED),
+    ]
+    cancelled = next(
+        record for record in _records(writer) if record["type"] == "run/cancelled"
+    )
+    assert cancelled["payload"] == {
+        "status": "cancelled",
+        "target_request_id": "task-submit-cancelled",
+        "intent": "task",
+        "task_id": "1",
+        "mission_id": "mission-auto",
+        "task_status": "blocked",
+        "reason": "用户取消了当前运行。",
+    }
+    assert len([
+        record for record in _records(writer) if record["type"] == "workbench/snapshot"
+    ]) == 2
 
 
 @pytest.mark.asyncio
