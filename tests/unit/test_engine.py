@@ -53,6 +53,138 @@ class FakeTool(Tool):
         return "ok"
 
 
+def _usage() -> TokenUsage:
+    return TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2)
+
+
+@pytest.mark.asyncio
+async def test_react_loop_requires_todo_reconciliation_before_final(tmp_path) -> None:
+    config = AppConfig(
+        memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+    )
+    engine = AgentEngine(config)
+    engine.task_store.set_session("todo-reconcile")
+    task = await engine.task_store.create_task("实现后端")
+    await engine.task_store.update_task(task.id, status=TaskStatus.IN_PROGRESS)
+    responses = [
+        ModelResponse(content="过早结束", usage=_usage(), model="test-model"),
+        ModelResponse(
+            content="",
+            tool_calls=[{
+                "id": "update-1",
+                "function": {
+                    "name": "task_update",
+                    "arguments": json.dumps({"task_id": task.id, "status": "completed"}),
+                },
+            }],
+            usage=_usage(),
+            model="test-model",
+        ),
+        ModelResponse(content="状态已对账", usage=_usage(), model="test-model"),
+    ]
+
+    try:
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            side_effect=responses,
+        ):
+            result = await engine._react_loop(engine.tool_registry.get_openai_tools())
+
+        stored = await engine.task_store.get_task(task.id)
+        assert result.response == "状态已对账"
+        assert stored is not None
+        assert stored.status == TaskStatus.COMPLETED
+        assert not any(message.get("content") == "过早结束" for message in engine._messages)
+        assert any(
+            "最终回答前必须对账 Todo" in str(message.get("content", ""))
+            for message in engine._messages
+        )
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_streaming_reconciliation_hides_premature_final_text(tmp_path) -> None:
+    config = AppConfig(
+        memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+    )
+    engine = AgentEngine(config)
+    engine.task_store.set_session("todo-stream-reconcile")
+    task = await engine.task_store.create_task("实现流式对账")
+    await engine.task_store.update_task(task.id, status=TaskStatus.IN_PROGRESS)
+    events: list[tuple[str, dict[str, object]]] = []
+    call_count = 0
+
+    async def stream_response(**_: object):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            yield StreamChunk(token="这是一段绝对不能展示给用户的过早最终回答。")
+            yield StreamChunk(finish_reason="stop")
+            return
+        yield StreamChunk(token="已将未对账任务标记为阻塞。")
+        yield StreamChunk(finish_reason="stop")
+
+    async def on_event(event: str, data: dict[str, object]) -> None:
+        events.append((event, data))
+
+    try:
+        with patch.object(engine._router, "stream", new=stream_response):
+            result = await engine._react_loop_streaming(
+                engine.tool_registry.get_openai_tools(),
+                on_event,
+            )
+
+        token_text = "".join(
+            str(data.get("content", ""))
+            for event, data in events
+            if event == "token"
+        )
+        stored = await engine.task_store.get_task(task.id)
+        assert result.response == "已将未对账任务标记为阻塞。"
+        assert "过早最终回答" not in token_text
+        assert token_text == "已将未对账任务标记为阻塞。"
+        assert stored is not None
+        assert stored.status == TaskStatus.BLOCKED
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_todo_reconciliation_blocks_active_task_when_turns_exhausted(tmp_path) -> None:
+    config = AppConfig(
+        memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        safety=SafetyConfig(max_turns=1),
+    )
+    engine = AgentEngine(config)
+    engine.task_store.set_session("todo-max-turns")
+    task = await engine.task_store.create_task("完成收尾")
+    await engine.task_store.update_task(task.id, status=TaskStatus.IN_PROGRESS)
+
+    try:
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            return_value=ModelResponse(
+                content="未对账的最终回答",
+                usage=_usage(),
+                model="test-model",
+            ),
+        ):
+            result = await engine._react_loop(engine.tool_registry.get_openai_tools())
+
+        stored = await engine.task_store.get_task(task.id)
+        assert result.status == "max_turns"
+        assert stored is not None
+        assert stored.status == TaskStatus.BLOCKED
+        assert stored.active_form == "Agent 结束前未完成状态对账"
+    finally:
+        await engine.shutdown()
+
+
 @pytest.fixture
 def engine(request: pytest.FixtureRequest) -> AgentEngine:
     config = AppConfig()
