@@ -23,7 +23,10 @@ test("bridgeEnvironment defaults LiteLLM logging to error", () => {
     PATH: "/bin",
     LITELLM_LOG: "ERROR",
     LITELLM_LOG_LEVEL: "ERROR",
+    PYTHONUTF8: "1",
+    PYTHONIOENCODING: "utf-8",
   });
 
   assert.equal(bridgeEnvironment({ LITELLM_LOG: "DEBUG" }).LITELLM_LOG, "DEBUG");
+  assert.equal(bridgeEnvironment({ PYTHONUTF8: "0" }).PYTHONUTF8, "0");
 });

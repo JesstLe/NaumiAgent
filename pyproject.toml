@@ -31,6 +31,7 @@ dependencies = [
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
     "python-dotenv>=1.0",
+    "keyring>=25.6",
     "opentelemetry-api>=1.30",
     "opentelemetry-sdk>=1.30",
 
@@ -57,6 +58,7 @@ e2b = [
 
 [project.scripts]
 naumi = "naumi_agent.main:cli"
+naumiagent = "naumi_agent.main:naumiagent_cli"
 naumi-deploy = "naumi_agent.deploy:main"
 naumi-ui-bridge = "naumi_agent.ui.bridge:main"
 

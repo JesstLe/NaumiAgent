@@ -58,8 +58,8 @@ def validate_deployment(
     if require_api_key and not config.models.api_key:
         report.ok = False
         report.errors.append(
-            "缺少模型 API Key。请在 .env 中设置 NAUMI_MODELS__API_KEY，"
-            "或在 config.yaml 的 models.api_key 中配置。"
+            "缺少模型 API Key。请设置 NAUMI_MODELS__API_KEY，"
+            "或通过首次引导保存到系统凭据库。"
         )
 
     for label, required_path in _required_paths(config):

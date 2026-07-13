@@ -10,6 +10,8 @@ import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from naumi_agent.config.credentials import CredentialStoreError, load_model_api_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +27,7 @@ class ModelMeta(BaseSettings):
 class ModelConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NAUMI_MODEL__")
 
+    provider: str | None = None
     default_model: str = "claude-sonnet-4-6"
     fast_model: str = "claude-haiku-4-5"
     reasoning_model: str = "claude-opus-4-7"
@@ -42,6 +45,7 @@ class MemoryConfig(BaseSettings):
     vector_db_path: str = "data/chroma"
     compaction_threshold: float = 0.75
     compaction_reserved_tokens: int = 20_000
+    long_term_enabled: bool = True
 
 
 class SafetyConfig(BaseSettings):
@@ -181,6 +185,11 @@ class AppConfig(BaseSettings):
         with p.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         config = cls(**data)
+        if not config.models.api_key:
+            try:
+                config.models.api_key = load_model_api_key()
+            except CredentialStoreError as exc:
+                logger.warning("System credential store unavailable: %s", exc)
         config._resolve_runtime_paths(p.parent)
         return config
 

@@ -51,6 +51,28 @@ class TestAppConfig:
         assert config.memory.session_db_path == str(tmp_path / "data" / "sessions.db")
         assert config.memory.vector_db_path == str(tmp_path / "data" / "chroma")
 
+    def test_from_yaml_loads_model_key_from_system_credential_store(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        yaml_path = tmp_path / "config.yaml"
+        yaml_path.write_text(
+            "models:\n  default_model: test-model\n",
+            encoding="utf-8",
+        )
+        monkeypatch.delenv("NAUMI_MODELS__API_KEY", raising=False)
+        monkeypatch.setitem(AppConfig.model_config, "env_file", None)
+        monkeypatch.setattr(
+            "naumi_agent.config.settings.load_model_api_key",
+            lambda: "credential-key",
+            raising=False,
+        )
+
+        config = AppConfig.from_yaml(yaml_path)
+
+        assert config.models.api_key == "credential-key"
+
     def test_from_missing_yaml(self) -> None:
         config = AppConfig.from_yaml("/nonexistent/config.yaml")
         assert config.models.default_model == "claude-sonnet-4-6"
@@ -100,6 +122,8 @@ class TestAppConfig:
         example_path = Path(__file__).resolve().parents[2] / "config.yaml.example"
         config = AppConfig.from_yaml(example_path)
         assert config.api.host == "127.0.0.1"
+        assert config.models.provider == "kimi"
+        assert config.models.temperature == 1.0
 
     def test_api_port_from_example_yaml(self) -> None:
         example_path = Path(__file__).resolve().parents[2] / "config.yaml.example"

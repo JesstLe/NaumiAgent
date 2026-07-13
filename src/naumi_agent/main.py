@@ -24,6 +24,7 @@ from rich.syntax import Syntax
 from rich.text import Text
 
 from naumi_agent.cli.slash_router import execute_slash_command
+from naumi_agent.config.configurator import ConfigurationError, configure_project
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.log_setup import suppress_startup_import_warnings
 from naumi_agent.ui.code_excerpt import (
@@ -40,6 +41,23 @@ suppress_startup_import_warnings()
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _CLI_STREAM_FRAME_INTERVAL_SECONDS = 0.2
+
+
+def _configure_windows_utf8(
+    *,
+    platform: str | None = None,
+    streams: tuple[Any, ...] | None = None,
+) -> None:
+    """Keep Rich output Unicode-safe in legacy Windows console code pages."""
+    if (sys.platform if platform is None else platform) != "win32":
+        return
+    for stream in streams or (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
+_configure_windows_utf8()
 
 
 def _get_git_info() -> dict[str, str | bool]:
@@ -84,7 +102,12 @@ def _get_git_info() -> dict[str, str | bool]:
 app = typer.Typer(
     name="naumi",
     help="NaumiAgent — 通用智能 Agent",
-    no_args_is_help=True,
+    no_args_is_help=False,
+)
+naumiagent_app = typer.Typer(
+    name="naumiagent",
+    help="Launch the new NaumiAgent terminal UI",
+    add_completion=False,
 )
 workbench_app = typer.Typer(
     name="workbench",
@@ -92,6 +115,57 @@ workbench_app = typer.Typer(
 )
 app.add_typer(workbench_app, name="workbench")
 console = Console()
+
+
+def _ensure_onboarding_ready(config: str) -> None:
+    """Migrate legacy credentials and complete first-run configuration."""
+    from naumi_agent.cli.onboarding import (
+        migrate_legacy_model_api_key,
+        needs_onboarding,
+        run_onboarding,
+    )
+    from naumi_agent.config.credentials import CredentialStoreError
+
+    config_path = Path(_resolve_config_path(config))
+    try:
+        migrate_legacy_model_api_key(config_path)
+    except CredentialStoreError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if needs_onboarding(config_path) and not run_onboarding(
+        config_path,
+        project_root=_PROJECT_ROOT,
+    ):
+        console.print("[yellow]配置未完成，退出。[/yellow]")
+        raise typer.Exit(1)
+
+
+@app.callback(invoke_without_command=True)
+def _default_command(
+    ctx: typer.Context,
+    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    classic: bool = typer.Option(False, "--classic", help="启动旧版命令行对话"),
+    legacy: bool = typer.Option(False, "--legacy", help="启动旧版 Textual TUI"),
+    version: bool = typer.Option(False, "--version", "-v", help="显示版本"),
+) -> None:
+    """默认无子命令时启动新一代终端 UI."""
+    if version:
+        import importlib.metadata
+
+        try:
+            console.print(f"naumi {importlib.metadata.version('naumi-agent')}")
+        except importlib.metadata.PackageNotFoundError:
+            console.print("naumi (development)")
+        raise typer.Exit()
+    if ctx.invoked_subcommand is None:
+        _ensure_onboarding_ready(config)
+        if classic:
+            asyncio.run(_chat(config))
+            return
+        if legacy:
+            _launch_tui(config)
+            return
+        _exit_after_terminal_ui(config)
 
 
 def _build_ui_style_from_config(config: Any):
@@ -265,16 +339,138 @@ def _capture_tui_launch_noise() -> Any:
             logging.getLogger(name).setLevel(level)
 
 
+@app.command("configure")
+def configure_command(
+    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    provider: str | None = typer.Option(
+        None,
+        "--provider",
+        help="模型提供商：kimi、openai、anthropic 或 custom",
+    ),
+    default_model: str | None = typer.Option(None, "--model", help="默认模型覆盖"),
+    fast_model: str | None = typer.Option(None, "--fast-model", help="快速模型覆盖"),
+    reasoning_model: str | None = typer.Option(
+        None,
+        "--reasoning-model",
+        help="推理模型覆盖",
+    ),
+    api_base: str | None = typer.Option(None, "--api-base", help="API Base 覆盖"),
+    workspace: Path | None = typer.Option(None, "--workspace", help="工作区目录"),
+    permission_mode: str | None = typer.Option(
+        None,
+        "--permission-mode",
+        help="权限模式：strict、moderate、relaxed 或 bypass",
+    ),
+    api_key_stdin: bool = typer.Option(
+        False,
+        "--api-key-stdin",
+        help="从标准输入读取模型密钥，避免进入命令历史",
+    ),
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        help="禁用所有提示，用于自动化",
+    ),
+) -> None:
+    """安全更新模型、凭据、工作区和权限配置."""
+    selected_provider = provider
+    if not selected_provider:
+        if non_interactive:
+            console.print("[red]非交互模式必须指定 --provider。[/red]")
+            raise typer.Exit(2)
+        selected_provider = typer.prompt(
+            "模型提供商 (kimi/openai/anthropic/custom)",
+            default="kimi",
+        )
+
+    if selected_provider.strip().lower() == "custom" and not non_interactive:
+        default_model = default_model or typer.prompt("默认模型")
+        api_base = api_base or typer.prompt("API Base")
+        fast_model = fast_model or typer.prompt("快速模型", default=default_model)
+        reasoning_model = reasoning_model or typer.prompt(
+            "推理模型",
+            default=default_model,
+        )
+
+    api_key: str | None = None
+    if api_key_stdin:
+        api_key = sys.stdin.readline().rstrip("\r\n")
+        if not api_key:
+            console.print("[red]标准输入中没有模型 API Key。[/red]")
+            raise typer.Exit(2)
+    elif not non_interactive and typer.confirm("是否更新模型 API Key？", default=True):
+        api_key = typer.prompt("模型 API Key", hide_input=True)
+
+    try:
+        result = configure_project(
+            config,
+            provider=selected_provider,
+            api_key=api_key,
+            default_model=default_model,
+            fast_model=fast_model,
+            reasoning_model=reasoning_model,
+            api_base=api_base,
+            workspace=workspace,
+            permission_mode=permission_mode,
+        )
+    except ConfigurationError as exc:
+        console.print(f"[red]配置失败：{exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    credential_status = "已更新" if result.credential_updated else "保持现有来源"
+    console.print("[green]配置已安全更新。[/green]")
+    console.print(f"  Provider: {result.provider}")
+    console.print(f"  默认模型: {result.default_model}")
+    console.print(f"  API Base: {result.api_base}")
+    console.print(f"  系统凭据: {credential_status}")
+    console.print(f"  配置文件: {result.config_path}")
+
+
+@app.command("doctor")
+def doctor_command(
+    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    live: bool = typer.Option(
+        False,
+        "--live",
+        help="执行一次最小真实模型请求，会产生少量 token 用量",
+    ),
+) -> None:
+    """诊断本机环境，并可显式验证模型连接."""
+    resolved = _resolve_config_path(config)
+    app_config = AppConfig.from_yaml(resolved)
+    report = asyncio.run(
+        run_doctor(
+            app_config,
+            workspace_root=app_config.resolve_workspace_root(),
+            live=live,
+        )
+    )
+    console.print(Markdown(render_doctor_report(report)))
+    if report.status == "error":
+        raise typer.Exit(1)
+
+
 @app.command()
 def chat(
     config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
-    tui: bool = typer.Option(False, "--tui", "-t", help="启动 TUI 界面"),
+    classic: bool = typer.Option(False, "--classic", help="启动旧版命令行对话"),
+    tui: bool = typer.Option(
+        False,
+        "--tui",
+        "-t",
+        help="兼容入口：启动旧版 Textual TUI",
+    ),
 ) -> None:
-    """启动交互式对话."""
+    """启动以对话为中心的新一代终端 UI."""
+    _ensure_onboarding_ready(config)
+    if classic and tui:
+        raise typer.BadParameter("--classic 与 --tui 不能同时使用。")
     if tui:
         _launch_tui(config)
-    else:
+    elif classic:
         asyncio.run(_chat(config))
+    else:
+        _exit_after_terminal_ui(config)
 
 
 @app.command("ui")
@@ -287,18 +483,46 @@ def terminal_ui(
     ),
 ) -> None:
     """启动新一代终端 UI（legacy CLI/TUI 仍可通过 chat 使用）."""
+    _ensure_onboarding_ready(config)
     if legacy:
         _launch_tui(config)
         return
+    _exit_after_terminal_ui(config)
+
+
+def _exit_after_terminal_ui(config: str) -> None:
+    """Launch the Node terminal UI and translate launch failures for Typer."""
     try:
         raise typer.Exit(_launch_terminal_ui(config))
     except TerminalUiLaunchError as exc:
         console.print(f"[red]{exc}[/red]")
         console.print(
             "[dim]可暂时使用 legacy fallback："
-            "naumi ui --legacy 或 naumi chat --tui[/dim]"
+            "naumi chat --classic 或 naumi ui --legacy[/dim]"
         )
         raise typer.Exit(1) from exc
+
+
+@naumiagent_app.callback(invoke_without_command=True)
+def naumiagent_entry(
+    ctx: typer.Context,
+    tui: bool = typer.Option(
+        False,
+        "--tui",
+        help="Launch the new Node terminal UI",
+    ),
+    config: str = typer.Option(
+        "config.yaml",
+        "--config",
+        "-c",
+        help="Configuration file path",
+    ),
+) -> None:
+    """Launch the new terminal UI through the short compatibility command."""
+    if not tui:
+        console.print(ctx.get_help())
+        return
+    terminal_ui(config=config, legacy=False)
 
 
 def _launch_terminal_ui(config_path: str, *, cwd: Path | None = None) -> int:
@@ -1264,6 +1488,7 @@ async def _chat(config_path: str) -> None:
         await cli.run()
     finally:
         debug_trace.close()
+        await engine.shutdown()
 
 
 @app.command()
@@ -1291,6 +1516,8 @@ async def _run_task(task: str, config_path: str) -> None:
     except Exception as e:
         console.print(f"[red]错误: {e}[/red]")
         return
+    finally:
+        await engine.shutdown()
 
     console.print(Markdown(excerpt_markdown_code_blocks(result.response)))
     console.print()
@@ -3012,9 +3239,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
                         py_file.name != "__init__.py"
                         and not _is_protected_file(py_file)
                     ):
-                        modifiable_files.append(
-                            str(py_file.relative_to(source_dir))
-                        )
+                        modifiable_files.append(py_file.relative_to(source_dir).as_posix())
 
         file_list = "\n".join(f"- {f}" for f in modifiable_files)
         prompt += f"\n可修改的文件列表:\n{file_list}"
@@ -3142,7 +3367,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         normalized = re.sub(r"(?<=\.py)#L\d+(?:-L?\d+)?$", "", normalized, flags=re.IGNORECASE)
         try:
             resolved = Path(normalized).expanduser().resolve()
-            return str(resolved.relative_to(source_dir.resolve()))
+            return resolved.relative_to(source_dir.resolve()).as_posix()
         except (OSError, ValueError):
             pass
         for prefix in ("src/naumi_agent/", "naumi_agent/"):
@@ -4502,14 +4727,18 @@ async def _run_btemplate_compare(engine: Any, arg: str) -> None:
 
 def _check_api_key(config: AppConfig) -> None:
     if not config.models.api_key:
-        console.print("[yellow]警告: 未设置 API Key。请通过环境变量设置:[/yellow]")
+        console.print("[yellow]警告: 未设置 API Key。[/yellow]")
         console.print("  [dim]export NAUMI_MODELS__API_KEY=your-key-here[/dim]")
-        console.print("  [dim]或在 config.yaml 中配置 api_key[/dim]")
+        console.print("  [dim]也可重新运行首次引导，将密钥保存到系统凭据库。[/dim]")
         console.print()
 
 
 def cli() -> None:
     app()
+
+
+def naumiagent_cli() -> None:
+    naumiagent_app(prog_name="naumiagent")
 
 
 @workbench_app.command("export-audit")

@@ -181,7 +181,7 @@ def _is_protected_file(file_path: Path) -> bool:
     except ValueError:
         return True
 
-    module_name = "naumi_agent." + str(relative.with_suffix("")).replace("/", ".")
+    module_name = "naumi_agent." + relative.with_suffix("").as_posix().replace("/", ".")
 
     for prefix in _PROTECTED_PREFIXES:
         if module_name == prefix or module_name.startswith(prefix.rstrip(".") + "."):
@@ -197,7 +197,7 @@ def _is_modifiable_file(file_path: Path) -> bool:
     except ValueError:
         return False
 
-    module_name = "naumi_agent." + str(relative.with_suffix("")).replace("/", ".")
+    module_name = "naumi_agent." + relative.with_suffix("").as_posix().replace("/", ".")
 
     for prefix in _MODIFIABLE_PREFIXES:
         if module_name.startswith(prefix):
@@ -373,7 +373,7 @@ def _run_import_test(file_path: Path, *, source_dir: Path | None = None) -> tupl
     except ValueError:
         return False, f"无法解析模块路径: {file_path}"
 
-    module_name = "naumi_agent." + str(relative.with_suffix("")).replace("/", ".")
+    module_name = "naumi_agent." + relative.with_suffix("").as_posix().replace("/", ".")
 
     try:
         env = os.environ.copy()

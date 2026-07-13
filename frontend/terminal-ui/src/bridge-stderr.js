@@ -20,5 +20,7 @@ export function bridgeEnvironment(baseEnv = process.env) {
     ...baseEnv,
     LITELLM_LOG: baseEnv.LITELLM_LOG ?? "ERROR",
     LITELLM_LOG_LEVEL: baseEnv.LITELLM_LOG_LEVEL ?? "ERROR",
+    PYTHONUTF8: baseEnv.PYTHONUTF8 ?? "1",
+    PYTHONIOENCODING: baseEnv.PYTHONIOENCODING ?? "utf-8",
   };
 }

@@ -7,13 +7,19 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 
+from naumi_agent.config.configurator import validate_provider_configuration
 from naumi_agent.config.settings import AppConfig
+
+if TYPE_CHECKING:
+    from naumi_agent.model.router import ModelResponse
 
 DoctorStatus = Literal["pass", "warn", "error"]
 
@@ -44,14 +50,18 @@ async def run_doctor(
     *,
     workspace_root: str | Path,
     mcp_manager: Any | None = None,
+    live: bool = False,
+    live_probe: Callable[[AppConfig], Awaitable[ModelResponse]] | None = None,
 ) -> DoctorReport:
-    """Run deterministic local diagnostics without mutating user data."""
+    """Run local diagnostics and an optional explicit model connectivity probe."""
     root = Path(workspace_root).expanduser()
+    api_key_check = _check_api_key(config)
+    provider_check = _check_model_provider(config)
     checks = [
         _check_python(),
         _check_config(config),
-        _check_api_key(config),
-        _check_model_provider(config),
+        api_key_check,
+        provider_check,
         _check_workspace(root),
         _check_git(root),
         _check_command("ripgrep", "rg", ["rg", "--version"]),
@@ -61,6 +71,25 @@ async def run_doctor(
         _check_debug_log(config),
         _check_terminal(),
     ]
+    if live:
+        failed_prerequisites = [
+            check.name
+            for check in (api_key_check, provider_check)
+            if check.status == "error"
+        ]
+        if failed_prerequisites:
+            checks.append(
+                DoctorCheck(
+                    "模型实时连接",
+                    "error",
+                    "已跳过：本地前置检查未通过（"
+                    + "、".join(failed_prerequisites)
+                    + "）",
+                    "先运行 `naumi configure` 修复配置和凭据。",
+                )
+            )
+        else:
+            checks.append(await _check_live_model(config, probe=live_probe))
     return DoctorReport(checks=tuple(checks))
 
 
@@ -105,15 +134,15 @@ def _check_config(config: AppConfig) -> DoctorCheck:
 
 def _check_api_key(config: AppConfig) -> DoctorCheck:
     if config.models.api_key:
-        return DoctorCheck("API key", "pass", "已配置 models.api_key")
+        return DoctorCheck("API key", "pass", "已从安全凭据来源加载")
     env_keys = [key for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY") if os.getenv(key)]
     if env_keys:
         return DoctorCheck("API key", "pass", f"已通过环境变量配置: {', '.join(env_keys)}")
     return DoctorCheck(
         "API key",
         "error",
-        "未检测到 models.api_key、OPENAI_API_KEY 或 ANTHROPIC_API_KEY",
-        "在 config.yaml 中配置 models.api_key，或导出对应模型服务的环境变量。",
+        "未检测到模型 API Key 或 provider 环境变量",
+        "重新运行首次引导写入系统凭据库，或导出对应模型服务的环境变量。",
     )
 
 
@@ -126,7 +155,101 @@ def _check_model_provider(config: AppConfig) -> DoctorCheck:
             "默认模型为空",
             "请配置 models.default_model。",
         )
-    return DoctorCheck("model provider", "pass", f"默认模型: {model}")
+    provider, error = validate_provider_configuration(
+        provider=config.models.provider,
+        default_model=config.models.default_model,
+        fast_model=config.models.fast_model,
+        reasoning_model=config.models.reasoning_model,
+        api_base=config.models.api_base,
+        temperature=config.models.temperature,
+    )
+    if error:
+        suggestion = "运行 `naumi configure` 统一 provider、模型和 API Base。"
+        if "temperature" in error:
+            suggestion = (
+                "运行 `naumi configure`，并清理覆盖它的 "
+                "NAUMI_MODELS__TEMPERATURE 或 .env 设置。"
+            )
+        return DoctorCheck(
+            "model provider",
+            "error",
+            error,
+            suggestion,
+        )
+    return DoctorCheck(
+        "model provider",
+        "pass",
+        f"provider: {provider}；默认模型: {model}",
+    )
+
+
+async def _check_live_model(
+    config: AppConfig,
+    *,
+    probe: Callable[[AppConfig], Awaitable[ModelResponse]] | None = None,
+) -> DoctorCheck:
+    started = time.monotonic()
+    try:
+        response = await (probe or _default_live_probe)(config)
+    except Exception as exc:
+        return _classify_live_model_error(exc)
+    duration_ms = max(0, round((time.monotonic() - started) * 1000))
+    model = response.model or config.models.fast_model
+    return DoctorCheck(
+        "模型实时连接",
+        "pass",
+        f"连接成功：{model}，耗时 {duration_ms} ms",
+    )
+
+
+async def _default_live_probe(config: AppConfig) -> ModelResponse:
+    from naumi_agent.model.router import ModelRouter, ModelTier
+
+    probe_config = config.models.model_copy(update={"max_tokens": 8})
+    router = ModelRouter(probe_config)
+    return await router.call(
+        messages=[{"role": "user", "content": "Reply with OK."}],
+        tier=ModelTier.FAST,
+        max_tokens=8,
+    )
+
+
+def _classify_live_model_error(exc: Exception) -> DoctorCheck:
+    evidence = f"{type(exc).__name__} {exc}".lower()
+    if "401" in evidence or "authentication" in evidence or "unauthorized" in evidence:
+        return DoctorCheck(
+            "模型实时连接",
+            "error",
+            "认证失败（401）",
+            "运行 `naumi configure` 更新系统凭据，然后重试。",
+        )
+    if "404" in evidence or "notfound" in evidence or "not found" in evidence:
+        return DoctorCheck(
+            "模型实时连接",
+            "error",
+            "模型或 API 地址不存在（404）",
+            "检查 provider、模型和 API Base；代理服务请使用 custom provider。",
+        )
+    if "429" in evidence or "ratelimit" in evidence or "rate limit" in evidence:
+        return DoctorCheck(
+            "模型实时连接",
+            "warn",
+            "服务限流（429）",
+            "凭据与地址通常有效，请稍后重试或检查服务额度。",
+        )
+    if "timeout" in evidence or "timed out" in evidence:
+        return DoctorCheck(
+            "模型实时连接",
+            "error",
+            "连接超时",
+            "检查网络、代理和 API Base 可达性。",
+        )
+    return DoctorCheck(
+        "模型实时连接",
+        "error",
+        f"连接失败（{type(exc).__name__}）",
+        "查看 debug log，并检查 provider、网络和服务状态。",
+    )
 
 
 def _check_workspace(root: Path) -> DoctorCheck:
