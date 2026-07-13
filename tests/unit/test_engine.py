@@ -876,6 +876,318 @@ class TestSessionLoading:
             await engine.shutdown()
 
     @pytest.mark.asyncio
+    async def test_delete_transition_blocks_session_grant_while_persistence_is_pending(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        delete_task: asyncio.Task[bool] | None = None
+        marker = tmp_path / "delete-transition-tool-ran"
+        try:
+            active = await engine.get_or_create_session()
+            engine._permission_grant_store.create(active.id, "shell", "active-grant")
+            original_delete = engine.session_store.delete
+
+            async def delayed_delete(session_id: str) -> bool:
+                entered.set()
+                await release.wait()
+                return await original_delete(session_id)
+
+            engine.session_store.delete = delayed_delete  # type: ignore[method-assign]
+            confirmations: list[dict[str, object]] = []
+
+            async def confirm(payload: dict[str, object]) -> str:
+                confirmations.append(payload)
+                return "allow_once"
+
+            engine.set_permission_confirmer(confirm)
+            delete_task = asyncio.create_task(engine.delete_session(active.id))
+            await entered.wait()
+
+            assert engine._permission_grant_store.allows(active.id, "shell") is True
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="delete-transition-tool",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "error"
+            assert "会话正在切换" in result.content
+            assert confirmations == []
+            assert not marker.exists()
+
+            release.set()
+            assert await delete_task is True
+        finally:
+            release.set()
+            if delete_task is not None and not delete_task.done():
+                await delete_task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_load_transition_blocks_session_grant_while_persistence_is_pending(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        load_task: asyncio.Task[bool] | None = None
+        marker = tmp_path / "load-transition-tool-ran"
+        try:
+            active = await engine.get_or_create_session()
+            engine._permission_grant_store.create(active.id, "shell", "active-grant")
+            replacement = await engine.session_store.create_session(title="replacement")
+            original_load = engine.session_store.load
+
+            async def delayed_load(session_id: str) -> Session | None:
+                entered.set()
+                await release.wait()
+                return await original_load(session_id)
+
+            engine.session_store.load = delayed_load  # type: ignore[method-assign]
+            confirmations: list[dict[str, object]] = []
+
+            async def confirm(payload: dict[str, object]) -> str:
+                confirmations.append(payload)
+                return "allow_once"
+
+            engine.set_permission_confirmer(confirm)
+            load_task = asyncio.create_task(engine.load_session(replacement.id))
+            await entered.wait()
+
+            assert engine._permission_grant_store.allows(active.id, "shell") is True
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="load-transition-tool",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "error"
+            assert "会话正在切换" in result.content
+            assert confirmations == []
+            assert not marker.exists()
+
+            release.set()
+            assert await load_task is True
+            assert engine._session is not None
+            assert engine._session.id == replacement.id
+            assert engine._permission_grant_store.list_session(active.id) == ()
+        finally:
+            release.set()
+            if load_task is not None and not load_task.done():
+                await load_task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_failed_delete_clears_transition_and_preserves_active_grant(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        delete_task: asyncio.Task[bool] | None = None
+        marker = tmp_path / "failed-delete-tool-ran"
+        try:
+            active = await engine.get_or_create_session()
+            grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "active-grant",
+            )
+
+            async def failed_delete(_: str) -> bool:
+                entered.set()
+                await release.wait()
+                return False
+
+            engine.session_store.delete = failed_delete  # type: ignore[method-assign]
+            confirmations: list[dict[str, object]] = []
+
+            async def confirm(payload: dict[str, object]) -> str:
+                confirmations.append(payload)
+                return "allow_once"
+
+            engine.set_permission_confirmer(confirm)
+            delete_task = asyncio.create_task(engine.delete_session(active.id))
+            await entered.wait()
+
+            release.set()
+            assert await delete_task is False
+            assert engine._session is active
+            assert engine._permission_grant_store.list_session(active.id) == (grant,)
+            assert engine._session_transition_epochs == {}
+
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="failed-delete-tool",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "success"
+            assert marker.exists()
+            assert confirmations == []
+        finally:
+            release.set()
+            if delete_task is not None and not delete_task.done():
+                await delete_task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_failed_load_clears_transition_and_preserves_active_grant(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        load_task: asyncio.Task[bool] | None = None
+        marker = tmp_path / "failed-load-tool-ran"
+        try:
+            active = await engine.get_or_create_session()
+            grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "active-grant",
+            )
+
+            async def failed_load(_: str) -> Session | None:
+                entered.set()
+                await release.wait()
+                return None
+
+            engine.session_store.load = failed_load  # type: ignore[method-assign]
+            confirmations: list[dict[str, object]] = []
+
+            async def confirm(payload: dict[str, object]) -> str:
+                confirmations.append(payload)
+                return "allow_once"
+
+            engine.set_permission_confirmer(confirm)
+            load_task = asyncio.create_task(engine.load_session("missing-session"))
+            await entered.wait()
+
+            release.set()
+            assert await load_task is False
+            assert engine._session is active
+            assert engine._permission_grant_store.list_session(active.id) == (grant,)
+            assert engine._session_transition_epochs == {}
+
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="failed-load-tool",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "success"
+            assert marker.exists()
+            assert confirmations == []
+        finally:
+            release.set()
+            if load_task is not None and not load_task.done():
+                await load_task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_delete_clears_transition_and_preserves_active_grant(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        delete_task: asyncio.Task[bool] | None = None
+        try:
+            active = await engine.get_or_create_session()
+            grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "active-grant",
+            )
+
+            async def delayed_delete(_: str) -> bool:
+                entered.set()
+                await release.wait()
+                return True
+
+            engine.session_store.delete = delayed_delete  # type: ignore[method-assign]
+            delete_task = asyncio.create_task(engine.delete_session(active.id))
+            await entered.wait()
+            delete_task.cancel()
+
+            with pytest.raises(asyncio.CancelledError):
+                await delete_task
+
+            assert engine._session is active
+            assert engine._permission_grant_store.list_session(active.id) == (grant,)
+            assert engine._session_transition_epochs == {}
+        finally:
+            release.set()
+            if delete_task is not None and not delete_task.done():
+                await delete_task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_same_session_load_does_not_begin_transition_or_revoke_grant(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        try:
+            active = await engine.get_or_create_session()
+            grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "active-grant",
+            )
+            original_load = engine.session_store.load
+
+            async def same_session_load(session_id: str) -> Session | None:
+                assert engine._session_transition_epochs == {}
+                return await original_load(session_id)
+
+            engine.session_store.load = same_session_load  # type: ignore[method-assign]
+
+            assert await engine.load_session(active.id) is True
+            assert engine._session is not None
+            assert engine._session.id == active.id
+            assert engine._permission_grant_store.list_session(active.id) == (grant,)
+            assert engine._session_transition_epochs == {}
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
     async def test_shutdown_clears_all_permission_grants(self, tmp_path) -> None:
         config = AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
