@@ -65,6 +65,7 @@ models:
   default_model: "openai/kimi-for-coding"
   fast_model: "openai/kimi-for-coding"
   reasoning_model: "openai/kimi-for-coding"
+  temperature: 1.0
   api_base: "https://api.kimi.com/coding/v1"
 ```
 

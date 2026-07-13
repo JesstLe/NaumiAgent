@@ -30,6 +30,7 @@ def test_setup_script_creates_config_only_when_missing() -> None:
     assert '    - "."' in script
     assert 'host: "127.0.0.1"' in script
     assert "enabled: false" in script
+    assert "temperature: 1.0" in script
 
 
 def test_setup_script_reads_user_key_without_printing_or_accepting_it() -> None:

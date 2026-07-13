@@ -100,7 +100,7 @@ models:
   fast_model: "openai/kimi-for-coding"
   reasoning_model: "openai/kimi-for-coding"
   max_tokens: 4096
-  temperature: 0.7
+  temperature: 1.0
   api_base: "https://api.kimi.com/coding/v1"
   model_info:
     openai/kimi-for-coding:

@@ -1,6 +1,9 @@
 """权限系统测试."""
 
+import os
 from types import SimpleNamespace
+
+import pytest
 
 from naumi_agent.safety.permissions import (
     PermissionChecker,
@@ -67,6 +70,19 @@ class TestPermissionChecker:
         )
         assert checker.check("file_read", {"path": "/workspace/file.txt"}).allowed
         assert not checker.check("file_read", {"path": "/etc/passwd"}).allowed
+
+    def test_path_sandbox_rejects_different_windows_drive_without_crashing(self) -> None:
+        if os.name != "nt":
+            pytest.skip("Windows drive semantics")
+        checker = PermissionChecker(
+            PermissionMode.MODERATE,
+            allowed_dirs=[r"Z:\allowed"],
+        )
+
+        result = checker.check("file_read", {"path": r"C:\outside\file.txt"})
+
+        assert not result.allowed
+        assert result.code == PermissionReasonCode.PATH_OUTSIDE_SANDBOX
 
     def test_tool_metadata_path_args_are_sandboxed(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE, allowed_dirs=["/workspace"])

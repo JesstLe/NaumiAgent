@@ -4,22 +4,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.deploy import validate_deployment
 
 
 def _write_config(path: Path, root: Path, *, include_key: bool = False) -> None:
-    api_key = '  api_key: "test-key"\n' if include_key else ""
-    path.write_text(
-        "models:\n"
-        '  default_model: "openai/kimi-for-coding"\n'
-        f"{api_key}"
-        "memory:\n"
-        f'  session_db_path: "{root / "data" / "sessions.db"}"\n'
-        f'  vector_db_path: "{root / "data" / "chroma"}"\n'
-        f'workspace_root: "{root / "workspace"}"\n',
-        encoding="utf-8",
-    )
+    models = {"default_model": "openai/kimi-for-coding"}
+    if include_key:
+        models["api_key"] = "test-key"
+    data = {
+        "models": models,
+        "memory": {
+            "session_db_path": str(root / "data" / "sessions.db"),
+            "vector_db_path": str(root / "data" / "chroma"),
+        },
+        "workspace_root": str(root / "workspace"),
+    }
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
 
 def test_validate_deployment_creates_required_dirs(tmp_path) -> None:
@@ -36,12 +39,10 @@ def test_validate_deployment_creates_required_dirs(tmp_path) -> None:
 def test_validate_deployment_requires_api_key(tmp_path) -> None:
     config_path = tmp_path / "config.yaml"
     _write_config(config_path, tmp_path)
-    content = config_path.read_text(encoding="utf-8")
+    content = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    content["models"]["api_key"] = ""
     config_path.write_text(
-        content.replace(
-            '  default_model: "openai/kimi-for-coding"\n',
-            '  default_model: "openai/kimi-for-coding"\n  api_key: ""\n',
-        ),
+        yaml.safe_dump(content, sort_keys=False),
         encoding="utf-8",
     )
 

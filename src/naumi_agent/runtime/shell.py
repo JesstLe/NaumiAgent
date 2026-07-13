@@ -112,6 +112,42 @@ async def create_shell_process(
     return await asyncio.create_subprocess_exec(*argv, **kwargs)
 
 
+def run_shell_command(
+    command: str,
+    *,
+    cwd: str | Path | None = None,
+    timeout: float | None = None,
+    env: Mapping[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a Bash command synchronously and clean up its process tree on timeout."""
+    argv = build_shell_argv(command, env=env)
+    kwargs: dict[str, object] = {
+        "cwd": str(cwd) if cwd is not None else None,
+        "env": dict(env) if env is not None else None,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+    }
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+
+    process = subprocess.Popen(argv, **kwargs)
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        terminate_pid_tree(process.pid, force=True)
+        stdout, stderr = process.communicate()
+        raise subprocess.TimeoutExpired(
+            command,
+            timeout,
+            output=stdout,
+            stderr=stderr,
+        ) from exc
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+
+
 async def terminate_process_tree(
     proc: asyncio.subprocess.Process,
     *,

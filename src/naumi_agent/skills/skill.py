@@ -30,10 +30,11 @@ from __future__ import annotations
 
 import logging
 import re
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from naumi_agent.runtime.shell import run_shell_command
 
 logger = logging.getLogger(__name__)
 
@@ -120,10 +121,10 @@ class Skill:
         text = self.instructions
 
         # 1. 替换 ${SKILL_DIR}
-        text = _SKILL_DIR_RE.sub(self.skill_dir, text)
+        text = _SKILL_DIR_RE.sub(lambda _: self.skill_dir, text)
 
         # 2. 替换 $ARGUMENTS
-        text = _ARGUMENTS_RE.sub(arguments, text)
+        text = _ARGUMENTS_RE.sub(lambda _: arguments, text)
 
         # 3. 按空格拆分 arguments，替换 $0, $1, ...
         parts = arguments.split() if arguments else []
@@ -154,11 +155,8 @@ class Skill:
         def _run_command(match: re.Match) -> str:
             cmd = match.group(1)
             try:
-                result = subprocess.run(
+                result = run_shell_command(
                     cmd,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
                     timeout=10,
                     cwd=str(self.directory),
                 )
@@ -170,7 +168,7 @@ class Skill:
                     cmd,
                 )
                 return f"[command failed: {cmd}]"
-            except subprocess.TimeoutExpired:
+            except TimeoutError:
                 logger.warning("Dynamic context command timed out: %s", cmd)
                 return f"[command timed out: {cmd}]"
             except Exception as e:
