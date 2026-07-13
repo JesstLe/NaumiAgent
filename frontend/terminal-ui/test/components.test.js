@@ -19,6 +19,11 @@ import { ToolCard } from "../src/components/tool-card.js";
 import { parseTaskPanel, renderTaskPanel, TaskPanel } from "../src/components/task-panel.js";
 import { createInitialState } from "../src/state.js";
 import { setInputText } from "../src/input-buffer.js";
+import {
+  dismissSlashCompletion,
+  moveSlashCompletionSelection,
+  syncSlashCompletion,
+} from "../src/slash-completion.js";
 import { detachTimeline, jumpTimelineToLatest, markTimelineOutput } from "../src/timeline-follow.js";
 
 test("component core composes nested stacks and boxes within width", () => {
@@ -192,6 +197,31 @@ test("history search owns the footer instead of slash completion", () => {
   assert.match(full, /没有匹配记录/);
   assert.doesNotMatch(full, /命令补全/);
   assert.match(full, /Ctrl\+R/);
+});
+
+test("slash completion footer marks keyboard selection and respects dismissal", () => {
+  const state = createInitialState();
+  state.slashCommands = [
+    { command: "/debug", description: "调试" },
+    { command: "/delete", description: "删除" },
+    { command: "/doctor", description: "诊断" },
+  ];
+  setInputText(state, "/d");
+  syncSlashCompletion(state);
+  moveSlashCompletionSelection(state, "next");
+
+  const selected = renderComponent(
+    CommandCompletionFooter({ state }),
+    createRenderContext({ width: 52, state }),
+  ).map(stripAnsi);
+  assert.match(selected.join("\n"), /> 02\./);
+  assert(selected.every((line) => visibleWidth(line) <= 52));
+
+  dismissSlashCompletion(state);
+  assert.deepEqual(renderComponent(
+    CommandCompletionFooter({ state }),
+    createRenderContext({ width: 52, state }),
+  ), []);
 });
 
 test("tool card component preserves existing diff folding behavior", () => {
