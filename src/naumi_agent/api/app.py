@@ -12,10 +12,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from naumi_agent import __version__
-from naumi_agent.api.chat_runs import ChatRunStore
 from naumi_agent.api.permission_broker import PermissionApprovalBroker
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runs.store import ChatRunStore
 
 
 def resolve_config_path() -> str:
