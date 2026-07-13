@@ -15,7 +15,7 @@ import pytest
 
 from naumi_agent.agents.base import AgentResult
 from naumi_agent.agents.team_protocol import execute_team_signal
-from naumi_agent.config.settings import AppConfig, MemoryConfig, SafetyConfig
+from naumi_agent.config.settings import AppConfig, MemoryConfig, ModelConfig, SafetyConfig
 from naumi_agent.hooks import HookContext, HookPoint
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelResponse, ModelTier, StreamChunk, TokenUsage
@@ -95,6 +95,62 @@ class CoordinatedSafeTool(Tool):
 
 def _usage() -> TokenUsage:
     return TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2)
+
+
+def test_agent_engine_loads_model_catalog(tmp_path: Path) -> None:
+    catalog_path = tmp_path / "providers.json"
+    catalog_path.write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "local": {
+                        "apiFormat": "openai_chat",
+                        "baseURL": "http://127.0.0.1:8000/v1",
+                        "models": {
+                            "chat": {
+                                "upstreamId": "upstream-chat",
+                            }
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    engine = AgentEngine(
+        AppConfig(
+            models=ModelConfig(provider="local", catalog_path=str(catalog_path)),
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "chroma"),
+                long_term_enabled=False,
+            ),
+        )
+    )
+
+    target = engine.router.resolve_target("chat")
+
+    assert target.canonical_model == "local/chat"
+    assert target.upstream_model == "upstream-chat"
+
+
+def test_agent_engine_without_model_catalog_keeps_legacy_resolution(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(
+        AppConfig(
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "chroma"),
+                long_term_enabled=False,
+            )
+        )
+    )
+
+    target = engine.router.resolve_target("legacy")
+
+    assert target.canonical_model == "legacy"
+    assert target.upstream_model == "legacy"
 
 
 def _two_safe_tool_response() -> ModelResponse:

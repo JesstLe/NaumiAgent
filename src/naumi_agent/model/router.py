@@ -10,7 +10,9 @@ from typing import Any
 
 import litellm
 
-from naumi_agent.config.settings import ModelConfig
+from naumi_agent.config.settings import ModelConfig, ModelMeta
+from naumi_agent.model.catalog import ProviderCatalog
+from naumi_agent.model.targets import ResolvedModelTarget, resolve_model_target
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +86,11 @@ def _copy_tool_call_snapshot(
 class ModelRouter:
     """统一模型调用入口."""
 
-    def __init__(self, config: ModelConfig) -> None:
+    def __init__(
+        self, config: ModelConfig, *, catalog: ProviderCatalog | None = None
+    ) -> None:
         self._config = config
+        self._catalog = catalog
         self._tier_map: dict[ModelTier, str] = {
             ModelTier.FAST: config.fast_model,
             ModelTier.CAPABLE: config.default_model,
@@ -96,7 +101,7 @@ class ModelRouter:
     # --- 模型元数据 ---
 
     def get_model_info(self, model: str) -> dict[str, Any]:
-        """三级查找: config 覆盖 → litellm 内置 → fallback."""
+        """逐字段合并元数据：请求 config > canonical config > catalog > LiteLLM > fallback."""
         if model in self._info_cache:
             return self._info_cache[model]
 
@@ -124,41 +129,55 @@ class ModelRouter:
         return info.get("cost_rates", _FALLBACK_COST)
 
     def _resolve_model_info(self, model: str) -> dict[str, Any]:
-        # 1. 用户配置覆盖
-        meta = self._config.model_info.get(model)
-        if meta and meta.max_context:
-            info: dict[str, Any] = {"max_input_tokens": meta.max_context}
-            if meta.max_output:
-                info["max_output_tokens"] = meta.max_output
-            if (
-                meta.input_cost_per_million
-                and meta.output_cost_per_million
-                and (meta.input_cost_per_million > 0 or meta.output_cost_per_million > 0)
-            ):
-                info["cost_rates"] = {
-                    "input": meta.input_cost_per_million,
-                    "output": meta.output_cost_per_million,
-                }
-            return info
-
-        # 2. litellm 内置
-        try:
-            raw = litellm.get_model_info(model)
-            return {
-                "max_input_tokens": raw.get("max_input_tokens", _FALLBACK_CONTEXT),
-                "max_output_tokens": raw.get("max_output_tokens", _FALLBACK_MAX_OUTPUT),
-                "input_cost_per_token": raw.get("input_cost_per_token"),
-                "output_cost_per_token": raw.get("output_cost_per_token"),
-            }
-        except Exception:
-            logger.info("Model %s not in litellm registry, using fallback", model)
-
-        # 3. Fallback
-        return {
+        target = self.resolve_target(model)
+        info: dict[str, Any] = {
             "max_input_tokens": _FALLBACK_CONTEXT,
             "max_output_tokens": _FALLBACK_MAX_OUTPUT,
-            "cost_rates": _FALLBACK_COST,
+            "input_cost_per_token": _FALLBACK_COST["input"] / 1_000_000,
+            "output_cost_per_token": _FALLBACK_COST["output"] / 1_000_000,
         }
+
+        try:
+            raw = litellm.get_model_info(target.upstream_model)
+            for field_name in (
+                "max_input_tokens",
+                "max_output_tokens",
+                "input_cost_per_token",
+                "output_cost_per_token",
+            ):
+                if raw.get(field_name) is not None:
+                    info[field_name] = raw[field_name]
+        except Exception:
+            logger.info(
+                "Model %s not in litellm registry, using fallback",
+                target.upstream_model,
+            )
+
+        if target.model is not None:
+            if target.model.max_context is not None:
+                info["max_input_tokens"] = target.model.max_context
+            if target.model.max_output is not None:
+                info["max_output_tokens"] = target.model.max_output
+
+        canonical_meta = self._config.model_info.get(target.canonical_model)
+        if canonical_meta is not None:
+            self._merge_config_meta(info, canonical_meta)
+        if target.requested_model != target.canonical_model:
+            requested_meta = self._config.model_info.get(target.requested_model)
+            if requested_meta is not None:
+                self._merge_config_meta(info, requested_meta)
+        return info
+
+    @staticmethod
+    def _merge_config_meta(info: dict[str, Any], meta: ModelMeta) -> None:
+        if meta.max_context is not None:
+            info["max_input_tokens"] = meta.max_context
+        if meta.max_output is not None:
+            info["max_output_tokens"] = meta.max_output
+        if meta.input_cost_per_million is not None:
+            info["input_cost_per_token"] = meta.input_cost_per_million / 1_000_000
+        if meta.output_cost_per_million is not None:
+            info["output_cost_per_token"] = meta.output_cost_per_million / 1_000_000
 
     def _base_kwargs(self) -> dict[str, Any]:
         """构建底层 API 调用的公共参数（api_base、api_key）."""
@@ -175,6 +194,13 @@ class ModelRouter:
         if isinstance(tier, str):
             tier = ModelTier(tier)
         return self._tier_map[tier]
+
+    def resolve_target(self, model: str) -> ResolvedModelTarget:
+        return resolve_model_target(
+            model,
+            provider=self._config.provider,
+            catalog=self._catalog,
+        )
 
     def _resolve_max_tokens(self, model: str, requested: int | None) -> int:
         """确定 max_tokens: 调用方指定 > 配置值 > 模型输出上限."""

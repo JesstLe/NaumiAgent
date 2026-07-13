@@ -28,6 +28,7 @@ class ModelConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NAUMI_MODEL__")
 
     provider: str | None = None
+    catalog_path: str | None = None
     default_model: str = "claude-sonnet-4-6"
     fast_model: str = "claude-haiku-4-5"
     reasoning_model: str = "claude-opus-4-7"
@@ -213,6 +214,11 @@ class AppConfig(BaseSettings):
             self.memory.vector_db_path,
             base_dir,
         )
+        if self.models.catalog_path:
+            self.models.catalog_path = _anchor_path(
+                self.models.catalog_path,
+                base_dir,
+            )
 
 
 def _anchor_path(path: str, base_dir: Path) -> str:
