@@ -391,9 +391,10 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
         "limit": 50,
         "source": "background",
         "status": "needs_input",
-        "pinned": True,
-        "refresh": True,
-        "detail_id": "bg_0001",
+            "pinned": True,
+            "refresh": True,
+            "history": False,
+            "detail_id": "bg_0001",
     }
 
     permission_record = normalize_client_record({
@@ -470,7 +471,8 @@ async def test_bridge_status_payload_includes_compact_task_activity() -> None:
     engine.background_runner = SimpleNamespace(
         list_tasks=lambda: [
             SimpleNamespace(status=BackgroundStatus.RUNNING),
-            SimpleNamespace(status=BackgroundStatus.FAILED),
+            SimpleNamespace(status=BackgroundStatus.FAILED, notified=False),
+            SimpleNamespace(status=BackgroundStatus.FAILED, notified=True),
         ]
     )
     engine.subagent_manager = SimpleNamespace(
@@ -1053,12 +1055,14 @@ async def test_bridge_renders_task_panel_as_system_notice(
         source: str = "all",
         status: str = "all",
         detail_id: str = "",
+        history: bool = False,
     ) -> str:
         assert target_engine is engine
         assert limit == 5
         assert source == "background"
         assert status == "running"
         assert detail_id == "bg_1"
+        assert history is False
         return (
             "任务面板\n"
             "filter: source=background status=running detail=bg_1\n"

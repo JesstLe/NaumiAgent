@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from naumi_agent.background.models import BackgroundStatus, BackgroundTask
+
+
+@dataclass(frozen=True)
+class BackgroundPruneResult:
+    records_deleted: int = 0
+    artifacts_deleted: int = 0
+    errors: tuple[str, ...] = ()
 
 
 class BackgroundTaskStore:
@@ -80,17 +88,87 @@ class BackgroundTaskStore:
             return text[:max_chars] + f"\n...（输出已截断，完整内容见 {path}）"
         return text or "（无输出）"
 
+    def prune(
+        self,
+        *,
+        now: datetime | None = None,
+        retention_days: int = 7,
+        max_records: int = 100,
+    ) -> BackgroundPruneResult:
+        """Prune bounded terminal history without touching live tasks or external files."""
+        if retention_days < 0:
+            raise ValueError("retention_days 不能小于 0")
+        if max_records < 0:
+            raise ValueError("max_records 不能小于 0")
+
+        current = now or datetime.now()
+        cutoff = current - timedelta(days=retention_days)
+        records = {task.id: task for task in self.list_tasks()}
+        terminal = sorted(
+            (task for task in records.values() if task.is_finished),
+            key=_task_terminal_time,
+            reverse=True,
+        )
+        retained_by_count = {task.id for task in terminal[:max_records]}
+        candidates = [
+            task
+            for task in terminal
+            if task.id not in retained_by_count
+            or _task_terminal_time(task) < cutoff
+        ]
+
+        records_deleted = 0
+        artifacts_deleted = 0
+        errors: list[str] = []
+        for task in candidates:
+            artifact = Path(task.output_path).expanduser()
+            if not self._is_managed_artifact(task, artifact):
+                errors.append(f"拒绝删除非受管日志：{task.id}")
+                continue
+            try:
+                if artifact.exists():
+                    artifact.unlink()
+                    artifacts_deleted += 1
+            except OSError as exc:
+                errors.append(f"日志删除失败：{task.id} ({type(exc).__name__})")
+                continue
+            records.pop(task.id, None)
+            records_deleted += 1
+
+        if records_deleted:
+            self._write_records(records)
+        return BackgroundPruneResult(
+            records_deleted=records_deleted,
+            artifacts_deleted=artifacts_deleted,
+            errors=tuple(errors),
+        )
+
+    def _is_managed_artifact(self, task: BackgroundTask, path: Path) -> bool:
+        artifacts_dir = self._artifacts_dir.resolve()
+        resolved = path.resolve()
+        return resolved.parent == artifacts_dir and resolved.name == f"{task.id}.log"
+
     def _write_records(self, records: dict[str, BackgroundTask]) -> None:
         self._base_dir.mkdir(parents=True, exist_ok=True)
         self._artifacts_dir.mkdir(parents=True, exist_ok=True)
         payload = {task_id: _task_to_dict(task) for task_id, task in records.items()}
-        self._records_path.write_text(
+        temporary_path = self._records_path.with_suffix(".json.tmp")
+        temporary_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        temporary_path.replace(self._records_path)
 
 
 def _task_to_dict(task: BackgroundTask) -> dict[str, Any]:
     payload = asdict(task)
     payload["status"] = task.status.value
     return payload
+
+
+def _task_terminal_time(task: BackgroundTask) -> datetime:
+    value = task.completed_at or task.started_at
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return datetime.min

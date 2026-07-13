@@ -33,6 +33,7 @@ class BackgroundRunner:
         self._store = store
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._watchers: dict[str, asyncio.Task[None]] = {}
+        self._store.prune()
 
     @property
     def store(self) -> BackgroundTaskStore:
@@ -109,10 +110,27 @@ class BackgroundRunner:
         task.completed_at = _now()
         task.error = "用户取消了后台任务"
         self._store.save(task)
+        self._store.prune()
         return task
 
     def list_tasks(self) -> list[BackgroundTask]:
         return self._store.list_tasks()
+
+    def list_active_tasks(self) -> list[BackgroundTask]:
+        """Return running tasks and terminal results not yet delivered to the agent."""
+        return [
+            task
+            for task in self._store.list_tasks()
+            if not task.is_finished or not task.notified
+        ]
+
+    def list_history(self) -> list[BackgroundTask]:
+        """Return acknowledged terminal task history."""
+        return [
+            task
+            for task in self._store.list_tasks()
+            if task.is_finished and task.notified
+        ]
 
     def get(self, task_id: str) -> BackgroundTask | None:
         return self._store.get(task_id)
@@ -145,7 +163,12 @@ class BackgroundRunner:
             task.error = "cleanup 标记：任务记录仍为运行中，但进程已不存在"
             self._store.save(task)
             stale += 1
-        return f"后台清理完成：终止 {cancelled} 个运行任务，标记 {stale} 个陈旧任务。"
+        pruned = self._store.prune()
+        return (
+            f"后台清理完成：终止 {cancelled} 个运行任务，标记 {stale} 个陈旧任务，"
+            f"清理历史记录 {pruned.records_deleted} 个，删除日志 "
+            f"{pruned.artifacts_deleted} 个。"
+        )
 
     def collect_notifications(self, limit: int = 5) -> list[str]:
         """Return newly finished task notifications and mark them delivered."""
@@ -157,6 +180,7 @@ class BackgroundRunner:
                 continue
             notifications.append(format_notification(task))
             self._store.mark_notified(task.id)
+        self._store.prune()
         return notifications
 
     async def shutdown(self) -> None:
@@ -168,6 +192,7 @@ class BackgroundRunner:
                 watcher.cancel()
         if self._watchers:
             await asyncio.gather(*list(self._watchers.values()), return_exceptions=True)
+        self._store.prune()
 
     async def _watch(
         self,
@@ -202,6 +227,7 @@ class BackgroundRunner:
             task.output_preview = _preview(output)
             task.error = error
             self._store.save(task)
+            self._store.prune()
         finally:
             self._processes.pop(task_id, None)
             self._watchers.pop(task_id, None)

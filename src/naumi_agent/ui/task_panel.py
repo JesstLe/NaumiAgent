@@ -72,6 +72,7 @@ class TaskPanelFilter:
     source: str = "all"
     status: str = "all"
     detail_id: str = ""
+    history: bool = False
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,7 @@ async def build_task_panel_snapshot(
     source: str = "all",
     status: str = "all",
     detail_id: str = "",
+    history: bool = False,
 ) -> TaskPanelSnapshot:
     """Collect a read-only snapshot for the task panel."""
     safe_limit = max(1, min(limit, 50))
@@ -118,6 +120,7 @@ async def build_task_panel_snapshot(
         source=_normalize_filter(source, _SOURCE_FILTERS),
         status=_normalize_filter(status, _STATUS_FILTERS),
         detail_id=str(detail_id or "").strip(),
+        history=bool(history),
     )
     warnings: list[str] = []
 
@@ -164,7 +167,14 @@ async def build_task_panel_snapshot(
     try:
         runner = getattr(engine, "background_runner", None)
         if runner is not None:
-            tasks = runner.list_tasks()[:safe_limit]
+            list_method = getattr(
+                runner,
+                "list_history" if history else "list_active_tasks",
+                None,
+            )
+            if not callable(list_method):
+                list_method = runner.list_tasks
+            tasks = list_method()[:safe_limit]
             background_tasks = tuple(
                 _background_status_from_task(task)
                 for task in tasks
@@ -222,6 +232,7 @@ async def render_task_panel(
     source: str = "all",
     status: str = "all",
     detail_id: str = "",
+    history: bool = False,
 ) -> str:
     """Build and render the unified task panel for CLI/TUI commands."""
     snapshot = await build_task_panel_snapshot(
@@ -230,6 +241,7 @@ async def render_task_panel(
         source=source,
         status=status,
         detail_id=detail_id,
+        history=history,
     )
     return render_task_panel_snapshot(snapshot)
 
@@ -241,11 +253,13 @@ def render_task_panel_snapshot(snapshot: TaskPanelSnapshot) -> str:
         snapshot.filters.source != "all"
         or snapshot.filters.status != "all"
         or snapshot.filters.detail_id
+        or snapshot.filters.history
     ):
         lines.append(
             f"\033[2mfilter: source={snapshot.filters.source} "
             f"status={snapshot.filters.status}"
             f"{f' detail={snapshot.filters.detail_id}' if snapshot.filters.detail_id else ''}"
+            f"{' history=true' if snapshot.filters.history else ''}"
             "\033[0m"
         )
     summary = render_task_summary_bar(

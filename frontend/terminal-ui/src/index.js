@@ -166,6 +166,7 @@ function handleBridgeLine(line) {
         source: action.source ?? "all",
         status: action.status ?? "all",
         ...(action.detailId ? { detail_id: action.detailId } : {}),
+        ...(action.history ? { history: true } : {}),
         pinned: true,
         refresh: true,
       });
