@@ -838,7 +838,7 @@ class AgentEngine:
 
     def _clear_permission_grants(self, *, reason: str, source: str) -> None:
         """Clear and audit all active grants held by this engine."""
-        grants = tuple(self._permission_grant_store._grants_by_id.values())
+        grants = self._permission_grant_store.list_all()
         self._permission_grant_store.clear()
         for grant in grants:
             self._record_permission_grant_revocation(
