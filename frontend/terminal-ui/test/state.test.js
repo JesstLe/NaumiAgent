@@ -7,6 +7,7 @@ import {
   createUiSnapshot,
   applyUiSnapshot,
   extractTaskPanelItems,
+  failQueuedUserMessages,
   getFoldEntries,
   handleSubmitText,
   hasTaskPanelFocus,
@@ -28,6 +29,127 @@ test("assistant stream updates one active message", () => {
   assert.equal(state.messages[0].kind, "assistant");
   assert.equal(state.messages[0].content, "你好");
   assert.equal(state.activeAssistant, null);
+});
+
+test("submit queues one local message and echo accepts it without duplication", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload, options = {}) => {
+    sent.push({ type, payload, options });
+    return options.id;
+  };
+
+  handleSubmitText(state, "修复测试", send);
+  const pending = state.messages.at(-1);
+  assert.equal(pending.kind, "user");
+  assert.equal(pending.deliveryStatus, "queued");
+  assert.equal(pending.attempt, 1);
+  assert.equal(sent[0].options.id, pending.requestId);
+
+  reduceServerEvent(state, {
+    type: "user/message",
+    request_id: pending.requestId,
+    payload: { content: "修复测试" },
+  });
+
+  assert.equal(state.messages.filter((message) => message.kind === "user").length, 1);
+  assert.equal(pending.deliveryStatus, "accepted");
+  assert.equal(pending.localOutbox, false);
+});
+
+test("matching error fails only an unconfirmed user submission", () => {
+  const state = createInitialState();
+  const send = (_type, _payload, options = {}) => options.id;
+  handleSubmitText(state, "第一条", send);
+  const pending = state.messages.at(-1);
+
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: pending.requestId,
+    payload: { code: "run_in_progress", message: "当前任务仍在执行。" },
+  });
+  assert.equal(pending.deliveryStatus, "failed");
+  assert.equal(pending.errorCode, "run_in_progress");
+  assert.match(pending.errorMessage, /当前任务仍在执行/);
+
+  handleSubmitText(state, "第二条", send);
+  const accepted = state.messages.at(-1);
+  reduceServerEvent(state, {
+    type: "user/message",
+    request_id: accepted.requestId,
+    payload: { content: "第二条" },
+  });
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: accepted.requestId,
+    payload: { code: "model_not_found", message: "模型不可用。" },
+  });
+  assert.equal(accepted.deliveryStatus, "accepted");
+});
+
+test("run start accepts a queued message when user echo is missing", () => {
+  const state = createInitialState();
+  const send = (_type, _payload, options = {}) => options.id;
+  handleSubmitText(state, "继续执行", send);
+  const pending = state.messages.at(-1);
+
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: pending.requestId,
+    payload: { task: "继续执行" },
+  });
+
+  assert.equal(pending.deliveryStatus, "accepted");
+});
+
+test("synchronous sender failure leaves one retryable failed message", () => {
+  const state = createInitialState();
+  const send = () => {
+    throw new Error("broken pipe");
+  };
+
+  handleSubmitText(state, "仍需保留", send);
+
+  const users = state.messages.filter((message) => message.kind === "user");
+  assert.equal(users.length, 1);
+  assert.equal(users[0].deliveryStatus, "failed");
+  assert.equal(users[0].errorCode, "transport_write_failed");
+  assert.match(users[0].errorMessage, /发送失败/);
+});
+
+test("transport failure terminates queued messages but preserves accepted ones", () => {
+  const state = createInitialState();
+  const send = (_type, _payload, options = {}) => options.id;
+  handleSubmitText(state, "等待确认", send);
+  handleSubmitText(state, "已经确认", send);
+  const [queued, accepted] = state.messages.filter((message) => message.kind === "user");
+  reduceServerEvent(state, {
+    type: "user/message",
+    request_id: accepted.requestId,
+    payload: { content: accepted.content },
+  });
+
+  assert.equal(failQueuedUserMessages(state, {
+    code: "bridge_disconnected",
+    message: "Bridge 已断开。",
+  }), 1);
+  assert.equal(queued.deliveryStatus, "failed");
+  assert.equal(accepted.deliveryStatus, "accepted");
+});
+
+test("unmatched backend user message still renders once as accepted", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "user/message",
+    request_id: "external-client",
+    payload: { content: "来自其他客户端" },
+  });
+
+  const user = state.messages.at(-1);
+  assert.equal(user.kind, "user");
+  assert.equal(user.requestId, "external-client");
+  assert.equal(user.deliveryStatus, "accepted");
 });
 
 test("thinking content is hidden and removed after completion by default", () => {
@@ -668,6 +790,7 @@ test("slash commands route through protocol without adding chat noise", () => {
   state.folds["message:old:code:0"] = { expanded: true };
   handleSubmitText(state, "/clear", send);
   handleSubmitText(state, "/c", send);
+  assert.deepEqual(state.messages, []);
   handleSubmitText(state, "你好", send);
 
   assert.deepEqual(sent, [
@@ -681,7 +804,9 @@ test("slash commands route through protocol without adding chat noise", () => {
     { type: "submit", payload: { text: "/c" } },
     { type: "submit", payload: { text: "你好" } },
   ]);
-  assert.deepEqual(state.messages, []);
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.messages[0].kind, "user");
+  assert.equal(state.messages[0].deliveryStatus, "queued");
   assert.deepEqual(state.folds, {});
 });
 
