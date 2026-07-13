@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from naumi_agent.config.settings import ModelConfig, ModelMeta
+from naumi_agent.model.catalog import parse_provider_catalog_json
 from naumi_agent.model.router import ModelRouter, ModelTier
 
 
@@ -50,6 +53,29 @@ class TestResolveTier:
         with pytest.raises(ValueError):
             router.resolve_model("nonexistent")
 
+    def test_resolves_catalog_target_without_changing_tier_value(self) -> None:
+        catalog = parse_provider_catalog_json(
+            json.dumps(
+                {
+                    "provider": {
+                        "nvidia": {
+                            "models": {
+                                "local-glm": {"upstreamId": "z-ai/glm4.7"},
+                            }
+                        }
+                    }
+                }
+            )
+        )
+        config = ModelConfig(provider="nvidia", default_model="local-glm")
+        router = ModelRouter(config, catalog=catalog)
+
+        target = router.resolve_target("local-glm")
+
+        assert target.canonical_model == "nvidia/local-glm"
+        assert target.upstream_model == "z-ai/glm4.7"
+        assert router.resolve_model(ModelTier.CAPABLE) == "local-glm"
+
 
 class TestModelInfo:
     def test_litellm_known_model(self, router: ModelRouter) -> None:
@@ -94,6 +120,70 @@ class TestModelInfo:
         info1 = router.get_model_info("claude-sonnet-4-6")
         info2 = router.get_model_info("claude-sonnet-4-6")
         assert info1 is info2  # same object
+
+    def test_merges_metadata_per_field_and_caches_requested_aliases(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        catalog = parse_provider_catalog_json(
+            json.dumps(
+                {
+                    "provider": {
+                        "nvidia": {
+                            "models": {
+                                "local-glm": {
+                                    "upstreamId": "z-ai/glm4.7",
+                                    "limit": {"context": 32_000, "output": 2_000},
+                                },
+                                "local-glm-copy": {
+                                    "upstreamId": "z-ai/glm4.7",
+                                    "limit": {"context": 48_000},
+                                },
+                            }
+                        }
+                    }
+                }
+            )
+        )
+        config = ModelConfig(
+            provider="nvidia",
+            model_info={
+                "nvidia/local-glm": ModelMeta(
+                    max_context=64_000,
+                    max_output=8_000,
+                    input_cost_per_million=3.0,
+                ),
+                "local-glm": ModelMeta(
+                    max_context=96_000,
+                    input_cost_per_million=5.0,
+                ),
+            },
+        )
+        requested_upstreams: list[str] = []
+
+        def fake_get_model_info(model: str) -> dict[str, float | int]:
+            requested_upstreams.append(model)
+            return {
+                "max_input_tokens": 8_000,
+                "max_output_tokens": 1_000,
+                "input_cost_per_token": 1.0 / 1_000_000,
+                "output_cost_per_token": 2.0 / 1_000_000,
+            }
+
+        monkeypatch.setattr(
+            "naumi_agent.model.router.litellm.get_model_info", fake_get_model_info
+        )
+        router = ModelRouter(config, catalog=catalog)
+
+        primary = router.get_model_info("local-glm")
+        copy = router.get_model_info("local-glm-copy")
+
+        assert primary["max_input_tokens"] == 96_000
+        assert primary["max_output_tokens"] == 8_000
+        assert router.get_cost_rates("local-glm") == {"input": 5.0, "output": 2.0}
+        assert copy["max_input_tokens"] == 48_000
+        assert copy["max_output_tokens"] == 1_000
+        assert primary is not copy
+        assert requested_upstreams == ["z-ai/glm4.7", "z-ai/glm4.7"]
 
 
 class TestMaxTokens:

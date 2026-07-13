@@ -24,6 +24,7 @@ from naumi_agent.memory.auto_extract import extract_memory_candidates
 from naumi_agent.memory.compactor import ContextCompactor
 from naumi_agent.memory.long_term import LongTermMemory, MemoryEntry
 from naumi_agent.memory.session import Session, SessionStore
+from naumi_agent.model.catalog import load_provider_catalog
 from naumi_agent.model.router import ModelRouter, ModelTier, TokenUsage
 from naumi_agent.orchestrator.context_assembly import (
     HARNESS_CONTEXT_MARKER,
@@ -411,7 +412,12 @@ class AgentEngine:
         self._runtime_data_dir = Path(config.memory.session_db_path).parent
         self._worktree_storage_dir = self._runtime_data_dir / "worktrees"
         self.chat_run_store = ChatRunStore(self._runtime_data_dir / "chat-runs.db")
-        self._router = ModelRouter(config.models)
+        catalog = (
+            load_provider_catalog(config.models.catalog_path)
+            if config.models.catalog_path
+            else None
+        )
+        self._router = ModelRouter(config.models, catalog=catalog)
         self._tool_registry = ToolRegistry()
         self._messages: list[dict[str, Any]] = []
         self._full_history: list[dict[str, Any]] = []  # untruncated display history
