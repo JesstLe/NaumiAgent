@@ -164,7 +164,7 @@ def test_rejects_legacy_target() -> None:
     ("api_format", "message"),
     [
         (None, "缺少 apiFormat"),
-        (APIFormat.OPENAI_RESPONSES, "适配器尚未实现"),
+        (APIFormat.OPENAI_RESPONSES, "不能由 openai_chat 适配器处理"),
     ],
 )
 def test_rejects_missing_or_unsupported_api_format(
@@ -174,6 +174,17 @@ def test_rejects_missing_or_unsupported_api_format(
     with pytest.raises(ProviderRuntimeError, match=message):
         build_openai_chat_transport(
             _target(api_format=api_format),
+            catalog_source="/tmp/catalog.json",
+        )
+
+
+def test_responses_builder_rejects_a_chat_target_with_an_accurate_error() -> None:
+    with pytest.raises(
+        ProviderRuntimeError,
+        match="不能由 openai_responses 适配器处理",
+    ):
+        build_openai_responses_transport(
+            _target(api_format=APIFormat.OPENAI_CHAT),
             catalog_source="/tmp/catalog.json",
         )
 

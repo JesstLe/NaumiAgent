@@ -150,7 +150,8 @@ def _validate_provider_format(
         )
     if provider.api_format is not expected_format:
         raise ProviderRuntimeError(
-            f'provider "{provider.id}" 的 {provider.api_format.value} 适配器尚未实现。'
+            f'provider "{provider.id}" 的 {provider.api_format.value} '
+            f"不能由 {expected_format.value} 适配器处理。"
         )
     if not provider.base_url:
         raise ProviderRuntimeError(
