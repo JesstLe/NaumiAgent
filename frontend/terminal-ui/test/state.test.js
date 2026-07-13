@@ -13,6 +13,7 @@ import {
   hasTaskPanelFocus,
   getSlashCommandCompletions,
   reduceServerEvent,
+  requestRunCancel,
   selectTaskPanelOffset,
   setTaskPanelFocus,
   retryUserMessage,
@@ -1620,6 +1621,94 @@ test("task execution error blocks the accepted task instead of making it retry-c
   assert.equal(message.taskStatus, "blocked");
   assert.equal(message.deliveryStatus, "accepted");
   assert.equal(message.localOutbox, false);
+});
+
+test("run cancellation request is single-flight and exposes stopping state", () => {
+  const state = createInitialState();
+  state.running = true;
+  const sent = [];
+  const send = (type, payload, options = {}) => {
+    sent.push({ type, payload, options });
+    return options.id;
+  };
+
+  assert.equal(requestRunCancel(state, send), true);
+  assert.equal(requestRunCancel(state, send), false);
+
+  assert.equal(state.cancelPending, true);
+  assert.equal(state.cancelRequestId, "cancel-1");
+  assert.deepEqual(sent, [{
+    type: "run_cancel",
+    payload: { reason: "用户按下 Ctrl+C" },
+    options: { id: "cancel-1" },
+  }]);
+  assert(state.messages.some(
+    (message) => message.kind === "system" && message.content.includes("正在停止当前运行"),
+  ));
+});
+
+test("run cancelled clears live state and blocks linked workbench task", () => {
+  const state = createInitialState();
+  const taskMessage = submitTaskMessage(
+    state,
+    "取消我",
+    (_type, _payload, options = {}) => options.id,
+  );
+  reduceServerEvent(state, {
+    type: "task/created",
+    request_id: taskMessage.requestId,
+    payload: {
+      mission: { id: "mission-5" },
+      task: { id: "12", status: "in_progress" },
+      issue: { task_id: "12" },
+    },
+  });
+  state.cancelPending = true;
+  state.cancelRequestId = "cancel-2";
+  state.permission = { requestId: "perm-1", payload: {} };
+  state.activeToolPrepare = { id: "prepare-1" };
+
+  reduceServerEvent(state, {
+    type: "run/cancelled",
+    request_id: "cancel-2",
+    payload: {
+      status: "cancelled",
+      target_request_id: taskMessage.requestId,
+      intent: "task",
+      task_id: "12",
+      mission_id: "mission-5",
+      task_status: "blocked",
+      reason: "用户取消了当前运行。",
+    },
+  });
+
+  assert.equal(state.running, false);
+  assert.equal(state.cancelPending, false);
+  assert.equal(state.cancelRequestId, "");
+  assert.equal(state.permission, null);
+  assert.equal(state.activeToolPrepare, null);
+  assert.equal(state.activeTaskSubmission.state, "blocked");
+  assert.equal(taskMessage.taskStatus, "blocked");
+  assert(state.messages.some(
+    (message) => message.kind === "system" && message.content.includes("运行已取消"),
+  ));
+});
+
+test("correlated cancel rejection restores running presentation", () => {
+  const state = createInitialState();
+  state.running = true;
+  state.cancelPending = true;
+  state.cancelRequestId = "cancel-3";
+
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: "cancel-3",
+    payload: { code: "no_active_run", message: "当前没有正在运行的任务。" },
+  });
+
+  assert.equal(state.cancelPending, false);
+  assert.equal(state.cancelRequestId, "");
+  assert.equal(state.running, false);
 });
 
 test("outbox snapshot restores task intent without automatic downgrade", () => {

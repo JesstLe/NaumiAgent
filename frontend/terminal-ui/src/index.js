@@ -61,6 +61,7 @@ import {
   createUiSnapshot,
   applyUiSnapshot,
   failQueuedUserMessages,
+  requestRunCancel,
   toggleComposerIntent,
 } from "./state.js";
 import { captureViewportAnchor, renderScreen, restoreViewportAnchor } from "./render.js";
@@ -289,7 +290,16 @@ function handleKeyInput(chunk) {
 }
 
 function handleSingleKeyInput(chunk) {
-  if (chunk === "\u0003") exit();
+  if (chunk === "\u0003") {
+    if (state.running && !state.cancelPending) {
+      requestRunCancel(state, send);
+      persistUiSnapshot();
+      scheduleRedraw();
+      return;
+    }
+    exit();
+    return;
+  }
   if (state.permission) {
     const key = chunk.toLowerCase();
     if (chunk === INPUT_KEYS.ctrlR) return;

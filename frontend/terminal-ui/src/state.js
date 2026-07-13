@@ -147,6 +147,7 @@ export function createInitialState() {
   return {
     nextMessageId: 1,
     nextSubmitId: 1,
+    nextCancelId: 1,
     currentSessionId: "",
     input: "",
     inputCursor: null,
@@ -156,6 +157,8 @@ export function createInitialState() {
     inputHistoryDraft: "",
     composerIntent: "chat",
     activeTaskSubmission: null,
+    cancelPending: false,
+    cancelRequestId: "",
     historySearch: {
       open: false,
       query: "",
@@ -292,6 +295,7 @@ export function reduceServerEvent(state, record) {
       handlePermissionResolved(state, payload);
       break;
     case "run/started":
+      resetRunCancellation(state);
       acceptUserMessage(state, record.request_id, payload.task ?? "");
       state.running = true;
       state.currentTurnStartedAtMs = Date.now();
@@ -299,6 +303,7 @@ export function reduceServerEvent(state, record) {
       break;
     case "run/completed":
       state.running = false;
+      resetRunCancellation(state);
       if (payload.intent === "task" && state.activeTaskSubmission) {
         const taskState = payload.status === "completed" ? "completed" : "blocked";
         state.activeTaskSubmission.state = taskState;
@@ -323,6 +328,29 @@ export function reduceServerEvent(state, record) {
       state.activeRuntimePhase = "";
       state.permission = null;
       return state.taskPanel.pinned ? [taskPanelRefreshAction(state)] : [];
+    case "run/cancelled":
+      state.running = false;
+      resetRunCancellation(state);
+      finishActiveToolPrepare(state, "本轮执行已取消");
+      state.activeToolPrepare = null;
+      state.activeRuntimePhase = "";
+      state.permission = null;
+      if (payload.intent === "task" && state.activeTaskSubmission) {
+        state.activeTaskSubmission.state = "blocked";
+        const taskId = String(payload.task_id ?? state.activeTaskSubmission.taskId);
+        const taskMessage = state.messages.find(
+          (message) => message.kind === "user" && message.taskId === taskId,
+        );
+        if (taskMessage) taskMessage.taskStatus = "blocked";
+      }
+      clearRenderCache(state.renderCache);
+      pushSystemMessage(
+        state,
+        "运行取消",
+        `运行已取消。${payload.reason ? ` ${payload.reason}` : ""}`,
+        "warning",
+      );
+      return state.taskPanel.pinned ? [taskPanelRefreshAction(state)] : [];
     case "session/replayed":
       jumpTimelineToLatest(state);
       state.currentSessionId = payload.session_id || state.currentSessionId;
@@ -331,6 +359,7 @@ export function reduceServerEvent(state, record) {
       state.currentTurnFirstTokenAtMs = null;
       state.lastFirstTokenLatencyMs = null;
       state.permission = null;
+      resetRunCancellation(state);
       state.todo = null;
       state.activeToolPrepare = null;
       state.activeRuntimePhase = "";
@@ -347,6 +376,9 @@ export function reduceServerEvent(state, record) {
       return [{ type: "session_replayed", sessionId: state.currentSessionId }];
     case "error":
       state.running = false;
+      if (state.cancelRequestId === String(record.request_id ?? "")) {
+        resetRunCancellation(state);
+      }
       if (
         payload.intent === "task"
         && state.activeTaskSubmission
@@ -899,6 +931,35 @@ export function submitUserMessage(state, text, send, existingMessage = null) {
     intent: "chat",
     payload: {},
   });
+}
+
+export function requestRunCancel(state, send) {
+  if (!state.running || state.cancelPending) return false;
+  const requestId = `cancel-${state.nextCancelId++}`;
+  try {
+    send(
+      "run_cancel",
+      { reason: "用户按下 Ctrl+C" },
+      { id: requestId },
+    );
+  } catch (error) {
+    pushSystemMessage(
+      state,
+      "运行取消",
+      `无法发送取消请求: ${error instanceof Error ? error.message : String(error)}`,
+      "error",
+    );
+    return false;
+  }
+  state.cancelPending = true;
+  state.cancelRequestId = requestId;
+  pushSystemMessage(state, "运行取消", "正在停止当前运行... 再按 Ctrl+C 可强制退出。", "warning");
+  return true;
+}
+
+function resetRunCancellation(state) {
+  state.cancelPending = false;
+  state.cancelRequestId = "";
 }
 
 export function submitTaskMessage(state, text, send, taskDraft = {}, existingMessage = null) {
