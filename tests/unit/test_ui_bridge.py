@@ -20,6 +20,8 @@ from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.model.router import StreamChunk
 from naumi_agent.orchestrator.engine import AgentEngine, AgentResult, AgentRuntimeMode, AgentUsage
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
+from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.safety.permissions import PermissionMode
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.store import TaskStore
@@ -902,6 +904,67 @@ async def test_bridge_streams_engine_events_as_ui_messages() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bridge_emits_completion_receipt_before_correlated_run_completion() -> None:
+    receipt = CompletionReceipt.from_dict(
+        {
+            "schema_version": 1,
+            "receipt_id": "receipt-bridge",
+            "run_id": "run-bridge",
+            "outcome": "partial",
+            "summary": "验证失败，已保留改动证据。",
+            "validations": [
+                {
+                    "command": "pytest -q",
+                    "scope": "tests",
+                    "status": "failed",
+                    "exit_code": 1,
+                    "failed": 1,
+                }
+            ],
+            "risks": [
+                {
+                    "code": "validation_failed",
+                    "level": "high",
+                    "message": "1 项验证失败。",
+                }
+            ],
+            "git_state": {"available": True, "branch": "main", "dirty": True},
+        }
+    )
+
+    class ReceiptEngine(_FakeEngine):
+        async def run_streaming(self, task: str, on_event: Any) -> AgentResult:
+            await on_event("run_started", {"task": task, "run_id": receipt.run_id})
+            await on_event("completion_receipt", receipt.to_dict())
+            return AgentResult(
+                status="completed",
+                response="完成",
+                usage=self.usage,
+                receipt=receipt,
+            )
+
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(ReceiptEngine(), config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("执行验证", request_id="submit-receipt")
+    assert bridge._run_task is not None
+    await bridge._run_task
+
+    records = _records(writer)
+    receipt_record = next(
+        record for record in records if record["type"] == "completion/receipt"
+    )
+    completed_record = next(
+        record for record in records if record["type"] == "run/completed"
+    )
+    assert records.index(receipt_record) < records.index(completed_record)
+    assert receipt_record["payload"] == json.loads(json.dumps(receipt.to_dict()))
+    assert completed_record["payload"]["receipt_id"] == receipt.receipt_id
+    assert completed_record["payload"]["run_id"] == receipt.run_id
+
+
+@pytest.mark.asyncio
 async def test_bridge_task_submit_creates_issue_and_executes_with_task_context() -> None:
     engine = _TaskSubmitFakeEngine()
     writer = io.StringIO()
@@ -1405,6 +1468,50 @@ async def test_bridge_resume_replays_session_messages() -> None:
         message.get("type") == "assistant_stream" and message.get("content") == "旧回答"
         for message in replayed
     )
+
+
+@pytest.mark.asyncio
+async def test_bridge_resume_replays_durable_completion_receipts(tmp_path: Path) -> None:
+    engine = _FakeEngine()
+    engine.chat_run_store = ChatRunStore(tmp_path / "chat-runs.db")
+    run = await engine.chat_run_store.start_run(
+        session_id="session-1",
+        user_message_id="msg-old",
+        run_id="run-old",
+    )
+    receipt = CompletionReceipt.from_dict(
+        {
+            "schema_version": 1,
+            "receipt_id": "receipt-old",
+            "run_id": run.id,
+            "outcome": "completed",
+            "summary": "历史运行已完成。",
+            "git_state": {"available": False, "dirty": False},
+        }
+    )
+    await engine.chat_run_store.finish_run(
+        run.id,
+        status="completed",
+        receipt=receipt,
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {"id": "resume-receipt", "type": ClientEventType.RESUME, "payload": {}}
+    )
+
+    records = _records(writer)
+    replayed = [
+        record
+        for record in records
+        if record["type"] == "completion/receipt"
+    ]
+    assert [record["payload"] for record in replayed] == [
+        json.loads(json.dumps(receipt.to_dict()))
+    ]
+    assert replayed[0]["request_id"] == "resume-receipt"
 
 
 @pytest.mark.asyncio

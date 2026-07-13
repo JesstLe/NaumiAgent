@@ -17,6 +17,7 @@ from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
 from naumi_agent.log_setup import setup_logging
+from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNoticeMessage
 from naumi_agent.ui.protocol import (
@@ -108,6 +109,15 @@ def _public_mapping(value: Any) -> dict[str, Any]:
     if hasattr(value, "__dict__"):
         return dict(vars(value))
     return {}
+
+
+def _receipt_reference(receipt: CompletionReceipt | None) -> dict[str, str]:
+    if receipt is None:
+        return {}
+    return {
+        "receipt_id": receipt.receipt_id,
+        "run_id": receipt.run_id,
+    }
 
 
 def _task_turn_context(
@@ -353,6 +363,7 @@ class JsonlEngineBridge:
         self._writer_lock = asyncio.Lock()
         self._run_task: asyncio.Task[Any] | None = None
         self._active_run_context: dict[str, str] = {}
+        self._active_completion_receipt: CompletionReceipt | None = None
         self._cli_supported_commands = _load_cli_slash_commands_with_alias()
         self._pending_permissions: dict[str, asyncio.Future[str]] = {}
         self._pending_permission_payloads: dict[str, dict[str, Any]] = {}
@@ -631,6 +642,7 @@ class JsonlEngineBridge:
         await self.emit(ServerEventType.USER_MESSAGE, {"content": text}, request_id=request_id)
         await self.emit(ServerEventType.RUN_STARTED, {"task": text}, request_id=request_id)
         await self.emit(ServerEventType.STATUS, self.status_payload())
+        self._active_completion_receipt = None
 
         async def run() -> None:
             try:
@@ -641,6 +653,10 @@ class JsonlEngineBridge:
                         "status": result.status,
                         "response": result.response or "",
                         "error": result.error or "",
+                        **_receipt_reference(
+                            getattr(result, "receipt", None)
+                            or self._active_completion_receipt
+                        ),
                     },
                     request_id=request_id,
                 )
@@ -752,6 +768,7 @@ class JsonlEngineBridge:
             request_id=request_id,
         )
         await self.emit(ServerEventType.STATUS, self.status_payload())
+        self._active_completion_receipt = None
 
         async def run() -> None:
             try:
@@ -781,6 +798,10 @@ class JsonlEngineBridge:
                         "task_id": task_id,
                         "mission_id": mission_id,
                         "intent": "task",
+                        **_receipt_reference(
+                            getattr(result, "receipt", None)
+                            or self._active_completion_receipt
+                        ),
                     },
                     request_id=request_id,
                 )
@@ -865,6 +886,7 @@ class JsonlEngineBridge:
             "target_request_id": target_request_id,
             "intent": context.get("intent", "chat"),
             "reason": reason,
+            **_receipt_reference(self._active_completion_receipt),
         }
         if context.get("task_id"):
             cancelled.update({
@@ -987,6 +1009,16 @@ class JsonlEngineBridge:
         )
         for message in replay_messages(raw_messages):
             await self.emit(ServerEventType.UI_MESSAGE, ui_message_payload(message))
+        run_store = getattr(self.engine, "chat_run_store", None)
+        if run_store is not None:
+            runs = await run_store.list_runs(session_id, limit=200)
+            for run in reversed(runs):
+                if run.receipt is not None:
+                    await self.emit(
+                        ServerEventType.COMPLETION_RECEIPT,
+                        run.receipt.to_dict(),
+                        request_id=request_id,
+                    )
         await self.emit(ServerEventType.STATUS, self.status_payload())
 
     async def _run_cli_slash_command(self, cmd: str, *, request_id: str) -> None:
@@ -1317,6 +1349,14 @@ class JsonlEngineBridge:
             self.debug_trace.event("engine.stream_event", {"event": event, "data": data})
 
         await self.emit(ServerEventType.ENGINE_EVENT, {"event": event, "data": data})
+        if event == "completion_receipt":
+            receipt = CompletionReceipt.from_dict(data)
+            self._active_completion_receipt = receipt
+            await self.emit(
+                ServerEventType.COMPLETION_RECEIPT,
+                receipt.to_dict(),
+                request_id=self._active_run_context.get("request_id") or None,
+            )
         message = self.adapter.adapt(event, data)
         if message is not None:
             await self.emit(ServerEventType.UI_MESSAGE, ui_message_payload(message))

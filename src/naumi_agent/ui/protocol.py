@@ -58,6 +58,7 @@ class ServerEventType(StrEnum):
     TASK_CREATED = "task/created"
     UI_MESSAGE = "ui/message"
     ENGINE_EVENT = "engine/event"
+    COMPLETION_RECEIPT = "completion/receipt"
     RUN_STARTED = "run/started"
     RUN_COMPLETED = "run/completed"
     RUN_CANCELLED = "run/cancelled"
