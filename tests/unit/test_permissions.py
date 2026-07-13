@@ -147,6 +147,21 @@ class TestPermissionChecker:
         assert not result.allowed
         assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
 
+    @pytest.mark.parametrize("language", [" Bash ", "BASH", "bash\n"])
+    def test_normalized_bash_code_execute_blocks_dangerous_commands_in_bypass(
+        self, language: str
+    ) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check(
+            "code_execute",
+            {"language": language, "code": "rm -rf / && echo done"},
+            tool=CodeExecuteTool(),
+        )
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
     @pytest.mark.parametrize("mode", list(PermissionMode))
     def test_bash_code_execute_blocks_dangerous_commands_in_every_mode(
         self, mode: PermissionMode
@@ -173,6 +188,54 @@ class TestPermissionChecker:
 
         assert result.allowed
         assert result.code is PermissionReasonCode.ALLOWED
+
+    @pytest.mark.parametrize(
+        "mode",
+        [PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
+    )
+    def test_dynamic_mcp_tool_blocks_dangerous_commands_in_every_allowed_mode(
+        self, mode: PermissionMode
+    ) -> None:
+        checker = PermissionChecker(mode)
+
+        result = checker.check("mcp__terminal__run", {"command": "rm -rf /"})
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    @pytest.mark.parametrize(
+        "mode",
+        [PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
+    )
+    def test_dynamic_mcp_tool_blocks_outside_sandbox_cwd_in_every_allowed_mode(
+        self, mode: PermissionMode, tmp_path
+    ) -> None:
+        checker = PermissionChecker(
+            mode,
+            allowed_dirs=[str(tmp_path / "allowed")],
+            workspace_root=str(tmp_path / "allowed"),
+        )
+
+        result = checker.check(
+            "mcp__terminal__run",
+            {"cwd": str(tmp_path / "outside")},
+        )
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.PATH_OUTSIDE_SANDBOX
+
+    def test_dynamic_mcp_tool_uses_common_mode_count_and_session_grant_policy(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+
+        allowed = checker.check("mcp__terminal__run", {"command": "echo hi"})
+        checker.set_mode(PermissionMode.STRICT)
+        blocked = checker.check("mcp__terminal__run", {"command": "echo hi"})
+
+        assert allowed.allowed
+        assert allowed.allow_session_grant is False
+        assert checker.get_call_counts() == {"mcp__terminal__run": 1}
+        assert not blocked.allowed
+        assert blocked.code is PermissionReasonCode.MODE_BLOCKED
 
     def test_path_sandbox_blocks_symlink_escape(self, tmp_path) -> None:
         allowed_dir = tmp_path / "allowed"

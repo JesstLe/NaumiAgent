@@ -904,20 +904,16 @@ class PermissionChecker:
                     ],
                     requires_confirmation=False,
                 )
-            # MCP tools are dynamic — allow based on mode
+            # Dynamic MCP tools use the common safety pipeline.
             elif tool_name.startswith("mcp__"):
-                mcp_allowed = [
-                    PermissionMode.BYPASS,
-                    PermissionMode.PERMISSIVE,
-                    PermissionMode.MODERATE,
-                ]
-                if self._mode in mcp_allowed:
-                    self._call_counts[tool_name] = self._call_counts.get(tool_name, 0) + 1
-                    return PermissionDecision(allowed=True)
-                return self._deny(
-                    f"MCP 工具 `{tool_name}` 不允许在 {self._mode.value} 模式下执行。",
-                    code=PermissionReasonCode.MODE_BLOCKED,
-                    risk_level=PermissionRiskLevel.HIGH,
+                rule = PermissionRule(
+                    tool_name=tool_name,
+                    allowed_modes=[
+                        PermissionMode.BYPASS,
+                        PermissionMode.PERMISSIVE,
+                        PermissionMode.MODERATE,
+                    ],
+                    requires_confirmation=False,
                 )
             else:
                 return self._deny(
@@ -926,7 +922,12 @@ class PermissionChecker:
                     risk_level=PermissionRiskLevel.HIGH,
                 )
 
-        if tool_name == "code_execute" and args.get("language") == "bash":
+        language = args.get("language")
+        if (
+            tool_name == "code_execute"
+            and isinstance(language, str)
+            and language.strip().lower() == "bash"
+        ):
             code = args.get("code")
             if isinstance(code, str) and code:
                 cmd_check = self._check_command(
@@ -973,7 +974,11 @@ class PermissionChecker:
         command_argument_names = (
             metadata.command_argument_names if metadata else ("command",)
         )
-        if tool_name in {"bash_run", "background_run", "runtime_mcp_connect"}:
+        if tool_name.startswith("mcp__") or tool_name in {
+            "bash_run",
+            "background_run",
+            "runtime_mcp_connect",
+        }:
             for arg_name in command_argument_names:
                 if arg_name not in args or not args[arg_name]:
                     continue
