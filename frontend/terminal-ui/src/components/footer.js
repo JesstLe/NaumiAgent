@@ -69,6 +69,18 @@ export function TaskSelectionFooter({ taskPanel }) {
   };
 }
 
+export function NewOutputFooter({ state }) {
+  return {
+    render(ctx) {
+      if (state.followTail || Number(state.unreadOutputCount) <= 0) return [];
+      return wrapAnsiLine(
+        color(ANSI.cyan, `↓ 有 ${state.unreadOutputCount} 条新输出 · End/Ctrl+L 跳到最新`),
+        ctx.width,
+      );
+    },
+  };
+}
+
 export function StatusFooter({ state, env = {} }) {
   return {
     render(ctx) {
@@ -151,6 +163,7 @@ export function renderFooterSections(state, width, env = {}) {
     { name: "todo", lines: TodoFooter({ todo: state.todo }).render(ctx) },
     { name: "task-selection", lines: TaskSelectionFooter({ taskPanel: state.taskPanel }).render(ctx) },
     { name: "command-completion", lines: CommandCompletionFooter({ state }).render(ctx) },
+    { name: "new-output", lines: NewOutputFooter({ state }).render(ctx) },
     { name: "status", lines: StatusFooter({ state, env }).render(ctx) },
     { name: "prompt", lines: PromptFooter({ state }).render(ctx) },
     { name: "help", lines: HelpFooter().render(ctx) },

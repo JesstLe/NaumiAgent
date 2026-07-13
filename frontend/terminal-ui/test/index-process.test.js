@@ -717,6 +717,49 @@ test("terminal UI process restores an unsubmitted multiline draft after restart"
   }
 });
 
+test("terminal UI process preserves detached scroll and jumps back to live output", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("生成一个展示页面\n");
+    await waitForOutput(output, "permission: bash_run");
+
+    app.stdin.write("\x1b[5~");
+    const detached = await waitForDebugEvent(
+      app.debugLogPath,
+      (record) => record.event === "render.screen"
+        && record.payload.follow_tail === false
+        && record.payload.scroll_offset > 0,
+    );
+
+    app.stdin.write("y");
+    await waitForOutput(output, "有 1 条新输出");
+    const unread = await waitForDebugEvent(
+      app.debugLogPath,
+      (record) => record.event === "render.screen"
+        && record.payload.follow_tail === false
+        && record.payload.unread_output_count === 1
+        && record.payload.scroll_offset === detached.payload.scroll_offset,
+    );
+
+    app.stdin.write("\x0c");
+    await waitForDebugEvent(
+      app.debugLogPath,
+      (record) => record.event === "render.screen"
+        && record.ts > unread.ts
+        && record.payload.follow_tail === true
+        && record.payload.unread_output_count === 0
+        && record.payload.scroll_offset === 0,
+    );
+
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
   const debugLogPath = path.join(tmpdir(), `naumi-terminal-ui-debug-${Date.now()}-${Math.random()}.jsonl`);
   const fakeBridge = fixtureName
