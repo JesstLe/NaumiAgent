@@ -17,3 +17,4 @@ node_modules/
 chroma/
 .coverage
 .claude/.naumi/
+.naumi/terminal-ui-state.json

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from dataclasses import dataclass
 
 from naumi_agent.workbench.models import FailureKind, now_iso
@@ -47,8 +48,11 @@ class ValidationRunner:
     ) -> ValidationResult:
         self._ensure_allowed(command.argv)
         started = now_iso()
+        runtime_argv = list(command.argv)
+        if sys.platform == "win32" and runtime_argv[0] == "python3":
+            runtime_argv[0] = sys.executable
         proc = await asyncio.create_subprocess_exec(
-            *command.argv,
+            *runtime_argv,
             cwd=command.cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,

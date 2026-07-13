@@ -42,6 +42,23 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _CLI_STREAM_FRAME_INTERVAL_SECONDS = 0.2
 
 
+def _configure_windows_utf8(
+    *,
+    platform: str | None = None,
+    streams: tuple[Any, ...] | None = None,
+) -> None:
+    """Keep Rich output Unicode-safe in legacy Windows console code pages."""
+    if (sys.platform if platform is None else platform) != "win32":
+        return
+    for stream in streams or (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
+_configure_windows_utf8()
+
+
 def _get_git_info() -> dict[str, str | bool]:
     """Get current git branch and dirty status (TTL-cached 5s)."""
     import subprocess
@@ -1264,6 +1281,7 @@ async def _chat(config_path: str) -> None:
         await cli.run()
     finally:
         debug_trace.close()
+        await engine.shutdown()
 
 
 @app.command()
@@ -1291,6 +1309,8 @@ async def _run_task(task: str, config_path: str) -> None:
     except Exception as e:
         console.print(f"[red]错误: {e}[/red]")
         return
+    finally:
+        await engine.shutdown()
 
     console.print(Markdown(excerpt_markdown_code_blocks(result.response)))
     console.print()
@@ -3012,9 +3032,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
                         py_file.name != "__init__.py"
                         and not _is_protected_file(py_file)
                     ):
-                        modifiable_files.append(
-                            str(py_file.relative_to(source_dir))
-                        )
+                        modifiable_files.append(py_file.relative_to(source_dir).as_posix())
 
         file_list = "\n".join(f"- {f}" for f in modifiable_files)
         prompt += f"\n可修改的文件列表:\n{file_list}"
@@ -3142,7 +3160,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         normalized = re.sub(r"(?<=\.py)#L\d+(?:-L?\d+)?$", "", normalized, flags=re.IGNORECASE)
         try:
             resolved = Path(normalized).expanduser().resolve()
-            return str(resolved.relative_to(source_dir.resolve()))
+            return resolved.relative_to(source_dir.resolve()).as_posix()
         except (OSError, ValueError):
             pass
         for prefix in ("src/naumi_agent/", "naumi_agent/"):

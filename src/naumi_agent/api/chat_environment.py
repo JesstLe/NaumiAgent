@@ -206,7 +206,7 @@ class ChatEnvironmentCollector:
 
     def _relative_path(self, path: Path) -> str | None:
         try:
-            return str(path.relative_to(self._workspace_root))
+            return path.relative_to(self._workspace_root).as_posix()
         except ValueError:
             return None
 

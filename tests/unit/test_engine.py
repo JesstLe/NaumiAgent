@@ -473,7 +473,7 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     async def test_path_in_allowed_dir(self, engine: AgentEngine) -> None:
-        engine._permission_checker._allowed_dirs = ["/tmp"]
+        engine._permission_checker._allowed_dirs = [str(Path("/tmp").resolve())]
         tc = ToolCall(
             id="x", name="file_read",
             arguments='{"path": "/tmp/nonexistent_test_file.txt"}',
