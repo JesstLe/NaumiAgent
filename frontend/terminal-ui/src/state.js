@@ -4,6 +4,9 @@ import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
 import { clearRenderCache, createRenderCache } from "./render-cache.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
 
+const MAX_OUTBOX_MESSAGES = 20;
+const MAX_OUTBOX_ERROR_CHARS = 500;
+
 export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/help", aliases: ["/h"], description: "显示帮助" },
   { command: "/history", description: "查看历史会话列表" },
@@ -882,11 +885,28 @@ export function failQueuedUserMessages(state, error = {}) {
 }
 
 function appendAcceptedUserMessage(state, content, requestId = "", extra = {}) {
+  const normalizedContent = String(content ?? "");
+  const uncertain = state.messages.find(
+    (item) => item.kind === "user"
+      && item.localOutbox
+      && item.deliveryStatus === "uncertain"
+      && item.content === normalizedContent,
+  );
+  if (uncertain) {
+    uncertain.requestId = String(requestId || uncertain.requestId || "");
+    uncertain.deliveryStatus = "accepted";
+    uncertain.errorCode = "";
+    uncertain.errorMessage = "";
+    uncertain.localOutbox = false;
+    Object.assign(uncertain, extra);
+    clearRenderCache(state.renderCache);
+    return uncertain;
+  }
   const message = {
     kind: "user",
     id: nextMessageId(state, "user"),
     requestId: String(requestId ?? ""),
-    content: String(content ?? ""),
+    content: normalizedContent,
     deliveryStatus: "accepted",
     attempt: 1,
     errorCode: "",
@@ -948,6 +968,7 @@ export function createUiSnapshot(state) {
     folds: state.folds,
     foldCursor: state.foldCursor,
     scrollOffset: state.scrollOffset,
+    outbox: serializeUserOutbox(state.messages),
     composer: {
       text: truncateInputText(state.input),
       cursor: getInputCursor(state),
@@ -966,6 +987,7 @@ export function applyUiSnapshot(state, snapshot) {
   state.followTail = state.scrollOffset === 0;
   state.unreadOutputCount = 0;
   state.unreadOutputKeys = {};
+  restoreUserOutbox(state, safeSnapshot.outbox);
   const composer = safeSnapshot.composer && typeof safeSnapshot.composer === "object"
     ? safeSnapshot.composer
     : {};
@@ -976,6 +998,75 @@ export function applyUiSnapshot(state, snapshot) {
     && Number.isFinite(Number(composer.preferredColumn))
     ? Math.max(0, Number(composer.preferredColumn))
     : null;
+}
+
+function serializeUserOutbox(messages) {
+  return messages
+    .filter((message) => message.kind === "user"
+      && message.localOutbox
+      && ["queued", "failed", "uncertain"].includes(message.deliveryStatus))
+    .slice(-MAX_OUTBOX_MESSAGES)
+    .map((message) => ({
+      requestId: String(message.requestId ?? ""),
+      content: truncateInputText(message.content ?? ""),
+      deliveryStatus: message.deliveryStatus,
+      attempt: Math.max(1, Math.floor(Number(message.attempt) || 1)),
+      errorCode: boundedText(message.errorCode, MAX_OUTBOX_ERROR_CHARS),
+      errorMessage: boundedText(message.errorMessage, MAX_OUTBOX_ERROR_CHARS),
+    }));
+}
+
+function restoreUserOutbox(state, rawOutbox) {
+  state.messages = state.messages.filter((message) => !message.localOutbox);
+  if (!Array.isArray(rawOutbox)) return;
+
+  const entries = rawOutbox
+    .map(sanitizeOutboxEntry)
+    .filter(Boolean)
+    .slice(-MAX_OUTBOX_MESSAGES);
+  for (const entry of entries) {
+    const deliveryStatus = entry.deliveryStatus === "queued" ? "uncertain" : entry.deliveryStatus;
+    state.messages.push({
+      kind: "user",
+      id: nextMessageId(state, "user"),
+      requestId: entry.requestId,
+      content: entry.content,
+      deliveryStatus,
+      attempt: entry.attempt,
+      errorCode: entry.errorCode,
+      errorMessage: deliveryStatus === "uncertain"
+        ? "上次发送未获得 Bridge 确认。"
+        : entry.errorMessage,
+      localOutbox: true,
+    });
+    const submitId = entry.requestId.match(/^submit-(\d+)$/)?.[1];
+    if (submitId) {
+      state.nextSubmitId = Math.max(state.nextSubmitId, Number(submitId) + 1);
+    }
+  }
+  if (entries.length) clearRenderCache(state.renderCache);
+}
+
+function sanitizeOutboxEntry(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const requestId = boundedText(value.requestId, MAX_OUTBOX_ERROR_CHARS).trim();
+  const content = truncateInputText(typeof value.content === "string" ? value.content : "");
+  const deliveryStatus = String(value.deliveryStatus ?? "");
+  if (!requestId || !content || !["queued", "failed", "uncertain"].includes(deliveryStatus)) {
+    return null;
+  }
+  return {
+    requestId,
+    content,
+    deliveryStatus,
+    attempt: Math.max(1, Math.floor(Number(value.attempt) || 1)),
+    errorCode: boundedText(value.errorCode, MAX_OUTBOX_ERROR_CHARS),
+    errorMessage: boundedText(value.errorMessage, MAX_OUTBOX_ERROR_CHARS),
+  };
+}
+
+function boundedText(value, maxChars) {
+  return Array.from(String(value ?? "")).slice(0, maxChars).join("");
 }
 
 export function getFoldEntries(state) {

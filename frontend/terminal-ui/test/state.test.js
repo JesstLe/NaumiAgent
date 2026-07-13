@@ -1209,6 +1209,97 @@ test("follow tail snapshot derives detached state without stale unread", () => {
   assert.equal(restored.scrollOffset, 0);
 });
 
+test("outbox snapshot restores queued delivery as uncertain without accepted messages", () => {
+  const source = createInitialState();
+  const send = (_type, _payload, options = {}) => options.id;
+  handleSubmitText(source, "等待确认", send);
+  handleSubmitText(source, "已经确认", send);
+  const [queued, accepted] = source.messages.filter((message) => message.kind === "user");
+  reduceServerEvent(source, {
+    type: "user/message",
+    request_id: accepted.requestId,
+    payload: { content: accepted.content },
+  });
+
+  const snapshot = createUiSnapshot(source);
+  assert.equal(snapshot.outbox.length, 1);
+  assert.equal(snapshot.outbox[0].requestId, queued.requestId);
+
+  const restored = createInitialState();
+  applyUiSnapshot(restored, snapshot);
+  const message = restored.messages.find((item) => item.localOutbox);
+  assert.equal(message.deliveryStatus, "uncertain");
+  assert.equal(message.content, "等待确认");
+  assert.equal(restored.messages.some((item) => item.content === "已经确认"), false);
+});
+
+test("outbox snapshot keeps failures, bounds entries, and ignores malformed values", () => {
+  const restored = createInitialState();
+  applyUiSnapshot(restored, {
+    outbox: [
+      null,
+      { requestId: "", content: "missing id", deliveryStatus: "failed" },
+      { requestId: "accepted", content: "not local", deliveryStatus: "accepted" },
+      ...Array.from({ length: 24 }, (_, index) => ({
+        requestId: `request-${index}`,
+        content: index === 23 ? "x".repeat(200_100) : `消息 ${index}`,
+        deliveryStatus: "failed",
+        attempt: index + 1,
+        errorCode: "offline",
+        errorMessage: "Bridge offline",
+      })),
+    ],
+  });
+
+  const outbox = restored.messages.filter((message) => message.localOutbox);
+  assert.equal(outbox.length, 20);
+  assert.equal(outbox[0].requestId, "request-4");
+  assert.equal(outbox.at(-1).content.length, 200_000);
+  assert(outbox.every((message) => message.deliveryStatus === "failed"));
+});
+
+test("applying an outbox snapshot twice does not duplicate local messages", () => {
+  const state = createInitialState();
+  const snapshot = {
+    outbox: [{
+      requestId: "submit-8",
+      content: "只出现一次",
+      deliveryStatus: "queued",
+      attempt: 1,
+    }],
+  };
+
+  applyUiSnapshot(state, snapshot);
+  applyUiSnapshot(state, snapshot);
+
+  assert.equal(state.messages.filter((message) => message.localOutbox).length, 1);
+  assert.equal(state.nextSubmitId, 9);
+});
+
+test("replayed user content reconciles one uncertain outbox entry", () => {
+  const state = createInitialState();
+  applyUiSnapshot(state, {
+    outbox: [{
+      requestId: "submit-4",
+      content: "可能已发送",
+      deliveryStatus: "queued",
+      attempt: 1,
+    }],
+  });
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "user", content: "可能已发送", is_command: false },
+  });
+
+  const users = state.messages.filter((message) => message.kind === "user");
+  assert.equal(users.length, 1);
+  assert.equal(users[0].requestId, "submit-4");
+  assert.equal(users[0].attempt, 1);
+  assert.equal(users[0].deliveryStatus, "accepted");
+  assert.equal(users[0].localOutbox, false);
+});
+
 test("applying a missing snapshot clears presentation state for a new session", () => {
   const state = createInitialState();
   state.input = "旧会话草稿";
