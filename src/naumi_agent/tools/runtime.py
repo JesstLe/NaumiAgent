@@ -10,6 +10,7 @@ from naumi_agent.background.models import BackgroundStatus
 from naumi_agent.scheduler.models import ScheduleStatus
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tools.base import Tool, ToolMetadata
+from naumi_agent.ui.budget import format_budget_detail
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
@@ -309,9 +310,7 @@ class _RuntimeSnapshot:
             "### 上下文与预算\n"
             f"- 上下文：{context.get('used', 0)}/{context.get('window', 0)} tokens "
             f"({context.get('percentage', 0)}%)\n"
-            f"- 预算：${budget.get('used_usd', 0):.4f}/"
-            f"${budget.get('max_usd', 0):.2f} "
-            f"({budget.get('percentage', 0)}%)\n"
+            f"- 预算：{format_budget_detail(budget)}\n"
             f"- 权限模式：{config.safety.permission_mode}\n"
             f"- 工作区：{self.engine.workspace_root}"
         )
@@ -471,7 +470,8 @@ class _RuntimeSnapshot:
             recommendations.append(
                 "上下文压力较高：优先短输出，必要时触发压缩或读取 runtime_status。"
             )
-        if budget.get("percentage", 0) >= 80:
+        budget_percentage = budget.get("percentage")
+        if isinstance(budget_percentage, int | float) and budget_percentage >= 80:
             recommendations.append("预算接近上限：优先使用 fast/本地扫描，避免长推理。")
 
         try:
