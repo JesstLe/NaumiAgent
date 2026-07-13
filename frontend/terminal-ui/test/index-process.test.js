@@ -9,12 +9,49 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { stripAnsi } from "../src/ansi.js";
 
+test("terminal UI startup welcome transitions from booting to ready and dismisses", async () => {
+  const app = launchTerminalUi("fake-bridge.js", {
+    env: { NAUMI_TEST_READY_DELAY_MS: "80" },
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "正在启动本地运行时", 7000);
+    await waitForLatestScreen(output, "NaumiAgent v0.1.214", 7000);
+    await waitForLatestScreen(output, "模型 openai/kimi-for-coding", 7000);
+    await waitForLatestScreen(output, "模式 default · 权限 moderate", 7000);
+
+    app.stdin.write("检查欢迎页\n");
+    await waitForLatestScreenWithout(output, "NaumiAgent v0.1.214", 7000);
+    await waitForLatestScreen(output, "检查欢迎页", 7000);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI welcome consumes identity from the real Python JSONL Bridge", async () => {
+  const app = launchTerminalUi("python-bridge-fixture.py", {
+    bridgeCommandJson: [pythonExecutable(), "test/fixtures/python-bridge-fixture.py"],
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForLatestScreen(output, "NaumiAgent v0.1.214", 7000);
+    await waitForLatestScreen(output, "模型 python-fixture-capable", 7000);
+    await waitForLatestScreen(output, "模式 default · 权限 moderate", 7000);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process handles submit, mode switch, permission, and tool rendering", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("\x1b[Z");
     await waitForOutput(output, "mode: plan");
     app.stdin.write("\x1b[Z");
@@ -70,7 +107,7 @@ test("terminal UI process can launch bridge from JSON argv", async () => {
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("json bridge\n");
     await waitForOutput(output, "json bridge");
 
@@ -96,7 +133,7 @@ test("terminal UI process creates one workbench task from the composer", async (
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("\x14");
     await waitForOutput(output, "task >");
 
@@ -123,7 +160,7 @@ test("terminal UI process cancels one run without exiting the session", async ()
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("需要取消的运行\n");
     await waitForOutput(output, "permission: bash_run", 7000);
 
@@ -153,7 +190,7 @@ test("terminal UI process keeps explicit plan mode across status refreshes", asy
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/mode plan\n");
     await waitForOutput(output, "mode: plan");
 
@@ -184,7 +221,7 @@ test("terminal UI process talks to the Python JSONL bridge fixture", async () =>
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("\x1b[105;5u");
     await waitForLatestScreen(output, "Runtime Inspector", 7000);
     await waitForLatestScreen(output, "同步 Python Bridge", 7000);
@@ -250,7 +287,7 @@ test("terminal UI process reports invalid bridge protocol records without crashi
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("bad bridge event\n");
     await waitForOutput(output, "bridge protocol");
     await waitForOutput(output, "未知 Bridge 事件");
@@ -276,7 +313,7 @@ test("terminal UI process treats Shift+Tab as bypass while permission is pending
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
 
     app.stdin.write("生成一个展示页面\n");
     await waitForOutput(output, "permission: bash_run");
@@ -307,7 +344,7 @@ test("terminal UI process renders resume replay from typed UI messages", async (
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/resume\n");
     await waitForOutput(output, "已恢复会话: 恢复测试");
     await waitForOutput(output, "继续检查 config.yaml");
@@ -329,7 +366,7 @@ test("terminal UI process submits cursor-edited input text", async () => {
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("helo\x1b[Dl\n");
     await waitForOutput(output, "hello");
 
@@ -349,7 +386,7 @@ test("terminal UI process supports home, end, delete, and backspace editing", as
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("bc\x1b[Ha\x1b[Fdx\b\x1b[D\x1b[3~\n");
     await waitForOutput(output, "abc");
 
@@ -369,7 +406,7 @@ test("terminal UI process recalls submitted input with arrow history", async () 
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("first\n");
     await waitForOutput(output, "submit#1:first");
 
@@ -392,7 +429,7 @@ test("terminal UI process shows debug paths with /debug", async () => {
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/debug\n");
     await waitForOutput(output, "前端日志:");
     await waitForOutput(output, app.debugLogPath);
@@ -411,7 +448,7 @@ test("terminal UI process opens task panel through bridge protocol", async () =>
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks\n");
     await waitForOutput(output, "tasks todo 1");
     await waitForOutput(output, "#1 [running] 写入页面");
@@ -438,7 +475,7 @@ test("terminal UI process opens filtered task panel through bridge protocol", as
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks background running 6\n");
     await waitForOutput(output, "filter source=background status=running");
 
@@ -463,7 +500,7 @@ test("terminal UI process opens task detail through bridge protocol", async () =
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks detail bg_0001\n");
     await waitForOutput(output, "detail=bg_0001");
     await waitForOutput(output, "类型: Background");
@@ -488,7 +525,7 @@ test("terminal UI process opens selected task detail with keyboard", async () =>
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks\n");
     await waitForOutput(output, "task: 1/3 1");
     app.stdin.write("\n");
@@ -515,7 +552,7 @@ test("terminal UI process sends task cancel through bridge protocol", async () =
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks cancel bg_0001\n");
     await waitForOutput(output, "已请求取消all任务 bg_0001");
 
@@ -539,7 +576,7 @@ test("terminal UI process uses focused task action keys", async () => {
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks\n");
     await waitForOutput(output, "Tab/n 选择");
     app.stdin.write("e");
@@ -567,7 +604,7 @@ test("terminal UI process folds timeline sources locally", async () => {
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks\n");
     await waitForOutput(output, "run_7");
     await waitForOutput(output, "sources: background 1");
@@ -593,7 +630,7 @@ test("terminal UI process refreshes pinned task panel on task status changes", a
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks pin\n");
     await waitForOutput(output, "tasks todo 1");
     await waitForOutput(output, "tasks: bg 1");
@@ -619,7 +656,7 @@ test("terminal UI process opens doctor diagnostics through bridge protocol", asy
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/doctor\n");
     await waitForOutput(output, "doctor: ## 环境诊断存在提醒");
     await waitForOutput(output, "PASS Python 环境");
@@ -646,7 +683,7 @@ test("terminal UI process selects slash completion before deliberate submit", as
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/d");
     await waitForLatestScreen(output, "命令补全");
     app.stdin.write("\x1b[B");
@@ -682,7 +719,7 @@ test("terminal UI process opens permission panel through bridge protocol", async
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/permissions\n");
     await waitForOutput(output, "permissions pending 1");
     await waitForOutput(output, "perm-1 main -> bash_run");
@@ -709,7 +746,7 @@ test("terminal UI process toggles reasoning display through bridge protocol", as
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     await waitForOutput(output, "reasoning: off");
     app.stdin.write("/reasoning on\n");
     await waitForOutput(output, "reasoning 文本显示已开启。");
@@ -737,7 +774,7 @@ test("terminal UI process keeps bracketed multiline paste atomic until submit", 
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("\x1b[20");
     await delay(20);
     app.stdin.write("0~第一行\n第二行\x1b[20");
@@ -768,7 +805,7 @@ test("terminal UI process inserts Shift Enter and submits multiline text with Ct
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("检查 API");
     app.stdin.write("\x1b[13;2u");
     app.stdin.write("修复测试");
@@ -801,7 +838,7 @@ test("terminal UI process restores an unsubmitted multiline draft after restart"
   const firstOutput = collectOutput(first);
 
   try {
-    await waitForOutput(firstOutput, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(firstOutput, 7000);
     first.stdin.write("保留第一行\x1b[13;2u保留第二行");
     await waitForOutput(firstOutput, "保留第二行");
     await delay(180);
@@ -827,7 +864,7 @@ test("terminal UI process preserves detached scroll and jumps back to live outpu
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("生成一个展示页面\n");
     await waitForOutput(output, "permission: bash_run");
 
@@ -870,7 +907,7 @@ test("terminal UI process shows queued, accepted, failed, and retried delivery l
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("生命周期测试\n");
     await waitForLatestScreen(output, "发送中...");
     await waitForLatestScreen(output, "已确认普通消息");
@@ -903,7 +940,7 @@ test("terminal UI process restores queued outbox as uncertain without automatic 
   const firstOutput = collectOutput(first);
 
   try {
-    await waitForOutput(firstOutput, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(firstOutput, 7000);
     first.stdin.write("等待重启确认\n");
     await waitForLatestScreen(firstOutput, "发送中...");
     assert.equal(await stopTerminalUi(first), 0);
@@ -946,7 +983,7 @@ test("terminal UI process restores project history and accepts search without se
   const firstOutput = collectOutput(first);
 
   try {
-    await waitForOutput(firstOutput, "新终端 UI 已连接 Python bridge。");
+    await waitForReadyWelcome(firstOutput, 7000);
     first.stdin.write("/doctor\x1b[13;5u");
     await delay(120);
     first.stdin.write("历史 alpha\n");
@@ -958,7 +995,7 @@ test("terminal UI process restores project history and accepts search without se
     const second = launchTerminalUi("message-lifecycle-bridge.js", { statePath });
     const secondOutput = collectOutput(second);
     try {
-      await waitForOutput(secondOutput, "新终端 UI 已连接 Python bridge。");
+      await waitForReadyWelcome(secondOutput, 7000);
       second.stdin.write("保留草稿");
       second.stdin.write("\x12alpha");
       await waitForLatestScreen(secondOutput, "历史搜索");
@@ -1027,7 +1064,7 @@ test("terminal UI process controls agents through the Python JSONL bridge", asyn
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/agents\n");
     await waitForLatestScreen(output, "Agent Control Center", 7000);
     await waitForLatestScreen(output, "Python Bridge 编程 Agent", 7000);
@@ -1062,7 +1099,7 @@ test("terminal UI process keeps inspector live without stealing drafts or permis
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("\x1b[105;5u");
     await waitForLatestScreen(output, "Runtime Inspector");
     await waitForLatestScreen(output, "保持运行检查器实时更新");
@@ -1111,7 +1148,7 @@ test("terminal UI process opens agent control and confirms exactly one stop", as
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/agents\n");
     await waitForLatestScreen(output, "Agent Control Center", 7000);
     await waitForLatestScreen(output, "真实编程 Agent", 7000);
@@ -1153,7 +1190,7 @@ test("terminal UI permission modal wins over agent page action keys", async () =
   const output = collectOutput(app);
 
   try {
-    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    await waitForReadyWelcome(output, 7000);
     app.stdin.write("/agents\n");
     await waitForLatestScreen(output, "Agent Control Center", 7000);
     await waitForLatestScreen(output, "permission: agent_sensitive_tool", 7000);
@@ -1191,7 +1228,7 @@ test("terminal UI process restores an open agent page with a fresh backend snaps
   const firstOutput = collectOutput(first);
 
   try {
-    await waitForOutput(firstOutput, "新终端 UI 已连接 Python bridge。", 7000);
+    await waitForReadyWelcome(firstOutput, 7000);
     first.stdin.write("/agents\n");
     await waitForLatestScreen(firstOutput, "Agent Control Center", 7000);
     assert.equal(await stopTerminalUi(first), 0);
@@ -1227,7 +1264,7 @@ test("terminal UI process restores an open session inspector with a fresh backen
   const firstOutput = collectOutput(first);
 
   try {
-    await waitForOutput(firstOutput, "新终端 UI 已连接 Python bridge。", 7000);
+    await waitForReadyWelcome(firstOutput, 7000);
     first.stdin.write("\x1b[105;5u");
     await waitForLatestScreen(firstOutput, "Runtime Inspector");
     assert.equal(await stopTerminalUi(first), 0);
@@ -1353,6 +1390,10 @@ async function waitForLatestScreen(output, needle, timeoutMs = 2000) {
     await delay(20);
   }
   assert.fail(`等待最新画面超时: ${needle}\n\n${latestScreen(output).slice(-3000)}`);
+}
+
+async function waitForReadyWelcome(output, timeoutMs = 7000) {
+  await waitForLatestScreen(output, "NaumiAgent v0.1.214", timeoutMs);
 }
 
 async function waitForLatestScreenWithout(output, needle, timeoutMs = 2000) {

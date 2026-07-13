@@ -15,16 +15,106 @@ import {
   handleSubmitText,
   hasTaskPanelFocus,
   getSlashCommandCompletions,
+  pushSystemMessage,
   reduceServerEvent,
   requestRunCancel,
   selectTaskPanelOffset,
   setTaskPanelFocus,
   retryUserMessage,
   submitTaskMessage,
+  submitUserMessage,
   toggleComposerIntent,
   toggleAgentControlCenter,
   toggleRuntimeInspector,
 } from "../src/state.js";
+
+test("welcome becomes ready without creating a timeline message", () => {
+  const state = createInitialState();
+  assert.deepEqual(state.welcome, { phase: "booting", dismissed: false });
+
+  reduceServerEvent(state, {
+    type: "ready",
+    payload: {
+      version: "0.1.214",
+      workspace_root: "/tmp/project",
+      model: "openai/gpt-5.4",
+      mode: "default",
+      permission_mode: "moderate",
+    },
+  });
+
+  assert.deepEqual(state.welcome, { phase: "ready_empty", dismissed: false });
+  assert.equal(state.messages.length, 0);
+});
+
+test("chat and task submissions dismiss welcome before transport completion", () => {
+  for (const intent of ["chat", "task"]) {
+    const state = createInitialState();
+    const sent = [];
+    state.welcome.phase = "ready_empty";
+    const send = (type, payload) => sent.push({ type, payload });
+
+    if (intent === "chat") submitUserMessage(state, "你好", send);
+    else submitTaskMessage(state, "实现欢迎页", send);
+
+    assert.deepEqual(state.welcome, { phase: "dismissed", dismissed: true });
+    assert.equal(state.messages[0].deliveryStatus, "queued");
+    assert.equal(sent[0].type, intent === "chat" ? "submit" : "task_submit");
+  }
+});
+
+test("backend user events replay and errors dismiss welcome idempotently", () => {
+  const cases = [
+    { type: "user/message", payload: { content: "远端消息" } },
+    { type: "task/created", payload: { task: { id: "1" }, mission: {}, issue: {} } },
+    { type: "session/replayed", payload: { session_id: "old", title: "旧会话" } },
+    { type: "error", payload: { code: "bridge_failed", message: "Bridge 失败" } },
+  ];
+  for (const record of cases) {
+    const state = createInitialState();
+    reduceServerEvent(state, record);
+    assert.deepEqual(state.welcome, { phase: "dismissed", dismissed: true });
+  }
+});
+
+test("clear mode status drafts and snapshots do not mutate welcome lifecycle", () => {
+  const state = createInitialState();
+  state.welcome.phase = "ready_empty";
+  reduceServerEvent(state, {
+    type: "runtime/status",
+    payload: { model: "openai/gpt-5.4" },
+  });
+  reduceServerEvent(state, {
+    type: "mode/changed",
+    payload: { mode: "plan", status: { mode: "plan", permission_mode: "strict" } },
+  });
+  assert.deepEqual(state.welcome, { phase: "ready_empty", dismissed: false });
+
+  submitUserMessage(state, "第一条", () => {});
+  handleSubmitText(state, "/clear", () => {});
+  assert.deepEqual(state.welcome, { phase: "dismissed", dismissed: true });
+  assert.equal(Object.hasOwn(createUiSnapshot(state), "welcome"), false);
+
+  applyUiSnapshot(state, { welcome: { phase: "ready_empty", dismissed: false } });
+  assert.deepEqual(state.welcome, { phase: "dismissed", dismissed: true });
+});
+
+test("only explicit infrastructure notices dismiss welcome", () => {
+  const state = createInitialState();
+  state.welcome.phase = "ready_empty";
+
+  pushSystemMessage(state, "mode", "已切换到 plan 模式。", "warning");
+  assert.deepEqual(state.welcome, { phase: "ready_empty", dismissed: false });
+
+  pushSystemMessage(
+    state,
+    "bridge protocol",
+    "Bridge 协议损坏。",
+    "error",
+    { dismissWelcome: true },
+  );
+  assert.deepEqual(state.welcome, { phase: "dismissed", dismissed: true });
+});
 
 function agentSnapshot(revision = 1) {
   return {

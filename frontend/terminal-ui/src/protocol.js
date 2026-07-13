@@ -114,6 +114,9 @@ export function normalizeServerRecord(record) {
 }
 
 function normalizeServerPayload(type, payload) {
+  if (type === "ready" || type === "runtime/status") {
+    return normalizeRuntimeStatus(payload, type);
+  }
   if (type === "user/message") {
     return { ...payload, content: String(payload.content ?? "") };
   }
@@ -168,7 +171,7 @@ function normalizeServerPayload(type, payload) {
     return {
       ...payload,
       mode: String(payload.mode ?? "").trim().toLowerCase(),
-      status: normalizeObject(payload.status),
+      status: normalizeRuntimeStatus(payload.status, "mode/changed.status"),
     };
   }
   if (type === "permission/resolved") {
@@ -250,6 +253,26 @@ function normalizeServerPayload(type, payload) {
     };
   }
   return { ...payload };
+}
+
+function normalizeRuntimeStatus(payload, source = "runtime/status") {
+  const status = normalizeObject(payload);
+  const normalized = { ...status };
+  for (const key of ["version", "workspace_root", "model", "mode", "permission_mode"]) {
+    if (!Object.hasOwn(status, key)) continue;
+    const text = strictStatusText(status[key], `${source}.${key}`);
+    normalized[key] = ["mode", "permission_mode"].includes(key)
+      ? text.toLowerCase()
+      : text;
+  }
+  return normalized;
+}
+
+function strictStatusText(value, name) {
+  if (typeof value !== "string") {
+    throw new Error(`${name} 必须是字符串`);
+  }
+  return publicText(value);
 }
 
 function normalizeObject(value) {

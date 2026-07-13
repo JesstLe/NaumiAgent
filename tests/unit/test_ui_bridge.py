@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from naumi_agent import __version__
 from naumi_agent.agents.base import AgentResult as SubAgentResult
 from naumi_agent.background.models import BackgroundStatus
 from naumi_agent.config.settings import AppConfig, MemoryConfig
@@ -1215,6 +1216,34 @@ async def test_bridge_status_payload_includes_session_id() -> None:
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
 
     assert bridge.status_payload()["session_id"] == "session-abc"
+
+
+def test_bridge_status_payload_exposes_authoritative_product_identity() -> None:
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+
+    payload = bridge.status_payload()
+
+    assert payload["version"] == __version__
+    assert payload["model"] == "fake-capable"
+    assert payload["workspace_root"]
+    assert payload["mode"] == "default"
+    assert payload["permission_mode"] == "moderate"
+
+
+@pytest.mark.asyncio
+async def test_bridge_ready_event_carries_authoritative_product_identity() -> None:
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.emit_ready()
+
+    ready = _records(writer)[0]
+    assert ready["type"] == "ready"
+    assert ready["payload"]["version"] == __version__
+    assert ready["payload"]["model"] == "fake-capable"
+    assert ready["payload"]["workspace_root"]
+    assert ready["payload"]["permission_mode"] == "moderate"
 
 
 def test_bridge_status_payload_includes_slash_command_list(monkeypatch: pytest.MonkeyPatch) -> None:

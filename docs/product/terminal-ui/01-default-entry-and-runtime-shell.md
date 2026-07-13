@@ -9,7 +9,8 @@
 - `src/naumi_agent/main.py` 已有 `chat` 和 `ui` 命令，新 UI 仍需显式调用。
 - `frontend/terminal-ui/src/index.js` 会进入 alternate screen、隐藏光标并生成 Bridge 子进程。
 - 默认 Bridge 依赖 `uv run python -m naumi_agent.ui.bridge`，已支持外部 bridge command 覆盖。
-- Bridge 非预期退出会显示错误，但缺少面向用户的恢复选择和启动前诊断。
+- 新 Terminal UI 已具备渲染层专用启动欢迎页：进程启动立即显示响应式 NAUMI，Bridge ready 后展示权威版本、工作区、模型与权限模式；首条 chat/task 提交后收起，不写入消息、会话或 UI snapshot。
+- 仍未完成的是启动前依赖诊断、ready 超时恢复选择、安装态资源解析和旧入口迁移；这些不由欢迎页伪装为完成。
 
 ## 3. 目标命令面
 
