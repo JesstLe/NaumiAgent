@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from naumi_agent.config.settings import AppConfig
@@ -12,6 +13,7 @@ class TestAppConfig:
         config = AppConfig()
         assert config.models.default_model == "claude-sonnet-4-6"
         assert config.safety.max_turns == 30
+        assert config.safety.max_parallel_tools == 4
         assert config.memory.session_db_path == "data/sessions.db"
         assert config.ui.theme == "dark"
         assert config.ui.output_style == "detailed"
@@ -129,3 +131,14 @@ class TestAppConfig:
         example_path = Path(__file__).resolve().parents[2] / "config.yaml.example"
         config = AppConfig.from_yaml(example_path)
         assert config.api.port == 8765
+
+    @pytest.mark.parametrize("value", [0, 17])
+    def test_parallel_tool_limit_rejects_out_of_range_values(self, value: int) -> None:
+        with pytest.raises(ValueError):
+            AppConfig(safety={"max_parallel_tools": value})  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("value", [1, 4, 16])
+    def test_parallel_tool_limit_accepts_supported_values(self, value: int) -> None:
+        config = AppConfig(safety={"max_parallel_tools": value})  # type: ignore[arg-type]
+
+        assert config.safety.max_parallel_tools == value

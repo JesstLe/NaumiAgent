@@ -202,6 +202,7 @@ def _normalize_client_payload(
             "status": str(payload.get("status") or "all").strip().lower().replace("-", "_"),
             "pinned": _to_bool(payload.get("pinned")),
             "refresh": _to_bool(payload.get("refresh")),
+            "history": _to_bool(payload.get("history")),
         }
         if detail_id:
             normalized["detail_id"] = detail_id

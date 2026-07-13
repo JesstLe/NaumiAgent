@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import socket
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -56,6 +57,100 @@ class TestBackgroundRunner:
         assert finished.exit_code == 0
         assert "background done" in runner.read_output(task.id)
         await runner.shutdown()
+
+
+class TestBackgroundRetention:
+    def _task(
+        self,
+        store: BackgroundTaskStore,
+        task_id: str,
+        *,
+        status: BackgroundStatus = BackgroundStatus.COMPLETED,
+        completed_at: str,
+        output_path: Path | None = None,
+    ) -> BackgroundTask:
+        path = output_path or store.artifacts_dir / f"{task_id}.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(task_id, encoding="utf-8")
+        task = BackgroundTask(
+            id=task_id,
+            command="echo done",
+            cwd=str(store.base_dir),
+            status=status,
+            output_path=str(path),
+            started_at=completed_at,
+            completed_at=completed_at if status != BackgroundStatus.RUNNING else "",
+            notified=True,
+        )
+        store.save(task)
+        return task
+
+    def test_prune_removes_expired_terminal_record_and_artifact(self, tmp_path: Path) -> None:
+        store = BackgroundTaskStore(tmp_path / "background")
+        now = datetime(2026, 7, 13, 12, 0, 0)
+        old = self._task(
+            store,
+            "bg_0001",
+            completed_at=(now - timedelta(days=8)).isoformat(),
+        )
+
+        result = store.prune(now=now, retention_days=7, max_records=100)
+
+        assert result.records_deleted == 1
+        assert result.artifacts_deleted == 1
+        assert store.get(old.id) is None
+        assert not Path(old.output_path).exists()
+
+    def test_prune_keeps_only_newest_terminal_records(self, tmp_path: Path) -> None:
+        store = BackgroundTaskStore(tmp_path / "background")
+        now = datetime(2026, 7, 13, 12, 0, 0)
+        for index in range(1, 103):
+            self._task(
+                store,
+                f"bg_{index:04d}",
+                completed_at=(now - timedelta(minutes=103 - index)).isoformat(),
+            )
+
+        result = store.prune(now=now, retention_days=7, max_records=100)
+
+        assert result.records_deleted == 2
+        assert store.get("bg_0001") is None
+        assert store.get("bg_0002") is None
+        assert len(store.list_tasks()) == 100
+
+    def test_prune_never_removes_running_record(self, tmp_path: Path) -> None:
+        store = BackgroundTaskStore(tmp_path / "background")
+        now = datetime(2026, 7, 13, 12, 0, 0)
+        running = self._task(
+            store,
+            "bg_0001",
+            status=BackgroundStatus.RUNNING,
+            completed_at=(now - timedelta(days=30)).isoformat(),
+        )
+
+        result = store.prune(now=now, retention_days=7, max_records=0)
+
+        assert result.records_deleted == 0
+        assert store.get(running.id) is not None
+        assert Path(running.output_path).exists()
+
+    def test_prune_refuses_external_artifact_and_keeps_record(self, tmp_path: Path) -> None:
+        store = BackgroundTaskStore(tmp_path / "background")
+        now = datetime(2026, 7, 13, 12, 0, 0)
+        external = tmp_path / "do-not-delete.log"
+        task = self._task(
+            store,
+            "bg_0001",
+            completed_at=(now - timedelta(days=8)).isoformat(),
+            output_path=external,
+        )
+
+        result = store.prune(now=now, retention_days=7, max_records=100)
+
+        assert result.records_deleted == 0
+        assert result.errors
+        assert store.get(task.id) is not None
+        assert external.exists()
 
     @pytest.mark.asyncio
     async def test_failed_command_records_exit_code(self, runner: BackgroundRunner) -> None:
@@ -153,6 +248,65 @@ class TestBackgroundRunner:
         assert stored is not None
         assert stored.status == BackgroundStatus.FAILED
         assert "进程已不存在" in stored.error
+
+
+class TestBackgroundLifecycleRelease:
+    @pytest.mark.asyncio
+    async def test_finished_process_releases_runtime_maps(
+        self,
+        runner: BackgroundRunner,
+    ) -> None:
+        task = await runner.run(f'{sys.executable} -c "print(\"done\")"')
+
+        await _wait_for_finished(runner, task.id)
+
+        assert task.id not in runner._processes
+        assert task.id not in runner._watchers
+        await runner.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_notification_moves_terminal_task_from_active_to_history(
+        self,
+        runner: BackgroundRunner,
+    ) -> None:
+        task = await runner.run(f'{sys.executable} -c "raise SystemExit(3)"')
+        await _wait_for_finished(runner, task.id)
+
+        assert [item.id for item in runner.list_active_tasks()] == [task.id]
+        assert runner.list_history() == []
+
+        notifications = runner.collect_notifications()
+
+        assert len(notifications) == 1
+        assert runner.list_active_tasks() == []
+        assert [item.id for item in runner.list_history()] == [task.id]
+        await runner.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_reports_expired_history_pruning(
+        self,
+        tmp_path: Path,
+        runner: BackgroundRunner,
+    ) -> None:
+        output_path = runner.store.artifacts_dir / "bg_0900.log"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("old", encoding="utf-8")
+        runner.store.save(BackgroundTask(
+            id="bg_0900",
+            command="echo old",
+            cwd=str(tmp_path),
+            status=BackgroundStatus.COMPLETED,
+            output_path=str(output_path),
+            started_at="2026-01-01T00:00:00",
+            completed_at="2026-01-01T00:00:01",
+            notified=True,
+        ))
+
+        result = await runner.cleanup()
+
+        assert "清理历史记录 1 个" in result
+        assert "删除日志 1 个" in result
+        assert runner.get("bg_0900") is None
 
 
 class TestBackgroundTools:

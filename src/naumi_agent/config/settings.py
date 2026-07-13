@@ -55,6 +55,7 @@ class SafetyConfig(BaseSettings):
     allowed_dirs: list[str] = Field(default_factory=lambda: ["/workspace", str(Path.cwd())])
     max_budget_usd: float = 5.0
     max_turns: int = 30
+    max_parallel_tools: int = Field(default=4, ge=1, le=16)
     max_input_tokens: int = 500_000
 
 

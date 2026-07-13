@@ -167,6 +167,7 @@ export function createInitialState() {
       limit: 12,
       source: "all",
       status: "all",
+      history: false,
       detailId: "",
       selectedId: "",
       selectedIndex: 0,
@@ -907,7 +908,7 @@ function handleTasksCommand(state, text, send) {
     handleTaskTimelineCommand(state, raw);
     return;
   }
-  const { command, commandArg, limit, source, status, detailId } = parseTaskCommand(raw, state.taskPanel.limit);
+  const { command, commandArg, limit, source, status, detailId, history } = parseTaskCommand(raw, state.taskPanel.limit);
   if (command === "off") {
     closeTaskPanel(state);
     pushSystemMessage(state, "任务面板", "已取消钉住。", "info");
@@ -958,6 +959,7 @@ function handleTasksCommand(state, text, send) {
   state.taskPanel.limit = limit;
   state.taskPanel.source = source;
   state.taskPanel.status = status;
+  state.taskPanel.history = history;
   state.taskPanel.detailId = detailId;
   state.taskPanel.focused = true;
   if (command === "pin") {
@@ -1032,6 +1034,12 @@ function parseTaskCommand(raw, fallbackLimit = 12) {
   let source = "all";
   let status = "all";
   let detailId = "";
+  let history = false;
+  if (tokens[0] === "history") {
+    tokens.shift();
+    history = true;
+    source = "background";
+  }
   if (["pin", "refresh", "off", "detail", "next", "prev", "select", "open", "jump", "expand", "collapse", "clear", "cancel", "focus", "blur"].includes(tokens[0])) {
     command = tokens.shift();
     if (["select", "cancel", "jump", "expand", "collapse"].includes(command) && tokens[0]) {
@@ -1053,7 +1061,7 @@ function parseTaskCommand(raw, fallbackLimit = 12) {
       detailId = String(rawValue ?? "").trim();
     }
   }
-  return { command, commandArg, limit, source, status, detailId };
+  return { command, commandArg, limit, source, status, detailId, history };
 }
 
 function normalizeTaskFilterToken(value) {
@@ -1069,6 +1077,7 @@ function closeTaskPanel(state) {
   state.taskPanel.pinned = false;
   state.taskPanel.lastStatusSignature = "";
   state.taskPanel.detailId = "";
+  state.taskPanel.history = false;
   state.taskPanel.selectedId = "";
   state.taskPanel.selectedIndex = 0;
   state.taskPanel.items = [];
@@ -1098,6 +1107,7 @@ function taskPanelRefreshAction(state) {
     status: state.taskPanel.status,
   };
   if (state.taskPanel.detailId) action.detailId = state.taskPanel.detailId;
+  if (state.taskPanel.history) action.history = true;
   return action;
 }
 
@@ -1259,6 +1269,7 @@ function sendCurrentTaskPanelRequest(state, send, overrides = {}) {
     refresh: Boolean(overrides.refresh),
   };
   if (state.taskPanel.detailId) payload.detail_id = state.taskPanel.detailId;
+  if (state.taskPanel.history) payload.history = true;
   send("task_panel", payload);
 }
 

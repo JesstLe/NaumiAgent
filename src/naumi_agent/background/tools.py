@@ -112,14 +112,25 @@ class BackgroundListTool(Tool):
 
     @property
     def description(self) -> str:
-        return "列出所有后台任务。"
+        return "列出活跃或未确认后台任务；可选择查看已确认历史。"
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
-        return {"type": "object", "properties": {}, "required": []}
+        return {
+            "type": "object",
+            "properties": {
+                "history": {
+                    "type": "boolean",
+                    "description": "为 true 时列出已确认的历史任务。",
+                    "default": False,
+                },
+            },
+            "required": [],
+        }
 
-    async def execute(self, **kwargs: Any) -> str:
-        return format_task_list(self._runner.list_tasks())
+    async def execute(self, *, history: bool = False, **kwargs: Any) -> str:
+        tasks = self._runner.list_history() if history else self._runner.list_active_tasks()
+        return format_task_list(tasks)
 
 
 class BackgroundCancelTool(Tool):

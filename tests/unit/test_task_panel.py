@@ -101,6 +101,31 @@ class FakeCancelledBackgroundRunner:
         ]
 
 
+class FakeHistoryBackgroundRunner:
+    def list_active_tasks(self) -> list[BackgroundTask]:
+        return [
+            BackgroundTask(
+                id="bg_active",
+                command="sleep 5",
+                cwd="/tmp/project",
+                status=BackgroundStatus.RUNNING,
+                output_path="/tmp/bg-active.log",
+            )
+        ]
+
+    def list_history(self) -> list[BackgroundTask]:
+        return [
+            BackgroundTask(
+                id="bg_history",
+                command="pytest -q",
+                cwd="/tmp/project",
+                status=BackgroundStatus.COMPLETED,
+                output_path="/tmp/bg-history.log",
+                notified=True,
+            )
+        ]
+
+
 class FakeBrowserTaskRunner:
     def list_runs(self, limit: int = 12) -> list[dict[str, Any]]:
         return [
@@ -148,6 +173,11 @@ class FakeCancelledBackgroundEngine(FakeEngine):
 
     def get_recent_permission_bubbles(self, limit: int = 12) -> list[dict[str, str]]:
         return []
+
+
+class FakeHistoryBackgroundEngine(FakeCancelledBackgroundEngine):
+    def __init__(self) -> None:
+        self.background_runner = FakeHistoryBackgroundRunner()
 
 
 @pytest.mark.asyncio
@@ -297,6 +327,23 @@ async def test_render_task_panel_filters_background_by_raw_lifecycle_status() ->
     assert "bg_cancel" in text
     assert "sleep 60" in text
     assert "exit=-15" in text
+
+
+@pytest.mark.asyncio
+async def test_task_panel_separates_active_background_tasks_from_history() -> None:
+    active = await build_task_panel_snapshot(
+        FakeHistoryBackgroundEngine(),
+        source="background",
+    )
+    history = await build_task_panel_snapshot(
+        FakeHistoryBackgroundEngine(),
+        source="background",
+        history=True,
+    )
+
+    assert [item.task_id for item in active.background_tasks] == ["bg_active"]
+    assert [item.task_id for item in history.background_tasks] == ["bg_history"]
+    assert history.filters.history is True
 
 
 def test_render_task_panel_snapshot_handles_empty_state() -> None:

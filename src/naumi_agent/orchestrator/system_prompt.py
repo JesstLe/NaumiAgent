@@ -71,6 +71,7 @@ TASK_MANAGEMENT_SECTION = """\
 - **task_delete**: Remove a task that's no longer needed.
 - Always create tasks BEFORE starting work on multi-step problems.
 - Mark tasks completed immediately when done; use todo_write for multiple related changes.
+- Before the final answer, explicitly move every in_progress task to completed, blocked, or pending.
 """
 
 CONTEXT_HYGIENE_SECTION = """\
