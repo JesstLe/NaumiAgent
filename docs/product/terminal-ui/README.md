@@ -19,7 +19,7 @@
 
 | 模块 | 已完成 | 下一切片 |
 |---|---|---|
-| 01 默认入口与运行壳 | 默认 Terminal UI、跨平台启动、诊断与兼容回退、响应式启动欢迎页（巨大 NAUMI、后端权威版本/工作区/模型/模式、首条消息后收起） | 进入发布门禁时补安装态矩阵 |
+| 01 默认入口与运行壳 | 默认 Terminal UI、跨平台启动、诊断与兼容回退、响应式启动欢迎页（巨大 NAUMI、后端权威版本/工作区/模型/模式、首条消息后收起）、预算状态真实区分“不限”和显式上限 | 进入发布门禁时补安装态矩阵 |
 | 02 对话时间线与输入器 | 多行编辑、原子 paste、受限高度 Composer、会话草稿恢复、`follow_tail`、语义未读计数、resize 消息锚点、用户消息发送确认/去重/失败重试、uncertain outbox 恢复、`Ctrl+R` 项目历史搜索、UI state v3 迁移、斜杠命令候选键盘选择、`chat | task` 输入模式、真实 `/task` Workbench 创建与执行联动 | Bridge v2 幂等请求与增量重放 |
 | 03 执行时间线与权限 | 结构化工具/权限卡、Todo/运行状态、`run_cancel` 安全取消、Workbench 取消终态联动、后端事件驱动的单运行活动组、允许一次/会话授权/撤销、bypass 全权限模式 | 结构化验证阶段 |
 | 04 Inspector 与命令页 | M5 Runtime Inspector；M6 `/agents`：后端权威执行/团队快照、精确停止、revision 增量/断序恢复、新 UI state v5 全屏页、Textual 同源三标签页、真实并发 Agent 跨前端验收 | M6 实现 `/workbench`；后续补 Agent 创建/重配、持久化历史与 Inspector 写操作 |
@@ -65,6 +65,10 @@ flowchart TD
 | Agent Engine | 推理、工具调用、运行终态 | 页面布局和快捷键 |
 | Session Store | 会话、消息、运行记录 | 终端宽度和视觉折叠 |
 | Workbench Store | 任务、Agent、验证和治理事件 | 普通输入草稿 |
+
+预算状态由 Agent Engine 通过 Bridge 提供：`null` 必须保留为“不限”，前端不得将其
+转换为 `0`、`Infinity` 或虚构的有限上限。Footer、Runtime Inspector 与兼容 UI 使用
+一致中文文案；显式有限预算继续显示已用值、上限和百分比。
 
 ## 第一阶段“可正式使用”定义
 

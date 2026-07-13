@@ -27,9 +27,15 @@ safety:
   permission_mode: "moderate"
   allowed_dirs:
     - "."
-  max_budget_usd: 5.0
-  max_turns: 30
-  max_input_tokens: 500000
+  # 累计预算默认不限，但仍会持续记录费用与 Token 用量。
+  max_budget_usd: null
+  max_input_tokens: null
+  max_output_tokens: null
+  max_turns: 50
+  # 如需主动限额，可改为明确数值，例如：
+  # max_budget_usd: 5.0
+  # max_input_tokens: 500000
+  # max_output_tokens: 50000
 
 mcp:
   servers: {}
