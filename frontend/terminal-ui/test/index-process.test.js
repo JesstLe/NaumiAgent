@@ -1015,6 +1015,91 @@ test("terminal UI process restores project history and accepts search without se
   }
 });
 
+test("terminal UI process keeps inspector live without stealing drafts or permission keys", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    app.stdin.write("\x1b[105;5u");
+    await waitForLatestScreen(output, "Runtime Inspector");
+    await waitForLatestScreen(output, "保持运行检查器实时更新");
+
+    app.stdin.write("\t]");
+    await waitForLatestScreen(output, "[Tools]");
+    await waitForLatestScreen(output, "file_read");
+
+    app.stdin.write("保留 Inspector 草稿");
+    await waitForLatestScreen(output, "保留 Inspector 草稿▌");
+    app.stdin.write("\x1b[105;5u");
+    await waitForLatestScreenWithout(output, "Runtime Inspector");
+    await waitForLatestScreen(output, "保留 Inspector 草稿▌");
+
+    app.stdin.write("\n");
+    await waitForLatestScreen(output, "permission: bash_run");
+    app.stdin.write("\x1b[105;5u");
+    await delay(80);
+    assert(!latestScreen(output).includes("Runtime Inspector"));
+    app.stdin.write("y");
+    await waitForLatestScreen(output, "完成回执", 7000);
+
+    assert.equal(await stopTerminalUi(app), 0);
+    const inspectorRequests = readDebugEvents(app.debugLogPath).filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "inspector/request",
+    );
+    assert.deepEqual(
+      inspectorRequests.map((record) => record.payload.record.payload.open),
+      [true, true, false],
+    );
+    assert.equal(inspectorRequests[1].payload.record.payload.known_revision, 1);
+    assert(
+      readDebugEvents(app.debugLogPath).some(
+        (record) => record.event === "protocol.receive.record"
+          && record.payload.type === "inspector/update",
+      ),
+    );
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process restores an open session inspector with a fresh backend snapshot", async () => {
+  const statePath = path.join(
+    tmpdir(),
+    `naumi-terminal-ui-inspector-${Date.now()}-${Math.random()}.json`,
+  );
+  const first = launchTerminalUi("fake-bridge.js", { statePath });
+  const firstOutput = collectOutput(first);
+
+  try {
+    await waitForOutput(firstOutput, "新终端 UI 已连接 Python bridge。", 7000);
+    first.stdin.write("\x1b[105;5u");
+    await waitForLatestScreen(firstOutput, "Runtime Inspector");
+    assert.equal(await stopTerminalUi(first), 0);
+
+    const second = launchTerminalUi("fake-bridge.js", { statePath });
+    const secondOutput = collectOutput(second);
+    try {
+      await waitForLatestScreen(secondOutput, "Runtime Inspector", 7000);
+      await waitForLatestScreen(secondOutput, "保持运行检查器实时更新", 7000);
+      const request = readDebugEvents(second.debugLogPath).find(
+        (record) => record.event === "protocol.send"
+          && record.payload.record.type === "inspector/request"
+          && record.payload.record.payload.open === true,
+      );
+      assert(request);
+      assert.equal(request.payload.record.payload.session_id, "session-fake-1");
+      assert.equal(await stopTerminalUi(second), 0);
+    } finally {
+      forceKill(second);
+    }
+  } finally {
+    forceKill(first);
+    fs.rmSync(statePath, { force: true });
+  }
+});
+
 function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
   const debugLogPath = path.join(tmpdir(), `naumi-terminal-ui-debug-${Date.now()}-${Math.random()}.jsonl`);
   const fakeBridge = fixtureName

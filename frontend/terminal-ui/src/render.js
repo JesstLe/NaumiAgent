@@ -49,7 +49,9 @@ function renderInspectorLayout(state, width, bodyHeight, env) {
     return renderRuntimeInspector(state.inspector, width, bodyHeight);
   }
 
-  const inspectorWidth = Math.min(46, Math.max(38, Math.floor(width * 0.34)));
+  const inspectorWidth = width >= 120
+    ? Math.min(46, Math.max(38, Math.floor(width * 0.34)))
+    : Math.min(38, Math.max(34, Math.floor(width * 0.34)));
   const timelineWidth = Math.max(1, width - inspectorWidth - 1);
   const timelineRenderWidth = width >= 120 ? timelineWidth : width;
   const timeline = renderMainViewport(state, timelineRenderWidth, bodyHeight, env);

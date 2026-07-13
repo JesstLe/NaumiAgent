@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const STORE_VERSION = 3;
+const STORE_VERSION = 4;
 const LEGACY_STORE_VERSION = 1;
 const COMPOSER_STORE_VERSION = 2;
+const HISTORY_STORE_VERSION = 3;
 const STORE_PATH = path.join(".naumi", "terminal-ui-state.json");
 const DEFAULT_SESSION_KEY = "__default__";
 const MAX_HISTORY_ENTRIES = 100;
@@ -42,8 +43,16 @@ export function loadUiStateStore(cwd) {
     if (parsed.version === COMPOSER_STORE_VERSION) {
       return {
         filePath,
-        sessions: parsed.sessions,
+        sessions: migrateInspectorSessions(parsed.sessions),
         inputHistory: [],
+        writable: true,
+      };
+    }
+    if (parsed.version === HISTORY_STORE_VERSION) {
+      return {
+        filePath,
+        sessions: migrateInspectorSessions(parsed.sessions),
+        inputHistory: sanitizeInputHistory(parsed.input_history),
         writable: true,
       };
     }
@@ -109,6 +118,29 @@ function migrateLegacySnapshot(snapshot) {
       cursor: 0,
       preferredColumn: null,
     },
+    inspector: defaultInspectorPresentation(),
+  };
+}
+
+function migrateInspectorSessions(sessions) {
+  return Object.fromEntries(
+    Object.entries(sessions).map(([key, snapshot]) => [
+      key,
+      {
+        ...(snapshot && typeof snapshot === "object" ? snapshot : {}),
+        inspector: defaultInspectorPresentation(),
+      },
+    ]),
+  );
+}
+
+function defaultInspectorPresentation() {
+  return {
+    open: false,
+    selectedTab: "plan",
+    selectionByTab: {},
+    expandedByTab: {},
+    scrollByTab: {},
   };
 }
 
