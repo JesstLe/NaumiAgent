@@ -37,6 +37,12 @@ class PermissionRiskLevel(StrEnum):
     HIGH = "high"
 
 
+class PermissionOutcome(StrEnum):
+    ALLOW = "allow"
+    CONFIRM = "confirm"
+    BLOCK = "block"
+
+
 @dataclass(frozen=True)
 class PermissionDecision:
     allowed: bool
@@ -44,6 +50,10 @@ class PermissionDecision:
     requires_confirmation: bool = False
     code: PermissionReasonCode = PermissionReasonCode.ALLOWED
     risk_level: PermissionRiskLevel = PermissionRiskLevel.LOW
+    outcome: PermissionOutcome = PermissionOutcome.ALLOW
+    tool_family: str = ""
+    allow_session_grant: bool = False
+    requires_double_confirm: bool = False
 
 
 @dataclass(frozen=True)
@@ -53,6 +63,9 @@ class PermissionRule:
     requires_confirmation: bool
     max_calls_per_session: int | None = None
     blocked_commands: list[str] | None = None
+    risk_level: PermissionRiskLevel = PermissionRiskLevel.LOW
+    tool_family: str = ""
+    allow_session_grant: bool = False
 
 
 class PermissionAwareTool(Protocol):
@@ -131,12 +144,18 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
         requires_confirmation=True,
         max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="shell",
+        allow_session_grant=True,
     ),
     "code_execute": PermissionRule(
         tool_name="code_execute",
         allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
         requires_confirmation=True,
         max_calls_per_session=20,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="code_execution",
+        allow_session_grant=True,
     ),
     "browser_goto": PermissionRule(
         tool_name="browser_goto",
@@ -282,6 +301,8 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
             PermissionMode.MODERATE,
         ],
         requires_confirmation=True,
+        risk_level=PermissionRiskLevel.HIGH,
+        tool_family="session_delete",
     ),
     "delegate_task": PermissionRule(
         tool_name="delegate_task",
@@ -382,6 +403,9 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
         requires_confirmation=True,
         max_calls_per_session=10,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="external_runtime",
+        allow_session_grant=True,
     ),
     "tool_search": PermissionRule(
         tool_name="tool_search",
@@ -575,6 +599,9 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         allowed_modes=[PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
         requires_confirmation=True,
         max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="background_process",
+        allow_session_grant=True,
     ),
     "background_status": PermissionRule(
         tool_name="background_status",
@@ -814,6 +841,7 @@ class PermissionChecker:
         *,
         code: PermissionReasonCode,
         risk_level: PermissionRiskLevel = PermissionRiskLevel.MEDIUM,
+        tool_family: str = "",
         requires_confirmation: bool = False,
     ) -> PermissionDecision:
         return PermissionDecision(
@@ -822,6 +850,8 @@ class PermissionChecker:
             requires_confirmation=requires_confirmation,
             code=code,
             risk_level=risk_level,
+            outcome=PermissionOutcome.BLOCK,
+            tool_family=tool_family,
         )
 
     def _resolve_path_for_sandbox(self, path: str) -> str:
@@ -899,6 +929,7 @@ class PermissionChecker:
                 f"工具 `{tool_name}` 不允许在 {self._mode.value} 模式下执行。",
                 code=PermissionReasonCode.MODE_BLOCKED,
                 risk_level=PermissionRiskLevel.HIGH,
+                tool_family=rule.tool_family or tool_name,
             )
 
         # 调用次数检查
@@ -908,6 +939,7 @@ class PermissionChecker:
                 f"工具 `{tool_name}` 已达到本会话最大调用次数（{rule.max_calls_per_session}）。",
                 code=PermissionReasonCode.MAX_CALLS_EXCEEDED,
                 risk_level=PermissionRiskLevel.MEDIUM,
+                tool_family=rule.tool_family or tool_name,
             )
 
         # 文件路径沙箱检查
@@ -917,7 +949,11 @@ class PermissionChecker:
         for arg_name in path_argument_names:
             if arg_name not in args or not args[arg_name]:
                 continue
-            path_check = self._check_path_sandbox(args[arg_name], arg_name=arg_name)
+            path_check = self._check_path_sandbox(
+                args[arg_name],
+                arg_name=arg_name,
+                tool_family=rule.tool_family or tool_name,
+            )
             if not path_check.allowed:
                 return path_check
 
@@ -925,14 +961,14 @@ class PermissionChecker:
         command_argument_names = (
             metadata.command_argument_names if metadata else ("command",)
         )
-        if (
-            self._mode != PermissionMode.BYPASS
-            and tool_name in {"bash_run", "background_run", "runtime_mcp_connect"}
-        ):
+        if tool_name in {"bash_run", "background_run", "runtime_mcp_connect"}:
             for arg_name in command_argument_names:
                 if arg_name not in args or not args[arg_name]:
                     continue
-                cmd_check = self._check_command(args[arg_name])
+                cmd_check = self._check_command(
+                    args[arg_name],
+                    tool_family=rule.tool_family or tool_name,
+                )
                 if not cmd_check.allowed:
                     return cmd_check
 
@@ -941,23 +977,48 @@ class PermissionChecker:
         requires_confirmation = rule.requires_confirmation
         if metadata and metadata.requires_confirmation is not None:
             requires_confirmation = metadata.requires_confirmation
+        risk_level = rule.risk_level
+        if requires_confirmation and risk_level == PermissionRiskLevel.LOW:
+            risk_level = PermissionRiskLevel.MEDIUM
+        if metadata and metadata.destructive:
+            risk_level = PermissionRiskLevel.HIGH
+            requires_confirmation = True
+
+        tool_family = rule.tool_family or tool_name
+        requires_double_confirm = risk_level == PermissionRiskLevel.HIGH and requires_confirmation
+        allow_session_grant = (
+            risk_level == PermissionRiskLevel.MEDIUM and rule.allow_session_grant
+        )
+        confirmation_required = requires_confirmation and (
+            self._mode != PermissionMode.BYPASS or risk_level == PermissionRiskLevel.HIGH
+        )
 
         return PermissionDecision(
             allowed=True,
-            requires_confirmation=(
-                requires_confirmation and self._mode != PermissionMode.BYPASS
+            requires_confirmation=confirmation_required,
+            risk_level=risk_level,
+            outcome=(
+                PermissionOutcome.CONFIRM if confirmation_required else PermissionOutcome.ALLOW
             ),
+            tool_family=tool_family,
+            allow_session_grant=allow_session_grant,
+            requires_double_confirm=requires_double_confirm,
         )
 
-    def _check_path_sandbox(self, path: Any, *, arg_name: str = "path") -> PermissionDecision:
+    def _check_path_sandbox(
+        self,
+        path: Any,
+        *,
+        arg_name: str = "path",
+        tool_family: str = "",
+    ) -> PermissionDecision:
         """检查文件路径是否在允许的目录内."""
-        if self._mode == PermissionMode.BYPASS:
-            return PermissionDecision(allowed=True)
         if not isinstance(path, str):
             return self._deny(
                 f"路径参数 `{arg_name}` 必须是字符串。",
                 code=PermissionReasonCode.INVALID_PATH_ARGUMENT,
                 risk_level=PermissionRiskLevel.MEDIUM,
+                tool_family=tool_family,
             )
 
         abs_path = self._resolve_path_for_sandbox(path)
@@ -973,9 +1034,10 @@ class PermissionChecker:
             f"路径 `{path}` 不在允许目录内。允许目录：{self._allowed_dirs}",
             code=PermissionReasonCode.PATH_OUTSIDE_SANDBOX,
             risk_level=PermissionRiskLevel.HIGH,
+            tool_family=tool_family,
         )
 
-    def _check_command(self, command: str) -> PermissionDecision:
+    def _check_command(self, command: str, *, tool_family: str = "") -> PermissionDecision:
         """检查 shell 命令是否安全."""
         cmd_lower = command.lower().strip()
         for blocked in BLOCKED_COMMANDS:
@@ -984,6 +1046,7 @@ class PermissionChecker:
                     f"命令包含高风险模式 `{blocked}`，已阻止执行。",
                     code=PermissionReasonCode.DANGEROUS_COMMAND,
                     risk_level=PermissionRiskLevel.HIGH,
+                    tool_family=tool_family,
                 )
         return PermissionDecision(allowed=True)
 
