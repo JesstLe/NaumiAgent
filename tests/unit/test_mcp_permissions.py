@@ -79,6 +79,9 @@ class TestMCPToolPermissions:
         "command",
         [
             pytest.param("printf safe\nrm -fr /absolute", id="newline-command-boundary"),
+            pytest.param("printf safe\n\nrm -fr /absolute", id="double-newline-boundary"),
+            pytest.param("printf safe;\nrm -fr /absolute", id="semicolon-newline-boundary"),
+            pytest.param("printf safe &&\nrm -fr /absolute", id="and-newline-boundary"),
             pytest.param("bash -lc 'rm -fr /absolute'", id="shell-option-bundle"),
             pytest.param("exec rm -fr /absolute", id="exec-wrapper"),
         ],

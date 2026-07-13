@@ -824,7 +824,7 @@ COMMON_PATH_ARGUMENT_NAMES = (
 )
 
 COMMON_COMMAND_ARGUMENT_NAMES = ("command", "cmd", "shell", "script")
-SHELL_COMMAND_SEPARATORS = frozenset({";", "&&", "||", "|", "&", "\n"})
+SHELL_COMMAND_SEPARATOR_CHARS = frozenset(";&|\n")
 SHELL_EXECUTABLES = frozenset({"sh", "bash", "zsh"})
 MAX_SHELL_COMMAND_RECURSION = 3
 STRUCTURAL_COMMAND_LITERAL_FALLBACKS = frozenset({"rm -rf /", "sudo rm"})
@@ -977,16 +977,16 @@ class PermissionChecker:
             tool_name == "code_execute"
             and isinstance(language, str)
             and language.strip().lower() == "bash"
+            and "code" in args
         ):
             code = args.get("code")
-            if isinstance(code, str) and code:
-                cmd_check = self._check_command(
-                    code,
-                    arg_name="code",
-                    tool_family=tool_family,
-                )
-                if not cmd_check.allowed:
-                    return cmd_check
+            cmd_check = self._check_command(
+                code,
+                arg_name="code",
+                tool_family=tool_family,
+            )
+            if not cmd_check.allowed:
+                return cmd_check
 
         path_argument_names = tuple(
             dict.fromkeys(
@@ -1010,6 +1010,11 @@ class PermissionChecker:
             if not path_check.allowed:
                 return path_check
 
+        if tool_name == "runtime_mcp_connect":
+            cmd_check = self._check_runtime_mcp_command(args, tool_family=tool_family)
+            if not cmd_check.allowed:
+                return cmd_check
+
         command_argument_names = tuple(
             dict.fromkeys(
                 (
@@ -1021,7 +1026,6 @@ class PermissionChecker:
         if is_dynamic_mcp or tool_name in {
             "bash_run",
             "background_run",
-            "runtime_mcp_connect",
         }:
             for arg_name in command_argument_names:
                 if arg_name not in args:
@@ -1164,6 +1168,40 @@ class PermissionChecker:
                 )
         return PermissionDecision(allowed=True)
 
+    def _check_runtime_mcp_command(
+        self,
+        args: dict[str, Any],
+        *,
+        tool_family: str,
+    ) -> PermissionDecision:
+        """Validate and inspect the runtime MCP executable with its argv."""
+        argv = args.get("args", [])
+        if not isinstance(argv, list) or not all(isinstance(argument, str) for argument in argv):
+            return self._deny(
+                "命令参数 `args` 必须是字符串数组。",
+                code=PermissionReasonCode.INVALID_COMMAND_ARGUMENT,
+                risk_level=PermissionRiskLevel.MEDIUM,
+                tool_family=tool_family,
+            )
+
+        if "command" not in args:
+            return PermissionDecision(allowed=True)
+
+        command = args["command"]
+        if isinstance(command, str) and not command:
+            return PermissionDecision(allowed=True)
+        if not isinstance(command, str):
+            return self._check_command(
+                command,
+                arg_name="command",
+                tool_family=tool_family,
+            )
+        return self._check_command(
+            shlex.join([command, *argv]),
+            arg_name="command",
+            tool_family=tool_family,
+        )
+
     @staticmethod
     def _contains_destructive_rm_command(
         command: str,
@@ -1185,7 +1223,7 @@ class PermissionChecker:
         malformed_payload = False
         simple_command: list[str] = []
         for token in [*tokens, ";"]:
-            if token in SHELL_COMMAND_SEPARATORS:
+            if token and all(character in SHELL_COMMAND_SEPARATOR_CHARS for character in token):
                 destructive = PermissionChecker._is_destructive_rm_simple_command(
                     simple_command,
                     recursion_depth=recursion_depth,
