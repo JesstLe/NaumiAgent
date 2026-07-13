@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import shlex
+import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -315,6 +316,21 @@ class TestSetSystemPrompt:
 
 class TestAutoMemoryExtraction:
     @pytest.mark.asyncio
+    async def test_disabled_long_term_memory_skips_extraction(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        engine._config.memory.long_term_enabled = False
+        engine.long_term_memory.store = AsyncMock(return_value="mem1")  # type: ignore[method-assign]
+
+        await engine._auto_extract_memories(
+            "remember this preference",
+            AgentResult(status="completed", response="ok"),
+        )
+
+        engine.long_term_memory.store.assert_not_awaited()  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
     async def test_completed_turn_stores_high_confidence_memory(
         self,
         engine: AgentEngine,
@@ -352,6 +368,21 @@ class TestAutoMemoryExtraction:
 
 
 class TestSessionLoading:
+    def test_git_branch_probe_does_not_inherit_interactive_stdin(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        with patch("subprocess.check_output", return_value="main\n") as check_output:
+            assert engine._current_git_branch() == "main"
+
+        assert check_output.call_args.kwargs == {
+            "cwd": str(engine.workspace_root),
+            "stdin": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "text": True,
+            "timeout": 2,
+        }
+
     @pytest.mark.asyncio
     async def test_load_session_keeps_sanitized_full_history(self, tmp_path) -> None:
         config = AppConfig(
@@ -473,7 +504,7 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     async def test_path_in_allowed_dir(self, engine: AgentEngine) -> None:
-        engine._permission_checker._allowed_dirs = ["/tmp"]
+        engine._permission_checker._allowed_dirs = [str(Path("/tmp").resolve())]
         tc = ToolCall(
             id="x", name="file_read",
             arguments='{"path": "/tmp/nonexistent_test_file.txt"}',
@@ -2106,6 +2137,18 @@ class TestRun:
 
 
 class TestMemoryInjection:
+    @pytest.mark.asyncio
+    async def test_disabled_long_term_memory_skips_recall(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        engine._config.memory.long_term_enabled = False
+        engine.long_term_memory.recall_for_session = AsyncMock(return_value=[])  # type: ignore[method-assign]
+
+        await engine._inject_relevant_memories("hello")
+
+        engine.long_term_memory.recall_for_session.assert_not_awaited()  # type: ignore[attr-defined]
+
     @pytest.mark.asyncio
     async def test_injection_uses_current_session_scope(self, engine: AgentEngine) -> None:
         from naumi_agent.memory.session import Session

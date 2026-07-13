@@ -14,6 +14,7 @@ from naumi_agent.main import (
     _launch_terminal_ui,
     _parse_node_major,
     _resolve_terminal_ui_frontend_dir,
+    naumiagent_app,
 )
 from naumi_agent.main import (
     app as naumi_app,
@@ -308,6 +309,62 @@ def test_ui_command_reports_legacy_fallback_when_next_ui_cannot_launch(
     assert "未找到 Node.js" in result.output
     assert "naumi ui --legacy" in result.output
     assert "naumi chat --tui" in result.output
+
+
+def test_naumiagent_tui_launches_new_terminal_ui(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_terminal_ui",
+        lambda config_path: calls.append(config_path) or 0,
+    )
+
+    result = runner.invoke(naumiagent_app, ["--tui"])
+
+    assert result.exit_code == 0
+    assert calls == ["config.yaml"]
+
+
+def test_naumiagent_tui_forwards_custom_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_terminal_ui",
+        lambda config_path: calls.append(config_path) or 0,
+    )
+
+    result = runner.invoke(
+        naumiagent_app,
+        ["--tui", "--config", "custom.yaml"],
+    )
+
+    assert result.exit_code == 0
+    assert calls == ["custom.yaml"]
+
+
+def test_naumiagent_without_tui_displays_help(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_terminal_ui",
+        lambda _config: pytest.fail("no arguments must not launch the UI"),
+    )
+
+    result = runner.invoke(naumiagent_app, [])
+
+    assert result.exit_code == 0
+    assert "--tui" in result.output
+
+
+def test_naumiagent_console_script_is_registered() -> None:
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+
+    assert data["project"]["scripts"]["naumiagent"] == (
+        "naumi_agent.main:naumiagent_cli"
+    )
 
 
 def test_terminal_ui_runtime_assets_are_included_in_wheel() -> None:

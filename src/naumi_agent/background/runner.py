@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
-import signal
 import socket
 from datetime import datetime
 from pathlib import Path
 
 from naumi_agent.background.models import BackgroundStatus, BackgroundTask
 from naumi_agent.background.store import BackgroundTaskStore
+from naumi_agent.runtime.shell import (
+    create_shell_process,
+    pid_exists,
+    terminate_pid_tree,
+    terminate_process_tree,
+)
 
 _PREVIEW_CHARS = 2000
 _PORT_PATTERNS = (
@@ -64,12 +68,11 @@ class BackgroundRunner:
         output_path = self._store.artifacts_dir / f"{task_id}.log"
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        proc = await asyncio.create_subprocess_shell(
+        proc = await create_shell_process(
             command,
             cwd=str(workdir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
         )
         now = _now()
         task = BackgroundTask(
@@ -100,7 +103,7 @@ class BackgroundRunner:
 
         proc = self._processes.get(task_id)
         if proc is not None and proc.returncode is None:
-            await _terminate_process(proc)
+            await terminate_process_tree(proc)
 
         task.status = BackgroundStatus.CANCELLED
         task.completed_at = _now()
@@ -129,8 +132,8 @@ class BackgroundRunner:
                 await self.cancel(task.id)
                 cancelled += 1
                 continue
-            if task.pid and _pid_exists(task.pid):
-                _terminate_pid_group(task.process_group_id or task.pid, force=True)
+            if task.pid and pid_exists(task.pid):
+                terminate_pid_tree(task.process_group_id or task.pid, force=True)
                 task.status = BackgroundStatus.CANCELLED
                 task.completed_at = _now()
                 task.error = "cleanup 已终止遗留后台进程"
@@ -184,7 +187,7 @@ class BackgroundRunner:
                 )
                 error = "" if proc.returncode == 0 else f"进程退出码：{proc.returncode}"
             except TimeoutError:
-                await _terminate_process(proc)
+                await terminate_process_tree(proc)
                 output = ""
                 status = BackgroundStatus.TIMED_OUT
                 error = f"后台任务超过 {timeout_seconds} 秒未完成，已终止"
@@ -247,52 +250,6 @@ def format_notification(task: BackgroundTask) -> str:
         f"输出预览：\n{preview}\n"
         "</background_task_notification>"
     )
-
-
-async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
-    if proc.returncode is not None:
-        return
-    try:
-        if proc.pid is not None:
-            os.killpg(proc.pid, signal.SIGTERM)
-        else:
-            proc.terminate()
-    except ProcessLookupError:
-        return
-    except Exception:
-        proc.terminate()
-
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=3)
-    except TimeoutError:
-        try:
-            if proc.pid is not None:
-                os.killpg(proc.pid, signal.SIGKILL)
-            else:
-                proc.kill()
-        except ProcessLookupError:
-            pass
-        await proc.wait()
-
-
-def _terminate_pid_group(pgid: int, *, force: bool = False) -> None:
-    sig = signal.SIGKILL if force else signal.SIGTERM
-    try:
-        os.killpg(pgid, sig)
-    except ProcessLookupError:
-        return
-    except PermissionError:
-        return
-
-
-def _pid_exists(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
 
 
 def _extract_port_hints(command: str) -> list[int]:

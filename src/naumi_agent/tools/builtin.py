@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.runtime.shell import create_shell_process, terminate_process_tree
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 
@@ -785,6 +786,7 @@ class BashRunTool(Tool):
     async def execute(
         self, *, command: str, timeout: int = 30, cwd: str | None = None, **kwargs: Any
     ) -> str:
+        proc: asyncio.subprocess.Process | None = None
         try:
             if _looks_like_background_shell(command):
                 return (
@@ -799,7 +801,7 @@ class BashRunTool(Tool):
             if not workdir.is_dir():
                 return f"Error: 工作目录不存在: {workdir}"
 
-            proc = await asyncio.create_subprocess_shell(
+            proc = await create_shell_process(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -824,6 +826,8 @@ class BashRunTool(Tool):
 
             return output
         except TimeoutError:
+            if proc is not None:
+                await terminate_process_tree(proc)
             return f"Error: Command timed out after {timeout}s"
         except Exception as e:
             return f"Error executing command: {type(e).__name__}: {e}"

@@ -961,11 +961,13 @@ class PermissionChecker:
             )
 
         abs_path = self._resolve_path_for_sandbox(path)
-        if any(
-            os.path.commonpath([abs_path, allowed]) == allowed
-            for allowed in self._allowed_dirs
-        ):
-            return PermissionDecision(allowed=True)
+        for allowed in self._allowed_dirs:
+            try:
+                if os.path.commonpath([abs_path, allowed]) == allowed:
+                    return PermissionDecision(allowed=True)
+            except ValueError:
+                # Windows paths on different drives cannot share a common path.
+                continue
 
         return self._deny(
             f"路径 `{path}` 不在允许目录内。允许目录：{self._allowed_dirs}",
