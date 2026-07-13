@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import platform
@@ -387,9 +388,123 @@ class TestBrowserRuntimeLifecycle:
         result = await runtime.stop()
 
         assert result["alreadyStopped"] is False
+        assert result["warnings"] == []
         browser.close.assert_awaited_once()
         playwright.stop.assert_awaited_once()
         assert runtime._playwright is None
+
+    @pytest.mark.asyncio
+    async def test_stop_preserves_cleanup_order_before_killing_chrome(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = BrowserRuntime(tmp_path)
+        runtime.artifacts.start_session()
+        runtime.browser = AsyncMock()
+        runtime.context = AsyncMock()
+        runtime.page = AsyncMock()
+        runtime.trace_active = True
+        runtime.launched_chrome = True
+        order: list[str] = []
+
+        runtime._stop_attached_screencast = AsyncMock(
+            side_effect=lambda **_: order.append("screencast")
+        )
+        runtime.context.storage_state = AsyncMock(
+            side_effect=lambda: order.append("storage")
+            or {"cookies": [], "origins": []}
+        )
+        runtime._finalize_trace_segment = AsyncMock(
+            side_effect=lambda *_: order.append("trace")
+        )
+        runtime._hide_browser_active_border = AsyncMock(
+            side_effect=lambda: order.append("border")
+        )
+        runtime.browser.close = AsyncMock(
+            side_effect=lambda: order.append("browser")
+        )
+        runtime.chrome_launcher.kill_chrome = MagicMock(
+            side_effect=lambda: order.append("chrome")
+            or {"killed": True, "pid": 123}
+        )
+
+        await runtime.stop()
+
+        assert order == [
+            "screencast",
+            "storage",
+            "trace",
+            "border",
+            "browser",
+            "chrome",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_stop_times_out_hung_cdp_and_still_resets(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = BrowserRuntime(tmp_path)
+        runtime.cleanup_timeout_seconds = 0.01
+        runtime.artifacts.start_session()
+        runtime.browser = AsyncMock()
+        runtime.context = AsyncMock()
+        runtime.context.storage_state.return_value = {"cookies": [], "origins": []}
+        cdp_session = MagicMock()
+
+        async def hang(*args: object, **kwargs: object) -> None:
+            await asyncio.Event().wait()
+
+        cdp_session.send = AsyncMock(side_effect=hang)
+        cdp_session.detach = AsyncMock()
+        frames_dir = tmp_path / "frames"
+        frames_dir.mkdir()
+        runtime.attached_screencast = {
+            "active": True,
+            "cdp_session": cdp_session,
+            "on_frame": None,
+            "pending_frame_writes": set(),
+            "frames_dir": frames_dir,
+            "frame_count": 0,
+            "received_frames": 0,
+            "dropped_frames": 0,
+        }
+
+        result = await asyncio.wait_for(runtime.stop(), timeout=1)
+
+        assert any(
+            warning["step"] == "screencast.stop"
+            and warning["code"] == "timeout"
+            for warning in result["warnings"]
+        )
+        cdp_session.detach.assert_awaited_once()
+        runtime.browser is None
+        assert runtime.context is None
+        assert runtime.attached_screencast is None
+
+    @pytest.mark.asyncio
+    async def test_stop_closed_context_returns_warnings_and_is_idempotent(
+        self, tmp_path: Path
+    ) -> None:
+        runtime = BrowserRuntime(tmp_path)
+        runtime.artifacts.start_session()
+        runtime.browser = AsyncMock()
+        runtime.context = AsyncMock()
+        runtime.context.storage_state.side_effect = RuntimeError("TargetClosedError")
+        runtime.trace_active = True
+        runtime.context.tracing.stop.side_effect = RuntimeError("TargetClosedError")
+
+        first = await runtime.stop()
+        second = await runtime.stop()
+
+        assert first["alreadyStopped"] is False
+        assert {warning["step"] for warning in first["warnings"]} >= {
+            "storage_state",
+            "trace",
+        }
+        assert second == {
+            "alreadyStopped": True,
+            "artifacts": first["artifacts"],
+            "warnings": [],
+        }
 
     def test_runtime_request_failed_accepts_string_failure(self, tmp_path: Path) -> None:
         runtime = BrowserRuntime(tmp_path)
@@ -553,6 +668,44 @@ class TestBrowserRuntimeInit:
         assert context_kwargs["record_video_dir"]
         assert context_kwargs["record_video_size"] == {"width": 1280, "height": 800}
         fake_context.add_init_script.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_managed_launch_falls_back_to_system_browser_when_bundle_missing(
+        self, tmp_path: Path,
+    ) -> None:
+        rt = BrowserRuntime(tmp_path)
+        rt.artifacts.start_session()
+        fake_page = MagicMock()
+        fake_context = MagicMock()
+        fake_context.tracing.start = AsyncMock()
+        fake_context.new_page = AsyncMock(return_value=fake_page)
+        fake_context.add_init_script = AsyncMock()
+        fake_browser = MagicMock()
+        fake_browser.new_context = AsyncMock(return_value=fake_context)
+        fake_chromium = MagicMock()
+        fake_chromium.launch = AsyncMock(
+            side_effect=[
+                RuntimeError("BrowserType.launch: Executable doesn't exist"),
+                fake_browser,
+            ]
+        )
+        rt._playwright = MagicMock(chromium=fake_chromium)
+        system_browser = tmp_path / "chrome.exe"
+        system_browser.write_text("", encoding="utf-8")
+
+        with patch(
+            "naumi_agent.tools.browser.runtime.browser_runtime."
+            "find_system_browser_executable",
+            return_value=system_browser,
+        ):
+            await rt._launch_browser_session(headless=True)
+
+        assert fake_chromium.launch.await_count == 2
+        assert (
+            fake_chromium.launch.await_args_list[1].kwargs["executable_path"]
+            == str(system_browser)
+        )
+        assert rt.managed_browser_executable == str(system_browser)
 
 
 class TestNormalizeBrowserSource:
