@@ -1159,6 +1159,96 @@ class TestSessionLoading:
             await engine.shutdown()
 
     @pytest.mark.asyncio
+    async def test_cancelled_delete_after_commit_reconciles_active_session_authority(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        committed = asyncio.Event()
+        release_delete_result = asyncio.Event()
+        confirmation_started = asyncio.Event()
+        release_confirmation = asyncio.Event()
+        delete_task: asyncio.Task[bool] | None = None
+        pending_tool_task: asyncio.Task[ToolResult] | None = None
+        marker = tmp_path / "post-commit-pending-confirmation-ran"
+        try:
+            active = await engine.get_or_create_session()
+            initial_generation = engine._session_authorization_generation
+            original_delete = engine.session_store.delete
+
+            async def committed_delete(session_id: str) -> bool:
+                deleted = await original_delete(session_id)
+                committed.set()
+                await release_delete_result.wait()
+                return deleted
+
+            async def confirm(payload: dict[str, object]) -> str:
+                assert payload["session_id"] == active.id
+                confirmation_started.set()
+                await release_confirmation.wait()
+                return "allow_once"
+
+            engine.session_store.delete = committed_delete  # type: ignore[method-assign]
+            engine.set_permission_confirmer(confirm)
+            pending_tool_task = asyncio.create_task(
+                engine._execute_tool(
+                    ToolCall(
+                        id="post-commit-pending-confirmation",
+                        name="bash_run",
+                        arguments=json.dumps(
+                            {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                        ),
+                    )
+                )
+            )
+            await confirmation_started.wait()
+            grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "pre-delete-grant",
+            )
+
+            delete_task = asyncio.create_task(engine.delete_session(active.id))
+            await committed.wait()
+            delete_task.cancel()
+
+            with pytest.raises(asyncio.CancelledError):
+                await delete_task
+
+            assert await engine.session_store.load(active.id) is None
+            assert engine._session is None
+            assert engine._session_authorization_generation == initial_generation + 1
+            assert engine._permission_grant_store.list_session(active.id) == ()
+            revocations = [
+                record
+                for record in engine.get_recent_permission_bubbles(limit=50)
+                if record["status"] == "grant_revoked"
+            ]
+            TestPermissionGrantRevocationAudit._assert_revocation(
+                revocations[-1],
+                grant_id=grant.grant_id,
+                tool_family="shell",
+                session_id=active.id,
+                source="session_deletion",
+            )
+
+            release_confirmation.set()
+            pending_result = await pending_tool_task
+
+            assert pending_result.status == "error"
+            assert "会话已切换" in pending_result.content
+            assert not marker.exists()
+        finally:
+            release_delete_result.set()
+            release_confirmation.set()
+            for task in (delete_task, pending_tool_task):
+                if task is not None and not task.done():
+                    await task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
     async def test_same_session_load_does_not_begin_transition_or_revoke_grant(
         self,
         tmp_path: Path,

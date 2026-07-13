@@ -1252,8 +1252,24 @@ class AgentEngine:
                     self._finish_session_transition("", transition_epoch)
                     transition_epoch = None
 
-                deleted = await self.session_store.delete(session_id)
+                delete_task = asyncio.create_task(self.session_store.delete(session_id))
+                caller_cancelled = False
+                try:
+                    deleted = await asyncio.shield(delete_task)
+                except asyncio.CancelledError:
+                    caller_cancelled = True
+                    delete_task.cancel()
+                    try:
+                        await delete_task
+                    except asyncio.CancelledError:
+                        pass
+
+                    # The caller may cancel after SQLite commits but before a
+                    # wrapper returns. Re-read persistence before releasing the fence.
+                    deleted = await self.session_store.load(session_id) is None
                 if not deleted:
+                    if caller_cancelled:
+                        raise asyncio.CancelledError
                     return False
 
                 self._revoke_permission_grants_for_session(
@@ -1270,6 +1286,8 @@ class AgentEngine:
                     self._session = None
                     self.task_store.set_session("")
                     self._permission_checker.reset_counts()
+                if caller_cancelled:
+                    raise asyncio.CancelledError
                 return True
         finally:
             self._finish_session_transition("", transition_epoch)
