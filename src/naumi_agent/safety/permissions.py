@@ -857,8 +857,10 @@ class PermissionChecker:
     def _resolve_path_for_sandbox(self, path: str) -> str:
         expanded = os.path.expanduser(path)
         if os.path.isabs(expanded):
-            return os.path.abspath(expanded)
-        return os.path.abspath(os.path.join(self._workspace_root, expanded))
+            resolved = os.path.abspath(expanded)
+        else:
+            resolved = os.path.abspath(os.path.join(self._workspace_root, expanded))
+        return os.path.realpath(resolved)
 
     def _resolve_rule(self, tool_name: str) -> tuple[str, PermissionRule | None]:
         """Resolve exact, namespaced, or prefix-based permission rules."""
@@ -923,6 +925,16 @@ class PermissionChecker:
                     code=PermissionReasonCode.UNKNOWN_TOOL,
                     risk_level=PermissionRiskLevel.HIGH,
                 )
+
+        if tool_name == "code_execute" and args.get("language") == "bash":
+            code = args.get("code")
+            if isinstance(code, str) and code:
+                cmd_check = self._check_command(
+                    code,
+                    tool_family=rule.tool_family or tool_name,
+                )
+                if not cmd_check.allowed:
+                    return cmd_check
 
         if self._mode not in rule.allowed_modes:
             return self._deny(
