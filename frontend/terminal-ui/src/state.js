@@ -6,6 +6,21 @@ import { jumpTimelineToLatest } from "./timeline-follow.js";
 
 const MAX_OUTBOX_MESSAGES = 20;
 const MAX_OUTBOX_ERROR_CHARS = 500;
+const MAX_RUN_ACTIVITY_PERF_PHASES = 5;
+const MAX_RUN_ACTIVITY_TOOLS = 100;
+const MAX_RUN_ACTIVITY_PERMISSION_IDS = 100;
+const MAX_RUN_ACTIVITY_PHASE_LABEL_CHARS = 160;
+
+const RUN_ACTIVITY_PHASE_LABELS = Object.freeze({
+  preparing: "准备运行",
+  generating: "生成响应",
+  executing: "执行工具",
+  awaiting_permission: "等待权限",
+  summarizing: "整理结果",
+  completed: "执行完成",
+  failed: "执行失败",
+  cancelled: "运行取消",
+});
 
 export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/help", aliases: ["/h"], description: "显示帮助" },
@@ -157,6 +172,7 @@ export function createInitialState() {
     inputHistoryDraft: "",
     composerIntent: "chat",
     activeTaskSubmission: null,
+    activeRunActivity: null,
     cancelPending: false,
     cancelRequestId: "",
     historySearch: {
@@ -296,16 +312,20 @@ export function reduceServerEvent(state, record) {
       break;
     case "run/started":
       resetRunCancellation(state);
+      startRunActivity(state, record, payload);
       acceptUserMessage(state, record.request_id, payload.task ?? "");
       state.running = true;
       state.currentTurnStartedAtMs = Date.now();
       state.currentTurnFirstTokenAtMs = null;
       break;
-    case "run/completed":
+    case "run/completed": {
+      if (!matchesActiveRunActivity(state, record.request_id)) break;
+      const terminalStatus = deriveRunCompletionStatus(payload.status);
       state.running = false;
       resetRunCancellation(state);
+      finishRunActivity(state, terminalStatus);
       if (payload.intent === "task" && state.activeTaskSubmission) {
-        const taskState = payload.status === "completed" ? "completed" : "blocked";
+        const taskState = terminalStatus === "completed" ? "completed" : "blocked";
         state.activeTaskSubmission.state = taskState;
         const taskMessage = state.messages.find(
           (message) => message.kind === "user"
@@ -328,9 +348,12 @@ export function reduceServerEvent(state, record) {
       state.activeRuntimePhase = "";
       state.permission = null;
       return state.taskPanel.pinned ? [taskPanelRefreshAction(state)] : [];
+    }
     case "run/cancelled":
+      if (!matchesActiveRunActivity(state, runCancelledTargetRequestId(record, payload))) break;
       state.running = false;
       resetRunCancellation(state);
+      finishRunActivity(state, "cancelled");
       finishActiveToolPrepare(state, "本轮执行已取消");
       state.activeToolPrepare = null;
       state.activeRuntimePhase = "";
@@ -355,6 +378,7 @@ export function reduceServerEvent(state, record) {
       jumpTimelineToLatest(state);
       state.currentSessionId = payload.session_id || state.currentSessionId;
       state.running = false;
+      discardActiveRunActivity(state);
       state.currentTurnStartedAtMs = null;
       state.currentTurnFirstTokenAtMs = null;
       state.lastFirstTokenLatencyMs = null;
@@ -374,9 +398,16 @@ export function reduceServerEvent(state, record) {
       }
       pushSystemMessage(state, "resume", `已恢复会话: ${payload.title ?? payload.session_id}`, "info");
       return [{ type: "session_replayed", sessionId: state.currentSessionId }];
-    case "error":
-      state.running = false;
-      if (state.cancelRequestId === String(record.request_id ?? "")) {
+    case "error": {
+      const errorRequestId = String(record.request_id ?? "");
+      const hasActiveRunActivity = Boolean(state.activeRunActivity);
+      const matchesActiveRun = matchesActiveRunActivity(state, errorRequestId);
+      const isCorrelatedCancelError = Boolean(state.cancelRequestId)
+        && state.cancelRequestId === errorRequestId;
+      if (!hasActiveRunActivity || matchesActiveRun || isCorrelatedCancelError) {
+        state.running = false;
+      }
+      if (isCorrelatedCancelError) {
         resetRunCancellation(state);
       }
       if (
@@ -395,12 +426,16 @@ export function reduceServerEvent(state, record) {
           clearRenderCache(state.renderCache);
         }
       }
+      if (hasActiveRunActivity && (matchesActiveRun || isCorrelatedCancelError)) {
+        finishRunActivity(state, "failed");
+      }
       failUserMessage(state, record.request_id, {
         code: payload.code ?? "error",
         message: payload.message ?? "发送失败。",
       });
       pushSystemMessage(state, "error", payload.message ?? "未知错误", "error");
       break;
+    }
     case "shutdown":
       return [{ type: "exit" }];
     case "workbench/snapshot":
@@ -434,6 +469,212 @@ export function mergeStatus(state, payload) {
   }
 }
 
+function startRunActivity(state, record, payload) {
+  const requestId = String(record.request_id ?? "");
+  if (state.activeRunActivity) {
+    return state.activeRunActivity;
+  }
+  const activity = {
+    kind: "run_activity",
+    id: nextMessageId(state, "run_activity"),
+    requestId,
+    intent: payload.intent === "task" ? "task" : "chat",
+    taskId: String(payload.task_id ?? payload.task?.id ?? ""),
+    missionId: String(payload.mission_id ?? payload.mission?.id ?? ""),
+    status: "running",
+    phase: "preparing",
+    phaseLabel: RUN_ACTIVITY_PHASE_LABELS.preparing,
+    turn: 0,
+    model: "",
+    toolCalls: {},
+    toolCallOrder: [],
+    nextFallbackToolId: 1,
+    permissionCount: 0,
+    permissionRequestIds: [],
+    nextFallbackPermissionId: 1,
+    perfPhases: [],
+    startedAtMs: Date.now(),
+    completedAtMs: null,
+    durationMs: 0,
+  };
+  state.activeRunActivity = activity;
+  state.messages.push(activity);
+  clearRenderCache(state.renderCache);
+  return activity;
+}
+
+function finishRunActivity(state, status) {
+  const activity = state.activeRunActivity;
+  if (!activity) return null;
+  const completedAtMs = Date.now();
+  activity.status = status;
+  activity.phase = status;
+  activity.phaseLabel = RUN_ACTIVITY_PHASE_LABELS[status] ?? RUN_ACTIVITY_PHASE_LABELS.failed;
+  activity.completedAtMs = completedAtMs;
+  activity.durationMs = Math.max(0, completedAtMs - Number(activity.startedAtMs || completedAtMs));
+  const messageIndex = state.messages.indexOf(activity);
+  if (messageIndex >= 0 && messageIndex !== state.messages.length - 1) {
+    state.messages.splice(messageIndex, 1);
+    state.messages.push(activity);
+  }
+  state.activeRunActivity = null;
+  clearRenderCache(state.renderCache);
+  return activity;
+}
+
+function discardActiveRunActivity(state) {
+  const activity = state.activeRunActivity;
+  if (!activity) return;
+  state.messages = state.messages.filter((message) => message !== activity);
+  state.activeRunActivity = null;
+  clearRenderCache(state.renderCache);
+}
+
+function matchesActiveRunActivity(state, targetRequestId) {
+  const activity = state.activeRunActivity;
+  if (!activity) return true;
+  const targetId = String(targetRequestId ?? "").trim();
+  const activityRequestId = String(activity.requestId ?? "").trim();
+  if (!activityRequestId) return true;
+  return Boolean(targetId) && activityRequestId === targetId;
+}
+
+function runCancelledTargetRequestId(record, payload) {
+  return String(payload.target_request_id ?? "").trim() || String(record.request_id ?? "").trim();
+}
+
+function deriveRunCompletionStatus(status) {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  return !normalized || normalized === "completed" ? "completed" : "failed";
+}
+
+function updateRunActivityPhase(state, phase) {
+  const activity = state.activeRunActivity;
+  if (!activity || activity.status !== "running" || !RUN_ACTIVITY_PHASE_LABELS[phase]) return;
+  const phaseLabel = RUN_ACTIVITY_PHASE_LABELS[phase];
+  if (activity.phase === phase && activity.phaseLabel === phaseLabel) return;
+  activity.phase = phase;
+  activity.phaseLabel = phaseLabel;
+  clearRenderCache(state.renderCache);
+}
+
+function updateRunActivityRuntime(state, message) {
+  const activity = state.activeRunActivity;
+  if (!activity || activity.status !== "running") return;
+  let changed = false;
+  if (message.phase === "run_started") {
+    const phaseLabel = boundedText(message.label, MAX_RUN_ACTIVITY_PHASE_LABEL_CHARS).trim();
+    if (phaseLabel && activity.phaseLabel !== phaseLabel) {
+      activity.phaseLabel = phaseLabel;
+      changed = true;
+    }
+  }
+  if (message.phase === "turn_start") {
+    const turn = Number(message.turn);
+    if (Number.isFinite(turn) && activity.turn !== turn) {
+      activity.turn = turn;
+      changed = true;
+    }
+    const model = String(message.model ?? "");
+    if (model && activity.model !== model) {
+      activity.model = model;
+      changed = true;
+    }
+  }
+  if (message.phase === "perf_phase") {
+    const label = String(message.label ?? "性能阶段");
+    const durationMs = Math.max(0, Number(message.duration_ms) || 0);
+    activity.perfPhases = [...activity.perfPhases, { label, durationMs }].slice(-MAX_RUN_ACTIVITY_PERF_PHASES);
+    changed = true;
+  }
+  if (changed) clearRenderCache(state.renderCache);
+}
+
+function updateRunActivityTool(state, message, status) {
+  const activity = state.activeRunActivity;
+  if (!activity || activity.status !== "running") return;
+  const name = String(message.tool_name ?? "未知工具");
+  const callId = String(message.tool_call_id ?? "").trim();
+  let key = callId;
+  let tool = key ? activity.toolCalls[key] : null;
+  let created = false;
+
+  if (!tool && key) {
+    const preparedFallback = findLatestRunTool(activity, name, ["prepared"], true);
+    if (preparedFallback) {
+      key = replaceRunToolKey(activity, preparedFallback.key, key);
+      tool = activity.toolCalls[key];
+    }
+  }
+  if (!tool && !key && (status !== "prepared" || message.phase !== "start")) {
+    const pendingStatuses = status === "prepared"
+      ? ["prepared"]
+      : status === "running"
+        ? ["prepared"]
+        : ["running", "prepared"];
+    const fallback = findLatestRunTool(activity, name, pendingStatuses, true);
+    if (fallback) {
+      key = fallback.key;
+      tool = fallback.tool;
+    }
+  }
+  if (!tool) {
+    if (activity.toolCallOrder.length >= MAX_RUN_ACTIVITY_TOOLS) return;
+    key = key || `fallback:${activity.nextFallbackToolId++}`;
+    tool = { name, status };
+    activity.toolCalls[key] = tool;
+    activity.toolCallOrder.push(key);
+    created = true;
+  }
+
+  const nextName = name || tool.name;
+  const changed = tool.name !== nextName || tool.status !== status;
+  tool.name = nextName;
+  tool.status = status;
+  if (created || changed) {
+    clearRenderCache(state.renderCache);
+  }
+}
+
+function findLatestRunTool(activity, name, statuses, fallbackOnly) {
+  for (let index = activity.toolCallOrder.length - 1; index >= 0; index -= 1) {
+    const key = activity.toolCallOrder[index];
+    const tool = activity.toolCalls[key];
+    if (!tool || tool.name !== name || !statuses.includes(tool.status)) continue;
+    if (fallbackOnly && !key.startsWith("fallback:")) continue;
+    return { key, tool };
+  }
+  return null;
+}
+
+function replaceRunToolKey(activity, previousKey, nextKey) {
+  if (previousKey === nextKey || activity.toolCalls[nextKey]) return nextKey;
+  activity.toolCalls[nextKey] = activity.toolCalls[previousKey];
+  delete activity.toolCalls[previousKey];
+  const index = activity.toolCallOrder.lastIndexOf(previousKey);
+  if (index >= 0) activity.toolCallOrder[index] = nextKey;
+  return nextKey;
+}
+
+function normalizeRunToolStatus(status) {
+  const normalized = String(status ?? "unknown").trim().toLowerCase();
+  if (["success", "succeeded", "completed", "done", "ok"].includes(normalized)) return "success";
+  if (["cancelled", "canceled", "cancel"].includes(normalized)) return "cancelled";
+  if (["error", "failed", "failure"].includes(normalized)) return "error";
+  return normalized || "unknown";
+}
+
+function updateRunActivityPermission(state, requestId) {
+  const activity = state.activeRunActivity;
+  if (!activity || activity.status !== "running") return;
+  const id = String(requestId ?? "").trim() || `missing:${activity.nextFallbackPermissionId++}`;
+  if (activity.permissionRequestIds.includes(id)) return;
+  if (activity.permissionRequestIds.length >= MAX_RUN_ACTIVITY_PERMISSION_IDS) return;
+  activity.permissionRequestIds = [...activity.permissionRequestIds, id];
+  activity.permissionCount += 1;
+  clearRenderCache(state.renderCache);
+}
+
 export function handleUiMessage(state, message) {
   switch (message.type) {
     case "user":
@@ -442,19 +683,29 @@ export function handleUiMessage(state, message) {
       });
       break;
     case "assistant_stream":
+      if (message.phase === "start") {
+        const hasTools = Object.keys(state.activeRunActivity?.toolCalls ?? {}).length > 0;
+        updateRunActivityPhase(state, hasTools ? "summarizing" : "generating");
+      }
       handleAssistantStream(state, message);
       break;
     case "thinking":
       handleThinking(state, message);
       break;
     case "tool_prepare":
+      updateRunActivityTool(state, message, "prepared");
+      updateRunActivityPhase(state, "executing");
       handleTodoPrepare(state, message);
       handleToolPrepare(state, message);
       break;
     case "tool_use":
+      updateRunActivityTool(state, message, "running");
+      updateRunActivityPhase(state, "executing");
       handleToolUse(state, message);
       break;
     case "tool_result":
+      updateRunActivityTool(state, message, normalizeRunToolStatus(message.status));
+      updateRunActivityPhase(state, "executing");
       handleToolResult(state, message);
       break;
     case "todo_status":
@@ -464,6 +715,7 @@ export function handleUiMessage(state, message) {
       state.messages.push({ kind: "permission", message });
       break;
     case "runtime_status":
+      updateRunActivityRuntime(state, message);
       if (message.phase === "perf_phase") {
         state.activeRuntimePhase = `${message.label}: ${message.duration_ms}ms`;
       }
@@ -489,6 +741,8 @@ export function handlePermissionRequest(state, record) {
   const payload = record.payload ?? {};
   const requestId = record.request_id ?? record.id ?? "";
   state.permission = { requestId, payload };
+  updateRunActivityPermission(state, requestId);
+  updateRunActivityPhase(state, "awaiting_permission");
   state.messages.push({
     kind: "permission",
     id: nextMessageId(state, "permission"),
@@ -504,6 +758,7 @@ export function handlePermissionRequest(state, record) {
 export function handlePermissionResolved(state, payload) {
   const requestId = payload.request_id ?? "";
   state.permission = null;
+  updateRunActivityPhase(state, "executing");
   const message = [...state.messages]
     .reverse()
     .find((item) => item.kind === "permission" && item.requestId === requestId);
@@ -889,6 +1144,7 @@ export function handleSubmitText(state, text, send) {
   if (text === "/clear" || text === "/c") {
     state.messages = [];
     state.tools = [];
+    state.activeRunActivity = null;
     state.activeAssistant = null;
     state.activeThinking = null;
     state.folds = {};
