@@ -7,6 +7,37 @@ from naumi_agent.safety.guardrails import OutputGuardrail, SecurityError
 
 
 class TestBudgetTracker:
+    def test_unlimited_budget_never_exceeds_and_keeps_usage(self) -> None:
+        tracker = BudgetTracker(TokenBudget())
+        usage = TokenUsage(
+            input_tokens=900_000,
+            output_tokens=90_000,
+            total_tokens=990_000,
+            cost_usd=20.0,
+        )
+
+        tracker.track(usage, "test-model")
+
+        assert tracker.budget.enabled is False
+        assert tracker.is_exceeded() is False
+        assert tracker.get_summary().remaining_usd is None
+        assert tracker.total_input_tokens == 900_000
+        assert tracker.total_output_tokens == 90_000
+        assert tracker.total_cost_usd == 20.0
+
+    @pytest.mark.parametrize(
+        "budget",
+        [
+            TokenBudget(max_input_tokens=0),
+            TokenBudget(max_output_tokens=0),
+            TokenBudget(max_usd=0),
+        ],
+    )
+    def test_zero_limit_is_already_exhausted(self, budget: TokenBudget) -> None:
+        tracker = BudgetTracker(budget)
+
+        assert tracker.is_exceeded() is True
+
     def test_track_usage(self) -> None:
         tracker = BudgetTracker(TokenBudget(max_usd=5.0))
         usage = TokenUsage(input_tokens=1000, output_tokens=500, total_tokens=1500, cost_usd=0.01)
