@@ -1252,45 +1252,82 @@ class AgentEngine:
                     self._finish_session_transition("", transition_epoch)
                     transition_epoch = None
 
-                delete_task = asyncio.create_task(self.session_store.delete(session_id))
-                caller_cancelled = False
-                try:
-                    deleted = await asyncio.shield(delete_task)
-                except asyncio.CancelledError:
-                    caller_cancelled = True
-                    delete_task.cancel()
-                    try:
-                        await delete_task
-                    except asyncio.CancelledError:
-                        pass
-
-                    # The caller may cancel after SQLite commits but before a
-                    # wrapper returns. Re-read persistence before releasing the fence.
-                    deleted = await self.session_store.load(session_id) is None
-                if not deleted:
-                    if caller_cancelled:
-                        raise asyncio.CancelledError
-                    return False
-
-                self._revoke_permission_grants_for_session(
-                    session_id,
-                    reason="删除会话时撤销了权限授权。",
-                    source="session_deletion",
+                completion_task = asyncio.create_task(
+                    self._delete_session_and_reconcile(session_id)
                 )
-                if self._session is not None and self._session.id == session_id:
-                    self._advance_session_authorization_generation()
-                    self._messages.clear()
-                    self._full_history.clear()
-                    self._usage = AgentUsage()
-                    self._budget_tracker.reset()
-                    self._session = None
-                    self.task_store.set_session("")
-                    self._permission_checker.reset_counts()
-                if caller_cancelled:
-                    raise asyncio.CancelledError
-                return True
+                return await self._await_delete_completion(completion_task)
         finally:
             self._finish_session_transition("", transition_epoch)
+
+    async def _await_delete_completion(
+        self,
+        completion_task: asyncio.Task[bool],
+    ) -> bool:
+        """Wait for Engine-owned reconciliation despite repeated caller cancellation."""
+        caller_cancelled = False
+        cancellation_forwarded = False
+        while not completion_task.done():
+            try:
+                deleted = await asyncio.shield(completion_task)
+            except asyncio.CancelledError:
+                caller_cancelled = True
+                if not completion_task.done() and not cancellation_forwarded:
+                    completion_task.cancel()
+                    cancellation_forwarded = True
+            else:
+                if caller_cancelled:
+                    raise asyncio.CancelledError
+                return deleted
+
+        if completion_task.cancelled():
+            raise asyncio.CancelledError
+        deleted = completion_task.result()
+        if caller_cancelled:
+            raise asyncio.CancelledError
+        return deleted
+
+    async def _delete_session_and_reconcile(self, session_id: str) -> bool:
+        """Own persistence result determination and deleted-session reconciliation."""
+        delete_task = asyncio.create_task(self.session_store.delete(session_id))
+        cancellation_forwarded = False
+        try:
+            deleted = await asyncio.shield(delete_task)
+        except asyncio.CancelledError:
+            cancellation_forwarded = True
+            delete_task.cancel()
+            try:
+                await delete_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.debug(
+                    "Session delete failed while cancellation was being reconciled",
+                    exc_info=True,
+                )
+
+            # A store wrapper can be cancelled after SQLite commits but before
+            # delivering its result. Persistence is authoritative at this boundary.
+            deleted = await self.session_store.load(session_id) is None
+
+        if deleted:
+            self._revoke_permission_grants_for_session(
+                session_id,
+                reason="删除会话时撤销了权限授权。",
+                source="session_deletion",
+            )
+            if self._session is not None and self._session.id == session_id:
+                self._advance_session_authorization_generation()
+                self._messages.clear()
+                self._full_history.clear()
+                self._usage = AgentUsage()
+                self._budget_tracker.reset()
+                self._session = None
+                self.task_store.set_session("")
+                self._permission_checker.reset_counts()
+
+        if cancellation_forwarded:
+            raise asyncio.CancelledError
+        return deleted
 
     async def archive_session(self, session_id: str) -> bool:
         """归档指定会话."""
