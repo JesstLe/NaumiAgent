@@ -9,6 +9,7 @@ from naumi_agent.runs.models import (
     ReceiptRisk,
     ReceiptValidation,
 )
+from naumi_agent.runs.recorder import ChatRunRecorder
 from naumi_agent.runs.store import (
     ChatArtifactRecord,
     ChatRunRecord,
@@ -20,6 +21,7 @@ from naumi_agent.runs.store import (
 __all__ = [
     "ChatArtifactRecord",
     "ChatRunRecord",
+    "ChatRunRecorder",
     "ChatRunStepRecord",
     "ChatRunStore",
     "CompletionReceipt",

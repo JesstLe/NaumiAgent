@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -41,6 +42,9 @@ from naumi_agent.orchestrator.tool_batches import (
     build_tool_batches,
     execute_tool_batch,
 )
+from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.runs.recorder import ChatRunRecorder
+from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
@@ -377,6 +381,7 @@ class AgentResult:
     usage: AgentUsage = field(default_factory=AgentUsage)
     error: str | None = None
     task_summary: str | None = None
+    receipt: CompletionReceipt | None = None
 
 
 class AgentEngine:
@@ -387,6 +392,7 @@ class AgentEngine:
         self.workspace_root = config.resolve_workspace_root()
         self._runtime_data_dir = Path(config.memory.session_db_path).parent
         self._worktree_storage_dir = self._runtime_data_dir / "worktrees"
+        self.chat_run_store = ChatRunStore(self._runtime_data_dir / "chat-runs.db")
         self._router = ModelRouter(config.models)
         self._tool_registry = ToolRegistry()
         self._messages: list[dict[str, Any]] = []
@@ -1906,6 +1912,48 @@ class AgentEngine:
         return result
 
     async def run_streaming(
+        self,
+        task: str,
+        on_event: EventCallback,
+        turn_context: str = "",
+    ) -> AgentResult:
+        """Execute and durably record one streamed Agent run."""
+        session = await self.get_or_create_session()
+        self.task_store.set_session(session.id)
+        recorder = await ChatRunRecorder.start(
+            store=self.chat_run_store,
+            workspace_root=self.workspace_root,
+            session_id=session.id,
+            task=task,
+        )
+
+        async def recorded_event(event: str, data: dict[str, Any]) -> None:
+            public_data = {**data, "run_id": recorder.run_id}
+            await recorder.observe(event, public_data)
+            await on_event(event, public_data)
+
+        try:
+            result = await self._run_streaming_core(
+                task,
+                recorded_event,
+                turn_context=turn_context,
+            )
+        except asyncio.CancelledError:
+            receipt = await recorder.finish("cancelled", "运行已由用户取消。")
+            await on_event("completion_receipt", receipt.to_dict())
+            raise
+        except Exception as exc:
+            receipt = await recorder.finish("failed", self._format_error(exc))
+            await on_event("completion_receipt", receipt.to_dict())
+            raise
+
+        summary = result.response or result.error or "本轮运行已结束。"
+        receipt = await recorder.finish(result.status, summary)
+        result.receipt = receipt
+        await on_event("completion_receipt", receipt.to_dict())
+        return result
+
+    async def _run_streaming_core(
         self,
         task: str,
         on_event: EventCallback,

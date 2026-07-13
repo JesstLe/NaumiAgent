@@ -38,6 +38,7 @@ class EventType(StrEnum):
     AGENT_START = "agent_start"
     AGENT_END = "agent_end"
     AGENT_ERROR = "agent_error"
+    COMPLETION_RECEIPT = "completion_receipt"
     TURN_START = "turn_start"
     TURN_END = "turn_end"
 

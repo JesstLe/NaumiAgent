@@ -1156,6 +1156,73 @@ class TestHookIntegration:
         assert hook_events[0]["point"] == "user_prompt_submit"
 
     @pytest.mark.asyncio
+    async def test_streaming_persists_authoritative_completion_receipt(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        mock_response = ModelResponse(
+            content="已完成真实检查。",
+            usage=TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2),
+            model="test-model",
+        )
+
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await engine.run_streaming("检查当前状态", on_event)
+
+        assert result.receipt is not None
+        receipt_events = [data for event, data in events if event == "completion_receipt"]
+        assert receipt_events == [result.receipt.to_dict()]
+        assert events[0][0] == "run_started"
+        assert events[0][1]["run_id"] == result.receipt.run_id
+        assert engine._session is not None
+        restored = await engine.chat_run_store.get_run(
+            engine._session.id,
+            result.receipt.run_id,
+        )
+        assert restored is not None
+        assert restored.receipt == result.receipt
+        assert restored.status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_streaming_cancellation_persists_receipt_before_propagating(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        with (
+            patch.object(
+                engine,
+                "_run_streaming_core",
+                new=AsyncMock(side_effect=asyncio.CancelledError()),
+            ),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await engine.run_streaming("执行后取消", on_event)
+
+        assert engine._session is not None
+        runs = await engine.chat_run_store.list_runs(engine._session.id)
+        assert len(runs) == 1
+        assert runs[0].status == "cancelled"
+        assert runs[0].receipt is not None
+        assert runs[0].receipt.outcome == "cancelled"
+        receipt_events = [data for event, data in events if event == "completion_receipt"]
+        assert receipt_events == [runs[0].receipt.to_dict()]
+
+    @pytest.mark.asyncio
     async def test_hook_trace_event_emits_when_trace_is_capped(
         self,
         engine: AgentEngine,
