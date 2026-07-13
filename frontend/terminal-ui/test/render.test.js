@@ -16,6 +16,67 @@ import { detachTimeline } from "../src/timeline-follow.js";
 import { renderRuntimeInspector } from "../src/components/runtime-inspector.js";
 import { renderAgentControlPage } from "../src/components/agent-control-page.js";
 
+test("conversation viewport renders welcome before the timeline and keeps footer usable", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "ready",
+    payload: {
+      version: "0.1.214",
+      workspace_root: "/Users/lv/Workspace/NaumiAgent",
+      model: "openai/gpt-5.4",
+      mode: "default",
+      permission_mode: "moderate",
+    },
+  });
+
+  const lines = renderScreen(state, 120, 24, {
+    cwd: "/tmp",
+    home: "/Users/lv",
+  });
+  const plain = lines.map(stripAnsi).join("\n");
+  assert.match(plain, /NaumiAgent v0\.1\.214/);
+  assert.match(plain, /模型 openai\/gpt-5\.4/);
+  assert.match(plain, /chat >/);
+  assert.equal(lines.length, 24);
+  assert(lines.every((line) => visibleWidth(line) <= 120));
+});
+
+test("welcome resize tiers stay bounded and dismissed state reveals the timeline", () => {
+  const state = createInitialState();
+  state.welcome.phase = "ready_empty";
+  state.status = {
+    version: "0.1.214",
+    workspace_root: "/very/long/workspace/path/for/naumi-agent",
+    model: "anthropic/claude-opus-4-6",
+    mode: "default",
+    permission_mode: "moderate",
+  };
+  for (const [width, height] of [[120, 24], [80, 14], [48, 10], [23, 5]]) {
+    const lines = renderScreen(state, width, height, { cwd: "/tmp" });
+    assert.equal(lines.length, height);
+    assert(lines.every((line) => visibleWidth(line) <= width));
+  }
+
+  state.welcome = { phase: "dismissed", dismissed: true };
+  state.messages.push({ kind: "assistant", id: "a1", content: "正常时间线" });
+  const dismissed = renderScreen(state, 100, 16).map(stripAnsi).join("\n");
+  assert.doesNotMatch(dismissed, /NaumiAgent v0\.1\.214/);
+  assert.match(dismissed, /正常时间线/);
+});
+
+test("inspector and agent pages take priority over the startup welcome", () => {
+  const state = createInitialState();
+  state.inspector.open = true;
+  state.inspector.loading = true;
+  assert.doesNotMatch(renderScreen(state, 80, 14).map(stripAnsi).join("\n"), /NAUMI/);
+
+  state.inspector.open = false;
+  state.route = { name: "agents", originAnchor: null };
+  state.agents.open = true;
+  state.agents.loading = true;
+  assert.doesNotMatch(renderScreen(state, 80, 14).map(stripAnsi).join("\n"), /NAUMI/);
+});
+
 test("agent control page renders bounded wide and narrow authoritative layouts", () => {
   const state = createInitialState();
   state.currentSessionId = "session-agents";
