@@ -79,22 +79,24 @@ attachJsonlLineReader(process.stdin, (line) => {
       content_lines: 88,
       elapsed_ms: 120,
     });
-    emitUi({
-      type: "tool_use",
-      tool_call_id: "call-1",
-      tool_name: "file_write",
-      file_path: "showcase/index.html",
-    });
-    emitUi({
-      type: "tool_result",
-      tool_call_id: "call-1",
-      tool_name: "file_write",
-      status: "success",
-      duration_ms: 21,
-      content_preview: ["--- a/showcase/index.html", "+++ b/showcase/index.html", "@@", "-old", "+new", ...Array.from({ length: 65 }, (_, index) => `+line ${index}`)].join("\n"),
-      content_length: 640,
-    });
-    emit("run/completed", {});
+    setTimeout(() => {
+      emitUi({
+        type: "tool_use",
+        tool_call_id: "call-1",
+        tool_name: "file_write",
+        file_path: "showcase/index.html",
+      });
+      emitUi({
+        type: "tool_result",
+        tool_call_id: "call-1",
+        tool_name: "file_write",
+        status: "success",
+        duration_ms: 21,
+        content_preview: ["--- a/showcase/index.html", "+++ b/showcase/index.html", "@@", "-old", "+new", ...Array.from({ length: 65 }, (_, index) => `+line ${index}`)].join("\n"),
+        content_length: 640,
+      });
+      emit("run/completed", {});
+    }, 30);
     return;
   }
 

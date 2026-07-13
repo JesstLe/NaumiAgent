@@ -49,6 +49,11 @@ test("input tokenizer preserves CSI keys and batches printable paste chunks", ()
     INPUT_KEYS.homeSs3,
     INPUT_KEYS.endSs3,
   ]);
+  assert.deepEqual(splitInputChunk(`${INPUT_KEYS.ctrlR}${INPUT_KEYS.escape}${INPUT_KEYS.tab}`), [
+    INPUT_KEYS.ctrlR,
+    INPUT_KEYS.escape,
+    INPUT_KEYS.tab,
+  ]);
 });
 
 test("stream tokenizer buffers split SS3 cursor keys from trackpads", () => {

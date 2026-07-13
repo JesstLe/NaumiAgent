@@ -2,7 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ANSI, stripAnsi, visibleWidth } from "../src/ansi.js";
 import { boxComponent, createRenderContext, line, renderComponent, stack } from "../src/components/core.js";
-import { Footer, NewOutputFooter, PermissionFooter, PromptFooter, TodoFooter } from "../src/components/footer.js";
+import {
+  CommandCompletionFooter,
+  Footer,
+  HistorySearchFooter,
+  NewOutputFooter,
+  PermissionFooter,
+  PromptFooter,
+  TodoFooter,
+} from "../src/components/footer.js";
 import { Message } from "../src/components/message.js";
 import { ActivityCard } from "../src/components/activity-card.js";
 import { PermissionCard } from "../src/components/permission-card.js";
@@ -140,6 +148,50 @@ test("prompt shows at most six wrapped rows around the cursor", () => {
   assert.equal(lines.length, 6);
   assert(lines.at(-1).includes("line-9▌"));
   assert(!lines.some((line) => line.includes("line-0")));
+});
+
+test("history search footer shows query, selection, and flattened preview within width", () => {
+  const state = createInitialState();
+  state.historySearch = {
+    open: true,
+    query: "测试",
+    matches: ["修复测试\n然后运行验证", "补充测试"],
+    selectedIndex: 0,
+    draftText: "",
+    draftCursor: 0,
+  };
+
+  const lines = renderComponent(
+    HistorySearchFooter({ state }),
+    createRenderContext({ width: 48, state }),
+  ).map(stripAnsi);
+
+  assert.match(lines.join("\n"), /历史搜索/);
+  assert.match(lines.join("\n"), /测试/);
+  assert.match(lines.join("\n"), /1\/2/);
+  assert.match(lines.join("\n"), /修复测试 然后运行验证/);
+  assert(lines.every((line) => visibleWidth(line) <= 48));
+});
+
+test("history search owns the footer instead of slash completion", () => {
+  const state = createInitialState();
+  setInputText(state, "/d");
+  state.historySearch.open = true;
+  state.historySearch.matches = [];
+
+  const completion = renderComponent(
+    CommandCompletionFooter({ state }),
+    createRenderContext({ width: 80, state }),
+  );
+  const full = renderComponent(
+    Footer({ state }),
+    createRenderContext({ width: 80, state }),
+  ).map(stripAnsi).join("\n");
+
+  assert.deepEqual(completion, []);
+  assert.match(full, /没有匹配记录/);
+  assert.doesNotMatch(full, /命令补全/);
+  assert.match(full, /Ctrl\+R/);
 });
 
 test("tool card component preserves existing diff folding behavior", () => {

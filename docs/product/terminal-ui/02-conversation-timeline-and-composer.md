@@ -2,7 +2,7 @@
 
 ## 实施状态（2026-07-13）
 
-已完成三个独立切片：“多行输入器与草稿恢复”“时间线跟随与缩放锚点”和“用户消息发送生命周期”。
+已完成四个独立切片：“多行输入器与草稿恢复”“时间线跟随与缩放锚点”“用户消息发送生命周期”和“项目输入历史搜索”。
 
 多行输入器与草稿恢复：
 
@@ -32,17 +32,30 @@
 - 进程重启后 queued 变为 uncertain，并明确提示“可能重复发送”；不会自动重发，只有用户显式 `/retry` 才执行。
 - 后端重放的同内容用户消息可以调和一条 uncertain outbox；异常值、超限条目和重复快照应用均被安全处理。
 
+项目输入历史搜索：
+
+- 成功提交的非空输入写入项目目录 `.naumi/terminal-ui-state.json`，同一项目的不同会话和进程重启可以共享。
+- UI state 已升级到 v3；v1/v2 会话快照自动迁移，保留旧草稿和折叠状态，未知未来版本仍保持只读保护。
+- `Ctrl+R` 打开反向搜索；输入或 bracketed paste 只更新查询，不改变原草稿。
+- 匹配按最新优先、大小写不敏感的子串规则执行，并在候选层去重；中文、Unicode 和多行原文可精确恢复。
+- 重复 `Ctrl+R`、`Down` 或 `Tab` 选择更早记录，`Up` 选择更新记录；空结果不会关闭面板。
+- `Enter` 只把候选放回 Composer，不会发送；用户需要再次按 `Enter` 才提交，避免搜索即执行。
+- `Esc` 关闭搜索并恢复原草稿及 grapheme 光标；孤立 ESC 使用短判定窗口，不会被方向键拆包逻辑永久吞掉。
+- 项目历史最多保留 100 条、单条最多 200,000 个 UTF-16 代码单元、总计最多 1,000,000 个代码单元；损坏和超限条目在存储边界被过滤。
+- 真实 `.venv` Bridge 双进程验收已证明 `/doctor` 可跨重启找回，接受候选不调用后端，第二次 Enter 只调用一次。
+
 本模块仍未整体完成。后续切片依次为：
 
-1. `Ctrl+R` 项目历史搜索和补全候选键盘选择。
+1. 斜杠命令补全候选的 `Tab/Up/Down/Enter/Esc` 键盘选择。
 2. `chat | task` 输入模式、`/task` 创建及对话上下文联动。
 3. Bridge v2 幂等请求、断线增量重放和多客户端 outbox 调和。
 
-两个切片的权威实现计划与验证证据见：
+四个切片的权威实现计划与验证证据见：
 
 - `docs/superpowers/plans/2026-07-13-terminal-multiline-composer.md`
 - `docs/superpowers/plans/2026-07-13-terminal-follow-tail.md`
 - `docs/superpowers/plans/2026-07-13-terminal-send-lifecycle.md`
+- `docs/superpowers/plans/2026-07-13-terminal-history-search.md`
 
 ## 1. 目标
 
