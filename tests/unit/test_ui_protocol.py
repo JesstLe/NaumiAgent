@@ -119,6 +119,17 @@ def test_permission_challenge_is_one_use_and_request_bound() -> None:
     assert store.consume(token, "request-1", "session-1", "call-1") == "consumed"
 
 
+def test_permission_challenge_replaces_the_prior_token_for_a_request() -> None:
+    store = PermissionChallengeStore(clock=lambda: 100.0)
+    superseded = store.issue("request-1", "session-1", "call-1")
+    current = store.issue("request-1", "session-1", "call-1")
+
+    assert current != superseded
+    assert store.count == 1
+    assert store.consume(superseded, "request-1", "session-1", "call-1") == "unknown"
+    assert store.consume(current, "request-1", "session-1", "call-1") == "valid"
+
+
 def test_permission_challenge_reports_unknown_mismatch_and_expiry() -> None:
     clock = [100.0]
     store = PermissionChallengeStore(clock=lambda: clock[0])

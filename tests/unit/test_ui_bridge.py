@@ -677,7 +677,13 @@ async def test_bridge_status_payload_includes_compact_task_activity() -> None:
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
     bridge.bind_writer(io.StringIO())
     pending_task = asyncio.create_task(
-        bridge.confirm_permission({"call_id": "perm-1", "tool_name": "bash_run"})
+        bridge.confirm_permission(
+            {
+                "call_id": "perm-1",
+                "tool_name": "bash_run",
+                "choices": ["allow_once", "deny"],
+            }
+        )
     )
     await asyncio.sleep(0)
 
@@ -890,6 +896,7 @@ async def test_bridge_renders_permission_panel_as_system_notice() -> None:
                 "call_id": "perm-1",
                 "tool_name": "bash_run",
                 "reason": "需要启动本地服务。",
+                "choices": ["allow_once", "deny"],
             }
         )
     )
@@ -1388,6 +1395,7 @@ async def test_bridge_mode_and_permission_round_trip() -> None:
                 "call_id": "call-1",
                 "tool_name": "bash_run",
                 "arguments": {"command": "rm -rf tmp"},
+                "choices": ["allow_once", "deny"],
             }
         )
     )
@@ -1417,7 +1425,7 @@ def _permission_payload(
         "tool_name": "bash_run",
         "tool_family": "shell",
         "arguments": {"authorization": "Bearer private", "command": "echo hello"},
-        "choices": choices or ["allow_once", "deny", "grant_session"],
+        "choices": choices if choices is not None else ["allow_once", "deny", "grant_session"],
         "requires_double_confirm": requires_double_confirm,
     }
 
@@ -1528,6 +1536,127 @@ async def test_bridge_requires_second_confirmation_for_high_risk_permission() ->
 
     assert await task == "allow_once"
     assert any(record["type"] == "permission/resolved" for record in _records(writer))
+
+
+@pytest.mark.asyncio
+async def test_bridge_replaces_high_risk_challenge_and_rejects_superseded_token() -> None:
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    writer = io.StringIO()
+    bridge.bind_writer(writer)
+    task = asyncio.create_task(
+        bridge.confirm_permission(
+            _permission_payload(
+                "call-danger",
+                choices=["allow_once", "deny"],
+                requires_double_confirm=True,
+            )
+        )
+    )
+    await asyncio.sleep(0)
+
+    for response_id in ("first-stage-1", "first-stage-2"):
+        await bridge.resolve_permission(
+            {"request_id": "call-danger", "choice": "allow_once"}, request_id=response_id
+        )
+    tokens = [
+        record["payload"]["confirmation_token"]
+        for record in _records(writer)
+        if record["type"] == "permission/confirmation_required"
+    ]
+    superseded, current = tokens
+
+    assert superseded != current
+    assert bridge._permission_challenges.count == 1
+    await bridge.resolve_permission(
+        {
+            "request_id": "call-danger",
+            "choice": "confirm",
+            "confirmation_token": superseded,
+        },
+        request_id="superseded-token",
+    )
+
+    assert not task.done()
+    assert _records(writer)[-1]["payload"]["code"] == "permission_challenge_mismatch"
+    await bridge.resolve_permission(
+        {
+            "request_id": "call-danger",
+            "choice": "confirm",
+            "confirmation_token": current,
+        },
+        request_id="current-token",
+    )
+
+    assert await task == "allow_once"
+
+
+@pytest.mark.asyncio
+async def test_bridge_rejects_replay_after_valid_confirmation() -> None:
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    writer = io.StringIO()
+    bridge.bind_writer(writer)
+    task = asyncio.create_task(
+        bridge.confirm_permission(
+            _permission_payload(
+                "call-danger",
+                choices=["allow_once", "deny"],
+                requires_double_confirm=True,
+            )
+        )
+    )
+    await asyncio.sleep(0)
+    await bridge.resolve_permission(
+        {"request_id": "call-danger", "choice": "allow_once"}, request_id="first-stage"
+    )
+    token = next(
+        record["payload"]["confirmation_token"]
+        for record in _records(writer)
+        if record["type"] == "permission/confirmation_required"
+    )
+
+    await bridge.resolve_permission(
+        {"request_id": "call-danger", "choice": "confirm", "confirmation_token": token},
+        request_id="valid-confirmation",
+    )
+    assert await task == "allow_once"
+
+    await bridge.resolve_permission(
+        {"request_id": "call-danger", "choice": "confirm", "confirmation_token": token},
+        request_id="replayed-confirmation",
+    )
+
+    resolved = [record for record in _records(writer) if record["type"] == "permission/resolved"]
+    assert len(resolved) == 1
+    assert _records(writer)[-1]["payload"]["code"] == "unknown_permission_request"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["empty", "missing"])
+async def test_bridge_fails_closed_when_backend_choices_are_not_usable(kind: str) -> None:
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    writer = io.StringIO()
+    bridge.bind_writer(writer)
+    payload = _permission_payload("call-no-choices", choices=[])
+    if kind == "missing":
+        del payload["choices"]
+
+    task = asyncio.create_task(bridge.confirm_permission(payload))
+    try:
+        await asyncio.sleep(0)
+
+        assert task.done()
+        assert await task == "deny"
+        assert bridge._pending_permissions == {}
+        records = _records(writer)
+        assert records[-1]["type"] == "error"
+        assert records[-1]["payload"]["code"] == f"permission_choices_{kind}"
+        assert "后端权限选择" in records[-1]["payload"]["message"]
+        assert not any(record["type"] == "permission/request" for record in records)
+        assert not any("grant_session" in str(record["payload"]) for record in records)
+    finally:
+        if not task.done():
+            await bridge.shutdown()
+            await task
 
 
 @pytest.mark.asyncio
