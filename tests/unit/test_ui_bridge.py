@@ -63,6 +63,25 @@ def test_bridge_stdio_is_configured_as_utf8() -> None:
     assert stderr.calls == [{"encoding": "utf-8", "errors": "replace"}]
 
 
+@pytest.mark.parametrize(
+    ("error", "expected_code"),
+    [
+        (RuntimeError("401 Unauthorized"), "model_auth_failed"),
+        (RuntimeError("429 rate limit exceeded"), "model_rate_limited"),
+        (TimeoutError("request timed out"), "model_timeout"),
+        (RuntimeError("private provider payload"), "run_failed"),
+    ],
+)
+def test_run_error_presentation_covers_provider_failure_classes(
+    error: Exception,
+    expected_code: str,
+) -> None:
+    message, code = ui_bridge._present_run_error(error)
+
+    assert code == expected_code
+    assert "private provider payload" not in message
+
+
 @pytest.mark.asyncio
 async def test_stdin_reader_does_not_use_asyncio_default_executor() -> None:
     loop = asyncio.get_running_loop()
@@ -217,6 +236,14 @@ class _SlowFakeEngine(_FakeEngine):
         await self.release_run.wait()
         await on_event("response_end", {})
         return AgentResult(status="completed", response="完成", usage=self.usage)
+
+
+class _FailingFakeEngine(_FakeEngine):
+    async def run_streaming(self, task: str, on_event: Any) -> AgentResult:
+        raise RuntimeError(
+            'litellm.NotFoundError: AnthropicException - '
+            '{"error":{"message":"The requested resource was not found"}}'
+        )
 
 
 class _FakeBackgroundRunner:
@@ -710,6 +737,30 @@ async def test_bridge_streams_engine_events_as_ui_messages() -> None:
         for record in records
     )
     assert any(record["type"] == "runtime/status" for record in records)
+
+
+@pytest.mark.asyncio
+async def test_bridge_presents_model_404_without_raw_provider_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(_FailingFakeEngine(), config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("你好", request_id="submit-failed")
+    assert bridge._run_task is not None
+    await bridge._run_task
+
+    error = next(record for record in _records(writer) if record["type"] == "error")
+    assert error["payload"] == {
+        "message": (
+            "模型或 API Base 不匹配，服务端未找到请求资源。"
+            "请运行 `naumi doctor --live` 检查配置。"
+        ),
+        "code": "model_not_found",
+    }
+    assert "AnthropicException" not in writer.getvalue()
+    assert not [record for record in caplog.records if record.levelno >= 40]
 
 
 @pytest.mark.asyncio
