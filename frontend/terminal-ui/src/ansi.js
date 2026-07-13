@@ -4,6 +4,8 @@ export const ANSI = {
   showCursor: "\x1b[?25h",
   altOn: "\x1b[?1049h",
   altOff: "\x1b[?1049l",
+  bracketedPasteOn: "\x1b[?2004h",
+  bracketedPasteOff: "\x1b[?2004l",
   reset: "\x1b[0m",
   dim: "\x1b[2m",
   bold: "\x1b[1m",
@@ -106,7 +108,8 @@ export function visibleWidth(text) {
 }
 
 export function charWidth(ch) {
-  return /[\u1100-\u115f\u2e80-\ua4cf\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/.test(ch) ? 2 : 1;
+  if (/^\p{Mark}+$/u.test(ch)) return 0;
+  return /[\u1100-\u115f\u2e80-\ua4cf\uf900-\ufaff\ufe10-\ufe19\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]|\p{Extended_Pictographic}/u.test(ch) ? 2 : 1;
 }
 
 export function stripAnsi(text) {

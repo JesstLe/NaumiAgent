@@ -627,6 +627,96 @@ test("terminal UI process toggles reasoning display through bridge protocol", as
   }
 });
 
+test("terminal UI process keeps bracketed multiline paste atomic until submit", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("\x1b[20");
+    await delay(20);
+    app.stdin.write("0~第一行\n第二行\x1b[20");
+    await delay(20);
+    app.stdin.write("1~");
+    await delay(80);
+
+    const sendsBeforeEnter = readDebugEvents(app.debugLogPath).filter(
+      (record) => record.event === "protocol.send" && record.payload.record.type === "submit",
+    );
+    assert.equal(sendsBeforeEnter.length, 0);
+
+    app.stdin.write("\n");
+    const submit = await waitForDebugEvent(
+      app.debugLogPath,
+      (record) => record.event === "protocol.send" && record.payload.record.type === "submit",
+    );
+    assert.equal(submit.payload.record.payload.text, "第一行\n第二行");
+
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process inserts Shift Enter and submits multiline text with Ctrl Enter", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("检查 API");
+    app.stdin.write("\x1b[13;2u");
+    app.stdin.write("修复测试");
+    await delay(80);
+    assert.equal(
+      readDebugEvents(app.debugLogPath).filter(
+        (record) => record.event === "protocol.send" && record.payload.record.type === "submit",
+      ).length,
+      0,
+    );
+
+    app.stdin.write("\x1b[13;5u");
+    const submit = await waitForDebugEvent(
+      app.debugLogPath,
+      (record) => record.event === "protocol.send" && record.payload.record.type === "submit",
+    );
+    assert.equal(submit.payload.record.payload.text, "检查 API\n修复测试");
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process restores an unsubmitted multiline draft after restart", async () => {
+  const statePath = path.join(
+    tmpdir(),
+    `naumi-terminal-ui-draft-${Date.now()}-${Math.random()}.json`,
+  );
+  const first = launchTerminalUi("fake-bridge.js", { statePath });
+  const firstOutput = collectOutput(first);
+
+  try {
+    await waitForOutput(firstOutput, "新终端 UI 已连接 Python bridge。");
+    first.stdin.write("保留第一行\x1b[13;2u保留第二行");
+    await waitForOutput(firstOutput, "保留第二行");
+    await delay(180);
+    assert.equal(await stopTerminalUi(first), 0);
+
+    const second = launchTerminalUi("fake-bridge.js", { statePath });
+    const secondOutput = collectOutput(second);
+    try {
+      await waitForOutput(secondOutput, "保留第一行", 3000);
+      await waitForOutput(secondOutput, "保留第二行▌", 3000);
+      assert.equal(await stopTerminalUi(second), 0);
+    } finally {
+      forceKill(second);
+    }
+  } finally {
+    forceKill(first);
+    fs.rmSync(statePath, { force: true });
+  }
+});
+
 function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
   const debugLogPath = path.join(tmpdir(), `naumi-terminal-ui-debug-${Date.now()}-${Math.random()}.jsonl`);
   const fakeBridge = fixtureName
@@ -646,7 +736,8 @@ function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
       env: {
         ...process.env,
         FORCE_COLOR: "0",
-        NAUMI_TERMINAL_UI_STATE_PATH: path.join(tmpdir(), `naumi-terminal-ui-state-${Date.now()}-${Math.random()}.json`),
+        NAUMI_TERMINAL_UI_STATE_PATH: options.statePath
+          || path.join(tmpdir(), `naumi-terminal-ui-state-${Date.now()}-${Math.random()}.json`),
         NAUMI_TERMINAL_UI_DEBUG_LOG: debugLogPath,
       },
     },
@@ -719,4 +810,14 @@ async function waitForOutput(output, needle, timeoutMs = 1500) {
 
 function readDebugEvents(filePath) {
   return fs.readFileSync(filePath, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+
+async function waitForDebugEvent(filePath, predicate, timeoutMs = 1500) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const match = readDebugEvents(filePath).find(predicate);
+    if (match) return match;
+    await delay(20);
+  }
+  assert.fail(`等待调试事件超时: ${filePath}`);
 }

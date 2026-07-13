@@ -1,5 +1,9 @@
+import { charWidth } from "./ansi.js";
+
 export const INPUT_KEYS = {
   shiftTab: "\x1b[Z",
+  shiftEnter: "\x1b[13;2u",
+  ctrlEnter: "\x1b[13;5u",
   pageUp: "\x1b[5~",
   pageDown: "\x1b[6~",
   up: "\x1b[A",
@@ -21,10 +25,13 @@ export const INPUT_KEYS = {
   ctrlE: "\x05",
 };
 
+const BRACKETED_PASTE_START = "\x1b[200~";
+const BRACKETED_PASTE_END = "\x1b[201~";
 const CSI_PATTERN = /^\x1b\[[0-9;?]*[~A-Za-z]/;
 const SS3_PATTERN = /^\x1b[Oo][A-Za-z]/;
 const SS3_FALLBACK_PATTERN = /^[Oo][ABab]$/;
 const MAX_PENDING_ESCAPE_CHARS = 16;
+const GRAPHEME_SEGMENTER = new Intl.Segmenter("und", { granularity: "grapheme" });
 
 export function splitInputStreamChunk(chunk, pending = "") {
   const combined = `${pending ?? ""}${chunk ?? ""}`;
@@ -34,6 +41,52 @@ export function splitInputStreamChunk(chunk, pending = "") {
     keys: splitInputChunk(text),
     pending: trailing,
   };
+}
+
+export function createInputTokenizerState() {
+  return { pendingEscape: "", pasteBuffer: null };
+}
+
+export function tokenizeInputChunk(chunk, state) {
+  let text = `${state.pendingEscape}${String(chunk ?? "")}`;
+  state.pendingEscape = "";
+  const tokens = [];
+
+  while (text) {
+    if (state.pasteBuffer !== null) {
+      const end = text.indexOf(BRACKETED_PASTE_END);
+      if (end < 0) {
+        const overlap = longestSuffixPrefix(text, BRACKETED_PASTE_END);
+        state.pasteBuffer += text.slice(0, text.length - overlap);
+        state.pendingEscape = text.slice(text.length - overlap);
+        return tokens;
+      }
+      state.pasteBuffer += text.slice(0, end);
+      tokens.push({ type: "paste", value: state.pasteBuffer });
+      state.pasteBuffer = null;
+      text = text.slice(end + BRACKETED_PASTE_END.length);
+      continue;
+    }
+
+    const start = text.indexOf(BRACKETED_PASTE_START);
+    if (start >= 0) {
+      for (const key of splitInputChunk(text.slice(0, start))) {
+        tokens.push({ type: "key", value: normalizeModifiedEnter(key) });
+      }
+      state.pasteBuffer = "";
+      text = text.slice(start + BRACKETED_PASTE_START.length);
+      continue;
+    }
+
+    const trailing = extractTrailingIncompleteEscape(text);
+    const complete = trailing ? text.slice(0, -trailing.length) : text;
+    for (const key of splitInputChunk(complete)) {
+      tokens.push({ type: "key", value: normalizeModifiedEnter(key) });
+    }
+    state.pendingEscape = trailing;
+    break;
+  }
+  return tokens;
 }
 
 export function splitInputChunk(chunk) {
@@ -96,7 +149,8 @@ export function getInputCursor(state) {
 
 export function setInputText(state, text, cursor = null) {
   state.input = String(text ?? "");
-  state.inputCursor = clampCursor(state.input, cursor ?? Array.from(state.input).length);
+  state.inputCursor = clampCursor(state.input, cursor ?? segmentGraphemes(state.input).length);
+  state.inputPreferredColumn = null;
 }
 
 export function clearInput(state) {
@@ -105,8 +159,9 @@ export function clearInput(state) {
 
 export function insertInputText(state, text) {
   resetInputHistoryNavigation(state);
-  const chars = Array.from(state.input ?? "");
-  const insertChars = Array.from(String(text ?? ""));
+  resetPreferredColumn(state);
+  const chars = segmentGraphemes(state.input);
+  const insertChars = segmentGraphemes(text);
   const cursor = getInputCursor(state);
   chars.splice(cursor, 0, ...insertChars);
   state.input = chars.join("");
@@ -115,7 +170,8 @@ export function insertInputText(state, text) {
 
 export function backspaceInput(state) {
   resetInputHistoryNavigation(state);
-  const chars = Array.from(state.input ?? "");
+  resetPreferredColumn(state);
+  const chars = segmentGraphemes(state.input);
   const cursor = getInputCursor(state);
   if (cursor <= 0) return false;
   chars.splice(cursor - 1, 1);
@@ -126,7 +182,8 @@ export function backspaceInput(state) {
 
 export function deleteInputForward(state) {
   resetInputHistoryNavigation(state);
-  const chars = Array.from(state.input ?? "");
+  resetPreferredColumn(state);
+  const chars = segmentGraphemes(state.input);
   const cursor = getInputCursor(state);
   if (cursor >= chars.length) return false;
   chars.splice(cursor, 1);
@@ -136,17 +193,93 @@ export function deleteInputForward(state) {
 }
 
 export function moveInputCursor(state, direction) {
+  resetPreferredColumn(state);
   const cursor = getInputCursor(state);
   if (direction === "left") state.inputCursor = clampCursor(state.input, cursor - 1);
   if (direction === "right") state.inputCursor = clampCursor(state.input, cursor + 1);
   if (direction === "home") state.inputCursor = 0;
-  if (direction === "end") state.inputCursor = Array.from(state.input ?? "").length;
+  if (direction === "end") state.inputCursor = segmentGraphemes(state.input).length;
+}
+
+export function insertInputNewline(state) {
+  insertInputText(state, "\n");
+}
+
+export function getInputCursorLocation(state) {
+  const chars = segmentGraphemes(state.input);
+  const before = chars.slice(0, getInputCursor(state));
+  let line = 0;
+  let column = 0;
+  for (const char of before) {
+    if (char === "\n") {
+      line += 1;
+      column = 0;
+    } else {
+      column += 1;
+    }
+  }
+  return { line, column };
+}
+
+export function moveInputCursorVertical(state, direction) {
+  if (direction !== "up" && direction !== "down") return false;
+  const lines = String(state.input ?? "").split("\n").map(segmentGraphemes);
+  const location = getInputCursorLocation(state);
+  const targetLine = location.line + (direction === "up" ? -1 : 1);
+  if (targetLine < 0 || targetLine >= lines.length) return false;
+
+  const preferredColumn = Number.isFinite(state.inputPreferredColumn)
+    ? state.inputPreferredColumn
+    : location.column;
+  const targetColumn = Math.min(preferredColumn, lines[targetLine].length);
+  state.inputPreferredColumn = preferredColumn;
+  state.inputCursor = inputLineOffset(lines, targetLine) + targetColumn;
+  return true;
+}
+
+export function moveInputCursorToLineBoundary(state, boundary) {
+  const lines = String(state.input ?? "").split("\n").map(segmentGraphemes);
+  const location = getInputCursorLocation(state);
+  const line = lines[location.line] ?? [];
+  const column = boundary === "end" ? line.length : 0;
+  state.inputCursor = inputLineOffset(lines, location.line) + column;
+  resetPreferredColumn(state);
 }
 
 export function renderInputWithCursor(state) {
-  const chars = Array.from(state.input ?? "");
+  const chars = segmentGraphemes(state.input);
   const cursor = getInputCursor(state);
   return `${chars.slice(0, cursor).join("")}\u258C${chars.slice(cursor).join("")}`;
+}
+
+export function renderInputLinesWithCursor(state, availableWidth, maxLines = 6) {
+  const width = Math.max(1, Number(availableWidth) || 1);
+  const limit = Math.max(1, Number(maxLines) || 1);
+  const location = getInputCursorLocation(state);
+  const logicalLines = String(state.input ?? "").split("\n");
+  const rendered = [];
+
+  for (const [lineIndex, line] of logicalLines.entries()) {
+    const tokens = segmentGraphemes(line);
+    if (lineIndex === location.line) {
+      tokens.splice(location.column, 0, "\u258C");
+    }
+    const wrapped = wrapComposerTokens(tokens, width);
+    rendered.push(...wrapped.map((text) => ({
+      text,
+      hasCursor: text.includes("\u258C"),
+    })));
+  }
+
+  const cursorRow = Math.max(0, rendered.findIndex((row) => row.hasCursor));
+  const maxStart = Math.max(0, rendered.length - limit);
+  const start = Math.max(0, Math.min(cursorRow - Math.floor(limit / 2), maxStart));
+  return rendered.slice(start, start + limit).map((row) => row.text);
+}
+
+export function truncateInputText(text, maxGraphemes = 200_000) {
+  const limit = Math.max(0, Number(maxGraphemes) || 0);
+  return segmentGraphemes(text).slice(0, limit).join("");
 }
 
 export function rememberSubmittedInput(state, text, { maxEntries = 100 } = {}) {
@@ -195,10 +328,43 @@ export function resetInputHistoryNavigation(state) {
   state.inputHistoryDraft = "";
 }
 
+function inputLineOffset(lines, lineIndex) {
+  return lines
+    .slice(0, lineIndex)
+    .reduce((total, line) => total + line.length + 1, 0);
+}
+
+function resetPreferredColumn(state) {
+  state.inputPreferredColumn = null;
+}
+
 function clampCursor(text, cursor) {
-  const length = Array.from(text ?? "").length;
+  const length = segmentGraphemes(text).length;
   const value = Number.isFinite(cursor) ? Number(cursor) : length;
   return Math.max(0, Math.min(length, value));
+}
+
+function segmentGraphemes(text) {
+  return Array.from(GRAPHEME_SEGMENTER.segment(String(text ?? "")), (entry) => entry.segment);
+}
+
+function wrapComposerTokens(tokens, width) {
+  if (!tokens.length) return [""];
+  const lines = [];
+  let current = "";
+  let currentWidth = 0;
+  for (const token of tokens) {
+    const tokenWidth = charWidth(token);
+    if (current && currentWidth + tokenWidth > width) {
+      lines.push(current);
+      current = "";
+      currentWidth = 0;
+    }
+    current += token;
+    currentWidth += tokenWidth;
+  }
+  lines.push(current);
+  return lines;
 }
 
 function isControlInput(char) {
@@ -228,4 +394,21 @@ function extractTrailingIncompleteEscape(text) {
 function normalizeSs3Key(value) {
   if (!value || value.length < 3) return value;
   return `\x1bO${value.slice(2).toUpperCase()}`;
+}
+
+function longestSuffixPrefix(text, marker) {
+  for (
+    let length = Math.min(text.length, marker.length - 1);
+    length > 0;
+    length -= 1
+  ) {
+    if (text.endsWith(marker.slice(0, length))) return length;
+  }
+  return 0;
+}
+
+function normalizeModifiedEnter(key) {
+  if (key === "\x1b[27;2;13~") return INPUT_KEYS.shiftEnter;
+  if (key === "\x1b[27;5;13~") return INPUT_KEYS.ctrlEnter;
+  return key;
 }
