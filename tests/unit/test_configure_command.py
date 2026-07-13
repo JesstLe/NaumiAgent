@@ -16,8 +16,12 @@ def test_configure_command_reads_key_from_stdin_without_echo(
     monkeypatch,
 ) -> None:
     config_path = tmp_path / "config.yaml"
-    stored: list[str] = []
-    monkeypatch.setattr(configurator, "store_model_api_key", stored.append)
+    stored: list[tuple[str | None, str]] = []
+    monkeypatch.setattr(
+        configurator,
+        "store_model_api_key",
+        lambda value, *, provider=None: stored.append((provider, value)),
+    )
 
     result = runner.invoke(
         app,
@@ -33,7 +37,7 @@ def test_configure_command_reads_key_from_stdin_without_echo(
     )
 
     assert result.exit_code == 0
-    assert stored == ["secret-value"]
+    assert stored == [("kimi", "secret-value")]
     assert "secret-value" not in result.output
     assert "openai/kimi-for-coding" in result.output
     persisted = yaml.safe_load(config_path.read_text(encoding="utf-8"))
