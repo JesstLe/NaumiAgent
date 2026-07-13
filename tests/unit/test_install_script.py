@@ -40,3 +40,11 @@ def test_install_script_updates_shell_path_idempotently() -> None:
     assert "grep -Fqx" in script
     assert "naumi chat --classic" in script
     assert "naumi ui --legacy" in script
+
+
+def test_readme_declares_terminal_ui_as_default_entry() -> None:
+    readme = (Path(__file__).resolve().parents[2] / "README.md").read_text(encoding="utf-8")
+
+    assert "`naumi` 默认启动新一代 Node Terminal UI" in readme
+    assert "主入口是全屏 CLI：`naumi chat`" not in readme
+    assert "可选安装 Node UI 依赖" not in readme

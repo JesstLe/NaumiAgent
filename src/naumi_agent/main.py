@@ -386,7 +386,7 @@ def _exit_after_terminal_ui(config: str) -> None:
         console.print(f"[red]{exc}[/red]")
         console.print(
             "[dim]可暂时使用 legacy fallback："
-            "naumi ui --legacy 或 naumi chat --tui[/dim]"
+            "naumi chat --classic 或 naumi ui --legacy[/dim]"
         )
         raise typer.Exit(1) from exc
 
@@ -4615,9 +4615,9 @@ async def _run_btemplate_compare(engine: Any, arg: str) -> None:
 
 def _check_api_key(config: AppConfig) -> None:
     if not config.models.api_key:
-        console.print("[yellow]警告: 未设置 API Key。请通过环境变量设置:[/yellow]")
+        console.print("[yellow]警告: 未设置 API Key。[/yellow]")
         console.print("  [dim]export NAUMI_MODELS__API_KEY=your-key-here[/dim]")
-        console.print("  [dim]或在 config.yaml 中配置 api_key[/dim]")
+        console.print("  [dim]也可重新运行首次引导，将密钥保存到系统凭据库。[/dim]")
         console.print()
 
 

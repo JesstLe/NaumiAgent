@@ -105,15 +105,15 @@ def _check_config(config: AppConfig) -> DoctorCheck:
 
 def _check_api_key(config: AppConfig) -> DoctorCheck:
     if config.models.api_key:
-        return DoctorCheck("API key", "pass", "已配置 models.api_key")
+        return DoctorCheck("API key", "pass", "已从安全凭据来源加载")
     env_keys = [key for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY") if os.getenv(key)]
     if env_keys:
         return DoctorCheck("API key", "pass", f"已通过环境变量配置: {', '.join(env_keys)}")
     return DoctorCheck(
         "API key",
         "error",
-        "未检测到 models.api_key、OPENAI_API_KEY 或 ANTHROPIC_API_KEY",
-        "在 config.yaml 中配置 models.api_key，或导出对应模型服务的环境变量。",
+        "未检测到模型 API Key 或 provider 环境变量",
+        "重新运行首次引导写入系统凭据库，或导出对应模型服务的环境变量。",
     )
 
 

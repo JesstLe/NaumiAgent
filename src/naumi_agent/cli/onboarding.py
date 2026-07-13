@@ -230,7 +230,7 @@ def _check_node_ui(project_root: Path) -> None:
         console.print(
             "\n[yellow]未检测到 Node.js，新一代终端 UI（naumi ui）不可用。[/yellow]"
         )
-        console.print("可继续使用全屏 CLI（naumi）或 Textual TUI（naumi chat --tui）。")
+        console.print("可使用 naumi chat --classic 或 naumi ui --legacy 继续工作。")
         console.print("如需 Node UI，请安装 Node.js 20+ 后运行：")
         console.print(f"  [dim]cd {project_root / 'frontend' / 'terminal-ui'} && npm install[/dim]")
         return
