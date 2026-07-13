@@ -510,7 +510,7 @@ class AgentEngine:
         for tool in create_sandbox_tools():
             self._tool_registry.register(tool)
         try:
-            for tool in create_web_tools():
+            for tool in create_web_tools(self._browser_session):
                 self._tool_registry.register(tool)
         except Exception:
             pass  # web tools optional (may need API keys)
