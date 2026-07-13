@@ -6,10 +6,16 @@ import asyncio
 import fnmatch
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from naumi_agent.runtime.shell import create_shell_process, terminate_process_tree
+from naumi_agent.runtime.shell_output import (
+    ShellOutputArtifact,
+    ShellOutputStore,
+    ShellOutputSummary,
+)
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 
@@ -740,9 +746,24 @@ class YamlMicroVerifyTool(Tool):
 class BashRunTool(Tool):
     """执行 shell 命令."""
 
-    def __init__(self, workspace_root: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        workspace_root: str | Path | None = None,
+        *,
+        output_dir: str | Path | None = None,
+    ) -> None:
         root = Path.cwd() if workspace_root is None else Path(workspace_root)
         self._workspace_root = root.expanduser().resolve()
+        resolved_output_dir = (
+            Path(output_dir)
+            if output_dir is not None
+            else Path(tempfile.gettempdir()) / "naumi-agent-shell-output"
+        )
+        self._output_store = ShellOutputStore(resolved_output_dir)
+
+    @property
+    def output_dir(self) -> Path:
+        return self._output_store.output_dir
 
     @property
     def name(self) -> str:
@@ -750,7 +771,7 @@ class BashRunTool(Tool):
 
     @property
     def description(self) -> str:
-        return "在 shell 中执行命令并返回输出。支持超时设置。工作目录默认为当前进程目录。"
+        return "在 shell 中执行命令并返回可恢复输出。支持超时设置，工作目录默认为工作区根目录。"
 
     @property
     def metadata(self) -> ToolMetadata:
@@ -777,7 +798,7 @@ class BashRunTool(Tool):
                 },
                 "cwd": {
                     "type": "string",
-                    "description": "工作目录，默认为当前目录",
+                    "description": "工作目录，默认为工作区根目录",
                 },
             },
             "required": ["command"],
@@ -787,10 +808,15 @@ class BashRunTool(Tool):
         self, *, command: str, timeout: int = 30, cwd: str | None = None, **kwargs: Any
     ) -> str:
         proc: asyncio.subprocess.Process | None = None
+        artifact: ShellOutputArtifact | None = None
         try:
+            if not isinstance(command, str) or not command.strip():
+                return "错误：Shell 命令不能为空"
+            if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+                return "错误：超时时间必须是正整数（秒）"
             if _looks_like_background_shell(command):
                 return (
-                    "Error: 检测到后台 shell 写法（如 `&`/`nohup`/`disown`）。"
+                    "错误：检测到后台 shell 写法（如 `&`/`nohup`/`disown`）。"
                     "请改用 background_run，这样系统可以记录 PID、输出文件并在 cleanup 时回收进程。"
                 )
             workdir = (
@@ -799,41 +825,121 @@ class BashRunTool(Tool):
                 else self._workspace_root
             )
             if not workdir.is_dir():
-                return f"Error: 工作目录不存在: {workdir}"
+                return f"错误：工作目录不存在: {workdir}"
+
+            self._output_store.prune()
+            try:
+                artifact = self._output_store.allocate()
+            except OSError as exc:
+                return f"错误：无法创建 Shell 输出日志: {type(exc).__name__}: {exc}"
 
             proc = await create_shell_process(
                 command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                stdout=artifact.stream,
+                stderr=asyncio.subprocess.STDOUT,
                 cwd=str(workdir),
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-
-            output_parts = [f"工作目录: {workdir}"]
-            if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
-            if stderr:
-                output_parts.append(f"[stderr]\n{stderr.decode('utf-8', errors='replace')}")
-
-            output = "\n".join(output_parts) if output_parts else "(no output)"
-
-            if proc.returncode != 0:
-                output += f"\n[exit code: {proc.returncode}]"
-
-            # 截断过长输出
-            if len(output) > 50000:
-                output = output[:50000] + f"\n... (truncated, {len(output)} total chars)"
-
-            return output
+            await asyncio.wait_for(proc.wait(), timeout=timeout)
+            try:
+                summary = self._output_store.summarize(artifact)
+            except OSError as exc:
+                self._output_store.preserve(artifact)
+                output_path = artifact.path
+                artifact = None
+                return (
+                    "错误：Shell 命令已结束，但输出日志读取失败: "
+                    f"{type(exc).__name__}: {exc}\n- 完整输出: {output_path}"
+                )
+            artifact = None
+            self._output_store.prune()
+            return _format_shell_result(
+                summary,
+                workdir=workdir,
+                exit_code=proc.returncode,
+            )
         except TimeoutError:
             if proc is not None:
                 await terminate_process_tree(proc)
-            return f"Error: Command timed out after {timeout}s"
+            if artifact is None:
+                return f"错误：命令超过 {timeout} 秒未完成，已终止"
+            try:
+                summary = self._output_store.summarize(artifact)
+                artifact = None
+            except OSError as exc:
+                self._output_store.preserve(artifact)
+                output_path = artifact.path
+                artifact = None
+                return (
+                    f"错误：命令超过 {timeout} 秒未完成，已终止；"
+                    f"输出日志读取失败: {type(exc).__name__}: {exc}"
+                    f"\n- 完整输出: {output_path}"
+                )
+            self._output_store.prune()
+            return _format_shell_result(
+                summary,
+                workdir=workdir,
+                exit_code=proc.returncode if proc is not None else None,
+                timed_out_after=timeout,
+            )
+        except asyncio.CancelledError:
+            if proc is not None:
+                await terminate_process_tree(proc)
+            if artifact is not None:
+                self._output_store.discard(artifact)
+            raise
         except Exception as e:
-            return f"Error executing command: {type(e).__name__}: {e}"
+            if proc is not None and proc.returncode is None:
+                await terminate_process_tree(proc)
+            if artifact is not None:
+                self._output_store.discard(artifact)
+            return f"错误：Shell 命令执行失败: {type(e).__name__}: {e}"
 
 
-def create_builtin_tools(workspace_root: str | Path | None = None) -> list[Tool]:
+def _format_shell_result(
+    summary: ShellOutputSummary,
+    *,
+    workdir: Path,
+    exit_code: int | None,
+    timed_out_after: int | None = None,
+) -> str:
+    title = (
+        "Shell 命令已超时并终止。"
+        if timed_out_after is not None
+        else "Shell 命令执行完成。"
+    )
+    lines = [title, f"工作目录: {workdir}"]
+    if timed_out_after is not None:
+        lines.append(f"状态: 命令超过 {timed_out_after} 秒未完成，已终止")
+    if timed_out_after is None and exit_code is not None:
+        lines.append(f"退出码: {exit_code}")
+    lines.append(f"输出: {summary.size_bytes} 字节")
+
+    if summary.is_large:
+        lines.append(f"- 完整输出: {summary.path}")
+        lines.extend(
+            [
+                "",
+                "输出摘要（开头）:",
+                summary.head,
+                "",
+                f"...（中间省略 {summary.omitted_bytes} 字节，完整内容见上方日志）...",
+                "",
+                "输出摘要（结尾）:",
+                summary.tail,
+            ]
+        )
+    else:
+        lines.extend(["", summary.content or "（无输出）"])
+    if timed_out_after is None and exit_code not in (None, 0):
+        lines.append(f"[exit code: {exit_code}]")
+    return "\n".join(lines)
+
+
+def create_builtin_tools(
+    workspace_root: str | Path | None = None,
+    *,
+    shell_output_dir: str | Path | None = None,
+) -> list[Tool]:
     """创建所有内置工具实例."""
     return [
         GlobTool(workspace_root),
@@ -843,7 +949,7 @@ def create_builtin_tools(workspace_root: str | Path | None = None) -> list[Tool]
         FileWriteTool(workspace_root),
         FileEditTool(workspace_root),
         YamlMicroVerifyTool(),
-        BashRunTool(workspace_root),
+        BashRunTool(workspace_root, output_dir=shell_output_dir),
         YamlValidateTool(),
     ]
 
