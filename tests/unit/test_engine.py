@@ -33,7 +33,7 @@ from naumi_agent.safety.permissions import (
     PermissionReasonCode,
 )
 from naumi_agent.tasks.models import TaskStatus
-from naumi_agent.tools.base import Tool, ToolCall, ToolResult
+from naumi_agent.tools.base import Tool, ToolCall, ToolMetadata, ToolResult
 
 
 class FakeTool(Tool):
@@ -53,8 +53,176 @@ class FakeTool(Tool):
         return "ok"
 
 
+class CoordinatedSafeTool(Tool):
+    def __init__(
+        self,
+        name: str,
+        entered: set[str],
+        both_entered: asyncio.Event,
+        release: asyncio.Event,
+    ) -> None:
+        self._name = name
+        self._entered = entered
+        self._both_entered = both_entered
+        self._release = release
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def description(self) -> str:
+        return self._name
+
+    @property
+    def parameters_schema(self) -> dict[str, object]:
+        return {"type": "object", "properties": {}}
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(read_only=True, concurrency_safe=True)
+
+    async def execute(self, **kwargs: object) -> str:
+        self._entered.add(self._name)
+        if len(self._entered) == 2:
+            self._both_entered.set()
+        await self._release.wait()
+        return self._name
+
+
 def _usage() -> TokenUsage:
     return TokenUsage(input_tokens=1, output_tokens=1, total_tokens=2)
+
+
+def _two_safe_tool_response() -> ModelResponse:
+    return ModelResponse(
+        content="",
+        tool_calls=[
+            {
+                "id": "safe-a-call",
+                "function": {"name": "safe_a", "arguments": "{}"},
+            },
+            {
+                "id": "safe-b-call",
+                "function": {"name": "safe_b", "arguments": "{}"},
+            },
+        ],
+        usage=_usage(),
+        model="test-model",
+    )
+
+
+@pytest.mark.asyncio
+async def test_react_loop_executes_safe_tool_calls_concurrently(tmp_path) -> None:
+    engine = AgentEngine(AppConfig(
+        memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        safety=SafetyConfig(max_parallel_tools=2),
+    ))
+    entered: set[str] = set()
+    both_entered = asyncio.Event()
+    release = asyncio.Event()
+    engine.tool_registry.register(
+        CoordinatedSafeTool("safe_a", entered, both_entered, release)
+    )
+    engine.tool_registry.register(
+        CoordinatedSafeTool("safe_b", entered, both_entered, release)
+    )
+    responses = [
+        _two_safe_tool_response(),
+        ModelResponse(content="完成", usage=_usage(), model="test-model"),
+    ]
+    run_task: asyncio.Task[object] | None = None
+
+    try:
+        with patch.object(
+            engine._router,
+            "call",
+            new_callable=AsyncMock,
+            side_effect=responses,
+        ):
+            run_task = asyncio.create_task(
+                engine._react_loop(engine.tool_registry.get_openai_tools())
+            )
+            await asyncio.wait_for(both_entered.wait(), timeout=1)
+            release.set()
+            result = await run_task
+
+        assert result.response == "完成"
+        tool_messages = [
+            message for message in engine._messages if message.get("role") == "tool"
+        ]
+        assert [message["tool_call_id"] for message in tool_messages] == [
+            "safe-a-call",
+            "safe-b-call",
+        ]
+    finally:
+        release.set()
+        if run_task is not None and not run_task.done():
+            await run_task
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_streaming_parallel_tools_emit_batch_metadata(tmp_path) -> None:
+    engine = AgentEngine(AppConfig(
+        memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        safety=SafetyConfig(max_parallel_tools=2),
+    ))
+    entered: set[str] = set()
+    both_entered = asyncio.Event()
+    release = asyncio.Event()
+    engine.tool_registry.register(
+        CoordinatedSafeTool("safe_a", entered, both_entered, release)
+    )
+    engine.tool_registry.register(
+        CoordinatedSafeTool("safe_b", entered, both_entered, release)
+    )
+    events: list[tuple[str, dict[str, object]]] = []
+    call_count = 0
+
+    async def stream_response(**_: object):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            yield StreamChunk(
+                tool_call={
+                    index: call
+                    for index, call in enumerate(_two_safe_tool_response().tool_calls)
+                },
+                finish_reason="tool_calls",
+            )
+            return
+        yield StreamChunk(token="完成")
+        yield StreamChunk(finish_reason="stop")
+
+    async def on_event(event: str, data: dict[str, object]) -> None:
+        events.append((event, data))
+
+    run_task: asyncio.Task[object] | None = None
+    try:
+        with patch.object(engine._router, "stream", new=stream_response):
+            run_task = asyncio.create_task(
+                engine._react_loop_streaming(
+                    engine.tool_registry.get_openai_tools(),
+                    on_event,
+                )
+            )
+            await asyncio.wait_for(both_entered.wait(), timeout=1)
+            release.set()
+            await run_task
+
+        tool_events = [
+            data for event, data in events if event in {"tool_start", "tool_end"}
+        ]
+        assert tool_events
+        assert all(data["batch_size"] == 2 for data in tool_events)
+        assert all(data["parallel"] is True for data in tool_events)
+        assert {data["batch_id"] for data in tool_events} == {"turn-1-batch-1"}
+    finally:
+        release.set()
+        if run_task is not None and not run_task.done():
+            await run_task
+        await engine.shutdown()
 
 
 @pytest.mark.asyncio
