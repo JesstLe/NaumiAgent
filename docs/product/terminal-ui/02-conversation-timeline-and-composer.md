@@ -2,7 +2,9 @@
 
 ## 实施状态（2026-07-13）
 
-已完成首个独立切片“多行输入器与草稿恢复”：
+已完成两个独立切片：“多行输入器与草稿恢复”和“时间线跟随与缩放锚点”。
+
+多行输入器与草稿恢复：
 
 - 输入编辑按 grapheme cluster 移动和删除，不会拆散 emoji 或组合字符。
 - `Shift+Enter` 插入换行，`Ctrl+Enter` 提交多行内容，普通 `Enter` 保持提交语义。
@@ -11,15 +13,25 @@
 - 草稿按会话写入 UI state v2；v1 快照自动迁移，未知未来版本不会被旧客户端覆盖。
 - 正常退出、进程重启和会话切换均保留未提交草稿、光标及垂直首选列。
 
+时间线跟随与缩放锚点：
+
+- 默认 `follow_tail=true`，流式 Agent 输出持续保持最新内容可见。
+- `PageUp` 或 `Alt+Up` 上翻后进入 detached 状态；后续输出不改变阅读偏移。
+- assistant token 按消息 ID 去重，tool prepare/use/result 按 `tool_call_id` 去重，不会把流式 token 数误当成未读数。
+- detached 状态在固定 footer 显示“有 N 条新输出”；`PageDown` 到底、空输入时按 `End`，或按 `Ctrl+L` 可恢复实时跟随。
+- 终端宽高变化时按顶部可见消息 ID 恢复阅读位置；缺少 ID 的旧消息按索引回退。
+- UI 快照只保留阅读偏移；重启后派生 follow/detached 状态并清空上一进程的未读证据。
+
 本模块仍未整体完成。后续切片依次为：
 
-1. `follow_tail`、新输出计数和 resize 锚点恢复。
-2. 用户消息 `queued -> accepted -> failed` 发送生命周期及重试。
-3. `Ctrl+R` 项目历史搜索和补全候选键盘选择。
-4. `chat | task` 输入模式、`/task` 创建及对话上下文联动。
+1. 用户消息 `queued -> accepted -> failed` 发送生命周期及重试。
+2. `Ctrl+R` 项目历史搜索和补全候选键盘选择。
+3. `chat | task` 输入模式、`/task` 创建及对话上下文联动。
 
-本切片的权威实现计划与验证证据见
-`docs/superpowers/plans/2026-07-13-terminal-multiline-composer.md`。
+两个切片的权威实现计划与验证证据见：
+
+- `docs/superpowers/plans/2026-07-13-terminal-multiline-composer.md`
+- `docs/superpowers/plans/2026-07-13-terminal-follow-tail.md`
 
 ## 1. 目标
 
