@@ -73,6 +73,7 @@ import {
   markTimelineOutput,
   scrollTimeline,
 } from "./timeline-follow.js";
+import { createTrackpadScrollFilter } from "./scroll-input.js";
 import {
   getProjectInputHistory,
   getUiSnapshot,
@@ -98,6 +99,7 @@ let quitting = false;
 let viewportWidth = null;
 let viewportHeight = null;
 const inputTokenizer = createInputTokenizerState();
+const trackpadScrollFilter = createTrackpadScrollFilter();
 
 main();
 
@@ -504,14 +506,10 @@ function handleSingleKeyInput(chunk) {
     scheduleRedraw();
     return;
   }
-  if (chunk === INPUT_KEYS.upAlt) {
-    adjustScrollOffset(state, "up");
-    persistUiSnapshot();
-    scheduleRedraw();
-    return;
-  }
-  if (chunk === INPUT_KEYS.downAlt) {
-    adjustScrollOffset(state, "down");
+  if (chunk === INPUT_KEYS.upAlt || chunk === INPUT_KEYS.downAlt) {
+    const direction = chunk === INPUT_KEYS.upAlt ? "up" : "down";
+    if (!trackpadScrollFilter.accept(direction)) return;
+    scrollTimeline(state, direction === "up" ? 1 : -1);
     persistUiSnapshot();
     scheduleRedraw();
     return;
@@ -617,15 +615,6 @@ function handleSlashCompletionKey(chunk) {
   }
   if (chunk === "\r" || chunk === "\n") return acceptSlashCompletion(state);
   return false;
-}
-
-function adjustScrollOffset(state, direction) {
-  const step = Math.max(3, Math.floor((process.stdout.rows ?? 24) / 2));
-  if (direction === "up") {
-    scrollTimeline(state, step);
-  } else {
-    scrollTimeline(state, -step);
-  }
 }
 
 function timelineEntryId(record) {
