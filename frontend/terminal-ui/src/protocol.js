@@ -265,7 +265,86 @@ function normalizeRuntimeStatus(payload, source = "runtime/status") {
       ? text.toLowerCase()
       : text;
   }
+  if (Object.hasOwn(status, "budget")) {
+    normalized.budget = normalizeBudgetStatus(status.budget, `${source}.budget`);
+  }
   return normalized;
+}
+
+export function normalizeBudgetStatus(value, source = "budget") {
+  const budget = requireObject(value, source);
+  const maxUsd = optionalBudgetNumber(budget.max_usd, `${source}.max_usd`);
+  const maxInputTokens = optionalBudgetInteger(
+    budget.max_input_tokens,
+    `${source}.max_input_tokens`,
+  );
+  const maxOutputTokens = optionalBudgetInteger(
+    budget.max_output_tokens,
+    `${source}.max_output_tokens`,
+  );
+  const enabled = Object.hasOwn(budget, "enabled")
+    ? strictBudgetBoolean(budget.enabled, `${source}.enabled`)
+    : [maxUsd, maxInputTokens, maxOutputTokens].some((limit) => limit !== null);
+  return {
+    enabled,
+    used_usd: budgetNumber(budget.used_usd ?? 0, `${source}.used_usd`),
+    max_usd: maxUsd,
+    remaining_usd: optionalBudgetNumber(
+      budget.remaining_usd,
+      `${source}.remaining_usd`,
+    ),
+    cost_percentage: optionalBudgetNumber(
+      budget.cost_percentage,
+      `${source}.cost_percentage`,
+    ),
+    input_tokens: budgetInteger(
+      budget.input_tokens ?? 0,
+      `${source}.input_tokens`,
+    ),
+    max_input_tokens: maxInputTokens,
+    input_percentage: optionalBudgetNumber(
+      budget.input_percentage,
+      `${source}.input_percentage`,
+    ),
+    output_tokens: budgetInteger(
+      budget.output_tokens ?? 0,
+      `${source}.output_tokens`,
+    ),
+    max_output_tokens: maxOutputTokens,
+    output_percentage: optionalBudgetNumber(
+      budget.output_percentage,
+      `${source}.output_percentage`,
+    ),
+    percentage: optionalBudgetNumber(budget.percentage, `${source}.percentage`),
+  };
+}
+
+function budgetNumber(value, name) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} 必须是非负有限数字`);
+  }
+  return value;
+}
+
+function optionalBudgetNumber(value, name) {
+  if (value == null) return null;
+  return budgetNumber(value, name);
+}
+
+function budgetInteger(value, name) {
+  const parsed = budgetNumber(value, name);
+  if (!Number.isInteger(parsed)) throw new Error(`${name} 必须是非负整数`);
+  return parsed;
+}
+
+function optionalBudgetInteger(value, name) {
+  if (value == null) return null;
+  return budgetInteger(value, name);
+}
+
+function strictBudgetBoolean(value, name) {
+  if (typeof value !== "boolean") throw new Error(`${name} 必须是布尔值`);
+  return value;
 }
 
 function strictStatusText(value, name) {
@@ -398,9 +477,24 @@ function normalizeInspectorTab(name, value) {
       context_used: strictNonnegativeInteger(tab.context_used, "context.context_used"),
       context_window: strictNonnegativeInteger(tab.context_window, "context.context_window"),
       context_percentage: nonnegativeNumber(tab.context_percentage),
-      budget_used_usd: nonnegativeNumber(tab.budget_used_usd),
-      budget_max_usd: nonnegativeNumber(tab.budget_max_usd),
-      budget_percentage: nonnegativeNumber(tab.budget_percentage),
+      budget_enabled: strictBudgetBoolean(
+        tab.budget_enabled ?? (tab.budget_max_usd != null),
+        "context.budget_enabled",
+      ),
+      budget_used_usd: budgetNumber(tab.budget_used_usd ?? 0, "context.budget_used_usd"),
+      budget_max_usd: optionalBudgetNumber(tab.budget_max_usd, "context.budget_max_usd"),
+      budget_percentage: optionalBudgetNumber(
+        tab.budget_percentage,
+        "context.budget_percentage",
+      ),
+      budget_max_input_tokens: optionalBudgetInteger(
+        tab.budget_max_input_tokens,
+        "context.budget_max_input_tokens",
+      ),
+      budget_max_output_tokens: optionalBudgetInteger(
+        tab.budget_max_output_tokens,
+        "context.budget_max_output_tokens",
+      ),
       input_tokens: strictNonnegativeInteger(tab.input_tokens, "context.input_tokens"),
       output_tokens: strictNonnegativeInteger(tab.output_tokens, "context.output_tokens"),
       turns: strictNonnegativeInteger(tab.turns, "context.turns"),

@@ -4,7 +4,6 @@ import {
   color,
   compactText,
   formatContext,
-  formatMoney,
   shortPath,
   truncateAnsi,
   visibleWidth,
@@ -13,6 +12,7 @@ import {
 import { boxLines } from "./core.js";
 import { renderInputLinesWithCursor } from "../input-buffer.js";
 import { getSlashCompletionItems } from "../slash-completion.js";
+import { formatBudgetStatus } from "./budget-status.js";
 
 export function Footer({ state, env = {} }) {
   return {
@@ -126,7 +126,7 @@ export function StatusFooter({ state, env = {} }) {
         `Token: ${status.usage?.total_tokens ?? 0}`,
         ...(firstToken ? [firstToken] : []),
         `上下文: ${formatContext(context)}`,
-        `预算: ${formatMoney(budget.used_usd)}/${formatMoney(budget.max_usd)}`,
+        formatBudgetStatus(budget),
       ];
       if (git.branch) parts.push(`${git.branch}${git.dirty ? "*" : ""}`);
       return wrapAnsiLine(color(ANSI.dim, truncateAnsi(parts.join(" | "), ctx.width)), ctx.width);
