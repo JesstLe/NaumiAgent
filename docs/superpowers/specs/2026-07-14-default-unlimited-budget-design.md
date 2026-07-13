@@ -1,7 +1,7 @@
 # Default-Unlimited Budget Design
 
-**Date:** 2026-07-14  
-**Status:** Approved design, pending written-spec review  
+**Date:** 2026-07-14
+**Status:** Approved and implemented
 **Scope:** Main Agent and child-Agent session budgets, runtime budget status, and current CLI/TUI surfaces
 
 ## 1. Objective
