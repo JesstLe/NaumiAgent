@@ -147,6 +147,50 @@ class TestPermissionChecker:
         assert not result.allowed
         assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
 
+    @pytest.mark.parametrize("mode", list(PermissionMode))
+    def test_bash_code_execute_blocks_dangerous_commands_in_every_mode(
+        self, mode: PermissionMode
+    ) -> None:
+        checker = PermissionChecker(mode)
+
+        result = checker.check(
+            "code_execute",
+            {"language": "bash", "code": "rm -rf / && echo done"},
+            tool=CodeExecuteTool(),
+        )
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_non_shell_code_execute_does_not_scan_code_as_a_shell_command(self) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check(
+            "code_execute",
+            {"language": "python", "code": "command = 'rm -rf /'"},
+            tool=CodeExecuteTool(),
+        )
+
+        assert result.allowed
+        assert result.code is PermissionReasonCode.ALLOWED
+
+    def test_path_sandbox_blocks_symlink_escape(self, tmp_path) -> None:
+        allowed_dir = tmp_path / "allowed"
+        outside_dir = tmp_path / "outside"
+        allowed_dir.mkdir()
+        outside_dir.mkdir()
+        (allowed_dir / "escape").symlink_to(outside_dir, target_is_directory=True)
+        checker = PermissionChecker(
+            PermissionMode.MODERATE,
+            allowed_dirs=[str(allowed_dir)],
+            workspace_root=str(allowed_dir),
+        )
+
+        result = checker.check("file_read", {"path": str(allowed_dir / "escape" / "secret.txt")})
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.PATH_OUTSIDE_SANDBOX
+
     def test_safe_commands(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
         assert checker.check("bash_run", {"command": "ls -la"}).allowed
