@@ -1792,6 +1792,53 @@ async def test_bridge_fails_closed_for_unusable_high_risk_choices(choices: list[
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("choices", "published", "resolution"),
+    [
+        (["allow_once"], False, "deny"),
+        (["deny"], False, "deny"),
+        (["grant_session"], False, "deny"),
+        (["allow_once", "deny"], True, "allow_once"),
+        (["allow_once", "grant_session"], False, "deny"),
+        (["deny", "grant_session"], False, "deny"),
+        (["allow_once", "deny", "grant_session"], True, "deny"),
+    ],
+)
+async def test_bridge_only_publishes_semantically_complete_medium_backend_choices(
+    choices: list[str],
+    published: bool,
+    resolution: str,
+) -> None:
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    writer = io.StringIO()
+    bridge.bind_writer(writer)
+    task = asyncio.create_task(
+        bridge.confirm_permission(
+            _permission_payload("call-medium-policy", choices=choices)
+        )
+    )
+    await asyncio.sleep(0)
+
+    records = _records(writer)
+    requests = [record for record in records if record["type"] == "permission/request"]
+    if not published:
+        assert task.done()
+        assert await task == "deny"
+        assert bridge._pending_permissions == {}
+        assert not requests
+        assert records[-1]["payload"]["code"] == "permission_choices_medium_risk_unusable"
+        assert "后端权限选择" in records[-1]["payload"]["message"]
+        return
+
+    assert len(requests) == 1
+    assert {"allow_once", "deny"}.issubset(requests[0]["payload"]["choices"])
+    await bridge.resolve_permission(
+        {"request_id": "call-medium-policy", "choice": resolution}, request_id="response"
+    )
+    assert await task == resolution
+
+
+@pytest.mark.asyncio
 async def test_bridge_allows_valid_high_risk_handshake_choices_after_filtering() -> None:
     bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
     writer = io.StringIO()

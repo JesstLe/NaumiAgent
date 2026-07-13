@@ -79,6 +79,8 @@ def _backend_choices_error_message(kind: str) -> str:
         return "后端权限选择格式或内容无效，系统已拒绝本次操作。"
     if kind == "high_risk_unusable":
         return "后端权限选择无法完成高风险确认，系统已拒绝本次操作。"
+    if kind == "medium_risk_unusable":
+        return "后端权限选择无法同时提供批准与拒绝，系统已拒绝本次操作。"
     return "后端权限选择为空或无效，系统已拒绝本次操作。"
 
 
@@ -1439,6 +1441,13 @@ class JsonlEngineBridge:
                     request_id=request_id,
                 )
                 return "deny"
+        elif not {"allow_once", "deny"}.issubset(choices):
+            await self.emit_error(
+                _backend_choices_error_message("medium_risk_unusable"),
+                code="permission_choices_medium_risk_unusable",
+                request_id=request_id,
+            )
+            return "deny"
         loop = asyncio.get_running_loop()
         future: asyncio.Future[str] = loop.create_future()
         public_payload = {

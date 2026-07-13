@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from typing import Any, Literal
 
 _REDACTED = "[已隐藏]"
 _TRUNCATED = "[已截断]"
+_NON_FINITE_FLOAT = "[非有限浮点数]"
 _SENSITIVE_KEY_PARTS = ("token", "secret", "password", "authorization", "cookie")
 _STRING_LIMIT = 160
 _COLLECTION_LIMIT = 50
@@ -39,11 +41,13 @@ def _summarize(value: Any) -> Any:
         return [_summarize(item) for item in list(value)[:_COLLECTION_LIMIT]]
     if isinstance(value, str):
         return _truncate(value)
-    if value is None or isinstance(value, bool | int | float):
+    if value is None or isinstance(value, bool | int):
         return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else _NON_FINITE_FLOAT
     if isinstance(value, bytes):
         return "<bytes>"
-    return f"<{type(value).__name__}>"
+    return _truncate(f"<{type(value).__name__}>")
 
 
 def _is_sensitive(key: str) -> bool:
@@ -56,7 +60,7 @@ def _truncate(value: str) -> str:
 
 
 def _json_size(value: Any) -> int:
-    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+    return len(json.dumps(value, ensure_ascii=False))
 
 
 def _fit_json(value: dict[str, Any]) -> dict[str, Any]:
