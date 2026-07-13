@@ -52,6 +52,15 @@ naumi configure
 
 自动化环境可使用 `--non-interactive --provider <name>`，并通过环境变量复用现有凭据；需要更新密钥时使用 `--api-key-stdin` 从标准输入传入，避免密钥进入 shell history。
 
+配置完成后可以先运行纯本地诊断；显式增加 `--live` 才会发送一次最多 8 token 的真实模型请求：
+
+```bash
+naumi doctor
+naumi doctor --live
+```
+
+实时诊断会区分 provider/model/API Base 混配、401 凭据失效、404 模型或地址错误、429 限流和连接超时，并且不会显示模型响应正文或服务端原始错误。
+
 #### 本地开发安装
 
 ```bash
