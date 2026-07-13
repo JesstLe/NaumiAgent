@@ -12,7 +12,15 @@ import litellm
 
 from naumi_agent.config.settings import ModelConfig, ModelMeta
 from naumi_agent.model.catalog import ProviderCatalog
-from naumi_agent.model.targets import ResolvedModelTarget, resolve_model_target
+from naumi_agent.model.provider_runtime import (
+    ProviderRuntimeError,
+    build_openai_chat_transport,
+)
+from naumi_agent.model.targets import (
+    ModelResolutionError,
+    ResolvedModelTarget,
+    resolve_model_target,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +210,23 @@ class ModelRouter:
             catalog=self._catalog,
         )
 
+    def _resolve_transport(self, model: str) -> tuple[str, dict[str, Any]]:
+        """Resolve one public model name into explicit LiteLLM transport args."""
+        target = self.resolve_target(model)
+        if target.source == "legacy":
+            return model, self._base_kwargs()
+        if self._catalog is None:
+            raise ProviderRuntimeError("catalog 模型缺少 catalog 来源。")
+
+        transport = build_openai_chat_transport(
+            target,
+            catalog_source=self._catalog.source,
+        )
+        kwargs = dict(transport.kwargs)
+        if "extra_headers" in kwargs:
+            kwargs["extra_headers"] = dict(kwargs["extra_headers"])
+        return transport.model, kwargs
+
     def _resolve_max_tokens(self, model: str, requested: int | None) -> int:
         """确定 max_tokens: 调用方指定 > 配置值 > 模型输出上限."""
         if requested:
@@ -384,11 +409,12 @@ class ModelRouter:
     ) -> ModelResponse:
         """非流式调用."""
         resolved = model or self.resolve_model(tier)
+        transport_model, transport_kwargs = self._resolve_transport(resolved)
         preserve_reasoning = self._should_preserve_reasoning_content(
             resolved, thinking,
         )
         kwargs: dict[str, Any] = {
-            "model": resolved,
+            "model": transport_model,
             "messages": self._sanitize_messages(
                 messages,
                 preserve_reasoning_content=preserve_reasoning,
@@ -401,7 +427,7 @@ class ModelRouter:
         if response_format == "json":
             kwargs["response_format"] = {"type": "json_object"}
 
-        kwargs.update(self._base_kwargs())
+        kwargs.update(transport_kwargs)
 
         # Kimi k2.6 thinking support
         if thinking is not None:
@@ -438,11 +464,12 @@ class ModelRouter:
     ) -> AsyncIterator[StreamChunk]:
         """流式调用，yield StreamChunk."""
         resolved = model or self.resolve_model(tier)
+        transport_model, transport_kwargs = self._resolve_transport(resolved)
         preserve_reasoning = self._should_preserve_reasoning_content(
             resolved, thinking,
         )
         kwargs: dict[str, Any] = {
-            "model": resolved,
+            "model": transport_model,
             "messages": self._sanitize_messages(
                 messages,
                 preserve_reasoning_content=preserve_reasoning,
@@ -455,7 +482,7 @@ class ModelRouter:
         if tools:
             kwargs["tools"] = tools
 
-        kwargs.update(self._base_kwargs())
+        kwargs.update(transport_kwargs)
 
         # Kimi k2.6 thinking support
         if thinking is not None:
@@ -546,14 +573,31 @@ class ModelRouter:
 
     def _is_kimi_thinking_model(self, model: str) -> bool:
         """Check if the model is a kimi thinking model that supports the thinking param."""
-        model_lower = model.lower()
-        return "kimi-k2" in model_lower or "kimi-latest" in model_lower
+        identities, _api_base = self._model_protocol_identity(model)
+        return any(
+            "kimi-k2" in identity or "kimi-latest" in identity
+            for identity in identities
+        )
 
     def _uses_kimi_protocol(self, model: str) -> bool:
         """Check whether requests go through Kimi's OpenAI-compatible protocol."""
-        model_lower = model.lower()
+        identities, api_base = self._model_protocol_identity(model)
+        return any("kimi" in identity for identity in identities) or "kimi.com" in api_base
+
+    def _model_protocol_identity(self, model: str) -> tuple[tuple[str, ...], str]:
+        """Return public/upstream identities and selected base URL for protocol checks."""
+        identities = [model.lower()]
         api_base = (self._config.api_base or "").lower()
-        return "kimi" in model_lower or "kimi.com" in api_base
+        try:
+            target = self.resolve_target(model)
+        except ModelResolutionError:
+            return tuple(identities), api_base
+        upstream = target.upstream_model.lower()
+        if upstream not in identities:
+            identities.append(upstream)
+        if target.provider is not None and target.provider.base_url:
+            api_base = target.provider.base_url.lower()
+        return tuple(identities), api_base
 
     def _apply_thinking(
         self, kwargs: dict[str, Any], thinking: dict[str, str],
