@@ -13,6 +13,7 @@ import {
   restoreViewportAnchor,
 } from "../src/render.js";
 import { detachTimeline } from "../src/timeline-follow.js";
+import { renderRuntimeInspector } from "../src/components/runtime-inspector.js";
 
 test("markdown code blocks show a bounded excerpt with lightweight highlighting", () => {
   const codeLines = Array.from({ length: 45 }, (_, index) => `const value${index} = ${index};`);
@@ -362,3 +363,102 @@ test("resize anchor clamps the offset when its message disappeared", () => {
   assert.equal(offset, 0);
   assert.equal(state.followTail, true);
 });
+
+test("runtime inspector renders authoritative empty states without inventing activity", () => {
+  const state = createInitialState();
+  state.inspector.open = true;
+  state.inspector.snapshot = runtimeInspectorRenderFixture(1, { empty: true });
+  state.inspector.revision = 1;
+
+  for (const [tab, expected] of [
+    ["plan", "尚未产生计划"],
+    ["tools", "尚未调用工具"],
+    ["changes", "尚未记录文件改动"],
+    ["tests", "尚未记录验证"],
+  ]) {
+    state.inspector.selectedTab = tab;
+    const plain = renderRuntimeInspector(state.inspector, 46, 18).map(stripAnsi).join("\n");
+    assert.match(plain, new RegExp(expected));
+  }
+});
+
+test("runtime inspector uses drawer overlay and page layouts across breakpoints", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-layout";
+  state.input = "继续实现";
+  state.messages = [{ kind: "assistant", id: "timeline-1", content: "时间线正文仍然可见" }];
+  state.permission = {
+    requestId: "permission-layout",
+    payload: { tool_name: "bash_run", reason: "需要确认真实命令" },
+  };
+  state.inspector.open = true;
+  state.inspector.snapshot = runtimeInspectorRenderFixture(2);
+  state.inspector.revision = 2;
+  const scrollOffset = state.scrollOffset;
+
+  const wide = renderScreen(state, 140, 20).map(stripAnsi);
+  assert(wide.some((line) => line.includes("时间线正文仍然可见")));
+  assert(wide.some((line) => line.includes("Runtime Inspector")));
+  assert(wide.some((line) => line.includes("实现运行检查器")));
+  assert(wide.some((line) => line.includes("permission: bash_run")));
+
+  const overlay = renderScreen(state, 110, 20).map(stripAnsi);
+  assert(overlay.some((line) => line.includes("时间线正文仍然可见")));
+  assert(overlay.some((line) => line.includes("Runtime Inspector")));
+  assert(overlay.some((line) => line.includes("permission: bash_run")));
+
+  state.messages = [{
+    kind: "assistant",
+    id: "timeline-wide-cjk",
+    content: "超长中文时间线".repeat(80),
+  }];
+  const cjkOverlay = renderScreen(state, 110, 20);
+  assert(cjkOverlay.every((line) => visibleWidth(line) <= 110));
+
+  const page = renderScreen(state, 80, 20).map(stripAnsi);
+  assert(page.some((line) => line.includes("Runtime Inspector")));
+  assert(page.some((line) => line.includes("实现运行检查器")));
+  assert(!page.some((line) => line.includes("时间线正文仍然可见")));
+  assert(page.some((line) => line.includes("chat > 继续实现")));
+  assert(page.some((line) => line.includes("permission: bash_run")));
+
+  for (const [lines, width] of [[wide, 140], [overlay, 110], [page, 80]]) {
+    assert.equal(lines.length, 20);
+    assert(lines.every((line) => visibleWidth(line) <= width));
+  }
+  assert.equal(state.scrollOffset, scrollOffset);
+});
+
+test("runtime inspector never exceeds an extremely small terminal", () => {
+  const state = createInitialState();
+  state.inspector.open = true;
+  state.inspector.snapshot = runtimeInspectorRenderFixture(1);
+  state.input = "x";
+
+  const lines = renderScreen(state, 12, 3);
+
+  assert.equal(lines.length, 3);
+  assert(lines.every((line) => visibleWidth(line) <= 12));
+  assert(lines.map(stripAnsi).some((line) => line.includes("chat > x")));
+});
+
+function runtimeInspectorRenderFixture(revision, { empty = false } = {}) {
+  const state = empty ? "empty" : "ready";
+  return {
+    schema_version: 1,
+    session_id: "session-layout",
+    revision,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    active_run_id: "run-layout",
+    plan: {
+      state,
+      items: empty ? [] : [{ id: "todo-1", subject: "实现运行检查器", status: "in_progress", blocked_by: [] }],
+      next_actions: [],
+      warnings: [],
+    },
+    tools: { state, items: [], approvals: [], warnings: [] },
+    context: { state, warnings: [] },
+    changes: { state, items: [], git_state: { available: true, branch: "main", dirty: true }, warnings: [] },
+    tests: { state, validations: [], unverified: [], next_actions: [], warnings: [] },
+  };
+}

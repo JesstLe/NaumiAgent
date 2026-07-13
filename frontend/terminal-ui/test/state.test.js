@@ -2292,3 +2292,148 @@ test("run activity uses the authoritative bounded run-started label", () => {
   assert(activity.phaseLabel.length < label.length);
   assert(activity.phaseLabel.length <= 160);
 });
+
+test("runtime inspector applies contiguous revisions and requests a full refresh for gaps", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-inspector";
+  state.inspector.open = true;
+  const first = runtimeInspectorFixture(3);
+
+  assert.deepEqual(reduceServerEvent(state, {
+    type: "inspector/snapshot",
+    payload: first,
+  }), []);
+  assert.equal(state.inspector.revision, 3);
+  assert.equal(state.inspector.snapshot.plan.items[0].subject, "实现运行检查器");
+  assert.equal(state.inspector.loading, false);
+
+  assert.deepEqual(reduceServerEvent(state, {
+    type: "inspector/update",
+    payload: {
+      schema_version: 1,
+      session_id: "session-inspector",
+      revision: 4,
+      generated_at: "2026-07-13T00:00:01+00:00",
+      active_run_id: "run-1",
+      changed_tabs: {
+        tools: {
+          ...first.tools,
+          items: [{ call_id: "read-2", name: "file_read", status: "running" }],
+        },
+      },
+    },
+  }), []);
+  assert.equal(state.inspector.revision, 4);
+  assert.equal(state.inspector.snapshot.tools.items[0].call_id, "read-2");
+
+  const beforeGap = state.inspector.snapshot;
+  assert.deepEqual(reduceServerEvent(state, {
+    type: "inspector/update",
+    payload: {
+      schema_version: 1,
+      session_id: "session-inspector",
+      revision: 6,
+      generated_at: "2026-07-13T00:00:03+00:00",
+      active_run_id: "run-1",
+      changed_tabs: { plan: first.plan },
+    },
+  }), [{ type: "refresh_inspector", knownRevision: 4, sessionId: "session-inspector" }]);
+  assert.equal(state.inspector.snapshot, beforeGap);
+  assert.equal(state.inspector.loading, true);
+
+  reduceServerEvent(state, {
+    type: "inspector/update",
+    payload: {
+      schema_version: 1,
+      session_id: "session-inspector",
+      revision: 4,
+      generated_at: "older",
+      active_run_id: "run-1",
+      changed_tabs: { plan: first.plan },
+    },
+  });
+  assert.equal(state.inspector.revision, 4);
+
+  reduceServerEvent(state, {
+    type: "inspector/snapshot",
+    payload: runtimeInspectorFixture(2),
+  });
+  assert.equal(state.inspector.revision, 4);
+});
+
+test("runtime inspector rejects cross-session data and clears authoritative data on replay", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-current";
+  state.inspector.open = true;
+  state.inspector.selectedTab = "tests";
+
+  reduceServerEvent(state, {
+    type: "inspector/snapshot",
+    payload: { ...runtimeInspectorFixture(1), session_id: "session-other" },
+  });
+  assert.equal(state.inspector.snapshot, null);
+
+  reduceServerEvent(state, {
+    type: "inspector/snapshot",
+    payload: { ...runtimeInspectorFixture(2), session_id: "session-current" },
+  });
+  reduceServerEvent(state, {
+    type: "session/replayed",
+    payload: { session_id: "session-next", title: "新会话", clear: true },
+  });
+
+  assert.equal(state.inspector.snapshot, null);
+  assert.equal(state.inspector.revision, 0);
+  assert.equal(state.inspector.selectedTab, "tests");
+});
+
+test("runtime inspector refresh errors keep the active run and last good snapshot", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-inspector";
+  state.inspector.open = true;
+  reduceServerEvent(state, { type: "inspector/snapshot", payload: runtimeInspectorFixture(1) });
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "run-inspector-error",
+    payload: { task: "继续运行" },
+  });
+  const snapshot = state.inspector.snapshot;
+
+  reduceServerEvent(state, {
+    type: "error",
+    payload: {
+      code: "inspector_refresh_failed",
+      message: "Inspector 刷新失败，已保留上一次快照。",
+    },
+  });
+
+  assert.equal(state.running, true);
+  assert.equal(state.inspector.snapshot, snapshot);
+  assert.equal(state.inspector.stale, true);
+  assert.match(state.inspector.error, /刷新失败/);
+});
+
+function runtimeInspectorFixture(revision) {
+  return {
+    schema_version: 1,
+    session_id: "session-inspector",
+    revision,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    active_run_id: "run-1",
+    plan: {
+      state: "ready",
+      items: [{ id: "todo-1", subject: "实现运行检查器", status: "in_progress", blocked_by: [] }],
+      next_actions: [],
+      warnings: [],
+    },
+    tools: {
+      state: "ready",
+      items: [{ call_id: "read-1", name: "file_read", status: "success" }],
+      approvals: [],
+      warnings: [],
+    },
+    context: { state: "empty", warnings: [] },
+    changes: { state: "empty", items: [], git_state: {}, warnings: [] },
+    tests: { state: "empty", validations: [], unverified: [], next_actions: [], warnings: [] },
+  };
+}
