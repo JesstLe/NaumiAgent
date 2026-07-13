@@ -400,9 +400,13 @@ Expected: all Node tests pass with zero failures.
 
 - [ ] **Step 3: Run the Python Bridge regression gate**
 
-Run: `.venv/bin/python -m pytest -q tests/unit/test_ui_bridge.py tests/unit/test_ui_protocol.py`
+Run: `.venv/bin/python -m pytest -q tests/unit/test_ui_bridge.py`
 
-Expected: all selected Python tests pass.
+Expected: all selected Python Bridge tests pass.
+
+Run: `cd frontend/terminal-ui && node --test test/protocol.test.js`
+
+Expected: all Node protocol-contract tests pass.
 
 - [ ] **Step 4: Update product documentation accurately**
 
