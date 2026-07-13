@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ANSI, stripAnsi, visibleWidth } from "../src/ansi.js";
 import { createInitialState, reduceServerEvent } from "../src/state.js";
+import { setInputText } from "../src/input-buffer.js";
 import { renderFooter, renderMarkdownExcerpt, renderScreen, renderToolCard, renderToolOutput } from "../src/render.js";
 
 test("markdown code blocks show a bounded excerpt with lightweight highlighting", () => {
@@ -250,6 +251,20 @@ test("screen renderer keeps oversized task panel header visible", () => {
   assert(plain.some((line) => line.includes("tasks timeline")));
   assert(plain.some((line) => line.includes("还有")));
   assert(lines.every((line) => visibleWidth(line) <= 96));
+});
+
+test("tiny terminal preserves the multiline composer cursor row", () => {
+  const state = createInitialState();
+  state.permission = {
+    requestId: "p1",
+    payload: { tool_name: "bash_run", reason: "需要确认" },
+  };
+  setInputText(state, "第一行\n第二行\n最后一行");
+
+  const screen = renderScreen(state, 60, 4).map(stripAnsi);
+
+  assert.equal(screen.length, 4);
+  assert(screen.some((line) => line.includes("最后一行▌")));
 });
 
 test("footer renders session id from state.currentSessionId", () => {
