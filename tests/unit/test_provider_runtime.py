@@ -22,6 +22,8 @@ from naumi_agent.model.provider_runtime import (
     NO_GLOBAL_API_KEY,
     ProviderRuntimeError,
     build_openai_chat_transport,
+    build_openai_responses_transport,
+    build_provider_transport,
 )
 from naumi_agent.model.targets import ResolvedModelTarget
 
@@ -103,6 +105,53 @@ def test_omits_timeout_when_provider_does_not_define_one() -> None:
     assert "timeout" not in transport.kwargs
 
 
+def test_maps_openai_responses_model_and_shared_provider_kwargs() -> None:
+    target = _target(
+        api_format=APIFormat.OPENAI_RESPONSES,
+        headers={"X-Tenant": "tenant-a"},
+    )
+
+    transport = build_openai_responses_transport(
+        target,
+        catalog_source="/tmp/catalog.json",
+    )
+
+    assert transport.model == "openai/responses/vendor/model-v2"
+    assert transport.kwargs == {
+        "api_base": "https://provider.example/v1",
+        "api_key": NO_GLOBAL_API_KEY,
+        "extra_headers": {"X-Tenant": "tenant-a"},
+        "timeout": 12.345,
+    }
+
+
+@pytest.mark.parametrize(
+    ("api_format", "expected_model"),
+    [
+        (APIFormat.OPENAI_CHAT, "openai/vendor/model-v2"),
+        (APIFormat.OPENAI_RESPONSES, "openai/responses/vendor/model-v2"),
+    ],
+)
+def test_dispatches_supported_openai_api_formats(
+    api_format: APIFormat,
+    expected_model: str,
+) -> None:
+    transport = build_provider_transport(
+        _target(api_format=api_format),
+        catalog_source="/tmp/catalog.json",
+    )
+
+    assert transport.model == expected_model
+
+
+def test_dispatcher_rejects_an_unimplemented_provider_format() -> None:
+    with pytest.raises(ProviderRuntimeError, match="anthropic_messages.*尚未实现"):
+        build_provider_transport(
+            _target(api_format=APIFormat.ANTHROPIC_MESSAGES),
+            catalog_source="/tmp/catalog.json",
+        )
+
+
 def test_rejects_legacy_target() -> None:
     with pytest.raises(ProviderRuntimeError, match="只接受 provider catalog"):
         build_openai_chat_transport(
@@ -115,7 +164,7 @@ def test_rejects_legacy_target() -> None:
     ("api_format", "message"),
     [
         (None, "缺少 apiFormat"),
-        (APIFormat.OPENAI_RESPONSES, "适配器尚未实现"),
+        (APIFormat.OPENAI_RESPONSES, "不能由 openai_chat 适配器处理"),
     ],
 )
 def test_rejects_missing_or_unsupported_api_format(
@@ -125,6 +174,17 @@ def test_rejects_missing_or_unsupported_api_format(
     with pytest.raises(ProviderRuntimeError, match=message):
         build_openai_chat_transport(
             _target(api_format=api_format),
+            catalog_source="/tmp/catalog.json",
+        )
+
+
+def test_responses_builder_rejects_a_chat_target_with_an_accurate_error() -> None:
+    with pytest.raises(
+        ProviderRuntimeError,
+        match="不能由 openai_responses 适配器处理",
+    ):
+        build_openai_responses_transport(
+            _target(api_format=APIFormat.OPENAI_CHAT),
             catalog_source="/tmp/catalog.json",
         )
 

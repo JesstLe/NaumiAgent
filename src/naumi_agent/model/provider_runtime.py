@@ -45,12 +45,58 @@ def build_openai_chat_transport(
     catalog_source: str,
 ) -> ProviderTransport:
     """Map one catalog target to explicit OpenAI-compatible Chat arguments."""
-    if target.source != "catalog":
-        raise ProviderRuntimeError("OpenAI Chat provider runtime 只接受 provider catalog 模型。")
-    provider = target.provider
-    if provider is None:
-        raise ProviderRuntimeError("catalog 模型缺少 provider 运行时信息。")
-    _validate_provider_format(provider)
+    return _build_openai_transport(
+        target,
+        catalog_source=catalog_source,
+        expected_format=APIFormat.OPENAI_CHAT,
+        model_prefix="openai/",
+    )
+
+
+def build_openai_responses_transport(
+    target: ResolvedModelTarget,
+    *,
+    catalog_source: str,
+) -> ProviderTransport:
+    """Map one catalog target to LiteLLM's OpenAI Responses bridge."""
+    return _build_openai_transport(
+        target,
+        catalog_source=catalog_source,
+        expected_format=APIFormat.OPENAI_RESPONSES,
+        model_prefix="openai/responses/",
+    )
+
+
+def build_provider_transport(
+    target: ResolvedModelTarget,
+    *,
+    catalog_source: str,
+) -> ProviderTransport:
+    """Dispatch one catalog target to its explicit provider transport."""
+    provider = _require_catalog_provider(target)
+    if provider.api_format is APIFormat.OPENAI_CHAT:
+        return build_openai_chat_transport(target, catalog_source=catalog_source)
+    if provider.api_format is APIFormat.OPENAI_RESPONSES:
+        return build_openai_responses_transport(target, catalog_source=catalog_source)
+    if provider.api_format is None:
+        raise ProviderRuntimeError(
+            f'provider "{provider.id}" 缺少 apiFormat，无法选择请求适配器。'
+        )
+    raise ProviderRuntimeError(
+        f'provider "{provider.id}" 的 {provider.api_format.value} 适配器尚未实现。'
+    )
+
+
+def _build_openai_transport(
+    target: ResolvedModelTarget,
+    *,
+    catalog_source: str,
+    expected_format: APIFormat,
+    model_prefix: str,
+) -> ProviderTransport:
+    """Build shared explicit kwargs for one OpenAI-family transport."""
+    provider = _require_catalog_provider(target)
+    _validate_provider_format(provider, expected_format=expected_format)
 
     static_headers = dict(provider.headers)
     _assert_no_auth_header_conflict(provider, static_headers)
@@ -79,19 +125,33 @@ def build_openai_chat_transport(
         kwargs["timeout"] = provider.request_timeout_ms / 1000
 
     return ProviderTransport(
-        model=f"openai/{target.upstream_model}",
+        model=f"{model_prefix}{target.upstream_model}",
         kwargs=MappingProxyType(kwargs),
     )
 
 
-def _validate_provider_format(provider: ProviderSpec) -> None:
+def _require_catalog_provider(target: ResolvedModelTarget) -> ProviderSpec:
+    if target.source != "catalog":
+        raise ProviderRuntimeError("provider runtime 只接受 provider catalog 模型。")
+    provider = target.provider
+    if provider is None:
+        raise ProviderRuntimeError("catalog 模型缺少 provider 运行时信息。")
+    return provider
+
+
+def _validate_provider_format(
+    provider: ProviderSpec,
+    *,
+    expected_format: APIFormat,
+) -> None:
     if provider.api_format is None:
         raise ProviderRuntimeError(
             f'provider "{provider.id}" 缺少 apiFormat，无法选择请求适配器。'
         )
-    if provider.api_format is not APIFormat.OPENAI_CHAT:
+    if provider.api_format is not expected_format:
         raise ProviderRuntimeError(
-            f'provider "{provider.id}" 的 {provider.api_format.value} 适配器尚未实现。'
+            f'provider "{provider.id}" 的 {provider.api_format.value} '
+            f"不能由 {expected_format.value} 适配器处理。"
         )
     if not provider.base_url:
         raise ProviderRuntimeError(
