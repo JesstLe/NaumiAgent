@@ -1,5 +1,7 @@
 # Terminal Scoped Permissions Design
 
+> 历史设计说明：2026-07-14 用户将权限语义改为“取消高风险二次确认，bypass 即全权限通过”。本文保留当时的设计背景；当前权威行为以 `docs/product/terminal-ui/03-execution-timeline-and-permissions.md` 和实现/测试为准。
+
 ## Goal
 
 将当前“允许一次 / 拒绝 / 切换全局 bypass”的权限确认，升级为可审计、可撤销、不会跨会话残留的授权系统：

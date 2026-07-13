@@ -1,6 +1,6 @@
 # 03 执行时间线与权限
 
-## 实施状态（2026-07-13）
+## 实施状态（2026-07-14）
 
 已完成“运行内安全取消”和“后端驱动运行活动组”两个切片。
 
@@ -25,7 +25,15 @@
 - 会话重放、`/clear`、失败和取消会清理旧运行指针；就地阶段更新同时失效渲染缓存，不会显示陈旧状态。
 - 定向验证覆盖 reducer、组件、render cache、完整事件流和真实 Node 终端进程的提交、权限、工具与完成链路。
 
-本模块仍未整体完成。下一切片优先完善高风险权限二次确认与 bypass 范围/撤销；结构化 validation 事件到位后，再把真实验证进度纳入活动组。
+权限切片：
+
+- `allow_once` 仅放行当前调用；中风险工具可提供 `grant_session`，授权按会话与工具族隔离并支持显式撤销。
+- 高风险工具在 default 模式只确认一次，不再进入 token/二次确认流程，也不能创建会话授权。
+- `bypass` 是明确的全权限运行模式：当前及后续工具直接放行，不执行未知工具、路径沙箱、危险命令、调用次数和确认检查。
+- 新 Terminal UI 与 Textual TUI 使用同一后端语义；`b/Shift+Tab` 或 Bypass 按钮会切换全局模式并执行当前调用。
+- 权限卡和面板明确展示允许一次、会话授权、拒绝、全权限四种结果；授权撤销通过 JSONL 协议同步到新 UI。
+
+本模块仍未整体完成。下一切片是结构化 validation 事件，把真实验证进度纳入活动组。
 
 权威实现计划与边界见：
 
@@ -67,15 +75,15 @@ queued -> planning -> executing <-> awaiting_permission
 
 ## 5. 权限状态机
 
-`requested -> focused -> allow_once | deny | bypass_session -> resolved`
+`requested -> focused -> allow_once | grant_session | deny | bypass -> resolved`
 
 - `allow_once`：仅批准当前请求。
 - `deny`：拒绝并把结构化原因返回引擎。
-- `bypass_session`：仅在策略允许时，对当前会话降低后续同类确认；UI 必须显示范围和可撤销入口。
-- 高风险操作不得提供 bypass。
+- `grant_session`：仅在策略允许时，对当前会话授权同一工具族；UI 必须显示范围和可撤销入口。
+- `bypass`：切换为全权限模式，放行当前及后续工具；UI 必须明确提示其全局影响。
 - 切页时权限请求仍保持全局可见；返回主界面后焦点恢复到该请求。
 
-权限键 `Y/N/B` 仅在卡片聚焦且输入器无组合输入时生效。首次按键选择，`Enter` 二次确认高风险动作，避免误触。
+权限键 `Y/N/G/B` 仅在卡片聚焦且输入器无组合输入时生效。`Y` 允许一次，`N` 拒绝，`G` 仅在后端提供时创建会话授权，`B` 切换 bypass 全权限模式；高风险动作只确认一次。
 
 ## 6. 取消、重试和中断
 
@@ -91,13 +99,13 @@ queued -> planning -> executing <-> awaiting_permission
 
 - `run_id`、`event_id`、`seq`、`timestamp`、`phase`。
 - 工具事件增加 `risk_level`、`display_summary_key`、`retry_of`。
-- 权限事件增加 `choices`、`scope`、`expires_at`、`requires_double_confirm`。
+- 权限事件增加 `choices`、`scope`、`expires_at`；兼容字段 `requires_double_confirm` 固定为 `false`。
 - 取消请求增加客户端 `request_id`，服务端返回 accepted/rejected 结果。
 
 字段缺失时 Bridge 负责兼容映射；前端不读取引擎私有对象。
 
 ## 8. 测试与验收
 
-定向测试必须覆盖：工具事件合并、重复事件幂等、权限拒绝、bypass 不可用、高风险二次确认、取消竞态、断线恢复、失败重试和敏感字段脱敏。
+定向测试必须覆盖：工具事件合并、重复事件幂等、权限拒绝、会话授权与撤销、bypass 对未知工具/路径/危险命令/次数限制的全放行、高风险单次确认、取消竞态、断线恢复、失败重试和敏感字段脱敏。
 
 真实验收至少运行一次只读工具、一次文件编辑、一次需要权限的命令、一次验证失败和一次用户取消。用户应始终知道系统在做什么、是否还在运行、是否需要自己行动。

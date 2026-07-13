@@ -933,6 +933,9 @@ class PermissionChecker:
         tool: PermissionAwareTool | None = None,
     ) -> PermissionDecision:
         """检查工具调用是否被允许."""
+        if self._mode is PermissionMode.BYPASS:
+            return PermissionDecision(allowed=True, tool_family=tool_name)
+
         requested_tool_name = tool_name
         is_dynamic_mcp = requested_tool_name.startswith("mcp__")
         tool_name, rule = self._resolve_rule(tool_name)
@@ -1075,13 +1078,10 @@ class PermissionChecker:
         if requires_confirmation and risk_level == PermissionRiskLevel.LOW:
             risk_level = PermissionRiskLevel.MEDIUM
 
-        requires_double_confirm = risk_level == PermissionRiskLevel.HIGH and requires_confirmation
         allow_session_grant = (
             risk_level == PermissionRiskLevel.MEDIUM and rule.allow_session_grant
         )
-        confirmation_required = requires_confirmation and (
-            self._mode != PermissionMode.BYPASS or risk_level == PermissionRiskLevel.HIGH
-        )
+        confirmation_required = requires_confirmation
 
         return PermissionDecision(
             allowed=True,
@@ -1092,7 +1092,7 @@ class PermissionChecker:
             ),
             tool_family=tool_family,
             allow_session_grant=allow_session_grant,
-            requires_double_confirm=requires_double_confirm,
+            requires_double_confirm=False,
         )
 
     def _check_path_sandbox(

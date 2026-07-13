@@ -31,6 +31,26 @@ class _Engine:
             },
         ][-limit:]
 
+    def list_permission_grants(self) -> tuple[SimpleNamespace, ...]:
+        return (
+            SimpleNamespace(
+                grant_id="grant-shell",
+                session_id="session-1",
+                tool_family="shell",
+                created_at="2026-07-13T00:00:00+00:00",
+                expires_at=None,
+                source_request_id="perm-1",
+            ),
+            SimpleNamespace(
+                grant_id="grant-browser",
+                session_id="session-1",
+                tool_family="browser",
+                created_at="2026-07-13T00:00:00+00:00",
+                expires_at="2026-07-13T01:00:00+00:00",
+                source_request_id="perm-2",
+            ),
+        )
+
 
 def test_permission_panel_renders_real_policy_metadata_for_pending_tool() -> None:
     snapshot = build_permission_panel_snapshot(
@@ -49,7 +69,7 @@ def test_permission_panel_renders_real_policy_metadata_for_pending_tool() -> Non
     assert "风险:high" in rendered
     assert "来源:TOOL_PERMISSIONS:bash_run" in rendered
     assert "确认:需要确认" in rendered
-    assert "bypass 允许；跳过逐次确认和路径沙箱，危险命令仍拦截" in rendered
+    assert "bypass 全权限放行；不执行确认、路径、命令与次数检查" in rendered
 
 
 def test_permission_panel_resolves_prefix_and_unknown_tool_policy() -> None:
@@ -67,4 +87,18 @@ def test_permission_panel_resolves_prefix_and_unknown_tool_policy() -> None:
     assert "风险:low" in rendered
     assert "perm-unknown main -> unknown_tool [needs_confirmation]" in rendered
     assert "来源:unknown_tool" in rendered
-    assert "未知工具会被拒绝" in rendered
+    assert "其他模式未知工具会被拒绝" in rendered
+    assert "bypass 全权限放行" in rendered
+
+
+def test_permission_panel_includes_active_session_grants() -> None:
+    snapshot = build_permission_panel_snapshot(_Engine())
+
+    rendered = render_permission_panel_snapshot(snapshot)
+
+    assert [grant["grant_id"] for grant in snapshot.grants] == ["grant-shell", "grant-browser"]
+    assert "有效授权" in rendered
+    assert "grant-shell shell [本会话]" in rendered
+    assert "grant-browser browser [有效至 2026-07-13T01:00:00+00:00]" in rendered
+    assert "[session]" not in rendered
+    assert "[until" not in rendered

@@ -3711,13 +3711,22 @@ class AgentEngine:
             return "error"
 
         choice = self._normalize_permission_confirmation(raw_choice)
+        if choice == "bypass":
+            self.set_runtime_mode(AgentRuntimeMode.BYPASS)
+            await self._emit_permission_bubble(
+                on_event,
+                agent_name=agent_name,
+                tool_name=tool_call.name,
+                call_id=tool_call.id,
+                status="bypass_enabled",
+                reason="用户已切换到 bypass，全权限模式已放行当前及后续工具。",
+                risk_level=risk_level,
+                requires_confirmation=False,
+                session_id=session_id,
+            )
+            return "allow_once"
         if choice == "grant_session":
             if not decision.allow_session_grant:
-                status = (
-                    "grant_rejected_high_risk"
-                    if decision.requires_double_confirm
-                    else "grant_rejected"
-                )
                 await self._emit_permission_bubble(
                     on_event,
                     agent_name=agent_name,
@@ -3729,7 +3738,7 @@ class AgentEngine:
                     requires_confirmation=True,
                     session_id=session_id,
                 )
-                return status
+                return "grant_rejected"
             if not session_id.strip():
                 await self._emit_permission_bubble(
                     on_event,
@@ -3826,7 +3835,9 @@ class AgentEngine:
         normalized = str(choice or "").strip().lower()
         if normalized in {"allow", "allowed", "yes", "y", "allow_once"}:
             return "allow_once"
-        if normalized in {"grant_session", "bypass", "b"}:
+        if normalized in {"bypass", "b"}:
+            return "bypass"
+        if normalized == "grant_session":
             return "grant_session"
         return "deny"
 

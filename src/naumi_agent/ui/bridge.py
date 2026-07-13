@@ -8,10 +8,11 @@ import logging
 import subprocess
 import sys
 import threading
-from collections.abc import Callable
-from dataclasses import asdict, is_dataclass
+from collections.abc import Callable, Collection, Mapping
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
+from uuid import uuid4
 
 from naumi_agent.agent_control import AgentControlSnapshot
 from naumi_agent.clipboard import strip_ansi
@@ -22,6 +23,7 @@ from naumi_agent.log_setup import setup_logging
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNoticeMessage
+from naumi_agent.ui.permission_confirmation import summarize_arguments
 from naumi_agent.ui.protocol import (
     ClientEventType,
     ServerEventType,
@@ -42,11 +44,58 @@ _TERMINAL_MISSION_STATUSES = frozenset({
     "closed",
     "archived",
 })
+_SUPPORTED_PERMISSION_CHOICES = frozenset({"allow_once", "deny", "grant_session"})
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
 
 EngineFactory = Callable[[AppConfig], "AgentEngine"]
+
+
+@dataclass
+class PendingPermission:
+    """One independently resolvable terminal permission confirmation."""
+
+    future: asyncio.Future[str]
+    public_payload: dict[str, Any]
+    choices: tuple[str, ...]
+    session_id: str
+    call_id: str
+
+
+def _backend_choices_error_message(kind: str) -> str:
+    if kind == "missing":
+        return "后端权限选择缺失，系统已拒绝本次操作。"
+    if kind == "invalid":
+        return "后端权限选择格式或内容无效，系统已拒绝本次操作。"
+    if kind == "medium_risk_unusable":
+        return "后端权限选择无法同时提供批准与拒绝，系统已拒绝本次操作。"
+    return "后端权限选择为空或无效，系统已拒绝本次操作。"
+
+
+def _normalize_backend_choices(raw_choices: Any) -> tuple[str, ...] | None:
+    if (
+        not isinstance(raw_choices, Collection)
+        or isinstance(raw_choices, (str, bytes, bytearray, Mapping))
+    ):
+        return None
+
+    values = (
+        sorted(raw_choices, key=lambda choice: str(choice))
+        if isinstance(raw_choices, (set, frozenset))
+        else raw_choices
+    )
+    choices: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            return None
+        choice = value.strip().lower()
+        if not choice or choice not in _SUPPORTED_PERMISSION_CHOICES:
+            return None
+        if choice not in choices:
+            choices.append(choice)
+    return tuple(choices)
+
 
 _SLASH_ALIAS_MAP: dict[str, str] = {
     "/h": "/help",
@@ -371,8 +420,7 @@ class JsonlEngineBridge:
         self._agents_subscribed = False
         self._agents_snapshot: AgentControlSnapshot | None = None
         self._cli_supported_commands = _load_cli_slash_commands_with_alias()
-        self._pending_permissions: dict[str, asyncio.Future[str]] = {}
-        self._pending_permission_payloads: dict[str, dict[str, Any]] = {}
+        self._pending_permissions: dict[str, PendingPermission] = {}
         config = getattr(self.engine, "_config", None)
         ui_config = getattr(config, "ui", None)
         self._show_reasoning = bool(getattr(ui_config, "show_reasoning", False))
@@ -560,6 +608,10 @@ class JsonlEngineBridge:
 
         if event_type == ClientEventType.PERMISSION_RESPONSE:
             await self.resolve_permission(payload, request_id=request_id)
+            return
+
+        if event_type == ClientEventType.PERMISSION_REVOKE:
+            await self.revoke_permission_grant(payload, request_id=request_id)
             return
 
         if event_type == ClientEventType.SUBMIT:
@@ -1611,7 +1663,10 @@ class JsonlEngineBridge:
             limit = 12
         content = render_permission_panel(
             self.engine,
-            pending=self._pending_permission_payloads,
+            pending={
+                pending_id: pending.public_payload
+                for pending_id, pending in self._pending_permissions.items()
+            },
             limit=limit,
         )
         await self.emit(
@@ -1730,43 +1785,163 @@ class JsonlEngineBridge:
             await self._emit_agents_update()
 
     async def confirm_permission(self, payload: dict[str, Any]) -> str:
-        request_id = (
-            str(payload.get("call_id") or "")
-            or f"perm-{len(self._pending_permissions) + 1}"
-        )
+        if self._closed:
+            return "deny"
+
+        call_id = str(payload.get("call_id") or "").strip()
+        request_id = call_id
+        if not request_id or request_id in self._pending_permissions:
+            request_id = self._next_permission_request_id()
+        if "choices" not in payload:
+            await self.emit_error(
+                _backend_choices_error_message("missing"),
+                code="permission_choices_missing",
+                request_id=request_id,
+            )
+            return "deny"
+        choices = _normalize_backend_choices(payload["choices"])
+        if choices is None:
+            await self.emit_error(
+                _backend_choices_error_message("invalid"),
+                code="permission_choices_invalid",
+                request_id=request_id,
+            )
+            return "deny"
+        if not choices:
+            await self.emit_error(
+                _backend_choices_error_message("empty"),
+                code="permission_choices_empty",
+                request_id=request_id,
+            )
+            return "deny"
+        if not {"allow_once", "deny"}.issubset(choices):
+            await self.emit_error(
+                _backend_choices_error_message("medium_risk_unusable"),
+                code="permission_choices_medium_risk_unusable",
+                request_id=request_id,
+            )
+            return "deny"
         loop = asyncio.get_running_loop()
         future: asyncio.Future[str] = loop.create_future()
-        self._pending_permissions[request_id] = future
-        self._pending_permission_payloads[request_id] = dict(payload)
-        await self.emit(ServerEventType.PERMISSION_REQUEST, payload, request_id=request_id)
+        public_payload = {
+            "request_id": request_id,
+            "call_id": call_id,
+            "session_id": str(payload.get("session_id") or ""),
+            "run_id": str(payload.get("run_id") or ""),
+            "agent_name": str(payload.get("agent_name") or payload.get("agent") or "main"),
+            "tool_name": str(payload.get("tool_name") or payload.get("tool") or "tool"),
+            "tool_family": str(payload.get("tool_family") or ""),
+            "arguments_summary": summarize_arguments(payload.get("arguments", {})),
+            "reason": str(payload.get("reason") or "等待用户确认。"),
+            "risk_level": str(payload.get("risk_level") or "medium"),
+            "choices": list(choices),
+            "scope": "session" if "grant_session" in choices else "call",
+            "expires_at": payload.get("expires_at"),
+            "requires_double_confirm": False,
+            "status": "needs_confirmation",
+        }
+        pending = PendingPermission(
+            future=future,
+            public_payload=public_payload,
+            choices=choices,
+            session_id=public_payload["session_id"],
+            call_id=call_id,
+        )
+        self._pending_permissions[request_id] = pending
+        await self.emit(ServerEventType.PERMISSION_REQUEST, public_payload, request_id=request_id)
         try:
             return await future
         finally:
-            self._pending_permissions.pop(request_id, None)
-            self._pending_permission_payloads.pop(request_id, None)
+            if self._pending_permissions.get(request_id) is pending:
+                self._pending_permissions.pop(request_id, None)
+
+    def _next_permission_request_id(self) -> str:
+        while True:
+            request_id = f"perm-{uuid4().hex}"
+            if request_id not in self._pending_permissions:
+                return request_id
 
     async def resolve_permission(self, payload: dict[str, Any], *, request_id: str) -> None:
         permission_id = str(payload.get("request_id") or request_id)
         choice = str(payload.get("choice", "deny")).strip().lower()
-        if choice not in {"allow", "deny", "bypass"}:
-            await self.emit_error(
-                "权限选择无效，可用值: allow / deny / bypass。",
-                code="invalid_permission_choice",
-                request_id=request_id,
-            )
-            return
-        future = self._pending_permissions.get(permission_id)
-        if future is None or future.done():
+        pending = self._pending_permissions.get(permission_id)
+        if pending is None or pending.future.done():
             await self.emit_error(
                 f"未找到待确认权限请求: {permission_id}",
                 code="unknown_permission_request",
                 request_id=request_id,
             )
             return
-        future.set_result(choice)
+        if choice == "allow":
+            choice = "allow_once"
+        elif choice == "bypass":
+            runtime_mode = self.engine.set_runtime_mode("bypass")
+            await self.emit(
+                ServerEventType.MODE_CHANGED,
+                {"mode": runtime_mode.value, "status": self.status_payload()},
+                request_id=request_id,
+            )
+            await self.emit(ServerEventType.STATUS, self.status_payload())
+            await self._resolve_pending_permission(
+                permission_id,
+                pending,
+                "allow_once",
+                response_request_id=request_id,
+                public_choice="bypass",
+            )
+            return
+        if choice not in pending.choices:
+            await self.emit_error(
+                "当前权限请求不支持该选择。",
+                code="permission_choice_unavailable",
+                request_id=request_id,
+            )
+            return
+        await self._resolve_pending_permission(
+            permission_id,
+            pending,
+            choice,
+            response_request_id=request_id,
+        )
+
+    async def _resolve_pending_permission(
+        self,
+        permission_id: str,
+        pending: PendingPermission,
+        choice: str,
+        *,
+        response_request_id: str,
+        public_choice: str | None = None,
+    ) -> None:
+        pending.future.set_result(choice)
+        resolved_choice = public_choice or choice
+        status = {
+            "allow_once": "allowed",
+            "deny": "denied",
+            "grant_session": "granted",
+            "bypass": "bypass_enabled",
+        }[resolved_choice]
         await self.emit(
             ServerEventType.PERMISSION_RESOLVED,
-            {"request_id": permission_id, "choice": choice},
+            {"request_id": permission_id, "choice": resolved_choice, "status": status},
+            request_id=response_request_id,
+        )
+
+    async def revoke_permission_grant(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Revoke one or all current-session grants through the engine API."""
+        if payload.get("scope") == "all":
+            revoked = int(self.engine.revoke_all_permission_grants())
+        else:
+            revoked = int(bool(self.engine.revoke_permission_grant(str(payload["grant_id"]))))
+        grants = [_public_mapping(grant) for grant in self.engine.list_permission_grants()]
+        await self.emit(
+            ServerEventType.PERMISSION_GRANTS_CHANGED,
+            {"revoked": revoked, "grants": grants},
             request_id=request_id,
         )
 
@@ -1791,9 +1966,10 @@ class JsonlEngineBridge:
         if self._closed:
             return
         self._closed = True
-        for future in list(self._pending_permissions.values()):
-            if not future.done():
-                future.set_result("deny")
+        for pending in list(self._pending_permissions.values()):
+            if not pending.future.done():
+                pending.future.set_result("deny")
+        self._pending_permissions.clear()
         if self._run_task is not None and not self._run_task.done():
             self._run_task.cancel()
             try:
