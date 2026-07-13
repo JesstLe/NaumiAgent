@@ -78,12 +78,17 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.client_events.includes("run_cancel"));
   assert(PROTOCOL_CONTRACT.client_events.includes("receipt/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("inspector/request"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("agents/request"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("agents/stop"));
   assert(PROTOCOL_CONTRACT.server_events.includes("ui/message"));
   assert(PROTOCOL_CONTRACT.server_events.includes("runtime/status"));
   assert(PROTOCOL_CONTRACT.server_events.includes("run/cancelled"));
   assert(PROTOCOL_CONTRACT.server_events.includes("completion/receipt"));
   assert(PROTOCOL_CONTRACT.server_events.includes("inspector/snapshot"));
   assert(PROTOCOL_CONTRACT.server_events.includes("inspector/update"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("agents/snapshot"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("agents/update"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("agents/action"));
   assert.deepEqual(PROTOCOL_CONTRACT.ui_messages.tool_prepare.phases, ["start", "snapshot", "end"]);
   assert(PROTOCOL_CONTRACT.ui_messages.tool_prepare.fields.includes("tool_call_id"));
   assert(PROTOCOL_CONTRACT.ui_messages.tool_prepare.fields.includes("content_lines"));
@@ -159,6 +164,152 @@ test("rejects malformed runtime inspector state and unknown changed tabs", () =>
     /exit_code 必须是整数/,
   );
 });
+
+test("normalizes strict agent control snapshots updates and actions", () => {
+  const snapshot = agentControlSnapshotFixture(3);
+  const normalized = normalizeServerRecord({
+    type: "agents/snapshot",
+    payload: snapshot,
+  }).payload;
+  assert.equal(normalized.revision, 3);
+  assert.equal(normalized.agents[0].name, "coder");
+  assert.equal(normalized.executions[0].stop_supported, true);
+
+  const update = normalizeServerRecord({
+    type: "agents/update",
+    payload: {
+      schema_version: 1,
+      session_id: "session-1",
+      revision: 4,
+      generated_at: "2026-07-13T00:00:01+00:00",
+      changed_sections: { executions: snapshot.executions },
+    },
+  }).payload;
+  assert.deepEqual(Object.keys(update.changed_sections), ["executions"]);
+
+  const action = normalizeServerRecord({
+    type: "agents/action",
+    payload: {
+      task_id: "task-1",
+      accepted: false,
+      code: "already_finished",
+      message: "执行已结束。",
+    },
+  }).payload;
+  assert.equal(action.accepted, false);
+  assert.equal(action.code, "already_finished");
+});
+
+test("rejects malformed agent control payloads and unknown sections", () => {
+  const invalidBoolean = agentControlSnapshotFixture(1);
+  invalidBoolean.executions[0].stop_supported = "yes";
+  assert.throws(
+    () => normalizeServerRecord({ type: "agents/snapshot", payload: invalidBoolean }),
+    /stop_supported.*boolean/,
+  );
+
+  const stringRevision = agentControlSnapshotFixture(1);
+  stringRevision.revision = "1";
+  assert.throws(
+    () => normalizeServerRecord({ type: "agents/snapshot", payload: stringRevision }),
+    /revision.*非负整数/,
+  );
+
+  const nonStringTool = agentControlSnapshotFixture(1);
+  nonStringTool.agents[0].tools = [42];
+  assert.throws(
+    () => normalizeServerRecord({ type: "agents/snapshot", payload: nonStringTool }),
+    /agent.tools.*字符串/,
+  );
+
+  const unknownState = agentControlSnapshotFixture(1);
+  unknownState.agents[0].state = "sleeping";
+  assert.throws(
+    () => normalizeServerRecord({ type: "agents/snapshot", payload: unknownState }),
+    /agent.state 无效/,
+  );
+
+  const unknownStatus = agentControlSnapshotFixture(1);
+  unknownStatus.executions[0].status = "paused";
+  assert.throws(
+    () => normalizeServerRecord({ type: "agents/snapshot", payload: unknownStatus }),
+    /execution.status 无效/,
+  );
+
+  const missingSection = agentControlSnapshotFixture(1);
+  delete missingSection.blackboard;
+  assert.throws(
+    () => normalizeServerRecord({ type: "agents/snapshot", payload: missingSection }),
+    /缺少 blackboard/,
+  );
+
+  const snapshot = agentControlSnapshotFixture(1);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "agents/update",
+      payload: {
+        schema_version: 1,
+        session_id: "session-1",
+        revision: 2,
+        generated_at: "now",
+        changed_sections: { invented: [] },
+      },
+    }),
+    /未知 Agent Control section/,
+  );
+});
+
+function agentControlSnapshotFixture(revision) {
+  return {
+    schema_version: 1,
+    session_id: "session-1",
+    revision,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    summary: {
+      total_agents: 1,
+      active_agents: 1,
+      attention_agents: 0,
+      stoppable_executions: 1,
+      pending_messages: 0,
+    },
+    agents: [{
+      name: "coder",
+      description: "编程 Agent",
+      kind: "preset",
+      state: "running",
+      task_count: 1,
+      model_tier: "capable",
+      capabilities: ["file_operations"],
+      tools: ["file_read"],
+      permission_level: "moderate",
+      age_ms: 10,
+      heartbeat_age_ms: 2,
+    }],
+    executions: [{
+      task_id: "task-1",
+      session_id: "session-1",
+      agent_name: "coder",
+      description: "实现功能",
+      status: "running",
+      phase: "running_tool",
+      started_at: 1,
+      finished_at: null,
+      elapsed_ms: 10,
+      heartbeat_age_ms: 2,
+      current_tool: "file_read",
+      recent_tools: ["file_read"],
+      total_tokens: 0,
+      total_cost_usd: 0,
+      turns: 0,
+      error: "",
+      stop_supported: true,
+      stop_requested: false,
+    }],
+    team_messages: [],
+    blackboard: [],
+    warnings: [],
+  };
+}
 
 function inspectorSnapshotFixture(revision) {
   return {

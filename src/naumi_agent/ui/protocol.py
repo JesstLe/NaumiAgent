@@ -29,6 +29,8 @@ class ClientEventType(StrEnum):
     RUN_CANCEL = "run_cancel"
     RECEIPT_REQUEST = "receipt/request"
     INSPECTOR_REQUEST = "inspector/request"
+    AGENTS_REQUEST = "agents/request"
+    AGENTS_STOP = "agents/stop"
     SET_MODE = "set_mode"
     CYCLE_MODE = "cycle_mode"
     SET_REASONING = "set_reasoning"
@@ -63,6 +65,9 @@ class ServerEventType(StrEnum):
     COMPLETION_RECEIPT = "completion/receipt"
     INSPECTOR_SNAPSHOT = "inspector/snapshot"
     INSPECTOR_UPDATE = "inspector/update"
+    AGENTS_SNAPSHOT = "agents/snapshot"
+    AGENTS_UPDATE = "agents/update"
+    AGENTS_ACTION = "agents/action"
     RUN_STARTED = "run/started"
     RUN_COMPLETED = "run/completed"
     RUN_CANCELLED = "run/cancelled"
@@ -245,6 +250,43 @@ def _normalize_client_payload(
             "open": _to_bool(payload.get("open", True)),
             "known_revision": known_revision,
             "session_id": session_id,
+        }
+
+    if event_type == ClientEventType.AGENTS_REQUEST:
+        raw_revision = payload.get("known_revision", 0)
+        if isinstance(raw_revision, bool):
+            raise ValueError("Agent known_revision 必须是非负整数。")
+        try:
+            known_revision = int(raw_revision)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Agent known_revision 必须是非负整数。") from exc
+        if known_revision < 0 or known_revision > 2_147_483_647:
+            raise ValueError("Agent known_revision 必须是非负整数。")
+        session_id = str(payload.get("session_id") or "").strip()
+        if len(session_id) > 500:
+            raise ValueError("Agent session_id 不能超过 500 个字符。")
+        return {
+            "open": _to_bool(payload.get("open", True)),
+            "known_revision": known_revision,
+            "session_id": session_id,
+        }
+
+    if event_type == ClientEventType.AGENTS_STOP:
+        task_id = str(payload.get("task_id") or "").strip()
+        session_id = str(payload.get("session_id") or "").strip()
+        reason = str(payload.get("reason") or "用户请求停止子 Agent。").strip()
+        if not task_id:
+            raise ValueError("Agent 停止请求缺少 task_id。")
+        if len(task_id) > 500:
+            raise ValueError("Agent task_id 不能超过 500 个字符。")
+        if len(session_id) > 500:
+            raise ValueError("Agent session_id 不能超过 500 个字符。")
+        if len(reason) > 500:
+            raise ValueError("Agent 停止原因不能超过 500 个字符。")
+        return {
+            "task_id": task_id,
+            "session_id": session_id,
+            "reason": reason or "用户请求停止子 Agent。",
         }
 
     if event_type == ClientEventType.SET_MODE:

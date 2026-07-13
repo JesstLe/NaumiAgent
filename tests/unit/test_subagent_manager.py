@@ -305,7 +305,7 @@ class TestSubAgentManager:
             **kwargs: object,
         ) -> AgentResult:
             assert callable(event_callback)
-            await event_callback("tool_use", {"tool_name": "file_read"})
+            await event_callback("tool_start", {"tool_name": "file_read"})
             tool_seen.set()
             await release.wait()
             return AgentResult(status="completed", turns=1)
@@ -326,8 +326,8 @@ class TestSubAgentManager:
         assert active.phase == "running_tool"
         assert active.current_tool == "file_read"
         assert active.recent_tools == ("file_read",)
-        assert [item for item in forwarded if item[0] == "tool_use"] == [
-            ("tool_use", {"tool_name": "file_read"})
+        assert [item for item in forwarded if item[0] == "tool_start"] == [
+            ("tool_start", {"tool_name": "file_read"})
         ]
         release.set()
         assert (await delegated).status == "completed"

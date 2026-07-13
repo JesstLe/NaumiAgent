@@ -504,7 +504,7 @@ class SubAgentManager:
             tool_name = str(data.get("tool_name") or data.get("name") or "").strip()
             if event.startswith("tool_prepare"):
                 execution.phase = "preparing_tool"
-            elif event == "tool_use":
+            elif event in {"tool_start", "tool_use"}:
                 execution.phase = "running_tool"
             elif event == "tool_result":
                 execution.phase = "running"
