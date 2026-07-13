@@ -7,6 +7,7 @@ import {
   createUiSnapshot,
   applyUiSnapshot,
   extractTaskPanelItems,
+  failQueuedUserMessages,
   getFoldEntries,
   handleSubmitText,
   hasTaskPanelFocus,
@@ -28,6 +29,184 @@ test("assistant stream updates one active message", () => {
   assert.equal(state.messages[0].kind, "assistant");
   assert.equal(state.messages[0].content, "你好");
   assert.equal(state.activeAssistant, null);
+});
+
+test("submit queues one local message and echo accepts it without duplication", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload, options = {}) => {
+    sent.push({ type, payload, options });
+    return options.id;
+  };
+
+  handleSubmitText(state, "修复测试", send);
+  const pending = state.messages.at(-1);
+  assert.equal(pending.kind, "user");
+  assert.equal(pending.deliveryStatus, "queued");
+  assert.equal(pending.attempt, 1);
+  assert.equal(sent[0].options.id, pending.requestId);
+
+  reduceServerEvent(state, {
+    type: "user/message",
+    request_id: pending.requestId,
+    payload: { content: "修复测试" },
+  });
+
+  assert.equal(state.messages.filter((message) => message.kind === "user").length, 1);
+  assert.equal(pending.deliveryStatus, "accepted");
+  assert.equal(pending.localOutbox, false);
+});
+
+test("matching error fails only an unconfirmed user submission", () => {
+  const state = createInitialState();
+  const send = (_type, _payload, options = {}) => options.id;
+  handleSubmitText(state, "第一条", send);
+  const pending = state.messages.at(-1);
+
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: pending.requestId,
+    payload: { code: "run_in_progress", message: "当前任务仍在执行。" },
+  });
+  assert.equal(pending.deliveryStatus, "failed");
+  assert.equal(pending.errorCode, "run_in_progress");
+  assert.match(pending.errorMessage, /当前任务仍在执行/);
+
+  handleSubmitText(state, "第二条", send);
+  const accepted = state.messages.at(-1);
+  reduceServerEvent(state, {
+    type: "user/message",
+    request_id: accepted.requestId,
+    payload: { content: "第二条" },
+  });
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: accepted.requestId,
+    payload: { code: "model_not_found", message: "模型不可用。" },
+  });
+  assert.equal(accepted.deliveryStatus, "accepted");
+});
+
+test("run start accepts a queued message when user echo is missing", () => {
+  const state = createInitialState();
+  const send = (_type, _payload, options = {}) => options.id;
+  handleSubmitText(state, "继续执行", send);
+  const pending = state.messages.at(-1);
+
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: pending.requestId,
+    payload: { task: "继续执行" },
+  });
+
+  assert.equal(pending.deliveryStatus, "accepted");
+});
+
+test("synchronous sender failure leaves one retryable failed message", () => {
+  const state = createInitialState();
+  const send = () => {
+    throw new Error("broken pipe");
+  };
+
+  handleSubmitText(state, "仍需保留", send);
+
+  const users = state.messages.filter((message) => message.kind === "user");
+  assert.equal(users.length, 1);
+  assert.equal(users[0].deliveryStatus, "failed");
+  assert.equal(users[0].errorCode, "transport_write_failed");
+  assert.match(users[0].errorMessage, /无法写入本地 Bridge/);
+});
+
+test("transport failure terminates queued messages but preserves accepted ones", () => {
+  const state = createInitialState();
+  const send = (_type, _payload, options = {}) => options.id;
+  handleSubmitText(state, "等待确认", send);
+  handleSubmitText(state, "已经确认", send);
+  const [queued, accepted] = state.messages.filter((message) => message.kind === "user");
+  reduceServerEvent(state, {
+    type: "user/message",
+    request_id: accepted.requestId,
+    payload: { content: accepted.content },
+  });
+
+  assert.equal(failQueuedUserMessages(state, {
+    code: "bridge_disconnected",
+    message: "Bridge 已断开。",
+  }), 1);
+  assert.equal(queued.deliveryStatus, "failed");
+  assert.equal(accepted.deliveryStatus, "accepted");
+});
+
+test("unmatched backend user message still renders once as accepted", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "user/message",
+    request_id: "external-client",
+    payload: { content: "来自其他客户端" },
+  });
+
+  const user = state.messages.at(-1);
+  assert.equal(user.kind, "user");
+  assert.equal(user.requestId, "external-client");
+  assert.equal(user.deliveryStatus, "accepted");
+});
+
+test("retry reuses one failed bubble with a new request id", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload, options = {}) => {
+    sent.push({ type, payload, id: options.id });
+    return options.id;
+  };
+  handleSubmitText(state, "失败消息", send);
+  const message = state.messages.at(-1);
+  const oldRequestId = message.requestId;
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: oldRequestId,
+    payload: { code: "run_in_progress", message: "当前任务仍在执行。" },
+  });
+
+  handleSubmitText(state, "/retry", send);
+
+  assert.equal(state.messages.filter((item) => item.kind === "user").length, 1);
+  assert.equal(message.deliveryStatus, "queued");
+  assert.equal(message.attempt, 2);
+  assert.notEqual(message.requestId, oldRequestId);
+  assert.equal(sent.at(-1).payload.text, "失败消息");
+});
+
+test("retry can select a failed request and warns when none is eligible", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload, options = {}) => {
+    sent.push({ type, payload, id: options.id });
+    return options.id;
+  };
+  handleSubmitText(state, "/retry", send);
+  assert.equal(sent.length, 0);
+  assert.match(state.messages.at(-1).content, /没有可重试/);
+
+  handleSubmitText(state, "A", send);
+  handleSubmitText(state, "B", send);
+  const [a, b] = state.messages.filter((item) => item.kind === "user");
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: a.requestId,
+    payload: { code: "rejected", message: "A failed" },
+  });
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: b.requestId,
+    payload: { code: "rejected", message: "B failed" },
+  });
+
+  const bRequestId = b.requestId;
+  handleSubmitText(state, `/retry ${a.requestId}`, send);
+  assert.equal(a.deliveryStatus, "queued");
+  assert.equal(b.deliveryStatus, "failed");
+  assert.equal(b.requestId, bRequestId);
 });
 
 test("thinking content is hidden and removed after completion by default", () => {
@@ -685,6 +864,7 @@ test("slash commands route through protocol without adding chat noise", () => {
   state.folds["message:old:code:0"] = { expanded: true };
   handleSubmitText(state, "/clear", send);
   handleSubmitText(state, "/c", send);
+  assert.deepEqual(state.messages, []);
   handleSubmitText(state, "你好", send);
 
   assert.deepEqual(sent, [
@@ -698,7 +878,9 @@ test("slash commands route through protocol without adding chat noise", () => {
     { type: "submit", payload: { text: "/c" } },
     { type: "submit", payload: { text: "你好" } },
   ]);
-  assert.deepEqual(state.messages, []);
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.messages[0].kind, "user");
+  assert.equal(state.messages[0].deliveryStatus, "queued");
   assert.deepEqual(state.folds, {});
 });
 
@@ -1022,6 +1204,117 @@ test("ui snapshots persist folds, scroll offset, and multiline composer draft", 
   assert.equal(restored.input, "第一行\n第二行");
   assert.equal(restored.inputCursor, 3);
   assert.equal(restored.inputPreferredColumn, 2);
+});
+
+test("follow tail snapshot derives detached state without stale unread", () => {
+  const source = createInitialState();
+  source.scrollOffset = 7;
+  source.followTail = false;
+  source.unreadOutputCount = 3;
+  source.unreadOutputKeys = { "assistant:old": true };
+
+  const restored = createInitialState();
+  applyUiSnapshot(restored, createUiSnapshot(source));
+  assert.equal(restored.scrollOffset, 7);
+  assert.equal(restored.followTail, false);
+  assert.equal(restored.unreadOutputCount, 0);
+  assert.deepEqual(restored.unreadOutputKeys, {});
+
+  source.scrollOffset = 0;
+  applyUiSnapshot(restored, createUiSnapshot(source));
+  assert.equal(restored.followTail, true);
+  assert.equal(restored.scrollOffset, 0);
+});
+
+test("outbox snapshot restores queued delivery as uncertain without accepted messages", () => {
+  const source = createInitialState();
+  const send = (_type, _payload, options = {}) => options.id;
+  handleSubmitText(source, "等待确认", send);
+  handleSubmitText(source, "已经确认", send);
+  const [queued, accepted] = source.messages.filter((message) => message.kind === "user");
+  reduceServerEvent(source, {
+    type: "user/message",
+    request_id: accepted.requestId,
+    payload: { content: accepted.content },
+  });
+
+  const snapshot = createUiSnapshot(source);
+  assert.equal(snapshot.outbox.length, 1);
+  assert.equal(snapshot.outbox[0].requestId, queued.requestId);
+
+  const restored = createInitialState();
+  applyUiSnapshot(restored, snapshot);
+  const message = restored.messages.find((item) => item.localOutbox);
+  assert.equal(message.deliveryStatus, "uncertain");
+  assert.equal(message.content, "等待确认");
+  assert.equal(restored.messages.some((item) => item.content === "已经确认"), false);
+});
+
+test("outbox snapshot keeps failures, bounds entries, and ignores malformed values", () => {
+  const restored = createInitialState();
+  applyUiSnapshot(restored, {
+    outbox: [
+      null,
+      { requestId: "", content: "missing id", deliveryStatus: "failed" },
+      { requestId: "accepted", content: "not local", deliveryStatus: "accepted" },
+      ...Array.from({ length: 24 }, (_, index) => ({
+        requestId: `request-${index}`,
+        content: index === 23 ? "x".repeat(200_100) : `消息 ${index}`,
+        deliveryStatus: "failed",
+        attempt: index + 1,
+        errorCode: "offline",
+        errorMessage: "Bridge offline",
+      })),
+    ],
+  });
+
+  const outbox = restored.messages.filter((message) => message.localOutbox);
+  assert.equal(outbox.length, 20);
+  assert.equal(outbox[0].requestId, "request-4");
+  assert.equal(outbox.at(-1).content.length, 200_000);
+  assert(outbox.every((message) => message.deliveryStatus === "failed"));
+});
+
+test("applying an outbox snapshot twice does not duplicate local messages", () => {
+  const state = createInitialState();
+  const snapshot = {
+    outbox: [{
+      requestId: "submit-8",
+      content: "只出现一次",
+      deliveryStatus: "queued",
+      attempt: 1,
+    }],
+  };
+
+  applyUiSnapshot(state, snapshot);
+  applyUiSnapshot(state, snapshot);
+
+  assert.equal(state.messages.filter((message) => message.localOutbox).length, 1);
+  assert.equal(state.nextSubmitId, 9);
+});
+
+test("replayed user content reconciles one uncertain outbox entry", () => {
+  const state = createInitialState();
+  applyUiSnapshot(state, {
+    outbox: [{
+      requestId: "submit-4",
+      content: "可能已发送",
+      deliveryStatus: "queued",
+      attempt: 1,
+    }],
+  });
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "user", content: "可能已发送", is_command: false },
+  });
+
+  const users = state.messages.filter((message) => message.kind === "user");
+  assert.equal(users.length, 1);
+  assert.equal(users[0].requestId, "submit-4");
+  assert.equal(users[0].attempt, 1);
+  assert.equal(users[0].deliveryStatus, "accepted");
+  assert.equal(users[0].localOutbox, false);
 });
 
 test("applying a missing snapshot clears presentation state for a new session", () => {
