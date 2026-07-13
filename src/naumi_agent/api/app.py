@@ -6,7 +6,6 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +14,6 @@ from naumi_agent import __version__
 from naumi_agent.api.permission_broker import PermissionApprovalBroker
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
-from naumi_agent.runs.store import ChatRunStore
 
 
 def resolve_config_path() -> str:
@@ -30,8 +28,7 @@ async def lifespan(app: FastAPI):
     permission_broker = PermissionApprovalBroker()
     engine.set_permission_confirmer(permission_broker.confirm)
     app.state.engine = engine
-    runtime_dir = Path(config.memory.session_db_path).expanduser().resolve().parent
-    app.state.chat_run_store = ChatRunStore(runtime_dir / "chat-runs.db")
+    app.state.chat_run_store = engine.chat_run_store
     app.state.active_chat_run_tasks = {}
     app.state.permission_broker = permission_broker
     app.state.config = config
