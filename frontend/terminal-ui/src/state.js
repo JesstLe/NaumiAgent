@@ -218,6 +218,19 @@ export function createInitialState() {
       messageId: "",
       lastStatusSignature: "",
     },
+    inspector: {
+      open: false,
+      loading: false,
+      focused: false,
+      selectedTab: "plan",
+      revision: 0,
+      snapshot: null,
+      error: "",
+      stale: false,
+      selectionByTab: {},
+      expandedByTab: {},
+      scrollByTab: {},
+    },
     permission: null,
     running: false,
     scrollOffset: 0,
@@ -313,6 +326,45 @@ export function reduceServerEvent(state, record) {
     case "completion/receipt":
       addCompletionReceipt(state, payload, record.request_id);
       break;
+    case "inspector/snapshot":
+      if (!inspectorMatchesCurrentSession(state, payload)) break;
+      if (
+        state.inspector.snapshot?.session_id === payload.session_id
+        && Number(payload.revision) < state.inspector.revision
+      ) break;
+      state.inspector.snapshot = payload;
+      state.inspector.revision = Number(payload.revision) || 0;
+      state.inspector.loading = false;
+      state.inspector.error = "";
+      state.inspector.stale = inspectorSnapshotIsStale(payload);
+      break;
+    case "inspector/update": {
+      if (!inspectorMatchesCurrentSession(state, payload)) break;
+      const nextRevision = Number(payload.revision) || 0;
+      if (nextRevision <= state.inspector.revision) break;
+      if (!state.inspector.snapshot || nextRevision !== state.inspector.revision + 1) {
+        state.inspector.loading = true;
+        return [{
+          type: "refresh_inspector",
+          knownRevision: state.inspector.revision,
+          sessionId: String(payload.session_id || state.currentSessionId || ""),
+        }];
+      }
+      state.inspector.snapshot = {
+        ...state.inspector.snapshot,
+        schema_version: payload.schema_version,
+        session_id: payload.session_id,
+        revision: nextRevision,
+        generated_at: payload.generated_at,
+        active_run_id: payload.active_run_id,
+        ...payload.changed_tabs,
+      };
+      state.inspector.revision = nextRevision;
+      state.inspector.loading = false;
+      state.inspector.error = "";
+      state.inspector.stale = inspectorSnapshotIsStale(state.inspector.snapshot);
+      break;
+    }
     case "run/started":
       resetRunCancellation(state);
       startRunActivity(state, record, payload);
@@ -392,6 +444,7 @@ export function reduceServerEvent(state, record) {
       state.todo = null;
       state.activeToolPrepare = null;
       state.activeRuntimePhase = "";
+      resetInspectorSnapshot(state.inspector);
       if (payload.clear !== false) {
         state.messages = [];
         state.tools = [];
@@ -404,6 +457,12 @@ export function reduceServerEvent(state, record) {
       pushSystemMessage(state, "resume", `已恢复会话: ${payload.title ?? payload.session_id}`, "info");
       return [{ type: "session_replayed", sessionId: state.currentSessionId }];
     case "error": {
+      if (payload.code === "inspector_refresh_failed") {
+        state.inspector.loading = false;
+        state.inspector.error = payload.message ?? "Inspector 刷新失败，已保留上一次快照。";
+        state.inspector.stale = Boolean(state.inspector.snapshot);
+        break;
+      }
       const errorRequestId = String(record.request_id ?? "");
       const hasActiveRunActivity = Boolean(state.activeRunActivity);
       const matchesActiveRun = matchesActiveRunActivity(state, errorRequestId);
@@ -473,6 +532,25 @@ export function mergeStatus(state, payload) {
   } else if ("show_reasoning" in payload) {
     state.showReasoning = Boolean(payload.show_reasoning);
   }
+}
+
+function inspectorMatchesCurrentSession(state, payload) {
+  const sessionId = String(payload?.session_id || "");
+  return Boolean(sessionId)
+    && (!state.currentSessionId || sessionId === String(state.currentSessionId));
+}
+
+function inspectorSnapshotIsStale(snapshot) {
+  return ["plan", "tools", "context", "changes", "tests"]
+    .some((name) => snapshot?.[name]?.state === "stale");
+}
+
+function resetInspectorSnapshot(inspector) {
+  inspector.loading = Boolean(inspector.open);
+  inspector.revision = 0;
+  inspector.snapshot = null;
+  inspector.error = "";
+  inspector.stale = false;
 }
 
 function startRunActivity(state, record, payload) {

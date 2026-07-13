@@ -2,11 +2,14 @@ import {
   ANSI,
   color,
   padRight,
+  stripAnsi,
+  visibleWidth,
   wrapAnsiLine,
 } from "./ansi.js";
 import { createRenderContext, renderComponent } from "./components/core.js";
 import { renderFooter, renderFooterSections } from "./components/footer.js";
 import { Message } from "./components/message.js";
+import { renderRuntimeInspector } from "./components/runtime-inspector.js";
 import { renderCachedMessage } from "./render-cache.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
 
@@ -18,20 +21,49 @@ export { renderMessage } from "./components/message.js";
 export { renderToolCard } from "./components/tool-card.js";
 
 export function renderScreen(state, width, height, env = {}) {
-  const ctx = createRenderContext({ width, env, state });
   const footer = clampFooterSections(renderFooterSections(state, width, env), height);
   const footerHeight = footer.length;
   const bodyHeight = Math.max(1, height - footerHeight);
+  const visible = state.inspector?.open
+    ? renderInspectorLayout(state, width, bodyHeight, env)
+    : renderMainViewport(state, width, bodyHeight, env);
+  return [
+    ...visible.map((line) => padRight(line, width)),
+    ...footer.map((line) => padRight(line, width)),
+  ];
+}
+
+function renderMainViewport(state, width, bodyHeight, env) {
+  const ctx = createRenderContext({ width, env, state });
   ctx.bodyHeight = bodyHeight;
   const bodyLines = renderBodyWindow(state, width, bodyHeight, state.scrollOffset, ctx);
   const target = bodyHeight + state.scrollOffset;
   const start = Math.max(0, bodyLines.length - target);
   const visible = bodyLines.slice(start, start + bodyHeight);
   while (visible.length < bodyHeight) visible.push("");
-  return [
-    ...visible.map((line) => padRight(line, width)),
-    ...footer.map((line) => padRight(line, width)),
-  ];
+  return visible;
+}
+
+function renderInspectorLayout(state, width, bodyHeight, env) {
+  if (width < 100) {
+    return renderRuntimeInspector(state.inspector, width, bodyHeight);
+  }
+
+  const inspectorWidth = Math.min(46, Math.max(38, Math.floor(width * 0.34)));
+  const timelineWidth = Math.max(1, width - inspectorWidth - 1);
+  const timelineRenderWidth = width >= 120 ? timelineWidth : width;
+  const timeline = renderMainViewport(state, timelineRenderWidth, bodyHeight, env);
+  const inspector = renderRuntimeInspector(state.inspector, inspectorWidth, bodyHeight);
+  return Array.from({ length: bodyHeight }, (_, index) => {
+    const left = padRight(cropLine(timeline[index] ?? "", timelineWidth), timelineWidth);
+    const right = padRight(inspector[index] ?? "", inspectorWidth);
+    return `${left}${color(ANSI.blue, "│")}${right}`;
+  });
+}
+
+function cropLine(line, width) {
+  if (visibleWidth(line) <= width) return line;
+  return wrapAnsiLine(stripAnsi(line), width)[0] ?? "";
 }
 
 function clampFooterSections(sections, height) {
