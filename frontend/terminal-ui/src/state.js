@@ -280,7 +280,6 @@ export function reduceServerEvent(state, record) {
       pushSystemMessage(state, "resume", `已恢复会话: ${payload.title ?? payload.session_id}`, "info");
       return [{ type: "session_replayed", sessionId: state.currentSessionId }];
     case "error":
-      state.running = false;
       pushSystemMessage(state, "error", payload.message ?? "未知错误", "error");
       break;
     case "shutdown":

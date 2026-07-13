@@ -146,6 +146,23 @@ test("session replay clears stale run, permission, todo, and perf footer state",
   assert(!plain.includes("运行中"));
 });
 
+test("generic errors do not override the active run lifecycle", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, { type: "run/started", payload: {} });
+  reduceServerEvent(state, {
+    type: "error",
+    payload: { code: "run_in_progress", message: "当前任务仍在执行。" },
+  });
+
+  assert.equal(state.running, true);
+  reduceServerEvent(state, {
+    type: "run/completed",
+    payload: { status: "completed", response: "完成", error: "" },
+  });
+  assert.equal(state.running, false);
+});
+
 test("permission request creates an updatable history card", () => {
   const state = createInitialState();
 
