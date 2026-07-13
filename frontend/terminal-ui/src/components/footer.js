@@ -132,7 +132,27 @@ export function PromptFooter({ state }) {
 export function HelpFooter() {
   return {
     render(ctx) {
-      return wrapAnsiLine(color(ANSI.dim, "Shift+Tab 模式 · Enter 发送 · Shift+Enter 换行 · ↑/↓ 导航 · PgUp/PgDn 滚动 · Ctrl+C 退出"), ctx.width);
+      return wrapAnsiLine(color(ANSI.dim, "Shift+Tab 模式 · Enter 发送 · Shift+Enter 换行 · Ctrl+R 历史 · ↑/↓ 导航 · PgUp/PgDn 滚动 · Ctrl+C 退出"), ctx.width);
+    },
+  };
+}
+
+export function HistorySearchFooter({ state }) {
+  return {
+    render(ctx) {
+      const search = state.historySearch;
+      if (!search?.open) return [];
+      const matches = Array.isArray(search.matches) ? search.matches : [];
+      const index = Math.max(0, Math.min(matches.length - 1, Number(search.selectedIndex) || 0));
+      const query = search.query ? compactText(search.query) : "全部记录";
+      const rows = [color(ANSI.cyan, `查询: ${query}`)];
+      if (matches.length) {
+        rows.push(`${index + 1}/${matches.length}  ${compactText(matches[index])}`);
+      } else {
+        rows.push(color(ANSI.yellow, "没有匹配记录"));
+      }
+      rows.push(color(ANSI.dim, "Ctrl+R/↓/Tab 更早 · ↑ 更新 · Enter 使用 · Esc 取消"));
+      return boxLines("历史搜索", rows, ctx.width);
     },
   };
 }
@@ -140,6 +160,7 @@ export function HelpFooter() {
 export function CommandCompletionFooter({ state }) {
   return {
     render(ctx) {
+      if (state.historySearch?.open) return [];
       const completions = getSlashCommandCompletions(state.input, state.slashCommands);
       if (!completions.length) return [];
       const rows = completions.map((item, index) => {
@@ -162,6 +183,7 @@ export function renderFooterSections(state, width, env = {}) {
     { name: "permission", lines: PermissionFooter({ permission: state.permission }).render(ctx) },
     { name: "todo", lines: TodoFooter({ todo: state.todo }).render(ctx) },
     { name: "task-selection", lines: TaskSelectionFooter({ taskPanel: state.taskPanel }).render(ctx) },
+    { name: "history-search", lines: HistorySearchFooter({ state }).render(ctx) },
     { name: "command-completion", lines: CommandCompletionFooter({ state }).render(ctx) },
     { name: "new-output", lines: NewOutputFooter({ state }).render(ctx) },
     { name: "status", lines: StatusFooter({ state, env }).render(ctx) },

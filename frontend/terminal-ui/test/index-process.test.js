@@ -832,6 +832,66 @@ test("terminal UI process restores queued outbox as uncertain without automatic 
   }
 });
 
+test("terminal UI process restores project history and accepts search without sending", async () => {
+  const statePath = path.join(
+    tmpdir(),
+    `naumi-terminal-ui-history-${Date.now()}-${Math.random()}.json`,
+  );
+  const first = launchTerminalUi("message-lifecycle-bridge.js", { statePath });
+  const firstOutput = collectOutput(first);
+
+  try {
+    await waitForOutput(firstOutput, "新终端 UI 已连接 Python bridge。");
+    first.stdin.write("历史 alpha\n");
+    await waitForLatestScreen(firstOutput, "已确认普通消息");
+    first.stdin.write("历史 beta\n");
+    await delay(250);
+    assert.equal(await stopTerminalUi(first), 0);
+
+    const second = launchTerminalUi("message-lifecycle-bridge.js", { statePath });
+    const secondOutput = collectOutput(second);
+    try {
+      await waitForOutput(secondOutput, "新终端 UI 已连接 Python bridge。");
+      second.stdin.write("保留草稿");
+      second.stdin.write("\x12alpha");
+      await waitForLatestScreen(secondOutput, "历史搜索");
+      await waitForLatestScreen(secondOutput, "历史 alpha");
+
+      second.stdin.write("\n");
+      await waitForLatestScreen(secondOutput, "历史 alpha▌");
+      await delay(180);
+      assert.equal(
+        readDebugEvents(second.debugLogPath).filter(
+          (record) => record.event === "protocol.send" && record.payload.record.type === "submit",
+        ).length,
+        0,
+      );
+
+      second.stdin.write("\n");
+      await waitForLatestScreen(secondOutput, "已确认普通消息");
+      const submits = readDebugEvents(second.debugLogPath).filter(
+        (record) => record.event === "protocol.send" && record.payload.record.type === "submit",
+      );
+      assert.equal(submits.length, 1);
+      assert.equal(submits[0].payload.record.payload.text, "历史 alpha");
+
+      second.stdin.write("新的草稿");
+      second.stdin.write("\x12beta");
+      await waitForLatestScreen(secondOutput, "历史搜索");
+      await waitForLatestScreen(secondOutput, "历史 beta");
+      second.stdin.write("\x1b");
+      await waitForLatestScreenWithout(secondOutput, "历史搜索");
+      assert.match(latestScreen(secondOutput), /新的草稿▌/);
+      assert.equal(await stopTerminalUi(second), 0);
+    } finally {
+      forceKill(second);
+    }
+  } finally {
+    forceKill(first);
+    fs.rmSync(statePath, { force: true });
+  }
+});
+
 function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
   const debugLogPath = path.join(tmpdir(), `naumi-terminal-ui-debug-${Date.now()}-${Math.random()}.jsonl`);
   const fakeBridge = fixtureName
@@ -930,6 +990,15 @@ async function waitForLatestScreen(output, needle, timeoutMs = 2000) {
     await delay(20);
   }
   assert.fail(`等待最新画面超时: ${needle}\n\n${latestScreen(output).slice(-3000)}`);
+}
+
+async function waitForLatestScreenWithout(output, needle, timeoutMs = 2000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (!latestScreen(output).includes(needle)) return;
+    await delay(20);
+  }
+  assert.fail(`等待最新画面关闭超时: ${needle}\n\n${latestScreen(output).slice(-3000)}`);
 }
 
 function countLatestScreen(output, needle) {
