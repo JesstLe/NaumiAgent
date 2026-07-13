@@ -10,6 +10,7 @@ from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
 from naumi_agent.tui.app import (
     ActivityPanel,
     ChatPanel,
+    InputBar,
     NaumiApp,
     PermissionConfirmScreen,
     StatusBar,
@@ -134,6 +135,7 @@ class TestNaumiApp:
         assert "tab" in binding_keys
         assert "shift+tab" in binding_keys
         assert "ctrl+l" in binding_keys
+        assert "ctrl+g" in binding_keys
 
     def test_custom_bindings_are_generated_for_tui(self) -> None:
         bindings = build_keybindings(
@@ -163,6 +165,9 @@ class TestNaumiApp:
 
     def test_tui_does_not_keep_legacy_analysis_router(self) -> None:
         assert not hasattr(NaumiApp, "_run_analysis_mode")
+
+    def test_tui_slash_completion_includes_local_agents_page(self) -> None:
+        assert "/agents" in InputBar()._build_slash_candidates("agents")
 
     @pytest.mark.asyncio
     async def test_resume_helper_skips_empty_recent_sessions(self) -> None:

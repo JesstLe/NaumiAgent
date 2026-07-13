@@ -30,6 +30,7 @@ class KeybindingAction(StrEnum):
     TUI_QUIT = "tui_quit"
     TOGGLE_ACTIVITY = "toggle_activity"
     TOGGLE_INSPECTOR = "toggle_inspector"
+    OPEN_AGENTS = "open_agents"
     TOGGLE_HISTORY = "toggle_history"
     CLEAR_CHAT = "clear_chat"
     SHOW_TOOLS = "show_tools"
@@ -209,6 +210,14 @@ KEYBINDING_DEFINITIONS: tuple[KeybindingDefinition, ...] = (
         ("c-i",),
         interfaces=("tui",),
         textual_action="toggle_inspector",
+        textual_priority=True,
+    ),
+    KeybindingDefinition(
+        KeybindingAction.OPEN_AGENTS,
+        "打开/关闭 Agent 控制中心",
+        ("c-g",),
+        interfaces=("tui",),
+        textual_action="toggle_agents",
         textual_priority=True,
     ),
     KeybindingDefinition(
