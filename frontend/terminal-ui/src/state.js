@@ -1,5 +1,5 @@
 import { looksLikeDiff } from "./ansi.js";
-import { getInputCursor, setInputText, truncateInputText } from "./input-buffer.js";
+import { INPUT_KEYS, getInputCursor, setInputText, truncateInputText } from "./input-buffer.js";
 import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
 import { clearRenderCache, createRenderCache } from "./render-cache.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
@@ -10,6 +10,7 @@ const MAX_RUN_ACTIVITY_PERF_PHASES = 5;
 const MAX_RUN_ACTIVITY_TOOLS = 100;
 const MAX_RUN_ACTIVITY_PERMISSION_IDS = 100;
 const MAX_RUN_ACTIVITY_PHASE_LABEL_CHARS = 160;
+const RUNTIME_INSPECTOR_TABS = Object.freeze(["plan", "tools", "context", "changes", "tests"]);
 
 const RUN_ACTIVITY_PHASE_LABELS = Object.freeze({
   preparing: "准备运行",
@@ -551,6 +552,112 @@ function resetInspectorSnapshot(inspector) {
   inspector.snapshot = null;
   inspector.error = "";
   inspector.stale = false;
+}
+
+export function toggleRuntimeInspector(state, send) {
+  const open = !Boolean(state.inspector.open);
+  state.inspector.open = open;
+  state.inspector.focused = false;
+  state.inspector.loading = open;
+  state.inspector.error = "";
+  send("inspector/request", {
+    open,
+    known_revision: state.inspector.revision,
+    session_id: String(state.currentSessionId || ""),
+  });
+  return open;
+}
+
+export function handleRuntimeInspectorKey(state, key, send) {
+  const inspector = state.inspector;
+  if (!inspector?.open) return false;
+  if (!inspector.focused) {
+    if (key === INPUT_KEYS.tab) {
+      inspector.focused = true;
+      if (state.taskPanel) state.taskPanel.focused = false;
+      return true;
+    }
+    if (key === INPUT_KEYS.escape) {
+      toggleRuntimeInspector(state, send);
+      return true;
+    }
+    return false;
+  }
+
+  if (key === INPUT_KEYS.escape) {
+    inspector.focused = false;
+    return true;
+  }
+  if (key === INPUT_KEYS.tab) return true;
+  if (["]", INPUT_KEYS.right, INPUT_KEYS.rightAlt].includes(key)) {
+    selectRuntimeInspectorTab(inspector, 1);
+    return true;
+  }
+  if (["[", INPUT_KEYS.left, INPUT_KEYS.leftAlt].includes(key)) {
+    selectRuntimeInspectorTab(inspector, -1);
+    return true;
+  }
+  if (key === INPUT_KEYS.up || key === INPUT_KEYS.upAlt) {
+    selectRuntimeInspectorItem(inspector, -1);
+    return true;
+  }
+  if (key === INPUT_KEYS.down || key === INPUT_KEYS.downAlt) {
+    selectRuntimeInspectorItem(inspector, 1);
+    return true;
+  }
+  if (key === "\r" || key === "\n" || key === INPUT_KEYS.ctrlEnter) {
+    toggleRuntimeInspectorExpanded(inspector);
+    return true;
+  }
+  return false;
+}
+
+function selectRuntimeInspectorTab(inspector, delta) {
+  const current = Math.max(0, RUNTIME_INSPECTOR_TABS.indexOf(inspector.selectedTab));
+  inspector.selectedTab = RUNTIME_INSPECTOR_TABS[
+    (current + delta + RUNTIME_INSPECTOR_TABS.length) % RUNTIME_INSPECTOR_TABS.length
+  ];
+  clampRuntimeInspectorSelection(inspector);
+}
+
+function selectRuntimeInspectorItem(inspector, delta) {
+  const count = runtimeInspectorItemCount(inspector);
+  if (!count) return false;
+  const tab = inspector.selectedTab;
+  const current = Math.min(count - 1, Math.max(0, Number(inspector.selectionByTab[tab]) || 0));
+  inspector.selectionByTab[tab] = (current + delta + count) % count;
+  return true;
+}
+
+function toggleRuntimeInspectorExpanded(inspector) {
+  const count = runtimeInspectorItemCount(inspector);
+  if (!count) return false;
+  const tab = inspector.selectedTab;
+  const index = Math.min(count - 1, Math.max(0, Number(inspector.selectionByTab[tab]) || 0));
+  const expanded = inspector.expandedByTab[tab] && typeof inspector.expandedByTab[tab] === "object"
+    ? { ...inspector.expandedByTab[tab] }
+    : {};
+  expanded[String(index)] = !Boolean(expanded[String(index)]);
+  inspector.expandedByTab[tab] = expanded;
+  return true;
+}
+
+function clampRuntimeInspectorSelection(inspector) {
+  const count = runtimeInspectorItemCount(inspector);
+  const tab = inspector.selectedTab;
+  inspector.selectionByTab[tab] = count
+    ? Math.min(count - 1, Math.max(0, Number(inspector.selectionByTab[tab]) || 0))
+    : 0;
+}
+
+function runtimeInspectorItemCount(inspector) {
+  const tab = inspector.snapshot?.[inspector.selectedTab];
+  if (!tab || typeof tab !== "object") return 0;
+  if (inspector.selectedTab === "plan") return Array.isArray(tab.items) ? tab.items.length : 0;
+  if (inspector.selectedTab === "tools") return Array.isArray(tab.items) ? tab.items.length : 0;
+  if (inspector.selectedTab === "changes") return Array.isArray(tab.items) ? tab.items.length : 0;
+  if (inspector.selectedTab === "tests") return Array.isArray(tab.validations) ? tab.validations.length : 0;
+  return 0;
 }
 
 function startRunActivity(state, record, payload) {
@@ -1556,6 +1663,7 @@ export function pushSystemMessage(state, title, content, level) {
     syncTaskPanelItems(state, content);
     if (state.taskPanel.items.length) {
       state.taskPanel.focused = true;
+      state.inspector.focused = false;
     }
   }
 }
@@ -1567,6 +1675,7 @@ export function createUiSnapshot(state) {
     scrollOffset: state.scrollOffset,
     outbox: serializeUserOutbox(state.messages),
     activeTaskSubmission: sanitizeActiveTaskSubmission(state.activeTaskSubmission),
+    inspector: sanitizeInspectorPresentation(state.inspector),
     composer: {
       text: truncateInputText(state.input),
       cursor: getInputCursor(state),
@@ -1590,6 +1699,14 @@ export function applyUiSnapshot(state, snapshot) {
   state.unreadOutputKeys = {};
   restoreUserOutbox(state, safeSnapshot.outbox);
   state.activeTaskSubmission = sanitizeActiveTaskSubmission(safeSnapshot.activeTaskSubmission);
+  const inspector = sanitizeInspectorPresentation(safeSnapshot.inspector);
+  state.inspector.open = inspector.open;
+  state.inspector.focused = false;
+  state.inspector.selectedTab = inspector.selectedTab;
+  state.inspector.selectionByTab = inspector.selectionByTab;
+  state.inspector.expandedByTab = inspector.expandedByTab;
+  state.inspector.scrollByTab = inspector.scrollByTab;
+  resetInspectorSnapshot(state.inspector);
   const composer = safeSnapshot.composer && typeof safeSnapshot.composer === "object"
     ? safeSnapshot.composer
     : {};
@@ -1601,6 +1718,44 @@ export function applyUiSnapshot(state, snapshot) {
     && Number.isFinite(Number(composer.preferredColumn))
     ? Math.max(0, Number(composer.preferredColumn))
     : null;
+}
+
+function sanitizeInspectorPresentation(value) {
+  const safe = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    open: safe.open === true,
+    selectedTab: RUNTIME_INSPECTOR_TABS.includes(safe.selectedTab) ? safe.selectedTab : "plan",
+    selectionByTab: sanitizeInspectorNumberMap(safe.selectionByTab),
+    expandedByTab: sanitizeInspectorExpandedMap(safe.expandedByTab),
+    scrollByTab: sanitizeInspectorNumberMap(safe.scrollByTab),
+  };
+}
+
+function sanitizeInspectorNumberMap(value) {
+  const safe = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const result = {};
+  for (const tab of RUNTIME_INSPECTOR_TABS) {
+    const parsed = Number(safe[tab]);
+    if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 10_000) result[tab] = parsed;
+  }
+  return result;
+}
+
+function sanitizeInspectorExpandedMap(value) {
+  const safe = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const result = {};
+  for (const tab of RUNTIME_INSPECTOR_TABS) {
+    const rawEntries = safe[tab] && typeof safe[tab] === "object" && !Array.isArray(safe[tab])
+      ? Object.entries(safe[tab])
+      : [];
+    const kept = {};
+    for (const [index, expanded] of rawEntries.slice(0, 100)) {
+      if (!/^\d{1,5}$/.test(index) || expanded !== true) continue;
+      kept[index] = true;
+    }
+    if (Object.keys(kept).length) result[tab] = kept;
+  }
+  return result;
 }
 
 function serializeUserOutbox(messages) {
@@ -1869,6 +2024,7 @@ function handleTasksCommand(state, text, send) {
   state.taskPanel.history = history;
   state.taskPanel.detailId = detailId;
   state.taskPanel.focused = true;
+  state.inspector.focused = false;
   if (command === "pin") {
     state.taskPanel.pinned = true;
     state.taskPanel.lastStatusSignature = "";
@@ -2042,6 +2198,7 @@ export function setTaskPanelFocus(state, focused) {
     return false;
   }
   state.taskPanel.focused = nextFocused;
+  if (nextFocused) state.inspector.focused = false;
   clearRenderCache(state.renderCache);
   pushSystemMessage(state, "任务面板", nextFocused ? "任务面板已聚焦。" : "任务面板焦点已退出。", "info");
   return true;

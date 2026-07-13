@@ -26,6 +26,7 @@ export function renderRuntimeInspector(inspector, width, height = Number.POSITIV
     : "plan";
   const snapshot = view.snapshot && typeof view.snapshot === "object" ? view.snapshot : null;
   const logical = [renderTabs(selectedTab)];
+  if (view.focused) logical.push(color(ANSI.cyan, "Inspector 已聚焦 · Esc 返回 Composer"));
 
   if (view.error) logical.push(color(ANSI.yellow, `刷新警告 · ${compactText(view.error, 500)}`));
   if (view.loading && snapshot) logical.push(color(ANSI.dim, "正在刷新，当前展示上一次完整快照。"));
@@ -90,9 +91,18 @@ function renderPlan(inspector, tab) {
   const items = array(tab.items);
   const actions = array(tab.next_actions);
   if (!items.length && !actions.length) return [emptyLine(tab.state, "尚未产生计划")];
-  const lines = items.slice(0, 20).map((item, index) => (
-    `${selectionPrefix(inspector, "plan", index)}${todoStatus(item.status)} ${compactText(item.subject || item.id, 400)}`
-  ));
+  const lines = [];
+  for (const [index, item] of items.slice(0, 20).entries()) {
+    lines.push(`${selectionPrefix(inspector, "plan", index)}${todoStatus(item.status)} ${compactText(item.subject || item.id, 400)}`);
+    if (isExpanded(inspector, "plan", index)) {
+      const details = [
+        item.active_form ? `进行态 ${compactText(item.active_form, 300)}` : "",
+        item.owner ? `负责人 ${compactText(item.owner, 120)}` : "",
+        array(item.blocked_by).length ? `阻塞于 ${array(item.blocked_by).join(", ")}` : "",
+      ].filter(Boolean).join(" · ");
+      lines.push(color(ANSI.dim, `    ${details || `ID ${compactText(item.id, 120)}`}`));
+    }
+  }
   for (const action of actions.slice(0, 5)) {
     lines.push(color(ANSI.cyan, `下一步 · ${compactText(action.label || action.kind, 400)}`));
   }
@@ -103,10 +113,19 @@ function renderTools(inspector, tab) {
   const items = array(tab.items);
   const approvals = array(tab.approvals);
   if (!items.length && !approvals.length) return [emptyLine(tab.state, "尚未调用工具")];
-  const lines = items.slice(0, 20).map((item, index) => {
+  const lines = [];
+  for (const [index, item] of items.slice(0, 20).entries()) {
     const duration = Number(item.duration_ms) > 0 ? ` · ${Number(item.duration_ms)}ms` : "";
-    return `${selectionPrefix(inspector, "tools", index)}${toolStatus(item.status)} ${compactText(item.name || "未知工具", 120)}${duration}`;
-  });
+    lines.push(`${selectionPrefix(inspector, "tools", index)}${toolStatus(item.status)} ${compactText(item.name || "未知工具", 120)}${duration}`);
+    if (isExpanded(inspector, "tools", index)) {
+      const details = [
+        item.summary ? compactText(item.summary, 400) : "",
+        item.call_id ? `call ${compactText(item.call_id, 120)}` : "",
+        item.run_id ? `run ${compactText(item.run_id, 120)}` : "",
+      ].filter(Boolean).join(" · ");
+      lines.push(color(ANSI.dim, `    ${details || "暂无更多工具证据"}`));
+    }
+  }
   for (const approval of approvals.slice(0, 8)) {
     lines.push(`审批 · ${compactText(approval.tool_name, 120)} · ${approvalLabel(approval.decision)}`);
   }
@@ -147,6 +166,12 @@ function renderChanges(inspector, tab) {
       Number(item.deletions) > 0 ? `-${Number(item.deletions)}` : "",
     ].filter(Boolean).join(" ");
     lines.push(`${selectionPrefix(inspector, "changes", index)}${changeStatus(item.status)} ${compactText(item.path, 400)}${stats ? ` · ${stats}` : ""}`);
+    if (isExpanded(inspector, "changes", index)) {
+      lines.push(color(
+        ANSI.dim,
+        `    ${item.source_tool ? `来源 ${compactText(item.source_tool, 120)}` : "暂无更多变更证据"}`,
+      ));
+    }
   }
   return lines;
 }
@@ -158,10 +183,18 @@ function renderTests(inspector, tab) {
   if (!validations.length && !unverified.length && !actions.length) {
     return [emptyLine(tab.state, "尚未记录验证")];
   }
-  const lines = validations.slice(0, 20).map((item, index) => {
+  const lines = [];
+  for (const [index, item] of validations.slice(0, 20).entries()) {
     const counts = validationCounts(item);
-    return `${selectionPrefix(inspector, "tests", index)}${validationStatus(item.status)} ${compactText(item.command || item.scope, 400)}${counts ? ` · ${counts}` : ""}`;
-  });
+    lines.push(`${selectionPrefix(inspector, "tests", index)}${validationStatus(item.status)} ${compactText(item.command || item.scope, 400)}${counts ? ` · ${counts}` : ""}`);
+    if (isExpanded(inspector, "tests", index)) {
+      const details = [
+        item.scope ? `范围 ${compactText(item.scope, 160)}` : "",
+        item.log_ref ? `日志 ${compactText(item.log_ref, 300)}` : "",
+      ].filter(Boolean).join(" · ");
+      lines.push(color(ANSI.dim, `    ${details || "暂无更多验证证据"}`));
+    }
+  }
   for (const item of unverified.slice(0, 8)) {
     lines.push(color(ANSI.yellow, `未验证 · ${compactText(item, 400)}`));
   }
@@ -192,6 +225,10 @@ function emptyLine(state, message) {
 function selectionPrefix(inspector, tabName, index) {
   const selected = Number(inspector?.selectionByTab?.[tabName] ?? 0);
   return selected === index ? color(ANSI.cyan, "› ") : "  ";
+}
+
+function isExpanded(inspector, tabName, index) {
+  return inspector?.expandedByTab?.[tabName]?.[String(index)] === true;
 }
 
 function todoStatus(status) {

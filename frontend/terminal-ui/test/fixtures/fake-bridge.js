@@ -7,6 +7,7 @@ let mode = "default";
 let showReasoning = false;
 let sessionId = "session-fake-1";
 let activeRun = null;
+let inspectorOpen = false;
 
 attachJsonlLineReader(process.stdin, (line) => {
   if (!line.trim()) return;
@@ -34,6 +35,32 @@ attachJsonlLineReader(process.stdin, (line) => {
   if (record.type === "set_reasoning") {
     showReasoning = Boolean(payload.enabled);
     emit("runtime/status", statusPayload());
+    return;
+  }
+
+  if (record.type === "inspector/request") {
+    inspectorOpen = payload.open !== false;
+    if (!inspectorOpen) {
+      emit("ack", { event: "inspector/request", open: false, revision: 2 }, record.id);
+      return;
+    }
+    if (Number(payload.known_revision) > 0) {
+      emit("inspector/snapshot", inspectorSnapshot(3), record.id);
+      return;
+    }
+    emit("inspector/snapshot", inspectorSnapshot(1), record.id);
+    setTimeout(() => {
+      if (!inspectorOpen) return;
+      const snapshot = inspectorSnapshot(3);
+      emit("inspector/update", {
+        schema_version: 1,
+        session_id: sessionId,
+        revision: 3,
+        generated_at: "2026-07-13T00:00:01+00:00",
+        active_run_id: "run-inspector-live",
+        changed_tabs: { tools: snapshot.tools },
+      });
+    }, 40);
     return;
   }
 
@@ -373,5 +400,89 @@ function workbenchSnapshot(mission, task, issue) {
     issues: [issue],
     failures: [],
     events: [{ id: "event-41", type: "issue.created" }],
+  };
+}
+
+function inspectorSnapshot(revision) {
+  return {
+    schema_version: 1,
+    session_id: sessionId,
+    revision,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    active_run_id: revision > 1 ? "run-inspector-live" : "",
+    plan: {
+      state: "ready",
+      items: [{
+        id: "todo-inspector-1",
+        subject: "保持运行检查器实时更新",
+        status: "in_progress",
+        active_form: "正在同步 Inspector",
+        owner: "main",
+        blocked_by: [],
+      }],
+      next_actions: [],
+      warnings: [],
+    },
+    tools: {
+      state: revision > 1 ? "ready" : "empty",
+      items: revision > 1
+        ? [{
+            call_id: "read-live-1",
+            name: "file_read",
+            status: "running",
+            summary: "正在读取真实项目文件",
+            duration_ms: 45,
+            run_id: "run-inspector-live",
+          }]
+        : [],
+      approvals: [],
+      warnings: [],
+    },
+    context: {
+      state: "ready",
+      workspace_root: "/Users/lv/Workspace/NaumiAgent",
+      branch: "main",
+      commit: "abc1234",
+      git_available: true,
+      git_dirty: true,
+      model: "openai/kimi-for-coding",
+      runtime_mode: mode,
+      permission_mode: permissionModeFor(mode),
+      context_used: 1200,
+      context_window: 256000,
+      context_percentage: 0.5,
+      budget_used_usd: 0.01,
+      budget_max_usd: 5,
+      budget_percentage: 0.2,
+      input_tokens: 1000,
+      output_tokens: 200,
+      turns: 1,
+      warnings: [],
+    },
+    changes: {
+      state: "empty",
+      source_run_id: "",
+      receipt_id: "",
+      summary: "",
+      items: [],
+      git_state: {
+        available: true,
+        branch: "main",
+        dirty: true,
+        commit: "abc1234",
+        ahead: 0,
+        behind: 0,
+      },
+      warnings: [],
+    },
+    tests: {
+      state: "empty",
+      source_run_id: "",
+      receipt_id: "",
+      validations: [],
+      unverified: [],
+      next_actions: [],
+      warnings: [],
+    },
   };
 }

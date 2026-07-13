@@ -9,6 +9,7 @@ import {
   extractTaskPanelItems,
   failQueuedUserMessages,
   getFoldEntries,
+  handleRuntimeInspectorKey,
   handleSubmitText,
   hasTaskPanelFocus,
   getSlashCommandCompletions,
@@ -19,6 +20,7 @@ import {
   retryUserMessage,
   submitTaskMessage,
   toggleComposerIntent,
+  toggleRuntimeInspector,
 } from "../src/state.js";
 
 test("assistant stream updates one active message", () => {
@@ -2411,6 +2413,106 @@ test("runtime inspector refresh errors keep the active run and last good snapsho
   assert.equal(state.inspector.snapshot, snapshot);
   assert.equal(state.inspector.stale, true);
   assert.match(state.inspector.error, /刷新失败/);
+});
+
+test("runtime inspector toggles without changing the composer draft", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-toggle";
+  state.input = "保留这份草稿";
+  state.inputCursor = 4;
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  assert.equal(toggleRuntimeInspector(state, send), true);
+  assert.equal(state.inspector.open, true);
+  assert.equal(state.inspector.loading, true);
+  assert.equal(state.input, "保留这份草稿");
+  assert.equal(state.inputCursor, 4);
+  assert.deepEqual(sent.at(-1), {
+    type: "inspector/request",
+    payload: { open: true, known_revision: 0, session_id: "session-toggle" },
+  });
+
+  assert.equal(toggleRuntimeInspector(state, send), false);
+  assert.equal(state.inspector.open, false);
+  assert.equal(state.inspector.focused, false);
+  assert.equal(state.input, "保留这份草稿");
+  assert.equal(sent.at(-1).payload.open, false);
+});
+
+test("runtime inspector explicitly focuses navigates expands and returns before closing", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-inspector";
+  state.inspector.open = true;
+  state.inspector.snapshot = runtimeInspectorFixture(1);
+  state.inspector.snapshot.plan.items.push({
+    id: "todo-2",
+    subject: "验证交互",
+    status: "pending",
+    blocked_by: [],
+  });
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  assert.equal(handleRuntimeInspectorKey(state, "\t", send), true);
+  assert.equal(state.inspector.focused, true);
+  assert.equal(handleRuntimeInspectorKey(state, "]", send), true);
+  assert.equal(state.inspector.selectedTab, "tools");
+  assert.equal(handleRuntimeInspectorKey(state, "\x1b[D", send), true);
+  assert.equal(state.inspector.selectedTab, "plan");
+  assert.equal(handleRuntimeInspectorKey(state, "\x1b[B", send), true);
+  assert.equal(state.inspector.selectionByTab.plan, 1);
+  assert.equal(handleRuntimeInspectorKey(state, "\r", send), true);
+  assert.equal(state.inspector.expandedByTab.plan["1"], true);
+
+  assert.equal(handleRuntimeInspectorKey(state, "\x1b", send), true);
+  assert.equal(state.inspector.focused, false);
+  assert.equal(state.inspector.open, true);
+  assert.equal(handleRuntimeInspectorKey(state, "\x1b", send), true);
+  assert.equal(state.inspector.open, false);
+  assert.equal(sent.at(-1).payload.open, false);
+});
+
+test("task panel and runtime inspector never retain focus simultaneously", () => {
+  const state = createInitialState();
+  state.inspector.open = true;
+  state.inspector.focused = true;
+  state.taskPanel.messageId = "tasks-focus";
+  state.taskPanel.items = [{ id: "todo:1", source: "todo" }];
+
+  assert.equal(setTaskPanelFocus(state, true), true);
+  assert.equal(state.taskPanel.focused, true);
+  assert.equal(state.inspector.focused, false);
+});
+
+test("ui snapshot persists only bounded runtime inspector presentation state", () => {
+  const state = createInitialState();
+  state.inspector.open = true;
+  state.inspector.focused = true;
+  state.inspector.selectedTab = "changes";
+  state.inspector.selectionByTab = { plan: 2, changes: 4, surprise: 99 };
+  state.inspector.expandedByTab = { changes: { "4": true, nope: "yes" } };
+  state.inspector.scrollByTab = { changes: 8 };
+  state.inspector.snapshot = runtimeInspectorFixture(7);
+  state.inspector.revision = 7;
+
+  const snapshot = createUiSnapshot(state);
+  assert.deepEqual(snapshot.inspector, {
+    open: true,
+    selectedTab: "changes",
+    selectionByTab: { plan: 2, changes: 4 },
+    expandedByTab: { changes: { "4": true } },
+    scrollByTab: { changes: 8 },
+  });
+  assert.equal("snapshot" in snapshot.inspector, false);
+
+  const restored = createInitialState();
+  applyUiSnapshot(restored, snapshot);
+  assert.equal(restored.inspector.open, true);
+  assert.equal(restored.inspector.focused, false);
+  assert.equal(restored.inspector.selectedTab, "changes");
+  assert.equal(restored.inspector.snapshot, null);
+  assert.equal(restored.inspector.loading, true);
 });
 
 function runtimeInspectorFixture(revision) {

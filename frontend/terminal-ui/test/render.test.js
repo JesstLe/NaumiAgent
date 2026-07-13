@@ -401,11 +401,13 @@ test("runtime inspector uses drawer overlay and page layouts across breakpoints"
   assert(wide.some((line) => line.includes("Runtime Inspector")));
   assert(wide.some((line) => line.includes("实现运行检查器")));
   assert(wide.some((line) => line.includes("permission: bash_run")));
+  assert.equal(wide.find((line) => line.includes("┌ Runtime Inspector")).indexOf("┌"), 94);
 
   const overlay = renderScreen(state, 110, 20).map(stripAnsi);
   assert(overlay.some((line) => line.includes("时间线正文仍然可见")));
   assert(overlay.some((line) => line.includes("Runtime Inspector")));
   assert(overlay.some((line) => line.includes("permission: bash_run")));
+  assert.equal(overlay.find((line) => line.includes("┌ Runtime Inspector")).indexOf("┌"), 73);
 
   state.messages = [{
     kind: "assistant",

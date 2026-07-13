@@ -67,7 +67,9 @@ test("ui state store migrates version one sessions with an empty composer", () =
     });
     saveUiStateStore(store);
     assert.deepEqual(getProjectInputHistory(store), []);
-    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 3);
+    assert.equal(getUiSnapshot(store, "abc").inspector.open, false);
+    assert.equal(getUiSnapshot(store, "abc").inspector.selectedTab, "plan");
+    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 4);
   } finally {
     if (previous === undefined) delete process.env.NAUMI_TERMINAL_UI_STATE_PATH;
     else process.env.NAUMI_TERMINAL_UI_STATE_PATH = previous;
@@ -92,7 +94,8 @@ test("ui state store migrates version two without losing session drafts", () => 
     assert.equal(getUiSnapshot(store, "abc").composer.text, "保留草稿");
     assert.deepEqual(getProjectInputHistory(store), []);
     saveUiStateStore(store);
-    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 3);
+    assert.equal(getUiSnapshot(store, "abc").inspector.open, false);
+    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 4);
   } finally {
     if (previous === undefined) delete process.env.NAUMI_TERMINAL_UI_STATE_PATH;
     else process.env.NAUMI_TERMINAL_UI_STATE_PATH = previous;

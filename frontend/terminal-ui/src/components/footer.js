@@ -133,7 +133,7 @@ export function PromptFooter({ state }) {
 export function HelpFooter() {
   return {
     render(ctx) {
-      return wrapAnsiLine(color(ANSI.dim, "Ctrl+T 对话/任务 · Shift+Tab 模式 · Enter 发送 · Shift+Enter 换行 · Ctrl+R 历史 · ↑/↓ 导航 · PgUp/PgDn 滚动 · Ctrl+C 取消/退出"), ctx.width);
+      return wrapAnsiLine(color(ANSI.dim, "Ctrl+I Inspector · Ctrl+T 对话/任务 · Shift+Tab 模式 · Enter 发送 · Shift+Enter 换行 · Ctrl+R 历史 · ↑/↓ 导航 · PgUp/PgDn 滚动 · Ctrl+C 取消/退出"), ctx.width);
     },
   };
 }
