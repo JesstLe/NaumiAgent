@@ -4,7 +4,7 @@
 
 **Goal:** 为每次流式 Agent 运行生成一份后端权威、可持久化、可补发的完成收据，并在新 Terminal UI 与 Textual TUI 中用同一结构展示真实改动、验证、未验证项、审批、风险、Git 状态和下一步。
 
-**Architecture:** 将现有 `api/chat_runs.py` 的持久运行模型下沉到中立的 `naumi_agent.runs` 包，由 `AgentEngine.run_streaming()` 包装器统一创建 `ChatRunRecorder`、观察原始引擎事件、生成 `CompletionReceipt` 并写入同一个 `chat-runs.db`。Bridge 只负责把权威收据映射为 `completion/receipt` 和补发协议；新 Terminal UI 与 Textual TUI 都消费共享 `RunReceiptMessage`，不得从本地工具卡临时拼装事实。
+**Architecture:** 将现有 `api/chat_runs.py` 的持久运行模型下沉到中立的 `naumi_agent.runs` 包，由 `AgentEngine.run_streaming()` 包装器统一创建 `ChatRunRecorder`、观察原始引擎事件、生成 `CompletionReceipt` 并写入同一个 `chat-runs.db`。Bridge 只负责把权威收据映射为 `completion/receipt` 和补发协议；新 Terminal UI 与 Textual TUI 都消费共享 `CompletionReceiptMessage`，不得从本地工具卡临时拼装事实。
 
 **Tech Stack:** Python 3.12+、dataclasses、asyncio subprocess、SQLite/aiosqlite、现有 UIMessage/JSONL Bridge、Node.js 20+ terminal frontend、Textual/Rich。
 
@@ -18,7 +18,7 @@
 - 失败、部分成功和取消都必须生成收据；无证据的声明进入 `unverified`。
 - Git 探测必须使用参数数组调用 `git`，设置超时，不通过 shell，不读取工作区外文件。
 - 命令、路径、输出和错误在写入 SQLite/协议前必须脱敏、限长，不能持久化 token、Cookie、Authorization 或完整环境变量。
-- 当前 `origin/main` 的 Python 基线有两项无关失败：worktree 中配置回退路径断言、`/browse` 命令表断言；实现不得顺手修改它们，最终报告必须单列。
+- 使用隔离 worktree 的开发依赖环境（`uv sync --extra dev` 后通过 `uv run python -m pytest`）验证 `origin/main` 基线无失败；早期看到的配置回退和 `/browse` 失败来自错误复用了全局 Python/主工作区，不属于仓库基线。
 - 每个任务先写失败测试并确认 RED，再写实现；完成一个任务立即定向验证并提交。
 
 ---
@@ -292,7 +292,7 @@ git commit -m "feat: persist authoritative run receipts"
 - Adds server event: `completion/receipt`.
 - Adds client event: `completion/receipt_get` with `receipt_id`.
 - Adds `run/completed.payload.receipt_id`.
-- Produces shared `RunReceiptMessage(type=MessageType.RUN_RECEIPT, receipt=CompletionReceipt)`.
+- Produces shared `CompletionReceiptMessage(type=MessageType.COMPLETION_RECEIPT, receipt=CompletionReceipt)`.
 
 - [ ] **Step 1: Write failing protocol and event-order tests**
 
@@ -316,7 +316,7 @@ Register protocol enums and contract fields. Bridge `on_event("completion_receip
 
 - [ ] **Step 5: Add shared UIMessage adapter and durable replay**
 
-`RunReceiptMessage` exposes only bounded public fields, not a generic untyped dict. `ui_message_payload()` serializes it with `schema_version` and `receipt_id`. `resume_session()` loads stored runs after message replay and emits their receipts in completion order.
+`CompletionReceiptMessage` exposes only bounded public fields, not a generic untyped dict. `ui_message_payload()` serializes it with `schema_version` and `receipt_id`. `resume_session()` loads stored runs after message replay and emits their receipts in completion order.
 
 - [ ] **Step 6: Verify and commit Task 3**
 
@@ -407,7 +407,7 @@ git commit -m "feat: render authoritative completion receipts"
 - Test: `tests/unit/test_tui.py`
 
 **Interfaces:**
-- Consumes: the same `RunReceiptMessage` used by Bridge/new UI.
+- Consumes: the same `CompletionReceiptMessage` used by Bridge/new UI.
 - Produces: compact Rich/Textual receipt widget and status text.
 - Preserves: no new TUI-only receipt model or persistence path.
 
@@ -454,7 +454,7 @@ git commit -m "feat: show completion receipts in textual tui"
 
 **Interfaces:**
 - Proves: real Git edit + validation + Bridge event + new UI reducer + TUI renderer + SQLite replay.
-- Records: exact remaining limitations and the two unrelated baseline failures.
+- Records: exact remaining limitations and the corrected clean baseline result.
 
 - [ ] **Step 1: Write a real process-level acceptance test**
 
@@ -475,7 +475,7 @@ Use real subprocess/Git operations for a failing pytest run, cancellation after 
 
 Run: `uv run ruff check src/ tests/e2e/test_terminal_completion_receipt.py`
 
-Run: `uv run python3 -c "from naumi_agent.runs import CompletionReceipt, ChatRunStore; from naumi_agent.ui.messages.events import RunReceiptMessage"`
+Run: `uv run python -c "from naumi_agent.runs import CompletionReceipt, ChatRunStore; from naumi_agent.ui.messages.events import CompletionReceiptMessage"`
 
 Run: `uv run pytest tests/unit/test_chat_runs.py tests/unit/test_run_receipts.py tests/unit/test_ui_protocol.py tests/unit/test_ui_message_adapter.py tests/unit/test_ui_message_replay.py tests/unit/test_tui_renderers.py tests/e2e/test_terminal_completion_receipt.py -q`
 
@@ -483,7 +483,7 @@ Run: `uv run pytest tests/unit/test_ui_bridge.py -q -k 'not resolve_config_path_
 
 Run: `node --test frontend/terminal-ui/test/state.test.js frontend/terminal-ui/test/components.test.js frontend/terminal-ui/test/protocol.test.js frontend/terminal-ui/test/flow.test.js`
 
-Expected: all feature-related checks pass; only the two documented baseline failures remain outside the selected Bridge command.
+Expected: all feature-related checks and the repository baseline pass in the isolated development environment.
 
 - [ ] **Step 4: Perform a manual real-workspace smoke without touching the colleague checkout**
 

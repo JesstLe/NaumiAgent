@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.212] - 2026-07-13
+
+### Added
+- **Authoritative Completion Receipts** — 流式运行现在从真实工具事件、审批结果、验证输出和运行前后 Git 差异生成版本化完成回执；成功、部分完成、失败与取消均先写入 SQLite，再通过 `completion/receipt` 发送，并支持会话重放和缺失回执补发。
+- **Terminal UI / Textual Receipt Parity** — 新 Terminal UI 与旧 Textual TUI 展示同一份后端回执，统一呈现改动、验证、未验证项、审批、风险、Git 状态和下一步，不再由客户端根据工具卡推断“是否完成”。
+
 ## [0.1.211] - 2026-07-08
 
 ### Changed
