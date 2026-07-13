@@ -191,7 +191,7 @@ test("tool card renders diff output inside a bounded card", () => {
   assert(card.every((line) => visibleWidth(line) <= 80));
 });
 
-test("footer truncates status without overflowing terminal width", () => {
+test("footer wraps complete status fields without ellipsis", () => {
   const state = createInitialState();
   state.mode = "bypass";
   state.status = {
@@ -207,6 +207,28 @@ test("footer truncates status without overflowing terminal width", () => {
 
   assert(footer.every((line) => visibleWidth(line) <= 72));
   assert(stripAnsi(footer[0]).includes("mode: bypass"));
+  const plain = footer.map(stripAnsi).join("\n");
+  assert.match(plain, /预算: \$0\.3000\/\$5\.00/);
+  assert.match(plain, /main\*/);
+  assert.doesNotMatch(plain, /…/);
+});
+
+test("footer renders unlimited budget without inventing a zero cap", () => {
+  const state = createInitialState();
+  state.status = {
+    model: "openai/kimi-for-coding",
+    workspace_root: "/Users/lv/Workspace/NaumiAgent",
+    usage: { total_tokens: 50 },
+    context: { used: 20, window: 256000, percentage: 0.1 },
+    budget: { enabled: false, used_usd: 0.0123, max_usd: null },
+  };
+
+  const footer = renderFooter(state, 220, { cwd: "/tmp", home: "/Users/lv" })
+    .map(stripAnsi)
+    .join("\n");
+
+  assert.match(footer, /预算: 不限 · 已用 \$0\.0123/);
+  assert.doesNotMatch(footer, /\/\$0\.00/);
 });
 
 test("footer shows compact task activity when backend reports active work", () => {
@@ -556,6 +578,32 @@ test("runtime inspector never exceeds an extremely small terminal", () => {
   assert.equal(lines.length, 3);
   assert(lines.every((line) => visibleWidth(line) <= 12));
   assert(lines.map(stripAnsi).some((line) => line.includes("chat > x")));
+});
+
+test("runtime inspector renders unlimited budget within its width", () => {
+  const state = createInitialState();
+  state.inspector.open = true;
+  state.inspector.selectedTab = "context";
+  state.inspector.snapshot = runtimeInspectorRenderFixture(3);
+  state.inspector.snapshot.context = {
+    state: "ready",
+    budget_enabled: false,
+    budget_used_usd: 0.0123,
+    budget_max_usd: null,
+    budget_percentage: null,
+    budget_max_input_tokens: null,
+    budget_max_output_tokens: null,
+    input_tokens: 42,
+    output_tokens: 8,
+    turns: 1,
+    warnings: [],
+  };
+
+  const lines = renderRuntimeInspector(state.inspector, 54, 18);
+  const plain = lines.map(stripAnsi).join("\n");
+
+  assert.match(plain, /预算: 不限 · 已用 \$0\.0123/);
+  assert(lines.every((line) => visibleWidth(line) <= 54));
 });
 
 function runtimeInspectorRenderFixture(revision, { empty = false } = {}) {

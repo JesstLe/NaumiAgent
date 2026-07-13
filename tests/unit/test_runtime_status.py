@@ -112,6 +112,7 @@ class TestRuntimeStatus:
 
         assert "## Runtime 状态" in output
         assert "### 上下文与预算" in output
+        assert "预算：不限 · 已用 $0.0000" in output
         assert "工作区" in output
 
     @pytest.mark.asyncio

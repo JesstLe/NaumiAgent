@@ -110,7 +110,7 @@ from enum import Enum
 
 class PermissionMode(Enum):
     """权限模式 — 从宽松到严格"""
-    BYPASS = "bypass"          # 无限制（仅限受信任环境）
+    BYPASS = "bypass"          # 工具权限全放行；显式预算仍生效
     PERMISSIVE = "permissive"   # 仅禁止危险操作
     MODERATE = "moderate"       # 需要确认危险操作
     STRICT = "strict"           # 仅允许明确许可的操作
@@ -234,15 +234,29 @@ class PermissionChecker:
 
 ## 4. 预算控制
 
+运行时默认不启用累计费用、输入 Token 或输出 Token 上限，但 `BudgetTracker`
+始终记录真实用量。只有配置明确数值时才启用对应限制：`null` 表示不限，`0`
+表示零额度并会在首次模型调用前停止，负数会在配置加载阶段被拒绝。
+
+预算与权限彼此独立。`bypass` 表示工具权限全放行，不会绕过显式配置的预算。
+主 Agent、动态 Agent 和预设 Agent 的默认最大轮数统一为 50；调用方仍可显式设置
+更小的正整数。
+
 ```python
 # src/naumi_agent/safety/budget.py
 
 @dataclass
 class TokenBudget:
-    max_input_tokens: int = 500000
-    max_output_tokens: int = 50000
-    max_total_tokens: int = 600000
-    max_usd: float = 5.0
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
+    max_usd: float | None = None
+
+    @property
+    def enabled(self) -> bool:
+        return any(
+            limit is not None
+            for limit in (self.max_input_tokens, self.max_output_tokens, self.max_usd)
+        )
 
 @dataclass
 class UsageRecord:
@@ -250,7 +264,7 @@ class UsageRecord:
     input_tokens: int
     output_tokens: int
     cost_usd: float
-    timestamp: datetime
+    timestamp: str
 
 class BudgetTracker:
     def __init__(self, budget: TokenBudget):
@@ -259,50 +273,53 @@ class BudgetTracker:
 
     def track(self, usage: TokenUsage, model: str) -> None:
         """记录一次模型调用的 token 用量"""
-        cost = self._calculate_cost(usage, model)
         self._records.append(UsageRecord(
             model=model,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
-            cost_usd=cost,
-            timestamp=datetime.now(),
+            cost_usd=usage.cost_usd,
+            timestamp=datetime.now().isoformat(),
         ))
 
     def is_exceeded(self) -> bool:
         """检查是否超出预算"""
         return (
-            self.total_input_tokens > self.budget.max_input_tokens
-            or self.total_cost > self.budget.max_usd
+            self._is_limit_exceeded(self.total_input_tokens, self.budget.max_input_tokens)
+            or self._is_limit_exceeded(self.total_output_tokens, self.budget.max_output_tokens)
+            or self._is_limit_exceeded(self.total_cost_usd, self.budget.max_usd)
         )
+
+    @staticmethod
+    def _is_limit_exceeded(total, limit) -> bool:
+        if limit is None:
+            return False
+        if limit == 0:
+            return True
+        return total > limit
 
     @property
     def total_input_tokens(self) -> int:
         return sum(r.input_tokens for r in self._records)
 
     @property
-    def total_cost(self) -> float:
+    def total_output_tokens(self) -> int:
+        return sum(r.output_tokens for r in self._records)
+
+    @property
+    def total_cost_usd(self) -> float:
         return sum(r.cost_usd for r in self._records)
 
     def get_summary(self) -> BudgetSummary:
         return BudgetSummary(
             total_input_tokens=self.total_input_tokens,
-            total_output_tokens=sum(r.output_tokens for r in self._records),
-            total_cost=self.total_cost,
-            remaining_budget=self.budget.max_usd - self.total_cost,
+            total_output_tokens=self.total_output_tokens,
+            total_cost_usd=self.total_cost_usd,
+            remaining_usd=(
+                None
+                if self.budget.max_usd is None
+                else max(0, self.budget.max_usd - self.total_cost_usd)
+            ),
             model_breakdown=self._model_breakdown(),
-        )
-
-    def _calculate_cost(self, usage: TokenUsage, model: str) -> float:
-        """计算调用成本"""
-        COST_PER_MILLION = {
-            "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
-            "claude-haiku-4-5": {"input": 0.80, "output": 4.0},
-            "gpt-4o": {"input": 2.5, "output": 10.0},
-        }
-        rates = COST_PER_MILLION.get(model, {"input": 3.0, "output": 15.0})
-        return (
-            usage.input_tokens * rates["input"] / 1_000_000
-            + usage.output_tokens * rates["output"] / 1_000_000
         )
 ```
 
@@ -365,7 +382,7 @@ class OutputGuardrail:
 # config.yaml — 安全相关配置
 
 safety:
-  permission_mode: "moderate"  # bypass | permissive | moderate | strict | lockdown
+  permission_mode: "moderate"  # bypass 仅跳过工具权限确认
 
   allowed_dirs:
     - "/workspace"             # 工作目录
@@ -377,10 +394,10 @@ safety:
     - "mkfs"
     - "dd if="
 
-  budget:
-    max_usd: 5.0               # 单会话最大费用
-    max_input_tokens: 500000
-    max_output_tokens: 50000
+  max_budget_usd: null          # null = 不限；例如 5.0 = 累计费用上限
+  max_input_tokens: null        # null = 不限；例如 500000 = 累计输入上限
+  max_output_tokens: null       # null = 不限；例如 50000 = 累计输出上限
+  max_turns: 50
 
   guardrails:
     input_validation: true

@@ -32,7 +32,7 @@ class TestAgentConfigs:
         assert CODER_CONFIG.name == "coder"
         assert AgentCapability.FILE_OPS in CODER_CONFIG.capabilities
         assert AgentCapability.CODE_EXEC in CODER_CONFIG.capabilities
-        assert CODER_CONFIG.max_turns == 15
+        assert CODER_CONFIG.max_turns == 50
 
     def test_researcher_config(self) -> None:
         assert RESEARCHER_CONFIG.name == "researcher"
@@ -41,6 +41,14 @@ class TestAgentConfigs:
     def test_browser_config(self) -> None:
         assert BROWSER_CONFIG.name == "browser"
         assert AgentCapability.WEB_BROWSE in BROWSER_CONFIG.capabilities
+
+    @pytest.mark.parametrize("config", ALL_AGENT_CONFIGS.values())
+    def test_presets_use_shared_unlimited_budget_and_fifty_turns(
+        self,
+        config: AgentConfig,
+    ) -> None:
+        assert config.max_budget_usd is None
+        assert config.max_turns == 50
 
 
 class TestBaseAgent:
@@ -177,6 +185,77 @@ class TestBaseAgent:
         assert result.status == "error"
         assert result.total_cost_usd == 0.02
         assert "预算" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_unlimited_budget_continues_after_high_cost(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        agent = BaseAgent(
+            AgentConfig(
+                name="unlimited",
+                description="Unlimited test agent",
+                capabilities=[],
+                max_turns=2,
+            ),
+            engine,
+        )
+        responses = [
+            ModelResponse(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call_unknown",
+                        "function": {"name": "unknown_tool", "arguments": "{}"},
+                    }
+                ],
+                usage=TokenUsage(total_tokens=20, cost_usd=100.0),
+                model="test",
+            ),
+            ModelResponse(
+                content="完成",
+                usage=TokenUsage(total_tokens=1, cost_usd=100.0),
+                model="test",
+            ),
+        ]
+
+        with patch.object(
+            engine.router,
+            "call",
+            new_callable=AsyncMock,
+            side_effect=responses,
+        ) as call:
+            result = await agent.execute("需要两轮")
+
+        assert call.await_count == 2
+        assert result.status == "completed"
+        assert result.total_cost_usd == 200.0
+
+    @pytest.mark.asyncio
+    async def test_zero_budget_stops_before_first_router_call(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        agent = BaseAgent(
+            AgentConfig(
+                name="zero-budget",
+                description="Zero budget test agent",
+                capabilities=[],
+                max_budget_usd=0,
+            ),
+            engine,
+        )
+
+        with patch.object(
+            engine.router,
+            "call",
+            new_callable=AsyncMock,
+        ) as call:
+            result = await agent.execute("不应调用模型")
+
+        call.assert_not_awaited()
+        assert result.status == "error"
+        assert "预算已耗尽" in (result.error or "")
 
     @pytest.mark.asyncio
     async def test_subagent_permission_level_blocks_disallowed_tools_before_parent_execution(

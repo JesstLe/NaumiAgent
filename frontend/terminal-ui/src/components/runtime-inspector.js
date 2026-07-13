@@ -5,6 +5,7 @@ import {
   visibleWidth,
   wrapAnsiLine,
 } from "../ansi.js";
+import { formatBudgetStatus } from "./budget-status.js";
 
 export const RUNTIME_INSPECTOR_TABS = Object.freeze([
   { id: "plan", label: "Plan" },
@@ -146,7 +147,16 @@ function renderContext(tab) {
     lines.push(`模式 · ${compactText(tab.runtime_mode || "default", 80)} · 权限 ${compactText(tab.permission_mode || "-", 80)}`);
   }
   lines.push(`上下文 · ${formatCount(tab.context_used)}/${formatCount(tab.context_window)} · ${formatPercent(tab.context_percentage)}`);
-  lines.push(`预算 · $${number(tab.budget_used_usd).toFixed(4)}/$${number(tab.budget_max_usd).toFixed(4)} · ${formatPercent(tab.budget_percentage)}`);
+  lines.push(formatBudgetStatus({
+    enabled: tab.budget_enabled,
+    used_usd: tab.budget_used_usd,
+    max_usd: tab.budget_max_usd,
+    cost_percentage: tab.budget_percentage,
+    input_tokens: tab.input_tokens,
+    max_input_tokens: tab.budget_max_input_tokens,
+    output_tokens: tab.output_tokens,
+    max_output_tokens: tab.budget_max_output_tokens,
+  }));
   lines.push(`Token · 输入 ${formatCount(tab.input_tokens)} · 输出 ${formatCount(tab.output_tokens)} · 轮次 ${number(tab.turns)}`);
   return lines;
 }

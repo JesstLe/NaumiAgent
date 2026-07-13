@@ -67,6 +67,7 @@ async def test_harness_context_snapshot_includes_live_state(engine: AgentEngine)
     assert "复查长期任务" in content
     assert "pursuit_ctx" in content
     assert "完成上下文快照" in content
+    assert "预算：不限 · 已用 $0.0000" in content
 
 
 @pytest.mark.asyncio

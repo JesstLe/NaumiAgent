@@ -78,8 +78,8 @@ class FakeEngine:
     def get_context_info(self) -> dict[str, int]:
         return {"used": 3000, "window": 12000, "percentage": 25}
 
-    def get_budget_info(self) -> dict[str, float]:
-        return {"used_usd": 0.01, "max_usd": 5.0}
+    def get_budget_info(self) -> dict[str, object]:
+        return {"enabled": False, "used_usd": 0.01, "max_usd": None}
 
 
 def test_tool_label_uses_english_tool_id() -> None:
@@ -111,6 +111,8 @@ def test_cli_status_updates_fixed_status_not_output(monkeypatch) -> None:
     assert "test-model" in cli.status
     assert cli.mode_status == "default"
     assert "工作区: /tmp/workspace" in cli.status
+    assert "预算: 不限 · 已用 $0.0100" in cli.status
+    assert "$0.00" not in cli.status
     assert cli.output == []
 
 

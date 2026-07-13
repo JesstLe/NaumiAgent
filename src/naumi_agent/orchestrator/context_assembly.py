@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from naumi_agent.background.models import BackgroundStatus
 from naumi_agent.scheduler.models import ScheduleStatus
 from naumi_agent.tasks.models import TaskStatus
+from naumi_agent.ui.budget import format_budget_detail
 from naumi_agent.worktree.models import WorktreeRecord
 
 if TYPE_CHECKING:
@@ -229,9 +230,7 @@ class HarnessContextAssembler:
             f"- 上下文：{context_info.get('used', 0)}/"
             f"{context_info.get('window', 0)} tokens "
             f"({context_info.get('percentage', 0)}%)\n"
-            f"- 预算：${budget_info.get('used_usd', 0):.4f}/"
-            f"${budget_info.get('max_usd', 0):.2f} "
-            f"({budget_info.get('percentage', 0)}%)"
+            f"- 预算：{format_budget_detail(budget_info)}"
         )
 
 

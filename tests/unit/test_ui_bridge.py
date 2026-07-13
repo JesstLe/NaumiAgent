@@ -1246,6 +1246,27 @@ async def test_bridge_ready_event_carries_authoritative_product_identity() -> No
     assert ready["payload"]["permission_mode"] == "moderate"
 
 
+@pytest.mark.asyncio
+async def test_bridge_ready_event_carries_nullable_budget(tmp_path: Path) -> None:
+    engine = AgentEngine(
+        AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    try:
+        await bridge.emit_ready()
+        ready = _records(writer)[0]
+        budget = ready["payload"]["budget"]
+
+        assert budget["enabled"] is False
+        assert budget["max_usd"] is None
+        json.dumps(ready, allow_nan=False)
+    finally:
+        await engine.shutdown()
+
+
 def test_bridge_status_payload_includes_slash_command_list(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ui_bridge,

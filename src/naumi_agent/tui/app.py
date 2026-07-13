@@ -44,6 +44,7 @@ from naumi_agent.tui.completion_receipt import (
     format_completion_receipt_markdown,
 )
 from naumi_agent.tui.runtime_inspector import RuntimeInspectorScreen
+from naumi_agent.ui.budget import format_budget_detail
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
 from naumi_agent.ui.history_screen import build_history_snapshot, render_history_preview
@@ -561,11 +562,7 @@ class ChatPanel(VerticalScroll):
             window_k = ctx["window"] / 1000
             line2_parts.append(f"上下文: {used_k:.0f}K/{window_k:.0f}K ({ctx_pct}%)")
             budget = engine.get_budget_info()
-            line2_parts.append(
-                f"预算: ${budget['used_usd']:.4f}"
-                f"/${budget['max_usd']:.2f}"
-                f" ({budget['percentage']}%)"
-            )
+            line2_parts.append(f"预算: {format_budget_detail(budget)}")
         line2_parts.append(f"费用: ${cost:.4f}")
         self.mount(
             Static(
@@ -1479,7 +1476,7 @@ class NaumiApp(App):
                 f"{model} | "
                 f"工作区: {workspace_root} | "
                 f"上下文: 0K/{window_k:.0f}K | "
-                f"预算: $0.0000/${budget['max_usd']:.2f}"
+                f"预算: {format_budget_detail(budget)}"
             )
         except Exception:
             pass
@@ -2215,9 +2212,7 @@ class NaumiApp(App):
         window_k = ctx["window"] / 1000
         stats_parts.append(f"上下文: {used_k:.0f}K/{window_k:.0f}K ({ctx_pct}%)")
         budget = self.engine.get_budget_info()
-        stats_parts.append(
-            f"预算: ${budget['used_usd']:.4f}/${budget['max_usd']:.2f}"
-        )
+        stats_parts.append(f"预算: {format_budget_detail(budget)}")
         stats_line = " | ".join(stats_parts)
         chat.mount(
             Static(
