@@ -110,6 +110,56 @@ def test_argument_summary_redacts_and_bounds_output() -> None:
     assert len(json.dumps(summary, ensure_ascii=False)) <= 1200
 
 
+@pytest.mark.parametrize("length", [160, 161])
+def test_argument_summary_caps_strings_at_the_exact_contract_boundary(length: int) -> None:
+    value = "x" * length
+
+    summary = summarize_arguments({"value": value})
+
+    assert summary["value"] == value[:160]
+    assert len(summary["value"]) == 160
+
+
+@pytest.mark.parametrize("count", [50, 51])
+def test_argument_summary_caps_collections_at_the_exact_contract_boundary(count: int) -> None:
+    summary = summarize_arguments({"items": list(range(count))})
+
+    assert summary["items"] == list(range(50))
+    assert len(summary["items"]) == 50
+
+
+def test_argument_summary_caps_dynamically_long_type_placeholders() -> None:
+    opaque = type("Opaque" * 40, (), {})()
+
+    summary = summarize_arguments({"opaque": opaque})
+
+    assert summary["opaque"].startswith("<Opaque")
+    assert len(summary["opaque"]) == 160
+
+
+@pytest.mark.parametrize("value_width", [10, 11])
+def test_argument_summary_uses_the_ordinary_json_contract_ceiling(value_width: int) -> None:
+    arguments = {f"key_{index:02d}": "v" * value_width for index in range(50)}
+
+    summary = summarize_arguments(arguments)
+
+    assert len(json.dumps(summary, ensure_ascii=False)) <= 1200
+    if value_width == 10:
+        assert summary == arguments
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_argument_summary_normalizes_non_finite_floats_to_strict_json(value: float) -> None:
+    summary = summarize_arguments({"value": value})
+
+    assert isinstance(summary["value"], str)
+    assert len(summary["value"]) <= 160
+    encoded = json.dumps(summary, ensure_ascii=False, allow_nan=False)
+    assert "NaN" not in encoded
+    assert "Infinity" not in encoded
+    assert json.loads(encoded) == summary
+
+
 def test_permission_challenge_is_one_use_and_request_bound() -> None:
     clock = [100.0]
     store = PermissionChallengeStore(clock=lambda: clock[0])
