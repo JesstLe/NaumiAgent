@@ -16,12 +16,15 @@ from naumi_agent.api.routes.messages import (
     _stream_response,
     add_chat_source,
     cancel_chat_run,
+    delete_session,
     get_chat_environment,
     list_chat_runs,
     list_messages,
     send_message,
 )
 from naumi_agent.api.schemas import HealthResponse, MessageCreate, SessionCreate
+from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.streaming.events import EventType
 
 
@@ -82,6 +85,8 @@ class _FakeEngine:
         self.background_runner = SimpleNamespace(
             store=SimpleNamespace(list_tasks=lambda: [])
         )
+        self.deleted: list[str] = []
+        self.delete_result = True
 
     @property
     def runtime_mode(self):
@@ -96,6 +101,10 @@ class _FakeEngine:
     async def load_session(self, session_id: str) -> bool:
         self.loaded.append(session_id)
         return True
+
+    async def delete_session(self, session_id: str) -> bool:
+        self.deleted.append(session_id)
+        return self.delete_result
 
     async def run(self, content: str, turn_context: str = ""):
         self.ran.append(content)
@@ -162,6 +171,51 @@ async def _async_value(value):
 
 
 class TestMessageRoutes:
+    @pytest.mark.asyncio
+    async def test_delete_session_route_delegates_to_engine_lifecycle(self) -> None:
+        engine = _FakeEngine()
+
+        response = await delete_session("sess_1", _fake_request(engine), auth="test")
+
+        assert response is None
+        assert engine.deleted == ["sess_1"]
+        route = next(
+            route
+            for route in message_routes.router.routes
+            if getattr(route, "path", "") == "/sessions/{session_id}"
+            and "DELETE" in getattr(route, "methods", set())
+        )
+        assert route.status_code == 204
+
+    @pytest.mark.asyncio
+    async def test_delete_session_route_returns_404_when_engine_cannot_delete(self) -> None:
+        engine = _FakeEngine()
+        engine.delete_result = False
+
+        with pytest.raises(Exception) as exc:
+            await delete_session("missing", _fake_request(engine), auth="test")
+
+        assert exc.value.status_code == 404
+        assert exc.value.detail == "Session not found"
+
+    @pytest.mark.asyncio
+    async def test_delete_session_route_cleans_active_engine_grants(self, tmp_path) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        try:
+            session = await engine.get_or_create_session()
+            engine._permission_grant_store.create(session.id, "shell", "active-grant")
+
+            response = await delete_session(session.id, _fake_request(engine), auth="test")
+
+            assert response is None
+            assert engine._session is None
+            assert engine._permission_grant_store.list_session(session.id) == ()
+            assert await engine.session_store.load(session.id) is None
+        finally:
+            await engine.shutdown()
+
     @pytest.mark.asyncio
     async def test_permission_resolution_route_unblocks_matching_request(self) -> None:
         broker = PermissionApprovalBroker(timeout_seconds=1)

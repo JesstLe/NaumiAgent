@@ -83,7 +83,7 @@ async def get_session(session_id: str, request: Request, auth: str = AuthDep):
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session(session_id: str, request: Request, auth: str = AuthDep):
     engine = request.app.state.engine
-    deleted = await engine.session_store.delete(session_id)
+    deleted = await engine.delete_session(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
 
