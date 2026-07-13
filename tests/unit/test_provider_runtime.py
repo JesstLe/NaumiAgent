@@ -21,6 +21,7 @@ from naumi_agent.model.catalog import (
 from naumi_agent.model.provider_runtime import (
     NO_GLOBAL_API_KEY,
     ProviderRuntimeError,
+    build_anthropic_messages_transport,
     build_openai_chat_transport,
     build_openai_responses_transport,
     build_provider_transport,
@@ -125,14 +126,35 @@ def test_maps_openai_responses_model_and_shared_provider_kwargs() -> None:
     }
 
 
+def test_maps_anthropic_messages_model_and_shared_provider_kwargs() -> None:
+    target = _target(
+        api_format=APIFormat.ANTHROPIC_MESSAGES,
+        headers={"X-Tenant": "tenant-a"},
+    )
+
+    transport = build_anthropic_messages_transport(
+        target,
+        catalog_source="/tmp/catalog.json",
+    )
+
+    assert transport.model == "anthropic/vendor/model-v2"
+    assert transport.kwargs == {
+        "api_base": "https://provider.example/v1",
+        "api_key": NO_GLOBAL_API_KEY,
+        "extra_headers": {"X-Tenant": "tenant-a"},
+        "timeout": 12.345,
+    }
+
+
 @pytest.mark.parametrize(
     ("api_format", "expected_model"),
     [
         (APIFormat.OPENAI_CHAT, "openai/vendor/model-v2"),
         (APIFormat.OPENAI_RESPONSES, "openai/responses/vendor/model-v2"),
+        (APIFormat.ANTHROPIC_MESSAGES, "anthropic/vendor/model-v2"),
     ],
 )
-def test_dispatches_supported_openai_api_formats(
+def test_dispatches_supported_provider_api_formats(
     api_format: APIFormat,
     expected_model: str,
 ) -> None:
@@ -145,9 +167,9 @@ def test_dispatches_supported_openai_api_formats(
 
 
 def test_dispatcher_rejects_an_unimplemented_provider_format() -> None:
-    with pytest.raises(ProviderRuntimeError, match="anthropic_messages.*尚未实现"):
+    with pytest.raises(ProviderRuntimeError, match="google_genai.*尚未实现"):
         build_provider_transport(
-            _target(api_format=APIFormat.ANTHROPIC_MESSAGES),
+            _target(api_format=APIFormat.GOOGLE_GENAI),
             catalog_source="/tmp/catalog.json",
         )
 
@@ -187,6 +209,99 @@ def test_responses_builder_rejects_a_chat_target_with_an_accurate_error() -> Non
             _target(api_format=APIFormat.OPENAI_CHAT),
             catalog_source="/tmp/catalog.json",
         )
+
+
+def test_anthropic_builder_rejects_a_chat_target_with_an_accurate_error() -> None:
+    with pytest.raises(
+        ProviderRuntimeError,
+        match="不能由 anthropic_messages 适配器处理",
+    ):
+        build_anthropic_messages_transport(
+            _target(api_format=APIFormat.OPENAI_CHAT),
+            catalog_source="/tmp/catalog.json",
+        )
+
+
+def test_anthropic_standard_api_key_is_passed_to_litellm(monkeypatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_SELECTED_KEY", "anthropic-selected-secret")
+    target = _target(
+        api_format=APIFormat.ANTHROPIC_MESSAGES,
+        auth=_auth(
+            AuthType.API_KEY_HEADER,
+            SecretSource.ENV,
+            "ANTHROPIC_SELECTED_KEY",
+            header="X-API-Key",
+        ),
+    )
+
+    transport = build_anthropic_messages_transport(
+        target,
+        catalog_source="/tmp/catalog.json",
+    )
+
+    assert transport.kwargs["api_key"] == "anthropic-selected-secret"
+    assert transport.kwargs["extra_headers"] == {}
+    assert "anthropic-selected-secret" not in repr(transport)
+
+
+def test_anthropic_bearer_stays_in_authorization_header(monkeypatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_SELECTED_TOKEN", "anthropic-selected-token")
+    target = _target(
+        api_format=APIFormat.ANTHROPIC_MESSAGES,
+        auth=_auth(
+            AuthType.BEARER,
+            SecretSource.ENV,
+            "ANTHROPIC_SELECTED_TOKEN",
+        ),
+    )
+
+    transport = build_anthropic_messages_transport(
+        target,
+        catalog_source="/tmp/catalog.json",
+    )
+
+    assert transport.kwargs["api_key"] == NO_GLOBAL_API_KEY
+    assert transport.kwargs["extra_headers"] == {
+        "Authorization": "Bearer anthropic-selected-token"
+    }
+
+
+def test_anthropic_none_auth_does_not_read_global_anthropic_key(monkeypatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "must-not-be-used")
+
+    transport = build_anthropic_messages_transport(
+        _target(
+            api_format=APIFormat.ANTHROPIC_MESSAGES,
+            auth=_auth(AuthType.NONE, None, None),
+        ),
+        catalog_source="/tmp/catalog.json",
+    )
+
+    assert transport.kwargs["api_key"] == NO_GLOBAL_API_KEY
+    assert "must-not-be-used" not in repr(transport)
+
+
+def test_anthropic_custom_api_key_header_is_preserved(monkeypatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_CUSTOM_KEY", "anthropic-custom-secret")
+    target = _target(
+        api_format=APIFormat.ANTHROPIC_MESSAGES,
+        auth=_auth(
+            AuthType.API_KEY_HEADER,
+            SecretSource.ENV,
+            "ANTHROPIC_CUSTOM_KEY",
+            header="X-Provider-Key",
+        ),
+    )
+
+    transport = build_anthropic_messages_transport(
+        target,
+        catalog_source="/tmp/catalog.json",
+    )
+
+    assert transport.kwargs["api_key"] == NO_GLOBAL_API_KEY
+    assert transport.kwargs["extra_headers"] == {
+        "X-Provider-Key": "anthropic-custom-secret"
+    }
 
 
 def test_rejects_missing_base_url() -> None:

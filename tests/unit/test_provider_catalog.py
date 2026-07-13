@@ -135,6 +135,31 @@ def test_opencode_environment_reference_is_normalized() -> None:
     assert provider.auth.secret_ref == "PROXY_API_KEY"
 
 
+def test_opencode_anthropic_api_key_uses_x_api_key_auth() -> None:
+    payload = {
+        "provider": {
+            "anthropic-proxy": {
+                "npm": "@ai-sdk/anthropic",
+                "options": {
+                    "apiKey": "{env:ANTHROPIC_PROXY_KEY}",
+                    "baseURL": "https://anthropic-proxy.example",
+                },
+                "models": {"claude": {}},
+            }
+        }
+    }
+
+    provider = parse_provider_catalog_json(json.dumps(payload)).providers[
+        "anthropic-proxy"
+    ]
+
+    assert provider.api_format is APIFormat.ANTHROPIC_MESSAGES
+    assert provider.auth.type is AuthType.API_KEY_HEADER
+    assert provider.auth.header == "X-API-Key"
+    assert provider.auth.secret_source is SecretSource.ENV
+    assert provider.auth.secret_ref == "ANTHROPIC_PROXY_KEY"
+
+
 @pytest.mark.parametrize("field", ["apiKey", "api_key"])
 def test_inline_api_keys_are_rejected_without_echoing_secret(field: str) -> None:
     secret = "do-not-echo-this-secret"
