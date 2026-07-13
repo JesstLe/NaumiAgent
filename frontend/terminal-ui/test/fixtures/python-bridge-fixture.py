@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.orchestrator.engine import AgentResult, AgentRuntimeMode, AgentUsage
 from naumi_agent.safety.permissions import PermissionMode
 from naumi_agent.tasks.models import Task, TaskStatus
@@ -32,6 +33,74 @@ class FakeTaskStore:
         ]
 
 
+class FakeRuntimeInspector:
+    async def snapshot(self) -> RuntimeInspectorSnapshot:
+        return RuntimeInspectorSnapshot.from_dict(
+            {
+                "schema_version": 1,
+                "session_id": "session-python",
+                "revision": 1,
+                "generated_at": "2026-07-13T00:00:00+00:00",
+                "active_run_id": "",
+                "plan": {
+                    "state": "ready",
+                    "items": [
+                        {
+                            "id": "1",
+                            "subject": "同步 Python Bridge Inspector",
+                            "status": "in_progress",
+                            "active_form": "正在同步 Python Bridge Inspector",
+                            "owner": "main",
+                            "blocked_by": [],
+                        }
+                    ],
+                    "next_actions": [],
+                    "warnings": [],
+                },
+                "tools": {
+                    "state": "empty",
+                    "items": [],
+                    "approvals": [],
+                    "warnings": [],
+                },
+                "context": {
+                    "state": "ready",
+                    "workspace_root": str(Path.cwd()),
+                    "branch": "fixture",
+                    "commit": "",
+                    "git_available": False,
+                    "git_dirty": False,
+                    "model": "python-fixture-capable",
+                    "runtime_mode": "default",
+                    "permission_mode": "moderate",
+                    "context_used": 21,
+                    "context_window": 256000,
+                    "context_percentage": 0.01,
+                    "budget_used_usd": 0.02,
+                    "budget_max_usd": 5.0,
+                    "budget_percentage": 0.4,
+                    "input_tokens": 21,
+                    "output_tokens": 8,
+                    "turns": 1,
+                    "warnings": [],
+                },
+                "changes": {
+                    "state": "empty",
+                    "items": [],
+                    "git_state": {},
+                    "warnings": [],
+                },
+                "tests": {
+                    "state": "empty",
+                    "validations": [],
+                    "unverified": [],
+                    "next_actions": [],
+                    "warnings": [],
+                },
+            }
+        )
+
+
 class FakeEngine:
     def __init__(self) -> None:
         self.runtime_mode = AgentRuntimeMode.DEFAULT
@@ -40,8 +109,18 @@ class FakeEngine:
         self.usage = AgentUsage(total_input_tokens=21, total_output_tokens=8, turns=1)
         self.router = FakeRouter()
         self.task_store = FakeTaskStore()
+        self.runtime_inspector = FakeRuntimeInspector()
         self.permission_confirmer = None
         self._session = None
+
+    async def get_or_create_session(self) -> Any:
+        if self._session is None:
+            self._session = SimpleNamespace(
+                id="session-python",
+                title="Python Bridge",
+                messages=[],
+            )
+        return self._session
 
     def set_permission_confirmer(self, confirmer: Any) -> None:
         self.permission_confirmer = confirmer
