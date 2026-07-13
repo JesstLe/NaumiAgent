@@ -18,3 +18,4 @@ chroma/
 .coverage
 .claude/.naumi/
 .naumi/terminal-ui-state.json
+.naumi/shell-output/

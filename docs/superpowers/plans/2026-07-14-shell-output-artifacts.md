@@ -4,7 +4,7 @@
 
 **Goal:** Preserve complete foreground Shell output without flooding model context.
 
-**Architecture:** A managed `ShellOutputStore` streams merged subprocess output to a private runtime log. `BashRunTool` returns full small output or a bounded head/tail summary plus a recoverable path for large output. Engine injects the production runtime directory.
+**Architecture:** A managed `ShellOutputStore` streams merged subprocess output to a private, Git-ignored workspace log. `BashRunTool` returns full small output or a bounded head/tail summary plus a path recoverable through existing file tools. Engine injects the production output directory.
 
 **Tech Stack:** Python 3.14, asyncio subprocesses, pathlib, pytest, Ruff.
 
@@ -44,7 +44,7 @@
 - `BashRunTool(..., output_dir: str | Path | None = None)` consumes `ShellOutputStore`.
 - `bash_run` keeps its public tool name and command/cwd/timeout arguments.
 
-- [ ] Add failing tests for small output compatibility, large output path and tail recovery, nonzero exit with output, timeout output preservation, cwd escape, invalid timeout, and log allocation failure.
+- [ ] Add failing tests for small output compatibility, large output path and tail recovery, nonzero exit with output, timeout output preservation, permission-approved external cwd, invalid timeout, and log allocation failure.
 - [ ] Run `NAUMI_MODELS__API_KEY=unit-test-placeholder .venv/bin/python -m pytest tests/unit/test_tool_registry.py -k BashRunTool -q` and confirm failures.
 - [ ] Replace PIPE/`communicate()` capture with merged streaming to the allocated log; preserve existing process-tree cleanup and background-syntax guidance.
 - [ ] Format truthful Chinese status and recovery metadata for every terminal outcome.
@@ -59,7 +59,7 @@
 
 **Interfaces:**
 - `create_builtin_tools(workspace_root, *, shell_output_dir=None)` forwards the directory.
-- Engine passes `_runtime_data_dir / "shell-output"`.
+- Engine passes `workspace_root / ".naumi" / "shell-output"`.
 
 - [ ] Add a focused Engine registration assertion that `bash_run` uses the configured runtime output directory.
 - [ ] Implement the injection without changing other built-in tool construction.
@@ -68,4 +68,3 @@
 - [ ] Execute a real command that emits more than 50,000 bytes with a unique tail marker; verify the summary, stored byte count, tail marker, and recoverable file.
 - [ ] Self-review security, cleanup, memory bounds, timeout behavior, and Chinese UX.
 - [ ] Commit with `git commit -m "feat: preserve complete shell output"`.
-
