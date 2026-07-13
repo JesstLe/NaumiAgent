@@ -59,6 +59,18 @@ test("event sender writes versioned JSONL records", () => {
   });
 });
 
+test("event sender accepts a caller supplied request id", () => {
+  const chunks = [];
+  const send = createEventSender({ write: (chunk) => chunks.push(chunk) });
+
+  assert.equal(
+    send("submit", { text: "修复测试" }, { id: "submit-local-1" }),
+    "submit-local-1",
+  );
+  assert.equal(JSON.parse(chunks[0]).id, "submit-local-1");
+  assert.equal(send("ping", {}), "ui-1");
+});
+
 test("protocol contract drives client and server event validation", () => {
   assert.equal(PROTOCOL_VERSION, PROTOCOL_CONTRACT.version);
   assert(PROTOCOL_CONTRACT.client_events.includes("submit"));
