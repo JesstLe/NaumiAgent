@@ -38,7 +38,7 @@ NaumiAgent 的默认终端入口采用聚焦对话的全屏 Terminal UI。主界
 - 缺少多行输入、历史搜索、命令补全和草稿恢复。
 - 执行结束缺少统一的“完成收据”，用户无法一次确认改动、测试、风险和下一步。
 - 任务面板仍是内容卡片，不是正式 Inspector 信息架构。
-- `/agents` 与 `/workbench` 缺少独立页面状态与导航协议。
+- `/agents` 已具备权威状态、精确停止和双 TUI 页面；`/workbench` 仍缺少独立页面状态与导航协议。
 - 旧 CLI、Textual TUI 和新 Terminal UI 的能力边界仍重叠。
 
 ## 4. 目标信息架构
@@ -104,11 +104,11 @@ flowchart LR
 3. **M3 执行时间线与权限**：统一事件卡状态机和安全交互。
 4. **M4 完成收据（0.1.212 已完成）**：建立任务完成的用户闭环；后续仅扩展 Inspector 详情与 next action 交互。
 5. **M5 Inspector（0.1.213 已完成）**：后端权威五标签快照、Bridge revision 同步、三档响应式新 UI 与 Textual 同源页已通过真实 Git/TaskStore/pytest/SQLite 端到端验收。
-6. **M6 独立命令页**：实现 `/tasks`、`/agents`、`/workbench`。
+6. **M6 独立命令页**：`/tasks` 与 `/agents` 已完成；继续独立实现 `/workbench`。`/agents` 后续能力扩展不与 `/workbench` 混交。
 7. **M7 会话持久化与恢复**：覆盖切页、退出、崩溃和协议重连。
 8. **M8 兼容迁移与发布门禁**：收敛旧界面、补齐端到端证据并发布。
 
-M1-M5 已形成可正式使用的对话、执行、完成与运行时检查闭环。M6-M8 在不改变 Bridge 主干的前提下逐步增强。
+M1-M5 与 M6 `/agents` 已形成可正式使用的对话、执行、完成、运行时检查和 Agent 控制闭环。其余 M6-M8 能力在不改变 Bridge 主干的前提下逐步增强。
 
 ## 8. 非目标
 

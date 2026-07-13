@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.214] - 2026-07-13
+
+### Added
+- **Authoritative Agent Control Center** — 后端记录真实 Agent 执行句柄、阶段、工具、心跳、用量和有界历史，并从执行管理器、消息总线与黑板生成严格、会话隔离、单调 revision 的权威快照；JSONL Bridge 支持增量同步、断序恢复和精确停止结果。
+- **Terminal UI / Textual Agent Parity** — 新 Terminal UI `/agents` 与 Textual `/agents`/`Ctrl+G` 共用 Agent、执行、协作三标签语义、两步停止确认、权限优先级和错误保留；UI state v5 只持久化表现状态，重启后重新读取后端快照。
+
+### Tests
+- **Real Agent Control E2E** — 在真实 `AgentEngine` 和 `SubAgentManager` 上并发运行两个本地确定性 Agent，经 Python Bridge 与 Node reducer/renderer 停止指定执行，确认兄弟执行完成，再用同一最终快照验证 Textual formatter；另有真实 Python Bridge 进程键盘测试。
+
+### Known Gaps
+- Agent 创建/重配、跨进程远程 Agent、持久化执行历史、Workbench Agent 映射和 `/workbench` 页面仍需独立实现。
+
 ## [0.1.213] - 2026-07-13
 
 ### Added
