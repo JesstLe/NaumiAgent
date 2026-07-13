@@ -123,6 +123,7 @@ class TestAppConfig:
         config = AppConfig.from_yaml(example_path)
         assert config.api.host == "127.0.0.1"
         assert config.models.provider == "kimi"
+        assert config.models.temperature == 1.0
 
     def test_api_port_from_example_yaml(self) -> None:
         example_path = Path(__file__).resolve().parents[2] / "config.yaml.example"

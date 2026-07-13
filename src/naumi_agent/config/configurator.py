@@ -59,6 +59,11 @@ PROVIDER_PROFILES: dict[str, ProviderProfile] = {
         temperature=1.0,
     ),
 }
+_PROVIDER_HOSTS = {
+    "kimi": "api.kimi.com",
+    "openai": "api.openai.com",
+    "anthropic": "api.anthropic.com",
+}
 
 
 def configure_project(
@@ -200,30 +205,67 @@ def _validate_api_base(value: str) -> None:
 
 
 def _validate_known_provider(provider: str, profile: ProviderProfile) -> None:
-    expected_hosts = {
-        "kimi": "api.kimi.com",
-        "openai": "api.openai.com",
-        "anthropic": "api.anthropic.com",
-    }
     hostname = (urlparse(profile.api_base).hostname or "").lower()
-    if hostname != expected_hosts[provider]:
+    if hostname != _PROVIDER_HOSTS[provider]:
         raise ConfigurationError(f"API Base 与 {provider} provider 不匹配；代理地址请使用 custom。")
 
-    def compatible(model: str) -> bool:
-        normalized = model.lower()
-        if provider == "kimi":
-            return normalized.startswith("openai/") and any(
-                name in normalized for name in ("kimi", "moonshot")
-            )
-        if provider == "openai":
-            return normalized.startswith(("gpt-", "o1", "o3", "o4", "openai/"))
-        return normalized.startswith(("claude-", "anthropic/"))
-
     if not all(
-        compatible(model)
+        _model_matches_provider(provider, model)
         for model in (profile.default_model, profile.fast_model, profile.reasoning_model)
     ):
         raise ConfigurationError(f"模型与 {provider} provider 不匹配；代理模型请使用 custom。")
+
+
+def validate_provider_configuration(
+    *,
+    provider: str | None,
+    default_model: str,
+    fast_model: str,
+    reasoning_model: str,
+    api_base: str | None,
+    temperature: float,
+) -> tuple[str | None, str | None]:
+    """Return the resolved provider and a safe inconsistency description."""
+    resolved = provider.strip().lower() if provider else _infer_provider(default_model, api_base)
+    if resolved == "custom":
+        return resolved, None
+    if resolved not in PROVIDER_PROFILES:
+        return resolved, "无法识别 provider，请运行 `naumi configure` 明确选择。"
+    if api_base:
+        hostname = (urlparse(api_base).hostname or "").lower()
+        if hostname != _PROVIDER_HOSTS[resolved]:
+            return resolved, f"API Base 与 {resolved} provider 不匹配。"
+    if not all(
+        _model_matches_provider(resolved, model)
+        for model in (default_model, fast_model, reasoning_model)
+    ):
+        return resolved, f"模型与 {resolved} provider 不匹配。"
+    if resolved == "kimi" and abs(temperature - 1.0) > 1e-9:
+        return resolved, "Kimi Coding API 的 temperature 必须为 1.0。"
+    return resolved, None
+
+
+def _infer_provider(default_model: str, api_base: str | None) -> str | None:
+    if api_base:
+        hostname = (urlparse(api_base).hostname or "").lower()
+        for provider, expected in _PROVIDER_HOSTS.items():
+            if hostname == expected:
+                return provider
+    for provider in PROVIDER_PROFILES:
+        if _model_matches_provider(provider, default_model):
+            return provider
+    return None
+
+
+def _model_matches_provider(provider: str, model: str) -> bool:
+    normalized = model.lower()
+    if provider == "kimi":
+        return normalized.startswith("openai/") and any(
+            name in normalized for name in ("kimi", "moonshot")
+        )
+    if provider == "openai":
+        return normalized.startswith(("gpt-", "o1", "o3", "o4", "openai/"))
+    return normalized.startswith(("claude-", "anthropic/"))
 
 
 def _read_config(path: Path) -> dict[str, object]:

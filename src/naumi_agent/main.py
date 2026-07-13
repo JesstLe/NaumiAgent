@@ -426,6 +426,30 @@ def configure_command(
     console.print(f"  配置文件: {result.config_path}")
 
 
+@app.command("doctor")
+def doctor_command(
+    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    live: bool = typer.Option(
+        False,
+        "--live",
+        help="执行一次最小真实模型请求，会产生少量 token 用量",
+    ),
+) -> None:
+    """诊断本机环境，并可显式验证模型连接."""
+    resolved = _resolve_config_path(config)
+    app_config = AppConfig.from_yaml(resolved)
+    report = asyncio.run(
+        run_doctor(
+            app_config,
+            workspace_root=app_config.resolve_workspace_root(),
+            live=live,
+        )
+    )
+    console.print(Markdown(render_doctor_report(report)))
+    if report.status == "error":
+        raise typer.Exit(1)
+
+
 @app.command()
 def chat(
     config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
