@@ -1015,8 +1015,21 @@ class AgentEngine:
         return await self.session_store.list_sessions(page=page, page_size=page_size, query=query)
 
     async def delete_session(self, session_id: str) -> bool:
-        """删除指定会话."""
-        return await self.session_store.delete(session_id)
+        """Delete one session and invalidate its scoped runtime state."""
+        deleted = await self.session_store.delete(session_id)
+        if not deleted:
+            return False
+
+        self._permission_grant_store.revoke_session(session_id)
+        if self._session is not None and self._session.id == session_id:
+            self._messages.clear()
+            self._full_history.clear()
+            self._usage = AgentUsage()
+            self._budget_tracker.reset()
+            self._session = None
+            self.task_store.set_session("")
+            self._permission_checker.reset_counts()
+        return True
 
     async def archive_session(self, session_id: str) -> bool:
         """归档指定会话."""

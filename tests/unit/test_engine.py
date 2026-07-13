@@ -764,6 +764,133 @@ class TestSessionLoading:
 
         assert engine._permission_grant_store.list_session(session.id) == ()
 
+    @pytest.mark.asyncio
+    async def test_delete_active_session_revokes_its_grants_and_invalidates_runtime_state(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        try:
+            active = await engine.get_or_create_session()
+            survivor = await engine.session_store.create_session(title="survivor")
+            engine._permission_grant_store.create(active.id, "shell", "active-grant")
+            survivor_grant = engine._permission_grant_store.create(
+                survivor.id,
+                "shell",
+                "survivor-grant",
+            )
+            engine._messages.append({"role": "user", "content": "active context"})
+            engine._full_history.append({"role": "user", "content": "active history"})
+            engine._usage.total_input_tokens = 9
+            engine._permission_checker.check("bash_run", {"command": "printf counted"})
+            engine.task_store.set_session(active.id)
+
+            assert await engine.delete_session(active.id) is True
+
+            assert await engine.session_store.load(active.id) is None
+            assert engine._permission_grant_store.list_session(active.id) == ()
+            assert engine._permission_grant_store.list_session(survivor.id) == (survivor_grant,)
+            assert engine._session is None
+            assert engine._messages == []
+            assert engine._full_history == []
+            assert engine._usage.total_input_tokens == 0
+            assert engine.task_store.session_id == ""
+            assert engine._permission_checker.get_call_counts() == {}
+
+            confirmations: list[dict[str, object]] = []
+
+            async def confirm(payload: dict[str, object]) -> str:
+                confirmations.append(payload)
+                return "deny"
+
+            engine.set_permission_confirmer(confirm)
+            fresh = await engine.get_or_create_session()
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="after-deletion",
+                    name="bash_run",
+                    arguments='{"command": "printf should_not_run"}',
+                )
+            )
+
+            assert result.status == "error"
+            assert len(confirmations) == 1
+            assert confirmations[0]["session_id"] == fresh.id
+            assert engine.list_permission_grants() == ()
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_delete_non_active_or_missing_session_preserves_current_runtime_state(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        try:
+            active = await engine.get_or_create_session()
+            other = await engine.session_store.create_session(title="other")
+            active_grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "active-grant",
+            )
+            engine._permission_grant_store.create(other.id, "shell", "other-grant")
+            engine._messages.append({"role": "user", "content": "keep context"})
+            engine._full_history.append({"role": "user", "content": "keep history"})
+            engine.task_store.set_session(active.id)
+
+            assert await engine.delete_session(other.id) is True
+            assert await engine.delete_session("missing-session") is False
+
+            assert engine._session is not None
+            assert engine._session.id == active.id
+            assert engine._messages == [{"role": "user", "content": "keep context"}]
+            assert engine._full_history == [{"role": "user", "content": "keep history"}]
+            assert engine.task_store.session_id == active.id
+            assert engine._permission_grant_store.list_session(active.id) == (active_grant,)
+            assert engine._permission_grant_store.list_session(other.id) == ()
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_delete_active_session_makes_pending_confirmation_stale(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        marker = tmp_path / "deleted-session-tool-ran"
+        try:
+            active = await engine.get_or_create_session()
+
+            async def confirm(payload: dict[str, object]) -> str:
+                assert payload["session_id"] == active.id
+                assert await engine.delete_session(active.id) is True
+                return "allow_once"
+
+            engine.set_permission_confirmer(confirm)
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="delete-during-confirmation",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "error"
+            assert "会话已切换" in result.content
+            assert not marker.exists()
+            assert engine._session is None
+        finally:
+            await engine.shutdown()
+
 
 class TestToolCallParsing:
     def test_valid_tool_call(self, engine: AgentEngine) -> None:
