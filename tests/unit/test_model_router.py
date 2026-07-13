@@ -4,11 +4,37 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 
 from naumi_agent.config.settings import ModelConfig, ModelMeta
 from naumi_agent.model.catalog import parse_provider_catalog_json
+from naumi_agent.model.discovery import ModelDiscoveryService
 from naumi_agent.model.router import ModelRouter, ModelTier
+
+
+def _discovery_catalog(*, static: bool = False):
+    models = {"static": {"upstreamId": "static-upstream"}} if static else {}
+    return parse_provider_catalog_json(
+        json.dumps(
+            {
+                "providers": {
+                    "vendor": {
+                        "apiFormat": "openai_chat",
+                        "baseURL": "https://discovery.vendor.example/v1",
+                        "auth": {"type": "none"},
+                        "models": models,
+                        "discovery": {
+                            "enabled": True,
+                            "path": "/models",
+                            "ttlSeconds": 60,
+                        },
+                    }
+                }
+            }
+        ),
+        source="/tmp/providers.json",
+    )
 
 
 @pytest.fixture
@@ -140,6 +166,68 @@ class TestResolveTier:
         assert identity.provider == "custom"
         assert identity.api_format == ""
         assert identity.upstream_model == "model-a-v2"
+
+    def test_discovery_only_runtime_identity_is_pending_without_network(self) -> None:
+        catalog = _discovery_catalog()
+        requests = 0
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal requests
+            requests += 1
+            return httpx.Response(200, json={"data": [{"id": "org/remote"}]})
+
+        discovery = ModelDiscoveryService(
+            catalog,
+            transport=httpx.MockTransport(handler),
+        )
+        router = ModelRouter(
+            ModelConfig(provider="vendor", default_model="org/remote"),
+            catalog=catalog,
+            discovery_service=discovery,
+        )
+
+        identity = router.get_runtime_identity("org/remote")
+
+        assert identity.requested_model == "org/remote"
+        assert identity.canonical_model == "vendor/org/remote"
+        assert identity.upstream_model == "org/remote"
+        assert identity.provider == "vendor"
+        assert identity.api_format == "openai_chat"
+        assert identity.source == "catalog_pending"
+        assert requests == 0
+
+
+class TestModelDiscovery:
+    async def test_listing_updates_dynamic_router_overlay(self) -> None:
+        catalog = _discovery_catalog(static=True)
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={"data": [{"id": "remote-b"}, {"id": "remote-a"}]},
+            )
+
+        discovery = ModelDiscoveryService(
+            catalog,
+            transport=httpx.MockTransport(handler),
+        )
+        router = ModelRouter(
+            ModelConfig(provider="vendor", default_model="static"),
+            catalog=catalog,
+            discovery_service=discovery,
+        )
+
+        listings = await router.list_available_models("vendor")
+        target = router.resolve_target("remote-a")
+
+        assert len(listings) == 1
+        assert [model.id for model in listings[0].models] == [
+            "static",
+            "remote-a",
+            "remote-b",
+        ]
+        assert target.canonical_model == "vendor/remote-a"
+        assert target.upstream_model == "remote-a"
 
 
 class TestModelInfo:

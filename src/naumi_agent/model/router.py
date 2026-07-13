@@ -4,15 +4,25 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any
 
 import litellm
 
 from naumi_agent.config.settings import ModelConfig, ModelMeta
-from naumi_agent.model.catalog import APIFormat, ProviderCatalog
+from naumi_agent.model.catalog import (
+    APIFormat,
+    ProviderCatalog,
+    ProviderModelSpec,
+    ProviderSpec,
+)
+from naumi_agent.model.discovery import (
+    ModelDiscoveryService,
+    ProviderModelListing,
+)
 from naumi_agent.model.provider_runtime import (
     ProviderRuntimeError,
     build_provider_transport,
@@ -108,10 +118,21 @@ class ModelRouter:
     """统一模型调用入口."""
 
     def __init__(
-        self, config: ModelConfig, *, catalog: ProviderCatalog | None = None
+        self,
+        config: ModelConfig,
+        *,
+        catalog: ProviderCatalog | None = None,
+        discovery_service: ModelDiscoveryService | None = None,
     ) -> None:
         self._config = config
         self._catalog = catalog
+        if discovery_service is not None:
+            self._discovery = discovery_service
+        elif catalog is not None:
+            self._discovery = ModelDiscoveryService(catalog)
+        else:
+            self._discovery = None
+        self._dynamic_models: dict[str, Mapping[str, ProviderModelSpec]] = {}
         self._tier_map: dict[ModelTier, str] = {
             ModelTier.FAST: config.fast_model,
             ModelTier.CAPABLE: config.default_model,
@@ -223,11 +244,48 @@ class ModelRouter:
             model,
             provider=self._config.provider,
             catalog=self._catalog,
+            dynamic_models=self._dynamic_models,
         )
+
+    async def list_available_models(
+        self,
+        provider_id: str | None = None,
+        *,
+        refresh: bool = False,
+    ) -> tuple[ProviderModelListing, ...]:
+        """Discover visible models and atomically refresh the runtime overlay."""
+        if self._discovery is None:
+            return ()
+        if provider_id is None:
+            listings = await self._discovery.list_all(refresh=refresh)
+        else:
+            listing = await self._discovery.list_provider(
+                provider_id.strip().lower(),
+                refresh=refresh,
+            )
+            listings = (listing,)
+        for listing in listings:
+            dynamic = {
+                model.id: model.to_provider_model_spec()
+                for model in listing.models
+                if model.source == "discovered"
+            }
+            self._dynamic_models[listing.provider_id] = MappingProxyType(dynamic)
+        return listings
 
     def get_runtime_identity(self, model: str) -> ModelRuntimeIdentity:
         """Return display-safe routing facts without resolving credentials or I/O."""
-        target = self.resolve_target(model)
+        try:
+            target = self.resolve_target(model)
+        except ModelResolutionError:
+            pending = self._pending_runtime_identity(model)
+            if pending is None:
+                raise
+            return pending
+        if target.source == "legacy":
+            pending = self._pending_runtime_identity(model)
+            if pending is not None:
+                return pending
         provider = target.provider
         if provider is None:
             provider_id = self._config.provider or ""
@@ -244,11 +302,99 @@ class ModelRouter:
             source=target.source,
         )
 
+    def _pending_runtime_identity(self, model: str) -> ModelRuntimeIdentity | None:
+        candidate = self._discovery_candidate(model)
+        if candidate is None:
+            return None
+        provider, model_id = candidate
+        requested = model.strip()
+        return ModelRuntimeIdentity(
+            requested_model=requested,
+            canonical_model=f"{provider.id}/{model_id}",
+            upstream_model=model_id,
+            provider=provider.id,
+            api_format=provider.api_format.value if provider.api_format else "",
+            source="catalog_pending",
+        )
+
+    def _discovery_candidate(self, model: str) -> tuple[ProviderSpec, str] | None:
+        if self._catalog is None:
+            return None
+        requested = model.strip()
+        if not requested:
+            return None
+        prefix, separator, alias = requested.partition("/")
+        selected = self._catalog.providers.get(prefix.lower()) if separator else None
+        if selected is not None:
+            if self._can_discover_model(selected, alias):
+                return selected, alias
+            return None
+        active = self._catalog.providers.get(
+            (self._config.provider or "").strip().lower()
+        )
+        if active is None or not self._can_discover_model(active, requested):
+            return None
+        return active, requested
+
+    def _can_discover_model(self, provider: ProviderSpec, model_id: str) -> bool:
+        if not provider.discovery.enabled or not model_id:
+            return False
+        if model_id in provider.models:
+            return False
+        if model_id in self._dynamic_models.get(provider.id, {}):
+            return False
+        if model_id in provider.blacklist:
+            return False
+        return not provider.whitelist or model_id in provider.whitelist
+
     def _resolve_transport(self, model: str) -> tuple[str, dict[str, Any]]:
         """Resolve one public model name into explicit LiteLLM transport args."""
         target = self.resolve_target(model)
+        return self._transport_for_target(target, requested_model=model)
+
+    async def _resolve_transport_async(self, model: str) -> tuple[str, dict[str, Any]]:
+        """Resolve transport, proving unknown catalog models through discovery."""
+        candidate = self._discovery_candidate(model)
+        try:
+            target = self.resolve_target(model)
+        except ModelResolutionError:
+            if candidate is None:
+                raise
+            target = await self._discover_target(model, candidate=candidate)
+        else:
+            if target.source == "legacy" and candidate is not None:
+                target = await self._discover_target(model, candidate=candidate)
+        return self._transport_for_target(target, requested_model=model)
+
+    async def _discover_target(
+        self,
+        model: str,
+        *,
+        candidate: tuple[ProviderSpec, str],
+    ) -> ResolvedModelTarget:
+        provider, model_id = candidate
+        if self._discovery is None:
+            raise ModelResolutionError(
+                f'provider "{provider.id}" 无法执行模型发现。'
+            )
+        listings = await self.list_available_models(provider.id)
+        listing = listings[0]
+        try:
+            return self.resolve_target(model)
+        except ModelResolutionError:
+            detail = f"（{listing.warning}）" if listing.warning else ""
+            raise ModelResolutionError(
+                f'provider "{provider.id}" 未发现模型 "{model_id}"。{detail}'
+            ) from None
+
+    def _transport_for_target(
+        self,
+        target: ResolvedModelTarget,
+        *,
+        requested_model: str,
+    ) -> tuple[str, dict[str, Any]]:
         if target.source == "legacy":
-            return model, self._base_kwargs()
+            return requested_model, self._base_kwargs()
         if self._catalog is None:
             raise ProviderRuntimeError("catalog 模型缺少 catalog 来源。")
 
@@ -470,7 +616,9 @@ class ModelRouter:
     ) -> ModelResponse:
         """非流式调用."""
         resolved = model or self.resolve_model(tier)
-        transport_model, transport_kwargs = self._resolve_transport(resolved)
+        transport_model, transport_kwargs = await self._resolve_transport_async(
+            resolved
+        )
         preserve_reasoning = self._should_preserve_reasoning_content(
             resolved, thinking,
         )
@@ -525,7 +673,9 @@ class ModelRouter:
     ) -> AsyncIterator[StreamChunk]:
         """流式调用，yield StreamChunk."""
         resolved = model or self.resolve_model(tier)
-        transport_model, transport_kwargs = self._resolve_transport(resolved)
+        transport_model, transport_kwargs = await self._resolve_transport_async(
+            resolved
+        )
         self._ensure_native_responses_streaming(resolved)
         preserve_reasoning = self._should_preserve_reasoning_content(
             resolved, thinking,
