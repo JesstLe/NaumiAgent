@@ -25,10 +25,10 @@ attachJsonlLineReader(process.stdin, (line) => {
 
   if (record.type === "submit") {
     submitCount += 1;
-    emit("run/started", {});
-    emit("user/message", { content: payload.text ?? "" });
+    emit("run/started", {}, record.id);
+    emit("user/message", { content: payload.text ?? "" }, record.id);
     emit("ui/message", { type: "assistant_stream", phase: "token", content: `submit#${submitCount}:${payload.text ?? ""}` });
-    emit("run/completed", {});
+    emit("run/completed", {}, record.id);
     return;
   }
 
@@ -38,6 +38,12 @@ attachJsonlLineReader(process.stdin, (line) => {
   }
 });
 
-function emit(type, payload) {
-  process.stdout.write(`${JSON.stringify({ type, version: 1, seq: sequence++, payload })}\n`);
+function emit(type, payload, requestId = "") {
+  process.stdout.write(`${JSON.stringify({
+    type,
+    version: 1,
+    seq: sequence++,
+    ...(requestId ? { request_id: requestId } : {}),
+    payload,
+  })}\n`);
 }

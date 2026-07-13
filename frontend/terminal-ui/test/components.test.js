@@ -49,6 +49,33 @@ test("semantic message component delegates tool cards and markdown text", () => 
   assert(assistantLines.some((item) => item.includes(`${ANSI.cyan}return${ANSI.reset}`)));
 });
 
+test("user delivery card is right indented and exposes failure recovery", () => {
+  const rendered = renderComponent(Message({
+    message: {
+      kind: "user",
+      content: "请修复测试",
+      deliveryStatus: "failed",
+      errorMessage: "Bridge 已断开",
+    },
+  }), { width: 80 }).map(stripAnsi);
+
+  assert(rendered.some((line) => line.startsWith(" ".repeat(20)) && line.includes("你  请修复测试")));
+  assert.match(rendered.join("\n"), /发送失败.*\/retry/);
+  assert(rendered.every((line) => visibleWidth(line) <= 80));
+});
+
+test("queued and uncertain user deliveries have distinct text status", () => {
+  const queued = renderComponent(Message({
+    message: { kind: "user", content: "第一条", deliveryStatus: "queued" },
+  }), { width: 60 }).map(stripAnsi).join("\n");
+  const uncertain = renderComponent(Message({
+    message: { kind: "user", content: "第二条", deliveryStatus: "uncertain" },
+  }), { width: 60 }).map(stripAnsi).join("\n");
+
+  assert.match(queued, /发送中/);
+  assert.match(uncertain, /发送状态待确认.*可能重复发送/);
+});
+
 test("footer components can render independently or as a full footer", () => {
   const state = createInitialState();
   state.permission = { requestId: "p1", payload: { tool_name: "bash_run", reason: "需要确认" } };
