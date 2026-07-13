@@ -29,7 +29,9 @@ from naumi_agent.orchestrator.subagent_manager import SubTask
 from naumi_agent.safety.budget import TokenBudget
 from naumi_agent.safety.permissions import (
     PermissionChecker,
+    PermissionDecision,
     PermissionMode,
+    PermissionOutcome,
     PermissionReasonCode,
 )
 from naumi_agent.tasks.models import TaskStatus
@@ -1360,6 +1362,246 @@ class TestSessionLoading:
             assert engine._session is None
         finally:
             await engine.shutdown()
+
+
+class TestSessionAuthorizationGeneration:
+    @pytest.mark.asyncio
+    async def test_allow_once_confirmation_does_not_revive_after_session_aba(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        marker = tmp_path / "allow-once-aba-ran"
+        try:
+            original = await engine.get_or_create_session()
+            replacement = await engine.session_store.create_session(title="replacement")
+
+            async def confirm(payload: dict[str, object]) -> str:
+                assert payload["session_id"] == original.id
+                assert await engine.load_session(replacement.id) is True
+                assert await engine.load_session(original.id) is True
+                return "allow_once"
+
+            engine.set_permission_confirmer(confirm)
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="allow-once-aba",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "error"
+            assert "会话已切换" in result.content
+            assert not marker.exists()
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_session_grant_does_not_revive_after_session_aba(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        marker = tmp_path / "grant-aba-ran"
+        try:
+            original = await engine.get_or_create_session()
+            replacement = await engine.session_store.create_session(title="replacement")
+
+            async def confirm(payload: dict[str, object]) -> str:
+                assert payload["session_id"] == original.id
+                assert await engine.load_session(replacement.id) is True
+                assert await engine.load_session(original.id) is True
+                return "grant_session"
+
+            engine.set_permission_confirmer(confirm)
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="grant-aba",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "error"
+            assert "会话已切换" in result.content
+            assert not marker.exists()
+            assert engine._permission_grant_store.list_session(original.id) == ()
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_serialized_concurrent_loads_keep_newer_transition_fence(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        first_entered = asyncio.Event()
+        first_release = asyncio.Event()
+        second_entered = asyncio.Event()
+        second_release = asyncio.Event()
+        first_load: asyncio.Task[bool] | None = None
+        second_load: asyncio.Task[bool] | None = None
+        try:
+            await engine.get_or_create_session()
+            intermediate = await engine.session_store.create_session(title="intermediate")
+            final = await engine.session_store.create_session(title="final")
+            real_load = engine.session_store.load
+
+            async def gated_load(session_id: str) -> Session | None:
+                if session_id == intermediate.id:
+                    first_entered.set()
+                    await first_release.wait()
+                elif session_id == final.id:
+                    second_entered.set()
+                    await second_release.wait()
+                return await real_load(session_id)
+
+            engine.session_store.load = gated_load  # type: ignore[method-assign]
+            first_load = asyncio.create_task(engine.load_session(intermediate.id))
+            await first_entered.wait()
+            second_load = asyncio.create_task(engine.load_session(final.id))
+            await asyncio.sleep(0)
+
+            first_release.set()
+            await second_entered.wait()
+            assert await first_load is True
+            assert engine._session is not None
+            assert engine._session.id == intermediate.id
+
+            intermediate_grant = engine._permission_grant_store.create(
+                intermediate.id,
+                "shell",
+                "intermediate-grant",
+            )
+            blocked = await engine._execute_tool(
+                ToolCall(
+                    id="blocked-while-newer-load-pending",
+                    name="bash_run",
+                    arguments='{"command": "printf must_not_run"}',
+                )
+            )
+            assert blocked.status == "error"
+            assert "会话正在切换" in blocked.content
+
+            second_release.set()
+            assert await second_load is True
+            assert engine._session is not None
+            assert engine._session.id == final.id
+            assert engine._permission_grant_store.list_session(intermediate.id) == ()
+            assert intermediate_grant.grant_id
+        finally:
+            first_release.set()
+            second_release.set()
+            for task in (first_load, second_load):
+                if task is not None and not task.done():
+                    await task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_cancelling_queued_load_does_not_clear_running_load_fence(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        running_load: asyncio.Task[bool] | None = None
+        queued_load: asyncio.Task[bool] | None = None
+        try:
+            active = await engine.get_or_create_session()
+            first_target = await engine.session_store.create_session(title="first")
+            second_target = await engine.session_store.create_session(title="second")
+            real_load = engine.session_store.load
+
+            async def gated_load(session_id: str) -> Session | None:
+                if session_id == first_target.id:
+                    entered.set()
+                    await release.wait()
+                return await real_load(session_id)
+
+            engine.session_store.load = gated_load  # type: ignore[method-assign]
+            running_load = asyncio.create_task(engine.load_session(first_target.id))
+            await entered.wait()
+            queued_load = asyncio.create_task(engine.load_session(second_target.id))
+            await asyncio.sleep(0)
+            queued_load.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await queued_load
+
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="blocked-after-queued-cancel",
+                    name="bash_run",
+                    arguments='{"command": "printf must_not_run"}',
+                )
+            )
+            assert result.status == "error"
+            assert "会话正在切换" in result.content
+            assert engine._session is active
+
+            release.set()
+            assert await running_load is True
+        finally:
+            release.set()
+            for task in (running_load, queued_load):
+                if task is not None and not task.done():
+                    await task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_engine_uses_permission_outcome_when_compatibility_booleans_disagree(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        await engine.get_or_create_session()
+        allow = PermissionDecision(
+            allowed=False,
+            requires_confirmation=True,
+            outcome=PermissionOutcome.ALLOW,
+        )
+        block = PermissionDecision(
+            allowed=True,
+            reason="outcome block",
+            requires_confirmation=False,
+            outcome=PermissionOutcome.BLOCK,
+        )
+        with patch.object(
+            engine._permission_checker,
+            "check",
+            side_effect=[allow, block],
+        ):
+            allowed_result = await engine._execute_tool(
+                ToolCall(
+                    id="outcome-allow",
+                    name="bash_run",
+                    arguments='{"command": "printf outcome_allow"}',
+                )
+            )
+            blocked_result = await engine._execute_tool(
+                ToolCall(
+                    id="outcome-block",
+                    name="bash_run",
+                    arguments='{"command": "printf outcome_block"}',
+                )
+            )
+
+        assert allowed_result.status == "success"
+        assert "outcome_allow" in allowed_result.content
+        assert blocked_result.status == "error"
+        assert "outcome block" in blocked_result.content
 
 
 class TestToolCallParsing:
