@@ -1,4 +1,5 @@
 import { looksLikeDiff } from "./ansi.js";
+import { getInputCursor, setInputText, truncateInputText } from "./input-buffer.js";
 import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
 import { clearRenderCache, createRenderCache } from "./render-cache.js";
 
@@ -145,6 +146,7 @@ export function createInitialState() {
     currentSessionId: "",
     input: "",
     inputCursor: null,
+    inputPreferredColumn: null,
     inputHistory: [],
     inputHistoryCursor: null,
     inputHistoryDraft: "",
@@ -805,14 +807,31 @@ export function createUiSnapshot(state) {
     folds: state.folds,
     foldCursor: state.foldCursor,
     scrollOffset: state.scrollOffset,
+    composer: {
+      text: truncateInputText(state.input),
+      cursor: getInputCursor(state),
+      preferredColumn: Number.isFinite(state.inputPreferredColumn)
+        ? Math.max(0, Number(state.inputPreferredColumn))
+        : null,
+    },
   };
 }
 
 export function applyUiSnapshot(state, snapshot) {
-  if (!snapshot || typeof snapshot !== "object") return;
-  state.folds = sanitizeFolds(snapshot.folds);
-  state.foldCursor = Number.isFinite(Number(snapshot.foldCursor)) ? Math.max(0, Number(snapshot.foldCursor)) : 0;
-  state.scrollOffset = Number.isFinite(Number(snapshot.scrollOffset)) ? Math.max(0, Number(snapshot.scrollOffset)) : 0;
+  const safeSnapshot = snapshot && typeof snapshot === "object" ? snapshot : {};
+  state.folds = sanitizeFolds(safeSnapshot.folds);
+  state.foldCursor = Number.isFinite(Number(safeSnapshot.foldCursor)) ? Math.max(0, Number(safeSnapshot.foldCursor)) : 0;
+  state.scrollOffset = Number.isFinite(Number(safeSnapshot.scrollOffset)) ? Math.max(0, Number(safeSnapshot.scrollOffset)) : 0;
+  const composer = safeSnapshot.composer && typeof safeSnapshot.composer === "object"
+    ? safeSnapshot.composer
+    : {};
+  const text = truncateInputText(typeof composer.text === "string" ? composer.text : "");
+  setInputText(state, text, Number(composer.cursor));
+  state.inputPreferredColumn = composer.preferredColumn !== null
+    && composer.preferredColumn !== undefined
+    && Number.isFinite(Number(composer.preferredColumn))
+    ? Math.max(0, Number(composer.preferredColumn))
+    : null;
 }
 
 export function getFoldEntries(state) {
