@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ANSI, stripAnsi, visibleWidth } from "../src/ansi.js";
 import { boxComponent, createRenderContext, line, renderComponent, stack } from "../src/components/core.js";
-import { Footer, PermissionFooter, PromptFooter, TodoFooter } from "../src/components/footer.js";
+import { Footer, NewOutputFooter, PermissionFooter, PromptFooter, TodoFooter } from "../src/components/footer.js";
 import { Message } from "../src/components/message.js";
 import { ActivityCard } from "../src/components/activity-card.js";
 import { PermissionCard } from "../src/components/permission-card.js";
@@ -11,6 +11,7 @@ import { ToolCard } from "../src/components/tool-card.js";
 import { parseTaskPanel, renderTaskPanel, TaskPanel } from "../src/components/task-panel.js";
 import { createInitialState } from "../src/state.js";
 import { setInputText } from "../src/input-buffer.js";
+import { detachTimeline, jumpTimelineToLatest, markTimelineOutput } from "../src/timeline-follow.js";
 
 test("component core composes nested stacks and boxes within width", () => {
   const lines = renderComponent(
@@ -48,6 +49,33 @@ test("semantic message component delegates tool cards and markdown text", () => 
   assert(assistantLines.some((item) => item.includes(`${ANSI.cyan}return${ANSI.reset}`)));
 });
 
+test("user delivery card is right indented and exposes failure recovery", () => {
+  const rendered = renderComponent(Message({
+    message: {
+      kind: "user",
+      content: "请修复测试",
+      deliveryStatus: "failed",
+      errorMessage: "Bridge 已断开",
+    },
+  }), { width: 80 }).map(stripAnsi);
+
+  assert(rendered.some((line) => line.startsWith(" ".repeat(20)) && line.includes("你  请修复测试")));
+  assert.match(rendered.join("\n"), /发送失败.*\/retry/);
+  assert(rendered.every((line) => visibleWidth(line) <= 80));
+});
+
+test("queued and uncertain user deliveries have distinct text status", () => {
+  const queued = renderComponent(Message({
+    message: { kind: "user", content: "第一条", deliveryStatus: "queued" },
+  }), { width: 60 }).map(stripAnsi).join("\n");
+  const uncertain = renderComponent(Message({
+    message: { kind: "user", content: "第二条", deliveryStatus: "uncertain" },
+  }), { width: 60 }).map(stripAnsi).join("\n");
+
+  assert.match(queued, /发送中/);
+  assert.match(uncertain, /发送状态待确认.*可能重复发送/);
+});
+
 test("footer components can render independently or as a full footer", () => {
   const state = createInitialState();
   state.permission = { requestId: "p1", payload: { tool_name: "bash_run", reason: "需要确认" } };
@@ -61,6 +89,24 @@ test("footer components can render independently or as a full footer", () => {
   assert(stripAnsi(todo.join("\n")).includes("todo: 1/2 完成"));
   assert(stripAnsi(full.join("\n")).includes("Shift+Tab 模式"));
   assert(full.every((item) => visibleWidth(item) <= 80));
+});
+
+test("new output footer appears only while detached with unread output", () => {
+  const state = createInitialState();
+  detachTimeline(state, 10);
+  markTimelineOutput(state, {
+    type: "ui/message",
+    seq: 1,
+    payload: { type: "assistant_stream", phase: "token", content: "继续" },
+  }, "assistant-1");
+
+  const detached = renderComponent(NewOutputFooter({ state }), { width: 80 }).map(stripAnsi);
+  assert.equal(detached.length, 1);
+  assert.match(detached[0], /有 1 条新输出/);
+  assert.match(detached[0], /End\/Ctrl\+L 跳到最新/);
+
+  jumpTimelineToLatest(state);
+  assert.deepEqual(renderComponent(NewOutputFooter({ state }), { width: 80 }), []);
 });
 
 test("prompt renders multiline text without flattening logical newlines", () => {

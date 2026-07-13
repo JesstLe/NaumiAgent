@@ -730,6 +730,9 @@ async def test_bridge_streams_engine_events_as_ui_messages() -> None:
     assert "user/message" in event_types
     assert "run/started" in event_types
     assert "run/completed" in event_types
+    for record in records:
+        if record["type"] in {"user/message", "run/started", "run/completed"}:
+            assert record["request_id"] == "submit-1"
     assert event_types.count("ui/message") >= 4
     assert any(
         record["type"] == "ui/message"
@@ -754,6 +757,7 @@ async def test_bridge_presents_model_404_without_raw_provider_traceback(
     await bridge._run_task
 
     error = next(record for record in _records(writer) if record["type"] == "error")
+    assert error["request_id"] == "submit-failed"
     assert error["payload"] == {
         "message": (
             "模型或 API Base 不匹配，服务端未找到请求资源。"
@@ -1043,6 +1047,41 @@ async def test_bridge_rejects_resume_while_run_is_active() -> None:
         for record in records
     )
     assert not any(record["type"] == "session/replayed" for record in records)
+
+    engine.release_run.set()
+    await bridge._run_task
+
+
+@pytest.mark.asyncio
+async def test_bridge_rejects_second_submit_with_correlated_error_and_no_echo() -> None:
+    engine = _SlowFakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {"id": "submit-first", "type": ClientEventType.SUBMIT, "payload": {"text": "长任务"}}
+    )
+    assert bridge._run_task is not None
+    await asyncio.sleep(0)
+
+    await bridge.handle_client_record(
+        {"id": "submit-second", "type": ClientEventType.SUBMIT, "payload": {"text": "第二条"}}
+    )
+
+    records = _records(writer)
+    rejection = next(
+        record
+        for record in records
+        if record["type"] == "error"
+        and record.get("request_id") == "submit-second"
+    )
+    assert rejection["payload"]["code"] == "run_in_progress"
+    assert not any(
+        record["type"] == "user/message"
+        and record.get("request_id") == "submit-second"
+        for record in records
+    )
 
     engine.release_run.set()
     await bridge._run_task

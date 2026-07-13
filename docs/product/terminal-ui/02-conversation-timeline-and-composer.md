@@ -2,7 +2,9 @@
 
 ## 实施状态（2026-07-13）
 
-已完成首个独立切片“多行输入器与草稿恢复”：
+已完成三个独立切片：“多行输入器与草稿恢复”“时间线跟随与缩放锚点”和“用户消息发送生命周期”。
+
+多行输入器与草稿恢复：
 
 - 输入编辑按 grapheme cluster 移动和删除，不会拆散 emoji 或组合字符。
 - `Shift+Enter` 插入换行，`Ctrl+Enter` 提交多行内容，普通 `Enter` 保持提交语义。
@@ -11,15 +13,36 @@
 - 草稿按会话写入 UI state v2；v1 快照自动迁移，未知未来版本不会被旧客户端覆盖。
 - 正常退出、进程重启和会话切换均保留未提交草稿、光标及垂直首选列。
 
+时间线跟随与缩放锚点：
+
+- 默认 `follow_tail=true`，流式 Agent 输出持续保持最新内容可见。
+- `PageUp` 或 `Alt+Up` 上翻后进入 detached 状态；后续输出不改变阅读偏移。
+- assistant token 按消息 ID 去重，tool prepare/use/result 按 `tool_call_id` 去重，不会把流式 token 数误当成未读数。
+- detached 状态在固定 footer 显示“有 N 条新输出”；`PageDown` 到底、空输入时按 `End`，或按 `Ctrl+L` 可恢复实时跟随。
+- 终端宽高变化时按顶部可见消息 ID 恢复阅读位置；缺少 ID 的旧消息按索引回退。
+- UI 快照只保留阅读偏移；重启后派生 follow/detached 状态并清空上一进程的未读证据。
+
+用户消息发送生命周期：
+
+- 普通提交立即创建右缩进的本地用户消息并显示“发送中...”，不再等待 Agent 回包后才出现。
+- 本地 `request_id` 与 Bridge `user/message`、`run/started`、`error` 关联；确认后原地变为 accepted，不重复追加用户消息。
+- 确认前的 Bridge 拒绝和管道异常会把同一消息标为发送失败，并展示可操作的 `/retry`。
+- `/retry [request_id]` 使用新请求 ID 原地重试同一气泡，保留尝试次数，不制造重复用户消息。
+- UI state 只保存 queued/failed/uncertain outbox，最多 20 条且单条内容受限；accepted 消息仍以后端会话为准。
+- 进程重启后 queued 变为 uncertain，并明确提示“可能重复发送”；不会自动重发，只有用户显式 `/retry` 才执行。
+- 后端重放的同内容用户消息可以调和一条 uncertain outbox；异常值、超限条目和重复快照应用均被安全处理。
+
 本模块仍未整体完成。后续切片依次为：
 
-1. `follow_tail`、新输出计数和 resize 锚点恢复。
-2. 用户消息 `queued -> accepted -> failed` 发送生命周期及重试。
-3. `Ctrl+R` 项目历史搜索和补全候选键盘选择。
-4. `chat | task` 输入模式、`/task` 创建及对话上下文联动。
+1. `Ctrl+R` 项目历史搜索和补全候选键盘选择。
+2. `chat | task` 输入模式、`/task` 创建及对话上下文联动。
+3. Bridge v2 幂等请求、断线增量重放和多客户端 outbox 调和。
 
-本切片的权威实现计划与验证证据见
-`docs/superpowers/plans/2026-07-13-terminal-multiline-composer.md`。
+两个切片的权威实现计划与验证证据见：
+
+- `docs/superpowers/plans/2026-07-13-terminal-multiline-composer.md`
+- `docs/superpowers/plans/2026-07-13-terminal-follow-tail.md`
+- `docs/superpowers/plans/2026-07-13-terminal-send-lifecycle.md`
 
 ## 1. 目标
 

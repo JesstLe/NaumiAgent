@@ -2,6 +2,10 @@ import { looksLikeDiff } from "./ansi.js";
 import { getInputCursor, setInputText, truncateInputText } from "./input-buffer.js";
 import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
 import { clearRenderCache, createRenderCache } from "./render-cache.js";
+import { jumpTimelineToLatest } from "./timeline-follow.js";
+
+const MAX_OUTBOX_MESSAGES = 20;
+const MAX_OUTBOX_ERROR_CHARS = 500;
 
 export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/help", aliases: ["/h"], description: "显示帮助" },
@@ -13,6 +17,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/doctor", description: "运行环境诊断" },
   { command: "/mode", description: "切换 runtime 模式 default / plan / bypass" },
   { command: "/reasoning", description: "显示/切换思考过程输出" },
+  { command: "/retry", description: "重试最近一条发送失败或状态待确认的消息" },
   { command: "/folds", description: "显示可折叠代码片段列表" },
   { command: "/fold", description: "切换指定折叠项（按编号或类型）" },
   { command: "/expand", description: "展开指定折叠项（按编号/全部）" },
@@ -143,6 +148,7 @@ export function getSlashCommandCompletions(input, slashCommands) {
 export function createInitialState() {
   return {
     nextMessageId: 1,
+    nextSubmitId: 1,
     currentSessionId: "",
     input: "",
     inputCursor: null,
@@ -183,6 +189,9 @@ export function createInitialState() {
     permission: null,
     running: false,
     scrollOffset: 0,
+    followTail: true,
+    unreadOutputCount: 0,
+    unreadOutputKeys: {},
     bridgeReady: false,
     debugTrace: null,
     frontendDebugLogPath: "",
@@ -203,6 +212,11 @@ export function createInitialState() {
 export function reduceServerEvent(state, record) {
   const payload = record.payload ?? {};
   switch (record.type) {
+    case "ack":
+      if (payload.event === "submit") {
+        acceptUserMessage(state, record.request_id);
+      }
+      break;
     case "ready":
       state.bridgeReady = true;
       mergeStatus(state, payload);
@@ -227,7 +241,9 @@ export function reduceServerEvent(state, record) {
         return maybeRefreshPinnedTaskPanel(state);
       }
     case "user/message":
-      state.messages.push({ kind: "user", content: payload.content ?? "" });
+      if (!acceptUserMessage(state, record.request_id, payload.content ?? "")) {
+        appendAcceptedUserMessage(state, payload.content ?? "", record.request_id);
+      }
       state.running = true;
       break;
     case "ui/message":
@@ -240,6 +256,7 @@ export function reduceServerEvent(state, record) {
       handlePermissionResolved(state, payload);
       break;
     case "run/started":
+      acceptUserMessage(state, record.request_id, payload.task ?? "");
       state.running = true;
       state.currentTurnStartedAtMs = Date.now();
       state.currentTurnFirstTokenAtMs = null;
@@ -259,6 +276,7 @@ export function reduceServerEvent(state, record) {
       state.permission = null;
       return state.taskPanel.pinned ? [taskPanelRefreshAction(state)] : [];
     case "session/replayed":
+      jumpTimelineToLatest(state);
       state.currentSessionId = payload.session_id || state.currentSessionId;
       state.running = false;
       state.currentTurnStartedAtMs = null;
@@ -280,6 +298,10 @@ export function reduceServerEvent(state, record) {
       pushSystemMessage(state, "resume", `已恢复会话: ${payload.title ?? payload.session_id}`, "info");
       return [{ type: "session_replayed", sessionId: state.currentSessionId }];
     case "error":
+      failUserMessage(state, record.request_id, {
+        code: payload.code ?? "error",
+        message: payload.message ?? "发送失败。",
+      });
       pushSystemMessage(state, "error", payload.message ?? "未知错误", "error");
       break;
     case "shutdown":
@@ -318,7 +340,9 @@ export function mergeStatus(state, payload) {
 export function handleUiMessage(state, message) {
   switch (message.type) {
     case "user":
-      state.messages.push({ kind: "user", content: message.content ?? "", isCommand: Boolean(message.is_command) });
+      appendAcceptedUserMessage(state, message.content ?? "", message.request_id ?? "", {
+        isCommand: Boolean(message.is_command),
+      });
       break;
     case "assistant_stream":
       handleAssistantStream(state, message);
@@ -708,6 +732,9 @@ export function handleSubmitText(state, text, send) {
     send("resume", {});
     return;
   }
+  if (text === "/retry" || text.startsWith("/retry ")) {
+    return retryUserMessage(state, send, text.slice("/retry".length).trim());
+  }
   if (text.startsWith("/load ")) {
     send("resume", { session_id: text.slice(6).trim() });
     return;
@@ -753,7 +780,141 @@ export function handleSubmitText(state, text, send) {
     showDebugInfo(state);
     return;
   }
-  send("submit", { text });
+  return submitUserMessage(state, text, send);
+}
+
+export function submitUserMessage(state, text, send, existingMessage = null) {
+  const content = String(text ?? "");
+  const requestId = `submit-${state.nextSubmitId++}`;
+  const message = existingMessage ?? {
+    kind: "user",
+    id: nextMessageId(state, "user"),
+    content,
+    attempt: 0,
+  };
+  message.requestId = requestId;
+  message.content = content;
+  message.deliveryStatus = "queued";
+  message.attempt = Math.max(0, Number(message.attempt) || 0) + 1;
+  message.errorCode = "";
+  message.errorMessage = "";
+  message.localOutbox = true;
+  if (!existingMessage) {
+    state.messages.push(message);
+  }
+
+  try {
+    send("submit", { text: content }, { id: requestId });
+  } catch (error) {
+    failUserMessage(state, requestId, {
+      code: "transport_write_failed",
+      message: `无法写入本地 Bridge: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+  clearRenderCache(state.renderCache);
+  return message;
+}
+
+export function retryUserMessage(state, send, requestId = "") {
+  const normalizedRequestId = String(requestId ?? "").trim();
+  const message = [...state.messages].reverse().find(
+    (item) => item.kind === "user"
+      && ["failed", "uncertain"].includes(item.deliveryStatus)
+      && (!normalizedRequestId || item.requestId === normalizedRequestId),
+  );
+  if (!message) {
+    pushSystemMessage(
+      state,
+      "retry",
+      normalizedRequestId
+        ? `没有可重试的消息: ${normalizedRequestId}`
+        : "当前没有可重试的发送失败消息。",
+      "warning",
+    );
+    return null;
+  }
+  return submitUserMessage(state, message.content, send, message);
+}
+
+export function acceptUserMessage(state, requestId, content = "") {
+  const normalizedRequestId = String(requestId ?? "");
+  if (!normalizedRequestId) return null;
+  const message = state.messages.find(
+    (item) => item.kind === "user" && item.requestId === normalizedRequestId,
+  );
+  if (!message) return null;
+  if (content) message.content = String(content);
+  message.deliveryStatus = "accepted";
+  message.errorCode = "";
+  message.errorMessage = "";
+  message.localOutbox = false;
+  clearRenderCache(state.renderCache);
+  return message;
+}
+
+export function failUserMessage(state, requestId, error = {}) {
+  const normalizedRequestId = String(requestId ?? "");
+  if (!normalizedRequestId) return null;
+  const message = state.messages.find(
+    (item) => item.kind === "user"
+      && item.requestId === normalizedRequestId
+      && ["queued", "uncertain"].includes(item.deliveryStatus),
+  );
+  if (!message) return null;
+  message.deliveryStatus = "failed";
+  message.errorCode = String(error.code ?? "send_failed");
+  message.errorMessage = String(error.message ?? "发送失败，请重试。");
+  message.localOutbox = true;
+  clearRenderCache(state.renderCache);
+  return message;
+}
+
+export function failQueuedUserMessages(state, error = {}) {
+  let failed = 0;
+  for (const message of state.messages) {
+    if (message.kind !== "user" || message.deliveryStatus !== "queued") continue;
+    message.deliveryStatus = "failed";
+    message.errorCode = String(error.code ?? "bridge_disconnected");
+    message.errorMessage = String(error.message ?? "Bridge 已断开，请重试。");
+    message.localOutbox = true;
+    failed += 1;
+  }
+  if (failed) clearRenderCache(state.renderCache);
+  return failed;
+}
+
+function appendAcceptedUserMessage(state, content, requestId = "", extra = {}) {
+  const normalizedContent = String(content ?? "");
+  const uncertain = state.messages.find(
+    (item) => item.kind === "user"
+      && item.localOutbox
+      && item.deliveryStatus === "uncertain"
+      && item.content === normalizedContent,
+  );
+  if (uncertain) {
+    uncertain.requestId = String(requestId || uncertain.requestId || "");
+    uncertain.deliveryStatus = "accepted";
+    uncertain.errorCode = "";
+    uncertain.errorMessage = "";
+    uncertain.localOutbox = false;
+    Object.assign(uncertain, extra);
+    clearRenderCache(state.renderCache);
+    return uncertain;
+  }
+  const message = {
+    kind: "user",
+    id: nextMessageId(state, "user"),
+    requestId: String(requestId ?? ""),
+    content: normalizedContent,
+    deliveryStatus: "accepted",
+    attempt: 1,
+    errorCode: "",
+    errorMessage: "",
+    localOutbox: false,
+    ...extra,
+  };
+  state.messages.push(message);
+  return message;
 }
 
 function handleReasoningCommand(state, text, send) {
@@ -806,6 +967,7 @@ export function createUiSnapshot(state) {
     folds: state.folds,
     foldCursor: state.foldCursor,
     scrollOffset: state.scrollOffset,
+    outbox: serializeUserOutbox(state.messages),
     composer: {
       text: truncateInputText(state.input),
       cursor: getInputCursor(state),
@@ -821,6 +983,10 @@ export function applyUiSnapshot(state, snapshot) {
   state.folds = sanitizeFolds(safeSnapshot.folds);
   state.foldCursor = Number.isFinite(Number(safeSnapshot.foldCursor)) ? Math.max(0, Number(safeSnapshot.foldCursor)) : 0;
   state.scrollOffset = Number.isFinite(Number(safeSnapshot.scrollOffset)) ? Math.max(0, Number(safeSnapshot.scrollOffset)) : 0;
+  state.followTail = state.scrollOffset === 0;
+  state.unreadOutputCount = 0;
+  state.unreadOutputKeys = {};
+  restoreUserOutbox(state, safeSnapshot.outbox);
   const composer = safeSnapshot.composer && typeof safeSnapshot.composer === "object"
     ? safeSnapshot.composer
     : {};
@@ -831,6 +997,75 @@ export function applyUiSnapshot(state, snapshot) {
     && Number.isFinite(Number(composer.preferredColumn))
     ? Math.max(0, Number(composer.preferredColumn))
     : null;
+}
+
+function serializeUserOutbox(messages) {
+  return messages
+    .filter((message) => message.kind === "user"
+      && message.localOutbox
+      && ["queued", "failed", "uncertain"].includes(message.deliveryStatus))
+    .slice(-MAX_OUTBOX_MESSAGES)
+    .map((message) => ({
+      requestId: String(message.requestId ?? ""),
+      content: truncateInputText(message.content ?? ""),
+      deliveryStatus: message.deliveryStatus,
+      attempt: Math.max(1, Math.floor(Number(message.attempt) || 1)),
+      errorCode: boundedText(message.errorCode, MAX_OUTBOX_ERROR_CHARS),
+      errorMessage: boundedText(message.errorMessage, MAX_OUTBOX_ERROR_CHARS),
+    }));
+}
+
+function restoreUserOutbox(state, rawOutbox) {
+  state.messages = state.messages.filter((message) => !message.localOutbox);
+  if (!Array.isArray(rawOutbox)) return;
+
+  const entries = rawOutbox
+    .map(sanitizeOutboxEntry)
+    .filter(Boolean)
+    .slice(-MAX_OUTBOX_MESSAGES);
+  for (const entry of entries) {
+    const deliveryStatus = entry.deliveryStatus === "queued" ? "uncertain" : entry.deliveryStatus;
+    state.messages.push({
+      kind: "user",
+      id: nextMessageId(state, "user"),
+      requestId: entry.requestId,
+      content: entry.content,
+      deliveryStatus,
+      attempt: entry.attempt,
+      errorCode: entry.errorCode,
+      errorMessage: deliveryStatus === "uncertain"
+        ? "上次发送未获得 Bridge 确认。"
+        : entry.errorMessage,
+      localOutbox: true,
+    });
+    const submitId = entry.requestId.match(/^submit-(\d+)$/)?.[1];
+    if (submitId) {
+      state.nextSubmitId = Math.max(state.nextSubmitId, Number(submitId) + 1);
+    }
+  }
+  if (entries.length) clearRenderCache(state.renderCache);
+}
+
+function sanitizeOutboxEntry(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const requestId = boundedText(value.requestId, MAX_OUTBOX_ERROR_CHARS).trim();
+  const content = truncateInputText(typeof value.content === "string" ? value.content : "");
+  const deliveryStatus = String(value.deliveryStatus ?? "");
+  if (!requestId || !content || !["queued", "failed", "uncertain"].includes(deliveryStatus)) {
+    return null;
+  }
+  return {
+    requestId,
+    content,
+    deliveryStatus,
+    attempt: Math.max(1, Math.floor(Number(value.attempt) || 1)),
+    errorCode: boundedText(value.errorCode, MAX_OUTBOX_ERROR_CHARS),
+    errorMessage: boundedText(value.errorMessage, MAX_OUTBOX_ERROR_CHARS),
+  };
+}
+
+function boundedText(value, maxChars) {
+  return Array.from(String(value ?? "")).slice(0, maxChars).join("");
 }
 
 export function getFoldEntries(state) {
