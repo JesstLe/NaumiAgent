@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from naumi_agent.agents.base import AgentCapability, AgentConfig
+from naumi_agent.agents.base import DEFAULT_AGENT_MAX_TURNS, AgentCapability, AgentConfig
 
 if TYPE_CHECKING:
     from naumi_agent.model.router import ModelRouter
@@ -224,13 +224,11 @@ class DynamicAgentFactory:
         # Generate system prompt
         system_prompt = self._build_system_prompt(role, detected_domain, focus)
 
-        # Determine model tier and budget from complexity
+        # Determine model tier while preserving shared runtime limits.
         if model_tier is None:
             model_tier = self._detect_tier(lower_task)
-        if max_budget_usd is None:
-            max_budget_usd = self._detect_budget(lower_task, model_tier)
         if max_turns is None:
-            max_turns = self._detect_max_turns(model_tier)
+            max_turns = DEFAULT_AGENT_MAX_TURNS
 
         config = AgentConfig(
             name=name,
@@ -323,19 +321,6 @@ class DynamicAgentFactory:
         if any(sig in text for sig in _COMPLEXITY_SIGNALS_LOW):
             return "fast"
         return "capable"
-
-    def _detect_budget(self, text: str, tier: str) -> float:
-        """Estimate budget based on tier and task size."""
-        base = {"fast": 0.08, "capable": 0.15, "reasoning": 0.25}
-        budget = base.get(tier, 0.15)
-        # Longer tasks may need more budget
-        if len(text) > 2000:
-            budget *= 1.5
-        return round(budget, 2)
-
-    def _detect_max_turns(self, tier: str) -> int:
-        """Set turn limit based on model tier."""
-        return {"fast": 5, "capable": 8, "reasoning": 12}.get(tier, 8)
 
     def _build_system_prompt(
         self, role: str, domain: str, focus: str,
