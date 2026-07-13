@@ -60,7 +60,8 @@ def test_build_eval_baseline_imports_module_without_public_targets(tmp_path: Pat
 
     baseline = build_eval_baseline([target])
 
-    assert f"TARGET_FILES = ['{target.resolve()}']" in baseline.test_code
+    expected_files = [str(target.resolve())]
+    assert f"TARGET_FILES = {expected_files!r}" in baseline.test_code
     assert baseline.function_count == 0
     assert baseline.class_count == 0
 
