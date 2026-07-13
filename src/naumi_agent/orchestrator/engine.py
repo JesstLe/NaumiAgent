@@ -43,6 +43,7 @@ from naumi_agent.orchestrator.tool_batches import (
 )
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
+from naumi_agent.safety.permission_grants import PermissionGrant, PermissionGrantStore
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.scheduler import SchedulerRunner, SchedulerStore, create_scheduler_tools
 from naumi_agent.skills.loader import SkillLoader
@@ -408,6 +409,7 @@ class AgentEngine:
             ],
             workspace_root=str(self.workspace_root),
         )
+        self._permission_grant_store = PermissionGrantStore()
         self._default_permission_mode = self._permission_checker.mode
         self._runtime_mode = (
             AgentRuntimeMode.BYPASS
@@ -773,6 +775,24 @@ class AgentEngine:
         """Register a UI callback used when a tool needs user confirmation."""
         self._permission_confirmer = confirmer
 
+    def list_permission_grants(self) -> tuple[PermissionGrant, ...]:
+        """Return active grants for the current session only."""
+        if self._session is None:
+            return ()
+        return self._permission_grant_store.list_session(self._session.id)
+
+    def revoke_permission_grant(self, grant_id: str) -> bool:
+        """Revoke one grant only when it belongs to the current session."""
+        if self._session is None:
+            return False
+        return self._permission_grant_store.revoke(grant_id, self._session.id)
+
+    def revoke_all_permission_grants(self) -> int:
+        """Revoke every active grant for the current session."""
+        if self._session is None:
+            return 0
+        return self._permission_grant_store.revoke_session(self._session.id)
+
     @property
     def task_runner(self) -> Any:
         if self._task_runner is None:
@@ -807,12 +827,14 @@ class AgentEngine:
         self._full_history.clear()
         self._usage = AgentUsage()
         self._budget_tracker.reset()
+        self._permission_grant_store.clear()
         self._session = None
         self.task_store.set_session("")
         self._permission_checker.reset_counts()
 
     async def shutdown(self) -> None:
         """释放资源（关闭数据库连接、浏览器、MCP 连接等）."""
+        self._permission_grant_store.clear()
         if hasattr(self, "subagent_manager"):
             await self.subagent_manager.stop_reaper()
             self.subagent_manager.destroy_all_dynamic()
@@ -917,6 +939,8 @@ class AgentEngine:
         session = await self.session_store.load(session_id)
         if session is None:
             return False
+        if self._session is not None and self._session.id != session.id:
+            self._permission_grant_store.revoke_session(self._session.id)
         self._session = session
         cleaned_messages = self._sanitize_messages(session.messages)
         self._messages = cleaned_messages
@@ -3039,7 +3063,18 @@ class AgentEngine:
                 status="error",
                 content=f"权限拒绝：{decision.reason}",
             )
-        if decision.requires_confirmation:
+        session_grant_applies = (
+            decision.requires_confirmation
+            and decision.allow_session_grant
+            and bool(session_id)
+            and self._session is not None
+            and self._session.id == session_id
+            and self._permission_grant_store.allows(
+                session_id,
+                decision.tool_family,
+            )
+        )
+        if decision.requires_confirmation and not session_grant_applies:
             logger.info("Tool %s requires confirmation", tc.name)
             confirmation = await self._confirm_tool_execution(
                 on_event,
@@ -3047,15 +3082,24 @@ class AgentEngine:
                 tool_call=tc,
                 arguments=args,
                 decision=decision,
+                session_id=session_id,
             )
-            if confirmation not in {"allow", "bypass"}:
+            if confirmation != "allow_once":
                 if confirmation == "unavailable":
                     content = (
                         "权限拒绝：该工具需要用户确认，但当前界面未注册确认入口。"
-                        "请使用支持确认的 CLI/TUI，或切换到 bypass 模式后重试。"
+                        "请使用支持确认的 CLI/TUI 后重试。"
                     )
                 elif confirmation == "error":
                     content = "权限拒绝：权限确认流程异常，已停止执行该工具。"
+                elif confirmation == "grant_rejected_high_risk":
+                    content = "权限拒绝：当前高风险操作不支持本会话授权。"
+                elif confirmation == "grant_rejected_no_session":
+                    content = "权限拒绝：当前工具调用没有活动会话，无法创建本会话授权。"
+                elif confirmation == "grant_rejected_session_changed":
+                    content = "权限拒绝：请求确认期间会话已切换，无法创建本会话授权。"
+                elif confirmation == "grant_rejected":
+                    content = "权限拒绝：当前工具不支持本会话授权。"
                 else:
                     content = "权限拒绝：用户已拒绝执行该工具。"
                 return ToolResult(call_id=tc.id, status="error", content=content)
@@ -3091,6 +3135,7 @@ class AgentEngine:
         tool_call: ToolCall,
         arguments: dict[str, Any],
         decision: Any,
+        session_id: str,
     ) -> str:
         """Ask the UI to confirm a tool execution that policy marked as sensitive."""
         reason = decision.reason or "该工具需要用户确认。"
@@ -3108,6 +3153,9 @@ class AgentEngine:
         if self._permission_confirmer is None:
             return "unavailable"
 
+        choices = ["allow_once", "deny"]
+        if decision.allow_session_grant:
+            choices.append("grant_session")
         payload = {
             "agent_name": agent_name or "main",
             "tool_name": tool_call.name,
@@ -3117,7 +3165,12 @@ class AgentEngine:
             "risk_level": risk_level,
             "requires_confirmation": True,
             "permission_mode": self._permission_checker.mode.value,
-            "session_id": self._session.id if self._session else "",
+            "session_id": session_id,
+            "tool_family": decision.tool_family,
+            "choices": choices,
+            "scope": "session" if decision.allow_session_grant else "call",
+            "expires_at": None,
+            "requires_double_confirm": decision.requires_double_confirm,
         }
         try:
             raw_choice = await self._permission_confirmer(payload)
@@ -3136,20 +3189,78 @@ class AgentEngine:
             return "error"
 
         choice = self._normalize_permission_confirmation(raw_choice)
-        if choice == "bypass":
-            self.set_runtime_mode(AgentRuntimeMode.BYPASS)
+        if choice == "grant_session":
+            if not decision.allow_session_grant:
+                status = (
+                    "grant_rejected_high_risk"
+                    if decision.requires_double_confirm
+                    else "grant_rejected"
+                )
+                await self._emit_permission_bubble(
+                    on_event,
+                    agent_name=agent_name,
+                    tool_name=tool_call.name,
+                    call_id=tool_call.id,
+                    status="grant_rejected",
+                    reason="当前操作不支持本会话授权。",
+                    risk_level=risk_level,
+                    requires_confirmation=True,
+                )
+                return status
+            if not session_id.strip():
+                await self._emit_permission_bubble(
+                    on_event,
+                    agent_name=agent_name,
+                    tool_name=tool_call.name,
+                    call_id=tool_call.id,
+                    status="grant_rejected",
+                    reason="当前工具调用没有活动会话，无法创建本会话授权。",
+                    risk_level=risk_level,
+                    requires_confirmation=True,
+                )
+                return "grant_rejected_no_session"
+            if self._session is None or self._session.id != session_id:
+                await self._emit_permission_bubble(
+                    on_event,
+                    agent_name=agent_name,
+                    tool_name=tool_call.name,
+                    call_id=tool_call.id,
+                    status="grant_rejected",
+                    reason="请求确认期间会话已切换，无法创建本会话授权。",
+                    risk_level=risk_level,
+                    requires_confirmation=True,
+                )
+                return "grant_rejected_session_changed"
+            try:
+                self._permission_grant_store.create(
+                    session_id,
+                    decision.tool_family,
+                    tool_call.id,
+                )
+            except ValueError:
+                await self._emit_permission_bubble(
+                    on_event,
+                    agent_name=agent_name,
+                    tool_name=tool_call.name,
+                    call_id=tool_call.id,
+                    status="grant_rejected",
+                    reason="当前工具调用没有活动会话，无法创建本会话授权。",
+                    risk_level=risk_level,
+                    requires_confirmation=True,
+                )
+                return "grant_rejected_no_session"
             await self._emit_permission_bubble(
                 on_event,
                 agent_name=agent_name,
                 tool_name=tool_call.name,
                 call_id=tool_call.id,
-                status="bypass_enabled",
-                reason="用户已切换到 bypass 模式，本次工具继续执行。",
+                status="session_granted",
+                reason=f"用户已允许本会话使用工具族 `{decision.tool_family}`。",
                 risk_level=risk_level,
                 requires_confirmation=False,
             )
-            return "bypass"
-        if choice == "allow":
+            return "allow_once"
+        if choice == "allow_once":
             await self._emit_permission_bubble(
                 on_event,
                 agent_name=agent_name,
@@ -3160,7 +3271,7 @@ class AgentEngine:
                 risk_level=risk_level,
                 requires_confirmation=False,
             )
-            return "allow"
+            return "allow_once"
 
         await self._emit_permission_bubble(
             on_event,
@@ -3177,14 +3288,14 @@ class AgentEngine:
     @staticmethod
     def _normalize_permission_confirmation(choice: str | bool) -> str:
         if choice is True:
-            return "allow"
+            return "allow_once"
         if choice is False:
             return "deny"
         normalized = str(choice or "").strip().lower()
-        if normalized in {"allow", "allowed", "yes", "y", "confirm", "confirmed"}:
-            return "allow"
-        if normalized in {"bypass", "b", "shift+tab", "s-tab"}:
-            return "bypass"
+        if normalized in {"allow", "allowed", "yes", "y", "allow_once"}:
+            return "allow_once"
+        if normalized in {"grant_session", "bypass", "b"}:
+            return "grant_session"
         return "deny"
 
     def _tool_allowed_in_plan_mode(self, tool_name: str, tool: Any) -> bool:
