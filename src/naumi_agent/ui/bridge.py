@@ -417,7 +417,10 @@ class JsonlEngineBridge:
                     status = str(getattr(raw_status, "value", raw_status))
                     if status == "running":
                         payload["background_running"] += 1
-                    elif status in {"failed", "timed_out"}:
+                    elif (
+                        status in {"failed", "timed_out"}
+                        and not bool(getattr(task, "notified", False))
+                    ):
                         payload["background_attention"] += 1
         except Exception:
             payload["background_attention"] += 1
@@ -811,6 +814,7 @@ class JsonlEngineBridge:
             source=str(payload.get("source") or "all"),
             status=str(payload.get("status") or "all"),
             detail_id=str(payload.get("detail_id") or payload.get("detail") or ""),
+            history=bool(payload.get("history", False)),
         )
         await self.emit(
             ServerEventType.UI_MESSAGE,

@@ -748,6 +748,26 @@ test("task panel command parses source and status filters", () => {
   assert.deepEqual(actions, [{ type: "refresh_task_panel", limit: 6, source: "background", status: "running" }]);
 });
 
+test("task panel history command requests acknowledged background history", () => {
+  const state = createInitialState();
+  const sent = [];
+
+  handleSubmitText(state, "/tasks history", (type, payload) => sent.push({ type, payload }));
+
+  assert.deepEqual(sent, [{
+    type: "task_panel",
+    payload: {
+      limit: 12,
+      source: "background",
+      status: "all",
+      history: true,
+      pinned: false,
+      refresh: false,
+    },
+  }]);
+  assert.equal(state.taskPanel.history, true);
+});
+
 test("task panel command parses detail id and preserves it for pinned refresh", () => {
   const state = createInitialState();
   const sent = [];
