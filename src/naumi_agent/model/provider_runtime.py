@@ -39,6 +39,55 @@ class ProviderTransport:
     kwargs: Mapping[str, Any] = field(repr=False)
 
 
+@dataclass(frozen=True)
+class ProviderHTTPConfig:
+    """Explicit, immutable HTTP settings for provider metadata requests."""
+
+    base_url: str
+    headers: Mapping[str, str] = field(repr=False)
+    timeout_seconds: float = 10.0
+
+
+def build_provider_http_config(
+    provider: ProviderSpec,
+    *,
+    catalog_source: str,
+) -> ProviderHTTPConfig:
+    """Resolve one provider's HTTP settings without ambient credential fallback."""
+    if not provider.base_url:
+        raise ProviderRuntimeError(
+            f'provider "{provider.id}" 缺少 baseURL，无法发起模型发现请求。'
+        )
+
+    static_headers = dict(provider.headers)
+    _assert_no_auth_header_conflict(provider, static_headers)
+    api_key, auth_header = _resolve_auth(
+        provider,
+        catalog_source=catalog_source,
+    )
+    if auth_header is not None:
+        header_name, header_value = auth_header
+        static_headers[header_name] = header_value
+    elif provider.auth.type is AuthType.BEARER:
+        static_headers[provider.auth.header or "Authorization"] = (
+            f"{provider.auth.scheme or 'Bearer'} {api_key}"
+        )
+
+    timeout_seconds = 10.0
+    if provider.request_timeout_ms is not None:
+        if provider.request_timeout_ms <= 0:
+            raise ProviderRuntimeError(
+                f'provider "{provider.id}" 的 request timeout 必须大于 0。'
+            )
+        timeout_seconds = provider.request_timeout_ms / 1000
+
+    return ProviderHTTPConfig(
+        base_url=provider.base_url,
+        headers=MappingProxyType(static_headers),
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def build_openai_chat_transport(
     target: ResolvedModelTarget,
     *,

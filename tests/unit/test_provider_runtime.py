@@ -20,10 +20,12 @@ from naumi_agent.model.catalog import (
 )
 from naumi_agent.model.provider_runtime import (
     NO_GLOBAL_API_KEY,
+    ProviderHTTPConfig,
     ProviderRuntimeError,
     build_anthropic_messages_transport,
     build_openai_chat_transport,
     build_openai_responses_transport,
+    build_provider_http_config,
     build_provider_transport,
 )
 from naumi_agent.model.targets import ResolvedModelTarget
@@ -79,6 +81,110 @@ def _auth(
         header=header,
         scheme=scheme,
     )
+
+
+def _provider(**kwargs) -> ProviderSpec:
+    target = _target(**kwargs)
+    assert target.provider is not None
+    return target.provider
+
+
+def test_http_config_maps_standard_bearer_to_authorization(monkeypatch) -> None:
+    monkeypatch.setenv("DISCOVERY_TOKEN", "selected-secret")
+
+    config = build_provider_http_config(
+        _provider(
+            auth=_auth(
+                AuthType.BEARER,
+                SecretSource.ENV,
+                "DISCOVERY_TOKEN",
+            )
+        ),
+        catalog_source="/tmp/providers.json",
+    )
+
+    assert isinstance(config, ProviderHTTPConfig)
+    assert config.base_url == "https://provider.example/v1"
+    assert config.headers == {"Authorization": "Bearer selected-secret"}
+    assert config.timeout_seconds == 12.345
+    assert "selected-secret" not in repr(config)
+
+
+def test_http_config_merges_custom_auth_and_static_headers(monkeypatch) -> None:
+    monkeypatch.setenv("DISCOVERY_KEY", "custom-secret")
+
+    config = build_provider_http_config(
+        _provider(
+            auth=_auth(
+                AuthType.API_KEY_HEADER,
+                SecretSource.ENV,
+                "DISCOVERY_KEY",
+                header="X-Provider-Key",
+            ),
+            headers={"X-Tenant": "tenant-a"},
+        ),
+        catalog_source="/tmp/providers.json",
+    )
+
+    assert config.headers == {
+        "X-Tenant": "tenant-a",
+        "X-Provider-Key": "custom-secret",
+    }
+
+
+def test_http_config_none_auth_ignores_global_keys(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-be-used")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "must-not-be-used-either")
+
+    config = build_provider_http_config(
+        _provider(
+            auth=_auth(AuthType.NONE, None, None),
+            request_timeout_ms=None,
+        ),
+        catalog_source="/tmp/providers.json",
+    )
+
+    assert config.headers == {}
+    assert config.timeout_seconds == 10.0
+    assert "must-not-be-used" not in repr(config)
+
+
+def test_http_config_rejects_missing_base_url() -> None:
+    with pytest.raises(ProviderRuntimeError, match="缺少 baseURL"):
+        build_provider_http_config(
+            _provider(base_url=None),
+            catalog_source="/tmp/providers.json",
+        )
+
+
+def test_http_config_rejects_header_conflict_before_secret_lookup(monkeypatch) -> None:
+    calls = 0
+
+    def fail_if_called(**_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("credential lookup must not happen")
+
+    monkeypatch.setattr(
+        "naumi_agent.model.provider_runtime.load_model_api_key",
+        fail_if_called,
+    )
+    provider = _provider(
+        auth=_auth(
+            AuthType.BEARER,
+            SecretSource.CREDENTIAL,
+            "discovery-provider",
+        ),
+        headers={"authorization": "static-value"},
+    )
+
+    with pytest.raises(ProviderRuntimeError, match="静态 header 与认证头冲突"):
+        build_provider_http_config(
+            provider,
+            catalog_source="/tmp/providers.json",
+        )
+
+    assert calls == 0
 
 
 def test_maps_model_base_headers_timeout_and_copies_headers() -> None:
