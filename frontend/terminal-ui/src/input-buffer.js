@@ -1,5 +1,7 @@
 export const INPUT_KEYS = {
   shiftTab: "\x1b[Z",
+  shiftEnter: "\x1b[13;2u",
+  ctrlEnter: "\x1b[13;5u",
   pageUp: "\x1b[5~",
   pageDown: "\x1b[6~",
   up: "\x1b[A",
@@ -21,6 +23,8 @@ export const INPUT_KEYS = {
   ctrlE: "\x05",
 };
 
+const BRACKETED_PASTE_START = "\x1b[200~";
+const BRACKETED_PASTE_END = "\x1b[201~";
 const CSI_PATTERN = /^\x1b\[[0-9;?]*[~A-Za-z]/;
 const SS3_PATTERN = /^\x1b[Oo][A-Za-z]/;
 const SS3_FALLBACK_PATTERN = /^[Oo][ABab]$/;
@@ -34,6 +38,52 @@ export function splitInputStreamChunk(chunk, pending = "") {
     keys: splitInputChunk(text),
     pending: trailing,
   };
+}
+
+export function createInputTokenizerState() {
+  return { pendingEscape: "", pasteBuffer: null };
+}
+
+export function tokenizeInputChunk(chunk, state) {
+  let text = `${state.pendingEscape}${String(chunk ?? "")}`;
+  state.pendingEscape = "";
+  const tokens = [];
+
+  while (text) {
+    if (state.pasteBuffer !== null) {
+      const end = text.indexOf(BRACKETED_PASTE_END);
+      if (end < 0) {
+        const overlap = longestSuffixPrefix(text, BRACKETED_PASTE_END);
+        state.pasteBuffer += text.slice(0, text.length - overlap);
+        state.pendingEscape = text.slice(text.length - overlap);
+        return tokens;
+      }
+      state.pasteBuffer += text.slice(0, end);
+      tokens.push({ type: "paste", value: state.pasteBuffer });
+      state.pasteBuffer = null;
+      text = text.slice(end + BRACKETED_PASTE_END.length);
+      continue;
+    }
+
+    const start = text.indexOf(BRACKETED_PASTE_START);
+    if (start >= 0) {
+      for (const key of splitInputChunk(text.slice(0, start))) {
+        tokens.push({ type: "key", value: normalizeModifiedEnter(key) });
+      }
+      state.pasteBuffer = "";
+      text = text.slice(start + BRACKETED_PASTE_START.length);
+      continue;
+    }
+
+    const trailing = extractTrailingIncompleteEscape(text);
+    const complete = trailing ? text.slice(0, -trailing.length) : text;
+    for (const key of splitInputChunk(complete)) {
+      tokens.push({ type: "key", value: normalizeModifiedEnter(key) });
+    }
+    state.pendingEscape = trailing;
+    break;
+  }
+  return tokens;
 }
 
 export function splitInputChunk(chunk) {
@@ -288,4 +338,21 @@ function extractTrailingIncompleteEscape(text) {
 function normalizeSs3Key(value) {
   if (!value || value.length < 3) return value;
   return `\x1bO${value.slice(2).toUpperCase()}`;
+}
+
+function longestSuffixPrefix(text, marker) {
+  for (
+    let length = Math.min(text.length, marker.length - 1);
+    length > 0;
+    length -= 1
+  ) {
+    if (text.endsWith(marker.slice(0, length))) return length;
+  }
+  return 0;
+}
+
+function normalizeModifiedEnter(key) {
+  if (key === "\x1b[27;2;13~") return INPUT_KEYS.shiftEnter;
+  if (key === "\x1b[27;5;13~") return INPUT_KEYS.ctrlEnter;
+  return key;
 }

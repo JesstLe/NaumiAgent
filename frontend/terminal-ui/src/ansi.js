@@ -4,6 +4,8 @@ export const ANSI = {
   showCursor: "\x1b[?25h",
   altOn: "\x1b[?1049h",
   altOff: "\x1b[?1049l",
+  bracketedPasteOn: "\x1b[?2004h",
+  bracketedPasteOff: "\x1b[?2004l",
   reset: "\x1b[0m",
   dim: "\x1b[2m",
   bold: "\x1b[1m",

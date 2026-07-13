@@ -4,6 +4,7 @@ import {
   INPUT_KEYS,
   backspaceInput,
   clearInput,
+  createInputTokenizerState,
   deleteInputForward,
   getInputCursor,
   getInputCursorLocation,
@@ -18,6 +19,7 @@ import {
   setInputText,
   splitInputChunk,
   splitInputStreamChunk,
+  tokenizeInputChunk,
 } from "../src/input-buffer.js";
 import { createInitialState } from "../src/state.js";
 
@@ -193,4 +195,43 @@ test("horizontal editing resets the preferred vertical column", () => {
   moveInputCursor(state, "left");
   assert.equal(moveInputCursorVertical(state, "down"), true);
   assert.deepEqual(getInputCursorLocation(state), { line: 2, column: 1 });
+});
+
+test("bracketed paste is emitted once across arbitrary chunks", () => {
+  const tokenizer = createInputTokenizerState();
+
+  assert.deepEqual(tokenizeInputChunk("\x1b[20", tokenizer), []);
+  assert.deepEqual(tokenizeInputChunk("0~第一行\n", tokenizer), []);
+  assert.deepEqual(tokenizeInputChunk("第二行\x1b[20", tokenizer), []);
+  assert.deepEqual(tokenizeInputChunk("1~", tokenizer), [
+    { type: "paste", value: "第一行\n第二行" },
+  ]);
+  assert.deepEqual(tokenizer, { pendingEscape: "", pasteBuffer: null });
+});
+
+test("text surrounding bracketed paste retains input order", () => {
+  const tokenizer = createInputTokenizerState();
+
+  assert.deepEqual(
+    tokenizeInputChunk("before\x1b[200~middle\ntext\x1b[201~after", tokenizer),
+    [
+      { type: "key", value: "before" },
+      { type: "paste", value: "middle\ntext" },
+      { type: "key", value: "after" },
+    ],
+  );
+});
+
+test("modified enter sequences normalize to explicit composer keys", () => {
+  const tokenizer = createInputTokenizerState();
+
+  assert.deepEqual(
+    tokenizeInputChunk("\x1b[13;2u\x1b[27;5;13~\x1b[27;2;13~\x1b[13;5u", tokenizer),
+    [
+      { type: "key", value: INPUT_KEYS.shiftEnter },
+      { type: "key", value: INPUT_KEYS.ctrlEnter },
+      { type: "key", value: INPUT_KEYS.shiftEnter },
+      { type: "key", value: INPUT_KEYS.ctrlEnter },
+    ],
+  );
 });
