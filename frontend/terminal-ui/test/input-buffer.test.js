@@ -6,8 +6,12 @@ import {
   clearInput,
   deleteInputForward,
   getInputCursor,
+  getInputCursorLocation,
+  insertInputNewline,
   insertInputText,
   moveInputCursor,
+  moveInputCursorToLineBoundary,
+  moveInputCursorVertical,
   navigateInputHistory,
   rememberSubmittedInput,
   renderInputWithCursor,
@@ -142,4 +146,51 @@ test("input buffer clamps cursor and clears both text and cursor", () => {
   clearInput(state);
   assert.equal(state.input, "");
   assert.equal(state.inputCursor, 0);
+});
+
+test("multiline input inserts a newline at the unicode cursor", () => {
+  const state = createInitialState();
+  setInputText(state, "第一行第二行", 3);
+
+  insertInputNewline(state);
+
+  assert.equal(state.input, "第一行\n第二行");
+  assert.equal(getInputCursor(state), 4);
+  assert.deepEqual(getInputCursorLocation(state), { line: 1, column: 0 });
+});
+
+test("vertical cursor movement preserves the preferred column across short lines", () => {
+  const state = createInitialState();
+  setInputText(state, "abcd\n你我\n12345", 3);
+
+  assert.equal(moveInputCursorVertical(state, "down"), true);
+  assert.deepEqual(getInputCursorLocation(state), { line: 1, column: 2 });
+  assert.equal(moveInputCursorVertical(state, "down"), true);
+  assert.deepEqual(getInputCursorLocation(state), { line: 2, column: 3 });
+  assert.equal(moveInputCursorVertical(state, "down"), false);
+});
+
+test("line boundaries differ from whole-buffer home and end", () => {
+  const state = createInitialState();
+  setInputText(state, "alpha\nbeta\ngamma", 8);
+
+  moveInputCursorToLineBoundary(state, "start");
+  assert.deepEqual(getInputCursorLocation(state), { line: 1, column: 0 });
+  moveInputCursorToLineBoundary(state, "end");
+  assert.deepEqual(getInputCursorLocation(state), { line: 1, column: 4 });
+
+  moveInputCursor(state, "home");
+  assert.equal(getInputCursor(state), 0);
+  moveInputCursor(state, "end");
+  assert.equal(getInputCursor(state), Array.from(state.input).length);
+});
+
+test("horizontal editing resets the preferred vertical column", () => {
+  const state = createInitialState();
+  setInputText(state, "abcd\n你我\n12345", 3);
+  moveInputCursorVertical(state, "down");
+
+  moveInputCursor(state, "left");
+  assert.equal(moveInputCursorVertical(state, "down"), true);
+  assert.deepEqual(getInputCursorLocation(state), { line: 2, column: 1 });
 });
