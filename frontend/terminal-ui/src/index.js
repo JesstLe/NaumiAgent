@@ -114,7 +114,7 @@ function main() {
       const ignored = isIgnorableBridgeStderr(text);
       debugLog?.log("bridge.stderr", { text, ignored });
       if (!ignored) {
-        pushSystemMessage(state, "bridge stderr", text, "warning");
+        pushSystemMessage(state, "bridge stderr", text, "warning", { dismissWelcome: true });
       }
     }
   });
@@ -124,7 +124,13 @@ function main() {
       code: "bridge_write_failed",
       message: "无法写入本地 Bridge，请检查后端进程后重试。",
     });
-    pushSystemMessage(state, "bridge stdin", `本地 Bridge 写入失败: ${error.message}`, "error");
+    pushSystemMessage(
+      state,
+      "bridge stdin",
+      `本地 Bridge 写入失败: ${error.message}`,
+      "error",
+      { dismissWelcome: true },
+    );
     persistUiSnapshot();
     scheduleRedraw();
   });
@@ -135,7 +141,13 @@ function main() {
         code: "bridge_disconnected",
         message: "本地 Bridge 已断开，请重启后重试。",
       });
-      pushSystemMessage(state, "bridge exit", `后端桥接已退出 code=${code} signal=${signal}`, "error");
+      pushSystemMessage(
+        state,
+        "bridge exit",
+        `后端桥接已退出 code=${code} signal=${signal}`,
+        "error",
+        { dismissWelcome: true },
+      );
       redraw();
     }
     restoreTerminal();
@@ -220,7 +232,7 @@ function handleBridgeLine(line) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     debugLog?.log("protocol.receive.error", { line, error: message });
-    pushSystemMessage(state, "bridge protocol", message, "error");
+    pushSystemMessage(state, "bridge protocol", message, "error", { dismissWelcome: true });
     return;
   }
   debugLog?.log("protocol.receive.record", { type: record.type, request_id: record.request_id, seq: record.seq, payload: record.payload });
@@ -714,7 +726,13 @@ function persistUiSnapshot() {
   try {
     saveUiStateStore(uiStateStore);
   } catch (error) {
-    pushSystemMessage(state, "ui state", `无法保存终端 UI 状态: ${error.message}`, "warning");
+    pushSystemMessage(
+      state,
+      "ui state",
+      `无法保存终端 UI 状态: ${error.message}`,
+      "warning",
+      { dismissWelcome: true },
+    );
   }
 }
 
@@ -726,7 +744,13 @@ function scheduleUiSnapshotPersist() {
     try {
       saveUiStateStore(uiStateStore);
     } catch (error) {
-      pushSystemMessage(state, "ui state", `无法保存终端 UI 状态: ${error.message}`, "warning");
+      pushSystemMessage(
+        state,
+        "ui state",
+        `无法保存终端 UI 状态: ${error.message}`,
+        "warning",
+        { dismissWelcome: true },
+      );
       scheduleRedraw();
     }
   }, 100);
