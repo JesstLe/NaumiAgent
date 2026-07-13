@@ -29,7 +29,9 @@ from naumi_agent.orchestrator.subagent_manager import SubTask
 from naumi_agent.safety.budget import TokenBudget
 from naumi_agent.safety.permissions import (
     PermissionChecker,
+    PermissionDecision,
     PermissionMode,
+    PermissionOutcome,
     PermissionReasonCode,
 )
 from naumi_agent.tasks.models import TaskStatus
@@ -479,6 +481,130 @@ class TestReset:
         engine.reset()
         assert engine._usage.total_input_tokens == 0
 
+    @pytest.mark.asyncio
+    async def test_reset_clears_permission_grants_for_the_active_session(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        grant = engine._permission_grant_store.create(
+            session.id,
+            "shell",
+            "reset-call",
+        )
+
+        engine.reset()
+
+        assert engine.list_permission_grants() == ()
+        assert engine._permission_grant_store.list_session(session.id) == ()
+        revocations = [
+            record
+            for record in engine.get_recent_permission_bubbles(limit=50)
+            if record["status"] == "grant_revoked"
+        ]
+        assert len(revocations) == 1
+        assert revocations[0]["grant_id"] == grant.grant_id
+        assert revocations[0]["tool_family"] == "shell"
+        assert revocations[0]["session_id"] == session.id
+        assert isinstance(revocations[0]["timestamp"], float)
+        assert revocations[0]["reason"]
+        assert revocations[0]["source"] == "reset"
+
+
+class TestPermissionGrantRevocationAudit:
+    @staticmethod
+    def _assert_revocation(
+        record: dict[str, object],
+        *,
+        grant_id: str,
+        tool_family: str,
+        session_id: str,
+        source: str,
+    ) -> None:
+        assert record["status"] == "grant_revoked"
+        assert record["grant_id"] == grant_id
+        assert record["tool_family"] == tool_family
+        assert record["session_id"] == session_id
+        assert isinstance(record["timestamp"], float)
+        assert record["reason"]
+        assert record["source"] == source
+
+    @pytest.mark.asyncio
+    async def test_explicit_revoke_records_the_removed_grant_with_bounded_history(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        grant = engine._permission_grant_store.create(
+            session.id,
+            "shell",
+            "explicit-call",
+        )
+        engine._permission_bubble_history = [
+            {"status": "existing", "timestamp": float(index)}
+            for index in range(100)
+        ]
+
+        assert engine.revoke_permission_grant(grant.grant_id) is True
+
+        history = engine.get_recent_permission_bubbles(limit=50)
+        assert len(engine._permission_bubble_history) == 100
+        self._assert_revocation(
+            history[-1],
+            grant_id=grant.grant_id,
+            tool_family="shell",
+            session_id=session.id,
+            source="explicit_revoke",
+        )
+
+    @pytest.mark.asyncio
+    async def test_revoke_all_records_each_removed_grant(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        shell = engine._permission_grant_store.create(session.id, "shell", "shell-call")
+        background = engine._permission_grant_store.create(
+            session.id,
+            "background_process",
+            "background-call",
+        )
+
+        assert engine.revoke_all_permission_grants() == 2
+
+        revocations = [
+            record
+            for record in engine.get_recent_permission_bubbles(limit=50)
+            if record["status"] == "grant_revoked"
+        ]
+        assert len(revocations) == 2
+        self._assert_revocation(
+            revocations[0],
+            grant_id=shell.grant_id,
+            tool_family="shell",
+            session_id=session.id,
+            source="revoke_all",
+        )
+        self._assert_revocation(
+            revocations[1],
+            grant_id=background.grant_id,
+            tool_family="background_process",
+            session_id=session.id,
+            source="revoke_all",
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_revocation_audit_is_created_when_no_grant_is_removed(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        await engine.get_or_create_session()
+
+        assert engine.revoke_permission_grant("missing-grant") is False
+        assert engine.revoke_all_permission_grants() == 0
+
+        assert engine.get_recent_permission_bubbles(limit=50) == []
+
 
 class TestContextVisualPayloads:
     @pytest.mark.asyncio
@@ -714,6 +840,970 @@ class TestSessionLoading:
         assert engine._messages[-1]["tool_call_id"] == "call_1"
         await engine.shutdown()
 
+    @pytest.mark.asyncio
+    async def test_load_session_revokes_previous_session_permission_grants(
+        self,
+        tmp_path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        try:
+            previous = await engine.get_or_create_session()
+            previous_grant = engine._permission_grant_store.create(
+                previous.id,
+                "shell",
+                "previous-call",
+            )
+            replacement = await engine.session_store.create_session(title="replacement")
+
+            assert await engine.load_session(replacement.id) is True
+            assert engine.list_permission_grants() == ()
+            assert engine._permission_grant_store.list_session(previous.id) == ()
+            revocations = [
+                record
+                for record in engine.get_recent_permission_bubbles(limit=50)
+                if record["status"] == "grant_revoked"
+            ]
+            assert len(revocations) == 1
+            TestPermissionGrantRevocationAudit._assert_revocation(
+                revocations[0],
+                grant_id=previous_grant.grant_id,
+                tool_family="shell",
+                session_id=previous.id,
+                source="session_load",
+            )
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_delete_transition_blocks_session_grant_while_persistence_is_pending(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        delete_task: asyncio.Task[bool] | None = None
+        marker = tmp_path / "delete-transition-tool-ran"
+        try:
+            active = await engine.get_or_create_session()
+            engine._permission_grant_store.create(active.id, "shell", "active-grant")
+            original_delete = engine.session_store.delete
+
+            async def delayed_delete(session_id: str) -> bool:
+                entered.set()
+                await release.wait()
+                return await original_delete(session_id)
+
+            engine.session_store.delete = delayed_delete  # type: ignore[method-assign]
+            confirmations: list[dict[str, object]] = []
+
+            async def confirm(payload: dict[str, object]) -> str:
+                confirmations.append(payload)
+                return "allow_once"
+
+            engine.set_permission_confirmer(confirm)
+            delete_task = asyncio.create_task(engine.delete_session(active.id))
+            await entered.wait()
+
+            assert engine._permission_grant_store.allows(active.id, "shell") is True
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="delete-transition-tool",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "error"
+            assert "会话正在切换" in result.content
+            assert confirmations == []
+            assert not marker.exists()
+
+            release.set()
+            assert await delete_task is True
+        finally:
+            release.set()
+            if delete_task is not None and not delete_task.done():
+                await delete_task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_load_transition_blocks_session_grant_while_persistence_is_pending(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        load_task: asyncio.Task[bool] | None = None
+        marker = tmp_path / "load-transition-tool-ran"
+        try:
+            active = await engine.get_or_create_session()
+            engine._permission_grant_store.create(active.id, "shell", "active-grant")
+            replacement = await engine.session_store.create_session(title="replacement")
+            original_load = engine.session_store.load
+
+            async def delayed_load(session_id: str) -> Session | None:
+                entered.set()
+                await release.wait()
+                return await original_load(session_id)
+
+            engine.session_store.load = delayed_load  # type: ignore[method-assign]
+            confirmations: list[dict[str, object]] = []
+
+            async def confirm(payload: dict[str, object]) -> str:
+                confirmations.append(payload)
+                return "allow_once"
+
+            engine.set_permission_confirmer(confirm)
+            load_task = asyncio.create_task(engine.load_session(replacement.id))
+            await entered.wait()
+
+            assert engine._permission_grant_store.allows(active.id, "shell") is True
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="load-transition-tool",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "error"
+            assert "会话正在切换" in result.content
+            assert confirmations == []
+            assert not marker.exists()
+
+            release.set()
+            assert await load_task is True
+            assert engine._session is not None
+            assert engine._session.id == replacement.id
+            assert engine._permission_grant_store.list_session(active.id) == ()
+        finally:
+            release.set()
+            if load_task is not None and not load_task.done():
+                await load_task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_failed_delete_clears_transition_and_preserves_active_grant(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        delete_task: asyncio.Task[bool] | None = None
+        marker = tmp_path / "failed-delete-tool-ran"
+        try:
+            active = await engine.get_or_create_session()
+            grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "active-grant",
+            )
+
+            async def failed_delete(_: str) -> bool:
+                entered.set()
+                await release.wait()
+                return False
+
+            engine.session_store.delete = failed_delete  # type: ignore[method-assign]
+            confirmations: list[dict[str, object]] = []
+
+            async def confirm(payload: dict[str, object]) -> str:
+                confirmations.append(payload)
+                return "allow_once"
+
+            engine.set_permission_confirmer(confirm)
+            delete_task = asyncio.create_task(engine.delete_session(active.id))
+            await entered.wait()
+
+            release.set()
+            assert await delete_task is False
+            assert engine._session is active
+            assert engine._permission_grant_store.list_session(active.id) == (grant,)
+            assert engine._session_transition_epochs == {}
+
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="failed-delete-tool",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "success"
+            assert marker.exists()
+            assert confirmations == []
+        finally:
+            release.set()
+            if delete_task is not None and not delete_task.done():
+                await delete_task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_failed_load_clears_transition_and_preserves_active_grant(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        load_task: asyncio.Task[bool] | None = None
+        marker = tmp_path / "failed-load-tool-ran"
+        try:
+            active = await engine.get_or_create_session()
+            grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "active-grant",
+            )
+
+            async def failed_load(_: str) -> Session | None:
+                entered.set()
+                await release.wait()
+                return None
+
+            engine.session_store.load = failed_load  # type: ignore[method-assign]
+            confirmations: list[dict[str, object]] = []
+
+            async def confirm(payload: dict[str, object]) -> str:
+                confirmations.append(payload)
+                return "allow_once"
+
+            engine.set_permission_confirmer(confirm)
+            load_task = asyncio.create_task(engine.load_session("missing-session"))
+            await entered.wait()
+
+            release.set()
+            assert await load_task is False
+            assert engine._session is active
+            assert engine._permission_grant_store.list_session(active.id) == (grant,)
+            assert engine._session_transition_epochs == {}
+
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="failed-load-tool",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "success"
+            assert marker.exists()
+            assert confirmations == []
+        finally:
+            release.set()
+            if load_task is not None and not load_task.done():
+                await load_task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_delete_clears_transition_and_preserves_active_grant(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        delete_task: asyncio.Task[bool] | None = None
+        try:
+            active = await engine.get_or_create_session()
+            grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "active-grant",
+            )
+
+            async def delayed_delete(_: str) -> bool:
+                entered.set()
+                await release.wait()
+                return True
+
+            engine.session_store.delete = delayed_delete  # type: ignore[method-assign]
+            delete_task = asyncio.create_task(engine.delete_session(active.id))
+            await entered.wait()
+            delete_task.cancel()
+
+            with pytest.raises(asyncio.CancelledError):
+                await delete_task
+
+            assert engine._session is active
+            assert engine._permission_grant_store.list_session(active.id) == (grant,)
+            assert engine._session_transition_epochs == {}
+        finally:
+            release.set()
+            if delete_task is not None and not delete_task.done():
+                await delete_task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_delete_after_commit_reconciles_active_session_authority(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        committed = asyncio.Event()
+        release_delete_result = asyncio.Event()
+        confirmation_started = asyncio.Event()
+        release_confirmation = asyncio.Event()
+        delete_task: asyncio.Task[bool] | None = None
+        pending_tool_task: asyncio.Task[ToolResult] | None = None
+        marker = tmp_path / "post-commit-pending-confirmation-ran"
+        try:
+            active = await engine.get_or_create_session()
+            initial_generation = engine._session_authorization_generation
+            original_delete = engine.session_store.delete
+
+            async def committed_delete(session_id: str) -> bool:
+                deleted = await original_delete(session_id)
+                committed.set()
+                await release_delete_result.wait()
+                return deleted
+
+            async def confirm(payload: dict[str, object]) -> str:
+                assert payload["session_id"] == active.id
+                confirmation_started.set()
+                await release_confirmation.wait()
+                return "allow_once"
+
+            engine.session_store.delete = committed_delete  # type: ignore[method-assign]
+            engine.set_permission_confirmer(confirm)
+            pending_tool_task = asyncio.create_task(
+                engine._execute_tool(
+                    ToolCall(
+                        id="post-commit-pending-confirmation",
+                        name="bash_run",
+                        arguments=json.dumps(
+                            {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                        ),
+                    )
+                )
+            )
+            await confirmation_started.wait()
+            grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "pre-delete-grant",
+            )
+
+            delete_task = asyncio.create_task(engine.delete_session(active.id))
+            await committed.wait()
+            delete_task.cancel()
+
+            with pytest.raises(asyncio.CancelledError):
+                await delete_task
+
+            assert await engine.session_store.load(active.id) is None
+            assert engine._session is None
+            assert engine._session_authorization_generation == initial_generation + 1
+            assert engine._permission_grant_store.list_session(active.id) == ()
+            revocations = [
+                record
+                for record in engine.get_recent_permission_bubbles(limit=50)
+                if record["status"] == "grant_revoked"
+            ]
+            TestPermissionGrantRevocationAudit._assert_revocation(
+                revocations[-1],
+                grant_id=grant.grant_id,
+                tool_family="shell",
+                session_id=active.id,
+                source="session_deletion",
+            )
+
+            release_confirmation.set()
+            pending_result = await pending_tool_task
+
+            assert pending_result.status == "error"
+            assert "会话已切换" in pending_result.content
+            assert not marker.exists()
+        finally:
+            release_delete_result.set()
+            release_confirmation.set()
+            for task in (delete_task, pending_tool_task):
+                if task is not None and not task.done():
+                    await task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_repeatedly_cancelled_delete_after_commit_finishes_reconciliation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        committed = asyncio.Event()
+        release_delete_result = asyncio.Event()
+        reconciliation_started = asyncio.Event()
+        release_reconciliation = asyncio.Event()
+        confirmation_started = asyncio.Event()
+        release_confirmation = asyncio.Event()
+        delete_task: asyncio.Task[bool] | None = None
+        pending_tool_task: asyncio.Task[ToolResult] | None = None
+        marker = tmp_path / "repeated-cancel-pending-confirmation-ran"
+        try:
+            active = await engine.get_or_create_session()
+            initial_generation = engine._session_authorization_generation
+            original_delete = engine.session_store.delete
+            original_load = engine.session_store.load
+
+            async def committed_delete(session_id: str) -> bool:
+                deleted = await original_delete(session_id)
+                committed.set()
+                await release_delete_result.wait()
+                return deleted
+
+            async def paused_reconciliation_load(session_id: str) -> Session | None:
+                reconciliation_started.set()
+                await release_reconciliation.wait()
+                return await original_load(session_id)
+
+            async def confirm(payload: dict[str, object]) -> str:
+                assert payload["session_id"] == active.id
+                confirmation_started.set()
+                await release_confirmation.wait()
+                return "allow_once"
+
+            engine.session_store.delete = committed_delete  # type: ignore[method-assign]
+            engine.session_store.load = (  # type: ignore[method-assign]
+                paused_reconciliation_load
+            )
+            engine.set_permission_confirmer(confirm)
+            pending_tool_task = asyncio.create_task(
+                engine._execute_tool(
+                    ToolCall(
+                        id="repeated-cancel-pending-confirmation",
+                        name="bash_run",
+                        arguments=json.dumps(
+                            {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                        ),
+                    )
+                )
+            )
+            await asyncio.wait_for(confirmation_started.wait(), timeout=1.0)
+            grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "repeated-cancel-grant",
+            )
+
+            delete_task = asyncio.create_task(engine.delete_session(active.id))
+            await asyncio.wait_for(committed.wait(), timeout=1.0)
+            delete_task.cancel()
+            await asyncio.wait_for(reconciliation_started.wait(), timeout=1.0)
+            delete_task.cancel()
+            await asyncio.sleep(0)
+
+            assert not delete_task.done()
+            release_reconciliation.set()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(delete_task, timeout=1.0)
+
+            assert await original_load(active.id) is None
+            assert engine._session is None
+            assert engine._session_authorization_generation == initial_generation + 1
+            assert engine._permission_grant_store.list_session(active.id) == ()
+            assert engine._session_transition_epochs == {}
+            assert engine._session_transition_tokens == {}
+            revocations = [
+                record
+                for record in engine.get_recent_permission_bubbles(limit=50)
+                if record["status"] == "grant_revoked"
+            ]
+            TestPermissionGrantRevocationAudit._assert_revocation(
+                revocations[-1],
+                grant_id=grant.grant_id,
+                tool_family="shell",
+                session_id=active.id,
+                source="session_deletion",
+            )
+
+            release_confirmation.set()
+            pending_result = await asyncio.wait_for(pending_tool_task, timeout=1.0)
+
+            assert pending_result.status == "error"
+            assert "会话已切换" in pending_result.content
+            assert not marker.exists()
+        finally:
+            release_delete_result.set()
+            release_reconciliation.set()
+            release_confirmation.set()
+            for task in (delete_task, pending_tool_task):
+                if task is not None and not task.done():
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_same_session_load_does_not_begin_transition_or_revoke_grant(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        try:
+            active = await engine.get_or_create_session()
+            grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "active-grant",
+            )
+            original_load = engine.session_store.load
+
+            async def same_session_load(session_id: str) -> Session | None:
+                assert engine._session_transition_epochs == {}
+                return await original_load(session_id)
+
+            engine.session_store.load = same_session_load  # type: ignore[method-assign]
+
+            assert await engine.load_session(active.id) is True
+            assert engine._session is not None
+            assert engine._session.id == active.id
+            assert engine._permission_grant_store.list_session(active.id) == (grant,)
+            assert engine._session_transition_epochs == {}
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_clears_all_permission_grants(self, tmp_path) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        session = await engine.get_or_create_session()
+        grant = engine._permission_grant_store.create(
+            session.id,
+            "shell",
+            "shutdown-call",
+        )
+
+        await engine.shutdown()
+
+        assert engine._permission_grant_store.list_session(session.id) == ()
+        revocations = [
+            record
+            for record in engine.get_recent_permission_bubbles(limit=50)
+            if record["status"] == "grant_revoked"
+        ]
+        assert len(revocations) == 1
+        TestPermissionGrantRevocationAudit._assert_revocation(
+            revocations[0],
+            grant_id=grant.grant_id,
+            tool_family="shell",
+            session_id=session.id,
+            source="shutdown",
+        )
+
+    @pytest.mark.asyncio
+    async def test_delete_active_session_revokes_its_grants_and_invalidates_runtime_state(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        try:
+            active = await engine.get_or_create_session()
+            survivor = await engine.session_store.create_session(title="survivor")
+            active_grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "active-grant",
+            )
+            survivor_grant = engine._permission_grant_store.create(
+                survivor.id,
+                "shell",
+                "survivor-grant",
+            )
+            engine._messages.append({"role": "user", "content": "active context"})
+            engine._full_history.append({"role": "user", "content": "active history"})
+            engine._usage.total_input_tokens = 9
+            engine._permission_checker.check("bash_run", {"command": "printf counted"})
+            engine.task_store.set_session(active.id)
+
+            assert await engine.delete_session(active.id) is True
+
+            assert await engine.session_store.load(active.id) is None
+            assert engine._permission_grant_store.list_session(active.id) == ()
+            assert engine._permission_grant_store.list_session(survivor.id) == (survivor_grant,)
+            assert engine._session is None
+            assert engine._messages == []
+            assert engine._full_history == []
+            assert engine._usage.total_input_tokens == 0
+            assert engine.task_store.session_id == ""
+            assert engine._permission_checker.get_call_counts() == {}
+            revocations = [
+                record
+                for record in engine.get_recent_permission_bubbles(limit=50)
+                if record["status"] == "grant_revoked"
+            ]
+            assert len(revocations) == 1
+            TestPermissionGrantRevocationAudit._assert_revocation(
+                revocations[0],
+                grant_id=active_grant.grant_id,
+                tool_family="shell",
+                session_id=active.id,
+                source="session_deletion",
+            )
+
+            confirmations: list[dict[str, object]] = []
+
+            async def confirm(payload: dict[str, object]) -> str:
+                confirmations.append(payload)
+                return "deny"
+
+            engine.set_permission_confirmer(confirm)
+            fresh = await engine.get_or_create_session()
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="after-deletion",
+                    name="bash_run",
+                    arguments='{"command": "printf should_not_run"}',
+                )
+            )
+
+            assert result.status == "error"
+            assert len(confirmations) == 1
+            assert confirmations[0]["session_id"] == fresh.id
+            assert engine.list_permission_grants() == ()
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_delete_non_active_or_missing_session_preserves_current_runtime_state(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        try:
+            active = await engine.get_or_create_session()
+            other = await engine.session_store.create_session(title="other")
+            active_grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "active-grant",
+            )
+            engine._permission_grant_store.create(other.id, "shell", "other-grant")
+            engine._messages.append({"role": "user", "content": "keep context"})
+            engine._full_history.append({"role": "user", "content": "keep history"})
+            engine.task_store.set_session(active.id)
+
+            assert await engine.delete_session(other.id) is True
+            assert await engine.delete_session("missing-session") is False
+
+            assert engine._session is not None
+            assert engine._session.id == active.id
+            assert engine._messages == [{"role": "user", "content": "keep context"}]
+            assert engine._full_history == [{"role": "user", "content": "keep history"}]
+            assert engine.task_store.session_id == active.id
+            assert engine._permission_grant_store.list_session(active.id) == (active_grant,)
+            assert engine._permission_grant_store.list_session(other.id) == ()
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_delete_active_session_makes_pending_confirmation_stale(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        marker = tmp_path / "deleted-session-tool-ran"
+        try:
+            active = await engine.get_or_create_session()
+
+            async def confirm(payload: dict[str, object]) -> str:
+                assert payload["session_id"] == active.id
+                assert await engine.delete_session(active.id) is True
+                return "allow_once"
+
+            engine.set_permission_confirmer(confirm)
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="delete-during-confirmation",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "error"
+            assert "会话已切换" in result.content
+            assert not marker.exists()
+            assert engine._session is None
+        finally:
+            await engine.shutdown()
+
+
+class TestSessionAuthorizationGeneration:
+    @pytest.mark.asyncio
+    async def test_allow_once_confirmation_does_not_revive_after_session_aba(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        marker = tmp_path / "allow-once-aba-ran"
+        try:
+            original = await engine.get_or_create_session()
+            replacement = await engine.session_store.create_session(title="replacement")
+
+            async def confirm(payload: dict[str, object]) -> str:
+                assert payload["session_id"] == original.id
+                assert await engine.load_session(replacement.id) is True
+                assert await engine.load_session(original.id) is True
+                return "allow_once"
+
+            engine.set_permission_confirmer(confirm)
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="allow-once-aba",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "error"
+            assert "会话已切换" in result.content
+            assert not marker.exists()
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_session_grant_does_not_revive_after_session_aba(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        marker = tmp_path / "grant-aba-ran"
+        try:
+            original = await engine.get_or_create_session()
+            replacement = await engine.session_store.create_session(title="replacement")
+
+            async def confirm(payload: dict[str, object]) -> str:
+                assert payload["session_id"] == original.id
+                assert await engine.load_session(replacement.id) is True
+                assert await engine.load_session(original.id) is True
+                return "grant_session"
+
+            engine.set_permission_confirmer(confirm)
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="grant-aba",
+                    name="bash_run",
+                    arguments=json.dumps(
+                        {"command": f"printf ran > {shlex.quote(str(marker))}"}
+                    ),
+                )
+            )
+
+            assert result.status == "error"
+            assert "会话已切换" in result.content
+            assert not marker.exists()
+            assert engine._permission_grant_store.list_session(original.id) == ()
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_serialized_concurrent_loads_keep_newer_transition_fence(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        first_entered = asyncio.Event()
+        first_release = asyncio.Event()
+        second_entered = asyncio.Event()
+        second_release = asyncio.Event()
+        first_load: asyncio.Task[bool] | None = None
+        second_load: asyncio.Task[bool] | None = None
+        try:
+            await engine.get_or_create_session()
+            intermediate = await engine.session_store.create_session(title="intermediate")
+            final = await engine.session_store.create_session(title="final")
+            real_load = engine.session_store.load
+
+            async def gated_load(session_id: str) -> Session | None:
+                if session_id == intermediate.id:
+                    first_entered.set()
+                    await first_release.wait()
+                elif session_id == final.id:
+                    second_entered.set()
+                    await second_release.wait()
+                return await real_load(session_id)
+
+            engine.session_store.load = gated_load  # type: ignore[method-assign]
+            first_load = asyncio.create_task(engine.load_session(intermediate.id))
+            await first_entered.wait()
+            second_load = asyncio.create_task(engine.load_session(final.id))
+            await asyncio.sleep(0)
+
+            first_release.set()
+            await second_entered.wait()
+            assert await first_load is True
+            assert engine._session is not None
+            assert engine._session.id == intermediate.id
+
+            intermediate_grant = engine._permission_grant_store.create(
+                intermediate.id,
+                "shell",
+                "intermediate-grant",
+            )
+            blocked = await engine._execute_tool(
+                ToolCall(
+                    id="blocked-while-newer-load-pending",
+                    name="bash_run",
+                    arguments='{"command": "printf must_not_run"}',
+                )
+            )
+            assert blocked.status == "error"
+            assert "会话正在切换" in blocked.content
+
+            second_release.set()
+            assert await second_load is True
+            assert engine._session is not None
+            assert engine._session.id == final.id
+            assert engine._permission_grant_store.list_session(intermediate.id) == ()
+            assert intermediate_grant.grant_id
+        finally:
+            first_release.set()
+            second_release.set()
+            for task in (first_load, second_load):
+                if task is not None and not task.done():
+                    await task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_cancelling_queued_load_does_not_clear_running_load_fence(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        engine = AgentEngine(
+            AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        running_load: asyncio.Task[bool] | None = None
+        queued_load: asyncio.Task[bool] | None = None
+        try:
+            active = await engine.get_or_create_session()
+            first_target = await engine.session_store.create_session(title="first")
+            second_target = await engine.session_store.create_session(title="second")
+            real_load = engine.session_store.load
+
+            async def gated_load(session_id: str) -> Session | None:
+                if session_id == first_target.id:
+                    entered.set()
+                    await release.wait()
+                return await real_load(session_id)
+
+            engine.session_store.load = gated_load  # type: ignore[method-assign]
+            running_load = asyncio.create_task(engine.load_session(first_target.id))
+            await entered.wait()
+            queued_load = asyncio.create_task(engine.load_session(second_target.id))
+            await asyncio.sleep(0)
+            queued_load.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await queued_load
+
+            result = await engine._execute_tool(
+                ToolCall(
+                    id="blocked-after-queued-cancel",
+                    name="bash_run",
+                    arguments='{"command": "printf must_not_run"}',
+                )
+            )
+            assert result.status == "error"
+            assert "会话正在切换" in result.content
+            assert engine._session is active
+
+            release.set()
+            assert await running_load is True
+        finally:
+            release.set()
+            for task in (running_load, queued_load):
+                if task is not None and not task.done():
+                    await task
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_engine_uses_permission_outcome_when_compatibility_booleans_disagree(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        await engine.get_or_create_session()
+        allow = PermissionDecision(
+            allowed=False,
+            requires_confirmation=True,
+            outcome=PermissionOutcome.ALLOW,
+        )
+        block = PermissionDecision(
+            allowed=True,
+            reason="outcome block",
+            requires_confirmation=False,
+            outcome=PermissionOutcome.BLOCK,
+        )
+        with patch.object(
+            engine._permission_checker,
+            "check",
+            side_effect=[allow, block],
+        ):
+            allowed_result = await engine._execute_tool(
+                ToolCall(
+                    id="outcome-allow",
+                    name="bash_run",
+                    arguments='{"command": "printf outcome_allow"}',
+                )
+            )
+            blocked_result = await engine._execute_tool(
+                ToolCall(
+                    id="outcome-block",
+                    name="bash_run",
+                    arguments='{"command": "printf outcome_block"}',
+                )
+            )
+
+        assert allowed_result.status == "success"
+        assert "outcome_allow" in allowed_result.content
+        assert blocked_result.status == "error"
+        assert "outcome block" in blocked_result.content
+
 
 class TestToolCallParsing:
     def test_valid_tool_call(self, engine: AgentEngine) -> None:
@@ -753,7 +1843,7 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     async def test_decoded_dict_args_execute_normally(self, engine: AgentEngine) -> None:
-        engine._permission_checker = PermissionChecker(PermissionMode.BYPASS)
+        engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
         tc = ToolCall(
             id="x",
             name="file_read",
@@ -853,34 +1943,378 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     async def test_confirmation_callback_allows_tool_once(self, engine: AgentEngine) -> None:
+        session = await engine.get_or_create_session()
         payloads: list[dict[str, object]] = []
+        events: list[tuple[str, dict[str, object]]] = []
 
         async def confirm(payload: dict[str, object]) -> str:
             payloads.append(payload)
             return "allow"
 
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
         engine.set_permission_confirmer(confirm)
         tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo confirm_ok"}')
-        result = await engine._execute_tool(tc)
+        result = await engine._execute_tool(tc, on_event=on_event)
 
         assert result.status == "success"
         assert "confirm_ok" in result.content
         assert payloads
         assert payloads[0]["tool_name"] == "bash_run"
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", session.id),
+            ("confirmed", session.id),
+        ]
 
     @pytest.mark.asyncio
-    async def test_confirmation_callback_can_enable_bypass(self, engine: AgentEngine) -> None:
+    async def test_legacy_bypass_grants_only_the_current_session_tool_family(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        payloads: list[dict[str, object]] = []
+        events: list[tuple[str, dict[str, object]]] = []
+
         async def confirm(payload: dict[str, object]) -> str:
+            payloads.append(payload)
             return "bypass"
 
-        engine.set_permission_confirmer(confirm)
-        tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo bypass_now"}')
-        result = await engine._execute_tool(tc)
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
 
-        assert result.status == "success"
-        assert "bypass_now" in result.content
-        assert engine.permission_mode == PermissionMode.BYPASS
+        engine.set_permission_confirmer(confirm)
+        first = await engine._execute_tool(
+            ToolCall(
+                id="shell-1",
+                name="bash_run",
+                arguments='{"command": "printf first"}',
+            ),
+            on_event=on_event,
+        )
+        second = await engine._execute_tool(
+            ToolCall(
+                id="shell-2",
+                name="bash_run",
+                arguments='{"command": "printf second"}',
+            )
+        )
+
+        assert first.status == "success"
+        assert second.status == "success"
+        assert len(payloads) == 1
+        assert payloads[0]["session_id"] == session.id
+        assert payloads[0]["tool_family"] == "shell"
+        assert payloads[0]["choices"] == ["allow_once", "deny", "grant_session"]
+        assert payloads[0]["scope"] == "session"
+        assert payloads[0]["expires_at"] is None
+        assert payloads[0]["requires_double_confirm"] is False
+        assert engine.runtime_mode == AgentRuntimeMode.DEFAULT
+        assert engine.permission_mode == PermissionMode.MODERATE
+        grants = engine.list_permission_grants()
+        assert len(grants) == 1
+        assert grants[0].session_id == session.id
+        assert grants[0].tool_family == "shell"
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", session.id),
+            ("session_granted", session.id),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_explicitly_revoked_shell_grant_requires_confirmation_again(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        await engine.get_or_create_session()
+        confirmations: list[dict[str, object]] = []
+        responses = iter(["grant_session", "allow_once"])
+
+        async def confirm(payload: dict[str, object]) -> str:
+            confirmations.append(payload)
+            return next(responses)
+
+        engine.set_permission_confirmer(confirm)
+        first = await engine._execute_tool(
+            ToolCall(
+                id="first-shell",
+                name="bash_run",
+                arguments='{"command": "printf first"}',
+            )
+        )
+        grants = engine.list_permission_grants()
+
+        assert first.status == "success"
+        assert len(grants) == 1
+        assert engine.revoke_permission_grant(grants[0].grant_id) is True
+
+        second = await engine._execute_tool(
+            ToolCall(
+                id="second-shell",
+                name="bash_run",
+                arguments='{"command": "printf second"}',
+            )
+        )
+
+        assert second.status == "success"
+        assert len(confirmations) == 2
+        assert all(payload["tool_family"] == "shell" for payload in confirmations)
+
+    @pytest.mark.asyncio
+    async def test_permission_grant_does_not_match_another_tool_family(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        await engine.get_or_create_session()
+        payloads: list[dict[str, object]] = []
+        responses = iter(["grant_session", "deny"])
+
+        async def confirm(payload: dict[str, object]) -> str:
+            payloads.append(payload)
+            return next(responses)
+
+        engine.set_permission_confirmer(confirm)
+        shell = await engine._execute_tool(
+            ToolCall(
+                id="shell-1",
+                name="bash_run",
+                arguments='{"command": "printf shell"}',
+            )
+        )
+        background = await engine._execute_tool(
+            ToolCall(
+                id="background-1",
+                name="background_run",
+                arguments='{"command": "printf background"}',
+            )
+        )
+
+        assert shell.status == "success"
+        assert background.status == "error"
+        assert len(payloads) == 2
+        assert payloads[1]["tool_family"] == "background_process"
+        assert engine.list_permission_grants()[0].tool_family == "shell"
+
+    @pytest.mark.asyncio
+    async def test_grant_session_without_an_active_session_is_denied(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def confirm(payload: dict[str, object]) -> str:
+            assert payload["session_id"] == ""
+            assert payload["choices"] == ["allow_once", "deny"]
+            assert payload["scope"] == "call"
+            return "grant_session"
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        engine.set_permission_confirmer(confirm)
+        result = await engine._execute_tool(
+            ToolCall(
+                id="no-session",
+                name="bash_run",
+                arguments='{"command": "printf should_not_run"}',
+            ),
+            on_event=on_event,
+        )
+
+        assert result.status == "error"
+        assert "没有活动会话" in result.content
+        assert engine.list_permission_grants() == ()
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", ""),
+            ("grant_rejected", ""),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_grant_session_is_rejected_when_the_session_changes_during_confirmation(
+        self,
+        engine: AgentEngine,
+        tmp_path: Path,
+    ) -> None:
+        original = await engine.get_or_create_session()
+        replacement = await engine.session_store.create_session(title="replacement")
+        marker = tmp_path / "grant-session-ran"
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def confirm(payload: dict[str, object]) -> str:
+            assert payload["session_id"] == original.id
+            assert await engine.load_session(replacement.id) is True
+            return "grant_session"
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        engine.set_permission_confirmer(confirm)
+        result = await engine._execute_tool(
+            ToolCall(
+                id="session-changed",
+                name="bash_run",
+                arguments=json.dumps({"command": f"printf ran > {shlex.quote(str(marker))}"}),
+            ),
+            on_event=on_event,
+        )
+
+        assert result.status == "error"
+        assert "会话已切换" in result.content
+        assert not marker.exists()
+        assert engine._permission_grant_store.list_session(original.id) == ()
+        assert engine._permission_grant_store.list_session(replacement.id) == ()
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", original.id),
+            ("grant_rejected", original.id),
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("response", ["allow", "allow_once"])
+    async def test_stale_allow_confirmation_is_rejected_before_bash_execution(
+        self,
+        engine: AgentEngine,
+        tmp_path: Path,
+        response: str,
+    ) -> None:
+        original = await engine.get_or_create_session()
+        replacement = await engine.session_store.create_session(title="replacement")
+        marker = tmp_path / f"stale-{response}-ran"
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def confirm(payload: dict[str, object]) -> str:
+            assert payload["session_id"] == original.id
+            assert await engine.load_session(replacement.id) is True
+            return response
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        engine.set_permission_confirmer(confirm)
+        result = await engine._execute_tool(
+            ToolCall(
+                id=f"stale-{response}",
+                name="bash_run",
+                arguments=json.dumps({"command": f"printf ran > {shlex.quote(str(marker))}"}),
+            ),
+            on_event=on_event,
+        )
+
+        assert result.status == "error"
+        assert "会话已切换" in result.content
+        assert not marker.exists()
+        assert engine._permission_grant_store.list_session(original.id) == ()
+        assert engine._permission_grant_store.list_session(replacement.id) == ()
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", original.id),
+            ("confirmed", original.id),
+            ("stale_confirmation_rejected", original.id),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_reset_during_allow_once_confirmation_stops_bash_execution(
+        self,
+        engine: AgentEngine,
+        tmp_path: Path,
+    ) -> None:
+        original = await engine.get_or_create_session()
+        marker = tmp_path / "reset-confirmation-ran"
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def confirm(payload: dict[str, object]) -> str:
+            assert payload["session_id"] == original.id
+            engine.reset()
+            return "allow_once"
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        engine.set_permission_confirmer(confirm)
+        result = await engine._execute_tool(
+            ToolCall(
+                id="reset-confirmation",
+                name="bash_run",
+                arguments=json.dumps({"command": f"printf ran > {shlex.quote(str(marker))}"}),
+            ),
+            on_event=on_event,
+        )
+
+        assert result.status == "error"
+        assert "会话已切换" in result.content
+        assert not marker.exists()
+        assert engine._permission_grant_store.list_session(original.id) == ()
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", original.id),
+            ("confirmed", original.id),
+            ("stale_confirmation_rejected", original.id),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_high_risk_legacy_bypass_is_rejected_without_creating_a_grant(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        await engine.get_or_create_session()
+        payloads: list[dict[str, object]] = []
+
+        async def confirm(payload: dict[str, object]) -> str:
+            payloads.append(payload)
+            return "bypass"
+
+        engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
+        engine.set_permission_confirmer(confirm)
+        result = await engine._execute_tool(
+            ToolCall(
+                id="high-risk",
+                name="session_delete",
+                arguments='{"session_id": "missing-session"}',
+            )
+        )
+
+        assert result.status == "error"
+        assert "不支持本会话授权" in result.content
+        assert payloads[0]["choices"] == ["allow_once", "deny"]
+        assert payloads[0]["scope"] == "call"
+        assert payloads[0]["requires_double_confirm"] is True
+        assert engine.list_permission_grants() == ()
         assert engine.runtime_mode == AgentRuntimeMode.BYPASS
+        assert engine.permission_mode == PermissionMode.BYPASS
+
+    @pytest.mark.asyncio
+    async def test_current_session_permission_grant_apis_cannot_touch_other_sessions(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        current = engine._permission_grant_store.create(
+            session.id,
+            "shell",
+            "current-call",
+        )
+        other = engine._permission_grant_store.create(
+            "another-session",
+            "shell",
+            "other-call",
+        )
+
+        assert engine.list_permission_grants() == (current,)
+        assert engine.revoke_permission_grant(other.grant_id) is False
+        assert engine.revoke_permission_grant(current.grant_id) is True
+        assert engine.list_permission_grants() == ()
+
+        engine._permission_grant_store.create(session.id, "shell", "shell-call")
+        engine._permission_grant_store.create(
+            session.id,
+            "background_process",
+            "background-call",
+        )
+        assert engine.revoke_all_permission_grants() == 2
+        assert engine.list_permission_grants() == ()
+        assert engine._permission_grant_store.list_session("another-session") == (other,)
 
     @pytest.mark.asyncio
     async def test_plan_runtime_mode_blocks_write_tools(
@@ -954,15 +2388,26 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     async def test_confirmation_callback_denies_tool(self, engine: AgentEngine) -> None:
+        session = await engine.get_or_create_session()
+        events: list[tuple[str, dict[str, object]]] = []
+
         async def confirm(payload: dict[str, object]) -> str:
             return "deny"
 
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
         engine.set_permission_confirmer(confirm)
         tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo denied"}')
-        result = await engine._execute_tool(tc)
+        result = await engine._execute_tool(tc, on_event=on_event)
 
         assert result.status == "error"
         assert "用户已拒绝" in result.content
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", session.id),
+            ("denied", session.id),
+        ]
 
     @pytest.mark.asyncio
     async def test_top_level_permission_bubble_emitted_for_confirmation(
@@ -988,18 +2433,18 @@ class TestToolExecution:
         assert bubbles[0]["status"] == "needs_confirmation"
         assert bubbles[0]["call_id"] == "x"
         assert bubbles[0]["session_id"] == engine._session.id
-        assert bubbles[0]["risk_level"] == "low"
+        assert bubbles[0]["risk_level"] == "medium"
 
     @pytest.mark.asyncio
     async def test_bypass_mode_runs_confirmation_tool(self, engine: AgentEngine) -> None:
-        engine._permission_checker = PermissionChecker(PermissionMode.BYPASS)
+        engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
         tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo bypass_ok"}')
         result = await engine._execute_tool(tc)
         assert result.status == "success"
         assert "bypass_ok" in result.content
 
     @pytest.mark.asyncio
-    async def test_bypass_mode_runs_dangerous_shell_command(
+    async def test_bypass_mode_blocks_dangerous_shell_command(
         self,
         engine: AgentEngine,
         tmp_path: Path,
@@ -1018,9 +2463,9 @@ class TestToolExecution:
 
         result = await engine._execute_tool(tc)
 
-        assert result.status == "success"
-        assert "removed" in result.content
-        assert not target.exists()
+        assert result.status == "error"
+        assert "高风险模式" in result.content
+        assert target.exists()
 
     @pytest.mark.asyncio
     async def test_task_create_tool_passes_permission_layer(self, tmp_path) -> None:
