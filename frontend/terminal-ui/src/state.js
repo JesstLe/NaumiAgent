@@ -189,6 +189,10 @@ export function createInitialState() {
     },
     mode: "default",
     status: {},
+    welcome: {
+      phase: "booting",
+      dismissed: false,
+    },
     showReasoning: false,
     slashCommands: DEFAULT_SLASH_COMMAND_CANDIDATES,
     slashCompletion: {
@@ -273,6 +277,13 @@ export function createInitialState() {
   };
 }
 
+export function dismissWelcome(state) {
+  if (!state.welcome || state.welcome.dismissed) return false;
+  state.welcome.phase = "dismissed";
+  state.welcome.dismissed = true;
+  return true;
+}
+
 export function reduceServerEvent(state, record) {
   const payload = record.payload ?? {};
   switch (record.type) {
@@ -287,7 +298,7 @@ export function reduceServerEvent(state, record) {
     case "ready":
       state.bridgeReady = true;
       mergeStatus(state, payload);
-      pushSystemMessage(state, "ready", "新终端 UI 已连接 Python bridge。", "info");
+      if (!state.welcome.dismissed) state.welcome.phase = "ready_empty";
       break;
     case "debug/trace":
       state.debugTrace = payload;
@@ -308,6 +319,7 @@ export function reduceServerEvent(state, record) {
         return maybeRefreshPinnedTaskPanel(state);
       }
     case "user/message":
+      dismissWelcome(state);
       if (!acceptUserMessage(state, record.request_id, payload.content ?? "")) {
         appendAcceptedUserMessage(state, payload.content ?? "", record.request_id);
       }
@@ -315,6 +327,7 @@ export function reduceServerEvent(state, record) {
       break;
     case "task/created":
       {
+        dismissWelcome(state);
         const message = acceptUserMessage(state, record.request_id);
         const taskId = String(payload.task?.id ?? payload.issue?.task_id ?? "");
         const missionId = String(payload.mission?.id ?? payload.issue?.mission_id ?? "");
@@ -512,6 +525,7 @@ export function reduceServerEvent(state, record) {
       moveCompletionReceiptToEnd(state, payload.receipt_id, payload.run_id);
       return terminalRunActions(state, payload);
     case "session/replayed":
+      dismissWelcome(state);
       jumpTimelineToLatest(state);
       state.currentSessionId = payload.session_id || state.currentSessionId;
       state.running = false;
@@ -538,6 +552,7 @@ export function reduceServerEvent(state, record) {
       pushSystemMessage(state, "resume", `已恢复会话: ${payload.title ?? payload.session_id}`, "info");
       return [{ type: "session_replayed", sessionId: state.currentSessionId }];
     case "error": {
+      dismissWelcome(state);
       if (payload.code === "inspector_refresh_failed") {
         state.inspector.loading = false;
         state.inspector.error = payload.message ?? "Inspector 刷新失败，已保留上一次快照。";
@@ -1817,6 +1832,7 @@ function submitMessage(state, text, send, existingMessage, submission) {
   if (!existingMessage) {
     state.messages.push(message);
   }
+  dismissWelcome(state);
 
   try {
     send(submission.eventType, { text: content, ...submission.payload }, { id: requestId });
@@ -1958,8 +1974,9 @@ function handleReasoningCommand(state, text, send) {
   );
 }
 
-export function pushSystemMessage(state, title, content, level) {
+export function pushSystemMessage(state, title, content, level, options = {}) {
   if (!content) return;
+  if (options.dismissWelcome === true) dismissWelcome(state);
   if (title === "tasks" && state.taskPanel) {
     const existing = state.messages.find((message) => message.id === state.taskPanel.messageId);
     if (existing) {
