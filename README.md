@@ -49,6 +49,12 @@ Remove-Variable kimiKey
 powershell -ExecutionPolicy Bypass -File scripts/windows/setup.ps1
 ```
 
+初始化完成后，可在 PowerShell 中直接启动新版终端 UI：
+
+```powershell
+naumiagent --tui
+```
+
 脚本会检查 Python 3.12+、uv、Node.js 20+ 与 Git Bash，创建 `.venv` 和无密钥的本地 `config.yaml`，并验证配置。若 Git Bash 不在标准 Git for Windows 目录，可设置 `NAUMI_GIT_BASH` 指向 `bin\bash.exe`。脚本不会覆盖已有 `config.yaml`。
 
 ### 配置

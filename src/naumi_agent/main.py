@@ -103,6 +103,11 @@ app = typer.Typer(
     help="NaumiAgent — 通用智能 Agent",
     no_args_is_help=True,
 )
+naumiagent_app = typer.Typer(
+    name="naumiagent",
+    help="Launch the new NaumiAgent terminal UI",
+    add_completion=False,
+)
 workbench_app = typer.Typer(
     name="workbench",
     help="Workbench 治理与审计命令",
@@ -316,6 +321,28 @@ def terminal_ui(
             "naumi ui --legacy 或 naumi chat --tui[/dim]"
         )
         raise typer.Exit(1) from exc
+
+
+@naumiagent_app.callback(invoke_without_command=True)
+def naumiagent_entry(
+    ctx: typer.Context,
+    tui: bool = typer.Option(
+        False,
+        "--tui",
+        help="Launch the new Node terminal UI",
+    ),
+    config: str = typer.Option(
+        "config.yaml",
+        "--config",
+        "-c",
+        help="Configuration file path",
+    ),
+) -> None:
+    """Launch the new terminal UI through the short compatibility command."""
+    if not tui:
+        console.print(ctx.get_help())
+        return
+    terminal_ui(config=config, legacy=False)
 
 
 def _launch_terminal_ui(config_path: str, *, cwd: Path | None = None) -> int:
@@ -4528,6 +4555,10 @@ def _check_api_key(config: AppConfig) -> None:
 
 def cli() -> None:
     app()
+
+
+def naumiagent_cli() -> None:
+    naumiagent_app(prog_name="naumiagent")
 
 
 @workbench_app.command("export-audit")

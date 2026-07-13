@@ -20,6 +20,12 @@ def test_setup_script_checks_required_runtimes() -> None:
     assert 'Require-Command "node"' in script
     assert "Resolve-GitBash" in script
     assert "uv.Source sync --python 3.12 --extra dev" in script
+    assert (
+        "uv.Source tool install --editable --force --python 3.12 $repoRoot"
+        in script
+    )
+    assert 'Get-Command "naumiagent"' in script
+    assert 'Write-Host "  TUI:  naumiagent --tui"' in script
 
 
 def test_setup_script_creates_config_only_when_missing() -> None:
