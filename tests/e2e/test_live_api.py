@@ -17,7 +17,8 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def engine() -> AgentEngine:
-    config = AppConfig.from_yaml("config.yaml")
+    config_path = os.environ.get("NAUMI_E2E_CONFIG", "config.yaml")
+    config = AppConfig.from_yaml(config_path)
     return AgentEngine(config)
 
 

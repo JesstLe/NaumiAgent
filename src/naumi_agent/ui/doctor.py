@@ -11,13 +11,15 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 
 from naumi_agent.config.configurator import validate_provider_configuration
 from naumi_agent.config.settings import AppConfig
-from naumi_agent.model.router import ModelResponse, ModelRouter, ModelTier
+
+if TYPE_CHECKING:
+    from naumi_agent.model.router import ModelResponse
 
 DoctorStatus = Literal["pass", "warn", "error"]
 
@@ -201,6 +203,8 @@ async def _check_live_model(
 
 
 async def _default_live_probe(config: AppConfig) -> ModelResponse:
+    from naumi_agent.model.router import ModelRouter, ModelTier
+
     probe_config = config.models.model_copy(update={"max_tokens": 8})
     router = ModelRouter(probe_config)
     return await router.call(
