@@ -117,7 +117,13 @@ def configure_project(
         raise ConfigurationError("模型 API Key 不能为空。")
     if credential:
         try:
-            (store_credential or store_model_api_key)(credential)
+            if store_credential is not None:
+                store_credential(credential)
+            else:
+                store_model_api_key(
+                    credential,
+                    provider=normalized_provider,
+                )
         except Exception as exc:
             raise ConfigurationError("无法写入系统凭据库，配置未发生变化。") from exc
         os.environ["NAUMI_MODELS__API_KEY"] = credential

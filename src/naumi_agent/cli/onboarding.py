@@ -94,7 +94,7 @@ def run_onboarding(config_path: Path, *, project_root: Path | None = None) -> bo
     environment_key = os.environ.get("NAUMI_MODELS__API_KEY", "")
     if environment_key != api_key:
         try:
-            store_model_api_key(api_key)
+            store_model_api_key(api_key, provider=provider)
         except (CredentialStoreError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
             return False
@@ -290,7 +290,11 @@ def migrate_legacy_model_api_key(config_path: str | Path) -> bool:
     if not isinstance(api_key, str) or not api_key.strip():
         return False
 
-    store_model_api_key(api_key)
+    provider = models.get("provider")
+    store_model_api_key(
+        api_key,
+        provider=provider if isinstance(provider, str) else None,
+    )
     os.environ["NAUMI_MODELS__API_KEY"] = api_key
     del models["api_key"]
 
@@ -321,6 +325,9 @@ def needs_onboarding(config_path: str | Path) -> bool:
     if env_key or models.get("api_key"):
         return False
     try:
-        return load_model_api_key() is None
+        provider = models.get("provider")
+        return load_model_api_key(
+            provider=provider if isinstance(provider, str) else None,
+        ) is None
     except CredentialStoreError:
         return True
