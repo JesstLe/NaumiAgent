@@ -903,20 +903,30 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     async def test_confirmation_callback_allows_tool_once(self, engine: AgentEngine) -> None:
+        session = await engine.get_or_create_session()
         payloads: list[dict[str, object]] = []
+        events: list[tuple[str, dict[str, object]]] = []
 
         async def confirm(payload: dict[str, object]) -> str:
             payloads.append(payload)
             return "allow"
 
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
         engine.set_permission_confirmer(confirm)
         tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo confirm_ok"}')
-        result = await engine._execute_tool(tc)
+        result = await engine._execute_tool(tc, on_event=on_event)
 
         assert result.status == "success"
         assert "confirm_ok" in result.content
         assert payloads
         assert payloads[0]["tool_name"] == "bash_run"
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", session.id),
+            ("confirmed", session.id),
+        ]
 
     @pytest.mark.asyncio
     async def test_legacy_bypass_grants_only_the_current_session_tool_family(
@@ -925,10 +935,14 @@ class TestToolExecution:
     ) -> None:
         session = await engine.get_or_create_session()
         payloads: list[dict[str, object]] = []
+        events: list[tuple[str, dict[str, object]]] = []
 
         async def confirm(payload: dict[str, object]) -> str:
             payloads.append(payload)
             return "bypass"
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
 
         engine.set_permission_confirmer(confirm)
         first = await engine._execute_tool(
@@ -936,7 +950,8 @@ class TestToolExecution:
                 id="shell-1",
                 name="bash_run",
                 arguments='{"command": "printf first"}',
-            )
+            ),
+            on_event=on_event,
         )
         second = await engine._execute_tool(
             ToolCall(
@@ -961,6 +976,11 @@ class TestToolExecution:
         assert len(grants) == 1
         assert grants[0].session_id == session.id
         assert grants[0].tool_family == "shell"
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", session.id),
+            ("session_granted", session.id),
+        ]
 
     @pytest.mark.asyncio
     async def test_permission_grant_does_not_match_another_tool_family(
@@ -1002,9 +1022,16 @@ class TestToolExecution:
         self,
         engine: AgentEngine,
     ) -> None:
+        events: list[tuple[str, dict[str, object]]] = []
+
         async def confirm(payload: dict[str, object]) -> str:
             assert payload["session_id"] == ""
+            assert payload["choices"] == ["allow_once", "deny"]
+            assert payload["scope"] == "call"
             return "grant_session"
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
 
         engine.set_permission_confirmer(confirm)
         result = await engine._execute_tool(
@@ -1012,39 +1039,140 @@ class TestToolExecution:
                 id="no-session",
                 name="bash_run",
                 arguments='{"command": "printf should_not_run"}',
-            )
+            ),
+            on_event=on_event,
         )
 
         assert result.status == "error"
         assert "没有活动会话" in result.content
         assert engine.list_permission_grants() == ()
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", ""),
+            ("grant_rejected", ""),
+        ]
 
     @pytest.mark.asyncio
     async def test_grant_session_is_rejected_when_the_session_changes_during_confirmation(
         self,
         engine: AgentEngine,
+        tmp_path: Path,
     ) -> None:
         original = await engine.get_or_create_session()
         replacement = await engine.session_store.create_session(title="replacement")
+        marker = tmp_path / "grant-session-ran"
+        events: list[tuple[str, dict[str, object]]] = []
 
         async def confirm(payload: dict[str, object]) -> str:
             assert payload["session_id"] == original.id
             assert await engine.load_session(replacement.id) is True
             return "grant_session"
 
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
         engine.set_permission_confirmer(confirm)
         result = await engine._execute_tool(
             ToolCall(
                 id="session-changed",
                 name="bash_run",
-                arguments='{"command": "printf should_not_run"}',
-            )
+                arguments=json.dumps({"command": f"printf ran > {shlex.quote(str(marker))}"}),
+            ),
+            on_event=on_event,
         )
 
         assert result.status == "error"
         assert "会话已切换" in result.content
+        assert not marker.exists()
         assert engine._permission_grant_store.list_session(original.id) == ()
         assert engine._permission_grant_store.list_session(replacement.id) == ()
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", original.id),
+            ("grant_rejected", original.id),
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("response", ["allow", "allow_once"])
+    async def test_stale_allow_confirmation_is_rejected_before_bash_execution(
+        self,
+        engine: AgentEngine,
+        tmp_path: Path,
+        response: str,
+    ) -> None:
+        original = await engine.get_or_create_session()
+        replacement = await engine.session_store.create_session(title="replacement")
+        marker = tmp_path / f"stale-{response}-ran"
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def confirm(payload: dict[str, object]) -> str:
+            assert payload["session_id"] == original.id
+            assert await engine.load_session(replacement.id) is True
+            return response
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        engine.set_permission_confirmer(confirm)
+        result = await engine._execute_tool(
+            ToolCall(
+                id=f"stale-{response}",
+                name="bash_run",
+                arguments=json.dumps({"command": f"printf ran > {shlex.quote(str(marker))}"}),
+            ),
+            on_event=on_event,
+        )
+
+        assert result.status == "error"
+        assert "会话已切换" in result.content
+        assert not marker.exists()
+        assert engine._permission_grant_store.list_session(original.id) == ()
+        assert engine._permission_grant_store.list_session(replacement.id) == ()
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", original.id),
+            ("confirmed", original.id),
+            ("stale_confirmation_rejected", original.id),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_reset_during_allow_once_confirmation_stops_bash_execution(
+        self,
+        engine: AgentEngine,
+        tmp_path: Path,
+    ) -> None:
+        original = await engine.get_or_create_session()
+        marker = tmp_path / "reset-confirmation-ran"
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def confirm(payload: dict[str, object]) -> str:
+            assert payload["session_id"] == original.id
+            engine.reset()
+            return "allow_once"
+
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        engine.set_permission_confirmer(confirm)
+        result = await engine._execute_tool(
+            ToolCall(
+                id="reset-confirmation",
+                name="bash_run",
+                arguments=json.dumps({"command": f"printf ran > {shlex.quote(str(marker))}"}),
+            ),
+            on_event=on_event,
+        )
+
+        assert result.status == "error"
+        assert "会话已切换" in result.content
+        assert not marker.exists()
+        assert engine._permission_grant_store.list_session(original.id) == ()
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", original.id),
+            ("confirmed", original.id),
+            ("stale_confirmation_rejected", original.id),
+        ]
 
     @pytest.mark.asyncio
     async def test_high_risk_legacy_bypass_is_rejected_without_creating_a_grant(
@@ -1181,15 +1309,26 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     async def test_confirmation_callback_denies_tool(self, engine: AgentEngine) -> None:
+        session = await engine.get_or_create_session()
+        events: list[tuple[str, dict[str, object]]] = []
+
         async def confirm(payload: dict[str, object]) -> str:
             return "deny"
 
+        async def on_event(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
         engine.set_permission_confirmer(confirm)
         tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo denied"}')
-        result = await engine._execute_tool(tc)
+        result = await engine._execute_tool(tc, on_event=on_event)
 
         assert result.status == "error"
         assert "用户已拒绝" in result.content
+        bubbles = [data for event, data in events if event == "permission_bubble"]
+        assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
+            ("needs_confirmation", session.id),
+            ("denied", session.id),
+        ]
 
     @pytest.mark.asyncio
     async def test_top_level_permission_bubble_emitted_for_confirmation(

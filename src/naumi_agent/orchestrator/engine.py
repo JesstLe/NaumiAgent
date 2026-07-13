@@ -2967,6 +2967,7 @@ class AgentEngine:
         except ValueError as e:
             return ToolResult(call_id=tc.id, status="error", content=str(e))
 
+        session_id = self._session.id if self._session else ""
         if (
             self._runtime_mode == AgentRuntimeMode.PLAN
             and not self._tool_allowed_in_plan_mode(tc.name, tool)
@@ -2981,6 +2982,7 @@ class AgentEngine:
                 status="blocked_by_plan_mode",
                 reason=reason,
                 requires_confirmation=False,
+                session_id=session_id,
             )
             return ToolResult(
                 call_id=tc.id,
@@ -2988,7 +2990,6 @@ class AgentEngine:
                 content=f"权限拒绝：{reason}",
             )
 
-        session_id = self._session.id if self._session else ""
         before_ctx = await self._fire_hook(HookContext(
             point=HookPoint.TOOL_PERMISSION_CHECK,
             data={
@@ -3010,6 +3011,7 @@ class AgentEngine:
                 status="blocked_by_hook",
                 reason=str(reason),
                 requires_confirmation=False,
+                session_id=session_id,
             )
             return ToolResult(
                 call_id=tc.id,
@@ -3042,6 +3044,7 @@ class AgentEngine:
                 status="blocked_by_hook",
                 reason=str(reason),
                 requires_confirmation=decision.requires_confirmation,
+                session_id=session_id,
             )
             return ToolResult(
                 call_id=tc.id,
@@ -3057,6 +3060,7 @@ class AgentEngine:
                 status="blocked",
                 reason=decision.reason,
                 requires_confirmation=decision.requires_confirmation,
+                session_id=session_id,
             )
             return ToolResult(
                 call_id=tc.id,
@@ -3103,6 +3107,27 @@ class AgentEngine:
                 else:
                     content = "权限拒绝：用户已拒绝执行该工具。"
                 return ToolResult(call_id=tc.id, status="error", content=content)
+            if (self._session.id if self._session else "") != session_id:
+                await self._emit_permission_bubble(
+                    on_event,
+                    agent_name=agent_name,
+                    tool_name=tc.name,
+                    call_id=tc.id,
+                    status="stale_confirmation_rejected",
+                    reason="请求确认期间会话已切换，已停止执行该工具。",
+                    risk_level=getattr(
+                        decision.risk_level,
+                        "value",
+                        str(decision.risk_level),
+                    ),
+                    requires_confirmation=True,
+                    session_id=session_id,
+                )
+                return ToolResult(
+                    call_id=tc.id,
+                    status="error",
+                    content="权限拒绝：请求确认期间会话已切换，已停止执行该工具。",
+                )
 
         try:
             start = time.time()
@@ -3149,12 +3174,14 @@ class AgentEngine:
             reason=reason,
             risk_level=risk_level,
             requires_confirmation=True,
+            session_id=session_id,
         )
         if self._permission_confirmer is None:
             return "unavailable"
 
+        allow_session_grant = decision.allow_session_grant and bool(session_id)
         choices = ["allow_once", "deny"]
-        if decision.allow_session_grant:
+        if allow_session_grant:
             choices.append("grant_session")
         payload = {
             "agent_name": agent_name or "main",
@@ -3168,7 +3195,7 @@ class AgentEngine:
             "session_id": session_id,
             "tool_family": decision.tool_family,
             "choices": choices,
-            "scope": "session" if decision.allow_session_grant else "call",
+            "scope": "session" if allow_session_grant else "call",
             "expires_at": None,
             "requires_double_confirm": decision.requires_double_confirm,
         }
@@ -3185,6 +3212,7 @@ class AgentEngine:
                 reason=str(e),
                 risk_level=risk_level,
                 requires_confirmation=True,
+                session_id=session_id,
             )
             return "error"
 
@@ -3205,6 +3233,7 @@ class AgentEngine:
                     reason="当前操作不支持本会话授权。",
                     risk_level=risk_level,
                     requires_confirmation=True,
+                    session_id=session_id,
                 )
                 return status
             if not session_id.strip():
@@ -3217,6 +3246,7 @@ class AgentEngine:
                     reason="当前工具调用没有活动会话，无法创建本会话授权。",
                     risk_level=risk_level,
                     requires_confirmation=True,
+                    session_id=session_id,
                 )
                 return "grant_rejected_no_session"
             if self._session is None or self._session.id != session_id:
@@ -3229,6 +3259,7 @@ class AgentEngine:
                     reason="请求确认期间会话已切换，无法创建本会话授权。",
                     risk_level=risk_level,
                     requires_confirmation=True,
+                    session_id=session_id,
                 )
                 return "grant_rejected_session_changed"
             try:
@@ -3247,6 +3278,7 @@ class AgentEngine:
                     reason="当前工具调用没有活动会话，无法创建本会话授权。",
                     risk_level=risk_level,
                     requires_confirmation=True,
+                    session_id=session_id,
                 )
                 return "grant_rejected_no_session"
             await self._emit_permission_bubble(
@@ -3258,6 +3290,7 @@ class AgentEngine:
                 reason=f"用户已允许本会话使用工具族 `{decision.tool_family}`。",
                 risk_level=risk_level,
                 requires_confirmation=False,
+                session_id=session_id,
             )
             return "allow_once"
         if choice == "allow_once":
@@ -3270,6 +3303,7 @@ class AgentEngine:
                 reason="用户已允许本次工具执行。",
                 risk_level=risk_level,
                 requires_confirmation=False,
+                session_id=session_id,
             )
             return "allow_once"
 
@@ -3282,6 +3316,7 @@ class AgentEngine:
             reason="用户拒绝执行该工具。",
             risk_level=risk_level,
             requires_confirmation=True,
+            session_id=session_id,
         )
         return "deny"
 
@@ -3331,6 +3366,7 @@ class AgentEngine:
         reason: str,
         risk_level: str = "",
         requires_confirmation: bool,
+        session_id: str | None = None,
     ) -> None:
         """Emit permission decisions visible to parent or top-level UI."""
         payload = {
@@ -3341,7 +3377,9 @@ class AgentEngine:
             "reason": reason,
             "risk_level": risk_level,
             "requires_confirmation": requires_confirmation,
-            "session_id": self._session.id if self._session else "",
+            "session_id": (
+                self._session.id if session_id is None and self._session else session_id or ""
+            ),
             "timestamp": time.time(),
         }
         self._permission_bubble_history.append(payload)
