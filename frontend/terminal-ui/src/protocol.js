@@ -258,7 +258,16 @@ function normalizeServerPayload(type, payload) {
 function normalizeRuntimeStatus(payload, source = "runtime/status") {
   const status = normalizeObject(payload);
   const normalized = { ...status };
-  for (const key of ["version", "workspace_root", "model", "mode", "permission_mode"]) {
+  for (const key of [
+    "version",
+    "workspace_root",
+    "model",
+    "provider",
+    "api_format",
+    "upstream_model",
+    "mode",
+    "permission_mode",
+  ]) {
     if (!Object.hasOwn(status, key)) continue;
     const text = strictStatusText(status[key], `${source}.${key}`);
     normalized[key] = ["mode", "permission_mode"].includes(key)

@@ -40,6 +40,18 @@ class ModelTier(StrEnum):
 
 
 @dataclass(frozen=True)
+class ModelRuntimeIdentity:
+    """Safe, side-effect-free identity for one configured model target."""
+
+    requested_model: str
+    canonical_model: str
+    upstream_model: str
+    provider: str
+    api_format: str
+    source: str
+
+
+@dataclass(frozen=True)
 class TokenUsage:
     input_tokens: int = 0
     output_tokens: int = 0
@@ -211,6 +223,25 @@ class ModelRouter:
             model,
             provider=self._config.provider,
             catalog=self._catalog,
+        )
+
+    def get_runtime_identity(self, model: str) -> ModelRuntimeIdentity:
+        """Return display-safe routing facts without resolving credentials or I/O."""
+        target = self.resolve_target(model)
+        provider = target.provider
+        if provider is None:
+            provider_id = self._config.provider or ""
+            api_format = "legacy"
+        else:
+            provider_id = provider.id
+            api_format = provider.api_format.value if provider.api_format is not None else ""
+        return ModelRuntimeIdentity(
+            requested_model=target.requested_model,
+            canonical_model=target.canonical_model,
+            upstream_model=target.upstream_model,
+            provider=provider_id,
+            api_format=api_format,
+            source=target.source,
         )
 
     def _resolve_transport(self, model: str) -> tuple[str, dict[str, Any]]:

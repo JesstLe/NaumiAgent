@@ -5,6 +5,10 @@ import {
   truncateAnsi,
   visibleWidth,
 } from "../ansi.js";
+import {
+  formatApiFormat,
+  upstreamModelMapping,
+} from "./provider-identity.js";
 
 const WIDE_LOGO = [
   "██   ██   █████   ██   ██  ██   ██  ███████",
@@ -56,6 +60,9 @@ export function renderWelcomeScreen(state, width, bodyHeight, env = {}) {
   const product = `NaumiAgent v${fact(status.version)}`;
   const workspace = shortPath(fact(status.workspace_root), env.home ?? "");
   const model = fact(status.model);
+  const provider = fact(status.provider);
+  const apiFormat = formatApiFormat(status.api_format);
+  const upstreamModel = upstreamModelMapping(status);
 
   let content;
   if (layout === "minimal") {
@@ -75,6 +82,8 @@ export function renderWelcomeScreen(state, width, bodyHeight, env = {}) {
       `${color(ANSI.dim, "版本")} ${product} · ${readiness}`,
       `${color(ANSI.dim, "工作区")} ${workspace}`,
       `${color(ANSI.dim, "模型")} ${model}`,
+      `${color(ANSI.dim, "提供方")} ${provider} · ${color(ANSI.dim, "接口")} ${apiFormat}`,
+      ...(upstreamModel ? [`${color(ANSI.dim, "上游")} ${upstreamModel}`] : []),
       `${color(ANSI.dim, "模式")} ${renderedMode} · ${color(ANSI.dim, "权限")} ${renderedPermissionMode}`,
     ];
   }
