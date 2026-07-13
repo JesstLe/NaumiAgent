@@ -22,6 +22,7 @@ from typing import Any
 from naumi_agent.ui.messages.base import MessageType, UIMessage
 from naumi_agent.ui.messages.events import (
     AssistantStreamMessage,
+    CompletionReceiptMessage,
     ContextCompactMessage,
     ErrorMessage,
     HookTraceMessage,
@@ -206,6 +207,28 @@ class EngineEventAdapter:
             type=MessageType.RUNTIME_STATUS,
             phase="run_started",
             label="已接手，准备执行...",
+            raw_event=event,
+            raw_data=None,
+        )
+
+    def _adapt_completion_receipt(
+        self,
+        event: str,
+        data: dict[str, Any],
+    ) -> CompletionReceiptMessage:
+        from naumi_agent.runs.models import CompletionReceipt
+
+        receipt_data = data or {
+            "schema_version": 1,
+            "receipt_id": "uninitialized",
+            "run_id": "uninitialized",
+            "outcome": "failed",
+            "git_state": {"available": False, "dirty": False},
+        }
+        return CompletionReceiptMessage(
+            type=MessageType.COMPLETION_RECEIPT,
+            receipt=CompletionReceipt.from_dict(receipt_data),
+            message_id=str(data.get("receipt_id") or ""),
             raw_event=event,
             raw_data=None,
         )
@@ -577,6 +600,7 @@ class EngineEventAdapter:
     # ------------------------------------------------------------------
 
     _DISPATCH: dict[str, Any] = {
+        "completion_receipt": _adapt_completion_receipt,
         "run_started": _adapt_run_started,
         "turn_start": _adapt_turn_start,
         "perf_phase": _adapt_perf_phase,

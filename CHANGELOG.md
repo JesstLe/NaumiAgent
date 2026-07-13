@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.214] - 2026-07-13
+
+### Added
+- **Authoritative Agent Control Center** — 后端记录真实 Agent 执行句柄、阶段、工具、心跳、用量和有界历史，并从执行管理器、消息总线与黑板生成严格、会话隔离、单调 revision 的权威快照；JSONL Bridge 支持增量同步、断序恢复和精确停止结果。
+- **Terminal UI / Textual Agent Parity** — 新 Terminal UI `/agents` 与 Textual `/agents`/`Ctrl+G` 共用 Agent、执行、协作三标签语义、两步停止确认、权限优先级和错误保留；UI state v5 只持久化表现状态，重启后重新读取后端快照。
+
+### Tests
+- **Real Agent Control E2E** — 在真实 `AgentEngine` 和 `SubAgentManager` 上并发运行两个本地确定性 Agent，经 Python Bridge 与 Node reducer/renderer 停止指定执行，确认兄弟执行完成，再用同一最终快照验证 Textual formatter；另有真实 Python Bridge 进程键盘测试。
+
+### Known Gaps
+- Agent 创建/重配、跨进程远程 Agent、持久化执行历史、Workbench Agent 映射和 `/workbench` 页面仍需独立实现。
+
+## [0.1.213] - 2026-07-13
+
+### Added
+- **Authoritative Runtime Inspector** — 后端从真实 TaskStore、运行/工具/审批事件、完成回执和 Git 工作区生成 Plan、Tools、Context、Changes、Tests 五标签版本化快照；JSONL Bridge 支持严格 schema、revision 增量、断序全量恢复和会话隔离。
+- **Responsive Terminal UI / Textual Inspector Parity** — 新 Terminal UI 通过 `Ctrl+I` 在并排抽屉、覆盖层和窄屏全页间响应式切换，并持久化标签、焦点和展开状态；Textual TUI 读取同一后端快照，保留刷新错误证据与权限交互优先级。
+
+### Tests
+- **Real Cross-Frontend Inspector E2E** — 在真实临时 Git 仓库、TaskStore、pytest 子进程和 SQLite 完成回执上验证 Python Bridge、新 UI 三档布局与 Textual formatter，并覆盖无 Git、空状态、失败验证、revision 断序和跨会话拒绝。
+
+## [0.1.212] - 2026-07-13
+
+### Added
+- **Authoritative Completion Receipts** — 流式运行现在从真实工具事件、审批结果、验证输出和运行前后 Git 差异生成版本化完成回执；成功、部分完成、失败与取消均先写入 SQLite，再通过 `completion/receipt` 发送，并支持会话重放和缺失回执补发。
+- **Terminal UI / Textual Receipt Parity** — 新 Terminal UI 与旧 Textual TUI 展示同一份后端回执，统一呈现改动、验证、未验证项、审批、风险、Git 状态和下一步，不再由客户端根据工具卡推断“是否完成”。
+
 ## [0.1.211] - 2026-07-08
 
 ### Changed

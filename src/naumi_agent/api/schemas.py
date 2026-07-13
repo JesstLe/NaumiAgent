@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -99,6 +99,7 @@ class ChatRunResponse(BaseModel):
     completed_at: str = ""
     steps: list[ChatRunStepResponse] = Field(default_factory=list)
     artifacts: list[ChatArtifactResponse] = Field(default_factory=list)
+    receipt: dict[str, Any] | None = None
 
 
 class ChatRunListResponse(BaseModel):

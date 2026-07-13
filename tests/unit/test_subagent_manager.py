@@ -129,6 +129,256 @@ class TestSubAgentManager:
         assert "超时" in (result.error or "")
         assert manager.get_state("stuck_agent") == AgentState.IDLE
 
+    @pytest.mark.asyncio
+    async def test_stop_execution_cancels_only_the_selected_running_task(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        manager.spawn(
+            AgentConfig(
+                name="blocking_agent",
+                description="agent with independently cancellable executions",
+                capabilities=[],
+                timeout_seconds=60,
+            )
+        )
+        agent = manager.get_agent("blocking_agent")
+        assert agent is not None
+        both_started = asyncio.Event()
+        release_second = asyncio.Event()
+        started_count = 0
+
+        async def blocking_execute(*, task: str, **kwargs: object) -> AgentResult:
+            nonlocal started_count
+            started_count += 1
+            if started_count == 2:
+                both_started.set()
+            if task == "second":
+                await release_second.wait()
+                return AgentResult(status="completed", response="second done")
+            await asyncio.Event().wait()
+            return AgentResult(status="completed", response="unexpected")
+
+        monkeypatch.setattr(agent, "execute", blocking_execute)
+        first = asyncio.create_task(manager.delegate(SubTask(
+            id="agent-task-1",
+            description="first",
+            agent_name="blocking_agent",
+        )))
+        second = asyncio.create_task(manager.delegate(SubTask(
+            id="agent-task-2",
+            description="second",
+            agent_name="blocking_agent",
+        )))
+
+        try:
+            await asyncio.wait_for(both_started.wait(), timeout=1)
+            active = manager.list_executions()
+            assert {item.task_id for item in active if item.status == "running"} == {
+                "agent-task-1",
+                "agent-task-2",
+            }
+
+            stopped = await manager.stop_execution("agent-task-1", "用户停止。")
+            assert stopped.accepted is True
+            assert stopped.code == "accepted"
+            repeated = await manager.stop_execution("agent-task-1", "再次停止。")
+            assert repeated.accepted is False
+            assert repeated.code == "already_requested"
+            assert (await asyncio.wait_for(first, timeout=1)).status == "cancelled"
+            assert not second.done()
+            assert manager.get_state("blocking_agent") == AgentState.RUNNING
+            lifecycle = manager.get_lifecycle("blocking_agent")
+            assert lifecycle is not None
+            assert lifecycle.task_count == 2
+
+            release_second.set()
+            assert (await asyncio.wait_for(second, timeout=1)).status == "completed"
+            terminal = {item.task_id: item for item in manager.list_executions()}
+            assert terminal["agent-task-1"].status == "cancelled"
+            assert terminal["agent-task-1"].stop_requested is True
+            assert terminal["agent-task-2"].status == "completed"
+        finally:
+            for pending in (first, second):
+                if not pending.done():
+                    pending.cancel()
+            await asyncio.gather(first, second, return_exceptions=True)
+
+    @pytest.mark.asyncio
+    async def test_stop_execution_returns_stable_missing_and_finished_codes(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        assert (await manager.stop_execution("")).code == "missing_task_id"
+        assert (await manager.stop_execution("unknown")).code == "not_found"
+        agent = manager.get_agent("coder")
+        assert agent is not None
+
+        async def complete_execute(**kwargs: object) -> AgentResult:
+            return AgentResult(status="completed", response="done")
+
+        monkeypatch.setattr(agent, "execute", complete_execute)
+        result = await manager.delegate(SubTask("finished", "done", "coder"))
+
+        assert result.status == "completed"
+        stopped = await manager.stop_execution("finished")
+        assert stopped.accepted is False
+        assert stopped.code == "already_finished"
+
+    @pytest.mark.asyncio
+    async def test_delegate_rejects_duplicate_active_task_id(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        agent = manager.get_agent("coder")
+        assert agent is not None
+        started = asyncio.Event()
+
+        async def blocking_execute(**kwargs: object) -> AgentResult:
+            started.set()
+            await asyncio.Event().wait()
+            return AgentResult(status="completed")
+
+        monkeypatch.setattr(agent, "execute", blocking_execute)
+        first = asyncio.create_task(manager.delegate(SubTask("same", "first", "coder")))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=1)
+            duplicate = await manager.delegate(SubTask("same", "second", "coder"))
+            assert duplicate.status == "error"
+            assert "Duplicate active" in (duplicate.error or "")
+            assert len([
+                item for item in manager.list_executions()
+                if item.task_id == "same" and item.stop_supported
+            ]) == 1
+        finally:
+            await manager.stop_execution("same")
+            await asyncio.gather(first, return_exceptions=True)
+
+    @pytest.mark.asyncio
+    async def test_parent_cancellation_propagates_and_cleans_execution(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        agent = manager.get_agent("coder")
+        assert agent is not None
+        started = asyncio.Event()
+
+        async def blocking_execute(**kwargs: object) -> AgentResult:
+            started.set()
+            await asyncio.Event().wait()
+            return AgentResult(status="completed")
+
+        monkeypatch.setattr(agent, "execute", blocking_execute)
+        parent = asyncio.create_task(manager.delegate(SubTask("parent-cancel", "wait", "coder")))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        parent.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await parent
+        record = next(
+            item for item in manager.list_executions()
+            if item.task_id == "parent-cancel"
+        )
+        assert record.status == "cancelled"
+        assert record.stop_requested is False
+        assert manager.get_state("coder") == AgentState.IDLE
+
+    @pytest.mark.asyncio
+    async def test_execution_observes_tool_progress_without_swallowing_callback(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        agent = manager.get_agent("coder")
+        assert agent is not None
+        tool_seen = asyncio.Event()
+        release = asyncio.Event()
+        forwarded: list[tuple[str, dict[str, object]]] = []
+
+        async def tool_execute(
+            *,
+            event_callback: object,
+            **kwargs: object,
+        ) -> AgentResult:
+            assert callable(event_callback)
+            await event_callback("tool_start", {"tool_name": "file_read"})
+            tool_seen.set()
+            await release.wait()
+            return AgentResult(status="completed", turns=1)
+
+        async def callback(event: str, data: dict[str, object]) -> None:
+            forwarded.append((event, data))
+
+        monkeypatch.setattr(agent, "execute", tool_execute)
+        delegated = asyncio.create_task(manager.delegate(
+            SubTask("tool-progress", "inspect", "coder"),
+            event_callback=callback,
+        ))
+        await asyncio.wait_for(tool_seen.wait(), timeout=1)
+        active = next(
+            item for item in manager.list_executions()
+            if item.task_id == "tool-progress"
+        )
+        assert active.phase == "running_tool"
+        assert active.current_tool == "file_read"
+        assert active.recent_tools == ("file_read",)
+        assert [item for item in forwarded if item[0] == "tool_start"] == [
+            ("tool_start", {"tool_name": "file_read"})
+        ]
+        release.set()
+        assert (await delegated).status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_execution_history_is_bounded_to_one_hundred_records(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        agent = manager.get_agent("coder")
+        assert agent is not None
+
+        async def complete_execute(**kwargs: object) -> AgentResult:
+            return AgentResult(status="completed")
+
+        monkeypatch.setattr(agent, "execute", complete_execute)
+        for index in range(105):
+            result = await manager.delegate(SubTask(
+                f"history-{index}",
+                f"task {index}",
+                "coder",
+            ))
+            assert result.status == "completed"
+
+        records = manager.list_executions(limit=500)
+        assert len(records) == 100
+        assert records[0].task_id == "history-104"
+        assert records[-1].task_id == "history-5"
+
+    @pytest.mark.asyncio
+    async def test_started_callback_failure_does_not_leak_active_execution(
+        self,
+        manager: SubAgentManager,
+    ) -> None:
+        async def failing_callback(event: str, data: dict[str, object]) -> None:
+            if event == "subagent_event":
+                raise RuntimeError("broken event consumer")
+
+        with pytest.raises(RuntimeError, match="broken event consumer"):
+            await manager.delegate(
+                SubTask("callback-failure", "inspect", "coder"),
+                event_callback=failing_callback,
+            )
+
+        assert not any(
+            item.task_id == "callback-failure" and item.stop_supported
+            for item in manager.list_executions()
+        )
+        assert manager.get_state("coder") == AgentState.IDLE
+
 
 class TestSubTask:
     def test_subtask_defaults(self) -> None:

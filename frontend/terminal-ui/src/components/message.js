@@ -2,6 +2,7 @@ import { ANSI, color, compactText, visibleWidth, wrapAnsiLine } from "../ansi.js
 import { MarkdownExcerpt } from "./markdown.js";
 import { renderComponent } from "./core.js";
 import { ActivityCard } from "./activity-card.js";
+import { CompletionReceiptCard } from "./completion-receipt-card.js";
 import { EventCard } from "./event-card.js";
 import { PermissionCard } from "./permission-card.js";
 import { PermissionPanel } from "./permission-panel.js";
@@ -37,6 +38,9 @@ export function renderMessage(message, width, ctx = { width }) {
   }
   if (message.kind === "run_activity") {
     return renderComponent(RunActivityCard({ activity: message }), ctx);
+  }
+  if (message.kind === "completion_receipt") {
+    return renderComponent(CompletionReceiptCard({ receipt: message.receipt }), ctx);
   }
   if (message.kind === "permission") {
     return renderComponent(PermissionCard({ permission: message }), ctx);

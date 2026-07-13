@@ -46,7 +46,9 @@ import {
   splitShellLike,
 } from "./protocol.js";
 import {
+  handleAgentControlKey,
   handleSubmitText,
+  handleRuntimeInspectorKey,
   hasTaskPanelFocus,
   cancelTaskPanelItem,
   jumpToTaskPanelRecord,
@@ -63,6 +65,7 @@ import {
   failQueuedUserMessages,
   requestRunCancel,
   toggleComposerIntent,
+  toggleRuntimeInspector,
 } from "./state.js";
 import { captureViewportAnchor, renderScreen, restoreViewportAnchor } from "./render.js";
 import {
@@ -143,6 +146,7 @@ function main() {
   setupTerminal();
   restoreUiSnapshot(state.currentSessionId);
   send("hello", { client: "naumi-terminal-ui" });
+  if (state.inspector.open) requestRuntimeInspectorSnapshot();
   redraw();
 }
 
@@ -164,7 +168,9 @@ function startBridge() {
 }
 
 function setupTerminal() {
-  process.stdout.write(ANSI.altOn + ANSI.bracketedPasteOn + ANSI.hideCursor);
+  process.stdout.write(
+    ANSI.altOn + ANSI.bracketedPasteOn + ANSI.keyboardDisambiguateOn + ANSI.hideCursor,
+  );
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(true);
   }
@@ -177,7 +183,13 @@ function setupTerminal() {
 }
 
 function restoreTerminal() {
-  process.stdout.write(ANSI.bracketedPasteOff + ANSI.showCursor + ANSI.altOff + ANSI.reset);
+  process.stdout.write(
+    ANSI.keyboardDisambiguateOff
+      + ANSI.bracketedPasteOff
+      + ANSI.showCursor
+      + ANSI.altOff
+      + ANSI.reset,
+  );
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(false);
   }
@@ -218,10 +230,18 @@ function handleBridgeLine(line) {
   if (state.currentSessionId !== previousSessionId) {
     setUiSnapshot(uiStateStore, previousSessionId, previousSnapshot);
     restoreUiSnapshot(state.currentSessionId);
+    if (state.inspector.open) requestRuntimeInspectorSnapshot();
+    if (state.agents.open) requestAgentControlSnapshot();
   }
   if (record.type === "session/replayed") {
     resetHistorySearch(state);
     jumpTimelineToLatest(state);
+    if (state.inspector.open && state.currentSessionId === previousSessionId) {
+      requestRuntimeInspectorSnapshot();
+    }
+    if (state.agents.open && state.currentSessionId === previousSessionId) {
+      requestAgentControlSnapshot();
+    }
   }
   if (!(record.type === "ui/message" && record.payload?.type === "thinking" && !state.showReasoning)) {
     markTimelineOutput(state, record, timelineEntryId(record));
@@ -236,6 +256,27 @@ function handleBridgeLine(line) {
         ...(action.history ? { history: true } : {}),
         pinned: true,
         refresh: true,
+      });
+    }
+    if (action.type === "request_completion_receipt") {
+      send("receipt/request", {
+        session_id: action.sessionId ?? "",
+        receipt_id: action.receiptId ?? "",
+        run_id: action.runId ?? "",
+      });
+    }
+    if (action.type === "refresh_inspector") {
+      send("inspector/request", {
+        open: true,
+        known_revision: action.knownRevision ?? state.inspector.revision,
+        session_id: action.sessionId ?? state.currentSessionId,
+      });
+    }
+    if (action.type === "refresh_agents") {
+      send("agents/request", {
+        open: true,
+        known_revision: action.knownRevision ?? state.agents.revision,
+        session_id: action.sessionId ?? state.currentSessionId,
       });
     }
   }
@@ -303,6 +344,7 @@ function handleSingleKeyInput(chunk) {
   if (state.permission) {
     const key = chunk.toLowerCase();
     if (chunk === INPUT_KEYS.ctrlR) return;
+    if (chunk === INPUT_KEYS.ctrlI || chunk === INPUT_KEYS.tab) return;
     if (chunk === INPUT_KEYS.shiftTab) {
       send("permission_response", { request_id: state.permission.requestId, choice: "bypass" });
       return;
@@ -319,6 +361,36 @@ function handleSingleKeyInput(chunk) {
       send("permission_response", { request_id: state.permission.requestId, choice: "bypass" });
       return;
     }
+    if (
+      state.agents?.open
+      && [
+        "x",
+        "r",
+        "[",
+        "]",
+        "\r",
+        "\n",
+        INPUT_KEYS.up,
+        INPUT_KEYS.upAlt,
+        INPUT_KEYS.down,
+        INPUT_KEYS.downAlt,
+        INPUT_KEYS.left,
+        INPUT_KEYS.leftAlt,
+        INPUT_KEYS.right,
+        INPUT_KEYS.rightAlt,
+      ].includes(chunk)
+    ) return;
+  }
+  if (state.agents?.open && handleAgentControlKey(state, chunk, send)) {
+    persistUiSnapshot();
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.ctrlI) {
+    toggleRuntimeInspector(state, send);
+    persistUiSnapshot();
+    scheduleRedraw();
+    return;
   }
   if (state.historySearch?.open && handleHistorySearchKey(chunk)) {
     scheduleRedraw();
@@ -349,6 +421,19 @@ function handleSingleKeyInput(chunk) {
     return;
   }
   if (isSlashCompletionOpen(state) && handleSlashCompletionKey(chunk)) {
+    scheduleRedraw();
+    return;
+  }
+  if (!state.input.trim() && state.inspector.open) {
+    if (handleRuntimeInspectorKey(state, chunk, send)) {
+      persistUiSnapshot();
+      scheduleRedraw();
+      return;
+    }
+  }
+  if (!state.input.trim() && chunk === INPUT_KEYS.tab && !state.inspector.open) {
+    toggleRuntimeInspector(state, send);
+    persistUiSnapshot();
     scheduleRedraw();
     return;
   }
@@ -596,6 +681,24 @@ function restoreUiSnapshot(sessionId) {
   resetHistorySearch(state);
   resetSlashCompletion(state);
   applyUiSnapshot(state, getUiSnapshot(uiStateStore, sessionId));
+}
+
+function requestRuntimeInspectorSnapshot() {
+  state.inspector.loading = true;
+  send("inspector/request", {
+    open: true,
+    known_revision: state.inspector.revision,
+    session_id: String(state.currentSessionId || ""),
+  });
+}
+
+function requestAgentControlSnapshot() {
+  state.agents.loading = true;
+  send("agents/request", {
+    open: true,
+    known_revision: state.agents.revision,
+    session_id: String(state.currentSessionId || ""),
+  });
 }
 
 function persistUiSnapshot() {

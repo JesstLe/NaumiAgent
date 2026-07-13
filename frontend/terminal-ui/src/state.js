@@ -1,5 +1,5 @@
 import { looksLikeDiff } from "./ansi.js";
-import { getInputCursor, setInputText, truncateInputText } from "./input-buffer.js";
+import { INPUT_KEYS, getInputCursor, setInputText, truncateInputText } from "./input-buffer.js";
 import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
 import { clearRenderCache, createRenderCache } from "./render-cache.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
@@ -10,6 +10,8 @@ const MAX_RUN_ACTIVITY_PERF_PHASES = 5;
 const MAX_RUN_ACTIVITY_TOOLS = 100;
 const MAX_RUN_ACTIVITY_PERMISSION_IDS = 100;
 const MAX_RUN_ACTIVITY_PHASE_LABEL_CHARS = 160;
+const RUNTIME_INSPECTOR_TABS = Object.freeze(["plan", "tools", "context", "changes", "tests"]);
+const AGENT_CONTROL_TABS = Object.freeze(["agents", "executions", "team"]);
 
 const RUN_ACTIVITY_PHASE_LABELS = Object.freeze({
   preparing: "准备运行",
@@ -31,6 +33,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/tasks", description: "显示/更新任务面板（支持 list/open/cancel/refresh）" },
   { command: "/chat", description: "切换为普通对话输入" },
   { command: "/permissions", description: "显示待确认权限面板" },
+  { command: "/agents", description: "打开 Agent 控制中心" },
   { command: "/doctor", description: "运行环境诊断" },
   { command: "/mode", description: "切换 runtime 模式 default / plan / bypass" },
   { command: "/reasoning", description: "显示/切换思考过程输出" },
@@ -160,6 +163,7 @@ export function getSlashCommandCompletions(input, slashCommands) {
 
 export function createInitialState() {
   return {
+    route: { name: "conversation", originAnchor: null },
     nextMessageId: 1,
     nextSubmitId: 1,
     nextCancelId: 1,
@@ -218,6 +222,34 @@ export function createInitialState() {
       messageId: "",
       lastStatusSignature: "",
     },
+    inspector: {
+      open: false,
+      loading: false,
+      focused: false,
+      selectedTab: "plan",
+      revision: 0,
+      snapshot: null,
+      error: "",
+      stale: false,
+      selectionByTab: {},
+      expandedByTab: {},
+      scrollByTab: {},
+    },
+    agents: {
+      open: false,
+      loading: false,
+      selectedTab: "agents",
+      selectedByTab: {},
+      detailId: "",
+      scrollByTab: {},
+      revision: 0,
+      snapshot: null,
+      error: "",
+      stale: false,
+      stopConfirmationTaskId: "",
+      actionPendingTaskId: "",
+      actionMessage: "",
+    },
     permission: null,
     running: false,
     scrollOffset: 0,
@@ -247,6 +279,9 @@ export function reduceServerEvent(state, record) {
     case "ack":
       if (payload.event === "submit") {
         acceptUserMessage(state, record.request_id);
+      }
+      if (payload.event === "agents/request" && payload.open === true) {
+        state.agents.loading = false;
       }
       break;
     case "ready":
@@ -310,6 +345,98 @@ export function reduceServerEvent(state, record) {
     case "permission/resolved":
       handlePermissionResolved(state, payload);
       break;
+    case "completion/receipt":
+      addCompletionReceipt(state, payload, record.request_id);
+      break;
+    case "inspector/snapshot":
+      if (!inspectorMatchesCurrentSession(state, payload)) break;
+      if (
+        state.inspector.snapshot?.session_id === payload.session_id
+        && Number(payload.revision) < state.inspector.revision
+      ) break;
+      state.inspector.snapshot = payload;
+      state.inspector.revision = Number(payload.revision) || 0;
+      state.inspector.loading = false;
+      state.inspector.error = "";
+      state.inspector.stale = inspectorSnapshotIsStale(payload);
+      break;
+    case "inspector/update": {
+      if (!inspectorMatchesCurrentSession(state, payload)) break;
+      const nextRevision = Number(payload.revision) || 0;
+      if (nextRevision <= state.inspector.revision) break;
+      if (!state.inspector.snapshot || nextRevision !== state.inspector.revision + 1) {
+        state.inspector.loading = true;
+        return [{
+          type: "refresh_inspector",
+          knownRevision: state.inspector.revision,
+          sessionId: String(payload.session_id || state.currentSessionId || ""),
+        }];
+      }
+      state.inspector.snapshot = {
+        ...state.inspector.snapshot,
+        schema_version: payload.schema_version,
+        session_id: payload.session_id,
+        revision: nextRevision,
+        generated_at: payload.generated_at,
+        active_run_id: payload.active_run_id,
+        ...payload.changed_tabs,
+      };
+      state.inspector.revision = nextRevision;
+      state.inspector.loading = false;
+      state.inspector.error = "";
+      state.inspector.stale = inspectorSnapshotIsStale(state.inspector.snapshot);
+      break;
+    }
+    case "agents/snapshot":
+      if (!agentControlMatchesCurrentSession(state, payload)) break;
+      if (
+        state.agents.snapshot?.session_id === payload.session_id
+        && Number(payload.revision) < state.agents.revision
+      ) break;
+      state.agents.snapshot = payload;
+      state.agents.revision = Number(payload.revision) || 0;
+      state.agents.loading = false;
+      state.agents.error = "";
+      state.agents.stale = false;
+      settleAgentActionFromSnapshot(state.agents);
+      ensureAgentControlSelection(state.agents);
+      break;
+    case "agents/update": {
+      if (!agentControlMatchesCurrentSession(state, payload)) break;
+      const nextRevision = Number(payload.revision) || 0;
+      if (nextRevision <= state.agents.revision) break;
+      if (!state.agents.snapshot || nextRevision !== state.agents.revision + 1) {
+        state.agents.loading = true;
+        return [{
+          type: "refresh_agents",
+          knownRevision: state.agents.revision,
+          sessionId: String(payload.session_id || state.currentSessionId || ""),
+        }];
+      }
+      state.agents.snapshot = {
+        ...state.agents.snapshot,
+        schema_version: payload.schema_version,
+        session_id: payload.session_id,
+        revision: nextRevision,
+        generated_at: payload.generated_at,
+        ...payload.changed_sections,
+      };
+      state.agents.revision = nextRevision;
+      state.agents.loading = false;
+      state.agents.error = "";
+      state.agents.stale = false;
+      settleAgentActionFromSnapshot(state.agents);
+      ensureAgentControlSelection(state.agents);
+      break;
+    }
+    case "agents/action":
+      if (String(payload.task_id || "") !== state.agents.actionPendingTaskId) break;
+      state.agents.actionMessage = String(payload.message || "");
+      state.agents.stopConfirmationTaskId = "";
+      if (payload.accepted !== true) {
+        state.agents.actionPendingTaskId = "";
+      }
+      break;
     case "run/started":
       resetRunCancellation(state);
       startRunActivity(state, record, payload);
@@ -324,6 +451,7 @@ export function reduceServerEvent(state, record) {
       state.running = false;
       resetRunCancellation(state);
       finishRunActivity(state, terminalStatus);
+      moveCompletionReceiptToEnd(state, payload.receipt_id, payload.run_id);
       if (payload.intent === "task" && state.activeTaskSubmission) {
         const taskState = terminalStatus === "completed" ? "completed" : "blocked";
         state.activeTaskSubmission.state = taskState;
@@ -347,7 +475,7 @@ export function reduceServerEvent(state, record) {
       state.activeToolPrepare = null;
       state.activeRuntimePhase = "";
       state.permission = null;
-      return state.taskPanel.pinned ? [taskPanelRefreshAction(state)] : [];
+      return terminalRunActions(state, payload);
     }
     case "run/cancelled":
       if (!matchesActiveRunActivity(state, runCancelledTargetRequestId(record, payload))) break;
@@ -373,7 +501,8 @@ export function reduceServerEvent(state, record) {
         `运行已取消。${payload.reason ? ` ${payload.reason}` : ""}`,
         "warning",
       );
-      return state.taskPanel.pinned ? [taskPanelRefreshAction(state)] : [];
+      moveCompletionReceiptToEnd(state, payload.receipt_id, payload.run_id);
+      return terminalRunActions(state, payload);
     case "session/replayed":
       jumpTimelineToLatest(state);
       state.currentSessionId = payload.session_id || state.currentSessionId;
@@ -387,6 +516,8 @@ export function reduceServerEvent(state, record) {
       state.todo = null;
       state.activeToolPrepare = null;
       state.activeRuntimePhase = "";
+      resetInspectorSnapshot(state.inspector);
+      resetAgentControlSnapshot(state.agents);
       if (payload.clear !== false) {
         state.messages = [];
         state.tools = [];
@@ -399,6 +530,27 @@ export function reduceServerEvent(state, record) {
       pushSystemMessage(state, "resume", `已恢复会话: ${payload.title ?? payload.session_id}`, "info");
       return [{ type: "session_replayed", sessionId: state.currentSessionId }];
     case "error": {
+      if (payload.code === "inspector_refresh_failed") {
+        state.inspector.loading = false;
+        state.inspector.error = payload.message ?? "Inspector 刷新失败，已保留上一次快照。";
+        state.inspector.stale = Boolean(state.inspector.snapshot);
+        break;
+      }
+      if (["agents_refresh_failed", "agents_snapshot_failed"].includes(payload.code)) {
+        state.agents.loading = false;
+        state.agents.error = payload.message ?? "Agent 页面刷新失败，已保留上一次快照。";
+        state.agents.stale = Boolean(state.agents.snapshot);
+        break;
+      }
+      if (String(payload.code || "").startsWith("agents_")) {
+        state.agents.loading = false;
+        state.agents.error = payload.message ?? "Agent 页面操作失败。";
+        state.agents.stale = Boolean(state.agents.snapshot);
+        state.agents.stopConfirmationTaskId = "";
+        state.agents.actionPendingTaskId = "";
+        state.agents.actionMessage = state.agents.error;
+        break;
+      }
       const errorRequestId = String(record.request_id ?? "");
       const hasActiveRunActivity = Boolean(state.activeRunActivity);
       const matchesActiveRun = matchesActiveRunActivity(state, errorRequestId);
@@ -434,6 +586,7 @@ export function reduceServerEvent(state, record) {
         message: payload.message ?? "发送失败。",
       });
       pushSystemMessage(state, "error", payload.message ?? "未知错误", "error");
+      moveCompletionReceiptToEnd(state, payload.receipt_id, payload.run_id);
       break;
     }
     case "shutdown":
@@ -467,6 +620,331 @@ export function mergeStatus(state, payload) {
   } else if ("show_reasoning" in payload) {
     state.showReasoning = Boolean(payload.show_reasoning);
   }
+}
+
+function inspectorMatchesCurrentSession(state, payload) {
+  const sessionId = String(payload?.session_id || "");
+  return Boolean(sessionId)
+    && (!state.currentSessionId || sessionId === String(state.currentSessionId));
+}
+
+function inspectorSnapshotIsStale(snapshot) {
+  return ["plan", "tools", "context", "changes", "tests"]
+    .some((name) => snapshot?.[name]?.state === "stale");
+}
+
+function resetInspectorSnapshot(inspector) {
+  inspector.loading = Boolean(inspector.open);
+  inspector.revision = 0;
+  inspector.snapshot = null;
+  inspector.error = "";
+  inspector.stale = false;
+}
+
+function agentControlMatchesCurrentSession(state, payload) {
+  const sessionId = String(payload?.session_id || "");
+  return Boolean(sessionId)
+    && (!state.currentSessionId || sessionId === String(state.currentSessionId));
+}
+
+function resetAgentControlSnapshot(agents) {
+  agents.loading = Boolean(agents.open);
+  agents.revision = 0;
+  agents.snapshot = null;
+  agents.error = "";
+  agents.stale = false;
+  agents.stopConfirmationTaskId = "";
+  agents.actionPendingTaskId = "";
+  agents.actionMessage = "";
+}
+
+export function toggleAgentControlCenter(state, send, forceOpen = null) {
+  const open = forceOpen === null ? !Boolean(state.agents.open) : Boolean(forceOpen);
+  if (open === state.agents.open && state.route?.name === (open ? "agents" : "conversation")) {
+    if (open) {
+      state.agents.loading = true;
+      send("agents/request", {
+        open: true,
+        known_revision: state.agents.revision,
+        session_id: String(state.currentSessionId || ""),
+      });
+    }
+    return open;
+  }
+  state.agents.open = open;
+  state.agents.loading = open;
+  state.agents.error = "";
+  state.agents.stopConfirmationTaskId = "";
+  if (open) {
+    state.route = {
+      name: "agents",
+      originAnchor: {
+        scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+        followTail: Boolean(state.followTail),
+      },
+    };
+  } else {
+    state.route = { name: "conversation", originAnchor: null };
+    state.agents.detailId = "";
+  }
+  send("agents/request", {
+    open,
+    known_revision: state.agents.revision,
+    session_id: String(state.currentSessionId || ""),
+  });
+  return open;
+}
+
+export function handleAgentControlKey(state, key, send) {
+  const agents = state.agents;
+  if (!agents?.open || state.route?.name !== "agents") return false;
+  const normalized = String(key || "").toLowerCase();
+
+  if (agents.stopConfirmationTaskId) {
+    if (normalized === "y") {
+      if (!agents.actionPendingTaskId) {
+        agents.actionPendingTaskId = agents.stopConfirmationTaskId;
+        agents.actionMessage = "正在请求停止…";
+        send("agents/stop", {
+          session_id: String(state.currentSessionId || ""),
+          task_id: agents.stopConfirmationTaskId,
+          reason: "用户在 Agent 控制中心确认停止。",
+        });
+      }
+      agents.stopConfirmationTaskId = "";
+      return true;
+    }
+    if (normalized === "n" || key === INPUT_KEYS.escape) {
+      agents.stopConfirmationTaskId = "";
+      return true;
+    }
+    return true;
+  }
+
+  if (key === INPUT_KEYS.escape) {
+    if (agents.detailId) {
+      agents.detailId = "";
+    } else {
+      toggleAgentControlCenter(state, send, false);
+    }
+    return true;
+  }
+  if (key === INPUT_KEYS.tab || key === "]" || key === INPUT_KEYS.right || key === INPUT_KEYS.rightAlt) {
+    selectAgentControlTab(agents, 1);
+    return true;
+  }
+  if (key === INPUT_KEYS.shiftTab || key === "[" || key === INPUT_KEYS.left || key === INPUT_KEYS.leftAlt) {
+    selectAgentControlTab(agents, -1);
+    return true;
+  }
+  if (key === INPUT_KEYS.up || key === INPUT_KEYS.upAlt) {
+    selectAgentControlItem(agents, -1);
+    return true;
+  }
+  if (key === INPUT_KEYS.down || key === INPUT_KEYS.downAlt) {
+    selectAgentControlItem(agents, 1);
+    return true;
+  }
+  if (key === "\r" || key === "\n" || key === INPUT_KEYS.ctrlEnter) {
+    agents.detailId = selectedAgentControlId(agents);
+    return true;
+  }
+  if (normalized === "r") {
+    agents.loading = true;
+    send("agents/request", {
+      open: true,
+      known_revision: agents.revision,
+      session_id: String(state.currentSessionId || ""),
+    });
+    return true;
+  }
+  if (normalized === "x" && agents.selectedTab === "executions") {
+    const taskId = selectedAgentControlId(agents);
+    const execution = (agents.snapshot?.executions || []).find((item) => item.task_id === taskId);
+    if (execution?.stop_supported === true && !agents.actionPendingTaskId) {
+      agents.stopConfirmationTaskId = taskId;
+    }
+    return true;
+  }
+  return true;
+}
+
+function selectAgentControlTab(agents, delta) {
+  const current = Math.max(0, AGENT_CONTROL_TABS.indexOf(agents.selectedTab));
+  agents.selectedTab = AGENT_CONTROL_TABS[
+    (current + delta + AGENT_CONTROL_TABS.length) % AGENT_CONTROL_TABS.length
+  ];
+  agents.detailId = "";
+  ensureAgentControlSelection(agents);
+}
+
+function selectAgentControlItem(agents, delta) {
+  const ids = agentControlItemIds(agents);
+  if (!ids.length) return false;
+  const selected = selectedAgentControlId(agents);
+  const current = Math.max(0, ids.indexOf(selected));
+  agents.selectedByTab[agents.selectedTab] = ids[
+    (current + delta + ids.length) % ids.length
+  ];
+  agents.scrollByTab[agents.selectedTab] = ids.indexOf(
+    agents.selectedByTab[agents.selectedTab],
+  );
+  agents.detailId = "";
+  return true;
+}
+
+function selectedAgentControlId(agents) {
+  ensureAgentControlSelection(agents);
+  return String(agents.selectedByTab[agents.selectedTab] || "");
+}
+
+function ensureAgentControlSelection(agents) {
+  const ids = agentControlItemIds(agents);
+  const selected = String(agents.selectedByTab[agents.selectedTab] || "");
+  agents.selectedByTab[agents.selectedTab] = ids.includes(selected) ? selected : (ids[0] || "");
+  if (agents.detailId && !ids.includes(agents.detailId)) agents.detailId = "";
+}
+
+function agentControlItemIds(agents) {
+  const snapshot = agents.snapshot || {};
+  if (agents.selectedTab === "agents") {
+    return (snapshot.agents || []).map((item) => String(item.name || "")).filter(Boolean);
+  }
+  if (agents.selectedTab === "executions") {
+    return (snapshot.executions || []).map((item) => String(item.task_id || "")).filter(Boolean);
+  }
+  return [
+    ...(snapshot.team_messages || []).map(
+      (item) => `message:${item.timestamp}:${item.sender}:${item.topic}`,
+    ),
+    ...(snapshot.blackboard || []).map((item) => `blackboard:${item.key}`),
+  ];
+}
+
+function settleAgentActionFromSnapshot(agents) {
+  const taskId = agents.actionPendingTaskId;
+  if (!taskId) return;
+  const execution = (agents.snapshot?.executions || []).find((item) => item.task_id === taskId);
+  const terminalStatuses = new Set([
+    "completed",
+    "error",
+    "failed",
+    "timeout",
+    "max_turns",
+    "cancelled",
+  ]);
+  if (!execution || terminalStatuses.has(execution.status)) {
+    agents.actionPendingTaskId = "";
+    agents.actionMessage = execution?.status
+      ? `执行已进入终态：${execution.status}`
+      : "执行已结束。";
+  }
+}
+
+export function toggleRuntimeInspector(state, send) {
+  const open = !Boolean(state.inspector.open);
+  state.inspector.open = open;
+  state.inspector.focused = false;
+  state.inspector.loading = open;
+  state.inspector.error = "";
+  send("inspector/request", {
+    open,
+    known_revision: state.inspector.revision,
+    session_id: String(state.currentSessionId || ""),
+  });
+  return open;
+}
+
+export function handleRuntimeInspectorKey(state, key, send) {
+  const inspector = state.inspector;
+  if (!inspector?.open) return false;
+  if (!inspector.focused) {
+    if (key === INPUT_KEYS.tab) {
+      inspector.focused = true;
+      if (state.taskPanel) state.taskPanel.focused = false;
+      return true;
+    }
+    if (key === INPUT_KEYS.escape) {
+      toggleRuntimeInspector(state, send);
+      return true;
+    }
+    return false;
+  }
+
+  if (key === INPUT_KEYS.escape) {
+    inspector.focused = false;
+    return true;
+  }
+  if (key === INPUT_KEYS.tab) return true;
+  if (["]", INPUT_KEYS.right, INPUT_KEYS.rightAlt].includes(key)) {
+    selectRuntimeInspectorTab(inspector, 1);
+    return true;
+  }
+  if (["[", INPUT_KEYS.left, INPUT_KEYS.leftAlt].includes(key)) {
+    selectRuntimeInspectorTab(inspector, -1);
+    return true;
+  }
+  if (key === INPUT_KEYS.up || key === INPUT_KEYS.upAlt) {
+    selectRuntimeInspectorItem(inspector, -1);
+    return true;
+  }
+  if (key === INPUT_KEYS.down || key === INPUT_KEYS.downAlt) {
+    selectRuntimeInspectorItem(inspector, 1);
+    return true;
+  }
+  if (key === "\r" || key === "\n" || key === INPUT_KEYS.ctrlEnter) {
+    toggleRuntimeInspectorExpanded(inspector);
+    return true;
+  }
+  return false;
+}
+
+function selectRuntimeInspectorTab(inspector, delta) {
+  const current = Math.max(0, RUNTIME_INSPECTOR_TABS.indexOf(inspector.selectedTab));
+  inspector.selectedTab = RUNTIME_INSPECTOR_TABS[
+    (current + delta + RUNTIME_INSPECTOR_TABS.length) % RUNTIME_INSPECTOR_TABS.length
+  ];
+  clampRuntimeInspectorSelection(inspector);
+}
+
+function selectRuntimeInspectorItem(inspector, delta) {
+  const count = runtimeInspectorItemCount(inspector);
+  if (!count) return false;
+  const tab = inspector.selectedTab;
+  const current = Math.min(count - 1, Math.max(0, Number(inspector.selectionByTab[tab]) || 0));
+  inspector.selectionByTab[tab] = (current + delta + count) % count;
+  return true;
+}
+
+function toggleRuntimeInspectorExpanded(inspector) {
+  const count = runtimeInspectorItemCount(inspector);
+  if (!count) return false;
+  const tab = inspector.selectedTab;
+  const index = Math.min(count - 1, Math.max(0, Number(inspector.selectionByTab[tab]) || 0));
+  const expanded = inspector.expandedByTab[tab] && typeof inspector.expandedByTab[tab] === "object"
+    ? { ...inspector.expandedByTab[tab] }
+    : {};
+  expanded[String(index)] = !Boolean(expanded[String(index)]);
+  inspector.expandedByTab[tab] = expanded;
+  return true;
+}
+
+function clampRuntimeInspectorSelection(inspector) {
+  const count = runtimeInspectorItemCount(inspector);
+  const tab = inspector.selectedTab;
+  inspector.selectionByTab[tab] = count
+    ? Math.min(count - 1, Math.max(0, Number(inspector.selectionByTab[tab]) || 0))
+    : 0;
+}
+
+function runtimeInspectorItemCount(inspector) {
+  const tab = inspector.snapshot?.[inspector.selectedTab];
+  if (!tab || typeof tab !== "object") return 0;
+  if (inspector.selectedTab === "plan") return Array.isArray(tab.items) ? tab.items.length : 0;
+  if (inspector.selectedTab === "tools") return Array.isArray(tab.items) ? tab.items.length : 0;
+  if (inspector.selectedTab === "changes") return Array.isArray(tab.items) ? tab.items.length : 0;
+  if (inspector.selectedTab === "tests") return Array.isArray(tab.validations) ? tab.validations.length : 0;
+  return 0;
 }
 
 function startRunActivity(state, record, payload) {
@@ -520,6 +998,71 @@ function finishRunActivity(state, status) {
   state.activeRunActivity = null;
   clearRenderCache(state.renderCache);
   return activity;
+}
+
+function addCompletionReceipt(state, receipt, requestId) {
+  const receiptId = String(receipt.receipt_id ?? "");
+  const runId = String(receipt.run_id ?? "");
+  if (!receiptId || !runId) return null;
+  const existing = state.messages.find(
+    (message) => message.kind === "completion_receipt"
+      && message.receiptId === receiptId,
+  );
+  if (existing) return existing;
+  const message = {
+    kind: "completion_receipt",
+    id: nextMessageId(state, "completion_receipt"),
+    requestId: String(requestId ?? ""),
+    receiptId,
+    runId,
+    receipt,
+  };
+  state.messages.push(message);
+  clearRenderCache(state.renderCache);
+  return message;
+}
+
+function moveCompletionReceiptToEnd(state, receiptId, runId) {
+  const normalizedReceiptId = String(receiptId ?? "");
+  const normalizedRunId = String(runId ?? "");
+  if (!normalizedReceiptId && !normalizedRunId) return null;
+  const index = state.messages.findIndex(
+    (message) => message.kind === "completion_receipt"
+      && (
+        (normalizedReceiptId && message.receiptId === normalizedReceiptId)
+        || (normalizedRunId && message.runId === normalizedRunId)
+      ),
+  );
+  if (index < 0) return null;
+  const [message] = state.messages.splice(index, 1);
+  state.messages.push(message);
+  clearRenderCache(state.renderCache);
+  return message;
+}
+
+function terminalRunActions(state, payload) {
+  const actions = state.taskPanel.pinned ? [taskPanelRefreshAction(state)] : [];
+  const receiptId = String(payload.receipt_id ?? "");
+  const runId = String(payload.run_id ?? "");
+  if ((receiptId || runId) && !hasCompletionReceipt(state, receiptId, runId)) {
+    actions.push({
+      type: "request_completion_receipt",
+      sessionId: String(state.currentSessionId ?? ""),
+      receiptId,
+      runId,
+    });
+  }
+  return actions;
+}
+
+function hasCompletionReceipt(state, receiptId, runId) {
+  return state.messages.some(
+    (message) => message.kind === "completion_receipt"
+      && (
+        (receiptId && message.receiptId === receiptId)
+        || (runId && message.runId === runId)
+      ),
+  );
 }
 
 function discardActiveRunActivity(state) {
@@ -1065,6 +1608,10 @@ export function handleTodoPrepare(state, message) {
 
 export function handleSubmitText(state, text, send) {
   const commandText = String(text ?? "").trim();
+  if (commandText === "/agents") {
+    toggleAgentControlCenter(state, send, true);
+    return;
+  }
   if (text === "/folds") {
     showFoldList(state);
     return;
@@ -1407,6 +1954,7 @@ export function pushSystemMessage(state, title, content, level) {
     syncTaskPanelItems(state, content);
     if (state.taskPanel.items.length) {
       state.taskPanel.focused = true;
+      state.inspector.focused = false;
     }
   }
 }
@@ -1418,6 +1966,8 @@ export function createUiSnapshot(state) {
     scrollOffset: state.scrollOffset,
     outbox: serializeUserOutbox(state.messages),
     activeTaskSubmission: sanitizeActiveTaskSubmission(state.activeTaskSubmission),
+    inspector: sanitizeInspectorPresentation(state.inspector),
+    agents: sanitizeAgentControlPresentation(state.agents),
     composer: {
       text: truncateInputText(state.input),
       cursor: getInputCursor(state),
@@ -1441,6 +1991,24 @@ export function applyUiSnapshot(state, snapshot) {
   state.unreadOutputKeys = {};
   restoreUserOutbox(state, safeSnapshot.outbox);
   state.activeTaskSubmission = sanitizeActiveTaskSubmission(safeSnapshot.activeTaskSubmission);
+  const inspector = sanitizeInspectorPresentation(safeSnapshot.inspector);
+  state.inspector.open = inspector.open;
+  state.inspector.focused = false;
+  state.inspector.selectedTab = inspector.selectedTab;
+  state.inspector.selectionByTab = inspector.selectionByTab;
+  state.inspector.expandedByTab = inspector.expandedByTab;
+  state.inspector.scrollByTab = inspector.scrollByTab;
+  resetInspectorSnapshot(state.inspector);
+  const agents = sanitizeAgentControlPresentation(safeSnapshot.agents);
+  state.agents.open = agents.open;
+  state.agents.selectedTab = agents.selectedTab;
+  state.agents.selectedByTab = agents.selectedByTab;
+  state.agents.detailId = agents.detailId;
+  state.agents.scrollByTab = agents.scrollByTab;
+  state.route = agents.open
+    ? { name: "agents", originAnchor: null }
+    : { name: "conversation", originAnchor: null };
+  resetAgentControlSnapshot(state.agents);
   const composer = safeSnapshot.composer && typeof safeSnapshot.composer === "object"
     ? safeSnapshot.composer
     : {};
@@ -1452,6 +2020,74 @@ export function applyUiSnapshot(state, snapshot) {
     && Number.isFinite(Number(composer.preferredColumn))
     ? Math.max(0, Number(composer.preferredColumn))
     : null;
+}
+
+function sanitizeInspectorPresentation(value) {
+  const safe = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    open: safe.open === true,
+    selectedTab: RUNTIME_INSPECTOR_TABS.includes(safe.selectedTab) ? safe.selectedTab : "plan",
+    selectionByTab: sanitizeInspectorNumberMap(safe.selectionByTab),
+    expandedByTab: sanitizeInspectorExpandedMap(safe.expandedByTab),
+    scrollByTab: sanitizeInspectorNumberMap(safe.scrollByTab),
+  };
+}
+
+function sanitizeAgentControlPresentation(value) {
+  const safe = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const selectedByTab = {};
+  const rawSelected = safe.selectedByTab && typeof safe.selectedByTab === "object"
+    ? safe.selectedByTab
+    : {};
+  for (const tab of AGENT_CONTROL_TABS) {
+    if (typeof rawSelected[tab] === "string") {
+      selectedByTab[tab] = rawSelected[tab].slice(0, 500);
+    }
+  }
+  return {
+    open: safe.open === true,
+    selectedTab: AGENT_CONTROL_TABS.includes(safe.selectedTab) ? safe.selectedTab : "agents",
+    selectedByTab,
+    detailId: typeof safe.detailId === "string" ? safe.detailId.slice(0, 500) : "",
+    scrollByTab: sanitizeAgentControlNumberMap(safe.scrollByTab),
+  };
+}
+
+function sanitizeAgentControlNumberMap(value) {
+  const safe = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const result = {};
+  for (const tab of AGENT_CONTROL_TABS) {
+    const parsed = Number(safe[tab]);
+    if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 10_000) result[tab] = parsed;
+  }
+  return result;
+}
+
+function sanitizeInspectorNumberMap(value) {
+  const safe = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const result = {};
+  for (const tab of RUNTIME_INSPECTOR_TABS) {
+    const parsed = Number(safe[tab]);
+    if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 10_000) result[tab] = parsed;
+  }
+  return result;
+}
+
+function sanitizeInspectorExpandedMap(value) {
+  const safe = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const result = {};
+  for (const tab of RUNTIME_INSPECTOR_TABS) {
+    const rawEntries = safe[tab] && typeof safe[tab] === "object" && !Array.isArray(safe[tab])
+      ? Object.entries(safe[tab])
+      : [];
+    const kept = {};
+    for (const [index, expanded] of rawEntries.slice(0, 100)) {
+      if (!/^\d{1,5}$/.test(index) || expanded !== true) continue;
+      kept[index] = true;
+    }
+    if (Object.keys(kept).length) result[tab] = kept;
+  }
+  return result;
 }
 
 function serializeUserOutbox(messages) {
@@ -1720,6 +2356,7 @@ function handleTasksCommand(state, text, send) {
   state.taskPanel.history = history;
   state.taskPanel.detailId = detailId;
   state.taskPanel.focused = true;
+  state.inspector.focused = false;
   if (command === "pin") {
     state.taskPanel.pinned = true;
     state.taskPanel.lastStatusSignature = "";
@@ -1893,6 +2530,7 @@ export function setTaskPanelFocus(state, focused) {
     return false;
   }
   state.taskPanel.focused = nextFocused;
+  if (nextFocused) state.inspector.focused = false;
   clearRenderCache(state.renderCache);
   pushSystemMessage(state, "任务面板", nextFocused ? "任务面板已聚焦。" : "任务面板焦点已退出。", "info");
   return true;

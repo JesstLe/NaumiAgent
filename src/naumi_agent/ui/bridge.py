@@ -13,10 +13,13 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
+from naumi_agent.agent_control import AgentControlSnapshot
 from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
+from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.log_setup import setup_logging
+from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNoticeMessage
 from naumi_agent.ui.protocol import (
@@ -108,6 +111,15 @@ def _public_mapping(value: Any) -> dict[str, Any]:
     if hasattr(value, "__dict__"):
         return dict(vars(value))
     return {}
+
+
+def _receipt_reference(receipt: CompletionReceipt | None) -> dict[str, str]:
+    if receipt is None:
+        return {}
+    return {
+        "receipt_id": receipt.receipt_id,
+        "run_id": receipt.run_id,
+    }
 
 
 def _task_turn_context(
@@ -353,6 +365,11 @@ class JsonlEngineBridge:
         self._writer_lock = asyncio.Lock()
         self._run_task: asyncio.Task[Any] | None = None
         self._active_run_context: dict[str, str] = {}
+        self._active_completion_receipt: CompletionReceipt | None = None
+        self._inspector_subscribed = False
+        self._inspector_snapshot: RuntimeInspectorSnapshot | None = None
+        self._agents_subscribed = False
+        self._agents_snapshot: AgentControlSnapshot | None = None
         self._cli_supported_commands = _load_cli_slash_commands_with_alias()
         self._pending_permissions: dict[str, asyncio.Future[str]] = {}
         self._pending_permission_payloads: dict[str, dict[str, Any]] = {}
@@ -556,6 +573,18 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.RUN_CANCEL:
             await self.cancel_run(payload, request_id=request_id)
             return
+        if event_type == ClientEventType.RECEIPT_REQUEST:
+            await self.resend_completion_receipt(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.INSPECTOR_REQUEST:
+            await self.show_inspector(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.AGENTS_REQUEST:
+            await self.show_agents(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.AGENTS_STOP:
+            await self.stop_agent_execution(payload, request_id=request_id)
+            return
 
         if event_type == ClientEventType.RESUME:
             await self.resume_session(payload, request_id=request_id)
@@ -631,6 +660,7 @@ class JsonlEngineBridge:
         await self.emit(ServerEventType.USER_MESSAGE, {"content": text}, request_id=request_id)
         await self.emit(ServerEventType.RUN_STARTED, {"task": text}, request_id=request_id)
         await self.emit(ServerEventType.STATUS, self.status_payload())
+        self._active_completion_receipt = None
 
         async def run() -> None:
             try:
@@ -641,6 +671,10 @@ class JsonlEngineBridge:
                         "status": result.status,
                         "response": result.response or "",
                         "error": result.error or "",
+                        **_receipt_reference(
+                            getattr(result, "receipt", None)
+                            or self._active_completion_receipt
+                        ),
                     },
                     request_id=request_id,
                 )
@@ -655,6 +689,7 @@ class JsonlEngineBridge:
                     message,
                     code=code,
                     request_id=request_id,
+                    details=_receipt_reference(self._active_completion_receipt),
                 )
             finally:
                 if self._active_run_context.get("request_id") == request_id:
@@ -752,6 +787,7 @@ class JsonlEngineBridge:
             request_id=request_id,
         )
         await self.emit(ServerEventType.STATUS, self.status_payload())
+        self._active_completion_receipt = None
 
         async def run() -> None:
             try:
@@ -781,6 +817,10 @@ class JsonlEngineBridge:
                         "task_id": task_id,
                         "mission_id": mission_id,
                         "intent": "task",
+                        **_receipt_reference(
+                            getattr(result, "receipt", None)
+                            or self._active_completion_receipt
+                        ),
                     },
                     request_id=request_id,
                 )
@@ -811,6 +851,7 @@ class JsonlEngineBridge:
                         "mission_id": mission_id,
                         "intent": "task",
                         "task_status": TaskStatus.BLOCKED.value,
+                        **_receipt_reference(self._active_completion_receipt),
                     },
                 )
             finally:
@@ -865,6 +906,7 @@ class JsonlEngineBridge:
             "target_request_id": target_request_id,
             "intent": context.get("intent", "chat"),
             "reason": reason,
+            **_receipt_reference(self._active_completion_receipt),
         }
         if context.get("task_id"):
             cancelled.update({
@@ -878,6 +920,299 @@ class JsonlEngineBridge:
             request_id=request_id,
         )
         await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def resend_completion_receipt(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Resend one durable receipt without allowing cross-session lookup."""
+        receipt_id = str(payload.get("receipt_id") or "")
+        run_id = str(payload.get("run_id") or "")
+        session_id = str(payload.get("session_id") or "")
+        current_session_id = str(
+            getattr(getattr(self.engine, "_session", None), "id", "")
+        )
+        if not session_id:
+            session_id = current_session_id
+
+        receipt = self._active_completion_receipt
+        if session_id and current_session_id and session_id != current_session_id:
+            receipt = None
+        if receipt is not None and (
+            (receipt_id and receipt.receipt_id != receipt_id)
+            or (run_id and receipt.run_id != run_id)
+        ):
+            receipt = None
+
+        store = getattr(self.engine, "chat_run_store", None)
+        if receipt is None and store is not None and session_id:
+            if receipt_id:
+                receipt = await store.get_receipt(session_id, receipt_id)
+            elif run_id:
+                run = await store.get_run(session_id, run_id)
+                receipt = run.receipt if run is not None else None
+        if receipt is None or (run_id and receipt.run_id != run_id):
+            await self.emit_error(
+                "未找到可补发的完成回执。",
+                code="receipt_not_found",
+                request_id=request_id,
+            )
+            return
+        await self.emit(
+            ServerEventType.COMPLETION_RECEIPT,
+            receipt.to_dict(),
+            request_id=request_id,
+        )
+
+    async def show_inspector(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Open, refresh, or close the current session Inspector subscription."""
+        if not bool(payload.get("open", True)):
+            self._inspector_subscribed = False
+            revision = (
+                self._inspector_snapshot.revision
+                if self._inspector_snapshot is not None
+                else 0
+            )
+            self._inspector_snapshot = None
+            await self.emit(
+                ServerEventType.ACK,
+                {
+                    "event": str(ClientEventType.INSPECTOR_REQUEST),
+                    "open": False,
+                    "revision": revision,
+                },
+                request_id=request_id,
+            )
+            return
+
+        session = getattr(self.engine, "_session", None)
+        if session is None:
+            session = await self.engine.get_or_create_session()
+        session_id = str(getattr(session, "id", "") or "")
+        requested_session_id = str(payload.get("session_id") or "")
+        if requested_session_id and requested_session_id != session_id:
+            await self.emit_error(
+                "Inspector 只能读取当前会话。",
+                code="inspector_session_mismatch",
+                request_id=request_id,
+            )
+            return
+
+        snapshot = await self.engine.runtime_inspector.snapshot()
+        if snapshot.session_id != session_id:
+            await self.emit_error(
+                "Inspector 快照会话与当前会话不一致。",
+                code="inspector_session_mismatch",
+                request_id=request_id,
+            )
+            return
+        self._inspector_subscribed = True
+        self._inspector_snapshot = snapshot
+        await self.emit(
+            ServerEventType.INSPECTOR_SNAPSHOT,
+            snapshot.to_dict(),
+            request_id=request_id,
+        )
+
+    async def _emit_inspector_update(self) -> None:
+        if not self._inspector_subscribed:
+            return
+        try:
+            current = await self.engine.runtime_inspector.snapshot()
+            previous = self._inspector_snapshot
+            if previous is None or previous.session_id != current.session_id:
+                self._inspector_snapshot = current
+                await self.emit(ServerEventType.INSPECTOR_SNAPSHOT, current.to_dict())
+                return
+            changed_tabs = self.engine.runtime_inspector.changed_tabs(previous, current)
+            if not changed_tabs and current.revision == previous.revision:
+                return
+            self._inspector_snapshot = current
+            if not changed_tabs or current.revision != previous.revision + 1:
+                await self.emit(ServerEventType.INSPECTOR_SNAPSHOT, current.to_dict())
+                return
+            payload = current.to_dict()
+            await self.emit(
+                ServerEventType.INSPECTOR_UPDATE,
+                {
+                    "schema_version": payload["schema_version"],
+                    "session_id": payload["session_id"],
+                    "revision": payload["revision"],
+                    "generated_at": payload["generated_at"],
+                    "active_run_id": payload["active_run_id"],
+                    "changed_tabs": {
+                        name: payload[name]
+                        for name in changed_tabs
+                    },
+                },
+            )
+        except Exception:
+            logger.exception("Runtime Inspector refresh failed")
+            await self.emit_error(
+                "Inspector 刷新失败，已保留上一次快照。",
+                code="inspector_refresh_failed",
+            )
+
+    async def show_agents(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Open, refresh, or close the current session Agent subscription."""
+        was_subscribed = self._agents_subscribed
+        if not bool(payload.get("open", True)):
+            self._agents_subscribed = False
+            revision = self._agents_snapshot.revision if self._agents_snapshot else 0
+            self._agents_snapshot = None
+            await self.emit(
+                ServerEventType.ACK,
+                {
+                    "event": str(ClientEventType.AGENTS_REQUEST),
+                    "open": False,
+                    "revision": revision,
+                },
+                request_id=request_id,
+            )
+            return
+
+        session = getattr(self.engine, "_session", None)
+        if session is None:
+            session = await self.engine.get_or_create_session()
+        session_id = str(getattr(session, "id", "") or "")
+        requested_session_id = str(payload.get("session_id") or "")
+        if requested_session_id and requested_session_id != session_id:
+            await self.emit_error(
+                "Agent 页面只能读取当前会话。",
+                code="agents_session_mismatch",
+                request_id=request_id,
+            )
+            return
+
+        try:
+            snapshot = await self.engine.agent_control.snapshot()
+        except Exception:
+            logger.exception("Agent Control initial snapshot failed")
+            await self.emit_error(
+                "Agent 页面暂时无法加载，请稍后重试。",
+                code="agents_snapshot_failed",
+                request_id=request_id,
+            )
+            return
+        if snapshot.session_id != session_id:
+            await self.emit_error(
+                "Agent 快照会话与当前会话不一致。",
+                code="agents_session_mismatch",
+                request_id=request_id,
+            )
+            return
+        self._agents_subscribed = True
+        self._agents_snapshot = snapshot
+        if was_subscribed and int(payload.get("known_revision", 0)) == snapshot.revision:
+            await self.emit(
+                ServerEventType.ACK,
+                {
+                    "event": str(ClientEventType.AGENTS_REQUEST),
+                    "open": True,
+                    "revision": snapshot.revision,
+                },
+                request_id=request_id,
+            )
+            return
+        await self.emit(
+            ServerEventType.AGENTS_SNAPSHOT,
+            snapshot.to_dict(),
+            request_id=request_id,
+        )
+
+    async def stop_agent_execution(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Request cancellation of one concrete Agent execution."""
+        session = getattr(self.engine, "_session", None)
+        session_id = str(getattr(session, "id", "") or "")
+        requested_session_id = str(payload.get("session_id") or "")
+        if requested_session_id and requested_session_id != session_id:
+            await self.emit_error(
+                "Agent 停止请求不属于当前会话。",
+                code="agents_session_mismatch",
+                request_id=request_id,
+            )
+            return
+        task_id = str(payload.get("task_id") or "")
+        target = next(
+            (
+                item
+                for item in self.engine.subagent_manager.list_executions(limit=100)
+                if item.task_id == task_id
+            ),
+            None,
+        )
+        if target is not None and target.session_id != session_id:
+            await self.emit_error(
+                "Agent 停止目标不属于当前会话。",
+                code="agents_session_mismatch",
+                request_id=request_id,
+            )
+            return
+        result = await self.engine.subagent_manager.stop_execution(
+            task_id,
+            str(payload.get("reason") or "用户请求停止子 Agent。"),
+        )
+        await self.emit(
+            ServerEventType.AGENTS_ACTION,
+            asdict(result),
+            request_id=request_id,
+        )
+        await self._emit_agents_update()
+
+    async def _emit_agents_update(self) -> None:
+        if not self._agents_subscribed:
+            return
+        try:
+            current = await self.engine.agent_control.snapshot()
+            previous = self._agents_snapshot
+            if previous is None or previous.session_id != current.session_id:
+                self._agents_snapshot = current
+                await self.emit(ServerEventType.AGENTS_SNAPSHOT, current.to_dict())
+                return
+            changed_sections = self.engine.agent_control.changed_sections(previous, current)
+            if not changed_sections and current.revision == previous.revision:
+                return
+            self._agents_snapshot = current
+            if not changed_sections or current.revision != previous.revision + 1:
+                await self.emit(ServerEventType.AGENTS_SNAPSHOT, current.to_dict())
+                return
+            public = current.to_dict()
+            await self.emit(
+                ServerEventType.AGENTS_UPDATE,
+                {
+                    "schema_version": public["schema_version"],
+                    "session_id": public["session_id"],
+                    "revision": public["revision"],
+                    "generated_at": public["generated_at"],
+                    "changed_sections": {
+                        name: public[name]
+                        for name in changed_sections
+                    },
+                },
+            )
+        except Exception:
+            logger.exception("Agent Control refresh failed")
+            await self.emit_error(
+                "Agent 页面刷新失败，已保留上一次快照。",
+                code="agents_refresh_failed",
+            )
 
     async def _resolve_task_mission(
         self,
@@ -973,6 +1308,9 @@ class JsonlEngineBridge:
             )
             return
 
+        self._inspector_subscribed = False
+        self._inspector_snapshot = None
+
         session = getattr(self.engine, "_session", None)
         raw_messages = list(getattr(session, "messages", []) or [])
         await self.emit(
@@ -987,6 +1325,16 @@ class JsonlEngineBridge:
         )
         for message in replay_messages(raw_messages):
             await self.emit(ServerEventType.UI_MESSAGE, ui_message_payload(message))
+        run_store = getattr(self.engine, "chat_run_store", None)
+        if run_store is not None:
+            runs = await run_store.list_runs(session_id, limit=200)
+            for run in reversed(runs):
+                if run.receipt is not None:
+                    await self.emit(
+                        ServerEventType.COMPLETION_RECEIPT,
+                        run.receipt.to_dict(),
+                        request_id=request_id,
+                    )
         await self.emit(ServerEventType.STATUS, self.status_payload())
 
     async def _run_cli_slash_command(self, cmd: str, *, request_id: str) -> None:
@@ -1317,8 +1665,16 @@ class JsonlEngineBridge:
             self.debug_trace.event("engine.stream_event", {"event": event, "data": data})
 
         await self.emit(ServerEventType.ENGINE_EVENT, {"event": event, "data": data})
+        if event == "completion_receipt":
+            receipt = CompletionReceipt.from_dict(data)
+            self._active_completion_receipt = receipt
+            await self.emit(
+                ServerEventType.COMPLETION_RECEIPT,
+                receipt.to_dict(),
+                request_id=self._active_run_context.get("request_id") or None,
+            )
         message = self.adapter.adapt(event, data)
-        if message is not None:
+        if message is not None and event != "completion_receipt":
             await self.emit(ServerEventType.UI_MESSAGE, ui_message_payload(message))
 
         if event in {
@@ -1333,6 +1689,36 @@ class JsonlEngineBridge:
                 ServerEventType.STATUS,
                 self.status_payload(include_slash_commands=False),
             )
+        if event in {
+            "run_started",
+            "turn_start",
+            "tool_start",
+            "tool_end",
+            "tool_error",
+            "task_snapshot",
+            "permission_bubble",
+            "context_compacted",
+            "response_end",
+            "completion_receipt",
+            "error",
+        }:
+            await self._emit_inspector_update()
+        if event in {
+            "subagent_event",
+            "team_event",
+            "tool_prepare_start",
+            "tool_prepare_snapshot",
+            "tool_prepare_end",
+            "tool_start",
+            "tool_use",
+            "tool_result",
+            "tool_end",
+            "tool_error",
+            "permission_bubble",
+            "completion_receipt",
+            "error",
+        }:
+            await self._emit_agents_update()
 
     async def confirm_permission(self, payload: dict[str, Any]) -> str:
         request_id = (

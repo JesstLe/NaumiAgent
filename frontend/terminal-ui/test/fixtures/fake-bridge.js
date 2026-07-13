@@ -7,6 +7,10 @@ let mode = "default";
 let showReasoning = false;
 let sessionId = "session-fake-1";
 let activeRun = null;
+let inspectorOpen = false;
+let agentsOpen = false;
+let agentStopped = false;
+let agentPermissionSent = false;
 
 attachJsonlLineReader(process.stdin, (line) => {
   if (!line.trim()) return;
@@ -34,6 +38,72 @@ attachJsonlLineReader(process.stdin, (line) => {
   if (record.type === "set_reasoning") {
     showReasoning = Boolean(payload.enabled);
     emit("runtime/status", statusPayload());
+    return;
+  }
+
+  if (record.type === "inspector/request") {
+    inspectorOpen = payload.open !== false;
+    if (!inspectorOpen) {
+      emit("ack", { event: "inspector/request", open: false, revision: 2 }, record.id);
+      return;
+    }
+    if (Number(payload.known_revision) > 0) {
+      emit("inspector/snapshot", inspectorSnapshot(3), record.id);
+      return;
+    }
+    emit("inspector/snapshot", inspectorSnapshot(1), record.id);
+    setTimeout(() => {
+      if (!inspectorOpen) return;
+      const snapshot = inspectorSnapshot(3);
+      emit("inspector/update", {
+        schema_version: 1,
+        session_id: sessionId,
+        revision: 3,
+        generated_at: "2026-07-13T00:00:01+00:00",
+        active_run_id: "run-inspector-live",
+        changed_tabs: { tools: snapshot.tools },
+      });
+    }, 40);
+    return;
+  }
+
+  if (record.type === "agents/request") {
+    agentsOpen = payload.open !== false;
+    if (!agentsOpen) {
+      emit("ack", { event: "agents/request", open: false, revision: agentStopped ? 2 : 1 }, record.id);
+      return;
+    }
+    emit("agents/snapshot", agentControlSnapshot(agentStopped ? 2 : 1), record.id);
+    if (process.env.NAUMI_TEST_AGENT_PERMISSION === "1" && !agentPermissionSent) {
+      agentPermissionSent = true;
+      setTimeout(() => {
+        emit("permission/request", {
+          tool_name: "agent_sensitive_tool",
+          reason: "验证 Agent 页面权限优先级。",
+        }, "agent-perm-1");
+      }, 40);
+    }
+    return;
+  }
+
+  if (record.type === "agents/stop") {
+    if (payload.task_id !== "task-agent-1") {
+      emit("agents/action", {
+        task_id: payload.task_id,
+        accepted: false,
+        code: "not_found",
+        message: "未找到 Agent 执行。",
+      }, record.id);
+      return;
+    }
+    agentStopped = true;
+    emit("agents/action", {
+      task_id: "task-agent-1",
+      accepted: true,
+      code: "accepted",
+      message: "已请求停止 Agent 执行。",
+    }, record.id);
+    emit("agents/snapshot", agentControlSnapshot(2));
     return;
   }
 
@@ -140,6 +210,28 @@ attachJsonlLineReader(process.stdin, (line) => {
     return;
   }
 
+  if (record.type === "receipt/request") {
+    setTimeout(() => {
+      emit("completion/receipt", {
+        schema_version: 1,
+        receipt_id: payload.receipt_id || "receipt-fake-1",
+        run_id: payload.run_id || "run-fake-1",
+        outcome: "completed",
+        summary: "页面已写入并完成验证。",
+        changes: [{ path: "showcase/index.html", status: "modified", source_tool: "file_write", additions: 65, deletions: 1 }],
+        validations: [{ command: "node --test", scope: "frontend/terminal-ui", status: "passed", exit_code: 0, passed: 1 }],
+        unverified: [],
+        approvals: [{ call_id: "call-1", tool_name: "file_write", decision: "allowed_once" }],
+        risks: [],
+        git_state: { available: true, branch: "main", dirty: true, ahead: 0, behind: 0 },
+        next_actions: [{ id: "review", label: "审查本轮改动", kind: "review_changes" }],
+        evidence_refs: ["run:run-fake-1:tool:call-1"],
+        duration_ms: 140,
+      }, record.id);
+    }, 80);
+    return;
+  }
+
   if (record.type === "permission_response") {
     const targetRun = activeRun;
     emit("permission/resolved", { request_id: payload.request_id, choice: payload.choice });
@@ -173,7 +265,11 @@ attachJsonlLineReader(process.stdin, (line) => {
         content_preview: ["--- a/showcase/index.html", "+++ b/showcase/index.html", "@@", "-old", "+new", ...Array.from({ length: 65 }, (_, index) => `+line ${index}`)].join("\n"),
         content_length: 640,
       });
-      emit("run/completed", {}, targetRun.requestId);
+      emit("run/completed", {
+        status: "completed",
+        receipt_id: "receipt-fake-1",
+        run_id: "run-fake-1",
+      }, targetRun.requestId);
       activeRun = null;
     }, 30);
     return;
@@ -347,5 +443,155 @@ function workbenchSnapshot(mission, task, issue) {
     issues: [issue],
     failures: [],
     events: [{ id: "event-41", type: "issue.created" }],
+  };
+}
+
+function inspectorSnapshot(revision) {
+  return {
+    schema_version: 1,
+    session_id: sessionId,
+    revision,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    active_run_id: revision > 1 ? "run-inspector-live" : "",
+    plan: {
+      state: "ready",
+      items: [{
+        id: "todo-inspector-1",
+        subject: "保持运行检查器实时更新",
+        status: "in_progress",
+        active_form: "正在同步 Inspector",
+        owner: "main",
+        blocked_by: [],
+      }],
+      next_actions: [],
+      warnings: [],
+    },
+    tools: {
+      state: revision > 1 ? "ready" : "empty",
+      items: revision > 1
+        ? [{
+            call_id: "read-live-1",
+            name: "file_read",
+            status: "running",
+            summary: "正在读取真实项目文件",
+            duration_ms: 45,
+            run_id: "run-inspector-live",
+          }]
+        : [],
+      approvals: [],
+      warnings: [],
+    },
+    context: {
+      state: "ready",
+      workspace_root: "/Users/lv/Workspace/NaumiAgent",
+      branch: "main",
+      commit: "abc1234",
+      git_available: true,
+      git_dirty: true,
+      model: "openai/kimi-for-coding",
+      runtime_mode: mode,
+      permission_mode: permissionModeFor(mode),
+      context_used: 1200,
+      context_window: 256000,
+      context_percentage: 0.5,
+      budget_used_usd: 0.01,
+      budget_max_usd: 5,
+      budget_percentage: 0.2,
+      input_tokens: 1000,
+      output_tokens: 200,
+      turns: 1,
+      warnings: [],
+    },
+    changes: {
+      state: "empty",
+      source_run_id: "",
+      receipt_id: "",
+      summary: "",
+      items: [],
+      git_state: {
+        available: true,
+        branch: "main",
+        dirty: true,
+        commit: "abc1234",
+        ahead: 0,
+        behind: 0,
+      },
+      warnings: [],
+    },
+    tests: {
+      state: "empty",
+      source_run_id: "",
+      receipt_id: "",
+      validations: [],
+      unverified: [],
+      next_actions: [],
+      warnings: [],
+    },
+  };
+}
+
+function agentControlSnapshot(revision) {
+  const stopped = revision > 1;
+  return {
+    schema_version: 1,
+    session_id: sessionId,
+    revision,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    summary: {
+      total_agents: 1,
+      active_agents: stopped ? 0 : 1,
+      attention_agents: 0,
+      stoppable_executions: stopped ? 0 : 1,
+      pending_messages: 1,
+    },
+    agents: [{
+      name: "coder",
+      description: "真实编程 Agent",
+      kind: "preset",
+      state: stopped ? "idle" : "running",
+      task_count: 1,
+      model_tier: "capable",
+      capabilities: ["代码"],
+      tools: ["file_read"],
+      permission_level: "moderate",
+      age_ms: 500,
+      heartbeat_age_ms: 100,
+    }],
+    executions: [{
+      task_id: "task-agent-1",
+      session_id: sessionId,
+      agent_name: "coder",
+      description: "验证 Agent 控制中心",
+      status: stopped ? "cancelled" : "running",
+      phase: stopped ? "finished" : "running_tool",
+      started_at: 1,
+      finished_at: stopped ? 2 : null,
+      elapsed_ms: 1000,
+      heartbeat_age_ms: 100,
+      current_tool: stopped ? "" : "file_read",
+      recent_tools: ["file_read"],
+      total_tokens: 42,
+      total_cost_usd: 0.01,
+      turns: 2,
+      error: stopped ? "用户请求停止子 Agent。" : "",
+      stop_supported: !stopped,
+      stop_requested: stopped,
+    }],
+    team_messages: [{
+      sender: "coder",
+      recipient: "reviewer",
+      topic: "review",
+      priority: "high",
+      timestamp: 1,
+      content: "请检查实现",
+    }],
+    blackboard: [{
+      key: "team/review",
+      author: "coder",
+      version: 1,
+      timestamp: 1,
+      value_summary: "ready",
+    }],
+    warnings: [],
   };
 }

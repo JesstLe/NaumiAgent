@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -13,9 +14,11 @@ from inspect import signature
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.agent_control import AgentControlService
 from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
+from naumi_agent.inspector import RuntimeInspectorService
 from naumi_agent.mcp.client import MCPClientManager, MCPServerConfig, setup_mcp_servers
 from naumi_agent.memory.auto_extract import extract_memory_candidates
 from naumi_agent.memory.compactor import ContextCompactor
@@ -41,6 +44,9 @@ from naumi_agent.orchestrator.tool_batches import (
     build_tool_batches,
     execute_tool_batch,
 )
+from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.runs.recorder import ChatRunRecorder
+from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
@@ -377,6 +383,7 @@ class AgentResult:
     usage: AgentUsage = field(default_factory=AgentUsage)
     error: str | None = None
     task_summary: str | None = None
+    receipt: CompletionReceipt | None = None
 
 
 class AgentEngine:
@@ -387,6 +394,7 @@ class AgentEngine:
         self.workspace_root = config.resolve_workspace_root()
         self._runtime_data_dir = Path(config.memory.session_db_path).parent
         self._worktree_storage_dir = self._runtime_data_dir / "worktrees"
+        self.chat_run_store = ChatRunStore(self._runtime_data_dir / "chat-runs.db")
         self._router = ModelRouter(config.models)
         self._tool_registry = ToolRegistry()
         self._messages: list[dict[str, Any]] = []
@@ -487,6 +495,7 @@ class AgentEngine:
             storage_dir=self._worktree_storage_dir,
             task_store=self.task_store,
         )
+        self.runtime_inspector = RuntimeInspectorService(self)
 
         self._mcp_manager: MCPClientManager | None = None
 
@@ -599,6 +608,10 @@ class AgentEngine:
         from naumi_agent.tools.subagent import create_subagent_tools
 
         self.subagent_manager = SubAgentManager(self)
+        self.agent_control = AgentControlService(
+            self,
+            session_id_getter=lambda: self._session.id if self._session else "",
+        )
         set_analysis_subagent_manager(self.subagent_manager)
         for tool in create_subagent_tools(self.subagent_manager):
             self._tool_registry.register(tool)
@@ -1906,6 +1919,65 @@ class AgentEngine:
         return result
 
     async def run_streaming(
+        self,
+        task: str,
+        on_event: EventCallback,
+        turn_context: str = "",
+    ) -> AgentResult:
+        """Execute and durably record one streamed Agent run."""
+        session = await self.get_or_create_session()
+        self.task_store.set_session(session.id)
+        recorder = await ChatRunRecorder.start(
+            store=self.chat_run_store,
+            workspace_root=self.workspace_root,
+            session_id=session.id,
+            task=task,
+        )
+
+        async def recorded_event(event: str, data: dict[str, Any]) -> None:
+            public_data = {
+                **data,
+                "run_id": recorder.run_id,
+                "session_id": session.id,
+            }
+            self.runtime_inspector.observe(event, public_data)
+            await recorder.observe(event, public_data)
+            await on_event(event, public_data)
+
+        try:
+            result = await self._run_streaming_core(
+                task,
+                recorded_event,
+                turn_context=turn_context,
+            )
+        except asyncio.CancelledError:
+            receipt = await recorder.finish("cancelled", "运行已由用户取消。")
+            self.runtime_inspector.observe(
+                "completion_receipt",
+                {**receipt.to_dict(), "session_id": session.id},
+            )
+            await on_event("completion_receipt", receipt.to_dict())
+            raise
+        except Exception as exc:
+            receipt = await recorder.finish("failed", self._format_error(exc))
+            self.runtime_inspector.observe(
+                "completion_receipt",
+                {**receipt.to_dict(), "session_id": session.id},
+            )
+            await on_event("completion_receipt", receipt.to_dict())
+            raise
+
+        summary = result.response or result.error or "本轮运行已结束。"
+        receipt = await recorder.finish(result.status, summary)
+        result.receipt = receipt
+        self.runtime_inspector.observe(
+            "completion_receipt",
+            {**receipt.to_dict(), "session_id": session.id},
+        )
+        await on_event("completion_receipt", receipt.to_dict())
+        return result
+
+    async def _run_streaming_core(
         self,
         task: str,
         on_event: EventCallback,

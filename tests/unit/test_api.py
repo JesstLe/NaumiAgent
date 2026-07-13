@@ -339,6 +339,67 @@ class TestMessageRoutes:
         assert response.runs[0].steps[-1].stage == "response"
 
     @pytest.mark.asyncio
+    async def test_stream_response_reuses_engine_managed_run_and_exposes_receipt(
+        self,
+        tmp_path,
+    ) -> None:
+        from naumi_agent.runs.models import CompletionReceipt
+
+        store = ChatRunStore(tmp_path / "chat-runs.db")
+
+        class ManagedRunEngine(_FakeEngine):
+            def __init__(self) -> None:
+                super().__init__()
+                self.chat_run_store = store
+
+            async def run_streaming(
+                self,
+                content: str,
+                on_event,
+                turn_context: str = "",
+            ):
+                run = await store.start_run(
+                    session_id="sess_1",
+                    user_message_id="msg-engine",
+                    run_id="run-engine",
+                )
+                await on_event("run_started", {"task": content, "run_id": run.id})
+                receipt = CompletionReceipt.from_dict(
+                    {
+                        "schema_version": 1,
+                        "receipt_id": "receipt-engine",
+                        "run_id": run.id,
+                        "outcome": "completed",
+                        "summary": "已完成。",
+                        "git_state": {"available": False, "dirty": False},
+                    }
+                )
+                await store.finish_run(run.id, status="completed", receipt=receipt)
+                await on_event("completion_receipt", receipt.to_dict())
+                usage = SimpleNamespace(turns=1, total_cost_usd=0.01)
+                return SimpleNamespace(
+                    status="completed",
+                    response="已完成。",
+                    usage=usage,
+                    receipt=receipt,
+                )
+
+        engine = ManagedRunEngine()
+        request = _fake_request(engine, store)
+        events = [
+            json.loads(chunk.removeprefix("data: "))
+            async for chunk in _stream_response(engine, "sess_1", "hello", request)
+        ]
+
+        runs = await store.list_runs("sess_1")
+        assert len(runs) == 1
+        assert runs[0].id == "run-engine"
+        receipt_events = [event for event in events if event["type"] == "completion_receipt"]
+        assert receipt_events[0]["data"]["receipt_id"] == "receipt-engine"
+        response = await list_chat_runs("sess_1", request, limit=50, auth="test")
+        assert response.runs[0].receipt["receipt_id"] == "receipt-engine"
+
+    @pytest.mark.asyncio
     async def test_chat_environment_requires_existing_session(self, tmp_path) -> None:
         engine = _FakeEngine()
         engine.session_store.load = lambda _session_id: _async_value(None)

@@ -13,6 +13,60 @@ import {
   restoreViewportAnchor,
 } from "../src/render.js";
 import { detachTimeline } from "../src/timeline-follow.js";
+import { renderRuntimeInspector } from "../src/components/runtime-inspector.js";
+import { renderAgentControlPage } from "../src/components/agent-control-page.js";
+
+test("agent control page renders bounded wide and narrow authoritative layouts", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-agents";
+  state.route = { name: "agents", originAnchor: null };
+  state.agents.open = true;
+  state.agents.selectedTab = "executions";
+  state.agents.selectedByTab.executions = "task-1";
+  state.agents.detailId = "task-1";
+  state.agents.revision = 3;
+  state.agents.snapshot = {
+    schema_version: 1,
+    session_id: "session-agents",
+    revision: 3,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    summary: { total_agents: 1, active_agents: 1, attention_agents: 0, stoppable_executions: 1, pending_messages: 0 },
+    agents: [{ name: "coder", description: "编程 Agent", kind: "preset", state: "running", task_count: 1, model_tier: "capable", capabilities: ["代码"], tools: ["file_read"], permission_level: "moderate", age_ms: 500, heartbeat_age_ms: 100 }],
+    executions: [{ task_id: "task-1", session_id: "session-agents", agent_name: "coder", description: "实现控制中心", status: "running", phase: "running_tool", started_at: 1, finished_at: null, elapsed_ms: 1000, heartbeat_age_ms: 100, current_tool: "file_read", recent_tools: ["file_read"], total_tokens: 42, total_cost_usd: 0.01, turns: 2, error: "", stop_supported: true, stop_requested: false }],
+    team_messages: [],
+    blackboard: [],
+    warnings: [],
+  };
+
+  const wide = renderAgentControlPage(state.agents, 120, 20).map(stripAnsi);
+  const narrow = renderAgentControlPage(state.agents, 72, 16).map(stripAnsi);
+  assert(wide.some((line) => line.includes("Agent Control Center")));
+  assert(wide.some((line) => line.includes("task-1")));
+  assert(wide.some((line) => line.includes("当前工具 · file_read")));
+  assert(narrow.some((line) => line.includes("执行详情")));
+  assert.equal(wide.length, 20);
+  assert.equal(narrow.length, 16);
+  assert(renderAgentControlPage(state.agents, 120, 20).every((line) => visibleWidth(line) <= 120));
+  assert(renderAgentControlPage(state.agents, 72, 16).every((line) => visibleWidth(line) <= 72));
+});
+
+test("agent control page distinguishes loading empty stale and error states", () => {
+  const state = createInitialState();
+  state.agents.open = true;
+  state.agents.loading = true;
+  assert(renderAgentControlPage(state.agents, 80, 10).map(stripAnsi).join("\n").includes("正在加载"));
+
+  state.agents.loading = false;
+  state.agents.snapshot = { summary: {}, agents: [], executions: [], team_messages: [], blackboard: [], warnings: [], revision: 1, generated_at: "now" };
+  assert(renderAgentControlPage(state.agents, 80, 10).map(stripAnsi).join("\n").includes("暂无 Agent"));
+
+  state.agents.stale = true;
+  state.agents.error = "刷新失败";
+  assert(renderAgentControlPage(state.agents, 80, 10).map(stripAnsi).join("\n").includes("已过期"));
+
+  state.agents.snapshot = null;
+  assert(renderAgentControlPage(state.agents, 80, 10).map(stripAnsi).join("\n").includes("加载失败"));
+});
 
 test("markdown code blocks show a bounded excerpt with lightweight highlighting", () => {
   const codeLines = Array.from({ length: 45 }, (_, index) => `const value${index} = ${index};`);
@@ -362,3 +416,104 @@ test("resize anchor clamps the offset when its message disappeared", () => {
   assert.equal(offset, 0);
   assert.equal(state.followTail, true);
 });
+
+test("runtime inspector renders authoritative empty states without inventing activity", () => {
+  const state = createInitialState();
+  state.inspector.open = true;
+  state.inspector.snapshot = runtimeInspectorRenderFixture(1, { empty: true });
+  state.inspector.revision = 1;
+
+  for (const [tab, expected] of [
+    ["plan", "尚未产生计划"],
+    ["tools", "尚未调用工具"],
+    ["changes", "尚未记录文件改动"],
+    ["tests", "尚未记录验证"],
+  ]) {
+    state.inspector.selectedTab = tab;
+    const plain = renderRuntimeInspector(state.inspector, 46, 18).map(stripAnsi).join("\n");
+    assert.match(plain, new RegExp(expected));
+  }
+});
+
+test("runtime inspector uses drawer overlay and page layouts across breakpoints", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-layout";
+  state.input = "继续实现";
+  state.messages = [{ kind: "assistant", id: "timeline-1", content: "时间线正文仍然可见" }];
+  state.permission = {
+    requestId: "permission-layout",
+    payload: { tool_name: "bash_run", reason: "需要确认真实命令" },
+  };
+  state.inspector.open = true;
+  state.inspector.snapshot = runtimeInspectorRenderFixture(2);
+  state.inspector.revision = 2;
+  const scrollOffset = state.scrollOffset;
+
+  const wide = renderScreen(state, 140, 20).map(stripAnsi);
+  assert(wide.some((line) => line.includes("时间线正文仍然可见")));
+  assert(wide.some((line) => line.includes("Runtime Inspector")));
+  assert(wide.some((line) => line.includes("实现运行检查器")));
+  assert(wide.some((line) => line.includes("permission: bash_run")));
+  assert.equal(wide.find((line) => line.includes("┌ Runtime Inspector")).indexOf("┌"), 94);
+
+  const overlay = renderScreen(state, 110, 20).map(stripAnsi);
+  assert(overlay.some((line) => line.includes("时间线正文仍然可见")));
+  assert(overlay.some((line) => line.includes("Runtime Inspector")));
+  assert(overlay.some((line) => line.includes("permission: bash_run")));
+  assert.equal(overlay.find((line) => line.includes("┌ Runtime Inspector")).indexOf("┌"), 73);
+
+  state.messages = [{
+    kind: "assistant",
+    id: "timeline-wide-cjk",
+    content: "超长中文时间线".repeat(80),
+  }];
+  const cjkOverlay = renderScreen(state, 110, 20);
+  assert(cjkOverlay.every((line) => visibleWidth(line) <= 110));
+
+  const page = renderScreen(state, 80, 20).map(stripAnsi);
+  assert(page.some((line) => line.includes("Runtime Inspector")));
+  assert(page.some((line) => line.includes("实现运行检查器")));
+  assert(!page.some((line) => line.includes("时间线正文仍然可见")));
+  assert(page.some((line) => line.includes("chat > 继续实现")));
+  assert(page.some((line) => line.includes("permission: bash_run")));
+
+  for (const [lines, width] of [[wide, 140], [overlay, 110], [page, 80]]) {
+    assert.equal(lines.length, 20);
+    assert(lines.every((line) => visibleWidth(line) <= width));
+  }
+  assert.equal(state.scrollOffset, scrollOffset);
+});
+
+test("runtime inspector never exceeds an extremely small terminal", () => {
+  const state = createInitialState();
+  state.inspector.open = true;
+  state.inspector.snapshot = runtimeInspectorRenderFixture(1);
+  state.input = "x";
+
+  const lines = renderScreen(state, 12, 3);
+
+  assert.equal(lines.length, 3);
+  assert(lines.every((line) => visibleWidth(line) <= 12));
+  assert(lines.map(stripAnsi).some((line) => line.includes("chat > x")));
+});
+
+function runtimeInspectorRenderFixture(revision, { empty = false } = {}) {
+  const state = empty ? "empty" : "ready";
+  return {
+    schema_version: 1,
+    session_id: "session-layout",
+    revision,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    active_run_id: "run-layout",
+    plan: {
+      state,
+      items: empty ? [] : [{ id: "todo-1", subject: "实现运行检查器", status: "in_progress", blocked_by: [] }],
+      next_actions: [],
+      warnings: [],
+    },
+    tools: { state, items: [], approvals: [], warnings: [] },
+    context: { state, warnings: [] },
+    changes: { state, items: [], git_state: { available: true, branch: "main", dirty: true }, warnings: [] },
+    tests: { state, validations: [], unverified: [], next_actions: [], warnings: [] },
+  };
+}
