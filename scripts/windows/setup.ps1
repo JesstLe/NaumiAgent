@@ -185,7 +185,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Step "Windows 初始化完成"
-Write-Host "  TUI:  naumiagent --tui"
+Write-Host "  TUI:  naumi"
+Write-Host "  Windows compatibility alias:  naumiagent --tui"
 Write-Host "  CLI:  uv run naumi chat"
 Write-Host "  UI:   uv run naumi ui"
 Write-Host "  API:  uv run naumi serve"

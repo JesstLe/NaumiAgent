@@ -25,7 +25,8 @@ def test_setup_script_checks_required_runtimes() -> None:
         in script
     )
     assert 'Get-Command "naumiagent"' in script
-    assert 'Write-Host "  TUI:  naumiagent --tui"' in script
+    assert 'Write-Host "  TUI:  naumi"' in script
+    assert "Windows compatibility alias:  naumiagent --tui" in script
 
 
 def test_setup_script_creates_config_only_when_missing() -> None:

@@ -1,12 +1,15 @@
 import { readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
+const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const roots = ["src", "test"];
-const files = roots.flatMap((root) => collectJavaScript(root)).sort();
+const files = roots.flatMap((root) => collectJavaScript(join(packageRoot, root))).sort();
 
 for (const file of files) {
   const result = spawnSync(process.execPath, ["--check", file], {
+    cwd: packageRoot,
     stdio: "inherit",
   });
   if (result.error) {
@@ -29,4 +32,3 @@ function collectJavaScript(directory) {
     return entry.isFile() && entry.name.endsWith(".js") ? [path] : [];
   });
 }
-

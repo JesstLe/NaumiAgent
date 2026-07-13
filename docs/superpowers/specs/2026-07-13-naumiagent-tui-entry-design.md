@@ -2,18 +2,20 @@
 
 ## 目标
 
-在 Windows PowerShell 中直接执行 `naumiagent --tui`，启动新版 Node 终端 UI，且不破坏现有 `naumi` 命令或 Mac/Swift App。
+在 Windows PowerShell 中保留 `naumiagent --tui` 兼容入口，同时与全平台统一的 `naumi` 默认 Node Terminal UI 行为保持一致，不影响 Mac/Swift App。
 
 ## 命令行为
 
 - `naumiagent --tui` 启动新版 Node 终端 UI，行为等同于 `naumi ui`。
 - `naumiagent --tui --config <path>` 将配置路径传给新版终端 UI。
 - `naumiagent` 未携带 `--tui` 时显示帮助并正常退出，不隐式进入其他界面。
-- 原有 `naumi chat`、`naumi ui`、`naumi run`、`naumi serve` 保持不变。
+- `naumi` 与 `naumi chat` 默认启动 Node Terminal UI。
+- `naumi chat --classic` 与 `naumi ui --legacy` 提供显式回退。
+- `naumi run`、`naumi serve` 等非交互命令保持不变。
 
 ## 实现边界
 
-1. 在 Python CLI 中增加一个独立、可单测的兼容入口，只解析 `--tui` 与 `--config`。
+1. 在 Python CLI 中保留一个独立、可单测的 Windows 兼容入口，只解析 `--tui` 与 `--config`，并复用统一 onboarding 和 Node UI 启动链。
 2. 在 `pyproject.toml` 中注册 `naumiagent` 控制台脚本，同时保留 `naumi`。
 3. Windows 初始化脚本在完成依赖同步后，以 editable tool 方式安装当前项目，使 `naumiagent` 出现在 uv 的用户命令目录中。
 4. 不修改 `apps/macos`、Swift 源码或 Mac App 的启动路径。

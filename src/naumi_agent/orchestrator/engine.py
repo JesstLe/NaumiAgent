@@ -3247,7 +3247,7 @@ class AgentEngine:
             return (
                 "API Key 未设置或无效。请通过环境变量设置:\n"
                 "  export NAUMI_MODELS__API_KEY=your-key\n"
-                "或在 config.yaml 中配置 api_key"
+                "或重新运行首次引导保存到系统凭据库"
             )
         if "RateLimitError" in error_type:
             return "API 调用频率超限，请稍后重试。"

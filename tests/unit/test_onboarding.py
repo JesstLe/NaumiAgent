@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
+from rich.console import Console
 
 import naumi_agent.cli.onboarding as onboarding
 import naumi_agent.main as main_module
@@ -156,3 +159,30 @@ def test_main_prepares_legacy_credentials_before_onboarding_check(
     main_module._ensure_onboarding_ready("config.yaml")
 
     assert calls == ["migrate", "check"]
+
+
+def test_node_check_recommends_only_explicit_legacy_fallbacks(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output = StringIO()
+    monkeypatch.setattr(onboarding, "console", Console(file=output, force_terminal=False))
+    monkeypatch.setattr(onboarding.shutil, "which", lambda _name: None)
+
+    onboarding._check_node_ui(tmp_path)
+
+    text = output.getvalue()
+    assert "naumi chat --classic" in text
+    assert "naumi ui --legacy" in text
+    assert "全屏 CLI（naumi）" not in text
+
+
+def test_missing_key_message_does_not_recommend_plaintext_yaml(monkeypatch) -> None:
+    output = StringIO()
+    monkeypatch.setattr(main_module, "console", Console(file=output, force_terminal=False))
+
+    main_module._check_api_key(SimpleNamespace(models=SimpleNamespace(api_key=None)))
+
+    text = output.getvalue()
+    assert "系统凭据库" in text
+    assert "config.yaml 中配置 api_key" not in text

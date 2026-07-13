@@ -282,7 +282,7 @@ def test_bridge_resolve_config_path_falls_back_to_repo_config() -> None:
 
     assert resolved.name in {"config.yaml", "config.yaml.example"}
     assert resolved.exists()
-    assert resolved.parent.name.casefold() == "naumiagent"
+    assert resolved.parent == Path(__file__).resolve().parents[2]
 
 
 def test_protocol_decodes_strict_jsonl() -> None:

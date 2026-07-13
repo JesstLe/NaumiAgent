@@ -1,10 +1,13 @@
 import { readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const testFiles = readdirSync("test", { withFileTypes: true })
+const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+const testDirectory = join(packageRoot, "test");
+const testFiles = readdirSync(testDirectory, { withFileTypes: true })
   .filter((entry) => entry.isFile() && entry.name.endsWith(".test.js"))
-  .map((entry) => join("test", entry.name))
+  .map((entry) => join(testDirectory, entry.name))
   .sort();
 
 if (testFiles.length === 0) {
@@ -13,6 +16,7 @@ if (testFiles.length === 0) {
 }
 
 const result = spawnSync(process.execPath, ["--test", ...testFiles], {
+  cwd: packageRoot,
   stdio: "inherit",
 });
 if (result.error) {
@@ -20,4 +24,3 @@ if (result.error) {
   process.exit(1);
 }
 process.exit(result.status ?? 1);
-

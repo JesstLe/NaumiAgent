@@ -308,7 +308,7 @@ def test_ui_command_reports_legacy_fallback_when_next_ui_cannot_launch(
     assert result.exit_code == 1
     assert "未找到 Node.js" in result.output
     assert "naumi ui --legacy" in result.output
-    assert "naumi chat --tui" in result.output
+    assert "naumi chat --classic" in result.output
 
 
 def test_naumiagent_tui_launches_new_terminal_ui(
