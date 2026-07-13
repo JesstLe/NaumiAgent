@@ -12,8 +12,9 @@ import os
 import shutil
 import subprocess
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from playwright.async_api import async_playwright
 
@@ -483,8 +484,11 @@ ATTACHED_SCREENCAST_MAX_PENDING_WRITES = int(
         "BROWSER_ATTACHED_SCREENCAST_MAX_PENDING_WRITES", "80"
     )
 )
+DEFAULT_CLEANUP_TIMEOUT_SECONDS = 5.0
+DEFAULT_VIDEO_ENCODE_TIMEOUT_SECONDS = 60.0
 
 _LOG_BUFFER_LIMIT = 200
+_CleanupResult = TypeVar("_CleanupResult")
 
 
 # ---------------------------------------------------------------------------
@@ -560,6 +564,18 @@ class BrowserRuntime:
         self.network_recorder = NetworkRecorder()
         self.download_manager = DownloadManager(self.base_dir / "artifacts")
         self._playwright: Any = None
+        self.cleanup_timeout_seconds = float(
+            os.environ.get(
+                "BROWSER_CLEANUP_TIMEOUT_SECONDS",
+                str(DEFAULT_CLEANUP_TIMEOUT_SECONDS),
+            )
+        )
+        self.video_encode_timeout_seconds = float(
+            os.environ.get(
+                "BROWSER_VIDEO_ENCODE_TIMEOUT_SECONDS",
+                str(DEFAULT_VIDEO_ENCODE_TIMEOUT_SECONDS),
+            )
+        )
         self.reset_runtime_state()
 
     # ── State management ──
@@ -776,64 +792,213 @@ class BrowserRuntime:
             return
         try:
             await self._playwright.stop()
-        except Exception as exc:
-            logger.warning("Failed to stop Playwright driver: %s", exc)
         finally:
             self._playwright = None
 
+    def _record_cleanup_warning(
+        self,
+        warnings: list[dict[str, str]],
+        *,
+        step: str,
+        code: str,
+        message: str,
+    ) -> None:
+        warning = {
+            "step": step,
+            "code": code,
+            "message": message[:500],
+        }
+        warnings.append(warning)
+        logger.warning("Browser cleanup warning [%s/%s]: %s", step, code, message)
+        if self.artifacts.session_dir:
+            try:
+                self.artifacts.append_event("session_cleanup_warning", warning)
+            except Exception:
+                logger.debug("Failed to persist browser cleanup warning", exc_info=True)
+
+    async def _run_cleanup_step(
+        self,
+        step: str,
+        operation: Callable[[], Awaitable[_CleanupResult]],
+        warnings: list[dict[str, str]],
+        *,
+        timeout: float | None = None,
+    ) -> _CleanupResult | None:
+        try:
+            return await asyncio.wait_for(
+                operation(),
+                timeout=timeout or self.cleanup_timeout_seconds,
+            )
+        except TimeoutError:
+            self._record_cleanup_warning(
+                warnings,
+                step=step,
+                code="timeout",
+                message=f"清理步骤超过 {timeout or self.cleanup_timeout_seconds:g} 秒。",
+            )
+        except Exception as exc:
+            error_text = f"{type(exc).__name__}: {exc}"
+            code = (
+                "target_closed"
+                if type(exc).__name__ == "TargetClosedError"
+                or "TargetClosedError" in str(exc)
+                else "failed"
+            )
+            self._record_cleanup_warning(
+                warnings,
+                step=step,
+                code=code,
+                message=error_text,
+            )
+        return None
+
+    def _has_browser_resources(self) -> bool:
+        return any(
+            (
+                self.browser is not None,
+                self.context is not None,
+                self.page is not None,
+                self.attached_screencast is not None,
+                self.trace_active,
+                self.launched_chrome,
+            )
+        )
+
     async def stop(self) -> dict[str, Any]:
-        if not self.browser:
-            await self._stop_playwright_driver()
+        warnings: list[dict[str, str]] = []
+        had_resources = self._has_browser_resources()
+        if not had_resources:
+            await self._run_cleanup_step(
+                "playwright_driver",
+                self._stop_playwright_driver,
+                warnings,
+            )
             return {
                 "alreadyStopped": True,
                 "artifacts": self.last_session_summary,
+                "warnings": warnings,
             }
 
-        self.artifacts.append_event(
-            "session_stopping", self.get_debug_state(10)
-        )
-        self.network_recorder.detach()
-        self.download_manager.detach()
+        if self.artifacts.session_dir:
+            try:
+                self.artifacts.append_event(
+                    "session_stopping", self.get_debug_state(10)
+                )
+            except Exception as exc:
+                self._record_cleanup_warning(
+                    warnings,
+                    step="session_event",
+                    code="failed",
+                    message=f"{type(exc).__name__}: {exc}",
+                )
 
-        if self.launched_chrome:
-            kill_result = self.chrome_launcher.kill_chrome()
-            self.launched_chrome = False
-            self.artifacts.append_event(
-                "chrome_auto_launched_killed",
-                {
-                    "killed": kill_result.get("killed"),
-                    "pid": kill_result.get("pid"),
-                },
+        try:
+            self.network_recorder.detach()
+            self.download_manager.detach()
+
+            await self._run_cleanup_step(
+                "screencast",
+                lambda: self._stop_attached_screencast(
+                    reason="session-stop",
+                    persist=True,
+                    warnings=warnings,
+                ),
+                warnings,
+                timeout=self.video_encode_timeout_seconds
+                + (self.cleanup_timeout_seconds * 3),
+            )
+            if self.context is not None:
+                saved = await self._run_cleanup_step(
+                    "storage_state",
+                    lambda: save_browser_state(
+                        self.context,
+                        self.storage_state_path,
+                    ),
+                    warnings,
+                )
+                if saved is False:
+                    self._record_cleanup_warning(
+                        warnings,
+                        step="storage_state",
+                        code="unavailable",
+                        message="浏览器状态未能保存。",
+                    )
+
+            if self.trace_active and self.context is not None:
+                await self._run_cleanup_step(
+                    "trace",
+                    lambda: self._finalize_trace_segment("session-stop"),
+                    warnings,
+                )
+
+            if self.page is not None:
+                await self._run_cleanup_step(
+                    "active_border",
+                    self._hide_browser_active_border,
+                    warnings,
+                )
+        finally:
+            if self.browser is not None:
+                await self._run_cleanup_step(
+                    "browser_close",
+                    self.browser.close,
+                    warnings,
+                )
+
+            if self.launched_chrome:
+                try:
+                    kill_result = self.chrome_launcher.kill_chrome()
+                    if self.artifacts.session_dir:
+                        self.artifacts.append_event(
+                            "chrome_auto_launched_killed",
+                            {
+                                "killed": kill_result.get("killed"),
+                                "pid": kill_result.get("pid"),
+                            },
+                        )
+                except Exception as exc:
+                    self._record_cleanup_warning(
+                        warnings,
+                        step="chrome_process",
+                        code="failed",
+                        message=f"{type(exc).__name__}: {exc}",
+                    )
+                finally:
+                    self.launched_chrome = False
+
+            await self._run_cleanup_step(
+                "playwright_driver",
+                self._stop_playwright_driver,
+                warnings,
             )
 
-        await self._stop_attached_screencast(
-            reason="session-stop", persist=True
-        )
-        await save_browser_state(self.context, self.storage_state_path)
+            self._flush_logs_to_artifacts()
+            try:
+                video_files = self.artifacts.list_video_files()
+                if video_files and self.artifacts.session_dir:
+                    self.artifacts.append_event(
+                        "session_videos_saved",
+                        {
+                            "count": len(video_files),
+                            "files": [str(p) for p in video_files],
+                        },
+                    )
+                self.last_session_summary = self.artifacts.get_summary()
+            except Exception as exc:
+                self._record_cleanup_warning(
+                    warnings,
+                    step="artifact_summary",
+                    code="failed",
+                    message=f"{type(exc).__name__}: {exc}",
+                )
+            finally:
+                self.reset_runtime_state()
 
-        await self._finalize_trace_segment("session-stop")
-        await self._hide_browser_active_border()
-        if self.browser:
-            await self.browser.close()
-        await self._stop_playwright_driver()
-
-        self._flush_logs_to_artifacts()
-
-        video_files = self.artifacts.list_video_files()
-        if video_files:
-            self.artifacts.append_event(
-                "session_videos_saved",
-                {"count": len(video_files), "files": [str(p) for p in video_files]},
-            )
-
-        self.last_session_summary = self.artifacts.get_summary()
-        result = {
+        return {
             "alreadyStopped": False,
             "artifacts": self.last_session_summary,
+            "warnings": warnings,
         }
-
-        self.reset_runtime_state()
-        return result
 
     # ── Managed mode launch ──
 
@@ -1266,7 +1431,9 @@ class BrowserRuntime:
         *,
         reason: str = "session-stop",
         persist: bool = True,
+        warnings: list[dict[str, str]] | None = None,
     ) -> str | None:
+        cleanup_warnings = warnings if warnings is not None else []
         recorder = self.attached_screencast
         if not recorder:
             return None
@@ -1276,10 +1443,11 @@ class BrowserRuntime:
 
         cdp_session = recorder["cdp_session"]
 
-        try:
-            await cdp_session.send("Page.stopScreencast")
-        except Exception:
-            pass
+        await self._run_cleanup_step(
+            "screencast.stop",
+            lambda: cdp_session.send("Page.stopScreencast"),
+            cleanup_warnings,
+        )
 
         on_frame = recorder.get("on_frame")
         if on_frame:
@@ -1290,15 +1458,21 @@ class BrowserRuntime:
             except Exception:
                 pass
 
-        try:
-            await cdp_session.detach()
-        except Exception:
-            pass
+        await self._run_cleanup_step(
+            "screencast.detach",
+            cdp_session.detach,
+            cleanup_warnings,
+        )
 
         pending = recorder.get("pending_frame_writes", set())
         if pending:
-            await asyncio.gather(
-                *pending, return_exceptions=True
+            await self._run_cleanup_step(
+                "screencast.frames",
+                lambda: asyncio.gather(
+                    *pending,
+                    return_exceptions=True,
+                ),
+                cleanup_warnings,
             )
 
         frames_dir = recorder["frames_dir"]
@@ -1325,18 +1499,22 @@ class BrowserRuntime:
         output_path = str(
             self.artifacts.get_video_path(f"attached-{reason}")
         )
-        try:
-            await self._encode_screencast_frames_to_webm(
+        encoded = await self._run_cleanup_step(
+            "screencast.encode",
+            lambda: self._encode_screencast_frames_to_webm(
                 input_pattern=recorder["input_pattern"],
                 output_path=output_path,
                 fps=ATTACHED_SCREENCAST_FPS,
-            )
-        except Exception as exc:
+            ),
+            cleanup_warnings,
+            timeout=self.video_encode_timeout_seconds,
+        )
+        if encoded is None:
             self.attached_video_capability = False
             self.artifacts.append_event(
                 "session_attached_video_failed",
                 {
-                    "error": str(exc),
+                    "error": "cleanup_warning",
                     "frameCount": recorder["frame_count"],
                     "receivedFrames": recorder["received_frames"],
                     "droppedFrames": recorder["dropped_frames"],
@@ -1812,23 +1990,20 @@ class BrowserRuntime:
     async def _hide_browser_active_border(self) -> None:
         if not self.page:
             return
-        try:
-            await self.page.evaluate("""() => {
-                document.getElementById(
-                    "agent-browser-active-border"
-                )?.remove();
-                document.getElementById(
-                    "agent-browser-active-bloom"
-                )?.remove();
-                document.getElementById(
-                    "agent-browser-active-badge"
-                )?.remove();
-                document.getElementById(
-                    "agent-browser-active-styles"
-                )?.remove();
-            }""")
-        except Exception:
-            logger.debug("Border removal failed", exc_info=True)
+        await self.page.evaluate("""() => {
+            document.getElementById(
+                "agent-browser-active-border"
+            )?.remove();
+            document.getElementById(
+                "agent-browser-active-bloom"
+            )?.remove();
+            document.getElementById(
+                "agent-browser-active-badge"
+            )?.remove();
+            document.getElementById(
+                "agent-browser-active-styles"
+            )?.remove();
+        }""")
 
     async def _install_active_border_init_script(self) -> None:
         if not self.context or self.session_source == "attached":
