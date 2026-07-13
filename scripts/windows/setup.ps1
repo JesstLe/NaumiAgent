@@ -121,6 +121,7 @@ memory:
   session_db_path: "data/sessions.db"
   vector_db_path: "data/chroma"
   compaction_threshold: 0.75
+  long_term_enabled: false
 
 workspace_root: "."
 

@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import io
 import json
+import subprocess
 import sys
 import types
 from dataclasses import fields
@@ -40,6 +41,58 @@ from naumi_agent.ui.protocol import (
     make_envelope,
     normalize_client_record,
 )
+
+
+class _ReconfigurableStream:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, str]] = []
+
+    def reconfigure(self, **kwargs: str) -> None:
+        self.calls.append(kwargs)
+
+
+def test_bridge_stdio_is_configured_as_utf8() -> None:
+    stdin = _ReconfigurableStream()
+    stdout = _ReconfigurableStream()
+    stderr = _ReconfigurableStream()
+
+    ui_bridge._configure_stdio_utf8(streams=(stdin, stdout, stderr))  # type: ignore[arg-type]
+
+    assert stdin.calls == [{"encoding": "utf-8", "errors": "strict"}]
+    assert stdout.calls == [{"encoding": "utf-8", "errors": "strict"}]
+    assert stderr.calls == [{"encoding": "utf-8", "errors": "replace"}]
+
+
+@pytest.mark.asyncio
+async def test_stdin_reader_does_not_use_asyncio_default_executor() -> None:
+    loop = asyncio.get_running_loop()
+    lines = ui_bridge._start_stdin_line_reader(io.StringIO("hello\n"), loop)
+
+    assert await asyncio.wait_for(lines.get(), timeout=1) == "hello\n"
+    assert await asyncio.wait_for(lines.get(), timeout=1) == ""
+
+
+def test_git_snapshot_does_not_inherit_bridge_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_check_output(*_args: Any, **kwargs: Any) -> bytes:
+        calls.append(kwargs)
+        raise subprocess.CalledProcessError(1, "git")
+
+    monkeypatch.setattr(ui_bridge.subprocess, "check_output", fake_check_output)
+
+    assert ui_bridge._git_snapshot(tmp_path) == {"branch": "", "dirty": False}
+    assert calls == [
+        {
+            "cwd": str(tmp_path),
+            "stdin": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "timeout": 2,
+        }
+    ]
 
 
 class _FakeRouter:

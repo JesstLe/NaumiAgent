@@ -7,6 +7,7 @@ import asyncio
 import logging
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
@@ -43,6 +44,43 @@ _SLASH_ALIAS_MAP: dict[str, str] = {
     "/u": "/usage",
     "/v": "/version",
 }
+
+
+def _configure_stdio_utf8(
+    *,
+    streams: tuple[TextIO, TextIO, TextIO] | None = None,
+) -> None:
+    """Keep the Node/Python JSONL protocol UTF-8 on Windows code pages."""
+    stdin, stdout, stderr = streams or (sys.stdin, sys.stdout, sys.stderr)
+    for stream, errors in ((stdin, "strict"), (stdout, "strict"), (stderr, "replace")):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors=errors)
+
+
+def _start_stdin_line_reader(
+    stream: TextIO,
+    loop: asyncio.AbstractEventLoop,
+) -> asyncio.Queue[str]:
+    """Read blocking Windows stdin without occupying asyncio's worker pool."""
+    queue: asyncio.Queue[str] = asyncio.Queue()
+
+    def pump() -> None:
+        while True:
+            line = stream.readline()
+            try:
+                loop.call_soon_threadsafe(queue.put_nowait, line)
+            except RuntimeError:
+                return
+            if line == "":
+                return
+
+    threading.Thread(
+        target=pump,
+        name="naumi-ui-stdin",
+        daemon=True,
+    ).start()
+    return queue
 _EXIT_COMMANDS = {"/q", "/quit", "/exit", "exit"}
 
 
@@ -200,14 +238,18 @@ def _git_snapshot(cwd: Path) -> dict[str, Any]:
         branch = subprocess.check_output(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             cwd=str(cwd),
+            stdin=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            timeout=2,
         ).decode().strip()
         result["branch"] = branch
         result["dirty"] = bool(
             subprocess.check_output(
                 ["git", "status", "--porcelain"],
                 cwd=str(cwd),
+                stdin=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                timeout=2,
             ).decode().strip()
         )
     except Exception:
@@ -1000,8 +1042,9 @@ async def serve_stdio(bridge: JsonlEngineBridge) -> None:
     await bridge.emit_ready()
 
     loop = asyncio.get_running_loop()
+    lines = _start_stdin_line_reader(sys.stdin, loop)
     while not bridge._closed:
-        line = await loop.run_in_executor(None, sys.stdin.readline)
+        line = await lines.get()
         if line == "":
             await bridge.shutdown()
             return
@@ -1051,6 +1094,7 @@ async def _amain(argv: list[str] | None = None) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    _configure_stdio_utf8()
     asyncio.run(_amain(argv))
 
 

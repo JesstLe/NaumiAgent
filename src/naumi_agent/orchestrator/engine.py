@@ -409,7 +409,11 @@ class AgentEngine:
             config.memory,
             self._router,
             threshold=config.memory.compaction_threshold,
-            long_term_memory=self.long_term_memory,
+            long_term_memory=(
+                self.long_term_memory
+                if config.memory.long_term_enabled
+                else None
+            ),
         )
 
         self.emitter = EventEmitter()
@@ -1010,8 +1014,10 @@ class AgentEngine:
             return subprocess.check_output(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                 cwd=str(self.workspace_root),
+                stdin=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 text=True,
+                timeout=2,
             ).strip()
         except Exception:
             return ""
@@ -1037,6 +1043,8 @@ class AgentEngine:
 
     async def _inject_relevant_memories(self, user_message: str) -> None:
         """自动召回与用户消息相关的长期记忆，注入到上下文中."""
+        if not self._config.memory.long_term_enabled:
+            return
         session_id = self._session.id if self._session else ""
         if not session_id:
             return
@@ -1073,6 +1081,8 @@ class AgentEngine:
 
     async def _auto_extract_memories(self, task: str, result: AgentResult) -> None:
         """Store high-confidence facts/preferences/decisions from a completed turn."""
+        if not self._config.memory.long_term_enabled:
+            return
         if result.status != "completed":
             return
         candidates = extract_memory_candidates(task, result.response or "")
