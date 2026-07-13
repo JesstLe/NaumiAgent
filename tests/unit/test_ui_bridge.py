@@ -480,6 +480,13 @@ def test_protocol_contract_ui_message_fields_match_python_messages() -> None:
 
 
 def test_protocol_normalizes_known_client_event_payloads() -> None:
+    run_cancel = normalize_client_record({
+        "id": "cancel-1",
+        "type": "run_cancel",
+        "payload": {"reason": " 用户请求停止 ", "ignored": "value"},
+    })
+    assert run_cancel["payload"] == {"reason": "用户请求停止"}
+
     task_submit = normalize_client_record({
         "id": "task-submit-1",
         "type": ClientEventType.TASK_SUBMIT,
@@ -562,6 +569,12 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
         normalize_client_record({
             "type": ClientEventType.TASK_SUBMIT,
             "payload": {"text": "任务", "parallel_mode": "invalid"},
+        })
+
+    with pytest.raises(ValueError, match="取消原因不能超过 500 个字符"):
+        normalize_client_record({
+            "type": "run_cancel",
+            "payload": {"reason": "x" * 501},
         })
 
 
