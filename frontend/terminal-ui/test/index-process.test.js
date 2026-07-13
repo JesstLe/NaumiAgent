@@ -34,6 +34,8 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
     await waitForOutput(output, "+new");
     await waitForOutput(output, "已折叠");
     await waitForLatestScreen(output, "已完成");
+    await waitForLatestScreen(output, "完成回执");
+    await waitForLatestScreen(output, "页面已写入并完成验证");
     assert.equal(countLatestScreen(output, "执行过程"), 1);
 
     app.stdin.write("/expand 1\n");
@@ -55,6 +57,7 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
     assert(debugEvents.some((record) => record.event === "input.chunk"));
     assert(debugEvents.some((record) => record.event === "protocol.send" && record.payload.record.type === "submit"));
     assert(debugEvents.some((record) => record.event === "protocol.send" && record.payload.record.type === "permission_response" && record.payload.record.payload.choice === "allow"));
+    assert(debugEvents.some((record) => record.event === "protocol.send" && record.payload.record.type === "receipt/request"));
     assert(debugEvents.some((record) => record.event === "protocol.receive.record" && record.payload.type === "ui/message"));
     assert(debugEvents.some((record) => record.event === "render.screen"));
   } finally {

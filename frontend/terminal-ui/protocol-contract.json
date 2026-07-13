@@ -6,6 +6,7 @@
     "submit",
     "task_submit",
     "run_cancel",
+    "receipt/request",
     "set_mode",
     "cycle_mode",
     "set_reasoning",

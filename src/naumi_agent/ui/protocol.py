@@ -27,6 +27,7 @@ class ClientEventType(StrEnum):
     SUBMIT = "submit"
     TASK_SUBMIT = "task_submit"
     RUN_CANCEL = "run_cancel"
+    RECEIPT_REQUEST = "receipt/request"
     SET_MODE = "set_mode"
     CYCLE_MODE = "cycle_mode"
     SET_REASONING = "set_reasoning"
@@ -212,6 +213,17 @@ def _normalize_client_payload(
         if len(reason) > 500:
             raise ValueError("取消原因不能超过 500 个字符。")
         return {"reason": reason}
+
+    if event_type == ClientEventType.RECEIPT_REQUEST:
+        receipt_id = str(payload.get("receipt_id") or "").strip()
+        run_id = str(payload.get("run_id") or "").strip()
+        if not receipt_id and not run_id:
+            raise ValueError("回执补发请求缺少 receipt_id 或 run_id。")
+        return {
+            "session_id": str(payload.get("session_id") or "").strip(),
+            "receipt_id": receipt_id,
+            "run_id": run_id,
+        }
 
     if event_type == ClientEventType.SET_MODE:
         return {"mode": str(payload.get("mode") or "").strip().lower()}

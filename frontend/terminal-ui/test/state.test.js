@@ -1926,6 +1926,34 @@ test("completion receipt is deduplicated and finalized after run activity", () =
   assert.equal(state.activeRunActivity, null);
 });
 
+test("run completion requests a missing authoritative receipt", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "submit-missing-receipt",
+    payload: { task: "等待回执" },
+  });
+
+  const actions = reduceServerEvent(state, {
+    type: "run/completed",
+    request_id: "submit-missing-receipt",
+    payload: {
+      status: "completed",
+      receipt_id: "receipt-missing",
+      run_id: "run-missing",
+    },
+  });
+
+  assert.deepEqual(actions, [
+    {
+      type: "request_completion_receipt",
+      sessionId: "",
+      receiptId: "receipt-missing",
+      runId: "run-missing",
+    },
+  ]);
+});
+
 test("replayed completion receipt remains visible without an active run", () => {
   const state = createInitialState();
 
