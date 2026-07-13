@@ -669,6 +669,44 @@ class TestBrowserRuntimeInit:
         assert context_kwargs["record_video_size"] == {"width": 1280, "height": 800}
         fake_context.add_init_script.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    async def test_managed_launch_falls_back_to_system_browser_when_bundle_missing(
+        self, tmp_path: Path,
+    ) -> None:
+        rt = BrowserRuntime(tmp_path)
+        rt.artifacts.start_session()
+        fake_page = MagicMock()
+        fake_context = MagicMock()
+        fake_context.tracing.start = AsyncMock()
+        fake_context.new_page = AsyncMock(return_value=fake_page)
+        fake_context.add_init_script = AsyncMock()
+        fake_browser = MagicMock()
+        fake_browser.new_context = AsyncMock(return_value=fake_context)
+        fake_chromium = MagicMock()
+        fake_chromium.launch = AsyncMock(
+            side_effect=[
+                RuntimeError("BrowserType.launch: Executable doesn't exist"),
+                fake_browser,
+            ]
+        )
+        rt._playwright = MagicMock(chromium=fake_chromium)
+        system_browser = tmp_path / "chrome.exe"
+        system_browser.write_text("", encoding="utf-8")
+
+        with patch(
+            "naumi_agent.tools.browser.runtime.browser_runtime."
+            "find_system_browser_executable",
+            return_value=system_browser,
+        ):
+            await rt._launch_browser_session(headless=True)
+
+        assert fake_chromium.launch.await_count == 2
+        assert (
+            fake_chromium.launch.await_args_list[1].kwargs["executable_path"]
+            == str(system_browser)
+        )
+        assert rt.managed_browser_executable == str(system_browser)
+
 
 class TestNormalizeBrowserSource:
     def test_auto(self) -> None:

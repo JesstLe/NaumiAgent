@@ -33,6 +33,7 @@ curl -sSL https://raw.githubusercontent.com/JesstLe/NaumiAgent/main/scripts/inst
 - 检测 Python 3.12+
 - 检测 Node.js 20+
 - 使用 `uv` 或 `pip` 安装依赖
+- 安装浏览器自动化与搜索回退所需的 Chromium
 - 将 `naumi` 命令链接到 `~/.local/bin`
 - 安装 Node UI 依赖
 

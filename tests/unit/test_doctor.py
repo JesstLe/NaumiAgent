@@ -33,7 +33,11 @@ def _config(tmp_path) -> AppConfig:
 async def test_run_doctor_checks_local_environment(tmp_path) -> None:
     config = _config(tmp_path)
 
-    report = await run_doctor(config, workspace_root=tmp_path)
+    report = await run_doctor(
+        config,
+        workspace_root=tmp_path,
+        browser_fallback_available=True,
+    )
     rendered = render_doctor_report(report)
 
     names = {check.name: check for check in report.checks}
@@ -54,7 +58,11 @@ async def test_doctor_reports_enhanced_search_when_brave_key_exists(
 ) -> None:
     monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "configured-secret")
 
-    report = await run_doctor(_config(tmp_path), workspace_root=tmp_path)
+    report = await run_doctor(
+        _config(tmp_path),
+        workspace_root=tmp_path,
+        browser_fallback_available=True,
+    )
 
     check = next(item for item in report.checks if item.name == "网络搜索")
     assert check.status == "pass"
@@ -72,6 +80,19 @@ def test_search_readiness_reports_restricted_without_any_route(monkeypatch) -> N
 
     assert check.status == "warn"
     assert "受限" in check.detail
+
+
+def test_search_readiness_warns_when_browser_runtime_is_missing(monkeypatch) -> None:
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+
+    check = _check_search_readiness(
+        direct_search_available=True,
+        browser_fallback_available=False,
+    )
+
+    assert check.status == "warn"
+    assert "浏览器回退不可用" in check.detail
+    assert "playwright install chromium" in check.suggestion
 
 
 @pytest.mark.asyncio

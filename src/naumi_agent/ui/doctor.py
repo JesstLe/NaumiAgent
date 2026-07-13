@@ -17,6 +17,9 @@ import httpx
 
 from naumi_agent.config.configurator import validate_provider_configuration
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.tools.browser.runtime.chrome_launcher import (
+    find_system_browser_executable,
+)
 
 if TYPE_CHECKING:
     from naumi_agent.model.router import ModelResponse
@@ -52,17 +55,22 @@ async def run_doctor(
     mcp_manager: Any | None = None,
     live: bool = False,
     live_probe: Callable[[AppConfig], Awaitable[ModelResponse]] | None = None,
+    browser_fallback_available: bool | None = None,
 ) -> DoctorReport:
     """Run local diagnostics and an optional explicit model connectivity probe."""
     root = Path(workspace_root).expanduser()
     api_key_check = _check_api_key(config)
     provider_check = _check_model_provider(config)
+    if browser_fallback_available is None:
+        browser_fallback_available = await _detect_browser_fallback()
     checks = [
         _check_python(),
         _check_config(config),
         api_key_check,
         provider_check,
-        _check_search_readiness(),
+        _check_search_readiness(
+            browser_fallback_available=browser_fallback_available,
+        ),
         _check_workspace(root),
         _check_git(root),
         _check_command("ripgrep", "rg", ["rg", "--version"]),
@@ -197,11 +205,17 @@ def _check_search_readiness(
             "已增强：检测到 Brave Search 凭据；失败时仍会自动回退。",
         )
     if direct_search_available:
-        fallback = "，并支持浏览器自动回退" if browser_fallback_available else ""
+        if not browser_fallback_available:
+            return DoctorCheck(
+                "网络搜索",
+                "warn",
+                "可用（零配置）：免 Key 直连可用，但浏览器回退不可用。",
+                "运行 `python -m playwright install chromium` 安装浏览器运行时。",
+            )
         return DoctorCheck(
             "网络搜索",
             "pass",
-            f"可用（零配置）：免 Key 直连搜索{fallback}。",
+            "可用（零配置）：免 Key 直连搜索，并支持浏览器自动回退。",
             "BRAVE_SEARCH_API_KEY 仅用于提升质量和稳定性，不是安装必需项。",
         )
     if browser_fallback_available:
@@ -217,6 +231,18 @@ def _check_search_readiness(
         "受限：当前没有可用的直连搜索或浏览器回退。",
         "检查网络和浏览器依赖；也可选配 BRAVE_SEARCH_API_KEY。",
     )
+
+
+async def _detect_browser_fallback() -> bool:
+    """Check the Playwright-managed Chromium executable without launching it."""
+    try:
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as playwright:
+            bundled = Path(playwright.chromium.executable_path).is_file()
+        return bundled or find_system_browser_executable() is not None
+    except Exception:
+        return False
 
 
 async def _check_live_model(

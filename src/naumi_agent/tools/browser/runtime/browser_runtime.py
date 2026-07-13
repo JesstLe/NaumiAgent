@@ -29,7 +29,7 @@ from ..som import (
     write_base64_files,
 )
 from .artifact_store import ArtifactStore
-from .chrome_launcher import ChromeLauncher
+from .chrome_launcher import ChromeLauncher, find_system_browser_executable
 from .download_manager import DownloadManager
 from .network_recorder import NetworkRecorder, failure_text
 
@@ -597,6 +597,7 @@ class BrowserRuntime:
         self.trace_active = False
         self.attached_video_capability = False
         self.attached_screencast = None
+        self.managed_browser_executable: str | None = None
 
     def is_running(self) -> bool:
         return self.context is not None
@@ -1012,14 +1013,31 @@ class BrowserRuntime:
         if self._playwright is None:
             self._playwright = await async_playwright().start()
 
-        self.browser = await self._playwright.chromium.launch(
-            headless=headless,
-            args=[
+        launch_options = {
+            "headless": headless,
+            "args": [
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
             ],
-        )
+        }
+        try:
+            self.browser = await self._playwright.chromium.launch(**launch_options)
+        except Exception as exc:
+            if "executable doesn't exist" not in str(exc).lower():
+                raise
+            system_browser = find_system_browser_executable()
+            if system_browser is None:
+                raise
+            self.managed_browser_executable = str(system_browser)
+            logger.warning(
+                "Playwright Chromium is missing; using system browser: %s",
+                system_browser,
+            )
+            self.browser = await self._playwright.chromium.launch(
+                **launch_options,
+                executable_path=str(system_browser),
+            )
 
         context_options: dict[str, Any] = {
             "viewport": {"width": 1280, "height": 800},
@@ -1065,6 +1083,7 @@ class BrowserRuntime:
             "sessionSource": self.session_source,
             "browserMode": self.browser_mode,
             "resumedUrl": navigate_to_url,
+            "managedBrowserExecutable": self.managed_browser_executable,
         })
 
         await self._install_active_border_init_script()

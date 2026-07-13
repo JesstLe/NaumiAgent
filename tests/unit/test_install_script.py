@@ -30,6 +30,12 @@ def test_install_script_requires_supported_node_for_default_ui() -> None:
     assert 'if [ "$node_major" -lt 20 ]' in script
 
 
+def test_install_script_installs_managed_browser_runtime() -> None:
+    script = _script()
+
+    assert '.venv/bin/playwright install chromium' in script
+
+
 def test_install_script_does_not_hide_repository_update_failures() -> None:
     assert "git pull --ff-only || true" not in _script()
 
