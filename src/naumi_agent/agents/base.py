@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
 
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
+DEFAULT_AGENT_MAX_TURNS = 50
 
 
 class AgentCapability(StrEnum):
@@ -34,8 +35,8 @@ class AgentConfig:
     capabilities: list[AgentCapability]
     model_tier: str = "capable"
     system_prompt: str = ""
-    max_turns: int = 20
-    max_budget_usd: float = float("inf")
+    max_turns: int = DEFAULT_AGENT_MAX_TURNS
+    max_budget_usd: float | None = None
     timeout_seconds: float = 300.0
     tools: list[str] = field(default_factory=list)
     permission_level: str = "moderate"
@@ -156,7 +157,8 @@ class BaseAgent:
         total_cost = 0.0
 
         for turn in range(self.config.max_turns):
-            if total_cost >= self.config.max_budget_usd:
+            max_budget_usd = self.config.max_budget_usd
+            if max_budget_usd is not None and total_cost >= max_budget_usd:
                 return AgentResult(
                     status="error",
                     response=messages[-1].get("content", "") if messages else "",
@@ -165,7 +167,7 @@ class BaseAgent:
                     turns=turn,
                     error=(
                         "子 Agent 预算已耗尽："
-                        f"{total_cost:.6f} / {self.config.max_budget_usd:.6f} USD"
+                        f"{total_cost:.6f} / {max_budget_usd:.6f} USD"
                     ),
                 )
 

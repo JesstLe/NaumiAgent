@@ -23,8 +23,6 @@ CODER_CONFIG = AgentConfig(
         "3. 修改文件时使用 file_edit，不要重写整个文件\n"
         "4. 保持代码风格一致\n"
     ),
-    max_turns=15,
-    max_budget_usd=0.5,
 )
 
 RESEARCHER_CONFIG = AgentConfig(
@@ -48,8 +46,6 @@ RESEARCHER_CONFIG = AgentConfig(
         "3. 区分事实和观点\n"
         "4. 引用信息来源\n"
     ),
-    max_turns=20,
-    max_budget_usd=0.5,
 )
 
 BROWSER_CONFIG = AgentConfig(
@@ -72,8 +68,6 @@ BROWSER_CONFIG = AgentConfig(
         "3. 每步操作后验证结果\n"
         "4. 超时或加载失败时重试\n"
     ),
-    max_turns=25,
-    max_budget_usd=0.3,
 )
 
 ALL_AGENT_CONFIGS = {
