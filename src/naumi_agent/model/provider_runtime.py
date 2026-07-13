@@ -67,6 +67,20 @@ def build_openai_responses_transport(
     )
 
 
+def build_anthropic_messages_transport(
+    target: ResolvedModelTarget,
+    *,
+    catalog_source: str,
+) -> ProviderTransport:
+    """Map one catalog target to LiteLLM's Anthropic Messages bridge."""
+    return _build_litellm_transport(
+        target,
+        catalog_source=catalog_source,
+        expected_format=APIFormat.ANTHROPIC_MESSAGES,
+        model_prefix="anthropic/",
+    )
+
+
 def build_provider_transport(
     target: ResolvedModelTarget,
     *,
@@ -78,6 +92,11 @@ def build_provider_transport(
         return build_openai_chat_transport(target, catalog_source=catalog_source)
     if provider.api_format is APIFormat.OPENAI_RESPONSES:
         return build_openai_responses_transport(target, catalog_source=catalog_source)
+    if provider.api_format is APIFormat.ANTHROPIC_MESSAGES:
+        return build_anthropic_messages_transport(
+            target,
+            catalog_source=catalog_source,
+        )
     if provider.api_format is None:
         raise ProviderRuntimeError(
             f'provider "{provider.id}" 缺少 apiFormat，无法选择请求适配器。'
@@ -95,15 +114,37 @@ def _build_openai_transport(
     model_prefix: str,
 ) -> ProviderTransport:
     """Build shared explicit kwargs for one OpenAI-family transport."""
+    return _build_litellm_transport(
+        target,
+        catalog_source=catalog_source,
+        expected_format=expected_format,
+        model_prefix=model_prefix,
+    )
+
+
+def _build_litellm_transport(
+    target: ResolvedModelTarget,
+    *,
+    catalog_source: str,
+    expected_format: APIFormat,
+    model_prefix: str,
+) -> ProviderTransport:
+    """Build explicit LiteLLM kwargs without global credential fallback."""
     provider = _require_catalog_provider(target)
     _validate_provider_format(provider, expected_format=expected_format)
 
     static_headers = dict(provider.headers)
     _assert_no_auth_header_conflict(provider, static_headers)
-    api_key, auth_header = _resolve_auth(
-        provider,
-        catalog_source=catalog_source,
-    )
+    if expected_format is APIFormat.ANTHROPIC_MESSAGES:
+        api_key, auth_header = _resolve_anthropic_auth(
+            provider,
+            catalog_source=catalog_source,
+        )
+    else:
+        api_key, auth_header = _resolve_auth(
+            provider,
+            catalog_source=catalog_source,
+        )
     if auth_header is not None:
         header_name, header_value = auth_header
         if any(name.casefold() == header_name.casefold() for name in static_headers):
@@ -210,6 +251,38 @@ def _resolve_auth(
         header = auth.header or "X-API-Key"
         return NO_GLOBAL_API_KEY, (header, secret)
     raise _invalid_auth(provider)
+
+
+def _resolve_anthropic_auth(
+    provider: ProviderSpec,
+    *,
+    catalog_source: str,
+) -> tuple[str, tuple[str, str] | None]:
+    """Resolve Anthropic auth without letting LiteLLM overwrite x-api-key."""
+    auth = provider.auth
+    if auth.type is AuthType.API_KEY_HEADER:
+        header = auth.header or "X-API-Key"
+        if header.casefold() == "x-api-key":
+            if auth.secret_source is None or not auth.secret_ref:
+                raise _invalid_auth(provider)
+            secret = _resolve_secret(
+                provider,
+                auth,
+                catalog_source=catalog_source,
+            )
+            return secret, None
+    if auth.type is AuthType.BEARER:
+        if auth.secret_source is None or not auth.secret_ref:
+            raise _invalid_auth(provider)
+        secret = _resolve_secret(
+            provider,
+            auth,
+            catalog_source=catalog_source,
+        )
+        header = auth.header or "Authorization"
+        scheme = auth.scheme or "Bearer"
+        return NO_GLOBAL_API_KEY, (header, f"{scheme} {secret}")
+    return _resolve_auth(provider, catalog_source=catalog_source)
 
 
 def _resolve_secret(
