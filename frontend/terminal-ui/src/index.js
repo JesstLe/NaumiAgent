@@ -42,6 +42,7 @@ import {
   createInitialState,
   createUiSnapshot,
   applyUiSnapshot,
+  failQueuedUserMessages,
 } from "./state.js";
 import { captureViewportAnchor, renderScreen, restoreViewportAnchor } from "./render.js";
 import {
@@ -85,9 +86,23 @@ function main() {
       }
     }
   });
+  bridge.stdin.on("error", (error) => {
+    if (quitting) return;
+    failQueuedUserMessages(state, {
+      code: "bridge_write_failed",
+      message: "无法写入本地 Bridge，请检查后端进程后重试。",
+    });
+    pushSystemMessage(state, "bridge stdin", `本地 Bridge 写入失败: ${error.message}`, "error");
+    persistUiSnapshot();
+    scheduleRedraw();
+  });
   bridge.on("exit", (code, signal) => {
     debugLog?.log("bridge.exit", { code, signal, quitting });
     if (!quitting) {
+      failQueuedUserMessages(state, {
+        code: "bridge_disconnected",
+        message: "本地 Bridge 已断开，请重启后重试。",
+      });
       pushSystemMessage(state, "bridge exit", `后端桥接已退出 code=${code} signal=${signal}`, "error");
       redraw();
     }

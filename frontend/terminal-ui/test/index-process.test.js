@@ -760,6 +760,35 @@ test("terminal UI process preserves detached scroll and jumps back to live outpu
   }
 });
 
+test("terminal UI process shows queued, accepted, failed, and retried delivery lifecycle", async () => {
+  const app = launchTerminalUi("message-lifecycle-bridge.js");
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("生命周期测试\n");
+    await waitForLatestScreen(output, "发送中...");
+    await waitForLatestScreen(output, "已确认普通消息");
+    assert.equal(countLatestScreen(output, "生命周期测试"), 1);
+
+    app.stdin.write("失败后重试\n");
+    await waitForLatestScreen(output, "发送中...");
+    await waitForLatestScreen(output, "发送失败: 当前任务仍在执行。");
+    app.stdin.write("/retry\n");
+    await waitForLatestScreen(output, "重试已接受");
+    assert.equal(countLatestScreen(output, "失败后重试"), 1);
+
+    const submits = readDebugEvents(app.debugLogPath).filter(
+      (record) => record.event === "protocol.send" && record.payload.record.type === "submit",
+    );
+    assert.equal(submits.length, 3);
+    assert.notEqual(submits[1].payload.record.id, submits[2].payload.record.id);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
   const debugLogPath = path.join(tmpdir(), `naumi-terminal-ui-debug-${Date.now()}-${Math.random()}.jsonl`);
   const fakeBridge = fixtureName
@@ -849,6 +878,23 @@ async function waitForOutput(output, needle, timeoutMs = 1500) {
     await delay(20);
   }
   assert.fail(`等待输出超时: ${needle}\n\n${stripAnsi(output.text).slice(-3000)}`);
+}
+
+async function waitForLatestScreen(output, needle, timeoutMs = 2000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (latestScreen(output).includes(needle)) return;
+    await delay(20);
+  }
+  assert.fail(`等待最新画面超时: ${needle}\n\n${latestScreen(output).slice(-3000)}`);
+}
+
+function countLatestScreen(output, needle) {
+  return latestScreen(output).split(needle).length - 1;
+}
+
+function latestScreen(output) {
+  return stripAnsi(output.text.split("\x1b[2J\x1b[H").at(-1) ?? "");
 }
 
 function readDebugEvents(filePath) {

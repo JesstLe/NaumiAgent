@@ -14,6 +14,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/doctor", description: "运行环境诊断" },
   { command: "/mode", description: "切换 runtime 模式 default / plan / bypass" },
   { command: "/reasoning", description: "显示/切换思考过程输出" },
+  { command: "/retry", description: "重试最近一条发送失败或状态待确认的消息" },
   { command: "/folds", description: "显示可折叠代码片段列表" },
   { command: "/fold", description: "切换指定折叠项（按编号或类型）" },
   { command: "/expand", description: "展开指定折叠项（按编号/全部）" },
@@ -729,6 +730,9 @@ export function handleSubmitText(state, text, send) {
     send("resume", {});
     return;
   }
+  if (text === "/retry" || text.startsWith("/retry ")) {
+    return retryUserMessage(state, send, text.slice("/retry".length).trim());
+  }
   if (text.startsWith("/load ")) {
     send("resume", { session_id: text.slice(6).trim() });
     return;
@@ -802,11 +806,32 @@ export function submitUserMessage(state, text, send, existingMessage = null) {
   } catch (error) {
     failUserMessage(state, requestId, {
       code: "transport_write_failed",
-      message: `发送失败: ${error instanceof Error ? error.message : String(error)}`,
+      message: `无法写入本地 Bridge: ${error instanceof Error ? error.message : String(error)}`,
     });
   }
   clearRenderCache(state.renderCache);
   return message;
+}
+
+export function retryUserMessage(state, send, requestId = "") {
+  const normalizedRequestId = String(requestId ?? "").trim();
+  const message = [...state.messages].reverse().find(
+    (item) => item.kind === "user"
+      && ["failed", "uncertain"].includes(item.deliveryStatus)
+      && (!normalizedRequestId || item.requestId === normalizedRequestId),
+  );
+  if (!message) {
+    pushSystemMessage(
+      state,
+      "retry",
+      normalizedRequestId
+        ? `没有可重试的消息: ${normalizedRequestId}`
+        : "当前没有可重试的发送失败消息。",
+      "warning",
+    );
+    return null;
+  }
+  return submitUserMessage(state, message.content, send, message);
 }
 
 export function acceptUserMessage(state, requestId, content = "") {
