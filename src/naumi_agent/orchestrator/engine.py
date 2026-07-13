@@ -785,13 +785,91 @@ class AgentEngine:
         """Revoke one grant only when it belongs to the current session."""
         if self._session is None:
             return False
-        return self._permission_grant_store.revoke(grant_id, self._session.id)
+        grant = next(
+            (
+                candidate
+                for candidate in self._permission_grant_store.list_session(
+                    self._session.id
+                )
+                if candidate.grant_id == grant_id
+            ),
+            None,
+        )
+        if grant is None:
+            return False
+        revoked = self._permission_grant_store.revoke(grant_id, self._session.id)
+        if revoked:
+            self._record_permission_grant_revocation(
+                grant,
+                reason="用户主动撤销了本会话权限授权。",
+                source="explicit_revoke",
+            )
+        return revoked
 
     def revoke_all_permission_grants(self) -> int:
         """Revoke every active grant for the current session."""
         if self._session is None:
             return 0
-        return self._permission_grant_store.revoke_session(self._session.id)
+        return self._revoke_permission_grants_for_session(
+            self._session.id,
+            reason="用户撤销了本会话的全部权限授权。",
+            source="revoke_all",
+        )
+
+    def _revoke_permission_grants_for_session(
+        self,
+        session_id: str,
+        *,
+        reason: str,
+        source: str,
+    ) -> int:
+        """Revoke and audit every active grant scoped to one session."""
+        grants = self._permission_grant_store.list_session(session_id)
+        revoked_count = 0
+        for grant in grants:
+            if self._permission_grant_store.revoke(grant.grant_id, session_id):
+                self._record_permission_grant_revocation(
+                    grant,
+                    reason=reason,
+                    source=source,
+                )
+                revoked_count += 1
+        return revoked_count
+
+    def _clear_permission_grants(self, *, reason: str, source: str) -> None:
+        """Clear and audit all active grants held by this engine."""
+        grants = tuple(self._permission_grant_store._grants_by_id.values())
+        self._permission_grant_store.clear()
+        for grant in grants:
+            self._record_permission_grant_revocation(
+                grant,
+                reason=reason,
+                source=source,
+            )
+
+    def _record_permission_grant_revocation(
+        self,
+        grant: PermissionGrant,
+        *,
+        reason: str,
+        source: str,
+    ) -> None:
+        """Append one audit record after an in-memory grant is removed."""
+        self._append_permission_bubble({
+            "agent_name": "main",
+            "tool_name": "permission_grant",
+            "call_id": grant.source_request_id,
+            "status": "grant_revoked",
+            "reason": reason,
+            "risk_level": "",
+            "requires_confirmation": False,
+            "session_id": grant.session_id,
+            "timestamp": time.time(),
+            "grant_id": grant.grant_id,
+            "tool_family": grant.tool_family,
+            "source": source,
+            "source_request_id": grant.source_request_id,
+        })
 
     @property
     def task_runner(self) -> Any:
@@ -827,14 +905,20 @@ class AgentEngine:
         self._full_history.clear()
         self._usage = AgentUsage()
         self._budget_tracker.reset()
-        self._permission_grant_store.clear()
+        self._clear_permission_grants(
+            reason="引擎重置时撤销了权限授权。",
+            source="reset",
+        )
         self._session = None
         self.task_store.set_session("")
         self._permission_checker.reset_counts()
 
     async def shutdown(self) -> None:
         """释放资源（关闭数据库连接、浏览器、MCP 连接等）."""
-        self._permission_grant_store.clear()
+        self._clear_permission_grants(
+            reason="引擎关闭时撤销了权限授权。",
+            source="shutdown",
+        )
         if hasattr(self, "subagent_manager"):
             await self.subagent_manager.stop_reaper()
             self.subagent_manager.destroy_all_dynamic()
@@ -940,7 +1024,11 @@ class AgentEngine:
         if session is None:
             return False
         if self._session is not None and self._session.id != session.id:
-            self._permission_grant_store.revoke_session(self._session.id)
+            self._revoke_permission_grants_for_session(
+                self._session.id,
+                reason="切换到其他会话时撤销了权限授权。",
+                source="session_load",
+            )
         self._session = session
         cleaned_messages = self._sanitize_messages(session.messages)
         self._messages = cleaned_messages
@@ -1020,7 +1108,11 @@ class AgentEngine:
         if not deleted:
             return False
 
-        self._permission_grant_store.revoke_session(session_id)
+        self._revoke_permission_grants_for_session(
+            session_id,
+            reason="删除会话时撤销了权限授权。",
+            source="session_deletion",
+        )
         if self._session is not None and self._session.id == session_id:
             self._messages.clear()
             self._full_history.clear()
@@ -3395,11 +3487,15 @@ class AgentEngine:
             ),
             "timestamp": time.time(),
         }
+        self._append_permission_bubble(payload)
+        if on_event is not None:
+            await on_event("permission_bubble", payload)
+
+    def _append_permission_bubble(self, payload: dict[str, Any]) -> None:
+        """Append one permission audit record while retaining the latest 100."""
         self._permission_bubble_history.append(payload)
         if len(self._permission_bubble_history) > 100:
             self._permission_bubble_history = self._permission_bubble_history[-100:]
-        if on_event is not None:
-            await on_event("permission_bubble", payload)
 
     def get_recent_permission_bubbles(self, limit: int = 8) -> list[dict[str, Any]]:
         """Return recent subagent permission decisions that bubbled to parent."""
