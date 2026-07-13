@@ -99,14 +99,10 @@ export function timelineOutputKey(record, entryId = "") {
 }
 
 function ensureTimelineFollowState(state) {
+  state.scrollOffset = Math.max(0, finiteNumber(state.scrollOffset, 0));
+  state.unreadOutputCount = Math.max(0, Math.floor(finiteNumber(state.unreadOutputCount, 0)));
   if (typeof state.followTail !== "boolean") {
-    state.followTail = Number(state.scrollOffset) <= 0;
-  }
-  if (!Number.isFinite(Number(state.scrollOffset))) {
-    state.scrollOffset = 0;
-  }
-  if (!Number.isFinite(Number(state.unreadOutputCount))) {
-    state.unreadOutputCount = 0;
+    state.followTail = state.scrollOffset <= 0;
   }
   if (!state.unreadOutputKeys || typeof state.unreadOutputKeys !== "object" || Array.isArray(state.unreadOutputKeys)) {
     state.unreadOutputKeys = {};
