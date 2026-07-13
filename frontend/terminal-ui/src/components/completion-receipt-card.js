@@ -12,28 +12,22 @@ export function CompletionReceiptCard({ receipt }) {
 export function renderCompletionReceiptCard(receipt, ctx) {
   const view = receipt && typeof receipt === "object" ? receipt : {};
   const changes = array(view.changes);
+  const taskChanges = changes.filter((item) => item.scope !== "background");
+  const backgroundChanges = changes.filter((item) => item.scope === "background");
   const validations = array(view.validations);
   const approvals = array(view.approvals);
+  const actionableApprovals = approvals.filter((item) => ["denied", "error"].includes(item.decision));
   const risks = array(view.risks);
   const unverified = array(view.unverified);
   const actions = array(view.next_actions);
   const outcome = outcomeView(view.outcome);
-  const validationPassed = validations.filter((item) => item.status === "passed").length;
-  const validationFailed = validations.filter((item) => item.status === "failed").length;
   const rows = [
     line(color(outcome.style, `${outcome.label} · ${formatDuration(view.duration_ms)}`)),
   ];
   if (view.summary) rows.push(line(compactText(view.summary, 500)));
-  rows.push(line(
-    `改动 ${changes.length} · 验证 ${validationPassed}/${validations.length}`
-    + `（失败 ${validationFailed}） · 审批 ${approvals.length} · 风险 ${risks.length}`,
-  ));
-  rows.push(line(gitSummary(view.git_state)));
 
-  if (!validations.length) {
-    rows.push(line(color(ANSI.dim, "验证 · 未记录验证命令")));
-  } else {
-    for (const validation of validations.slice(0, 4)) {
+  if (validations.length) {
+    for (const validation of validations.slice(0, 2)) {
       const label = validation.status === "passed" ? "通过" : "失败";
       const style = validation.status === "passed" ? ANSI.green : ANSI.red;
       const counts = validationCounts(validation);
@@ -42,23 +36,31 @@ export function renderCompletionReceiptCard(receipt, ctx) {
         + `${counts ? ` · ${counts}` : ""}`,
       ));
     }
-    if (validations.length > 4) rows.push(line(color(ANSI.dim, `另有 ${validations.length - 4} 项验证`)));
+    if (validations.length > 2) rows.push(line(color(ANSI.dim, `另有 ${validations.length - 2} 项验证`)));
+  } else if (taskChanges.length) {
+    rows.push(line(color(ANSI.yellow, "未验证 · 本轮任务改动尚无验证证据")));
   }
 
-  for (const change of changes.slice(0, 5)) {
-    const stats = changeStats(change);
-    const source = change.source_tool ? ` · 来源 ${change.source_tool}` : "";
-    rows.push(line(
-      `改动 ${changeStatus(change.status)} · ${compactText(change.path || "未知路径", 300)}`
-      + `${stats ? ` · ${stats}` : ""}${source}`,
-    ));
+  if (taskChanges.length) {
+    rows.push(line(`影响 · ${changeSummary(taskChanges)}`));
   }
-  if (changes.length > 5) rows.push(line(color(ANSI.dim, `另有 ${changes.length - 5} 个文件改动`)));
+  if (backgroundChanges.length) {
+    rows.push(line(color(ANSI.dim, `工作区另有 ${backgroundChanges.length} 项运行时变化`)));
+  }
 
-  for (const approval of approvals.slice(0, 3)) {
-    const style = ["denied", "error"].includes(approval.decision) ? ANSI.red : ANSI.cyan;
+  const git = view.git_state && typeof view.git_state === "object" ? view.git_state : {};
+  const hasReviewableChanges = taskChanges.some(
+    (item) => !["removed_untracked", "restored"].includes(item.status),
+  );
+  if (!git.available && view.outcome !== "completed") {
+    rows.push(line(gitSummary(git)));
+  } else if (git.available && (hasReviewableChanges || Number(git.behind) > 0)) {
+    rows.push(line(color(ANSI.dim, gitSummary(git))));
+  }
+
+  for (const approval of actionableApprovals.slice(0, 3)) {
     rows.push(line(color(
-      style,
+      ANSI.red,
       `审批 · ${compactText(approval.tool_name || "未知工具", 120)} · ${approvalLabel(approval.decision)}`,
     )));
   }
@@ -99,15 +101,10 @@ function validationCounts(validation) {
   if (Number(validation.passed) > 0) counts.push(`通过 ${Number(validation.passed)}`);
   if (Number(validation.failed) > 0) counts.push(`失败 ${Number(validation.failed)}`);
   if (Number(validation.skipped) > 0) counts.push(`跳过 ${Number(validation.skipped)}`);
-  if (!counts.length && validation.exit_code != null) counts.push(`退出码 ${validation.exit_code}`);
+  if (!counts.length && validation.exit_code != null && validation.scope !== "文件系统") {
+    counts.push(`退出码 ${validation.exit_code}`);
+  }
   return counts.join(" · ");
-}
-
-function changeStats(change) {
-  const stats = [];
-  if (Number(change.additions) > 0) stats.push(`+${Number(change.additions)}`);
-  if (Number(change.deletions) > 0) stats.push(`-${Number(change.deletions)}`);
-  return stats.join(" ");
 }
 
 function changeStatus(status) {
@@ -116,10 +113,29 @@ function changeStatus(status) {
     added: "新增",
     deleted: "删除",
     renamed: "重命名",
-    untracked: "未跟踪",
+    untracked: "新增",
+    copied: "复制",
     conflicted: "冲突",
     restored: "还原",
+    removed_untracked: "删除",
   }[status] ?? compactText(status || "变化", 40);
+}
+
+function changeSummary(changes) {
+  const order = ["删除", "新增", "修改", "重命名", "还原", "冲突"];
+  const counts = new Map();
+  for (const change of changes) {
+    const label = changeStatus(change.status);
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort(([left], [right]) => {
+      const leftIndex = order.indexOf(left);
+      const rightIndex = order.indexOf(right);
+      return (leftIndex < 0 ? order.length : leftIndex) - (rightIndex < 0 ? order.length : rightIndex);
+    })
+    .map(([label, count]) => `${label} ${count} 个文件`)
+    .join(" · ");
 }
 
 function approvalLabel(decision) {

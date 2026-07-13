@@ -61,10 +61,10 @@ test("completion receipt card exposes evidence, risk, and recovery in Chinese", 
 
   assert.match(text, /完成回执/);
   assert.match(text, /部分完成/);
-  assert.match(text, /改动 1/);
+  assert.match(text, /影响.*修改 1 个文件/);
   assert.match(text, /pytest tests\/unit\/test_example.py -q/);
   assert.match(text, /风险.*1 项验证失败/);
-  assert.match(text, /审批.*bash_run.*仅本次允许/);
+  assert.doesNotMatch(text, /审批.*bash_run/);
   assert.match(text, /下一步.*重试失败验证/);
   assert(rendered.every((line) => visibleWidth(line) <= 72));
 });
@@ -86,7 +86,47 @@ test("completion receipt card states when Git and validation evidence are absent
   }), { width: 48 }).map(stripAnsi).join("\n");
 
   assert.match(rendered, /Git 未核查/);
-  assert.match(rendered, /未记录验证命令/);
+  assert.doesNotMatch(rendered, /未记录验证命令/);
+});
+
+test("completed delete receipt stays compact and separates runtime changes", () => {
+  const changes = Array.from({ length: 6 }, (_, index) => ({
+    path: `test/file-${index}.txt`,
+    status: "removed_untracked",
+    scope: "task",
+  }));
+  changes.push({
+    path: ".naumi/terminal-ui-debug.jsonl",
+    status: "modified",
+    scope: "background",
+  });
+  const rendered = renderComponent(CompletionReceiptCard({
+    receipt: {
+      outcome: "completed",
+      summary: "已删除 /workspace/test 目录及其所有内容。",
+      changes,
+      validations: [{
+        command: "路径已不存在: /workspace/test",
+        scope: "文件系统",
+        status: "passed",
+        exit_code: 0,
+      }],
+      unverified: [],
+      approvals: [{ tool_name: "bash_run", decision: "bypass" }],
+      risks: [],
+      git_state: { available: true, branch: "main", dirty: true },
+      next_actions: [],
+      duration_ms: 6300,
+    },
+  }), { width: 72 }).map(stripAnsi).join("\n");
+
+  assert.match(rendered, /已完成.*6\.3s/);
+  assert.match(rendered, /验证 通过.*路径已不存在: \/workspace\/test/);
+  assert.match(rendered, /影响.*删除 6 个文件/);
+  assert.match(rendered, /工作区另有 1 项运行时变化/);
+  assert.doesNotMatch(rendered, /验证 1\/1/);
+  assert.doesNotMatch(rendered, /bash_run/);
+  assert.doesNotMatch(rendered, /test\/file-0\.txt/);
 });
 
 test("semantic message component delegates tool cards and markdown text", () => {

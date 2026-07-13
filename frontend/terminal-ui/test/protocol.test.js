@@ -453,7 +453,10 @@ test("normalizeServerRecord stabilizes bridge payloads", () => {
       run_id: "run-1",
       outcome: "partial",
       summary: 42,
-      changes: null,
+      changes: [
+        { path: "src/example.py", status: "modified" },
+        { path: ".naumi/terminal-ui-debug.jsonl", status: "modified", scope: "background" },
+      ],
       validations: [{ command: "pytest", status: "failed", exit_code: "1" }],
       git_state: { available: 1, dirty: true, ahead: "2" },
     },
@@ -463,7 +466,10 @@ test("normalizeServerRecord stabilizes bridge payloads", () => {
     run_id: "run-1",
     outcome: "partial",
     summary: "42",
-    changes: [],
+    changes: [
+      { path: "src/example.py", status: "modified", scope: "task" },
+      { path: ".naumi/terminal-ui-debug.jsonl", status: "modified", scope: "background" },
+    ],
     validations: [{ command: "pytest", status: "failed", exit_code: "1" }],
     unverified: [],
     approvals: [],

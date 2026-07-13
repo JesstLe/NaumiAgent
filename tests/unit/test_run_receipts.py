@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -69,6 +70,41 @@ async def test_git_probe_attributes_only_net_changes_after_run_baseline(tmp_path
     assert by_path["tracked.txt"].additions == 1
     assert by_path["tracked.txt"].deletions == 1
     assert delta.warnings == ()
+
+
+@pytest.mark.asyncio
+async def test_git_probe_labels_removed_untracked_paths_as_deleted_effects(tmp_path):
+    from naumi_agent.runs.git_probe import GitWorkspaceProbe, diff_run_changes
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    removed = repo / "scratch" / "generated.txt"
+    removed.parent.mkdir()
+    removed.write_text("temporary\n", encoding="utf-8")
+    before = await GitWorkspaceProbe(repo).capture()
+
+    removed.unlink()
+    removed.parent.rmdir()
+    after = await GitWorkspaceProbe(repo).capture()
+
+    delta = diff_run_changes(before, after)
+
+    assert [(change.path, change.status) for change in delta.changes] == [
+        ("scratch/generated.txt", "removed_untracked")
+    ]
+
+
+def test_receipt_change_scope_defaults_to_task_for_schema_v1_compatibility():
+    from naumi_agent.runs.models import ReceiptChange
+
+    change = ReceiptChange.from_dict(
+        {
+            "path": "src/example.py",
+            "status": "modified",
+        }
+    )
+
+    assert change.scope == "task"
 
 
 @pytest.mark.asyncio
@@ -180,11 +216,275 @@ async def test_receipt_builder_marks_changed_but_unvalidated_run_partial(tmp_pat
 
     assert receipt.outcome == "partial"
     assert receipt.validations == ()
-    assert "未运行验证" in "\n".join(receipt.unverified)
+    assert "缺少对应的验证证据" in "\n".join(receipt.unverified)
     assert {action.kind for action in receipt.next_actions} >= {
         "run_validation",
         "review_changes",
     }
+
+
+@pytest.mark.asyncio
+async def test_receipt_builder_completes_verified_rm_and_separates_runtime_trace(tmp_path):
+    from naumi_agent.runs.receipt_builder import RunReceiptBuilder
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    target = repo / "scratch folder"
+    target.mkdir()
+    (target / "one.txt").write_text("one\n", encoding="utf-8")
+    (target / "two.txt").write_text("two\n", encoding="utf-8")
+    trace = repo / ".naumi" / "terminal-ui-debug.jsonl"
+    trace.parent.mkdir()
+    trace.write_text('{"event":"before"}\n', encoding="utf-8")
+    builder = await RunReceiptBuilder.start(workspace_root=repo, run_id="run-delete")
+    command = f"{shlex.join(['rm', '-rf', str(target)])} 2>/dev/null && echo removed"
+    builder.observe(
+        "tool_start",
+        {
+            "name": "bash_run",
+            "call_id": "delete-1",
+            "args": json.dumps({"command": command}),
+        },
+    )
+
+    for child in target.iterdir():
+        child.unlink()
+    target.rmdir()
+    trace.write_text(
+        '{"event":"before"}\n{"event":"after"}\n',
+        encoding="utf-8",
+    )
+    builder.observe(
+        "tool_end",
+        {
+            "name": "bash_run",
+            "call_id": "delete-1",
+            "status": "success",
+            "content": "Shell 命令执行完成。\n退出码: 0\n\nremoved",
+        },
+    )
+
+    receipt = await builder.finish("completed", f"已删除 {target} 目录及其所有内容。")
+
+    assert receipt.outcome == "completed"
+    assert len(receipt.validations) == 1
+    assert receipt.validations[0].status == "passed"
+    assert f"路径已不存在: {target}" in receipt.validations[0].command
+    by_path = {change.path: change for change in receipt.changes}
+    assert by_path["scratch folder/one.txt"].status == "removed_untracked"
+    assert by_path["scratch folder/one.txt"].source_tool == "bash_run"
+    assert by_path["scratch folder/one.txt"].scope == "task"
+    assert by_path[".naumi/terminal-ui-debug.jsonl"].scope == "background"
+    assert not any(risk.code == "changes_unverified" for risk in receipt.risks)
+    assert receipt.next_actions == ()
+
+
+@pytest.mark.asyncio
+async def test_receipt_builder_rejects_failed_or_unproven_rm_postconditions(tmp_path):
+    from naumi_agent.runs.receipt_builder import RunReceiptBuilder
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    target = repo / "still-here"
+    target.mkdir()
+    builder = await RunReceiptBuilder.start(workspace_root=repo, run_id="run-delete-failed")
+    builder.observe(
+        "tool_start",
+        {
+            "name": "bash_run",
+            "call_id": "delete-failed",
+            "args": json.dumps({"command": f"rm -rf {target}"}),
+        },
+    )
+    builder.observe(
+        "tool_end",
+        {
+            "name": "bash_run",
+            "call_id": "delete-failed",
+            "status": "success",
+            "content": "Shell 命令执行完成。\n退出码: 1\n[exit code: 1]",
+        },
+    )
+
+    receipt = await builder.finish("completed", "已尝试删除。")
+
+    assert receipt.outcome == "partial"
+    assert any(risk.code == "tool_failed" for risk in receipt.risks)
+    assert not receipt.validations
+
+
+@pytest.mark.asyncio
+async def test_receipt_builder_fails_rm_postcondition_when_target_remains(tmp_path):
+    from naumi_agent.runs.receipt_builder import RunReceiptBuilder
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    target = repo / "still-here"
+    target.mkdir()
+    builder = await RunReceiptBuilder.start(workspace_root=repo, run_id="run-delete-residual")
+    builder.observe(
+        "tool_start",
+        {
+            "name": "bash_run",
+            "call_id": "delete-residual",
+            "args": json.dumps({"command": f"rm -rf {target}"}),
+        },
+    )
+    builder.observe(
+        "tool_end",
+        {
+            "name": "bash_run",
+            "call_id": "delete-residual",
+            "status": "success",
+            "content": "Shell 命令执行完成。\n退出码: 0",
+        },
+    )
+
+    receipt = await builder.finish("completed", "已尝试删除。")
+
+    assert receipt.outcome == "partial"
+    assert receipt.validations[0].status == "failed"
+    assert any(risk.code == "validation_failed" for risk in receipt.risks)
+    assert receipt.next_actions[0].kind == "retry_validation"
+
+
+@pytest.mark.asyncio
+async def test_receipt_builder_verifies_deleting_symlink_without_following_target(tmp_path):
+    from naumi_agent.runs.receipt_builder import RunReceiptBuilder
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    target = repo / "tracked.txt"
+    link = repo / "temporary-link"
+    link.symlink_to(target)
+    builder = await RunReceiptBuilder.start(workspace_root=repo, run_id="run-delete-link")
+    builder.observe(
+        "tool_start",
+        {
+            "name": "file_delete",
+            "call_id": "delete-link",
+            "args": json.dumps({"path": str(link)}),
+        },
+    )
+
+    link.unlink()
+    builder.observe(
+        "tool_end",
+        {
+            "name": "file_delete",
+            "call_id": "delete-link",
+            "status": "success",
+            "content": "文件已删除。",
+        },
+    )
+    receipt = await builder.finish("completed", "符号链接已删除。")
+
+    assert target.exists()
+    assert not link.exists()
+    assert receipt.outcome == "completed"
+    assert receipt.validations[0].status == "passed"
+    assert receipt.changes[0].path == "temporary-link"
+    assert receipt.changes[0].source_tool == "file_delete"
+
+
+@pytest.mark.asyncio
+async def test_runtime_trace_only_is_background_but_explicit_trace_edit_is_task(tmp_path):
+    from naumi_agent.runs.receipt_builder import RunReceiptBuilder
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    trace = repo / ".naumi" / "terminal-ui-debug.jsonl"
+    trace.parent.mkdir()
+    trace.write_text("before\n", encoding="utf-8")
+    background_builder = await RunReceiptBuilder.start(
+        workspace_root=repo,
+        run_id="run-background-only",
+    )
+    trace.write_text("before\nafter\n", encoding="utf-8")
+
+    background_receipt = await background_builder.finish("completed", "读取完成。")
+
+    assert background_receipt.outcome == "completed"
+    assert background_receipt.changes[0].scope == "background"
+    assert not background_receipt.unverified
+
+    explicit_builder = await RunReceiptBuilder.start(
+        workspace_root=repo,
+        run_id="run-explicit-trace-edit",
+    )
+    explicit_builder.observe(
+        "tool_start",
+        {
+            "name": "file_write",
+            "call_id": "write-trace",
+            "args": json.dumps({"path": str(trace)}),
+        },
+    )
+    trace.write_text("explicit edit\n", encoding="utf-8")
+    explicit_builder.observe(
+        "tool_end",
+        {
+            "name": "file_write",
+            "call_id": "write-trace",
+            "status": "success",
+        },
+    )
+
+    explicit_receipt = await explicit_builder.finish("completed", "轨迹已编辑。")
+
+    assert explicit_receipt.outcome == "partial"
+    assert explicit_receipt.changes[0].scope == "task"
+    assert explicit_receipt.changes[0].source_tool == "file_write"
+    assert any(risk.code == "changes_unverified" for risk in explicit_receipt.risks)
+
+
+@pytest.mark.asyncio
+async def test_delete_postcondition_does_not_mask_unvalidated_code_change(tmp_path):
+    from naumi_agent.runs.receipt_builder import RunReceiptBuilder
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    disposable = repo / "disposable.txt"
+    disposable.write_text("temporary\n", encoding="utf-8")
+    builder = await RunReceiptBuilder.start(workspace_root=repo, run_id="run-mixed-change")
+    builder.observe(
+        "tool_start",
+        {
+            "name": "file_edit",
+            "call_id": "edit-code",
+            "args": json.dumps({"path": "tracked.txt"}),
+        },
+    )
+    (repo / "tracked.txt").write_text("code changed\n", encoding="utf-8")
+    builder.observe(
+        "tool_end",
+        {"name": "file_edit", "call_id": "edit-code", "status": "success"},
+    )
+    builder.observe(
+        "tool_start",
+        {
+            "name": "file_delete",
+            "call_id": "delete-temp",
+            "args": json.dumps({"path": str(disposable)}),
+        },
+    )
+    disposable.unlink()
+    builder.observe(
+        "tool_end",
+        {
+            "name": "file_delete",
+            "call_id": "delete-temp",
+            "status": "success",
+        },
+    )
+
+    receipt = await builder.finish("completed", "修改与清理已完成。")
+
+    assert receipt.validations[0].scope == "文件系统"
+    assert receipt.validations[0].status == "passed"
+    assert receipt.outcome == "partial"
+    assert any(risk.code == "changes_unverified" for risk in receipt.risks)
+    assert any(action.kind == "run_validation" for action in receipt.next_actions)
 
 
 @pytest.mark.asyncio
