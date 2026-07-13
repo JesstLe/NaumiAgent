@@ -1007,6 +1007,26 @@ test("ui snapshots persist folds, scroll offset, and multiline composer draft", 
   assert.equal(restored.inputPreferredColumn, 2);
 });
 
+test("follow tail snapshot derives detached state without stale unread", () => {
+  const source = createInitialState();
+  source.scrollOffset = 7;
+  source.followTail = false;
+  source.unreadOutputCount = 3;
+  source.unreadOutputKeys = { "assistant:old": true };
+
+  const restored = createInitialState();
+  applyUiSnapshot(restored, createUiSnapshot(source));
+  assert.equal(restored.scrollOffset, 7);
+  assert.equal(restored.followTail, false);
+  assert.equal(restored.unreadOutputCount, 0);
+  assert.deepEqual(restored.unreadOutputKeys, {});
+
+  source.scrollOffset = 0;
+  applyUiSnapshot(restored, createUiSnapshot(source));
+  assert.equal(restored.followTail, true);
+  assert.equal(restored.scrollOffset, 0);
+});
+
 test("applying a missing snapshot clears presentation state for a new session", () => {
   const state = createInitialState();
   state.input = "旧会话草稿";

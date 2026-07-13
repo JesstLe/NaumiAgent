@@ -2,6 +2,7 @@ import { looksLikeDiff } from "./ansi.js";
 import { getInputCursor, setInputText, truncateInputText } from "./input-buffer.js";
 import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
 import { clearRenderCache, createRenderCache } from "./render-cache.js";
+import { jumpTimelineToLatest } from "./timeline-follow.js";
 
 export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/help", aliases: ["/h"], description: "显示帮助" },
@@ -183,6 +184,9 @@ export function createInitialState() {
     permission: null,
     running: false,
     scrollOffset: 0,
+    followTail: true,
+    unreadOutputCount: 0,
+    unreadOutputKeys: {},
     bridgeReady: false,
     debugTrace: null,
     frontendDebugLogPath: "",
@@ -259,6 +263,7 @@ export function reduceServerEvent(state, record) {
       state.permission = null;
       return state.taskPanel.pinned ? [taskPanelRefreshAction(state)] : [];
     case "session/replayed":
+      jumpTimelineToLatest(state);
       state.currentSessionId = payload.session_id || state.currentSessionId;
       state.running = false;
       state.currentTurnStartedAtMs = null;
@@ -822,6 +827,9 @@ export function applyUiSnapshot(state, snapshot) {
   state.folds = sanitizeFolds(safeSnapshot.folds);
   state.foldCursor = Number.isFinite(Number(safeSnapshot.foldCursor)) ? Math.max(0, Number(safeSnapshot.foldCursor)) : 0;
   state.scrollOffset = Number.isFinite(Number(safeSnapshot.scrollOffset)) ? Math.max(0, Number(safeSnapshot.scrollOffset)) : 0;
+  state.followTail = state.scrollOffset === 0;
+  state.unreadOutputCount = 0;
+  state.unreadOutputKeys = {};
   const composer = safeSnapshot.composer && typeof safeSnapshot.composer === "object"
     ? safeSnapshot.composer
     : {};
