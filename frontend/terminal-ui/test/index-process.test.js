@@ -789,6 +789,49 @@ test("terminal UI process shows queued, accepted, failed, and retried delivery l
   }
 });
 
+test("terminal UI process restores queued outbox as uncertain without automatic resend", async () => {
+  const statePath = path.join(
+    tmpdir(),
+    `naumi-terminal-ui-outbox-${Date.now()}-${Math.random()}.json`,
+  );
+  const first = launchTerminalUi("message-lifecycle-bridge.js", { statePath });
+  const firstOutput = collectOutput(first);
+
+  try {
+    await waitForOutput(firstOutput, "新终端 UI 已连接 Python bridge。");
+    first.stdin.write("等待重启确认\n");
+    await waitForLatestScreen(firstOutput, "发送中...");
+    assert.equal(await stopTerminalUi(first), 0);
+
+    const second = launchTerminalUi("message-lifecycle-bridge.js", { statePath });
+    const secondOutput = collectOutput(second);
+    try {
+      await waitForLatestScreen(secondOutput, "发送状态待确认");
+      await delay(250);
+      assert.equal(
+        readDebugEvents(second.debugLogPath).filter(
+          (record) => record.event === "protocol.send" && record.payload.record.type === "submit",
+        ).length,
+        0,
+      );
+
+      second.stdin.write("/retry\n");
+      await waitForLatestScreen(secondOutput, "已确认普通消息");
+      const retrySubmit = readDebugEvents(second.debugLogPath).find(
+        (record) => record.event === "protocol.send" && record.payload.record.type === "submit",
+      );
+      assert(retrySubmit);
+      assert.equal(retrySubmit.payload.record.payload.text, "等待重启确认");
+      assert.equal(await stopTerminalUi(second), 0);
+    } finally {
+      forceKill(second);
+    }
+  } finally {
+    forceKill(first);
+    fs.rmSync(statePath, { force: true });
+  }
+});
+
 function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
   const debugLogPath = path.join(tmpdir(), `naumi-terminal-ui-debug-${Date.now()}-${Math.random()}.jsonl`);
   const fakeBridge = fixtureName
