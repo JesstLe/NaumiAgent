@@ -140,6 +140,28 @@ attachJsonlLineReader(process.stdin, (line) => {
     return;
   }
 
+  if (record.type === "receipt/request") {
+    setTimeout(() => {
+      emit("completion/receipt", {
+        schema_version: 1,
+        receipt_id: payload.receipt_id || "receipt-fake-1",
+        run_id: payload.run_id || "run-fake-1",
+        outcome: "completed",
+        summary: "页面已写入并完成验证。",
+        changes: [{ path: "showcase/index.html", status: "modified", source_tool: "file_write", additions: 65, deletions: 1 }],
+        validations: [{ command: "node --test", scope: "frontend/terminal-ui", status: "passed", exit_code: 0, passed: 1 }],
+        unverified: [],
+        approvals: [{ call_id: "call-1", tool_name: "file_write", decision: "allowed_once" }],
+        risks: [],
+        git_state: { available: true, branch: "main", dirty: true, ahead: 0, behind: 0 },
+        next_actions: [{ id: "review", label: "审查本轮改动", kind: "review_changes" }],
+        evidence_refs: ["run:run-fake-1:tool:call-1"],
+        duration_ms: 140,
+      }, record.id);
+    }, 80);
+    return;
+  }
+
   if (record.type === "permission_response") {
     const targetRun = activeRun;
     emit("permission/resolved", { request_id: payload.request_id, choice: payload.choice });
@@ -173,7 +195,11 @@ attachJsonlLineReader(process.stdin, (line) => {
         content_preview: ["--- a/showcase/index.html", "+++ b/showcase/index.html", "@@", "-old", "+new", ...Array.from({ length: 65 }, (_, index) => `+line ${index}`)].join("\n"),
         content_length: 640,
       });
-      emit("run/completed", {}, targetRun.requestId);
+      emit("run/completed", {
+        status: "completed",
+        receipt_id: "receipt-fake-1",
+        run_id: "run-fake-1",
+      }, targetRun.requestId);
       activeRun = null;
     }, 30);
     return;

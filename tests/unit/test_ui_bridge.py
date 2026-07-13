@@ -1515,6 +1515,68 @@ async def test_bridge_resume_replays_durable_completion_receipts(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_bridge_resends_requested_completion_receipt(tmp_path: Path) -> None:
+    engine = _FakeEngine()
+    engine.chat_run_store = ChatRunStore(tmp_path / "chat-runs.db")
+    run = await engine.chat_run_store.start_run(
+        session_id="session-1",
+        user_message_id="msg-resend",
+        run_id="run-resend",
+    )
+    receipt = CompletionReceipt.from_dict(
+        {
+            "schema_version": 1,
+            "receipt_id": "receipt-resend",
+            "run_id": run.id,
+            "outcome": "completed",
+            "summary": "补发成功。",
+            "git_state": {"available": False, "dirty": False},
+        }
+    )
+    await engine.chat_run_store.finish_run(
+        run.id,
+        status="completed",
+        receipt=receipt,
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "request-receipt",
+            "type": ClientEventType.RECEIPT_REQUEST,
+            "payload": {
+                "session_id": "session-1",
+                "receipt_id": receipt.receipt_id,
+                "run_id": run.id,
+            },
+        }
+    )
+
+    records = _records(writer)
+    resent = next(record for record in records if record["type"] == "completion/receipt")
+    assert resent["request_id"] == "request-receipt"
+    assert resent["payload"]["receipt_id"] == receipt.receipt_id
+
+    writer.seek(0)
+    writer.truncate(0)
+    await bridge.handle_client_record(
+        {
+            "id": "request-cross-session",
+            "type": ClientEventType.RECEIPT_REQUEST,
+            "payload": {
+                "session_id": "session-other",
+                "receipt_id": receipt.receipt_id,
+            },
+        }
+    )
+    rejected = _records(writer)
+    assert not any(record["type"] == "completion/receipt" for record in rejected)
+    assert rejected[-1]["payload"]["code"] == "receipt_not_found"
+
+
+@pytest.mark.asyncio
 async def test_bridge_rejects_resume_while_run_is_active() -> None:
     engine = _SlowFakeEngine()
     writer = io.StringIO()

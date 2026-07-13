@@ -567,6 +567,9 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.RUN_CANCEL:
             await self.cancel_run(payload, request_id=request_id)
             return
+        if event_type == ClientEventType.RECEIPT_REQUEST:
+            await self.resend_completion_receipt(payload, request_id=request_id)
+            return
 
         if event_type == ClientEventType.RESUME:
             await self.resume_session(payload, request_id=request_id)
@@ -902,6 +905,51 @@ class JsonlEngineBridge:
             request_id=request_id,
         )
         await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def resend_completion_receipt(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Resend one durable receipt without allowing cross-session lookup."""
+        receipt_id = str(payload.get("receipt_id") or "")
+        run_id = str(payload.get("run_id") or "")
+        session_id = str(payload.get("session_id") or "")
+        current_session_id = str(
+            getattr(getattr(self.engine, "_session", None), "id", "")
+        )
+        if not session_id:
+            session_id = current_session_id
+
+        receipt = self._active_completion_receipt
+        if session_id and current_session_id and session_id != current_session_id:
+            receipt = None
+        if receipt is not None and (
+            (receipt_id and receipt.receipt_id != receipt_id)
+            or (run_id and receipt.run_id != run_id)
+        ):
+            receipt = None
+
+        store = getattr(self.engine, "chat_run_store", None)
+        if receipt is None and store is not None and session_id:
+            if receipt_id:
+                receipt = await store.get_receipt(session_id, receipt_id)
+            elif run_id:
+                run = await store.get_run(session_id, run_id)
+                receipt = run.receipt if run is not None else None
+        if receipt is None or (run_id and receipt.run_id != run_id):
+            await self.emit_error(
+                "未找到可补发的完成回执。",
+                code="receipt_not_found",
+                request_id=request_id,
+            )
+            return
+        await self.emit(
+            ServerEventType.COMPLETION_RECEIPT,
+            receipt.to_dict(),
+            request_id=request_id,
+        )
 
     async def _resolve_task_mission(
         self,

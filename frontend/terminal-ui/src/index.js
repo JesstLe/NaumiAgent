@@ -238,6 +238,13 @@ function handleBridgeLine(line) {
         refresh: true,
       });
     }
+    if (action.type === "request_completion_receipt") {
+      send("receipt/request", {
+        session_id: action.sessionId ?? "",
+        receipt_id: action.receiptId ?? "",
+        run_id: action.runId ?? "",
+      });
+    }
   }
   if (actions.some((action) => action.type === "exit")) {
     exit();

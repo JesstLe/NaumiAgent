@@ -351,7 +351,7 @@ export function reduceServerEvent(state, record) {
       state.activeToolPrepare = null;
       state.activeRuntimePhase = "";
       state.permission = null;
-      return state.taskPanel.pinned ? [taskPanelRefreshAction(state)] : [];
+      return terminalRunActions(state, payload);
     }
     case "run/cancelled":
       if (!matchesActiveRunActivity(state, runCancelledTargetRequestId(record, payload))) break;
@@ -378,7 +378,7 @@ export function reduceServerEvent(state, record) {
         "warning",
       );
       moveCompletionReceiptToEnd(state, payload.receipt_id, payload.run_id);
-      return state.taskPanel.pinned ? [taskPanelRefreshAction(state)] : [];
+      return terminalRunActions(state, payload);
     case "session/replayed":
       jumpTimelineToLatest(state);
       state.currentSessionId = payload.session_id || state.currentSessionId;
@@ -566,6 +566,31 @@ function moveCompletionReceiptToEnd(state, receiptId, runId) {
   state.messages.push(message);
   clearRenderCache(state.renderCache);
   return message;
+}
+
+function terminalRunActions(state, payload) {
+  const actions = state.taskPanel.pinned ? [taskPanelRefreshAction(state)] : [];
+  const receiptId = String(payload.receipt_id ?? "");
+  const runId = String(payload.run_id ?? "");
+  if ((receiptId || runId) && !hasCompletionReceipt(state, receiptId, runId)) {
+    actions.push({
+      type: "request_completion_receipt",
+      sessionId: String(state.currentSessionId ?? ""),
+      receiptId,
+      runId,
+    });
+  }
+  return actions;
+}
+
+function hasCompletionReceipt(state, receiptId, runId) {
+  return state.messages.some(
+    (message) => message.kind === "completion_receipt"
+      && (
+        (receiptId && message.receiptId === receiptId)
+        || (runId && message.runId === runId)
+      ),
+  );
 }
 
 function discardActiveRunActivity(state) {

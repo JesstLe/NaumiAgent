@@ -76,6 +76,7 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.client_events.includes("submit"));
   assert(PROTOCOL_CONTRACT.client_events.includes("task_panel"));
   assert(PROTOCOL_CONTRACT.client_events.includes("run_cancel"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("receipt/request"));
   assert(PROTOCOL_CONTRACT.server_events.includes("ui/message"));
   assert(PROTOCOL_CONTRACT.server_events.includes("runtime/status"));
   assert(PROTOCOL_CONTRACT.server_events.includes("run/cancelled"));
@@ -185,6 +186,23 @@ test("normalizeServerRecord rejects invalid bridge records", () => {
     }),
     /schema_version/,
   );
+});
+
+test("event sender accepts explicit missing-receipt recovery requests", () => {
+  const chunks = [];
+  const send = createEventSender({ write: (chunk) => chunks.push(chunk) });
+
+  send("receipt/request", {
+    session_id: "session-1",
+    receipt_id: "receipt-missing",
+    run_id: "run-missing",
+  });
+
+  assert.deepEqual(JSON.parse(chunks[0]).payload, {
+    session_id: "session-1",
+    receipt_id: "receipt-missing",
+    run_id: "run-missing",
+  });
 });
 
 test("normalizes workbench snapshot events", () => {
