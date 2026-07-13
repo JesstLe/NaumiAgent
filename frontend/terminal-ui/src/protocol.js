@@ -8,6 +8,12 @@ const CLIENT_EVENT_TYPES = new Set(PROTOCOL_CONTRACT.client_events ?? []);
 const SERVER_EVENT_TYPES = new Set(PROTOCOL_CONTRACT.server_events ?? []);
 const INSPECTOR_TAB_NAMES = ["plan", "tools", "context", "changes", "tests"];
 const INSPECTOR_STATES = new Set(["ready", "empty", "loading", "stale", "error"]);
+const AGENT_CONTROL_SECTIONS = ["summary", "agents", "executions", "team_messages", "blackboard", "warnings"];
+const AGENT_KINDS = new Set(["preset", "dynamic"]);
+const AGENT_STATES = new Set(["uninitialized", "spawned", "ready", "running", "idle", "destroyed"]);
+const EXECUTION_STATUSES = new Set(["running", "stopping", "completed", "error", "failed", "timeout", "max_turns", "cancelled"]);
+const EXECUTION_PHASES = new Set(["starting", "running", "preparing_tool", "running_tool", "stopping", "finished"]);
+const TEAM_PRIORITIES = new Set(["low", "normal", "high", "critical"]);
 
 export function parseArgs(argv) {
   const parsed = { config: "config.yaml", bridgeCommand: "", bridgeCommandJson: "" };
@@ -141,6 +147,15 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "inspector/update") {
     return normalizeInspectorUpdate(payload);
+  }
+  if (type === "agents/snapshot") {
+    return normalizeAgentControlSnapshot(payload);
+  }
+  if (type === "agents/update") {
+    return normalizeAgentControlUpdate(payload);
+  }
+  if (type === "agents/action") {
+    return normalizeAgentAction(payload);
   }
   if (type === "ui/message") {
     const messageType = String(payload.type ?? "");
@@ -448,6 +463,199 @@ function normalizeInspectorAction(item) {
     label: publicText(item.label),
     kind: publicText(item.kind),
   };
+}
+
+function normalizeAgentControlSnapshot(payload) {
+  const header = normalizeAgentControlHeader(payload);
+  for (const section of AGENT_CONTROL_SECTIONS) {
+    if (!Object.hasOwn(payload, section)) {
+      throw new Error(`agents/snapshot 缺少 ${section}`);
+    }
+  }
+  return {
+    ...header,
+    summary: normalizeAgentSummary(payload.summary),
+    agents: agentObjectArray(payload.agents, "agents", 100).map(normalizeAgentDescriptor),
+    executions: agentObjectArray(payload.executions, "executions", 100).map(normalizeExecutionDescriptor),
+    team_messages: agentObjectArray(payload.team_messages, "team_messages", 100).map(normalizeTeamMessage),
+    blackboard: agentObjectArray(payload.blackboard, "blackboard", 100).map(normalizeBlackboard),
+    warnings: agentTextArray(payload.warnings, "warnings", 20),
+  };
+}
+
+function normalizeAgentControlUpdate(payload) {
+  const header = normalizeAgentControlHeader(payload);
+  const raw = agentObject(payload.changed_sections, "changed_sections");
+  const changedSections = {};
+  for (const [section, value] of Object.entries(raw)) {
+    if (!AGENT_CONTROL_SECTIONS.includes(section)) {
+      throw new Error(`未知 Agent Control section: ${section}`);
+    }
+    if (section === "summary") changedSections.summary = normalizeAgentSummary(value);
+    else if (section === "agents") changedSections.agents = agentObjectArray(value, "agents", 100).map(normalizeAgentDescriptor);
+    else if (section === "executions") changedSections.executions = agentObjectArray(value, "executions", 100).map(normalizeExecutionDescriptor);
+    else if (section === "team_messages") changedSections.team_messages = agentObjectArray(value, "team_messages", 100).map(normalizeTeamMessage);
+    else if (section === "blackboard") changedSections.blackboard = agentObjectArray(value, "blackboard", 100).map(normalizeBlackboard);
+    else changedSections.warnings = agentTextArray(value, "warnings", 20);
+  }
+  if (Object.keys(changedSections).length === 0) {
+    throw new Error("agents/update changed_sections 不能为空");
+  }
+  return { ...header, changed_sections: changedSections };
+}
+
+function normalizeAgentControlHeader(payload) {
+  if (payload.schema_version !== 1) {
+    throw new Error(`Agent Control schema_version 不兼容: ${payload.schema_version}`);
+  }
+  return {
+    schema_version: 1,
+    session_id: agentText(payload.session_id),
+    revision: strictAgentNonnegativeInteger(payload.revision, "Agent Control revision"),
+    generated_at: agentText(payload.generated_at),
+  };
+}
+
+function normalizeAgentSummary(value) {
+  const summary = agentObject(value, "summary");
+  return {
+    total_agents: strictAgentNonnegativeInteger(summary.total_agents, "summary.total_agents"),
+    active_agents: strictAgentNonnegativeInteger(summary.active_agents, "summary.active_agents"),
+    attention_agents: strictAgentNonnegativeInteger(summary.attention_agents, "summary.attention_agents"),
+    stoppable_executions: strictAgentNonnegativeInteger(summary.stoppable_executions, "summary.stoppable_executions"),
+    pending_messages: strictAgentNonnegativeInteger(summary.pending_messages, "summary.pending_messages"),
+  };
+}
+
+function normalizeAgentDescriptor(item) {
+  const kind = strictChoice(item.kind, "agent.kind", AGENT_KINDS);
+  const state = strictChoice(item.state, "agent.state", AGENT_STATES);
+  return {
+    name: requiredAgentText(item.name, "agent.name"),
+    description: agentText(item.description),
+    kind,
+    state,
+    task_count: strictAgentNonnegativeInteger(item.task_count ?? 0, "agent.task_count"),
+    model_tier: agentText(item.model_tier),
+    capabilities: agentTextArray(item.capabilities, "agent.capabilities", 50),
+    tools: agentTextArray(item.tools, "agent.tools", 50),
+    permission_level: agentText(item.permission_level),
+    age_ms: strictAgentNonnegativeInteger(item.age_ms ?? 0, "agent.age_ms"),
+    heartbeat_age_ms: strictAgentNonnegativeInteger(item.heartbeat_age_ms ?? 0, "agent.heartbeat_age_ms"),
+  };
+}
+
+function normalizeExecutionDescriptor(item) {
+  const finishedAt = item.finished_at;
+  return {
+    task_id: requiredAgentText(item.task_id, "execution.task_id"),
+    session_id: agentText(item.session_id),
+    agent_name: requiredAgentText(item.agent_name, "execution.agent_name"),
+    description: agentText(item.description),
+    status: strictChoice(item.status, "execution.status", EXECUTION_STATUSES),
+    phase: strictChoice(item.phase, "execution.phase", EXECUTION_PHASES),
+    started_at: strictNonnegativeNumber(item.started_at, "execution.started_at"),
+    finished_at: finishedAt == null ? null : strictNonnegativeNumber(finishedAt, "execution.finished_at"),
+    elapsed_ms: strictAgentNonnegativeInteger(item.elapsed_ms ?? 0, "execution.elapsed_ms"),
+    heartbeat_age_ms: strictAgentNonnegativeInteger(item.heartbeat_age_ms ?? 0, "execution.heartbeat_age_ms"),
+    current_tool: agentText(item.current_tool),
+    recent_tools: agentTextArray(item.recent_tools, "execution.recent_tools", 20),
+    total_tokens: strictAgentNonnegativeInteger(item.total_tokens ?? 0, "execution.total_tokens"),
+    total_cost_usd: strictNonnegativeNumber(item.total_cost_usd ?? 0, "execution.total_cost_usd"),
+    turns: strictAgentNonnegativeInteger(item.turns ?? 0, "execution.turns"),
+    error: agentText(item.error),
+    stop_supported: strictBoolean(item.stop_supported, "execution.stop_supported"),
+    stop_requested: strictBoolean(item.stop_requested, "execution.stop_requested"),
+  };
+}
+
+function normalizeTeamMessage(item) {
+  return {
+    sender: requiredAgentText(item.sender, "team_message.sender"),
+    recipient: agentText(item.recipient),
+    topic: requiredAgentText(item.topic, "team_message.topic"),
+    priority: strictChoice(item.priority, "team_message.priority", TEAM_PRIORITIES),
+    timestamp: strictNonnegativeNumber(item.timestamp, "team_message.timestamp"),
+    content: agentText(item.content),
+  };
+}
+
+function normalizeBlackboard(item) {
+  return {
+    key: requiredAgentText(item.key, "blackboard.key"),
+    author: requiredAgentText(item.author, "blackboard.author"),
+    version: strictAgentNonnegativeInteger(item.version, "blackboard.version"),
+    timestamp: strictNonnegativeNumber(item.timestamp, "blackboard.timestamp"),
+    value_summary: agentText(item.value_summary),
+  };
+}
+
+function normalizeAgentAction(payload) {
+  return {
+    task_id: requiredAgentText(payload.task_id, "agents/action task_id"),
+    accepted: strictBoolean(payload.accepted, "agents/action accepted"),
+    code: requiredAgentText(payload.code, "agents/action code"),
+    message: agentText(payload.message),
+  };
+}
+
+function agentObject(value, name) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Agent Control ${name} 必须是对象`);
+  }
+  return value;
+}
+
+function agentObjectArray(value, name, limit) {
+  if (!Array.isArray(value)) throw new Error(`Agent Control ${name} 必须是数组`);
+  if (value.length > limit) throw new Error(`Agent Control ${name} 最多 ${limit} 项`);
+  return value.map((item) => agentObject(item, name));
+}
+
+function agentTextArray(value, name, limit) {
+  if (!Array.isArray(value)) throw new Error(`Agent Control ${name} 必须是数组`);
+  if (value.length > limit) throw new Error(`Agent Control ${name} 最多 ${limit} 项`);
+  return value.map((item) => {
+    if (typeof item !== "string") {
+      throw new Error(`Agent Control ${name} 必须只包含字符串`);
+    }
+    return agentText(item);
+  });
+}
+
+function agentText(value) {
+  return String(value ?? "").trim().slice(0, 2000);
+}
+
+function requiredAgentText(value, name) {
+  const result = agentText(value);
+  if (!result) throw new Error(`Agent Control ${name} 不能为空`);
+  return result;
+}
+
+function strictChoice(value, name, allowed) {
+  const result = agentText(value).toLowerCase();
+  if (!allowed.has(result)) throw new Error(`Agent Control ${name} 无效: ${result}`);
+  return result;
+}
+
+function strictBoolean(value, name) {
+  if (typeof value !== "boolean") throw new Error(`Agent Control ${name} 必须是 boolean`);
+  return value;
+}
+
+function strictNonnegativeNumber(value, name) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} 必须是非负数`);
+  }
+  return value;
+}
+
+function strictAgentNonnegativeInteger(value, name) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(`${name} 必须是非负整数`);
+  }
+  return value;
 }
 
 function strictObjectArray(value, name, limit) {
