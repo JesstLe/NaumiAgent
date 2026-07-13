@@ -186,6 +186,9 @@ class TestPermissionChecker:
         "command",
         [
             pytest.param("printf safe\nrm -fr /absolute", id="newline-command-boundary"),
+            pytest.param("printf safe\n\nrm -fr /absolute", id="double-newline-boundary"),
+            pytest.param("printf safe;\nrm -fr /absolute", id="semicolon-newline-boundary"),
+            pytest.param("printf safe &&\nrm -fr /absolute", id="and-newline-boundary"),
             pytest.param("bash -lc 'rm -fr /absolute'", id="shell-option-bundle"),
             pytest.param("exec rm -fr /absolute", id="exec-wrapper"),
         ],
@@ -224,6 +227,10 @@ class TestPermissionChecker:
             pytest.param(
                 "echo 'sudo rm -rf /tmp/example'",
                 id="quoted-sudo-rm-text-not-command",
+            ),
+            pytest.param(
+                "echo 'safe\n\nrm -rf /absolute'",
+                id="quoted-double-newline-not-command",
             ),
             pytest.param("bash -c \"echo 'rm -rf /'\"", id="quoted-rm-in-shell-payload"),
         ],
@@ -325,6 +332,53 @@ class TestPermissionChecker:
 
         assert not result.allowed
         assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_bash_code_execute_rejects_list_code_before_confirmation(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+
+        result = checker.check(
+            "code_execute",
+            {"language": "Bash", "code": ["echo", "safe"]},
+            tool=CodeExecuteTool(),
+        )
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.INVALID_COMMAND_ARGUMENT
+        assert not result.requires_confirmation
+
+    @pytest.mark.parametrize("mode", [PermissionMode.BYPASS, PermissionMode.STRICT])
+    def test_runtime_mcp_connect_blocks_destructive_executable_and_args_before_mode(
+        self, mode: PermissionMode
+    ) -> None:
+        checker = PermissionChecker(mode)
+
+        result = checker.check(
+            "runtime_mcp_connect",
+            {"command": "/bin/rm", "args": ["-rf", "/absolute"]},
+        )
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            pytest.param("-rf /absolute", id="argv-not-list"),
+            pytest.param(["-rf", 1], id="argv-item-not-string"),
+        ],
+    )
+    def test_runtime_mcp_connect_rejects_invalid_argv_before_confirmation(self, argv) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+
+        result = checker.check(
+            "runtime_mcp_connect",
+            {"command": "echo", "args": argv},
+        )
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.INVALID_COMMAND_ARGUMENT
+        assert result.reason == "命令参数 `args` 必须是字符串数组。"
+        assert not result.requires_confirmation
 
     def test_non_shell_code_execute_does_not_scan_code_as_a_shell_command(self) -> None:
         checker = PermissionChecker(PermissionMode.BYPASS)
