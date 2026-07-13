@@ -485,12 +485,123 @@ class TestReset:
         engine: AgentEngine,
     ) -> None:
         session = await engine.get_or_create_session()
-        engine._permission_grant_store.create(session.id, "shell", "reset-call")
+        grant = engine._permission_grant_store.create(
+            session.id,
+            "shell",
+            "reset-call",
+        )
 
         engine.reset()
 
         assert engine.list_permission_grants() == ()
         assert engine._permission_grant_store.list_session(session.id) == ()
+        revocations = [
+            record
+            for record in engine.get_recent_permission_bubbles(limit=50)
+            if record["status"] == "grant_revoked"
+        ]
+        assert len(revocations) == 1
+        assert revocations[0]["grant_id"] == grant.grant_id
+        assert revocations[0]["tool_family"] == "shell"
+        assert revocations[0]["session_id"] == session.id
+        assert isinstance(revocations[0]["timestamp"], float)
+        assert revocations[0]["reason"]
+        assert revocations[0]["source"] == "reset"
+
+
+class TestPermissionGrantRevocationAudit:
+    @staticmethod
+    def _assert_revocation(
+        record: dict[str, object],
+        *,
+        grant_id: str,
+        tool_family: str,
+        session_id: str,
+        source: str,
+    ) -> None:
+        assert record["status"] == "grant_revoked"
+        assert record["grant_id"] == grant_id
+        assert record["tool_family"] == tool_family
+        assert record["session_id"] == session_id
+        assert isinstance(record["timestamp"], float)
+        assert record["reason"]
+        assert record["source"] == source
+
+    @pytest.mark.asyncio
+    async def test_explicit_revoke_records_the_removed_grant_with_bounded_history(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        grant = engine._permission_grant_store.create(
+            session.id,
+            "shell",
+            "explicit-call",
+        )
+        engine._permission_bubble_history = [
+            {"status": "existing", "timestamp": float(index)}
+            for index in range(100)
+        ]
+
+        assert engine.revoke_permission_grant(grant.grant_id) is True
+
+        history = engine.get_recent_permission_bubbles(limit=50)
+        assert len(engine._permission_bubble_history) == 100
+        self._assert_revocation(
+            history[-1],
+            grant_id=grant.grant_id,
+            tool_family="shell",
+            session_id=session.id,
+            source="explicit_revoke",
+        )
+
+    @pytest.mark.asyncio
+    async def test_revoke_all_records_each_removed_grant(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        shell = engine._permission_grant_store.create(session.id, "shell", "shell-call")
+        background = engine._permission_grant_store.create(
+            session.id,
+            "background_process",
+            "background-call",
+        )
+
+        assert engine.revoke_all_permission_grants() == 2
+
+        revocations = [
+            record
+            for record in engine.get_recent_permission_bubbles(limit=50)
+            if record["status"] == "grant_revoked"
+        ]
+        assert len(revocations) == 2
+        self._assert_revocation(
+            revocations[0],
+            grant_id=shell.grant_id,
+            tool_family="shell",
+            session_id=session.id,
+            source="revoke_all",
+        )
+        self._assert_revocation(
+            revocations[1],
+            grant_id=background.grant_id,
+            tool_family="background_process",
+            session_id=session.id,
+            source="revoke_all",
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_revocation_audit_is_created_when_no_grant_is_removed(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        await engine.get_or_create_session()
+
+        assert engine.revoke_permission_grant("missing-grant") is False
+        assert engine.revoke_all_permission_grants() == 0
+
+        assert engine.get_recent_permission_bubbles(limit=50) == []
 
 
 class TestContextVisualPayloads:
@@ -738,7 +849,7 @@ class TestSessionLoading:
         engine = AgentEngine(config)
         try:
             previous = await engine.get_or_create_session()
-            engine._permission_grant_store.create(
+            previous_grant = engine._permission_grant_store.create(
                 previous.id,
                 "shell",
                 "previous-call",
@@ -748,6 +859,19 @@ class TestSessionLoading:
             assert await engine.load_session(replacement.id) is True
             assert engine.list_permission_grants() == ()
             assert engine._permission_grant_store.list_session(previous.id) == ()
+            revocations = [
+                record
+                for record in engine.get_recent_permission_bubbles(limit=50)
+                if record["status"] == "grant_revoked"
+            ]
+            assert len(revocations) == 1
+            TestPermissionGrantRevocationAudit._assert_revocation(
+                revocations[0],
+                grant_id=previous_grant.grant_id,
+                tool_family="shell",
+                session_id=previous.id,
+                source="session_load",
+            )
         finally:
             await engine.shutdown()
 
@@ -758,11 +882,28 @@ class TestSessionLoading:
         )
         engine = AgentEngine(config)
         session = await engine.get_or_create_session()
-        engine._permission_grant_store.create(session.id, "shell", "shutdown-call")
+        grant = engine._permission_grant_store.create(
+            session.id,
+            "shell",
+            "shutdown-call",
+        )
 
         await engine.shutdown()
 
         assert engine._permission_grant_store.list_session(session.id) == ()
+        revocations = [
+            record
+            for record in engine.get_recent_permission_bubbles(limit=50)
+            if record["status"] == "grant_revoked"
+        ]
+        assert len(revocations) == 1
+        TestPermissionGrantRevocationAudit._assert_revocation(
+            revocations[0],
+            grant_id=grant.grant_id,
+            tool_family="shell",
+            session_id=session.id,
+            source="shutdown",
+        )
 
     @pytest.mark.asyncio
     async def test_delete_active_session_revokes_its_grants_and_invalidates_runtime_state(
@@ -775,7 +916,11 @@ class TestSessionLoading:
         try:
             active = await engine.get_or_create_session()
             survivor = await engine.session_store.create_session(title="survivor")
-            engine._permission_grant_store.create(active.id, "shell", "active-grant")
+            active_grant = engine._permission_grant_store.create(
+                active.id,
+                "shell",
+                "active-grant",
+            )
             survivor_grant = engine._permission_grant_store.create(
                 survivor.id,
                 "shell",
@@ -798,6 +943,19 @@ class TestSessionLoading:
             assert engine._usage.total_input_tokens == 0
             assert engine.task_store.session_id == ""
             assert engine._permission_checker.get_call_counts() == {}
+            revocations = [
+                record
+                for record in engine.get_recent_permission_bubbles(limit=50)
+                if record["status"] == "grant_revoked"
+            ]
+            assert len(revocations) == 1
+            TestPermissionGrantRevocationAudit._assert_revocation(
+                revocations[0],
+                grant_id=active_grant.grant_id,
+                tool_family="shell",
+                session_id=active.id,
+                source="session_deletion",
+            )
 
             confirmations: list[dict[str, object]] = []
 
@@ -1108,6 +1266,45 @@ class TestToolExecution:
             ("needs_confirmation", session.id),
             ("session_granted", session.id),
         ]
+
+    @pytest.mark.asyncio
+    async def test_explicitly_revoked_shell_grant_requires_confirmation_again(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        await engine.get_or_create_session()
+        confirmations: list[dict[str, object]] = []
+        responses = iter(["grant_session", "allow_once"])
+
+        async def confirm(payload: dict[str, object]) -> str:
+            confirmations.append(payload)
+            return next(responses)
+
+        engine.set_permission_confirmer(confirm)
+        first = await engine._execute_tool(
+            ToolCall(
+                id="first-shell",
+                name="bash_run",
+                arguments='{"command": "printf first"}',
+            )
+        )
+        grants = engine.list_permission_grants()
+
+        assert first.status == "success"
+        assert len(grants) == 1
+        assert engine.revoke_permission_grant(grants[0].grant_id) is True
+
+        second = await engine._execute_tool(
+            ToolCall(
+                id="second-shell",
+                name="bash_run",
+                arguments='{"command": "printf second"}',
+            )
+        )
+
+        assert second.status == "success"
+        assert len(confirmations) == 2
+        assert all(payload["tool_family"] == "shell" for payload in confirmations)
 
     @pytest.mark.asyncio
     async def test_permission_grant_does_not_match_another_tool_family(
