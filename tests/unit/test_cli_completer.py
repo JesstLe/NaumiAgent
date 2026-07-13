@@ -55,6 +55,11 @@ class TestSlashCommandCompleter:
     def test_browser_daemon_registered(self):
         assert "/bdaemon" in _complete("/")
 
+    def test_provider_models_command_registered(self):
+        assert "/models" in _complete("/")
+        descriptions = {cmd: desc for cmd, desc, _ in COMMANDS}
+        assert "provider" in descriptions["/models"].lower()
+
     def test_browser_daemon_description_lists_control_subcommands(self):
         descriptions = {cmd: desc for cmd, desc, _ in COMMANDS}
         description = descriptions["/bdaemon"]

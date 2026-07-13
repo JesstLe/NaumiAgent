@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from naumi_agent.api.deps import AuthDep
 from naumi_agent.api.schemas import ConfigResponse, ModelInfo, ToolInfo
+from naumi_agent.model.discovery import ModelDiscoveryError
 
 router = APIRouter(tags=["tools", "config"])
 
@@ -32,12 +33,64 @@ async def get_tool(tool_name: str, request: Request, auth: str = AuthDep):
 async def get_config(request: Request, auth: str = AuthDep):
     engine = request.app.state.engine
     config = engine.config
+    model_warnings: list[str] = []
+    try:
+        listings = await engine.router.list_available_models()
+    except ModelDiscoveryError as exc:
+        listings = ()
+        model_warnings.append(str(exc))
+
+    configured_tiers = {
+        tier: engine.router.resolve_model(tier)
+        for tier in ("fast", "capable", "reasoning")
+    }
+    models: list[ModelInfo] = []
+    for listing in listings:
+        if listing.warning:
+            model_warnings.append(f"{listing.provider_id}: {listing.warning}")
+        for model in listing.models:
+            matching_tiers = [
+                tier
+                for tier, configured in configured_tiers.items()
+                if configured
+                in {model.id, model.canonical_id, model.upstream_id}
+            ]
+            models.append(
+                ModelInfo(
+                    id=model.canonical_id,
+                    name=model.name,
+                    provider=model.provider_id,
+                    tier=",".join(matching_tiers) or "available",
+                    upstream_id=model.upstream_id,
+                    source=model.source,
+                    max_context=model.max_context,
+                    max_output=model.max_output,
+                    supports_tools=model.supports_tools,
+                    supports_reasoning=model.supports_reasoning,
+                    supports_vision=model.supports_vision,
+                )
+            )
+
+    if not models:
+        tiers_by_model: dict[str, list[str]] = {}
+        for tier, configured in configured_tiers.items():
+            tiers_by_model.setdefault(configured, []).append(tier)
+        for configured, tiers in tiers_by_model.items():
+            identity = engine.router.get_runtime_identity(configured)
+            models.append(
+                ModelInfo(
+                    id=identity.canonical_model,
+                    name=identity.requested_model,
+                    provider=identity.provider,
+                    tier=",".join(tiers),
+                    upstream_id=identity.upstream_model,
+                    source=identity.source,
+                )
+            )
+
     return ConfigResponse(
-        models=[
-            ModelInfo(
-                id="kimi-for-coding", name="Kimi for Coding", provider="moonshot", tier="capable"
-            ),
-        ],
+        models=models,
+        model_warnings=model_warnings,
         tools=[
             ToolInfo(name=t.name, description=t.description, parameters=t.schema.parameters)
             for t in engine.tool_registry.all()

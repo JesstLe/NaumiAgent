@@ -1926,6 +1926,84 @@ async def _run_tool_slash_command(
         console.print(f"[green]命令已执行: {slash_command}[/green]")
 
 
+def _parse_models_command_arg(arg: str) -> tuple[str | None, bool] | None:
+    try:
+        parts = shlex.split(arg)
+    except ValueError:
+        return None
+    refresh = False
+    provider_id: str | None = None
+    for part in parts:
+        if part == "--refresh":
+            if refresh:
+                return None
+            refresh = True
+            continue
+        if part.startswith("--") or provider_id is not None:
+            return None
+        provider_id = part.strip().lower() or None
+    return provider_id, refresh
+
+
+async def _show_available_models(engine: Any, arg: str) -> None:
+    from naumi_agent.model.discovery import ModelDiscoveryError
+
+    parsed = _parse_models_command_arg(arg)
+    if parsed is None:
+        console.print(
+            "用法: /models [provider] [--refresh]",
+            style="yellow",
+            markup=False,
+        )
+        return
+    provider_id, refresh = parsed
+    try:
+        listings = await engine.router.list_available_models(
+            provider_id,
+            refresh=refresh,
+        )
+    except ModelDiscoveryError as exc:
+        console.print(str(exc), style="yellow", markup=False)
+        return
+
+    if not listings:
+        console.print("[yellow]当前未配置 provider catalog，无法获取模型列表。[/yellow]")
+        return
+
+    for index, listing in enumerate(listings):
+        if index:
+            console.print()
+        cache_label = "旧缓存" if listing.stale else "已刷新"
+        cache_style = "yellow" if listing.stale else "green"
+        heading = Text()
+        heading.append(
+            f"{listing.provider_name} ({listing.provider_id})",
+            style="bold",
+        )
+        heading.append(f" {cache_label}", style=cache_style)
+        console.print(heading)
+        visible = listing.models[:100]
+        if not visible:
+            console.print("  [dim]没有可用模型[/dim]")
+        for model in visible:
+            source = "静态" if model.source == "static" else "发现"
+            name = f" — {model.name}" if model.name != model.id else ""
+            row = Text("  • ")
+            row.append(model.canonical_id, style="cyan")
+            row.append(name)
+            row.append(f" [{source}]", style="dim")
+            console.print(row)
+        omitted = len(listing.models) - len(visible)
+        if omitted:
+            console.print(f"  [dim]另有 {omitted} 个模型未显示[/dim]")
+        if listing.warning:
+            console.print(
+                f"  警告: {listing.warning}",
+                style="yellow",
+                markup=False,
+            )
+
+
 async def _handle_command(engine: Any, cmd: str) -> None:
     """处理斜杠命令."""
     parts = cmd.strip().split(maxsplit=1)
@@ -2072,6 +2150,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             console.print(f"默认模型: {engine.router.resolve_model('capable')}")
             console.print(f"快速模型: {engine.router.resolve_model('fast')}")
             console.print(f"推理模型: {engine.router.resolve_model('reasoning')}")
+        case "/models":
+            await _show_available_models(engine, arg)
         case "/version" | "/v":
             from naumi_agent import __version__
 
@@ -2470,6 +2550,7 @@ def _print_help() -> None:
         ("/pwd", "显示当前工作目录"),
         ("/tools", "列出可用工具"),
         ("/model", "显示模型配置"),
+        ("/models [provider] [--refresh]", "列出 provider 的可用模型"),
         ("/usage", "显示 token 用量"),
         ("/version", "显示版本号"),
         ("/hooks", "显示已注册的钩子"),

@@ -4,6 +4,7 @@ import { stripAnsi } from "../src/ansi.js";
 import { INPUT_KEYS } from "../src/input-buffer.js";
 import { renderScreen } from "../src/render.js";
 import {
+  DEFAULT_SLASH_COMMAND_CANDIDATES,
   createInitialState,
   createUiSnapshot,
   applyUiSnapshot,
@@ -1710,6 +1711,13 @@ test("slash completion lists candidates when input is only slash", () => {
   assert.equal(candidates.some((item) => item.command === "/folds"), true);
   assert.equal(candidates.some((item) => item.command === "/expand"), true);
   assert.equal(candidates.some((item) => item.command === "/collapse"), true);
+});
+
+test("default slash completion exposes provider model discovery", () => {
+  assert.equal(
+    DEFAULT_SLASH_COMMAND_CANDIDATES.some((item) => item.command === "/models"),
+    true,
+  );
 });
 
 test("slash completion uses complete backend registry without truncation", () => {
