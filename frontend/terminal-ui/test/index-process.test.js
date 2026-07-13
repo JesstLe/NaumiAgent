@@ -860,6 +860,27 @@ test("terminal UI process restores an unsubmitted multiline draft after restart"
   }
 });
 
+test("terminal UI process limits a trackpad SS3 burst to precise line scrolling", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    app.stdin.write("\x1bOA".repeat(40));
+    const detached = await waitForDebugEvent(
+      app.debugLogPath,
+      (record) => record.event === "render.screen"
+        && record.payload.follow_tail === false
+        && record.payload.scroll_offset > 0,
+    );
+
+    assert.equal(detached.payload.scroll_offset, 1);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process preserves detached scroll and jumps back to live output", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);
