@@ -1763,3 +1763,389 @@ test("workbench event appends to event log and keeps last 100", () => {
   assert.equal(state.workbench.events[0].id, "e6");
   assert.equal(state.workbench.events.at(-1).id, "e105");
 });
+
+test("run activity group aggregates backend phases into one durable message", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "submit-activity-1",
+    payload: { task: "实现活动组", intent: "chat" },
+  });
+  const activity = state.activeRunActivity;
+  assert(activity);
+  assert.equal(activity.kind, "run_activity");
+  assert.equal(activity.phase, "preparing");
+  assert.equal(state.messages.filter((message) => message.kind === "run_activity").length, 1);
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "runtime_status", phase: "turn_start", turn: 2, model: "model-a" },
+  });
+  for (let index = 0; index < 7; index += 1) {
+    reduceServerEvent(state, {
+      type: "ui/message",
+      payload: {
+        type: "runtime_status",
+        phase: "perf_phase",
+        label: `阶段 ${index}`,
+        duration_ms: index + 10,
+      },
+    });
+  }
+
+  assert.equal(activity.turn, 2);
+  assert.equal(activity.model, "model-a");
+  assert.equal(activity.perfPhases.length, 5);
+  assert.equal(activity.perfPhases[0].label, "阶段 2");
+  assert.equal(activity.perfPhases.at(-1).label, "阶段 6");
+  assert.equal(state.messages.filter((message) => message.kind === "run_activity").length, 1);
+});
+
+test("run activity deduplicates tools and follows permission lifecycle", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "submit-activity-2",
+    payload: { task: "运行工具" },
+  });
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "tool_prepare", phase: "start", tool_name: "file_read", tool_call_id: "call-1" },
+  });
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "tool_use", tool_name: "file_read", tool_call_id: "call-1", file_path: "README.md" },
+  });
+  reduceServerEvent(state, {
+    type: "permission/request",
+    request_id: "perm-activity-1",
+    payload: { tool_name: "bash_run", reason: "需要执行" },
+  });
+
+  const activity = state.activeRunActivity;
+  assert.equal(Object.keys(activity.toolCalls).length, 1);
+  assert.equal(activity.toolCalls["call-1"].status, "running");
+  assert.equal(activity.phase, "awaiting_permission");
+  assert.equal(activity.permissionCount, 1);
+
+  reduceServerEvent(state, {
+    type: "permission/resolved",
+    payload: { request_id: "perm-activity-1", choice: "allow" },
+  });
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "tool_result", tool_name: "file_read", tool_call_id: "call-1", status: "success" },
+  });
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "assistant_stream", phase: "start" },
+  });
+
+  assert.equal(activity.phase, "summarizing");
+  assert.equal(activity.toolCalls["call-1"].status, "success");
+  assert.equal(Object.keys(activity.toolCalls).length, 1);
+});
+
+test("run activity terminal event releases active pointer and preserves receipt", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "submit-activity-3",
+    payload: { task: "完成活动" },
+  });
+  const activity = state.activeRunActivity;
+
+  reduceServerEvent(state, {
+    type: "run/completed",
+    request_id: "submit-activity-3",
+    payload: { status: "" },
+  });
+
+  assert.equal(state.activeRunActivity, null);
+  assert.equal(activity.status, "completed");
+  assert.equal(activity.phase, "completed");
+  assert(Number.isFinite(activity.durationMs));
+  assert(state.messages.includes(activity));
+  assert.equal(state.messages.at(-1), activity);
+});
+
+test("run activity keeps sequential same-name tools distinct without call ids", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "submit-activity-anonymous",
+    payload: { task: "连续读取文件" },
+  });
+
+  for (const filePath of ["a.txt", "b.txt"]) {
+    reduceServerEvent(state, {
+      type: "ui/message",
+      payload: { type: "tool_prepare", phase: "start", tool_name: "file_read", path: filePath },
+    });
+    reduceServerEvent(state, {
+      type: "ui/message",
+      payload: { type: "tool_use", tool_name: "file_read", file_path: filePath },
+    });
+    reduceServerEvent(state, {
+      type: "ui/message",
+      payload: { type: "tool_result", tool_name: "file_read", status: "success" },
+    });
+  }
+
+  const tools = Object.values(state.activeRunActivity.toolCalls);
+  assert.equal(tools.length, 2);
+  assert.deepEqual(tools.map((tool) => tool.status), ["success", "success"]);
+});
+
+test("session replay drops the previous active run pointer", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "submit-before-replay",
+    payload: { task: "旧运行" },
+  });
+
+  reduceServerEvent(state, {
+    type: "session/replayed",
+    payload: { session_id: "replayed-session", title: "恢复会话", clear: true },
+  });
+
+  assert.equal(state.activeRunActivity, null);
+  assert.equal(state.messages.some((message) => message.kind === "run_activity"), false);
+});
+
+test("run activity keeps concurrent same-name preparations distinct without call ids", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "submit-concurrent-tools",
+    payload: { task: "并发读取文件" },
+  });
+
+  for (const path of ["a.txt", "b.txt"]) {
+    reduceServerEvent(state, {
+      type: "ui/message",
+      payload: { type: "tool_prepare", phase: "start", tool_name: "file_read", path },
+    });
+  }
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "tool_prepare", phase: "snapshot", tool_name: "file_read", path: "b.txt" },
+  });
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "tool_use", tool_name: "file_read", path: "b.txt" },
+  });
+
+  const tools = Object.values(state.activeRunActivity.toolCalls);
+  assert.equal(tools.length, 2);
+  assert.deepEqual(tools.map((tool) => tool.status), ["prepared", "running"]);
+});
+
+test("run activity terminal events only affect their correlated active run", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "run-active",
+    payload: { task: "保持运行" },
+  });
+  const activity = state.activeRunActivity;
+
+  reduceServerEvent(state, {
+    type: "run/cancelled",
+    request_id: "cancel-other",
+    payload: { target_request_id: "run-other" },
+  });
+
+  assert.equal(state.running, true);
+  assert.equal(state.activeRunActivity, activity);
+  assert.equal(activity.status, "running");
+
+  reduceServerEvent(state, {
+    type: "run/completed",
+    request_id: "run-other",
+    payload: {},
+  });
+  assert.equal(state.running, true);
+  assert.equal(state.activeRunActivity, activity);
+  assert.equal(activity.status, "running");
+
+  reduceServerEvent(state, {
+    type: "run/completed",
+    request_id: "run-active",
+    payload: {},
+  });
+  assert.equal(state.running, false);
+  assert.equal(activity.status, "completed");
+});
+
+test("identified run ignores terminal events and errors without a target id", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "run-identified",
+    payload: { task: "不能被空 ID 误杀" },
+  });
+  const activity = state.activeRunActivity;
+
+  for (const record of [
+    { type: "run/completed", payload: {} },
+    { type: "run/cancelled", payload: {} },
+    { type: "error", payload: { code: "bad_request", message: "请求格式错误" } },
+  ]) {
+    reduceServerEvent(state, record);
+    assert.equal(state.running, true);
+    assert.equal(state.activeRunActivity, activity);
+    assert.equal(activity.status, "running");
+  }
+});
+
+test("run cancelled uses target request id and legacy missing ids remain compatible", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, { type: "run/started", request_id: "run-cancel-target", payload: { task: "取消目标" } });
+  const activity = state.activeRunActivity;
+
+  reduceServerEvent(state, {
+    type: "run/cancelled",
+    request_id: "cancel-request",
+    payload: { target_request_id: "run-cancel-target" },
+  });
+  assert.equal(activity.status, "cancelled");
+
+  reduceServerEvent(state, { type: "run/started", payload: { task: "旧协议运行" } });
+  const legacyActivity = state.activeRunActivity;
+  reduceServerEvent(state, { type: "run/completed", payload: {} });
+  assert.equal(legacyActivity.status, "completed");
+
+  reduceServerEvent(state, { type: "run/started", request_id: "run-cancel-fallback", payload: { task: "回退取消" } });
+  const fallbackActivity = state.activeRunActivity;
+  reduceServerEvent(state, {
+    type: "run/cancelled",
+    request_id: "run-cancel-fallback",
+    payload: {},
+  });
+  assert.equal(fallbackActivity.status, "cancelled");
+});
+
+test("run activity ignores unrelated errors while matching run errors fail it", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, { type: "run/started", request_id: "run-errors", payload: { task: "错误关联" } });
+  const activity = state.activeRunActivity;
+
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: "unrelated-request",
+    payload: { code: "transport", message: "另一条请求失败" },
+  });
+  assert.equal(state.running, true);
+  assert.equal(state.activeRunActivity, activity);
+  assert.equal(activity.status, "running");
+
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: "run-errors",
+    payload: { code: "run_failed", message: "本轮执行失败" },
+  });
+  assert.equal(state.running, false);
+  assert.equal(state.activeRunActivity, null);
+  assert.equal(activity.status, "failed");
+});
+
+test("correlated cancel errors reconcile a stale active run", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, { type: "run/started", request_id: "run-cancel-error", payload: { task: "取消后同步" } });
+  const activity = state.activeRunActivity;
+  state.cancelPending = true;
+  state.cancelRequestId = "cancel-reconcile";
+
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: "cancel-reconcile",
+    payload: { code: "no_active_run", message: "当前没有正在运行的任务。" },
+  });
+
+  assert.equal(state.running, false);
+  assert.equal(state.activeRunActivity, null);
+  assert.equal(activity.status, "failed");
+});
+
+test("session replay drops an in-progress run activity without clearing other messages", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, { type: "run/started", request_id: "run-replay-keep", payload: { task: "旧运行" } });
+  const activity = state.activeRunActivity;
+  state.messages.push({ kind: "assistant", id: "keep-assistant", content: "保留内容" });
+
+  reduceServerEvent(state, {
+    type: "session/replayed",
+    payload: { session_id: "replayed-session", title: "恢复会话", clear: false },
+  });
+
+  assert.equal(state.activeRunActivity, null);
+  assert.equal(state.messages.includes(activity), false);
+  assert(state.messages.some((message) => message.id === "keep-assistant"));
+});
+
+test("run activity derives one completed terminal status for activity and linked task", () => {
+  const state = createInitialState();
+  const taskMessage = submitTaskMessage(state, "完成任务", (_type, _payload, options = {}) => options.id);
+  reduceServerEvent(state, {
+    type: "task/created",
+    request_id: taskMessage.requestId,
+    payload: { mission: { id: "mission-complete" }, task: { id: "task-complete" }, issue: {} },
+  });
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: taskMessage.requestId,
+    payload: { intent: "task", task_id: "task-complete", task: "完成任务" },
+  });
+  const activity = state.activeRunActivity;
+
+  reduceServerEvent(state, {
+    type: "run/completed",
+    request_id: taskMessage.requestId,
+    payload: { intent: "task", task_id: "task-complete" },
+  });
+
+  assert.equal(activity.status, "completed");
+  assert.equal(state.activeTaskSubmission.state, "completed");
+  assert.equal(taskMessage.taskStatus, "completed");
+});
+
+test("run activity bounds stable tool ids while retaining updates for tracked tools", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, { type: "run/started", request_id: "run-tool-bound", payload: { task: "工具上限" } });
+
+  for (let index = 0; index < 101; index += 1) {
+    reduceServerEvent(state, {
+      type: "ui/message",
+      payload: { type: "tool_prepare", phase: "start", tool_name: "file_read", tool_call_id: `call-${index}` },
+    });
+  }
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "tool_result", tool_name: "file_read", tool_call_id: "call-0", status: "success" },
+  });
+
+  assert.equal(Object.keys(state.activeRunActivity.toolCalls).length, 100);
+  assert.equal(state.activeRunActivity.toolCalls["call-0"].status, "success");
+  assert.equal(state.activeRunActivity.toolCalls["call-100"], undefined);
+});
+
+test("run activity uses the authoritative bounded run-started label", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, { type: "run/started", request_id: "run-runtime-label", payload: { task: "运行标签" } });
+  const activity = state.activeRunActivity;
+  const label = `后端确认正在准备${"中".repeat(300)}`;
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "runtime_status", phase: "run_started", label },
+  });
+
+  assert.equal(activity.phase, "preparing");
+  assert.match(activity.phaseLabel, /^后端确认正在准备/);
+  assert(activity.phaseLabel.length < label.length);
+  assert(activity.phaseLabel.length <= 160);
+});

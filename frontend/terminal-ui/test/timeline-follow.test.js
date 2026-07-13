@@ -25,6 +25,15 @@ function toolEvent(sequence, phase, toolCallId) {
   };
 }
 
+function runTerminalEvent(type, sequence, requestId, targetRequestId = "") {
+  return {
+    type,
+    seq: sequence,
+    request_id: requestId,
+    payload: targetRequestId ? { target_request_id: targetRequestId } : {},
+  };
+}
+
 test("following output stays pinned without unread items", () => {
   const state = createInitialState();
   state.scrollOffset = 9;
@@ -90,6 +99,28 @@ test("footer-only and lifecycle records do not create unread output", () => {
   }
   assert.equal(state.unreadOutputCount, 0);
   assert.equal(state.scrollOffset, 3);
+});
+
+test("detached timeline groups run terminal events by their target run identity", () => {
+  const state = createInitialState();
+  detachTimeline(state, 3);
+
+  markTimelineOutput(state, runTerminalEvent("run/completed", 1, "run-1"));
+  markTimelineOutput(state, runTerminalEvent("run/cancelled", 2, "cancel-1", "run-1"));
+
+  assert.equal(state.followTail, false);
+  assert.equal(state.unreadOutputCount, 1);
+  assert.deepEqual(state.unreadOutputKeys, { "run:run-1": true });
+});
+
+test("following timeline remains pinned for run terminal events", () => {
+  const state = createInitialState();
+  state.scrollOffset = 5;
+
+  assert.equal(markTimelineOutput(state, runTerminalEvent("run/cancelled", 1, "cancel-2", "run-2")), true);
+  assert.equal(state.followTail, true);
+  assert.equal(state.scrollOffset, 0);
+  assert.equal(state.unreadOutputCount, 0);
 });
 
 test("scrolling to the tail and explicit jump clear unread output", () => {
