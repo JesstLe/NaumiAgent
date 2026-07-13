@@ -84,7 +84,7 @@ def _get_git_info() -> dict[str, str | bool]:
 app = typer.Typer(
     name="naumi",
     help="NaumiAgent — 通用智能 Agent",
-    no_args_is_help=True,
+    no_args_is_help=False,
 )
 workbench_app = typer.Typer(
     name="workbench",
@@ -92,6 +92,57 @@ workbench_app = typer.Typer(
 )
 app.add_typer(workbench_app, name="workbench")
 console = Console()
+
+
+def _ensure_onboarding_ready(config: str) -> None:
+    """Migrate legacy credentials and complete first-run configuration."""
+    from naumi_agent.cli.onboarding import (
+        migrate_legacy_model_api_key,
+        needs_onboarding,
+        run_onboarding,
+    )
+    from naumi_agent.config.credentials import CredentialStoreError
+
+    config_path = Path(_resolve_config_path(config))
+    try:
+        migrate_legacy_model_api_key(config_path)
+    except CredentialStoreError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if needs_onboarding(config_path) and not run_onboarding(
+        config_path,
+        project_root=_PROJECT_ROOT,
+    ):
+        console.print("[yellow]配置未完成，退出。[/yellow]")
+        raise typer.Exit(1)
+
+
+@app.callback(invoke_without_command=True)
+def _default_command(
+    ctx: typer.Context,
+    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    classic: bool = typer.Option(False, "--classic", help="启动旧版命令行对话"),
+    legacy: bool = typer.Option(False, "--legacy", help="启动旧版 Textual TUI"),
+    version: bool = typer.Option(False, "--version", "-v", help="显示版本"),
+) -> None:
+    """默认无子命令时启动新一代终端 UI."""
+    if version:
+        import importlib.metadata
+
+        try:
+            console.print(f"naumi {importlib.metadata.version('naumi-agent')}")
+        except importlib.metadata.PackageNotFoundError:
+            console.print("naumi (development)")
+        raise typer.Exit()
+    if ctx.invoked_subcommand is None:
+        _ensure_onboarding_ready(config)
+        if classic:
+            asyncio.run(_chat(config))
+            return
+        if legacy:
+            _launch_tui(config)
+            return
+        _exit_after_terminal_ui(config)
 
 
 def _build_ui_style_from_config(config: Any):
@@ -268,13 +319,24 @@ def _capture_tui_launch_noise() -> Any:
 @app.command()
 def chat(
     config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
-    tui: bool = typer.Option(False, "--tui", "-t", help="启动 TUI 界面"),
+    classic: bool = typer.Option(False, "--classic", help="启动旧版命令行对话"),
+    tui: bool = typer.Option(
+        False,
+        "--tui",
+        "-t",
+        help="兼容入口：启动旧版 Textual TUI",
+    ),
 ) -> None:
-    """启动交互式对话."""
+    """启动以对话为中心的新一代终端 UI."""
+    _ensure_onboarding_ready(config)
+    if classic and tui:
+        raise typer.BadParameter("--classic 与 --tui 不能同时使用。")
     if tui:
         _launch_tui(config)
-    else:
+    elif classic:
         asyncio.run(_chat(config))
+    else:
+        _exit_after_terminal_ui(config)
 
 
 @app.command("ui")
@@ -287,9 +349,15 @@ def terminal_ui(
     ),
 ) -> None:
     """启动新一代终端 UI（legacy CLI/TUI 仍可通过 chat 使用）."""
+    _ensure_onboarding_ready(config)
     if legacy:
         _launch_tui(config)
         return
+    _exit_after_terminal_ui(config)
+
+
+def _exit_after_terminal_ui(config: str) -> None:
+    """Launch the Node terminal UI and translate launch failures for Typer."""
     try:
         raise typer.Exit(_launch_terminal_ui(config))
     except TerminalUiLaunchError as exc:

@@ -28,6 +28,7 @@ def _fake_supported_node_version(monkeypatch: pytest.MonkeyPatch) -> None:
         "naumi_agent.main.subprocess.check_output",
         lambda *args, **kwargs: "v20.11.1\n",
     )
+    monkeypatch.setattr("naumi_agent.main._ensure_onboarding_ready", lambda _config: None)
 
 
 def _write_terminal_ui_entry(frontend: Path) -> Path:
@@ -200,6 +201,60 @@ def test_launch_terminal_ui_preserves_invocation_cwd(
             "check": False,
         }
     ]
+
+
+def test_naumi_without_subcommand_launches_terminal_ui(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_terminal_ui",
+        lambda config_path: calls.append(config_path) or 0,
+    )
+    monkeypatch.setattr(
+        "naumi_agent.main._chat",
+        lambda _config: pytest.fail("default entry must not launch classic chat"),
+    )
+
+    result = runner.invoke(naumi_app, [])
+
+    assert result.exit_code == 0
+    assert calls == ["config.yaml"]
+
+
+def test_chat_command_launches_terminal_ui_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_terminal_ui",
+        lambda config_path: calls.append(config_path) or 0,
+    )
+
+    result = runner.invoke(naumi_app, ["chat", "--config", "custom.yaml"])
+
+    assert result.exit_code == 0
+    assert calls == ["custom.yaml"]
+
+
+def test_chat_classic_uses_prompt_toolkit_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def fake_chat(config_path: str) -> None:
+        calls.append(config_path)
+
+    monkeypatch.setattr("naumi_agent.main._chat", fake_chat)
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_terminal_ui",
+        lambda _config: pytest.fail("classic mode must not launch terminal UI"),
+    )
+
+    result = runner.invoke(naumi_app, ["chat", "--classic"])
+
+    assert result.exit_code == 0
+    assert calls == ["config.yaml"]
 
 
 def test_ui_command_launches_next_terminal_ui_by_default(

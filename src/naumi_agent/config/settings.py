@@ -10,6 +10,8 @@ import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from naumi_agent.config.credentials import CredentialStoreError, load_model_api_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -181,6 +183,11 @@ class AppConfig(BaseSettings):
         with p.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         config = cls(**data)
+        if not config.models.api_key:
+            try:
+                config.models.api_key = load_model_api_key()
+            except CredentialStoreError as exc:
+                logger.warning("System credential store unavailable: %s", exc)
         config._resolve_runtime_paths(p.parent)
         return config
 
