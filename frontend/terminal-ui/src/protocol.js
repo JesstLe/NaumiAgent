@@ -40,12 +40,13 @@ export function splitShellLike(command) {
 
 export function createEventSender(writable, { debugLog = null } = {}) {
   let nextClientId = 1;
-  return function send(type, payload) {
+  return function send(type, payload, options = {}) {
     if (!CLIENT_EVENT_TYPES.has(type)) {
       throw new Error(`未知客户端事件: ${type}`);
     }
+    const id = options.id ? String(options.id) : `ui-${nextClientId++}`;
     const record = {
-      id: `ui-${nextClientId++}`,
+      id,
       type,
       version: PROTOCOL_VERSION,
       payload,

@@ -144,6 +144,7 @@ export function getSlashCommandCompletions(input, slashCommands) {
 export function createInitialState() {
   return {
     nextMessageId: 1,
+    nextSubmitId: 1,
     currentSessionId: "",
     input: "",
     inputCursor: null,
@@ -207,6 +208,11 @@ export function createInitialState() {
 export function reduceServerEvent(state, record) {
   const payload = record.payload ?? {};
   switch (record.type) {
+    case "ack":
+      if (payload.event === "submit") {
+        acceptUserMessage(state, record.request_id);
+      }
+      break;
     case "ready":
       state.bridgeReady = true;
       mergeStatus(state, payload);
@@ -231,7 +237,9 @@ export function reduceServerEvent(state, record) {
         return maybeRefreshPinnedTaskPanel(state);
       }
     case "user/message":
-      state.messages.push({ kind: "user", content: payload.content ?? "" });
+      if (!acceptUserMessage(state, record.request_id, payload.content ?? "")) {
+        appendAcceptedUserMessage(state, payload.content ?? "", record.request_id);
+      }
       state.running = true;
       break;
     case "ui/message":
@@ -244,6 +252,7 @@ export function reduceServerEvent(state, record) {
       handlePermissionResolved(state, payload);
       break;
     case "run/started":
+      acceptUserMessage(state, record.request_id, payload.task ?? "");
       state.running = true;
       state.currentTurnStartedAtMs = Date.now();
       state.currentTurnFirstTokenAtMs = null;
@@ -286,6 +295,10 @@ export function reduceServerEvent(state, record) {
       return [{ type: "session_replayed", sessionId: state.currentSessionId }];
     case "error":
       state.running = false;
+      failUserMessage(state, record.request_id, {
+        code: payload.code ?? "error",
+        message: payload.message ?? "发送失败。",
+      });
       pushSystemMessage(state, "error", payload.message ?? "未知错误", "error");
       break;
     case "shutdown":
@@ -324,7 +337,9 @@ export function mergeStatus(state, payload) {
 export function handleUiMessage(state, message) {
   switch (message.type) {
     case "user":
-      state.messages.push({ kind: "user", content: message.content ?? "", isCommand: Boolean(message.is_command) });
+      appendAcceptedUserMessage(state, message.content ?? "", message.request_id ?? "", {
+        isCommand: Boolean(message.is_command),
+      });
       break;
     case "assistant_stream":
       handleAssistantStream(state, message);
@@ -759,7 +774,103 @@ export function handleSubmitText(state, text, send) {
     showDebugInfo(state);
     return;
   }
-  send("submit", { text });
+  return submitUserMessage(state, text, send);
+}
+
+export function submitUserMessage(state, text, send, existingMessage = null) {
+  const content = String(text ?? "");
+  const requestId = `submit-${state.nextSubmitId++}`;
+  const message = existingMessage ?? {
+    kind: "user",
+    id: nextMessageId(state, "user"),
+    content,
+    attempt: 0,
+  };
+  message.requestId = requestId;
+  message.content = content;
+  message.deliveryStatus = "queued";
+  message.attempt = Math.max(0, Number(message.attempt) || 0) + 1;
+  message.errorCode = "";
+  message.errorMessage = "";
+  message.localOutbox = true;
+  if (!existingMessage) {
+    state.messages.push(message);
+  }
+
+  try {
+    send("submit", { text: content }, { id: requestId });
+  } catch (error) {
+    failUserMessage(state, requestId, {
+      code: "transport_write_failed",
+      message: `发送失败: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+  clearRenderCache(state.renderCache);
+  return message;
+}
+
+export function acceptUserMessage(state, requestId, content = "") {
+  const normalizedRequestId = String(requestId ?? "");
+  if (!normalizedRequestId) return null;
+  const message = state.messages.find(
+    (item) => item.kind === "user" && item.requestId === normalizedRequestId,
+  );
+  if (!message) return null;
+  if (content) message.content = String(content);
+  message.deliveryStatus = "accepted";
+  message.errorCode = "";
+  message.errorMessage = "";
+  message.localOutbox = false;
+  clearRenderCache(state.renderCache);
+  return message;
+}
+
+export function failUserMessage(state, requestId, error = {}) {
+  const normalizedRequestId = String(requestId ?? "");
+  if (!normalizedRequestId) return null;
+  const message = state.messages.find(
+    (item) => item.kind === "user"
+      && item.requestId === normalizedRequestId
+      && ["queued", "uncertain"].includes(item.deliveryStatus),
+  );
+  if (!message) return null;
+  message.deliveryStatus = "failed";
+  message.errorCode = String(error.code ?? "send_failed");
+  message.errorMessage = String(error.message ?? "发送失败，请重试。");
+  message.localOutbox = true;
+  clearRenderCache(state.renderCache);
+  return message;
+}
+
+export function failQueuedUserMessages(state, error = {}) {
+  let failed = 0;
+  for (const message of state.messages) {
+    if (message.kind !== "user" || message.deliveryStatus !== "queued") continue;
+    message.deliveryStatus = "failed";
+    message.errorCode = String(error.code ?? "bridge_disconnected");
+    message.errorMessage = String(error.message ?? "Bridge 已断开，请重试。");
+    message.localOutbox = true;
+    failed += 1;
+  }
+  if (failed) clearRenderCache(state.renderCache);
+  return failed;
+}
+
+function appendAcceptedUserMessage(state, content, requestId = "", extra = {}) {
+  const message = {
+    kind: "user",
+    id: nextMessageId(state, "user"),
+    requestId: String(requestId ?? ""),
+    content: String(content ?? ""),
+    deliveryStatus: "accepted",
+    attempt: 1,
+    errorCode: "",
+    errorMessage: "",
+    localOutbox: false,
+    ...extra,
+  };
+  state.messages.push(message);
+  return message;
 }
 
 function handleReasoningCommand(state, text, send) {
