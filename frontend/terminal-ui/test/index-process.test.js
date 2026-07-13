@@ -687,6 +687,36 @@ test("terminal UI process inserts Shift Enter and submits multiline text with Ct
   }
 });
 
+test("terminal UI process restores an unsubmitted multiline draft after restart", async () => {
+  const statePath = path.join(
+    tmpdir(),
+    `naumi-terminal-ui-draft-${Date.now()}-${Math.random()}.json`,
+  );
+  const first = launchTerminalUi("fake-bridge.js", { statePath });
+  const firstOutput = collectOutput(first);
+
+  try {
+    await waitForOutput(firstOutput, "新终端 UI 已连接 Python bridge。");
+    first.stdin.write("保留第一行\x1b[13;2u保留第二行");
+    await waitForOutput(firstOutput, "保留第二行");
+    await delay(180);
+    assert.equal(await stopTerminalUi(first), 0);
+
+    const second = launchTerminalUi("fake-bridge.js", { statePath });
+    const secondOutput = collectOutput(second);
+    try {
+      await waitForOutput(secondOutput, "保留第一行", 3000);
+      await waitForOutput(secondOutput, "保留第二行▌", 3000);
+      assert.equal(await stopTerminalUi(second), 0);
+    } finally {
+      forceKill(second);
+    }
+  } finally {
+    forceKill(first);
+    fs.rmSync(statePath, { force: true });
+  }
+});
+
 function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
   const debugLogPath = path.join(tmpdir(), `naumi-terminal-ui-debug-${Date.now()}-${Math.random()}.jsonl`);
   const fakeBridge = fixtureName
@@ -706,7 +736,8 @@ function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
       env: {
         ...process.env,
         FORCE_COLOR: "0",
-        NAUMI_TERMINAL_UI_STATE_PATH: path.join(tmpdir(), `naumi-terminal-ui-state-${Date.now()}-${Math.random()}.json`),
+        NAUMI_TERMINAL_UI_STATE_PATH: options.statePath
+          || path.join(tmpdir(), `naumi-terminal-ui-state-${Date.now()}-${Math.random()}.json`),
         NAUMI_TERMINAL_UI_DEBUG_LOG: debugLogPath,
       },
     },

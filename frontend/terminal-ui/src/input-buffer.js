@@ -277,6 +277,11 @@ export function renderInputLinesWithCursor(state, availableWidth, maxLines = 6) 
   return rendered.slice(start, start + limit).map((row) => row.text);
 }
 
+export function truncateInputText(text, maxGraphemes = 200_000) {
+  const limit = Math.max(0, Number(maxGraphemes) || 0);
+  return segmentGraphemes(text).slice(0, limit).join("");
+}
+
 export function rememberSubmittedInput(state, text, { maxEntries = 100 } = {}) {
   const value = String(text ?? "").trim();
   if (!value) return;
