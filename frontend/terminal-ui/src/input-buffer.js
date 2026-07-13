@@ -23,6 +23,7 @@ export const INPUT_KEYS = {
   delete: "\x1b[3~",
   ctrlA: "\x01",
   ctrlE: "\x05",
+  ctrlI: "\x1b[105;5u",
   ctrlL: "\x0c",
   ctrlR: "\x12",
   ctrlT: "\x14",

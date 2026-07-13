@@ -13,7 +13,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from naumi_agent.api.chat_environment import ChatEnvironmentCollector
-from naumi_agent.api.chat_runs import ChatRunRecord, ChatRunStore, SourceReferenceRecord
 from naumi_agent.api.deps import AuthDep
 from naumi_agent.api.schemas import (
     ChatArtifactResponse,
@@ -35,6 +34,7 @@ from naumi_agent.api.schemas import (
     SessionListResponse,
     SessionResponse,
 )
+from naumi_agent.runs.store import ChatRunRecord, ChatRunStore, SourceReferenceRecord
 from naumi_agent.streaming.events import EventType, StreamEvent
 
 router = APIRouter(tags=["sessions", "messages"])
@@ -362,16 +362,22 @@ async def _stream_response(
 ):
     queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
     store = getattr(request.app.state, "chat_run_store", None)
+    engine_manages_run = (
+        store is not None and getattr(engine, "chat_run_store", None) is store
+    )
     run = (
         await store.start_run(
             session_id=session_id,
             user_message_id=f"msg-{uuid.uuid4().hex[:12]}",
         )
-        if store is not None
+        if store is not None and not engine_manages_run
         else None
     )
     step_sequences: dict[str, int] = {}
-    if run is not None:
+
+    async def attach_artifacts() -> None:
+        if run is None or store is None:
+            return
         for source in source_records or []:
             await store.append_artifact(
                 run.id,
@@ -398,11 +404,24 @@ async def _stream_response(
                 artifact_id=f"{run.id}-issue-{linked_issue.task_id}",
             )
 
+    await attach_artifacts()
+
     async def on_event(event: str, data: dict[str, Any]) -> None:
+        nonlocal run
+        event_run_id = str(data.get("run_id") or "")
+        if engine_manages_run and run is None and event_run_id:
+            run = await store.get_run(session_id, event_run_id)
+            if run is None:
+                raise RuntimeError("引擎运行记录未能持久化。")
+            await attach_artifacts()
+            current_task = asyncio.current_task()
+            if current_task is not None:
+                _active_chat_run_tasks(request)[run.id] = (session_id, current_task)
         stream_event = _engine_event_to_stream_event(event, data, session_id=session_id)
         if run is not None:
             stream_event = _stream_event_with_run_id(stream_event, run.id)
-            await _persist_stream_event(store, run.id, stream_event, step_sequences)
+            if not engine_manages_run:
+                await _persist_stream_event(store, run.id, stream_event, step_sequences)
         await queue.put(stream_event)
 
     async def run_agent() -> None:
@@ -431,13 +450,14 @@ async def _stream_response(
                 )
                 if run is not None:
                     terminal_event = _stream_event_with_run_id(terminal_event, run.id)
-                    await _persist_stream_event(
-                        store, run.id, terminal_event, step_sequences
-                    )
-                    await store.finish_run(run.id, status=result.status)
+                    if not engine_manages_run:
+                        await _persist_stream_event(
+                            store, run.id, terminal_event, step_sequences
+                        )
+                        await store.finish_run(run.id, status=result.status)
                 await queue.put(terminal_event)
         except asyncio.CancelledError:
-            if run is not None:
+            if run is not None and not engine_manages_run:
                 await store.finish_run(run.id, status="cancelled")
             raise
         except Exception as exc:
@@ -448,8 +468,9 @@ async def _stream_response(
             )
             if run is not None:
                 error_event = _stream_event_with_run_id(error_event, run.id)
-                await _persist_stream_event(store, run.id, error_event, step_sequences)
-                await store.finish_run(run.id, status="failed")
+                if not engine_manages_run:
+                    await _persist_stream_event(store, run.id, error_event, step_sequences)
+                    await store.finish_run(run.id, status="failed")
             await queue.put(error_event)
         finally:
             await queue.put(None)
@@ -613,6 +634,7 @@ def _chat_run_to_response(run: ChatRunRecord) -> ChatRunResponse:
             )
             for artifact in run.artifacts
         ],
+        receipt=run.receipt.to_dict() if run.receipt is not None else None,
     )
 
 
@@ -819,6 +841,7 @@ def _engine_event_to_stream_event(
         "token": EventType.TOKEN_DELTA,
         "context_compacted": EventType.CONTEXT_COMPACTED,
         "error": EventType.AGENT_ERROR,
+        "completion_receipt": EventType.COMPLETION_RECEIPT,
         "response_start": EventType.AGENT_START,
         "response_end": EventType.AGENT_END,
     }.get(event, EventType.TURN_END)

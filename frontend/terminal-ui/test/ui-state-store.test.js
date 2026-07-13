@@ -67,7 +67,11 @@ test("ui state store migrates version one sessions with an empty composer", () =
     });
     saveUiStateStore(store);
     assert.deepEqual(getProjectInputHistory(store), []);
-    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 3);
+    assert.equal(getUiSnapshot(store, "abc").inspector.open, false);
+    assert.equal(getUiSnapshot(store, "abc").inspector.selectedTab, "plan");
+    assert.equal(getUiSnapshot(store, "abc").agents.open, false);
+    assert.equal(getUiSnapshot(store, "abc").agents.selectedTab, "agents");
+    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 5);
   } finally {
     if (previous === undefined) delete process.env.NAUMI_TERMINAL_UI_STATE_PATH;
     else process.env.NAUMI_TERMINAL_UI_STATE_PATH = previous;
@@ -92,7 +96,47 @@ test("ui state store migrates version two without losing session drafts", () => 
     assert.equal(getUiSnapshot(store, "abc").composer.text, "保留草稿");
     assert.deepEqual(getProjectInputHistory(store), []);
     saveUiStateStore(store);
-    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 3);
+    assert.equal(getUiSnapshot(store, "abc").inspector.open, false);
+    assert.equal(getUiSnapshot(store, "abc").agents.open, false);
+    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 5);
+  } finally {
+    if (previous === undefined) delete process.env.NAUMI_TERMINAL_UI_STATE_PATH;
+    else process.env.NAUMI_TERMINAL_UI_STATE_PATH = previous;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ui state store migrates version four with closed bounded agent presentation", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "naumi-ui-state-v4-"));
+  const filePath = path.join(dir, "state.json");
+  const previous = process.env.NAUMI_TERMINAL_UI_STATE_PATH;
+  process.env.NAUMI_TERMINAL_UI_STATE_PATH = filePath;
+  fs.writeFileSync(filePath, JSON.stringify({
+    version: 4,
+    sessions: {
+      abc: {
+        composer: { text: "保留草稿", cursor: 4, preferredColumn: null },
+        inspector: { open: true, selectedTab: "tools" },
+      },
+    },
+    input_history: ["历史"],
+  }), "utf8");
+
+  try {
+    const store = loadUiStateStore(process.cwd());
+    const snapshot = getUiSnapshot(store, "abc");
+    assert.equal(snapshot.composer.text, "保留草稿");
+    assert.equal(snapshot.inspector.open, true);
+    assert.deepEqual(snapshot.agents, {
+      open: false,
+      selectedTab: "agents",
+      selectedByTab: {},
+      detailId: "",
+      scrollByTab: {},
+    });
+    assert.deepEqual(getProjectInputHistory(store), ["历史"]);
+    saveUiStateStore(store);
+    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 5);
   } finally {
     if (previous === undefined) delete process.env.NAUMI_TERMINAL_UI_STATE_PATH;
     else process.env.NAUMI_TERMINAL_UI_STATE_PATH = previous;

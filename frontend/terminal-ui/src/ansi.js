@@ -6,6 +6,8 @@ export const ANSI = {
   altOff: "\x1b[?1049l",
   bracketedPasteOn: "\x1b[?2004h",
   bracketedPasteOff: "\x1b[?2004l",
+  keyboardDisambiguateOn: "\x1b[>1u",
+  keyboardDisambiguateOff: "\x1b[<u",
   reset: "\x1b[0m",
   dim: "\x1b[2m",
   bold: "\x1b[1m",
@@ -113,5 +115,5 @@ export function charWidth(ch) {
 }
 
 export function stripAnsi(text) {
-  return String(text).replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+  return String(text).replace(/\x1b\[[0-9;?<>]*[A-Za-z]/g, "");
 }

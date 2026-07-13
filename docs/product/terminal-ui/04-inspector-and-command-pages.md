@@ -75,3 +75,20 @@ RouteState
 ## 9. 测试与验收
 
 覆盖三个宽度区间、路由往返、并发事件刷新、对象删除、快照乱序、空状态和 Inspector 焦点冲突。验收时必须在运行中的对话里打开三个命令页并返回，确认输出继续、权限可处理、草稿不丢、三栏信息不会互相压住。
+
+## 10. 当前实现（0.1.214）
+
+M5 Runtime Inspector 与 M6 `/agents` Agent Control Center 已完成：
+
+- 后端 `RuntimeInspectorService` 从 TaskStore、运行/工具/审批事件、完成回执和真实 Git 工作区生成版本化快照；Plan、Tools、Context、Changes、Tests 五个标签均使用权威数据，缺少证据时显示明确空状态。
+- JSONL Bridge 提供 `inspector/request`、`inspector/snapshot`、`inspector/update`。增量 revision 必须连续，客户端发现断序会携带已知 revision 请求完整快照；跨会话请求被拒绝。
+- 新 Terminal UI 使用 `Ctrl+I` 打开，`Tab` 显式进入/离开 Inspector 焦点，支持标签、条目和展开状态持久化。`>= 120` 列为并排抽屉，`100-119` 列为覆盖层，`< 100` 列为独立全屏页；中文宽字符和极小高度均有边界测试。
+- Textual TUI 通过同一个后端快照和共享字段语义提供五标签全屏页；运行完成后刷新，刷新失败保留最近一次成功内容。权限弹窗保持最高交互优先级。
+- 真实端到端测试在临时 Git 仓库中创建 Todo、编辑文件、运行成功/失败 pytest、持久化完成回执，再把同一快照依次穿过 Python Bridge、三个宽度的新 UI 和 Textual formatter；另覆盖无 Git、空计划、revision 断序恢复和会话隔离。
+- 后端 `SubAgentManager` 登记真实执行句柄、阶段、工具、心跳、token/cost 和有界终态历史；`AgentControlService` 从执行管理器、消息总线与黑板生成严格、会话隔离、单调 revision 的权威快照。
+- JSONL Bridge 提供 `agents/request`、`agents/snapshot`、`agents/update`、`agents/stop` 和 `agents/action`，支持连续增量、断序全量恢复、跨会话拒绝与稳定停止结果码。
+- 新 Terminal UI 的 `/agents` 是独立全屏页，提供 Agent、执行、协作三标签、宽窄有界布局、UI state v5 表现状态恢复，以及 `x` 后 `y` 的非乐观停止确认；权限请求始终优先。
+- Textual TUI 的 `/agents` 与 `Ctrl+G` 读取同一 `AgentControlSnapshot`，使用真实三标签列表/详情、同样的停止确认，并在刷新失败时保留最后成功快照。
+- 真实 Agent E2E 同时运行两个本地确定性 Agent，经 Python Bridge 和新 UI reducer/renderer 停止指定执行，确认兄弟执行完成，再把同一最终快照交给 Textual formatter；进程测试还覆盖实际 Python Bridge 的键盘闭环。
+
+尚未完成：Agent 创建/重配、跨进程远程 Agent、持久化执行历史、Workbench Agent 映射、`/workbench` 独立命令页、Inspector 写操作与完成回执 next action 交互。这些能力不得由客户端推断或用 mock 补齐。

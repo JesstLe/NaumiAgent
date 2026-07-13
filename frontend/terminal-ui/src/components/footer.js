@@ -81,6 +81,21 @@ export function NewOutputFooter({ state }) {
   };
 }
 
+export function AgentControlFooter({ agents }) {
+  return {
+    render(ctx) {
+      if (!agents?.open) return [];
+      const message = agents.stopConfirmationTaskId
+        ? `agents: 确认停止 ${agents.stopConfirmationTaskId} · y 确认 · n/Esc 取消`
+        : "agents: Tab/Shift+Tab 标签 · ↑/↓ 选择 · Enter 详情 · r 刷新 · x 停止 · Esc 返回";
+      return wrapAnsiLine(
+        color(agents.stopConfirmationTaskId ? ANSI.yellow : ANSI.cyan, message),
+        ctx.width,
+      );
+    },
+  };
+}
+
 export function StatusFooter({ state, env = {} }) {
   return {
     render(ctx) {
@@ -133,7 +148,7 @@ export function PromptFooter({ state }) {
 export function HelpFooter() {
   return {
     render(ctx) {
-      return wrapAnsiLine(color(ANSI.dim, "Ctrl+T 对话/任务 · Shift+Tab 模式 · Enter 发送 · Shift+Enter 换行 · Ctrl+R 历史 · ↑/↓ 导航 · PgUp/PgDn 滚动 · Ctrl+C 取消/退出"), ctx.width);
+      return wrapAnsiLine(color(ANSI.dim, "Ctrl+I Inspector · Ctrl+T 对话/任务 · Shift+Tab 模式 · Enter 发送 · Shift+Enter 换行 · Ctrl+R 历史 · ↑/↓ 导航 · PgUp/PgDn 滚动 · Ctrl+C 取消/退出"), ctx.width);
     },
   };
 }
@@ -183,14 +198,18 @@ export function renderFooterSections(state, width, env = {}) {
   const ctx = { width };
   return [
     { name: "permission", lines: PermissionFooter({ permission: state.permission }).render(ctx) },
+    { name: "agents", lines: AgentControlFooter({ agents: state.agents }).render(ctx) },
     { name: "todo", lines: TodoFooter({ todo: state.todo }).render(ctx) },
     { name: "task-selection", lines: TaskSelectionFooter({ taskPanel: state.taskPanel }).render(ctx) },
     { name: "history-search", lines: HistorySearchFooter({ state }).render(ctx) },
     { name: "command-completion", lines: CommandCompletionFooter({ state }).render(ctx) },
     { name: "new-output", lines: NewOutputFooter({ state }).render(ctx) },
     { name: "status", lines: StatusFooter({ state, env }).render(ctx) },
-    { name: "prompt", lines: PromptFooter({ state }).render(ctx) },
-    { name: "help", lines: HelpFooter().render(ctx) },
+    {
+      name: "prompt",
+      lines: state.agents?.open ? [] : PromptFooter({ state }).render(ctx),
+    },
+    { name: "help", lines: state.agents?.open ? [] : HelpFooter().render(ctx) },
   ].filter((section) => section.lines.length > 0);
 }
 

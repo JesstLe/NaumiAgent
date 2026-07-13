@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { stripAnsi } from "../src/ansi.js";
+import { INPUT_KEYS } from "../src/input-buffer.js";
 import { renderScreen } from "../src/render.js";
 import {
   createInitialState,
@@ -9,6 +10,8 @@ import {
   extractTaskPanelItems,
   failQueuedUserMessages,
   getFoldEntries,
+  handleAgentControlKey,
+  handleRuntimeInspectorKey,
   handleSubmitText,
   hasTaskPanelFocus,
   getSlashCommandCompletions,
@@ -19,7 +22,206 @@ import {
   retryUserMessage,
   submitTaskMessage,
   toggleComposerIntent,
+  toggleAgentControlCenter,
+  toggleRuntimeInspector,
 } from "../src/state.js";
+
+function agentSnapshot(revision = 1) {
+  return {
+    schema_version: 1,
+    session_id: "session-agents",
+    revision,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    summary: {
+      total_agents: 1,
+      active_agents: 1,
+      attention_agents: 0,
+      stoppable_executions: 1,
+      pending_messages: 1,
+    },
+    agents: [{
+      name: "coder",
+      description: "编程 Agent",
+      kind: "preset",
+      state: "running",
+      task_count: 1,
+      model_tier: "capable",
+      capabilities: ["代码"],
+      tools: ["file_read"],
+      permission_level: "moderate",
+      age_ms: 500,
+      heartbeat_age_ms: 100,
+    }],
+    executions: [{
+      task_id: "task-1",
+      session_id: "session-agents",
+      agent_name: "coder",
+      description: "实现控制中心",
+      status: "running",
+      phase: "running_tool",
+      started_at: 1,
+      finished_at: null,
+      elapsed_ms: 1000,
+      heartbeat_age_ms: 100,
+      current_tool: "file_read",
+      recent_tools: ["file_read"],
+      total_tokens: 42,
+      total_cost_usd: 0.01,
+      turns: 2,
+      error: "",
+      stop_supported: true,
+      stop_requested: false,
+    }],
+    team_messages: [{
+      sender: "coder",
+      recipient: "reviewer",
+      topic: "review",
+      priority: "high",
+      timestamp: 1,
+      content: "请检查实现",
+    }],
+    blackboard: [{
+      key: "team/review",
+      author: "coder",
+      version: 1,
+      timestamp: 1,
+      value_summary: "ready",
+    }],
+    warnings: [],
+  };
+}
+
+test("agent control route preserves conversation presentation and applies revisioned state", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+  state.currentSessionId = "session-agents";
+  state.input = "尚未发送的草稿";
+  state.scrollOffset = 17;
+  state.inspector.open = true;
+  state.inspector.selectedTab = "changes";
+  const messageCount = state.messages.length;
+
+  toggleAgentControlCenter(state, send, true);
+  assert.equal(state.route.name, "agents");
+  assert.equal(state.input, "尚未发送的草稿");
+  assert.equal(state.scrollOffset, 17);
+  assert.equal(state.inspector.selectedTab, "changes");
+  assert.equal(state.messages.length, messageCount);
+  assert.deepEqual(sent[0], {
+    type: "agents/request",
+    payload: { open: true, known_revision: 0, session_id: "session-agents" },
+  });
+
+  reduceServerEvent(state, { type: "agents/snapshot", payload: agentSnapshot(1) });
+  assert.equal(state.agents.revision, 1);
+  assert.equal(state.agents.snapshot.executions[0].task_id, "task-1");
+  const update = agentSnapshot(2);
+  const effects = reduceServerEvent(state, {
+    type: "agents/update",
+    payload: {
+      schema_version: 1,
+      session_id: "session-agents",
+      revision: 2,
+      generated_at: update.generated_at,
+      changed_sections: { warnings: ["延迟"] },
+    },
+  });
+  assert.deepEqual(effects, []);
+  assert.deepEqual(state.agents.snapshot.warnings, ["延迟"]);
+
+  const gapEffects = reduceServerEvent(state, {
+    type: "agents/update",
+    payload: {
+      schema_version: 1,
+      session_id: "session-agents",
+      revision: 4,
+      generated_at: update.generated_at,
+      changed_sections: { warnings: [] },
+    },
+  });
+  assert.deepEqual(gapEffects, [{
+    type: "refresh_agents",
+    knownRevision: 2,
+    sessionId: "session-agents",
+  }]);
+
+  toggleAgentControlCenter(state, send, false);
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.input, "尚未发送的草稿");
+  assert.equal(state.scrollOffset, 17);
+  assert.equal(state.inspector.open, true);
+});
+
+test("agent control keyboard uses stable tabs and confirms one authoritative stop", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+  state.currentSessionId = "session-agents";
+  toggleAgentControlCenter(state, send, true);
+  reduceServerEvent(state, { type: "agents/snapshot", payload: agentSnapshot(1) });
+
+  assert.equal(state.agents.selectedTab, "agents");
+  assert.equal(handleAgentControlKey(state, INPUT_KEYS.tab, send), true);
+  assert.equal(state.agents.selectedTab, "executions");
+  assert.equal(handleAgentControlKey(state, "x", send), true);
+  assert.equal(state.agents.stopConfirmationTaskId, "task-1");
+  assert.equal(handleAgentControlKey(state, "n", send), true);
+  assert.equal(state.agents.stopConfirmationTaskId, "");
+  assert.equal(sent.filter((item) => item.type === "agents/stop").length, 0);
+
+  handleAgentControlKey(state, "x", send);
+  handleAgentControlKey(state, "y", send);
+  handleAgentControlKey(state, "y", send);
+  const stops = sent.filter((item) => item.type === "agents/stop");
+  assert.equal(stops.length, 1);
+  assert.deepEqual(stops[0].payload, {
+    session_id: "session-agents",
+    task_id: "task-1",
+    reason: "用户在 Agent 控制中心确认停止。",
+  });
+  assert.equal(state.agents.snapshot.executions[0].status, "running");
+  assert.equal(state.agents.actionPendingTaskId, "task-1");
+
+  reduceServerEvent(state, {
+    type: "agents/action",
+    payload: {
+      task_id: "task-1",
+      accepted: true,
+      code: "accepted",
+      message: "已请求停止。",
+    },
+  });
+  assert.equal(state.agents.actionPendingTaskId, "task-1");
+  assert.equal(state.agents.actionMessage, "已请求停止。");
+
+  const stopping = agentSnapshot(2);
+  stopping.executions[0].status = "stopping";
+  stopping.executions[0].phase = "stopping";
+  stopping.executions[0].stop_supported = false;
+  stopping.executions[0].stop_requested = true;
+  reduceServerEvent(state, { type: "agents/snapshot", payload: stopping });
+  assert.equal(state.agents.actionPendingTaskId, "task-1");
+
+  const terminal = agentSnapshot(3);
+  terminal.executions[0].status = "cancelled";
+  terminal.executions[0].phase = "finished";
+  terminal.executions[0].stop_supported = false;
+  terminal.executions[0].stop_requested = true;
+  reduceServerEvent(state, { type: "agents/snapshot", payload: terminal });
+  assert.equal(state.agents.actionPendingTaskId, "");
+
+  handleAgentControlKey(state, INPUT_KEYS.tab, send);
+  assert.equal(state.agents.selectedTab, "team");
+  handleAgentControlKey(state, INPUT_KEYS.shiftTab, send);
+  assert.equal(state.agents.selectedTab, "executions");
+
+  const persisted = createUiSnapshot(state);
+  assert.equal(persisted.agents.open, true);
+  assert.equal(persisted.agents.selectedTab, "executions");
+  assert.equal("snapshot" in persisted.agents, false);
+  assert.equal("revision" in persisted.agents, false);
+});
 
 test("assistant stream updates one active message", () => {
   const state = createInitialState();
@@ -1871,6 +2073,149 @@ test("run activity terminal event releases active pointer and preserves receipt"
   assert.equal(state.messages.at(-1), activity);
 });
 
+test("completion receipt is deduplicated and finalized after run activity", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "submit-receipt-1",
+    payload: { task: "修改并验证" },
+  });
+  reduceServerEvent(state, {
+    type: "completion/receipt",
+    request_id: "submit-receipt-1",
+    payload: {
+      schema_version: 1,
+      receipt_id: "receipt-ui-1",
+      run_id: "run-ui-1",
+      outcome: "partial",
+      summary: "验证失败，已保留改动。",
+      changes: [{ path: "src/app.py", status: "modified", additions: 3, deletions: 1 }],
+      validations: [{ command: "pytest -q", status: "failed", exit_code: 1, failed: 1 }],
+      unverified: [],
+      approvals: [],
+      risks: [{ code: "validation_failed", level: "high", message: "1 项验证失败。" }],
+      git_state: { available: true, branch: "main", dirty: true },
+      next_actions: [{ id: "retry", label: "重试失败验证", kind: "retry_validation" }],
+      evidence_refs: ["run:run-ui-1:tool:test-1"],
+      duration_ms: 1200,
+    },
+  });
+  reduceServerEvent(state, {
+    type: "completion/receipt",
+    request_id: "submit-receipt-1",
+    payload: {
+      schema_version: 1,
+      receipt_id: "receipt-ui-1",
+      run_id: "run-ui-1",
+      outcome: "partial",
+      summary: "不应覆盖已接收回执。",
+    },
+  });
+  reduceServerEvent(state, {
+    type: "run/completed",
+    request_id: "submit-receipt-1",
+    payload: {
+      status: "completed",
+      receipt_id: "receipt-ui-1",
+      run_id: "run-ui-1",
+    },
+  });
+
+  const receipts = state.messages.filter((message) => message.kind === "completion_receipt");
+  assert.equal(receipts.length, 1);
+  assert.equal(receipts[0].receipt.summary, "验证失败，已保留改动。");
+  assert.equal(state.messages.at(-1), receipts[0]);
+  assert.equal(state.activeRunActivity, null);
+});
+
+test("run completion requests a missing authoritative receipt", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "submit-missing-receipt",
+    payload: { task: "等待回执" },
+  });
+
+  const actions = reduceServerEvent(state, {
+    type: "run/completed",
+    request_id: "submit-missing-receipt",
+    payload: {
+      status: "completed",
+      receipt_id: "receipt-missing",
+      run_id: "run-missing",
+    },
+  });
+
+  assert.deepEqual(actions, [
+    {
+      type: "request_completion_receipt",
+      sessionId: "",
+      receiptId: "receipt-missing",
+      runId: "run-missing",
+    },
+  ]);
+});
+
+test("replayed completion receipt remains visible without an active run", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "completion/receipt",
+    request_id: "resume-1",
+    payload: {
+      schema_version: 1,
+      receipt_id: "receipt-history",
+      run_id: "run-history",
+      outcome: "cancelled",
+      summary: "历史运行已取消。",
+      changes: [],
+      validations: [],
+      unverified: [],
+      approvals: [],
+      risks: [],
+      git_state: { available: false, dirty: false },
+      next_actions: [],
+      evidence_refs: [],
+    },
+  });
+
+  assert.equal(state.messages.at(-1).kind, "completion_receipt");
+  assert.equal(state.messages.at(-1).receipt.outcome, "cancelled");
+});
+
+test("cancelled run keeps its authoritative receipt as the final card", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "submit-cancel-receipt",
+    payload: { task: "执行后取消" },
+  });
+  reduceServerEvent(state, {
+    type: "completion/receipt",
+    request_id: "submit-cancel-receipt",
+    payload: {
+      schema_version: 1,
+      receipt_id: "receipt-cancelled",
+      run_id: "run-cancelled",
+      outcome: "cancelled",
+      summary: "运行已取消，改动证据已保留。",
+    },
+  });
+  reduceServerEvent(state, {
+    type: "run/cancelled",
+    request_id: "cancel-request",
+    payload: {
+      target_request_id: "submit-cancel-receipt",
+      receipt_id: "receipt-cancelled",
+      run_id: "run-cancelled",
+      reason: "用户取消。",
+    },
+  });
+
+  assert.equal(state.messages.at(-1).kind, "completion_receipt");
+  assert.equal(state.messages.at(-1).receiptId, "receipt-cancelled");
+});
+
 test("run activity keeps sequential same-name tools distinct without call ids", () => {
   const state = createInitialState();
   reduceServerEvent(state, {
@@ -2149,3 +2494,248 @@ test("run activity uses the authoritative bounded run-started label", () => {
   assert(activity.phaseLabel.length < label.length);
   assert(activity.phaseLabel.length <= 160);
 });
+
+test("runtime inspector applies contiguous revisions and requests a full refresh for gaps", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-inspector";
+  state.inspector.open = true;
+  const first = runtimeInspectorFixture(3);
+
+  assert.deepEqual(reduceServerEvent(state, {
+    type: "inspector/snapshot",
+    payload: first,
+  }), []);
+  assert.equal(state.inspector.revision, 3);
+  assert.equal(state.inspector.snapshot.plan.items[0].subject, "实现运行检查器");
+  assert.equal(state.inspector.loading, false);
+
+  assert.deepEqual(reduceServerEvent(state, {
+    type: "inspector/update",
+    payload: {
+      schema_version: 1,
+      session_id: "session-inspector",
+      revision: 4,
+      generated_at: "2026-07-13T00:00:01+00:00",
+      active_run_id: "run-1",
+      changed_tabs: {
+        tools: {
+          ...first.tools,
+          items: [{ call_id: "read-2", name: "file_read", status: "running" }],
+        },
+      },
+    },
+  }), []);
+  assert.equal(state.inspector.revision, 4);
+  assert.equal(state.inspector.snapshot.tools.items[0].call_id, "read-2");
+
+  const beforeGap = state.inspector.snapshot;
+  assert.deepEqual(reduceServerEvent(state, {
+    type: "inspector/update",
+    payload: {
+      schema_version: 1,
+      session_id: "session-inspector",
+      revision: 6,
+      generated_at: "2026-07-13T00:00:03+00:00",
+      active_run_id: "run-1",
+      changed_tabs: { plan: first.plan },
+    },
+  }), [{ type: "refresh_inspector", knownRevision: 4, sessionId: "session-inspector" }]);
+  assert.equal(state.inspector.snapshot, beforeGap);
+  assert.equal(state.inspector.loading, true);
+
+  reduceServerEvent(state, {
+    type: "inspector/update",
+    payload: {
+      schema_version: 1,
+      session_id: "session-inspector",
+      revision: 4,
+      generated_at: "older",
+      active_run_id: "run-1",
+      changed_tabs: { plan: first.plan },
+    },
+  });
+  assert.equal(state.inspector.revision, 4);
+
+  reduceServerEvent(state, {
+    type: "inspector/snapshot",
+    payload: runtimeInspectorFixture(2),
+  });
+  assert.equal(state.inspector.revision, 4);
+});
+
+test("runtime inspector rejects cross-session data and clears authoritative data on replay", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-current";
+  state.inspector.open = true;
+  state.inspector.selectedTab = "tests";
+
+  reduceServerEvent(state, {
+    type: "inspector/snapshot",
+    payload: { ...runtimeInspectorFixture(1), session_id: "session-other" },
+  });
+  assert.equal(state.inspector.snapshot, null);
+
+  reduceServerEvent(state, {
+    type: "inspector/snapshot",
+    payload: { ...runtimeInspectorFixture(2), session_id: "session-current" },
+  });
+  reduceServerEvent(state, {
+    type: "session/replayed",
+    payload: { session_id: "session-next", title: "新会话", clear: true },
+  });
+
+  assert.equal(state.inspector.snapshot, null);
+  assert.equal(state.inspector.revision, 0);
+  assert.equal(state.inspector.selectedTab, "tests");
+});
+
+test("runtime inspector refresh errors keep the active run and last good snapshot", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-inspector";
+  state.inspector.open = true;
+  reduceServerEvent(state, { type: "inspector/snapshot", payload: runtimeInspectorFixture(1) });
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "run-inspector-error",
+    payload: { task: "继续运行" },
+  });
+  const snapshot = state.inspector.snapshot;
+
+  reduceServerEvent(state, {
+    type: "error",
+    payload: {
+      code: "inspector_refresh_failed",
+      message: "Inspector 刷新失败，已保留上一次快照。",
+    },
+  });
+
+  assert.equal(state.running, true);
+  assert.equal(state.inspector.snapshot, snapshot);
+  assert.equal(state.inspector.stale, true);
+  assert.match(state.inspector.error, /刷新失败/);
+});
+
+test("runtime inspector toggles without changing the composer draft", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-toggle";
+  state.input = "保留这份草稿";
+  state.inputCursor = 4;
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  assert.equal(toggleRuntimeInspector(state, send), true);
+  assert.equal(state.inspector.open, true);
+  assert.equal(state.inspector.loading, true);
+  assert.equal(state.input, "保留这份草稿");
+  assert.equal(state.inputCursor, 4);
+  assert.deepEqual(sent.at(-1), {
+    type: "inspector/request",
+    payload: { open: true, known_revision: 0, session_id: "session-toggle" },
+  });
+
+  assert.equal(toggleRuntimeInspector(state, send), false);
+  assert.equal(state.inspector.open, false);
+  assert.equal(state.inspector.focused, false);
+  assert.equal(state.input, "保留这份草稿");
+  assert.equal(sent.at(-1).payload.open, false);
+});
+
+test("runtime inspector explicitly focuses navigates expands and returns before closing", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-inspector";
+  state.inspector.open = true;
+  state.inspector.snapshot = runtimeInspectorFixture(1);
+  state.inspector.snapshot.plan.items.push({
+    id: "todo-2",
+    subject: "验证交互",
+    status: "pending",
+    blocked_by: [],
+  });
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  assert.equal(handleRuntimeInspectorKey(state, "\t", send), true);
+  assert.equal(state.inspector.focused, true);
+  assert.equal(handleRuntimeInspectorKey(state, "]", send), true);
+  assert.equal(state.inspector.selectedTab, "tools");
+  assert.equal(handleRuntimeInspectorKey(state, "\x1b[D", send), true);
+  assert.equal(state.inspector.selectedTab, "plan");
+  assert.equal(handleRuntimeInspectorKey(state, "\x1b[B", send), true);
+  assert.equal(state.inspector.selectionByTab.plan, 1);
+  assert.equal(handleRuntimeInspectorKey(state, "\r", send), true);
+  assert.equal(state.inspector.expandedByTab.plan["1"], true);
+
+  assert.equal(handleRuntimeInspectorKey(state, "\x1b", send), true);
+  assert.equal(state.inspector.focused, false);
+  assert.equal(state.inspector.open, true);
+  assert.equal(handleRuntimeInspectorKey(state, "\x1b", send), true);
+  assert.equal(state.inspector.open, false);
+  assert.equal(sent.at(-1).payload.open, false);
+});
+
+test("task panel and runtime inspector never retain focus simultaneously", () => {
+  const state = createInitialState();
+  state.inspector.open = true;
+  state.inspector.focused = true;
+  state.taskPanel.messageId = "tasks-focus";
+  state.taskPanel.items = [{ id: "todo:1", source: "todo" }];
+
+  assert.equal(setTaskPanelFocus(state, true), true);
+  assert.equal(state.taskPanel.focused, true);
+  assert.equal(state.inspector.focused, false);
+});
+
+test("ui snapshot persists only bounded runtime inspector presentation state", () => {
+  const state = createInitialState();
+  state.inspector.open = true;
+  state.inspector.focused = true;
+  state.inspector.selectedTab = "changes";
+  state.inspector.selectionByTab = { plan: 2, changes: 4, surprise: 99 };
+  state.inspector.expandedByTab = { changes: { "4": true, nope: "yes" } };
+  state.inspector.scrollByTab = { changes: 8 };
+  state.inspector.snapshot = runtimeInspectorFixture(7);
+  state.inspector.revision = 7;
+
+  const snapshot = createUiSnapshot(state);
+  assert.deepEqual(snapshot.inspector, {
+    open: true,
+    selectedTab: "changes",
+    selectionByTab: { plan: 2, changes: 4 },
+    expandedByTab: { changes: { "4": true } },
+    scrollByTab: { changes: 8 },
+  });
+  assert.equal("snapshot" in snapshot.inspector, false);
+
+  const restored = createInitialState();
+  applyUiSnapshot(restored, snapshot);
+  assert.equal(restored.inspector.open, true);
+  assert.equal(restored.inspector.focused, false);
+  assert.equal(restored.inspector.selectedTab, "changes");
+  assert.equal(restored.inspector.snapshot, null);
+  assert.equal(restored.inspector.loading, true);
+});
+
+function runtimeInspectorFixture(revision) {
+  return {
+    schema_version: 1,
+    session_id: "session-inspector",
+    revision,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    active_run_id: "run-1",
+    plan: {
+      state: "ready",
+      items: [{ id: "todo-1", subject: "实现运行检查器", status: "in_progress", blocked_by: [] }],
+      next_actions: [],
+      warnings: [],
+    },
+    tools: {
+      state: "ready",
+      items: [{ call_id: "read-1", name: "file_read", status: "success" }],
+      approvals: [],
+      warnings: [],
+    },
+    context: { state: "empty", warnings: [] },
+    changes: { state: "empty", items: [], git_state: {}, warnings: [] },
+    tests: { state: "empty", validations: [], unverified: [], next_actions: [], warnings: [] },
+  };
+}

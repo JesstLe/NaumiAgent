@@ -144,3 +144,27 @@ def test_tui_renderer_skips_duplicate_message_id() -> None:
 
     assert len(chat.mounted) == 1
     assert renderer.cache_stats().hits == 1
+
+
+def test_completion_receipt_renderer_mounts_authoritative_card() -> None:
+    adapter = EngineEventAdapter()
+    renderer = TUIRenderer()
+    chat = FakeChat()
+    status = FakeStatus()
+    msg = adapter.adapt(
+        "completion_receipt",
+        {
+            "schema_version": 1,
+            "receipt_id": "receipt-renderer",
+            "run_id": "run-renderer",
+            "outcome": "completed",
+            "summary": "验证通过。",
+            "git_state": {"available": False, "dirty": False},
+        },
+    )
+    assert msg is not None
+
+    renderer.render(msg, chat, status, FakeTodo())
+
+    assert len(chat.mounted) == 1
+    assert status.status_text == "完成回执：已完成"

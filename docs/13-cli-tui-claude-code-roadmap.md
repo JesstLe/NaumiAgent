@@ -883,7 +883,7 @@ tests/e2e/ui_scenarios/
 当前分支：
 
 ```text
-codex/docs-13-claude-code-roadmap
+codex/terminal-completion-receipt
 ```
 
 已完成（阶段一）：
@@ -896,7 +896,10 @@ codex/docs-13-claude-code-roadmap
 - ✅ 工具调用独立 card 化：`ToolCardSummary` + tool-specific extractors。
 - ✅ 工具准备阶段动态可视化：terminal-ui 将 `tool_prepare_start/snapshot/end` 的真实 path、argument chars、content chars、content lines、elapsed ms 渲染为 activity card；工具完成后同一份 prepare progress 摘要保留在最终 tool card 中，避免快速写文件时用户看不到变化。
 - ✅ 真实工具事件顺序与缓存稳定性：terminal-ui 支持生产链路中的 `tool_prepare_start -> snapshot -> end -> tool_use` 顺序，`prepare_end` 会保留到后续 tool card 消费；`tool_prepare.tool_call_id` 与 `tool_use.tool_call_id` 会精确匹配，ID 不一致时不会把准备摘要挂到错误工具；render cache key 纳入 activity/tool prepare phase 和 metrics，连续工具不会串用上一项准备摘要。
-- ✅ 运行活动组与终态收据：Terminal UI 按真实 Bridge 事件把一次运行聚合为唯一 `run_activity` 卡，展示阶段、工具、权限和后端耗时；成功、失败或取消后释放 active pointer，并把同一张收据置于时间线末尾，长工具输出不会遮住最终结果。
+- ✅ 运行活动组：Terminal UI 按真实 Bridge 事件把一次运行聚合为唯一 `run_activity` 卡，展示阶段、工具、权限和后端耗时；成功、失败或取消后释放 active pointer，长工具输出不会遮住最终状态。
+- ✅ 后端权威完成回执：`AgentEngine` 统一记录真实 Git 差异、验证命令/退出码、审批、风险和未验证项，SQLite 先落盘后发送 `completion/receipt`；`run/completed` 只引用回执，新 UI 丢包时用 `receipt/request` 补发，恢复会话时重放；Terminal UI 和 Textual TUI 展示同一份证据。
+- ✅ Runtime Inspector：后端从 TaskStore、运行事件、完成回执和真实 Git 生成 Plan/Tools/Context/Changes/Tests 五标签权威快照；Bridge 支持 revision 增量与断序补全；新 Terminal UI 在宽屏抽屉、中宽覆盖层、窄屏全页展示，Textual TUI 读取同一份快照并保持权限弹窗优先。
+- ✅ Agent Control Center：后端登记真实 Agent 执行、工具阶段、团队消息和黑板，提供会话隔离的 revision 快照与精确停止；新 Terminal UI `/agents` 和 Textual `/agents`/`Ctrl+G` 共用三标签语义、两步停止确认和错误保留，并通过真实双 Agent、Python Bridge、Node renderer 与 Textual formatter 端到端验收。
 - ✅ 长代码块/diff/文件写入摘要：`code_excerpt` / `file_summary_renderer`。
 - ✅ 底部布局稳定化：`BottomBarState` + `clip_to_width` + output guard。
 - ✅ 权限 prompt 闭环：`PermissionBubbleMessage` + y/n/Shift+Tab。
@@ -932,5 +935,5 @@ codex/docs-13-claude-code-roadmap
 下一步：
 
 ```text
-阶段三已完成。后续可进入跨终端兼容实测、性能基准和真实终端截图回归。
+M6 `/agents` Agent Control Center 已完成。下一切片独立实现 `/workbench` 命令页；Agent 创建/重配、跨进程持久化与 Workbench 映射另行设计，跨终端兼容实测、性能基准和真实终端截图回归仍需继续。
 ```

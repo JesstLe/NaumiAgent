@@ -27,6 +27,10 @@ def test_default_keybindings_include_cli_permission_and_mode_scopes() -> None:
         KeybindingAction.MODE_CYCLE,
         interface="cli",
     )
+    assert bindings.keys_for(KeybindingAction.TOGGLE_INSPECTOR, interface="tui") == (
+        "c-i",
+    )
+    assert bindings.keys_for(KeybindingAction.OPEN_AGENTS, interface="tui") == ("c-g",)
 
 
 def test_key_name_normalization_accepts_user_friendly_aliases() -> None:
@@ -59,6 +63,9 @@ def test_conflict_detection_is_scoped_by_interface_and_permission_mode() -> None
 
     with pytest.raises(KeybindingConfigError, match="快捷键冲突"):
         build_keybindings({"copy_transcript": "Shift+Tab"})
+
+    with pytest.raises(KeybindingConfigError, match="快捷键冲突"):
+        build_keybindings({"open_agents": "Ctrl+I"})
 
 
 def test_unknown_action_reports_available_actions() -> None:

@@ -7,7 +7,7 @@ import json
 import subprocess
 import sys
 import types
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -15,11 +15,16 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from naumi_agent.agents.base import AgentResult as SubAgentResult
 from naumi_agent.background.models import BackgroundStatus
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.model.router import StreamChunk
 from naumi_agent.orchestrator.engine import AgentEngine, AgentResult, AgentRuntimeMode, AgentUsage
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
+from naumi_agent.orchestrator.subagent_manager import SubTask
+from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.safety.permissions import PermissionMode
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.store import TaskStore
@@ -546,6 +551,48 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
         "choice": "allow",
     }
 
+    inspector_record = normalize_client_record({
+        "type": "inspector/request",
+        "payload": {
+            "open": "true",
+            "known_revision": "7",
+            "session_id": " session-1 ",
+            "ignored": "value",
+        },
+    })
+    assert inspector_record["payload"] == {
+        "open": True,
+        "known_revision": 7,
+        "session_id": "session-1",
+    }
+
+    agents_record = normalize_client_record({
+        "type": "agents/request",
+        "payload": {
+            "open": "true",
+            "known_revision": "3",
+            "session_id": " session-1 ",
+        },
+    })
+    assert agents_record["payload"] == {
+        "open": True,
+        "known_revision": 3,
+        "session_id": "session-1",
+    }
+    stop_record = normalize_client_record({
+        "type": "agents/stop",
+        "payload": {
+            "task_id": " execution-1 ",
+            "session_id": " session-1 ",
+            "reason": " 用户停止。 ",
+        },
+    })
+    assert stop_record["payload"] == {
+        "task_id": "execution-1",
+        "session_id": "session-1",
+        "reason": "用户停止。",
+    }
+
     with pytest.raises(ValueError, match="协议 version 不兼容"):
         normalize_client_record({
             "type": ClientEventType.PING,
@@ -576,6 +623,560 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
             "type": "run_cancel",
             "payload": {"reason": "x" * 501},
         })
+
+    with pytest.raises(ValueError, match="known_revision"):
+        normalize_client_record({
+            "type": "inspector/request",
+            "payload": {"known_revision": -1},
+        })
+
+    with pytest.raises(ValueError, match="task_id"):
+        normalize_client_record({"type": "agents/stop", "payload": {}})
+
+
+@pytest.mark.asyncio
+async def test_bridge_agent_snapshot_updates_and_session_isolation(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            vector_db_path=str(tmp_path / "vectors"),
+            long_term_enabled=False,
+        ),
+    ))
+    try:
+        session = await engine.get_or_create_session(title="Agent Bridge")
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+
+        await bridge.handle_client_record({
+            "id": "agents-open",
+            "type": "agents/request",
+            "payload": {"open": True, "known_revision": 0},
+        })
+        snapshot = next(
+            record for record in reversed(_records(writer))
+            if record["type"] == "agents/snapshot"
+        )
+        assert snapshot["request_id"] == "agents-open"
+        assert snapshot["payload"]["session_id"] == session.id
+        first_revision = snapshot["payload"]["revision"]
+
+        await engine.subagent_manager.message_bus.blackboard_set(
+            "team/review",
+            "ready",
+            "coder",
+        )
+        await bridge.handle_engine_event("team_event", {
+            "event_type": "decision",
+            "sender": "coder",
+            "recipient": "reviewer",
+        })
+        update = next(
+            record for record in reversed(_records(writer))
+            if record["type"] == "agents/update"
+        )
+        assert update["payload"]["revision"] == first_revision + 1
+        assert set(update["payload"]["changed_sections"]) == {"blackboard"}
+
+        await bridge.handle_client_record({
+            "id": "agents-wrong-session",
+            "type": "agents/request",
+            "payload": {"open": True, "session_id": "other-session"},
+        })
+        rejected = _records(writer)[-1]
+        assert rejected["type"] == "error"
+        assert rejected["payload"]["code"] == "agents_session_mismatch"
+
+        await bridge.handle_client_record({
+            "id": "agents-close",
+            "type": "agents/request",
+            "payload": {"open": False},
+        })
+        close_index = len(_records(writer))
+        await engine.subagent_manager.message_bus.blackboard_set(
+            "team/review",
+            "closed",
+            "coder",
+        )
+        await bridge.handle_engine_event("team_event", {"event_type": "decision"})
+        assert not any(
+            record["type"].startswith("agents/")
+            for record in _records(writer)[close_index:]
+        )
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_agent_initial_snapshot_failure_is_user_visible(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            vector_db_path=str(tmp_path / "vectors"),
+            long_term_enabled=False,
+        ),
+    ))
+    try:
+        await engine.get_or_create_session(title="Agent Snapshot Failure")
+        engine.agent_control.snapshot = AsyncMock(side_effect=RuntimeError("source down"))
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+
+        await bridge.handle_client_record({
+            "id": "agents-open-failed",
+            "type": "agents/request",
+            "payload": {"open": True},
+        })
+
+        failure = _records(writer)[-1]
+        assert failure["type"] == "error"
+        assert failure["request_id"] == "agents-open-failed"
+        assert failure["payload"] == {
+            "message": "Agent 页面暂时无法加载，请稍后重试。",
+            "code": "agents_snapshot_failed",
+        }
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_agent_revision_ack_gap_fallback_and_refresh_retention(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            vector_db_path=str(tmp_path / "vectors"),
+            long_term_enabled=False,
+        ),
+    ))
+    try:
+        await engine.get_or_create_session(title="Agent Revision")
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+        await bridge.handle_client_record({
+            "id": "agents-first",
+            "type": "agents/request",
+            "payload": {"open": True},
+        })
+        first = bridge._agents_snapshot
+        assert first is not None
+
+        await bridge.handle_client_record({
+            "id": "agents-current",
+            "type": "agents/request",
+            "payload": {"open": True, "known_revision": first.revision},
+        })
+        current = _records(writer)[-1]
+        assert current["type"] == "ack"
+        assert current["payload"] == {
+            "event": "agents/request",
+            "open": True,
+            "revision": first.revision,
+        }
+
+        gap = replace(
+            first,
+            revision=first.revision + 2,
+            warnings=("检测到数据源延迟。",),
+        )
+        engine.agent_control.snapshot = AsyncMock(return_value=gap)
+        await bridge.handle_engine_event("team_event", {"event_type": "status_update"})
+        fallback = _records(writer)[-1]
+        assert fallback["type"] == "agents/snapshot"
+        assert fallback["payload"]["revision"] == gap.revision
+        assert bridge._agents_snapshot is gap
+
+        engine.agent_control.snapshot = AsyncMock(side_effect=RuntimeError("source down"))
+        await bridge.handle_engine_event("team_event", {"event_type": "status_update"})
+        failure = _records(writer)[-1]
+        assert failure["type"] == "error"
+        assert failure["payload"]["code"] == "agents_refresh_failed"
+        assert bridge._agents_snapshot is gap
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_agent_stop_unknown_task_returns_stable_action(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            vector_db_path=str(tmp_path / "vectors"),
+            long_term_enabled=False,
+        ),
+    ))
+    try:
+        session = await engine.get_or_create_session(title="Unknown Agent Stop")
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+
+        await bridge.handle_client_record({
+            "id": "agents-stop-missing",
+            "type": "agents/stop",
+            "payload": {"session_id": session.id, "task_id": "missing-task"},
+        })
+
+        action = _records(writer)[-1]
+        assert action["type"] == "agents/action"
+        assert action["request_id"] == "agents-stop-missing"
+        assert action["payload"]["accepted"] is False
+        assert action["payload"]["code"] == "not_found"
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_agent_stop_returns_action_and_authoritative_terminal_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = AgentEngine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            vector_db_path=str(tmp_path / "vectors"),
+            long_term_enabled=False,
+        ),
+    ))
+    delegated: asyncio.Task[AgentResult] | None = None
+    try:
+        session = await engine.get_or_create_session(title="Agent Stop")
+        agent = engine.subagent_manager.get_agent("coder")
+        assert agent is not None
+        started = asyncio.Event()
+
+        async def blocking_execute(**kwargs: object) -> AgentResult:
+            started.set()
+            await asyncio.Event().wait()
+            return AgentResult(status="completed")
+
+        monkeypatch.setattr(agent, "execute", blocking_execute)
+        delegated = asyncio.create_task(engine.subagent_manager.delegate(
+            SubTask("stop-me", "等待停止", "coder")
+        ))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+        await bridge.handle_client_record({
+            "id": "agents-open-stop",
+            "type": "agents/request",
+            "payload": {"open": True},
+        })
+
+        await bridge.handle_client_record({
+            "id": "agents-stop",
+            "type": "agents/stop",
+            "payload": {
+                "session_id": session.id,
+                "task_id": "stop-me",
+                "reason": "用户确认停止。",
+            },
+        })
+        action = next(
+            record for record in reversed(_records(writer))
+            if record["type"] == "agents/action"
+        )
+        assert action["request_id"] == "agents-stop"
+        assert action["payload"] == {
+            "task_id": "stop-me",
+            "accepted": True,
+            "code": "accepted",
+            "message": "已请求停止 Agent 执行 stop-me。",
+        }
+        assert (await asyncio.wait_for(delegated, timeout=1)).status == "cancelled"
+
+        await bridge.handle_engine_event("subagent_event", {
+            "task_id": "stop-me",
+            "agent_name": "coder",
+            "status": "cancelled",
+        })
+        terminal = next(
+            record for record in reversed(_records(writer))
+            if record["type"] in {"agents/update", "agents/snapshot"}
+        )
+        payload = terminal["payload"]
+        executions = (
+            payload["changed_sections"]["executions"]
+            if terminal["type"] == "agents/update"
+            else payload["executions"]
+        )
+        assert executions[0]["status"] == "cancelled"
+        assert executions[0]["stop_supported"] is False
+
+        await bridge.handle_client_record({
+            "id": "agents-stop-again",
+            "type": "agents/stop",
+            "payload": {"session_id": session.id, "task_id": "stop-me"},
+        })
+        repeated = next(
+            record for record in reversed(_records(writer))
+            if record["type"] == "agents/action"
+            and record.get("request_id") == "agents-stop-again"
+        )
+        assert repeated["type"] == "agents/action"
+        assert repeated["payload"]["code"] == "already_finished"
+    finally:
+        if delegated is not None and not delegated.done():
+            delegated.cancel()
+            await asyncio.gather(delegated, return_exceptions=True)
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_agent_stop_rejects_execution_from_another_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = AgentEngine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            vector_db_path=str(tmp_path / "vectors"),
+            long_term_enabled=False,
+        ),
+    ))
+    delegated: asyncio.Task[AgentResult] | None = None
+    try:
+        await engine.get_or_create_session(title="old")
+        agent = engine.subagent_manager.get_agent("coder")
+        assert agent is not None
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def blocking_execute(**kwargs: object) -> SubAgentResult:
+            started.set()
+            await release.wait()
+            return SubAgentResult(status="completed")
+
+        monkeypatch.setattr(agent, "execute", blocking_execute)
+        delegated = asyncio.create_task(engine.subagent_manager.delegate(
+            SubTask("old-session-task", "等待", "coder")
+        ))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        engine._session = await engine.session_store.create_session(title="new")
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+
+        await bridge.handle_client_record({
+            "id": "cross-session-stop",
+            "type": "agents/stop",
+            "payload": {
+                "session_id": engine._session.id,
+                "task_id": "old-session-task",
+            },
+        })
+
+        rejected = _records(writer)[-1]
+        assert rejected["type"] == "error"
+        assert rejected["payload"]["code"] == "agents_session_mismatch"
+        assert not delegated.done()
+        release.set()
+        assert (await delegated).status == "completed"
+    finally:
+        if delegated is not None and not delegated.done():
+            delegated.cancel()
+            await asyncio.gather(delegated, return_exceptions=True)
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_inspector_snapshot_updates_and_session_isolation(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(
+        AppConfig(
+            workspace_root=str(tmp_path),
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "vectors"),
+                long_term_enabled=False,
+            ),
+        )
+    )
+    try:
+        session = await engine.get_or_create_session(title="Inspector Bridge")
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+
+        await bridge.handle_client_record({
+            "id": "inspector-open",
+            "type": "inspector/request",
+            "payload": {"open": True, "known_revision": 0},
+        })
+        snapshot = [
+            record
+            for record in _records(writer)
+            if record["type"] == "inspector/snapshot"
+        ][-1]
+        assert snapshot["request_id"] == "inspector-open"
+        assert snapshot["payload"]["session_id"] == session.id
+        first_revision = snapshot["payload"]["revision"]
+
+        event = {
+            "event_id": "inspector-tool-1",
+            "session_id": session.id,
+            "run_id": "run-inspector",
+            "name": "file_read",
+            "call_id": "read-1",
+            "args": json.dumps({"path": "README.md"}),
+        }
+        engine.runtime_inspector.observe("tool_start", event)
+        await bridge.handle_engine_event("tool_start", event)
+
+        update = [
+            record
+            for record in _records(writer)
+            if record["type"] == "inspector/update"
+        ][-1]
+        assert update["payload"]["revision"] > first_revision
+        assert set(update["payload"]["changed_tabs"]) == {"tools"}
+        assert update["payload"]["changed_tabs"]["tools"]["items"][0]["call_id"] == "read-1"
+
+        before_rejection = len(_records(writer))
+        await bridge.handle_client_record({
+            "id": "inspector-wrong-session",
+            "type": "inspector/request",
+            "payload": {
+                "open": True,
+                "known_revision": update["payload"]["revision"],
+                "session_id": "another-session",
+            },
+        })
+        rejected = _records(writer)[before_rejection:]
+        assert rejected[-1]["type"] == "error"
+        assert rejected[-1]["payload"]["code"] == "inspector_session_mismatch"
+
+        await bridge.handle_client_record({
+            "id": "inspector-close",
+            "type": "inspector/request",
+            "payload": {"open": False},
+        })
+        close_index = len(_records(writer))
+        second_event = {
+            "event_id": "inspector-tool-2",
+            "session_id": session.id,
+            "run_id": "run-inspector",
+            "name": "file_read",
+            "call_id": "read-2",
+        }
+        engine.runtime_inspector.observe("tool_start", second_event)
+        await bridge.handle_engine_event("tool_start", second_event)
+        after_close = _records(writer)[close_index:]
+        assert not any(record["type"].startswith("inspector/") for record in after_close)
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_inspector_known_revision_gap_gets_full_snapshot(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(
+        AppConfig(
+            workspace_root=str(tmp_path),
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "vectors"),
+                long_term_enabled=False,
+            ),
+        )
+    )
+    try:
+        await engine.get_or_create_session(title="Inspector Gap")
+        await engine.runtime_inspector.snapshot()
+        engine.runtime_inspector.observe(
+            "tool_start",
+            {"event_id": "gap-tool", "name": "file_read", "call_id": "gap-1"},
+        )
+        await engine.runtime_inspector.snapshot()
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+
+        await bridge.handle_client_record({
+            "id": "inspector-gap",
+            "type": "inspector/request",
+            "payload": {"open": True, "known_revision": 0},
+        })
+
+        records = _records(writer)
+        assert records[-1]["type"] == "inspector/snapshot"
+        assert records[-1]["payload"]["revision"] >= 2
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_inspector_top_level_only_revision_uses_full_snapshot(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(
+        AppConfig(
+            workspace_root=str(tmp_path),
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "vectors"),
+                long_term_enabled=False,
+            ),
+        )
+    )
+    try:
+        session = await engine.get_or_create_session(title="Inspector Top Level")
+        initial = RuntimeInspectorSnapshot.empty(session_id=session.id).with_revision(
+            1,
+            "2026-07-13T00:00:00+00:00",
+        )
+        changed = replace(
+            initial,
+            revision=2,
+            generated_at="2026-07-13T00:00:01+00:00",
+            active_run_id="run-new",
+        )
+        snapshots = iter((initial, changed))
+        engine.runtime_inspector.snapshot = AsyncMock(  # type: ignore[method-assign]
+            side_effect=lambda: next(snapshots)
+        )
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+
+        await bridge.handle_client_record({
+            "id": "inspector-top-open",
+            "type": "inspector/request",
+            "payload": {"open": True},
+        })
+        await bridge.handle_engine_event("run_started", {"run_id": "run-new"})
+
+        inspector_records = [
+            record
+            for record in _records(writer)
+            if record["type"].startswith("inspector/")
+        ]
+        assert [record["type"] for record in inspector_records] == [
+            "inspector/snapshot",
+            "inspector/snapshot",
+        ]
+        assert inspector_records[-1]["payload"]["active_run_id"] == "run-new"
+    finally:
+        await engine.shutdown()
 
 
 @pytest.mark.asyncio
@@ -899,6 +1500,67 @@ async def test_bridge_streams_engine_events_as_ui_messages() -> None:
         for record in records
     )
     assert any(record["type"] == "runtime/status" for record in records)
+
+
+@pytest.mark.asyncio
+async def test_bridge_emits_completion_receipt_before_correlated_run_completion() -> None:
+    receipt = CompletionReceipt.from_dict(
+        {
+            "schema_version": 1,
+            "receipt_id": "receipt-bridge",
+            "run_id": "run-bridge",
+            "outcome": "partial",
+            "summary": "验证失败，已保留改动证据。",
+            "validations": [
+                {
+                    "command": "pytest -q",
+                    "scope": "tests",
+                    "status": "failed",
+                    "exit_code": 1,
+                    "failed": 1,
+                }
+            ],
+            "risks": [
+                {
+                    "code": "validation_failed",
+                    "level": "high",
+                    "message": "1 项验证失败。",
+                }
+            ],
+            "git_state": {"available": True, "branch": "main", "dirty": True},
+        }
+    )
+
+    class ReceiptEngine(_FakeEngine):
+        async def run_streaming(self, task: str, on_event: Any) -> AgentResult:
+            await on_event("run_started", {"task": task, "run_id": receipt.run_id})
+            await on_event("completion_receipt", receipt.to_dict())
+            return AgentResult(
+                status="completed",
+                response="完成",
+                usage=self.usage,
+                receipt=receipt,
+            )
+
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(ReceiptEngine(), config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("执行验证", request_id="submit-receipt")
+    assert bridge._run_task is not None
+    await bridge._run_task
+
+    records = _records(writer)
+    receipt_record = next(
+        record for record in records if record["type"] == "completion/receipt"
+    )
+    completed_record = next(
+        record for record in records if record["type"] == "run/completed"
+    )
+    assert records.index(receipt_record) < records.index(completed_record)
+    assert receipt_record["payload"] == json.loads(json.dumps(receipt.to_dict()))
+    assert completed_record["payload"]["receipt_id"] == receipt.receipt_id
+    assert completed_record["payload"]["run_id"] == receipt.run_id
 
 
 @pytest.mark.asyncio
@@ -1405,6 +2067,112 @@ async def test_bridge_resume_replays_session_messages() -> None:
         message.get("type") == "assistant_stream" and message.get("content") == "旧回答"
         for message in replayed
     )
+
+
+@pytest.mark.asyncio
+async def test_bridge_resume_replays_durable_completion_receipts(tmp_path: Path) -> None:
+    engine = _FakeEngine()
+    engine.chat_run_store = ChatRunStore(tmp_path / "chat-runs.db")
+    run = await engine.chat_run_store.start_run(
+        session_id="session-1",
+        user_message_id="msg-old",
+        run_id="run-old",
+    )
+    receipt = CompletionReceipt.from_dict(
+        {
+            "schema_version": 1,
+            "receipt_id": "receipt-old",
+            "run_id": run.id,
+            "outcome": "completed",
+            "summary": "历史运行已完成。",
+            "git_state": {"available": False, "dirty": False},
+        }
+    )
+    await engine.chat_run_store.finish_run(
+        run.id,
+        status="completed",
+        receipt=receipt,
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {"id": "resume-receipt", "type": ClientEventType.RESUME, "payload": {}}
+    )
+
+    records = _records(writer)
+    replayed = [
+        record
+        for record in records
+        if record["type"] == "completion/receipt"
+    ]
+    assert [record["payload"] for record in replayed] == [
+        json.loads(json.dumps(receipt.to_dict()))
+    ]
+    assert replayed[0]["request_id"] == "resume-receipt"
+
+
+@pytest.mark.asyncio
+async def test_bridge_resends_requested_completion_receipt(tmp_path: Path) -> None:
+    engine = _FakeEngine()
+    engine.chat_run_store = ChatRunStore(tmp_path / "chat-runs.db")
+    run = await engine.chat_run_store.start_run(
+        session_id="session-1",
+        user_message_id="msg-resend",
+        run_id="run-resend",
+    )
+    receipt = CompletionReceipt.from_dict(
+        {
+            "schema_version": 1,
+            "receipt_id": "receipt-resend",
+            "run_id": run.id,
+            "outcome": "completed",
+            "summary": "补发成功。",
+            "git_state": {"available": False, "dirty": False},
+        }
+    )
+    await engine.chat_run_store.finish_run(
+        run.id,
+        status="completed",
+        receipt=receipt,
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "request-receipt",
+            "type": ClientEventType.RECEIPT_REQUEST,
+            "payload": {
+                "session_id": "session-1",
+                "receipt_id": receipt.receipt_id,
+                "run_id": run.id,
+            },
+        }
+    )
+
+    records = _records(writer)
+    resent = next(record for record in records if record["type"] == "completion/receipt")
+    assert resent["request_id"] == "request-receipt"
+    assert resent["payload"]["receipt_id"] == receipt.receipt_id
+
+    writer.seek(0)
+    writer.truncate(0)
+    await bridge.handle_client_record(
+        {
+            "id": "request-cross-session",
+            "type": ClientEventType.RECEIPT_REQUEST,
+            "payload": {
+                "session_id": "session-other",
+                "receipt_id": receipt.receipt_id,
+            },
+        }
+    )
+    rejected = _records(writer)
+    assert not any(record["type"] == "completion/receipt" for record in rejected)
+    assert rejected[-1]["payload"]["code"] == "receipt_not_found"
 
 
 @pytest.mark.asyncio

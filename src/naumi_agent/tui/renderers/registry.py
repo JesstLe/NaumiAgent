@@ -18,11 +18,12 @@ from typing import Any
 
 import rich.markup
 from rich.text import Text
-from textual.widgets import Static
+from textual.widgets import Markdown, Static
 
 from naumi_agent.ui.messages.base import MessageType, UIMessage
 from naumi_agent.ui.messages.events import (
     AssistantStreamMessage,
+    CompletionReceiptMessage,
     ContextCompactMessage,
     ErrorMessage,
     HookTraceMessage,
@@ -399,6 +400,26 @@ def _render_error(
     chat.add_response_token(f"**错误**: {msg.message}")
 
 
+def _render_completion_receipt(
+    msg: CompletionReceiptMessage,
+    chat: ChatPanelLike,
+    status: StatusBarLike,
+    todo: TodoBarLike,
+) -> None:
+    from naumi_agent.tui.completion_receipt import (
+        completion_outcome_label,
+        format_completion_receipt_markdown,
+    )
+
+    chat.mount(
+        Markdown(
+            format_completion_receipt_markdown(msg.receipt),
+            classes="agent-msg",
+        )
+    )
+    status.status_text = f"完成回执：{completion_outcome_label(msg.receipt)}"
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -472,4 +493,5 @@ class TUIRenderer:
             MessageType.CONTEXT_COMPACT: _render_context_compact,
             MessageType.RECOVERY: _render_recovery,
             MessageType.ERROR: _render_error,
+            MessageType.COMPLETION_RECEIPT: _render_completion_receipt,
         })

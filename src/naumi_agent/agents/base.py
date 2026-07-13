@@ -69,6 +69,17 @@ _CAPABILITY_TOOLS: dict[AgentCapability, list[str]] = {
 }
 
 
+def resolve_agent_tool_names(
+    config: AgentConfig,
+    available_names: list[str] | tuple[str, ...] | set[str],
+) -> tuple[str, ...]:
+    """Resolve stable registered tools without instantiating an Agent."""
+    configured = set(config.tools)
+    for capability in config.capabilities:
+        configured.update(_CAPABILITY_TOOLS.get(capability, ()))
+    return tuple(sorted(configured & set(available_names)))
+
+
 class BaseAgent:
     """所有子 Agent 的基类."""
 
@@ -94,18 +105,10 @@ class BaseAgent:
 
     def _resolve_tools(self) -> list[str]:
         """根据能力和显式配置解析工具列表."""
-        tools: set[str] = set()
-
-        for cap in self.config.capabilities:
-            for tool_name in _CAPABILITY_TOOLS.get(cap, []):
-                tools.add(tool_name)
-
-        for tool_name in self.config.tools:
-            tools.add(tool_name)
-
-        # 验证工具存在
-        available = set(self.engine.tool_registry.names)
-        return [t for t in tools if t in available]
+        return list(resolve_agent_tool_names(
+            self.config,
+            self.engine.tool_registry.names,
+        ))
 
     def _get_tool_schemas(self) -> list[dict[str, Any]]:
         """获取允许的工具 schema."""

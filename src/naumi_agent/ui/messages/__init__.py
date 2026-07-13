@@ -8,6 +8,7 @@ from naumi_agent.ui.messages.adapter import EngineEventAdapter
 from naumi_agent.ui.messages.base import MessageType, UIMessage
 from naumi_agent.ui.messages.events import (
     AssistantStreamMessage,
+    CompletionReceiptMessage,
     ContextCompactMessage,
     ErrorMessage,
     HookTraceMessage,
@@ -31,6 +32,7 @@ __all__ = [
     "MessageType",
     "UIMessage",
     "AssistantStreamMessage",
+    "CompletionReceiptMessage",
     "ContextCompactMessage",
     "ErrorMessage",
     "HookTraceMessage",

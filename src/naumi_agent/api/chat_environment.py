@@ -7,8 +7,8 @@ import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from naumi_agent.api.chat_runs import ChatRunStore
 from naumi_agent.background.store import BackgroundTaskStore
+from naumi_agent.runs.store import ChatRunStore
 
 _SENSITIVE_NAMES = ("token", "secret", "password", "passwd", "api_key", "apikey")
 _SOURCE_KINDS = {"source", "file", "screenshot"}
