@@ -84,6 +84,37 @@ def _start_stdin_line_reader(
 _EXIT_COMMANDS = {"/q", "/quit", "/exit", "exit"}
 
 
+def _present_run_error(exc: Exception) -> tuple[str, str]:
+    """Map provider failures to actionable UI copy without leaking raw responses."""
+    evidence = f"{type(exc).__name__} {exc}".lower()
+    auth_markers = ("401", "authentication", "unauthorized", "invalid api key")
+    if any(marker in evidence for marker in auth_markers):
+        return (
+            "模型服务认证失败。请运行 `naumi configure` 更新安全凭据，"
+            "然后执行 `naumi doctor --live` 验证。",
+            "model_auth_failed",
+        )
+    if any(marker in evidence for marker in ("404", "notfound", "not found", "resource_not_found")):
+        return (
+            "模型或 API Base 不匹配，服务端未找到请求资源。请运行 `naumi doctor --live` 检查配置。",
+            "model_not_found",
+        )
+    if any(marker in evidence for marker in ("429", "rate limit", "ratelimit")):
+        return (
+            "模型服务当前请求过多。请稍后重试；若持续出现，请检查供应商配额。",
+            "model_rate_limited",
+        )
+    if any(marker in evidence for marker in ("timeout", "timed out")):
+        return (
+            "模型服务响应超时。请检查网络后重试，并可运行 `naumi doctor --live` 验证连接。",
+            "model_timeout",
+        )
+    return (
+        "执行失败，详细信息已写入调试日志。请运行 `/debug` 查看诊断路径。",
+        "run_failed",
+    )
+
+
 def resolve_config_path(path: str) -> str:
     """Resolve a CLI config path with the same fallback as the legacy CLI."""
     candidate = Path(path)
@@ -558,12 +589,13 @@ class JsonlEngineBridge:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.exception("UI bridge agent run failed")
                 if self.debug_trace is not None:
                     self.debug_trace.exception("ui_bridge.run", exc)
+                logger.debug("UI bridge agent run failed: %s", type(exc).__name__)
+                message, code = _present_run_error(exc)
                 await self.emit_error(
-                    f"执行失败: {type(exc).__name__}: {exc}",
-                    code="run_failed",
+                    message,
+                    code=code,
                     request_id=request_id,
                 )
             finally:
