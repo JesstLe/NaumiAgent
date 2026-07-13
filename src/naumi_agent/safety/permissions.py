@@ -1152,10 +1152,20 @@ class PermissionChecker:
                 tool_family=tool_family,
             )
 
+        sudo_rm = self._contains_sudo_rm_command(command)
+        if sudo_rm:
+            return self._deny(
+                "命令包含高风险模式 `sudo rm`，已阻止执行。",
+                code=PermissionReasonCode.DANGEROUS_COMMAND,
+                risk_level=PermissionRiskLevel.HIGH,
+                tool_family=tool_family,
+            )
+
         cmd_lower = command.lower().strip()
         for blocked in BLOCKED_COMMANDS:
             if (
                 destructive_rm is not None
+                and sudo_rm is not None
                 and blocked in STRUCTURAL_COMMAND_LITERAL_FALLBACKS
             ):
                 continue
@@ -1229,6 +1239,35 @@ class PermissionChecker:
             if destructive:
                 return True
             malformed_payload = malformed_payload or destructive is None
+        return None if malformed_payload else False
+
+    @staticmethod
+    def _contains_sudo_rm_command(
+        command: str,
+        recursion_depth: int = 0,
+    ) -> bool | None:
+        """Detect sudo delegating to rm without matching quoted command text."""
+        if recursion_depth >= MAX_SHELL_COMMAND_RECURSION:
+            return True
+
+        segments = PermissionChecker._split_shell_command_segments(command)
+        if segments is None:
+            return None
+
+        malformed_payload = False
+        for segment in segments:
+            try:
+                simple_command = shlex.split(segment, posix=True, comments=False)
+            except ValueError:
+                return None
+
+            sudo_rm = PermissionChecker._is_sudo_rm_simple_command(
+                simple_command,
+                recursion_depth=recursion_depth,
+            )
+            if sudo_rm:
+                return True
+            malformed_payload = malformed_payload or sudo_rm is None
         return None if malformed_payload else False
 
     @staticmethod
@@ -1319,6 +1358,41 @@ class PermissionChecker:
         if not (recursive and force):
             return False
         return any(PermissionChecker._is_dangerous_rm_target(target) for target in targets)
+
+    @staticmethod
+    def _is_sudo_rm_simple_command(
+        tokens: list[str],
+        *,
+        recursion_depth: int,
+    ) -> bool | None:
+        """Detect sudo delegating to rm through supported command wrappers."""
+        if not tokens:
+            return False
+
+        command_index = 0
+        while command_index < len(tokens):
+            wrapper = os.path.basename(tokens[command_index])
+            if wrapper == "sudo":
+                command_index = PermissionChecker._skip_sudo_options(tokens, command_index + 1)
+                if command_index is None or command_index >= len(tokens):
+                    return None
+                return os.path.basename(tokens[command_index]) == "rm"
+            if wrapper == "env":
+                command_index = PermissionChecker._skip_env_assignments(tokens, command_index + 1)
+            elif wrapper == "command":
+                command_index = PermissionChecker._skip_command_options(tokens, command_index + 1)
+            elif wrapper == "exec":
+                command_index = PermissionChecker._skip_exec_options(tokens, command_index + 1)
+            elif wrapper in SHELL_EXECUTABLES:
+                return PermissionChecker._contains_sudo_rm_shell_payload(
+                    tokens[command_index + 1 :],
+                    recursion_depth=recursion_depth,
+                )
+            else:
+                return False
+            if command_index is None or command_index >= len(tokens):
+                return None
+        return None
 
     @staticmethod
     def _unwrap_command_position(tokens: list[str]) -> int | None:
@@ -1473,6 +1547,29 @@ class PermissionChecker:
                 if command_index + 1 >= len(arguments):
                     return False
                 return PermissionChecker._contains_destructive_rm_command(
+                    arguments[command_index + 1],
+                    recursion_depth=recursion_depth + 1,
+                )
+        return False
+
+    @staticmethod
+    def _contains_sudo_rm_shell_payload(
+        arguments: list[str],
+        *,
+        recursion_depth: int,
+    ) -> bool | None:
+        """Inspect a shell -c payload for an executable sudo rm command."""
+        for command_index, argument in enumerate(arguments):
+            if argument == "--":
+                return False
+            if (
+                argument.startswith("-")
+                and not argument.startswith("--")
+                and "c" in argument[1:]
+            ):
+                if command_index + 1 >= len(arguments):
+                    return None
+                return PermissionChecker._contains_sudo_rm_command(
                     arguments[command_index + 1],
                     recursion_depth=recursion_depth + 1,
                 )
