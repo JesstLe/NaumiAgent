@@ -43,6 +43,10 @@ from naumi_agent.skills.loader import SkillLoader
 from naumi_agent.skills.tool import create_skill_tools
 from naumi_agent.streaming.event_bus import EventEmitter
 from naumi_agent.tasks.models import TaskStatus
+from naumi_agent.tasks.reconciliation import (
+    TodoReconciliationAction,
+    reconcile_todos,
+)
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
@@ -89,6 +93,7 @@ _TASK_EVENT_TOOLS = {
     "task_update",
     "task_list",
     "task_delete",
+    "todo_reconciliation",
 }
 
 _TOOL_PREPARE_MIN_INTERVAL = 0.25
@@ -1783,6 +1788,22 @@ class AgentEngine:
         except Exception as e:
             logger.debug("Task snapshot event failed: %s", e)
 
+    async def _block_unreconciled_todos(
+        self,
+        on_event: EventCallback | None = None,
+    ) -> None:
+        """Prevent terminal engine exits from leaving active Todo state behind."""
+        reconciliation = await reconcile_todos(self.task_store, attempted=True)
+        if reconciliation.warning:
+            logger.warning("%s", reconciliation.warning)
+            if on_event is not None:
+                await on_event(
+                    "task_reconciliation_warning",
+                    {"message": reconciliation.warning},
+                )
+        if reconciliation.action == TodoReconciliationAction.BLOCKED:
+            await self._emit_task_snapshot(on_event, source="todo_reconciliation")
+
     def _check_budget(self) -> AgentResult | None:
         if self._permission_checker.mode == PermissionMode.BYPASS:
             return None
@@ -2187,6 +2208,7 @@ class AgentEngine:
         """ReAct 循环：推理 → 行动 → 观察."""
         max_turns = self._config.safety.max_turns
         tool_call_history: list[str] = []
+        todo_reconciliation_attempted = False
 
         # Inject plan as guidance to prevent approach oscillation
         if plan:
@@ -2201,6 +2223,7 @@ class AgentEngine:
 
             exceeded = self._check_budget()
             if exceeded:
+                await self._block_unreconciled_todos()
                 await self._fire_agent_stop(
                     status=exceeded.status,
                     response=exceeded.response,
@@ -2238,6 +2261,7 @@ class AgentEngine:
 
             exceeded = self._check_budget()
             if exceeded:
+                await self._block_unreconciled_todos()
                 await self._fire_agent_stop(
                     status=exceeded.status,
                     response=exceeded.response,
@@ -2343,6 +2367,7 @@ class AgentEngine:
 
                 exceeded = self._check_budget()
                 if exceeded:
+                    await self._block_unreconciled_todos()
                     await self._fire_agent_stop(
                         status=exceeded.status,
                         response=exceeded.response,
@@ -2354,6 +2379,18 @@ class AgentEngine:
 
             # --- 无工具调用：最终回答 ---
             tool_call_history.clear()
+            reconciliation = await reconcile_todos(
+                self.task_store,
+                attempted=todo_reconciliation_attempted,
+            )
+            if reconciliation.warning:
+                logger.warning("%s", reconciliation.warning)
+            if reconciliation.action == TodoReconciliationAction.RETRY:
+                todo_reconciliation_attempted = True
+                self._append_message(
+                    {"role": "system", "content": reconciliation.instruction}
+                )
+                continue
             final_content = response.content
             if _is_output_truncated(response.finish_reason):
                 final_content = await self._continue_truncated_final_response(
@@ -2373,6 +2410,7 @@ class AgentEngine:
                 usage=self._usage,
             )
 
+        await self._block_unreconciled_todos()
         await self._fire_agent_stop(
             status="max_turns",
             response="已达到最大轮次限制，任务未完成。",
@@ -2395,6 +2433,7 @@ class AgentEngine:
         model_str = self._router.resolve_model(ModelTier.CAPABLE)
         session_id = self._session.id if self._session else ""
         tool_call_history: list[str] = []
+        todo_reconciliation_attempted = False
 
         # Inject plan as guidance to prevent approach oscillation
         if plan:
@@ -2409,6 +2448,7 @@ class AgentEngine:
 
             exceeded = self._check_budget()
             if exceeded:
+                await self._block_unreconciled_todos(on_event)
                 await self._fire_agent_stop(
                     status=exceeded.status,
                     response=exceeded.response,
@@ -2440,7 +2480,14 @@ class AgentEngine:
             got_thinking = False
             stream_tokens = 0
             finish_reason: str | None = None
-            should_guard_text = bool(tools)
+            try:
+                guard_todo_final = any(
+                    task.status == TaskStatus.IN_PROGRESS
+                    for task in await self.task_store.list_tasks()
+                )
+            except Exception:
+                guard_todo_final = False
+            should_guard_text = bool(tools) or guard_todo_final
             tool_call_started = False
             tool_prepare_started = False
             tool_prepare_start = 0.0
@@ -2556,6 +2603,9 @@ class AgentEngine:
                         text_parts.append(chunk.token)
                         if tool_call_started:
                             continue
+                        if guard_todo_final and not got_response:
+                            pending_text_parts.append(chunk.token)
+                            continue
                         if should_guard_text and not got_response:
                             # Tool-capable streaming can emit a few text fragments before
                             # the first tool-call delta arrives. Keep only a small guard
@@ -2628,6 +2678,7 @@ class AgentEngine:
             exceeded = self._check_budget()
             if exceeded:
                 await on_event("error", {"message": exceeded.response})
+                await self._block_unreconciled_todos(on_event)
                 await self._fire_agent_stop(
                     status=exceeded.status,
                     response=exceeded.response,
@@ -2770,6 +2821,7 @@ class AgentEngine:
 
                 exceeded = self._check_budget()
                 if exceeded:
+                    await self._block_unreconciled_todos(on_event)
                     return exceeded
                 continue
 
@@ -2787,6 +2839,27 @@ class AgentEngine:
 
             # --- 最终回答 ---
             tool_call_history.clear()
+            reconciliation = await reconcile_todos(
+                self.task_store,
+                attempted=todo_reconciliation_attempted,
+            )
+            if reconciliation.warning:
+                await on_event(
+                    "task_reconciliation_warning",
+                    {"message": reconciliation.warning},
+                )
+            if reconciliation.action == TodoReconciliationAction.RETRY:
+                pending_text_parts.clear()
+                todo_reconciliation_attempted = True
+                self._append_message(
+                    {"role": "system", "content": reconciliation.instruction}
+                )
+                continue
+            if reconciliation.action == TodoReconciliationAction.BLOCKED:
+                await self._emit_task_snapshot(
+                    on_event,
+                    source="todo_reconciliation",
+                )
             if pending_text_parts:
                 await flush_pending_text()
             elif text_content and not got_response:
@@ -2826,6 +2899,7 @@ class AgentEngine:
                 usage=self._usage,
             )
 
+        await self._block_unreconciled_todos(on_event)
         await self._fire_agent_stop(
             status="max_turns",
             response="已达到最大轮次限制，任务未完成。",

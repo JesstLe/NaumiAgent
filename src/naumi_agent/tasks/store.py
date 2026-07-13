@@ -313,6 +313,49 @@ class TaskStore:
                 updated_at=now,
             )
 
+    async def block_unreconciled_tasks(self, reason: str) -> list[Task]:
+        """Atomically block active tasks left open when an agent run finishes."""
+        normalized_reason = reason.strip()
+        if not normalized_reason:
+            raise ValueError("阻塞原因不能为空")
+        if not self._session_id:
+            raise ValueError("当前没有活跃会话")
+
+        now = datetime.now().isoformat()
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_table(db)
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                active_tasks = [
+                    task
+                    for task in await self._list_tasks(db)
+                    if task.status == TaskStatus.IN_PROGRESS
+                ]
+                if active_tasks:
+                    await db.execute(
+                        """UPDATE tasks
+                           SET status = ?, active_form = ?, updated_at = ?
+                           WHERE session_id = ? AND status = ?""",
+                        (
+                            TaskStatus.BLOCKED,
+                            normalized_reason,
+                            now,
+                            self._session_id,
+                            TaskStatus.IN_PROGRESS,
+                        ),
+                    )
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+
+            changed_ids = {task.id for task in active_tasks}
+            return [
+                task
+                for task in await self._list_tasks(db)
+                if task.id in changed_ids
+            ]
+
     async def get_task(self, task_id: str) -> Task | None:
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_table(db)

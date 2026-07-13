@@ -44,6 +44,32 @@ class TestTaskModel:
 
 class TestTaskStore:
     @pytest.mark.asyncio
+    async def test_block_unreconciled_tasks_only_blocks_in_progress(
+        self,
+        store: TaskStore,
+    ) -> None:
+        active = await store.create_task("实现后端")
+        pending = await store.create_task("补充文档")
+        completed = await store.create_task("确认设计")
+        await store.update_task(
+            active.id,
+            status=TaskStatus.IN_PROGRESS,
+            active_form="正在实现后端",
+        )
+        await store.update_task(completed.id, status=TaskStatus.COMPLETED)
+
+        changed = await store.block_unreconciled_tasks("Agent 结束前未完成状态对账")
+        tasks = await store.list_tasks()
+
+        assert [task.id for task in changed] == [active.id]
+        assert changed[0].status == TaskStatus.BLOCKED
+        assert changed[0].active_form == "Agent 结束前未完成状态对账"
+        assert tasks[1].id == pending.id
+        assert tasks[1].status == TaskStatus.PENDING
+        assert tasks[2].id == completed.id
+        assert tasks[2].status == TaskStatus.COMPLETED
+
+    @pytest.mark.asyncio
     async def test_legacy_global_task_id_schema_is_migrated_before_creating_task(
         self,
         tmp_path,
