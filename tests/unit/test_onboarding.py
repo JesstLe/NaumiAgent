@@ -51,7 +51,7 @@ def test_run_onboarding_stores_key_outside_yaml(
     monkeypatch,
 ) -> None:
     config_path = tmp_path / "config.yaml"
-    stored: list[str] = []
+    stored: list[tuple[str | None, str]] = []
     answers = iter([str(tmp_path), "moderate"])
 
     monkeypatch.setattr(onboarding, "_choose_provider", lambda: "kimi")
@@ -63,14 +63,14 @@ def test_run_onboarding_stores_key_outside_yaml(
     monkeypatch.setattr(
         onboarding,
         "store_model_api_key",
-        lambda value: stored.append(value),
+        lambda value, *, provider=None: stored.append((provider, value)),
         raising=False,
     )
 
     assert onboarding.run_onboarding(config_path, project_root=tmp_path) is True
 
     persisted = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert stored == ["secret-value"]
+    assert stored == [("kimi", "secret-value")]
     assert "api_key" not in persisted["models"]
 
 
@@ -92,7 +92,9 @@ def test_run_onboarding_reuses_environment_key_without_keyring(
     monkeypatch.setattr(
         onboarding,
         "store_model_api_key",
-        lambda _value: pytest.fail("environment credentials must not require keyring"),
+        lambda _value, **_kwargs: pytest.fail(
+            "environment credentials must not require keyring"
+        ),
     )
 
     assert onboarding.run_onboarding(config_path, project_root=tmp_path) is True
@@ -104,17 +106,21 @@ def test_migrate_legacy_key_moves_secret_before_rewriting_yaml(
 ) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "models:\n  default_model: test-model\n  api_key: legacy-secret\n",
+        "models:\n  provider: openai\n  default_model: test-model\n  api_key: legacy-secret\n",
         encoding="utf-8",
     )
-    stored: list[str] = []
-    monkeypatch.setattr(onboarding, "store_model_api_key", stored.append)
+    stored: list[tuple[str | None, str]] = []
+    monkeypatch.setattr(
+        onboarding,
+        "store_model_api_key",
+        lambda value, *, provider=None: stored.append((provider, value)),
+    )
     monkeypatch.setenv("NAUMI_MODELS__API_KEY", "")
 
     assert onboarding.migrate_legacy_model_api_key(config_path) is True
 
     persisted = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert stored == ["legacy-secret"]
+    assert stored == [("openai", "legacy-secret")]
     assert "api_key" not in persisted["models"]
     assert onboarding.os.environ["NAUMI_MODELS__API_KEY"] == "legacy-secret"
 
@@ -127,7 +133,7 @@ def test_migrate_legacy_key_keeps_file_when_secure_store_fails(
     original = "models:\n  api_key: legacy-secret\n"
     config_path.write_text(original, encoding="utf-8")
 
-    def fail_store(_value: str) -> None:
+    def fail_store(_value: str, **_kwargs) -> None:
         raise CredentialStoreError("secure store unavailable")
 
     monkeypatch.setattr(onboarding, "store_model_api_key", fail_store)
@@ -136,6 +142,27 @@ def test_migrate_legacy_key_keeps_file_when_secure_store_fails(
         onboarding.migrate_legacy_model_api_key(config_path)
 
     assert config_path.read_text(encoding="utf-8") == original
+
+
+def test_needs_onboarding_loads_only_configured_provider(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "models:\n  provider: anthropic\n  default_model: claude-test\n",
+        encoding="utf-8",
+    )
+    requested: list[str | None] = []
+    monkeypatch.delenv("NAUMI_MODELS__API_KEY", raising=False)
+    monkeypatch.setattr(
+        onboarding,
+        "load_model_api_key",
+        lambda *, provider=None: requested.append(provider) or "anthropic-secret",
+    )
+
+    assert onboarding.needs_onboarding(config_path) is False
+    assert requested == ["anthropic"]
 
 
 def test_main_prepares_legacy_credentials_before_onboarding_check(

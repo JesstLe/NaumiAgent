@@ -12,7 +12,7 @@ class TestAppConfig:
     def test_default_config(self) -> None:
         config = AppConfig()
         assert config.models.default_model == "claude-sonnet-4-6"
-        assert config.safety.max_turns == 30
+        assert config.safety.max_turns == 50
         assert config.safety.max_parallel_tools == 4
         assert config.memory.session_db_path == "data/sessions.db"
         assert config.ui.theme == "dark"
@@ -60,20 +60,48 @@ class TestAppConfig:
     ) -> None:
         yaml_path = tmp_path / "config.yaml"
         yaml_path.write_text(
-            "models:\n  default_model: test-model\n",
+            "models:\n  provider: openai\n  default_model: test-model\n",
             encoding="utf-8",
         )
+        requested_providers: list[str | None] = []
         monkeypatch.delenv("NAUMI_MODELS__API_KEY", raising=False)
         monkeypatch.setitem(AppConfig.model_config, "env_file", None)
         monkeypatch.setattr(
             "naumi_agent.config.settings.load_model_api_key",
-            lambda: "credential-key",
+            lambda *, provider=None: requested_providers.append(provider) or "credential-key",
             raising=False,
         )
 
         config = AppConfig.from_yaml(yaml_path)
 
         assert config.models.api_key == "credential-key"
+        assert requested_providers == ["openai"]
+
+    def test_from_yaml_environment_key_skips_system_credential_store(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        yaml_path = tmp_path / "config.yaml"
+        yaml_path.write_text(
+            "models:\n  provider: anthropic\n  default_model: claude-test\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("NAUMI_MODELS__API_KEY", "environment-key")
+        monkeypatch.setitem(AppConfig.model_config, "env_file", None)
+
+        def fail_load(*, provider=None):
+            pytest.fail(f"环境变量存在时不应读取 provider 凭据：{provider}")
+
+        monkeypatch.setattr(
+            "naumi_agent.config.settings.load_model_api_key",
+            fail_load,
+            raising=False,
+        )
+
+        config = AppConfig.from_yaml(yaml_path)
+
+        assert config.models.api_key == "environment-key"
 
     def test_from_missing_yaml(self) -> None:
         config = AppConfig.from_yaml("/nonexistent/config.yaml")

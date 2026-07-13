@@ -50,6 +50,8 @@ load_model_api_key(provider=None, backend=None, fallback_to_legacy=True)
 
 系统不会枚举或预加载所有 provider 的 Key，因此启动一次最多读取当前 provider，不会因未来 catalog 中存在多个厂商而触发多次系统凭据提示。
 
+同一进程对同一“凭据后端实例 + 账号”的读取结果（包括不存在）做内存缓存，`needs_onboarding` 与正式配置加载共享结果，避免同次启动重复触发 Keychain。缓存不写磁盘；成功保存新 Key 时立即更新对应项，后端异常不进入缓存。
+
 ### Configure / Onboarding
 
 - `configure_project(provider=...)` 把新 Key 写入该 provider 账号。
@@ -87,4 +89,3 @@ load_model_api_key(provider=None, backend=None, fallback_to_legacy=True)
 3. provider/model 别名映射与 tier 选择。
 4. `/models`、Ollama tags 等自动模型发现、缓存、白名单和黑名单。
 5. 新 UI/TUI 的 provider 连接与模型选择界面。
-
