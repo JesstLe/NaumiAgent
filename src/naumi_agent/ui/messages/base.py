@@ -28,6 +28,7 @@ class MessageType(StrEnum):
     RECOVERY = "recovery"
     ERROR = "error"
     SYSTEM_NOTICE = "system_notice"
+    COMPLETION_RECEIPT = "completion_receipt"
 
 
 @dataclass(frozen=True)

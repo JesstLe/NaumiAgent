@@ -6,6 +6,7 @@ import pytest
 
 from naumi_agent.ui.messages import (
     AssistantStreamMessage,
+    CompletionReceiptMessage,
     ContextCompactMessage,
     EngineEventAdapter,
     ErrorMessage,
@@ -448,6 +449,22 @@ class TestHookTrace:
 
 class TestRuntimeEvents:
 
+    def test_completion_receipt(self, adapter: EngineEventAdapter) -> None:
+        msg = adapter.adapt(
+            "completion_receipt",
+            {
+                "schema_version": 1,
+                "receipt_id": "receipt-adapter",
+                "run_id": "run-adapter",
+                "outcome": "partial",
+                "summary": "验证未通过。",
+                "git_state": {"available": True, "dirty": True},
+            },
+        )
+        assert isinstance(msg, CompletionReceiptMessage)
+        assert msg.receipt.receipt_id == "receipt-adapter"
+        assert msg.receipt.outcome == "partial"
+
     def test_run_started(self, adapter: EngineEventAdapter) -> None:
         msg = adapter.adapt("run_started", {"task": "test"})
         assert isinstance(msg, RuntimeStatusMessage)
@@ -613,6 +630,7 @@ class TestDispatchCoverage:
 
     # These are all events emitted by the engine (from engine.py analysis).
     ENGINE_EVENTS = [
+        "completion_receipt",
         "run_started",
         "turn_start",
         "perf_phase",
