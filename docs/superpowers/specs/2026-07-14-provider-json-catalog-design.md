@@ -59,6 +59,8 @@ The loader also accepts a full OpenCode config and reads only its top-level `pro
 
 Known adapter hints are translated to Naumi API formats. Unknown `npm` packages require an explicit `apiFormat`; the Python runtime never installs or executes an npm provider package.
 
+OpenCode 内置 provider 可能既不声明 `npm`，也不声明 `baseURL`。加载器会保留其模型与密钥引用，但将 `api_format` / `base_url` 记为未解析；后续 adapter registry 必须按 provider ID 显式补齐，不能凭名称猜测协议或地址。Naumi 原生配置仍强制声明这两个字段。
+
 ## Normalized Model
 
 - `ProviderCatalog`: immutable mapping of normalized provider IDs.
@@ -89,7 +91,7 @@ Accepted references:
 - OpenCode-compatible `options.apiKey: "{env:NVIDIA_API_KEY}"`.
 - OpenCode-compatible `options.apiKey: "{file:secrets/nvidia_api_key}"`; only the reference is stored. Path resolution and confinement are deferred to the credential resolver.
 
-Any other `apiKey`, `api_key`, bearer token, Authorization header or X-API-Key header is rejected before a catalog object is produced. Error text names the field path but never echoes its value.
+Any other `apiKey`, `api_key`, bearer token, mainstream authentication header, or credential-like `baseURL` query parameter is rejected before a catalog object is produced. Error text names the field path but never echoes its value.
 
 ## Validation
 
@@ -135,4 +137,3 @@ All failures raise `ProviderCatalogError` with a Chinese, field-oriented message
 3. Secret reference resolution with provider-scoped Keychain/env/file confinement.
 4. `/models` and Ollama discovery clients, caching and merge policy.
 5. UI/TUI provider and model picker.
-
