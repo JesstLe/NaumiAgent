@@ -141,7 +141,7 @@ test("screen renderer reserves footer lines and keeps prompt visible", () => {
   const plain = lines.map(stripAnsi);
 
   assert.equal(lines.length, 12);
-  assert(plain.some((line) => line.includes("default > hello")));
+  assert(plain.some((line) => line.includes("chat > hello")));
   assert(lines.every((line) => visibleWidth(line) <= 60));
 });
 
@@ -175,7 +175,7 @@ test("screen renderer clamps oversized footer in tiny terminals", () => {
   const plain = lines.map(stripAnsi);
 
   assert.equal(lines.length, 5);
-  assert(plain.some((line) => line.includes("bypass > 确认一下")));
+  assert(plain.some((line) => line.includes("chat > 确认一下")));
   assert(plain.some((line) => line.includes("permission: bash_run")));
   assert(!plain.some((line) => line.includes("Shift+Tab 模式")));
   assert(lines.every((line) => visibleWidth(line) <= 34));
@@ -223,7 +223,7 @@ test("screen renderer stays stable after resume replay then a new run starts", (
 
   assert.equal(lines.length, 10);
   assert.equal(plain.filter((line) => line.includes("mode: default")).length, 1);
-  assert(plain.some((line) => line.includes("default running")));
+  assert(plain.some((line) => line.includes("chat running")));
   assert(plain.some((line) => line.includes("运行中")));
   assert(!plain.some((line) => line.includes("todo:")));
   assert(lines.every((line) => visibleWidth(line) <= 72));
