@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
@@ -188,6 +189,12 @@ async def test_stream_uses_the_same_catalog_transport(
         "naumi_agent.model.router.litellm.acompletion",
         fake_acompletion,
     )
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.register_model",
+        lambda _model_cost: pytest.fail(
+            "Chat transport must not register Responses streaming"
+        ),
+    )
     router = ModelRouter(
         ModelConfig(provider="vendor", default_model="chat"),
         catalog=_chat_catalog(),
@@ -199,7 +206,6 @@ async def test_stream_uses_the_same_catalog_transport(
             [{"role": "user", "content": "hello"}]
         )
     ]
-
     assert captured["model"] == "openai/vendor/model-v2"
     assert captured["api_base"] == "https://chat.vendor.example/v1"
     assert captured["api_key"] == "selected-provider-secret"
@@ -278,6 +284,7 @@ async def test_stream_uses_catalog_openai_responses_transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
+    registrations: list[dict[str, dict[str, Any]]] = []
 
     async def fake_acompletion(**kwargs: Any):
         captured.update(kwargs)
@@ -291,21 +298,41 @@ async def test_stream_uses_catalog_openai_responses_transport(
         "naumi_agent.model.router.litellm.acompletion",
         fake_acompletion,
     )
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.register_model",
+        lambda model_cost: registrations.append(model_cost),
+    )
     router = ModelRouter(
         ModelConfig(provider="vendor", default_model="chat"),
         catalog=_responses_catalog(),
     )
 
-    chunks = [
-        chunk
-        async for chunk in router.stream(
-            [{"role": "user", "content": "hello"}]
-        )
-    ]
+    async def collect(content: str):
+        return [
+            chunk
+            async for chunk in router.stream(
+                [{"role": "user", "content": content}]
+            )
+        ]
+
+    chunks, second_chunks = await asyncio.gather(
+        collect("hello"),
+        collect("hello again"),
+    )
 
     assert captured["model"] == "openai/responses/vendor/model-v2"
     assert captured["api_base"] == "https://responses.vendor.example/v1"
     assert [chunk.token for chunk in chunks] == ["stream-ok"]
+    assert [chunk.token for chunk in second_chunks] == ["stream-ok"]
+    assert registrations == [
+        {
+            "openai/vendor/model-v2": {
+                "litellm_provider": "openai",
+                "mode": "responses",
+                "supports_native_streaming": True,
+            }
+        }
+    ]
 
 
 @pytest.mark.asyncio

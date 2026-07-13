@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -11,7 +12,7 @@ from typing import Any
 import litellm
 
 from naumi_agent.config.settings import ModelConfig, ModelMeta
-from naumi_agent.model.catalog import ProviderCatalog
+from naumi_agent.model.catalog import APIFormat, ProviderCatalog
 from naumi_agent.model.provider_runtime import (
     ProviderRuntimeError,
     build_provider_transport,
@@ -105,6 +106,8 @@ class ModelRouter:
             ModelTier.REASONING: config.reasoning_model,
         }
         self._info_cache: dict[str, dict[str, Any]] = {}
+        self._registered_native_stream_models: set[str] = set()
+        self._native_stream_registration_lock = threading.Lock()
 
     # --- 模型元数据 ---
 
@@ -226,6 +229,28 @@ class ModelRouter:
         if "extra_headers" in kwargs:
             kwargs["extra_headers"] = dict(kwargs["extra_headers"])
         return transport.model, kwargs
+
+    def _ensure_native_responses_streaming(self, model: str) -> None:
+        """Prevent LiteLLM from fake-streaming unknown catalog Responses models."""
+        target = self.resolve_target(model)
+        provider = target.provider
+        if provider is None or provider.api_format is not APIFormat.OPENAI_RESPONSES:
+            return
+
+        registry_model = f"openai/{target.upstream_model}"
+        with self._native_stream_registration_lock:
+            if registry_model in self._registered_native_stream_models:
+                return
+            litellm.register_model(
+                {
+                    registry_model: {
+                        "litellm_provider": "openai",
+                        "mode": "responses",
+                        "supports_native_streaming": True,
+                    }
+                }
+            )
+            self._registered_native_stream_models.add(registry_model)
 
     def _resolve_max_tokens(self, model: str, requested: int | None) -> int:
         """确定 max_tokens: 调用方指定 > 配置值 > 模型输出上限."""
@@ -465,6 +490,7 @@ class ModelRouter:
         """流式调用，yield StreamChunk."""
         resolved = model or self.resolve_model(tier)
         transport_model, transport_kwargs = self._resolve_transport(resolved)
+        self._ensure_native_responses_streaming(resolved)
         preserve_reasoning = self._should_preserve_reasoning_content(
             resolved, thinking,
         )
