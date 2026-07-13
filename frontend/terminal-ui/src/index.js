@@ -43,7 +43,7 @@ import {
   createUiSnapshot,
   applyUiSnapshot,
 } from "./state.js";
-import { renderScreen } from "./render.js";
+import { captureViewportAnchor, renderScreen, restoreViewportAnchor } from "./render.js";
 import {
   jumpTimelineToLatest,
   markTimelineOutput,
@@ -62,6 +62,8 @@ let send = null;
 let redrawTimer = null;
 let uiSnapshotTimer = null;
 let quitting = false;
+let viewportWidth = null;
+let viewportHeight = null;
 const inputTokenizer = createInputTokenizerState();
 
 main();
@@ -125,7 +127,7 @@ function setupTerminal() {
   process.stdin.resume();
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", handleKeyInput);
-  process.stdout.on("resize", scheduleRedraw);
+  process.stdout.on("resize", handleTerminalResize);
   process.on("SIGINT", exit);
   process.on("SIGTERM", exit);
 }
@@ -502,11 +504,57 @@ function scheduleRedraw() {
   }, 16);
 }
 
+function handleTerminalResize() {
+  const width = Math.max(60, process.stdout.columns ?? 100);
+  const height = Math.max(12, process.stdout.rows ?? 30);
+  if (viewportWidth === null || viewportHeight === null) {
+    viewportWidth = width;
+    viewportHeight = height;
+    scheduleRedraw();
+    return;
+  }
+  if (width === viewportWidth && height === viewportHeight) return;
+
+  const previousWidth = viewportWidth;
+  const previousHeight = viewportHeight;
+  const anchor = captureViewportAnchor(
+    state,
+    previousWidth,
+    previousHeight,
+    { cwd: process.cwd(), home: process.env.HOME },
+  );
+  const previousOffset = state.scrollOffset;
+  restoreViewportAnchor(
+    state,
+    anchor,
+    width,
+    height,
+    { cwd: process.cwd(), home: process.env.HOME },
+  );
+  viewportWidth = width;
+  viewportHeight = height;
+  debugLog?.log("viewport.resize_anchor", {
+    previous_width: previousWidth,
+    previous_height: previousHeight,
+    width,
+    height,
+    message_id: anchor?.messageId ?? "",
+    message_index: anchor?.messageIndex ?? null,
+    previous_offset: previousOffset,
+    scroll_offset: state.scrollOffset,
+    follow_tail: state.followTail,
+  });
+  scheduleUiSnapshotPersist();
+  scheduleRedraw();
+}
+
 function redraw() {
   const width = Math.max(60, process.stdout.columns ?? 100);
   const height = Math.max(12, process.stdout.rows ?? 30);
   try {
     const lines = renderScreen(state, width, height, { cwd: process.cwd(), home: process.env.HOME });
+    viewportWidth = width;
+    viewportHeight = height;
     debugLog?.log("render.screen", {
       width,
       height,
