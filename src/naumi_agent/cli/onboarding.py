@@ -138,6 +138,7 @@ def run_onboarding(config_path: Path, *, project_root: Path | None = None) -> bo
 
     # 8. Node UI 检查
     _check_node_ui(project_root)
+    _report_search_readiness()
 
     return True
 
@@ -253,6 +254,20 @@ def _check_node_ui(project_root: Path) -> None:
                     console.print("[red]未找到 npm[/red]")
             except Exception as exc:
                 console.print(f"[red]安装失败: {exc}[/red]")
+
+
+def _report_search_readiness() -> None:
+    """Explain that web search works without asking for another required key."""
+    if os.environ.get("BRAVE_SEARCH_API_KEY", "").strip():
+        console.print(
+            "\n[green]网络搜索：已增强（检测到 Brave Search 凭据）。[/green]"
+        )
+        return
+    console.print("\n[green]网络搜索：可用（零配置，无需搜索 API Key）。[/green]")
+    console.print(
+        "[dim]系统会先使用免 Key 搜索，必要时自动回退到浏览器；"
+        "BRAVE_SEARCH_API_KEY 仅是可选增强项。[/dim]"
+    )
 
 
 def _run(cmd: list[str], cwd: str | None = None) -> str:

@@ -187,3 +187,28 @@ def test_missing_key_message_does_not_recommend_plaintext_yaml(monkeypatch) -> N
     text = output.getvalue()
     assert "系统凭据库" in text
     assert "config.yaml 中配置 api_key" not in text
+
+
+def test_onboarding_reports_keyless_search_as_ready(monkeypatch) -> None:
+    output = StringIO()
+    monkeypatch.setattr(onboarding, "console", Console(file=output, force_terminal=False))
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+
+    onboarding._report_search_readiness()
+
+    text = output.getvalue()
+    assert "网络搜索" in text
+    assert "零配置" in text
+    assert "无需搜索 API Key" in text
+
+
+def test_onboarding_masks_enhanced_search_credentials(monkeypatch) -> None:
+    output = StringIO()
+    monkeypatch.setattr(onboarding, "console", Console(file=output, force_terminal=False))
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "search-secret-value")
+
+    onboarding._report_search_readiness()
+
+    text = output.getvalue()
+    assert "已增强" in text
+    assert "search-secret-value" not in text

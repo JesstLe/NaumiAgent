@@ -7,7 +7,11 @@ import pytest
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.model.router import ModelResponse
 from naumi_agent.orchestrator.engine import AgentEngine
-from naumi_agent.ui.doctor import render_doctor_report, run_doctor
+from naumi_agent.ui.doctor import (
+    _check_search_readiness,
+    render_doctor_report,
+    run_doctor,
+)
 
 
 def _config(tmp_path) -> AppConfig:
@@ -35,11 +39,39 @@ async def test_run_doctor_checks_local_environment(tmp_path) -> None:
     names = {check.name: check for check in report.checks}
     assert names["Python 环境"].status == "pass"
     assert names["API key"].status == "pass"
+    assert names["网络搜索"].status == "pass"
+    assert "零配置" in names["网络搜索"].detail
     assert names["workspace 权限"].status == "pass"
     assert names["browser daemon"].status == "warn"
     assert names["debug log 写入权限"].status == "pass"
     assert "环境诊断" in rendered
     assert "可直接复制" in rendered
+
+
+@pytest.mark.asyncio
+async def test_doctor_reports_enhanced_search_when_brave_key_exists(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "configured-secret")
+
+    report = await run_doctor(_config(tmp_path), workspace_root=tmp_path)
+
+    check = next(item for item in report.checks if item.name == "网络搜索")
+    assert check.status == "pass"
+    assert "已增强" in check.detail
+    assert "configured-secret" not in check.detail
+
+
+def test_search_readiness_reports_restricted_without_any_route(monkeypatch) -> None:
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+
+    check = _check_search_readiness(
+        direct_search_available=False,
+        browser_fallback_available=False,
+    )
+
+    assert check.status == "warn"
+    assert "受限" in check.detail
 
 
 @pytest.mark.asyncio
