@@ -26,7 +26,7 @@ test("phase 1: complete conversation renders without footer overlap", () => {
 
   assert(plain.includes("生成一个展示页面"));
   assert(plain.includes("我会创建文件并验证。"));
-  assert(plain.includes("default >"));
+  assert(plain.includes("chat >"));
   assert(lines.every((line) => visibleWidth(line) <= 88));
 });
 
