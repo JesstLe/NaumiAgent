@@ -63,6 +63,10 @@ class PermissionGrantStore:
             if grant.session_id == session_id
         )
 
+    def list_all(self) -> tuple[PermissionGrant, ...]:
+        """Return an immutable snapshot of every active grant in creation order."""
+        return tuple(self._grants_by_id.values())
+
     def revoke(self, grant_id: str, session_id: str) -> bool:
         """Revoke a matching grant without allowing cross-session removal."""
         grant = self._grants_by_id.get(grant_id)

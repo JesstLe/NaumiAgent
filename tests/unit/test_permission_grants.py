@@ -85,3 +85,17 @@ class TestPermissionGrantStore:
 
         with pytest.raises(FrozenInstanceError):
             grant.tool_family = "code_execution"  # type: ignore[misc]
+
+    def test_list_all_returns_an_ordered_immutable_snapshot_of_all_sessions(self) -> None:
+        store = PermissionGrantStore()
+        first = store.create("session-a", "shell", "call-1")
+        second = store.create("session-b", "code_execution", "call-2")
+
+        snapshot = store.list_all()
+
+        assert isinstance(snapshot, tuple)
+        assert snapshot == (first, second)
+
+        store.clear()
+
+        assert snapshot == (first, second)
