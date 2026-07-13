@@ -1069,6 +1069,118 @@ test("terminal UI process keeps inspector live without stealing drafts or permis
   }
 });
 
+test("terminal UI process opens agent control and confirms exactly one stop", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    app.stdin.write("/agents\n");
+    await waitForLatestScreen(output, "Agent Control Center", 7000);
+    await waitForLatestScreen(output, "真实编程 Agent", 7000);
+    app.stdin.write("\t");
+    await waitForLatestScreen(output, "[执行]");
+    await waitForLatestScreen(output, "task-agent-1");
+    app.stdin.write("x");
+    await waitForLatestScreen(output, "确认停止 task-agent-1");
+    app.stdin.write("y");
+    await waitForLatestScreen(output, "cancelled", 7000);
+
+    app.stdin.write("y");
+    await delay(80);
+    const events = readDebugEvents(app.debugLogPath);
+    const stops = events.filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "agents/stop",
+    );
+    assert.equal(stops.length, 1);
+    assert.equal(stops[0].payload.record.payload.task_id, "task-agent-1");
+    assert.equal(
+      events.filter(
+        (record) => record.event === "protocol.send"
+          && record.payload.record.type === "submit"
+          && record.payload.record.payload.text === "/agents",
+      ).length,
+      0,
+    );
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI permission modal wins over agent page action keys", async () => {
+  const app = launchTerminalUi("fake-bridge.js", {
+    env: { NAUMI_TEST_AGENT_PERMISSION: "1" },
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    app.stdin.write("/agents\n");
+    await waitForLatestScreen(output, "Agent Control Center", 7000);
+    await waitForLatestScreen(output, "permission: agent_sensitive_tool", 7000);
+    app.stdin.write("x");
+    await delay(40);
+    app.stdin.write("y");
+    await delay(120);
+
+    const events = readDebugEvents(app.debugLogPath);
+    assert.equal(
+      events.filter(
+        (record) => record.event === "protocol.send"
+          && record.payload.record.type === "agents/stop",
+      ).length,
+      0,
+    );
+    const permission = events.find(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "permission_response",
+    );
+    assert(permission);
+    assert.equal(permission.payload.record.payload.choice, "allow");
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process restores an open agent page with a fresh backend snapshot", async () => {
+  const statePath = path.join(
+    tmpdir(),
+    `naumi-terminal-ui-agents-${Date.now()}-${Math.random()}.json`,
+  );
+  const first = launchTerminalUi("fake-bridge.js", { statePath });
+  const firstOutput = collectOutput(first);
+
+  try {
+    await waitForOutput(firstOutput, "新终端 UI 已连接 Python bridge。", 7000);
+    first.stdin.write("/agents\n");
+    await waitForLatestScreen(firstOutput, "Agent Control Center", 7000);
+    assert.equal(await stopTerminalUi(first), 0);
+
+    const second = launchTerminalUi("fake-bridge.js", { statePath });
+    const secondOutput = collectOutput(second);
+    try {
+      await waitForLatestScreen(secondOutput, "Agent Control Center", 7000);
+      await waitForLatestScreen(secondOutput, "真实编程 Agent", 7000);
+      const request = readDebugEvents(second.debugLogPath).find(
+        (record) => record.event === "protocol.send"
+          && record.payload.record.type === "agents/request"
+          && record.payload.record.payload.open === true,
+      );
+      assert(request);
+      assert.equal(request.payload.record.payload.session_id, "session-fake-1");
+      assert.equal(await stopTerminalUi(second), 0);
+    } finally {
+      forceKill(second);
+    }
+  } finally {
+    forceKill(first);
+    fs.rmSync(statePath, { force: true });
+  }
+});
+
 test("terminal UI process restores an open session inspector with a fresh backend snapshot", async () => {
   const statePath = path.join(
     tmpdir(),
@@ -1127,6 +1239,7 @@ function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
         NAUMI_TERMINAL_UI_STATE_PATH: options.statePath
           || path.join(tmpdir(), `naumi-terminal-ui-state-${Date.now()}-${Math.random()}.json`),
         NAUMI_TERMINAL_UI_DEBUG_LOG: debugLogPath,
+        ...(options.env || {}),
       },
     },
   );

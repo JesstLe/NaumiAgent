@@ -14,6 +14,59 @@ import {
 } from "../src/render.js";
 import { detachTimeline } from "../src/timeline-follow.js";
 import { renderRuntimeInspector } from "../src/components/runtime-inspector.js";
+import { renderAgentControlPage } from "../src/components/agent-control-page.js";
+
+test("agent control page renders bounded wide and narrow authoritative layouts", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-agents";
+  state.route = { name: "agents", originAnchor: null };
+  state.agents.open = true;
+  state.agents.selectedTab = "executions";
+  state.agents.selectedByTab.executions = "task-1";
+  state.agents.detailId = "task-1";
+  state.agents.revision = 3;
+  state.agents.snapshot = {
+    schema_version: 1,
+    session_id: "session-agents",
+    revision: 3,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    summary: { total_agents: 1, active_agents: 1, attention_agents: 0, stoppable_executions: 1, pending_messages: 0 },
+    agents: [{ name: "coder", description: "编程 Agent", kind: "preset", state: "running", task_count: 1, model_tier: "capable", capabilities: ["代码"], tools: ["file_read"], permission_level: "moderate", age_ms: 500, heartbeat_age_ms: 100 }],
+    executions: [{ task_id: "task-1", session_id: "session-agents", agent_name: "coder", description: "实现控制中心", status: "running", phase: "running_tool", started_at: 1, finished_at: null, elapsed_ms: 1000, heartbeat_age_ms: 100, current_tool: "file_read", recent_tools: ["file_read"], total_tokens: 42, total_cost_usd: 0.01, turns: 2, error: "", stop_supported: true, stop_requested: false }],
+    team_messages: [],
+    blackboard: [],
+    warnings: [],
+  };
+
+  const wide = renderAgentControlPage(state.agents, 120, 20).map(stripAnsi);
+  const narrow = renderAgentControlPage(state.agents, 72, 16).map(stripAnsi);
+  assert(wide.some((line) => line.includes("Agent Control Center")));
+  assert(wide.some((line) => line.includes("task-1")));
+  assert(wide.some((line) => line.includes("当前工具 · file_read")));
+  assert(narrow.some((line) => line.includes("执行详情")));
+  assert.equal(wide.length, 20);
+  assert.equal(narrow.length, 16);
+  assert(renderAgentControlPage(state.agents, 120, 20).every((line) => visibleWidth(line) <= 120));
+  assert(renderAgentControlPage(state.agents, 72, 16).every((line) => visibleWidth(line) <= 72));
+});
+
+test("agent control page distinguishes loading empty stale and error states", () => {
+  const state = createInitialState();
+  state.agents.open = true;
+  state.agents.loading = true;
+  assert(renderAgentControlPage(state.agents, 80, 10).map(stripAnsi).join("\n").includes("正在加载"));
+
+  state.agents.loading = false;
+  state.agents.snapshot = { summary: {}, agents: [], executions: [], team_messages: [], blackboard: [], warnings: [], revision: 1, generated_at: "now" };
+  assert(renderAgentControlPage(state.agents, 80, 10).map(stripAnsi).join("\n").includes("暂无 Agent"));
+
+  state.agents.stale = true;
+  state.agents.error = "刷新失败";
+  assert(renderAgentControlPage(state.agents, 80, 10).map(stripAnsi).join("\n").includes("已过期"));
+
+  state.agents.snapshot = null;
+  assert(renderAgentControlPage(state.agents, 80, 10).map(stripAnsi).join("\n").includes("加载失败"));
+});
 
 test("markdown code blocks show a bounded excerpt with lightweight highlighting", () => {
   const codeLines = Array.from({ length: 45 }, (_, index) => `const value${index} = ${index};`);

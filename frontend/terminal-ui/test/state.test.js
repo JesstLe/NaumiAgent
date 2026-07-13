@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { stripAnsi } from "../src/ansi.js";
+import { INPUT_KEYS } from "../src/input-buffer.js";
 import { renderScreen } from "../src/render.js";
 import {
   createInitialState,
@@ -9,6 +10,7 @@ import {
   extractTaskPanelItems,
   failQueuedUserMessages,
   getFoldEntries,
+  handleAgentControlKey,
   handleRuntimeInspectorKey,
   handleSubmitText,
   hasTaskPanelFocus,
@@ -20,8 +22,206 @@ import {
   retryUserMessage,
   submitTaskMessage,
   toggleComposerIntent,
+  toggleAgentControlCenter,
   toggleRuntimeInspector,
 } from "../src/state.js";
+
+function agentSnapshot(revision = 1) {
+  return {
+    schema_version: 1,
+    session_id: "session-agents",
+    revision,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    summary: {
+      total_agents: 1,
+      active_agents: 1,
+      attention_agents: 0,
+      stoppable_executions: 1,
+      pending_messages: 1,
+    },
+    agents: [{
+      name: "coder",
+      description: "编程 Agent",
+      kind: "preset",
+      state: "running",
+      task_count: 1,
+      model_tier: "capable",
+      capabilities: ["代码"],
+      tools: ["file_read"],
+      permission_level: "moderate",
+      age_ms: 500,
+      heartbeat_age_ms: 100,
+    }],
+    executions: [{
+      task_id: "task-1",
+      session_id: "session-agents",
+      agent_name: "coder",
+      description: "实现控制中心",
+      status: "running",
+      phase: "running_tool",
+      started_at: 1,
+      finished_at: null,
+      elapsed_ms: 1000,
+      heartbeat_age_ms: 100,
+      current_tool: "file_read",
+      recent_tools: ["file_read"],
+      total_tokens: 42,
+      total_cost_usd: 0.01,
+      turns: 2,
+      error: "",
+      stop_supported: true,
+      stop_requested: false,
+    }],
+    team_messages: [{
+      sender: "coder",
+      recipient: "reviewer",
+      topic: "review",
+      priority: "high",
+      timestamp: 1,
+      content: "请检查实现",
+    }],
+    blackboard: [{
+      key: "team/review",
+      author: "coder",
+      version: 1,
+      timestamp: 1,
+      value_summary: "ready",
+    }],
+    warnings: [],
+  };
+}
+
+test("agent control route preserves conversation presentation and applies revisioned state", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+  state.currentSessionId = "session-agents";
+  state.input = "尚未发送的草稿";
+  state.scrollOffset = 17;
+  state.inspector.open = true;
+  state.inspector.selectedTab = "changes";
+  const messageCount = state.messages.length;
+
+  toggleAgentControlCenter(state, send, true);
+  assert.equal(state.route.name, "agents");
+  assert.equal(state.input, "尚未发送的草稿");
+  assert.equal(state.scrollOffset, 17);
+  assert.equal(state.inspector.selectedTab, "changes");
+  assert.equal(state.messages.length, messageCount);
+  assert.deepEqual(sent[0], {
+    type: "agents/request",
+    payload: { open: true, known_revision: 0, session_id: "session-agents" },
+  });
+
+  reduceServerEvent(state, { type: "agents/snapshot", payload: agentSnapshot(1) });
+  assert.equal(state.agents.revision, 1);
+  assert.equal(state.agents.snapshot.executions[0].task_id, "task-1");
+  const update = agentSnapshot(2);
+  const effects = reduceServerEvent(state, {
+    type: "agents/update",
+    payload: {
+      schema_version: 1,
+      session_id: "session-agents",
+      revision: 2,
+      generated_at: update.generated_at,
+      changed_sections: { warnings: ["延迟"] },
+    },
+  });
+  assert.deepEqual(effects, []);
+  assert.deepEqual(state.agents.snapshot.warnings, ["延迟"]);
+
+  const gapEffects = reduceServerEvent(state, {
+    type: "agents/update",
+    payload: {
+      schema_version: 1,
+      session_id: "session-agents",
+      revision: 4,
+      generated_at: update.generated_at,
+      changed_sections: { warnings: [] },
+    },
+  });
+  assert.deepEqual(gapEffects, [{
+    type: "refresh_agents",
+    knownRevision: 2,
+    sessionId: "session-agents",
+  }]);
+
+  toggleAgentControlCenter(state, send, false);
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.input, "尚未发送的草稿");
+  assert.equal(state.scrollOffset, 17);
+  assert.equal(state.inspector.open, true);
+});
+
+test("agent control keyboard uses stable tabs and confirms one authoritative stop", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+  state.currentSessionId = "session-agents";
+  toggleAgentControlCenter(state, send, true);
+  reduceServerEvent(state, { type: "agents/snapshot", payload: agentSnapshot(1) });
+
+  assert.equal(state.agents.selectedTab, "agents");
+  assert.equal(handleAgentControlKey(state, INPUT_KEYS.tab, send), true);
+  assert.equal(state.agents.selectedTab, "executions");
+  assert.equal(handleAgentControlKey(state, "x", send), true);
+  assert.equal(state.agents.stopConfirmationTaskId, "task-1");
+  assert.equal(handleAgentControlKey(state, "n", send), true);
+  assert.equal(state.agents.stopConfirmationTaskId, "");
+  assert.equal(sent.filter((item) => item.type === "agents/stop").length, 0);
+
+  handleAgentControlKey(state, "x", send);
+  handleAgentControlKey(state, "y", send);
+  handleAgentControlKey(state, "y", send);
+  const stops = sent.filter((item) => item.type === "agents/stop");
+  assert.equal(stops.length, 1);
+  assert.deepEqual(stops[0].payload, {
+    session_id: "session-agents",
+    task_id: "task-1",
+    reason: "用户在 Agent 控制中心确认停止。",
+  });
+  assert.equal(state.agents.snapshot.executions[0].status, "running");
+  assert.equal(state.agents.actionPendingTaskId, "task-1");
+
+  reduceServerEvent(state, {
+    type: "agents/action",
+    payload: {
+      task_id: "task-1",
+      accepted: true,
+      code: "accepted",
+      message: "已请求停止。",
+    },
+  });
+  assert.equal(state.agents.actionPendingTaskId, "task-1");
+  assert.equal(state.agents.actionMessage, "已请求停止。");
+
+  const stopping = agentSnapshot(2);
+  stopping.executions[0].status = "stopping";
+  stopping.executions[0].phase = "stopping";
+  stopping.executions[0].stop_supported = false;
+  stopping.executions[0].stop_requested = true;
+  reduceServerEvent(state, { type: "agents/snapshot", payload: stopping });
+  assert.equal(state.agents.actionPendingTaskId, "task-1");
+
+  const terminal = agentSnapshot(3);
+  terminal.executions[0].status = "cancelled";
+  terminal.executions[0].phase = "finished";
+  terminal.executions[0].stop_supported = false;
+  terminal.executions[0].stop_requested = true;
+  reduceServerEvent(state, { type: "agents/snapshot", payload: terminal });
+  assert.equal(state.agents.actionPendingTaskId, "");
+
+  handleAgentControlKey(state, INPUT_KEYS.tab, send);
+  assert.equal(state.agents.selectedTab, "team");
+  handleAgentControlKey(state, INPUT_KEYS.shiftTab, send);
+  assert.equal(state.agents.selectedTab, "executions");
+
+  const persisted = createUiSnapshot(state);
+  assert.equal(persisted.agents.open, true);
+  assert.equal(persisted.agents.selectedTab, "executions");
+  assert.equal("snapshot" in persisted.agents, false);
+  assert.equal("revision" in persisted.agents, false);
+});
 
 test("assistant stream updates one active message", () => {
   const state = createInitialState();

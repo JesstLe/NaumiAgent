@@ -9,6 +9,7 @@ import {
 import { createRenderContext, renderComponent } from "./components/core.js";
 import { renderFooter, renderFooterSections } from "./components/footer.js";
 import { Message } from "./components/message.js";
+import { renderAgentControlPage } from "./components/agent-control-page.js";
 import { renderRuntimeInspector } from "./components/runtime-inspector.js";
 import { renderCachedMessage } from "./render-cache.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
@@ -24,9 +25,11 @@ export function renderScreen(state, width, height, env = {}) {
   const footer = clampFooterSections(renderFooterSections(state, width, env), height);
   const footerHeight = footer.length;
   const bodyHeight = Math.max(1, height - footerHeight);
-  const visible = state.inspector?.open
-    ? renderInspectorLayout(state, width, bodyHeight, env)
-    : renderMainViewport(state, width, bodyHeight, env);
+  const visible = state.route?.name === "agents"
+    ? renderAgentControlPage(state.agents, width, bodyHeight)
+    : state.inspector?.open
+      ? renderInspectorLayout(state, width, bodyHeight, env)
+      : renderMainViewport(state, width, bodyHeight, env);
   return [
     ...visible.map((line) => padRight(line, width)),
     ...footer.map((line) => padRight(line, width)),
