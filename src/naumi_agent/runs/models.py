@@ -77,6 +77,7 @@ class ReceiptChange:
     path: str
     status: str
     source_tool: str = ""
+    scope: str = "task"
     additions: int = 0
     deletions: int = 0
 
@@ -87,6 +88,7 @@ class ReceiptChange:
             path=_text(data.get("path"), "change.path", required=True),
             status=_text(data.get("status"), "change.status", required=True),
             source_tool=_text(data.get("source_tool"), "change.source_tool"),
+            scope=_text(data.get("scope") or "task", "change.scope", required=True),
             additions=_nonnegative(data.get("additions", 0), "change.additions"),
             deletions=_nonnegative(data.get("deletions", 0), "change.deletions"),
         )
