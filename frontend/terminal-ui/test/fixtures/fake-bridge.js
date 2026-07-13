@@ -141,6 +141,7 @@ attachJsonlLineReader(process.stdin, (line) => {
   }
 
   if (record.type === "permission_response") {
+    const targetRun = activeRun;
     emit("permission/resolved", { request_id: payload.request_id, choice: payload.choice });
     if (payload.choice === "bypass") {
       mode = "bypass";
@@ -156,6 +157,7 @@ attachJsonlLineReader(process.stdin, (line) => {
       elapsed_ms: 120,
     });
     setTimeout(() => {
+      if (!targetRun || activeRun?.requestId !== targetRun.requestId) return;
       emitUi({
         type: "tool_use",
         tool_call_id: "call-1",
@@ -171,7 +173,7 @@ attachJsonlLineReader(process.stdin, (line) => {
         content_preview: ["--- a/showcase/index.html", "+++ b/showcase/index.html", "@@", "-old", "+new", ...Array.from({ length: 65 }, (_, index) => `+line ${index}`)].join("\n"),
         content_length: 640,
       });
-      emit("run/completed", {});
+      emit("run/completed", {}, targetRun.requestId);
       activeRun = null;
     }, 30);
     return;

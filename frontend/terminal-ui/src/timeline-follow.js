@@ -70,6 +70,12 @@ export function timelineOutputKey(record, entryId = "") {
     const requestId = normalizeIdentity(record?.request_id ?? record?.id ?? entryId);
     return requestId ? `permission:${requestId}` : null;
   }
+  if (record?.type === "run/completed" || record?.type === "run/cancelled") {
+    const requestId = record.type === "run/cancelled"
+      ? normalizeIdentity(payload.target_request_id) || normalizeIdentity(record?.request_id)
+      : normalizeIdentity(record?.request_id);
+    return requestId ? `run:${requestId}` : null;
+  }
   if (record?.type !== "ui/message") return null;
 
   if (payload.type === "assistant_stream") {

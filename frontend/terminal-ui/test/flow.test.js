@@ -75,7 +75,7 @@ test("terminal UI consumes a first-phase conversation event flow", () => {
     { type: "run/completed", payload: {} },
   ]);
 
-  const lines = renderScreen(state, 100, 32, { cwd: "/Users/lv/Workspace/NaumiAgent", home: "/Users/lv" });
+  const lines = renderScreen(state, 100, 40, { cwd: "/Users/lv/Workspace/NaumiAgent", home: "/Users/lv" });
   const plain = lines.map(stripAnsi).join("\n");
 
   assert.equal(state.mode, "bypass");

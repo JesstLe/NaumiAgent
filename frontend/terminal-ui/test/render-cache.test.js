@@ -24,10 +24,11 @@ test("render cache misses when streaming content changes", () => {
   reduceServerEvent(state, { type: "ui/message", payload: { type: "assistant_stream", phase: "token", content: "A" } });
 
   renderScreen(state, 80, 12, { cwd: "/tmp", home: "/Users/lv" });
+  const missesBeforeUpdate = state.renderCache.misses;
   reduceServerEvent(state, { type: "ui/message", payload: { type: "assistant_stream", phase: "token", content: "B" } });
   const plain = renderScreen(state, 80, 12, { cwd: "/tmp", home: "/Users/lv" }).map(stripAnsi).join("\n");
 
-  assert.equal(state.renderCache.misses, 2);
+  assert.equal(state.renderCache.misses, missesBeforeUpdate + 1);
   assert(plain.includes("AB"));
 });
 
@@ -53,6 +54,31 @@ test("render cache misses when live activity progress changes", () => {
   assert(plain.includes("生成中 ["));
   assert(plain.includes("88 lines"));
   assert(plain.includes("2.4s"));
+});
+
+test("run activity updates remain visible after an in-place phase transition", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "submit-cache-activity",
+    payload: { task: "验证活动缓存" },
+  });
+
+  const before = renderScreen(state, 90, 18, { cwd: "/tmp", home: "/Users/lv" })
+    .map(stripAnsi)
+    .join("\n");
+  reduceServerEvent(state, {
+    type: "permission/request",
+    request_id: "permission-cache-activity",
+    payload: { tool_name: "bash_run", reason: "验证缓存刷新" },
+  });
+  const after = renderScreen(state, 90, 18, { cwd: "/tmp", home: "/Users/lv" })
+    .map(stripAnsi)
+    .join("\n");
+
+  assert(before.includes("准备运行"));
+  assert(after.includes("等待权限"));
+  assert(after.includes("权限请求 1"));
 });
 
 test("render cache misses when tool prepare progress summary changes", () => {
