@@ -7,7 +7,7 @@ import json
 import subprocess
 import sys
 import types
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -17,6 +17,7 @@ import pytest
 
 from naumi_agent.background.models import BackgroundStatus
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.model.router import StreamChunk
 from naumi_agent.orchestrator.engine import AgentEngine, AgentResult, AgentRuntimeMode, AgentUsage
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
@@ -548,6 +549,21 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
         "choice": "allow",
     }
 
+    inspector_record = normalize_client_record({
+        "type": "inspector/request",
+        "payload": {
+            "open": "true",
+            "known_revision": "7",
+            "session_id": " session-1 ",
+            "ignored": "value",
+        },
+    })
+    assert inspector_record["payload"] == {
+        "open": True,
+        "known_revision": 7,
+        "session_id": "session-1",
+    }
+
     with pytest.raises(ValueError, match="协议 version 不兼容"):
         normalize_client_record({
             "type": ClientEventType.PING,
@@ -578,6 +594,195 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
             "type": "run_cancel",
             "payload": {"reason": "x" * 501},
         })
+
+    with pytest.raises(ValueError, match="known_revision"):
+        normalize_client_record({
+            "type": "inspector/request",
+            "payload": {"known_revision": -1},
+        })
+
+
+@pytest.mark.asyncio
+async def test_bridge_inspector_snapshot_updates_and_session_isolation(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(
+        AppConfig(
+            workspace_root=str(tmp_path),
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "vectors"),
+                long_term_enabled=False,
+            ),
+        )
+    )
+    try:
+        session = await engine.get_or_create_session(title="Inspector Bridge")
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+
+        await bridge.handle_client_record({
+            "id": "inspector-open",
+            "type": "inspector/request",
+            "payload": {"open": True, "known_revision": 0},
+        })
+        snapshot = [
+            record
+            for record in _records(writer)
+            if record["type"] == "inspector/snapshot"
+        ][-1]
+        assert snapshot["request_id"] == "inspector-open"
+        assert snapshot["payload"]["session_id"] == session.id
+        first_revision = snapshot["payload"]["revision"]
+
+        event = {
+            "event_id": "inspector-tool-1",
+            "session_id": session.id,
+            "run_id": "run-inspector",
+            "name": "file_read",
+            "call_id": "read-1",
+            "args": json.dumps({"path": "README.md"}),
+        }
+        engine.runtime_inspector.observe("tool_start", event)
+        await bridge.handle_engine_event("tool_start", event)
+
+        update = [
+            record
+            for record in _records(writer)
+            if record["type"] == "inspector/update"
+        ][-1]
+        assert update["payload"]["revision"] > first_revision
+        assert set(update["payload"]["changed_tabs"]) == {"tools"}
+        assert update["payload"]["changed_tabs"]["tools"]["items"][0]["call_id"] == "read-1"
+
+        before_rejection = len(_records(writer))
+        await bridge.handle_client_record({
+            "id": "inspector-wrong-session",
+            "type": "inspector/request",
+            "payload": {
+                "open": True,
+                "known_revision": update["payload"]["revision"],
+                "session_id": "another-session",
+            },
+        })
+        rejected = _records(writer)[before_rejection:]
+        assert rejected[-1]["type"] == "error"
+        assert rejected[-1]["payload"]["code"] == "inspector_session_mismatch"
+
+        await bridge.handle_client_record({
+            "id": "inspector-close",
+            "type": "inspector/request",
+            "payload": {"open": False},
+        })
+        close_index = len(_records(writer))
+        second_event = {
+            "event_id": "inspector-tool-2",
+            "session_id": session.id,
+            "run_id": "run-inspector",
+            "name": "file_read",
+            "call_id": "read-2",
+        }
+        engine.runtime_inspector.observe("tool_start", second_event)
+        await bridge.handle_engine_event("tool_start", second_event)
+        after_close = _records(writer)[close_index:]
+        assert not any(record["type"].startswith("inspector/") for record in after_close)
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_inspector_known_revision_gap_gets_full_snapshot(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(
+        AppConfig(
+            workspace_root=str(tmp_path),
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "vectors"),
+                long_term_enabled=False,
+            ),
+        )
+    )
+    try:
+        await engine.get_or_create_session(title="Inspector Gap")
+        await engine.runtime_inspector.snapshot()
+        engine.runtime_inspector.observe(
+            "tool_start",
+            {"event_id": "gap-tool", "name": "file_read", "call_id": "gap-1"},
+        )
+        await engine.runtime_inspector.snapshot()
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+
+        await bridge.handle_client_record({
+            "id": "inspector-gap",
+            "type": "inspector/request",
+            "payload": {"open": True, "known_revision": 0},
+        })
+
+        records = _records(writer)
+        assert records[-1]["type"] == "inspector/snapshot"
+        assert records[-1]["payload"]["revision"] >= 2
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_inspector_top_level_only_revision_uses_full_snapshot(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(
+        AppConfig(
+            workspace_root=str(tmp_path),
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "vectors"),
+                long_term_enabled=False,
+            ),
+        )
+    )
+    try:
+        session = await engine.get_or_create_session(title="Inspector Top Level")
+        initial = RuntimeInspectorSnapshot.empty(session_id=session.id).with_revision(
+            1,
+            "2026-07-13T00:00:00+00:00",
+        )
+        changed = replace(
+            initial,
+            revision=2,
+            generated_at="2026-07-13T00:00:01+00:00",
+            active_run_id="run-new",
+        )
+        snapshots = iter((initial, changed))
+        engine.runtime_inspector.snapshot = AsyncMock(  # type: ignore[method-assign]
+            side_effect=lambda: next(snapshots)
+        )
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+
+        await bridge.handle_client_record({
+            "id": "inspector-top-open",
+            "type": "inspector/request",
+            "payload": {"open": True},
+        })
+        await bridge.handle_engine_event("run_started", {"run_id": "run-new"})
+
+        inspector_records = [
+            record
+            for record in _records(writer)
+            if record["type"].startswith("inspector/")
+        ]
+        assert [record["type"] for record in inspector_records] == [
+            "inspector/snapshot",
+            "inspector/snapshot",
+        ]
+        assert inspector_records[-1]["payload"]["active_run_id"] == "run-new"
+    finally:
+        await engine.shutdown()
 
 
 @pytest.mark.asyncio
