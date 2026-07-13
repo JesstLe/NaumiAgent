@@ -1871,6 +1871,121 @@ test("run activity terminal event releases active pointer and preserves receipt"
   assert.equal(state.messages.at(-1), activity);
 });
 
+test("completion receipt is deduplicated and finalized after run activity", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "submit-receipt-1",
+    payload: { task: "修改并验证" },
+  });
+  reduceServerEvent(state, {
+    type: "completion/receipt",
+    request_id: "submit-receipt-1",
+    payload: {
+      schema_version: 1,
+      receipt_id: "receipt-ui-1",
+      run_id: "run-ui-1",
+      outcome: "partial",
+      summary: "验证失败，已保留改动。",
+      changes: [{ path: "src/app.py", status: "modified", additions: 3, deletions: 1 }],
+      validations: [{ command: "pytest -q", status: "failed", exit_code: 1, failed: 1 }],
+      unverified: [],
+      approvals: [],
+      risks: [{ code: "validation_failed", level: "high", message: "1 项验证失败。" }],
+      git_state: { available: true, branch: "main", dirty: true },
+      next_actions: [{ id: "retry", label: "重试失败验证", kind: "retry_validation" }],
+      evidence_refs: ["run:run-ui-1:tool:test-1"],
+      duration_ms: 1200,
+    },
+  });
+  reduceServerEvent(state, {
+    type: "completion/receipt",
+    request_id: "submit-receipt-1",
+    payload: {
+      schema_version: 1,
+      receipt_id: "receipt-ui-1",
+      run_id: "run-ui-1",
+      outcome: "partial",
+      summary: "不应覆盖已接收回执。",
+    },
+  });
+  reduceServerEvent(state, {
+    type: "run/completed",
+    request_id: "submit-receipt-1",
+    payload: {
+      status: "completed",
+      receipt_id: "receipt-ui-1",
+      run_id: "run-ui-1",
+    },
+  });
+
+  const receipts = state.messages.filter((message) => message.kind === "completion_receipt");
+  assert.equal(receipts.length, 1);
+  assert.equal(receipts[0].receipt.summary, "验证失败，已保留改动。");
+  assert.equal(state.messages.at(-1), receipts[0]);
+  assert.equal(state.activeRunActivity, null);
+});
+
+test("replayed completion receipt remains visible without an active run", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "completion/receipt",
+    request_id: "resume-1",
+    payload: {
+      schema_version: 1,
+      receipt_id: "receipt-history",
+      run_id: "run-history",
+      outcome: "cancelled",
+      summary: "历史运行已取消。",
+      changes: [],
+      validations: [],
+      unverified: [],
+      approvals: [],
+      risks: [],
+      git_state: { available: false, dirty: false },
+      next_actions: [],
+      evidence_refs: [],
+    },
+  });
+
+  assert.equal(state.messages.at(-1).kind, "completion_receipt");
+  assert.equal(state.messages.at(-1).receipt.outcome, "cancelled");
+});
+
+test("cancelled run keeps its authoritative receipt as the final card", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "submit-cancel-receipt",
+    payload: { task: "执行后取消" },
+  });
+  reduceServerEvent(state, {
+    type: "completion/receipt",
+    request_id: "submit-cancel-receipt",
+    payload: {
+      schema_version: 1,
+      receipt_id: "receipt-cancelled",
+      run_id: "run-cancelled",
+      outcome: "cancelled",
+      summary: "运行已取消，改动证据已保留。",
+    },
+  });
+  reduceServerEvent(state, {
+    type: "run/cancelled",
+    request_id: "cancel-request",
+    payload: {
+      target_request_id: "submit-cancel-receipt",
+      receipt_id: "receipt-cancelled",
+      run_id: "run-cancelled",
+      reason: "用户取消。",
+    },
+  });
+
+  assert.equal(state.messages.at(-1).kind, "completion_receipt");
+  assert.equal(state.messages.at(-1).receiptId, "receipt-cancelled");
+});
+
 test("run activity keeps sequential same-name tools distinct without call ids", () => {
   const state = createInitialState();
   reduceServerEvent(state, {

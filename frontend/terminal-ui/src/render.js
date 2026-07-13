@@ -12,6 +12,7 @@ import { jumpTimelineToLatest } from "./timeline-follow.js";
 
 export { boxLines } from "./components/core.js";
 export { renderFooter } from "./components/footer.js";
+export { renderCompletionReceiptCard } from "./components/completion-receipt-card.js";
 export { renderMarkdownExcerpt, renderToolOutput } from "./components/markdown.js";
 export { renderMessage } from "./components/message.js";
 export { renderToolCard } from "./components/tool-card.js";

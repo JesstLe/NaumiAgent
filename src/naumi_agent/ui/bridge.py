@@ -671,6 +671,7 @@ class JsonlEngineBridge:
                     message,
                     code=code,
                     request_id=request_id,
+                    details=_receipt_reference(self._active_completion_receipt),
                 )
             finally:
                 if self._active_run_context.get("request_id") == request_id:
@@ -832,6 +833,7 @@ class JsonlEngineBridge:
                         "mission_id": mission_id,
                         "intent": "task",
                         "task_status": TaskStatus.BLOCKED.value,
+                        **_receipt_reference(self._active_completion_receipt),
                     },
                 )
             finally:
