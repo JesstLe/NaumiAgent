@@ -601,6 +601,15 @@ class JsonlEngineBridge:
                     code=code,
                     request_id=request_id,
                 )
+                await self.emit(
+                    ServerEventType.RUN_COMPLETED,
+                    {
+                        "status": "failed",
+                        "response": "",
+                        "error": message,
+                    },
+                    request_id=request_id,
+                )
             finally:
                 await self.emit(ServerEventType.STATUS, self.status_payload())
 
