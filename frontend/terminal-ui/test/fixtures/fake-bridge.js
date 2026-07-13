@@ -41,8 +41,8 @@ attachJsonlLineReader(process.stdin, (line) => {
       process.stdout.write('{"type":"unknown/server","payload":{}}\n');
       return;
     }
-    emit("run/started", {});
-    emit("user/message", { content: payload.text ?? "" });
+    emit("run/started", {}, record.id);
+    emit("user/message", { content: payload.text ?? "" }, record.id);
     emitUi({ type: "assistant_stream", phase: "start" });
     emitUi({ type: "assistant_stream", phase: "token", content: "收到，我会创建一个可验证页面。" });
     emitUi({ type: "assistant_stream", phase: "end" });

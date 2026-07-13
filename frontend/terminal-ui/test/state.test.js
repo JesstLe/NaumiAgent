@@ -114,7 +114,7 @@ test("synchronous sender failure leaves one retryable failed message", () => {
   assert.equal(users.length, 1);
   assert.equal(users[0].deliveryStatus, "failed");
   assert.equal(users[0].errorCode, "transport_write_failed");
-  assert.match(users[0].errorMessage, /发送失败/);
+  assert.match(users[0].errorMessage, /无法写入本地 Bridge/);
 });
 
 test("transport failure terminates queued messages but preserves accepted ones", () => {
@@ -150,6 +150,63 @@ test("unmatched backend user message still renders once as accepted", () => {
   assert.equal(user.kind, "user");
   assert.equal(user.requestId, "external-client");
   assert.equal(user.deliveryStatus, "accepted");
+});
+
+test("retry reuses one failed bubble with a new request id", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload, options = {}) => {
+    sent.push({ type, payload, id: options.id });
+    return options.id;
+  };
+  handleSubmitText(state, "失败消息", send);
+  const message = state.messages.at(-1);
+  const oldRequestId = message.requestId;
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: oldRequestId,
+    payload: { code: "run_in_progress", message: "当前任务仍在执行。" },
+  });
+
+  handleSubmitText(state, "/retry", send);
+
+  assert.equal(state.messages.filter((item) => item.kind === "user").length, 1);
+  assert.equal(message.deliveryStatus, "queued");
+  assert.equal(message.attempt, 2);
+  assert.notEqual(message.requestId, oldRequestId);
+  assert.equal(sent.at(-1).payload.text, "失败消息");
+});
+
+test("retry can select a failed request and warns when none is eligible", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload, options = {}) => {
+    sent.push({ type, payload, id: options.id });
+    return options.id;
+  };
+  handleSubmitText(state, "/retry", send);
+  assert.equal(sent.length, 0);
+  assert.match(state.messages.at(-1).content, /没有可重试/);
+
+  handleSubmitText(state, "A", send);
+  handleSubmitText(state, "B", send);
+  const [a, b] = state.messages.filter((item) => item.kind === "user");
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: a.requestId,
+    payload: { code: "rejected", message: "A failed" },
+  });
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: b.requestId,
+    payload: { code: "rejected", message: "B failed" },
+  });
+
+  const bRequestId = b.requestId;
+  handleSubmitText(state, `/retry ${a.requestId}`, send);
+  assert.equal(a.deliveryStatus, "queued");
+  assert.equal(b.deliveryStatus, "failed");
+  assert.equal(b.requestId, bRequestId);
 });
 
 test("thinking content is hidden and removed after completion by default", () => {
