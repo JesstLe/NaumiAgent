@@ -79,6 +79,7 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.server_events.includes("ui/message"));
   assert(PROTOCOL_CONTRACT.server_events.includes("runtime/status"));
   assert(PROTOCOL_CONTRACT.server_events.includes("run/cancelled"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("completion/receipt"));
   assert.deepEqual(PROTOCOL_CONTRACT.ui_messages.tool_prepare.phases, ["start", "snapshot", "end"]);
   assert(PROTOCOL_CONTRACT.ui_messages.tool_prepare.fields.includes("tool_call_id"));
   assert(PROTOCOL_CONTRACT.ui_messages.tool_prepare.fields.includes("content_lines"));
@@ -127,6 +128,37 @@ test("normalizeServerRecord stabilizes bridge payloads", () => {
     request_id: "99",
     choice: "bypass",
   });
+
+  assert.deepEqual(normalizeServerRecord({
+    type: "completion/receipt",
+    payload: {
+      schema_version: 1,
+      receipt_id: "receipt-1",
+      run_id: "run-1",
+      outcome: "partial",
+      summary: 42,
+      changes: null,
+      validations: [{ command: "pytest", status: "failed", exit_code: "1" }],
+      git_state: { available: 1, dirty: true, ahead: "2" },
+    },
+  }).payload, {
+    schema_version: 1,
+    receipt_id: "receipt-1",
+    run_id: "run-1",
+    outcome: "partial",
+    summary: "42",
+    changes: [],
+    validations: [{ command: "pytest", status: "failed", exit_code: "1" }],
+    unverified: [],
+    approvals: [],
+    risks: [],
+    git_state: { available: true, dirty: true, ahead: 2 },
+    next_actions: [],
+    evidence_refs: [],
+    started_at: "",
+    completed_at: "",
+    duration_ms: 0,
+  });
 });
 
 test("normalizeServerRecord rejects invalid bridge records", () => {
@@ -145,6 +177,13 @@ test("normalizeServerRecord rejects invalid bridge records", () => {
   assert.throws(
     () => normalizeServerRecord({ type: "ui/message", payload: {} }),
     /缺少 type/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "completion/receipt",
+      payload: { schema_version: 2, receipt_id: "r", run_id: "run", outcome: "completed" },
+    }),
+    /schema_version/,
   );
 });
 

@@ -27,6 +27,7 @@
     "task/created",
     "ui/message",
     "engine/event",
+    "completion/receipt",
     "run/started",
     "run/completed",
     "run/cancelled",

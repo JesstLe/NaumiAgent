@@ -127,7 +127,12 @@ function normalizeServerPayload(type, payload) {
       mission_id: String(payload.mission_id ?? ""),
       task_status: String(payload.task_status ?? ""),
       reason: String(payload.reason ?? ""),
+      receipt_id: String(payload.receipt_id ?? ""),
+      run_id: String(payload.run_id ?? ""),
     };
+  }
+  if (type === "completion/receipt") {
+    return normalizeCompletionReceipt(payload);
   }
   if (type === "ui/message") {
     const messageType = String(payload.type ?? "");
@@ -165,6 +170,8 @@ function normalizeServerPayload(type, payload) {
       status: String(payload.status ?? ""),
       response: String(payload.response ?? ""),
       error: String(payload.error ?? ""),
+      receipt_id: String(payload.receipt_id ?? ""),
+      run_id: String(payload.run_id ?? ""),
     };
   }
   if (type === "error") {
@@ -210,6 +217,61 @@ function normalizeServerPayload(type, payload) {
 
 function normalizeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function normalizeCompletionReceipt(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`completion/receipt schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const receiptId = String(payload.receipt_id ?? "").trim();
+  const runId = String(payload.run_id ?? "").trim();
+  const outcome = String(payload.outcome ?? "").trim().toLowerCase();
+  if (!receiptId || !runId) {
+    throw new Error("completion/receipt 缺少 receipt_id 或 run_id");
+  }
+  if (!["completed", "partial", "failed", "cancelled"].includes(outcome)) {
+    throw new Error(`completion/receipt outcome 无效: ${outcome}`);
+  }
+  const gitState = normalizeObject(payload.git_state);
+  return {
+    schema_version: 1,
+    receipt_id: receiptId,
+    run_id: runId,
+    outcome,
+    summary: String(payload.summary ?? ""),
+    changes: normalizeObjectArray(payload.changes, 100),
+    validations: normalizeObjectArray(payload.validations, 50),
+    unverified: normalizeTextArray(payload.unverified, 50),
+    approvals: normalizeObjectArray(payload.approvals, 50),
+    risks: normalizeObjectArray(payload.risks, 50),
+    git_state: {
+      ...gitState,
+      ...(Object.hasOwn(gitState, "available") ? { available: toBool(gitState.available) } : {}),
+      ...(Object.hasOwn(gitState, "dirty") ? { dirty: toBool(gitState.dirty) } : {}),
+      ...(Object.hasOwn(gitState, "ahead") ? { ahead: nonnegativeNumber(gitState.ahead) } : {}),
+      ...(Object.hasOwn(gitState, "behind") ? { behind: nonnegativeNumber(gitState.behind) } : {}),
+    },
+    next_actions: normalizeObjectArray(payload.next_actions, 50),
+    evidence_refs: normalizeTextArray(payload.evidence_refs, 100),
+    started_at: String(payload.started_at ?? ""),
+    completed_at: String(payload.completed_at ?? ""),
+    duration_ms: nonnegativeNumber(payload.duration_ms),
+  };
+}
+
+function normalizeObjectArray(value, limit) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, limit).map((item) => ({ ...normalizeObject(item) }));
+}
+
+function normalizeTextArray(value, limit) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, limit).map((item) => String(item ?? ""));
+}
+
+function nonnegativeNumber(value) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
 
 function toBool(value) {
