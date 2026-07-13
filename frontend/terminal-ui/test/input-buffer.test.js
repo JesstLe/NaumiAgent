@@ -197,6 +197,18 @@ test("horizontal editing resets the preferred vertical column", () => {
   assert.deepEqual(getInputCursorLocation(state), { line: 2, column: 1 });
 });
 
+test("cursor movement and deletion keep combining graphemes intact", () => {
+  const state = createInitialState();
+  setInputText(state, "e\u0301x");
+
+  assert.equal(getInputCursor(state), 2);
+  moveInputCursor(state, "left");
+  assert.equal(getInputCursor(state), 1);
+  assert.equal(backspaceInput(state), true);
+  assert.equal(state.input, "x");
+  assert.equal(getInputCursor(state), 0);
+});
+
 test("bracketed paste is emitted once across arbitrary chunks", () => {
   const tokenizer = createInputTokenizerState();
 

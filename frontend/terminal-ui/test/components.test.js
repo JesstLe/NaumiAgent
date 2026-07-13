@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ANSI, stripAnsi, visibleWidth } from "../src/ansi.js";
-import { boxComponent, line, renderComponent, stack } from "../src/components/core.js";
-import { Footer, PermissionFooter, TodoFooter } from "../src/components/footer.js";
+import { boxComponent, createRenderContext, line, renderComponent, stack } from "../src/components/core.js";
+import { Footer, PermissionFooter, PromptFooter, TodoFooter } from "../src/components/footer.js";
 import { Message } from "../src/components/message.js";
 import { ActivityCard } from "../src/components/activity-card.js";
 import { PermissionCard } from "../src/components/permission-card.js";
@@ -10,6 +10,7 @@ import { parsePermissionPanel, PermissionPanel } from "../src/components/permiss
 import { ToolCard } from "../src/components/tool-card.js";
 import { parseTaskPanel, renderTaskPanel, TaskPanel } from "../src/components/task-panel.js";
 import { createInitialState } from "../src/state.js";
+import { setInputText } from "../src/input-buffer.js";
 
 test("component core composes nested stacks and boxes within width", () => {
   const lines = renderComponent(
@@ -60,6 +61,39 @@ test("footer components can render independently or as a full footer", () => {
   assert(stripAnsi(todo.join("\n")).includes("todo: 1/2 完成"));
   assert(stripAnsi(full.join("\n")).includes("Shift+Tab 模式"));
   assert(full.every((item) => visibleWidth(item) <= 80));
+});
+
+test("prompt renders multiline text without flattening logical newlines", () => {
+  const state = createInitialState();
+  setInputText(state, "检查 API\n然后修复测试");
+
+  const lines = renderComponent(
+    PromptFooter({ state }),
+    createRenderContext({ width: 40, state }),
+  ).map(stripAnsi);
+
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /检查 API/);
+  assert.doesNotMatch(lines[0], /然后修复测试/);
+  assert.match(lines[1], /然后修复测试.*▌/);
+  assert(lines.every((line) => visibleWidth(line) <= 40));
+});
+
+test("prompt shows at most six wrapped rows around the cursor", () => {
+  const state = createInitialState();
+  setInputText(
+    state,
+    Array.from({ length: 10 }, (_, index) => `line-${index}`).join("\n"),
+  );
+
+  const lines = renderComponent(
+    PromptFooter({ state }),
+    createRenderContext({ width: 24, state }),
+  ).map(stripAnsi);
+
+  assert.equal(lines.length, 6);
+  assert(lines.at(-1).includes("line-9▌"));
+  assert(!lines.some((line) => line.includes("line-0")));
 });
 
 test("tool card component preserves existing diff folding behavior", () => {

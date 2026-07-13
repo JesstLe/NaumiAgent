@@ -1,3 +1,5 @@
+import { charWidth } from "./ansi.js";
+
 export const INPUT_KEYS = {
   shiftTab: "\x1b[Z",
   shiftEnter: "\x1b[13;2u",
@@ -29,6 +31,7 @@ const CSI_PATTERN = /^\x1b\[[0-9;?]*[~A-Za-z]/;
 const SS3_PATTERN = /^\x1b[Oo][A-Za-z]/;
 const SS3_FALLBACK_PATTERN = /^[Oo][ABab]$/;
 const MAX_PENDING_ESCAPE_CHARS = 16;
+const GRAPHEME_SEGMENTER = new Intl.Segmenter("und", { granularity: "grapheme" });
 
 export function splitInputStreamChunk(chunk, pending = "") {
   const combined = `${pending ?? ""}${chunk ?? ""}`;
@@ -146,7 +149,7 @@ export function getInputCursor(state) {
 
 export function setInputText(state, text, cursor = null) {
   state.input = String(text ?? "");
-  state.inputCursor = clampCursor(state.input, cursor ?? Array.from(state.input).length);
+  state.inputCursor = clampCursor(state.input, cursor ?? segmentGraphemes(state.input).length);
   state.inputPreferredColumn = null;
 }
 
@@ -157,8 +160,8 @@ export function clearInput(state) {
 export function insertInputText(state, text) {
   resetInputHistoryNavigation(state);
   resetPreferredColumn(state);
-  const chars = Array.from(state.input ?? "");
-  const insertChars = Array.from(String(text ?? ""));
+  const chars = segmentGraphemes(state.input);
+  const insertChars = segmentGraphemes(text);
   const cursor = getInputCursor(state);
   chars.splice(cursor, 0, ...insertChars);
   state.input = chars.join("");
@@ -168,7 +171,7 @@ export function insertInputText(state, text) {
 export function backspaceInput(state) {
   resetInputHistoryNavigation(state);
   resetPreferredColumn(state);
-  const chars = Array.from(state.input ?? "");
+  const chars = segmentGraphemes(state.input);
   const cursor = getInputCursor(state);
   if (cursor <= 0) return false;
   chars.splice(cursor - 1, 1);
@@ -180,7 +183,7 @@ export function backspaceInput(state) {
 export function deleteInputForward(state) {
   resetInputHistoryNavigation(state);
   resetPreferredColumn(state);
-  const chars = Array.from(state.input ?? "");
+  const chars = segmentGraphemes(state.input);
   const cursor = getInputCursor(state);
   if (cursor >= chars.length) return false;
   chars.splice(cursor, 1);
@@ -195,7 +198,7 @@ export function moveInputCursor(state, direction) {
   if (direction === "left") state.inputCursor = clampCursor(state.input, cursor - 1);
   if (direction === "right") state.inputCursor = clampCursor(state.input, cursor + 1);
   if (direction === "home") state.inputCursor = 0;
-  if (direction === "end") state.inputCursor = Array.from(state.input ?? "").length;
+  if (direction === "end") state.inputCursor = segmentGraphemes(state.input).length;
 }
 
 export function insertInputNewline(state) {
@@ -203,7 +206,7 @@ export function insertInputNewline(state) {
 }
 
 export function getInputCursorLocation(state) {
-  const chars = Array.from(state.input ?? "");
+  const chars = segmentGraphemes(state.input);
   const before = chars.slice(0, getInputCursor(state));
   let line = 0;
   let column = 0;
@@ -220,7 +223,7 @@ export function getInputCursorLocation(state) {
 
 export function moveInputCursorVertical(state, direction) {
   if (direction !== "up" && direction !== "down") return false;
-  const lines = String(state.input ?? "").split("\n").map((line) => Array.from(line));
+  const lines = String(state.input ?? "").split("\n").map(segmentGraphemes);
   const location = getInputCursorLocation(state);
   const targetLine = location.line + (direction === "up" ? -1 : 1);
   if (targetLine < 0 || targetLine >= lines.length) return false;
@@ -235,7 +238,7 @@ export function moveInputCursorVertical(state, direction) {
 }
 
 export function moveInputCursorToLineBoundary(state, boundary) {
-  const lines = String(state.input ?? "").split("\n").map((line) => Array.from(line));
+  const lines = String(state.input ?? "").split("\n").map(segmentGraphemes);
   const location = getInputCursorLocation(state);
   const line = lines[location.line] ?? [];
   const column = boundary === "end" ? line.length : 0;
@@ -244,9 +247,34 @@ export function moveInputCursorToLineBoundary(state, boundary) {
 }
 
 export function renderInputWithCursor(state) {
-  const chars = Array.from(state.input ?? "");
+  const chars = segmentGraphemes(state.input);
   const cursor = getInputCursor(state);
   return `${chars.slice(0, cursor).join("")}\u258C${chars.slice(cursor).join("")}`;
+}
+
+export function renderInputLinesWithCursor(state, availableWidth, maxLines = 6) {
+  const width = Math.max(1, Number(availableWidth) || 1);
+  const limit = Math.max(1, Number(maxLines) || 1);
+  const location = getInputCursorLocation(state);
+  const logicalLines = String(state.input ?? "").split("\n");
+  const rendered = [];
+
+  for (const [lineIndex, line] of logicalLines.entries()) {
+    const tokens = segmentGraphemes(line);
+    if (lineIndex === location.line) {
+      tokens.splice(location.column, 0, "\u258C");
+    }
+    const wrapped = wrapComposerTokens(tokens, width);
+    rendered.push(...wrapped.map((text) => ({
+      text,
+      hasCursor: text.includes("\u258C"),
+    })));
+  }
+
+  const cursorRow = Math.max(0, rendered.findIndex((row) => row.hasCursor));
+  const maxStart = Math.max(0, rendered.length - limit);
+  const start = Math.max(0, Math.min(cursorRow - Math.floor(limit / 2), maxStart));
+  return rendered.slice(start, start + limit).map((row) => row.text);
 }
 
 export function rememberSubmittedInput(state, text, { maxEntries = 100 } = {}) {
@@ -306,9 +334,32 @@ function resetPreferredColumn(state) {
 }
 
 function clampCursor(text, cursor) {
-  const length = Array.from(text ?? "").length;
+  const length = segmentGraphemes(text).length;
   const value = Number.isFinite(cursor) ? Number(cursor) : length;
   return Math.max(0, Math.min(length, value));
+}
+
+function segmentGraphemes(text) {
+  return Array.from(GRAPHEME_SEGMENTER.segment(String(text ?? "")), (entry) => entry.segment);
+}
+
+function wrapComposerTokens(tokens, width) {
+  if (!tokens.length) return [""];
+  const lines = [];
+  let current = "";
+  let currentWidth = 0;
+  for (const token of tokens) {
+    const tokenWidth = charWidth(token);
+    if (current && currentWidth + tokenWidth > width) {
+      lines.push(current);
+      current = "";
+      currentWidth = 0;
+    }
+    current += token;
+    currentWidth += tokenWidth;
+  }
+  lines.push(current);
+  return lines;
 }
 
 function isControlInput(char) {
