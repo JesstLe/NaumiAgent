@@ -12,6 +12,7 @@ from naumi_agent.safety.permissions import (
     PermissionReasonCode,
     PermissionRiskLevel,
 )
+from naumi_agent.tools.base import ToolMetadata
 from naumi_agent.tools.builtin import YamlMicroVerifyTool, YamlValidateTool
 from naumi_agent.tools.forge import ForgeTool
 from naumi_agent.tools.hotreload import HotReloadTool
@@ -146,6 +147,49 @@ class TestPermissionChecker:
         )
         assert not result.allowed
         assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_strict_bash_dangerous_command_blocks_before_mode_rejection(self) -> None:
+        checker = PermissionChecker(PermissionMode.STRICT)
+
+        decision = checker.check("bash_run", {"command": "rm -rf /"})
+
+        assert not decision.allowed
+        assert decision.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_lockdown_background_dangerous_command_blocks_before_mode_rejection(self) -> None:
+        checker = PermissionChecker(PermissionMode.LOCKDOWN)
+
+        decision = checker.check("background_run", {"command": "rm -rf /"})
+
+        assert not decision.allowed
+        assert decision.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_non_string_command_argument_is_denied_without_raising(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+
+        decision = checker.check("bash_run", {"command": ["echo", "safe"]})
+
+        assert not decision.allowed
+        assert decision.code.value == "invalid_command_argument"
+        assert "命令参数 `command` 必须是字符串" in decision.reason
+
+    def test_metadata_named_non_string_command_argument_is_denied_without_raising(
+        self,
+    ) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+        tool = SimpleNamespace(
+            metadata=ToolMetadata(command_argument_names=("shell_input",))
+        )
+
+        decision = checker.check(
+            "bash_run",
+            {"shell_input": ["echo", "safe"]},
+            tool=tool,
+        )
+
+        assert not decision.allowed
+        assert decision.code.value == "invalid_command_argument"
+        assert "命令参数 `shell_input` 必须是字符串" in decision.reason
 
     @pytest.mark.parametrize("language", [" Bash ", "BASH", "bash\n"])
     def test_normalized_bash_code_execute_blocks_dangerous_commands_in_bypass(

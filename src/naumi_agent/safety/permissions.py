@@ -27,6 +27,7 @@ class PermissionReasonCode(StrEnum):
     MODE_BLOCKED = "mode_blocked"
     MAX_CALLS_EXCEEDED = "max_calls_exceeded"
     INVALID_PATH_ARGUMENT = "invalid_path_argument"
+    INVALID_COMMAND_ARGUMENT = "invalid_command_argument"
     PATH_OUTSIDE_SANDBOX = "path_outside_sandbox"
     DANGEROUS_COMMAND = "dangerous_command"
 
@@ -807,6 +808,17 @@ BLOCKED_COMMANDS = [
     "init 6",
 ]
 
+COMMON_PATH_ARGUMENT_NAMES = (
+    "path",
+    "cwd",
+    "directory",
+    "dir",
+    "file_path",
+    "working_directory",
+)
+
+COMMON_COMMAND_ARGUMENT_NAMES = ("command", "cmd", "shell", "script")
+
 
 class PermissionChecker:
     """工具调用权限检查器."""
@@ -888,10 +900,25 @@ class PermissionChecker:
         tool: PermissionAwareTool | None = None,
     ) -> PermissionDecision:
         """检查工具调用是否被允许."""
+        requested_tool_name = tool_name
+        is_dynamic_mcp = requested_tool_name.startswith("mcp__")
         tool_name, rule = self._resolve_rule(tool_name)
         metadata = tool.metadata if tool is not None else None
 
-        if not rule:
+        if is_dynamic_mcp:
+            tool_name = requested_tool_name
+            rule = PermissionRule(
+                tool_name=tool_name,
+                allowed_modes=[
+                    PermissionMode.BYPASS,
+                    PermissionMode.PERMISSIVE,
+                    PermissionMode.MODERATE,
+                ],
+                requires_confirmation=True,
+                risk_level=PermissionRiskLevel.HIGH,
+                tool_family="mcp",
+            )
+        elif not rule:
             if metadata and metadata.read_only:
                 rule = PermissionRule(
                     tool_name=tool_name,
@@ -904,17 +931,6 @@ class PermissionChecker:
                     ],
                     requires_confirmation=False,
                 )
-            # Dynamic MCP tools use the common safety pipeline.
-            elif tool_name.startswith("mcp__"):
-                rule = PermissionRule(
-                    tool_name=tool_name,
-                    allowed_modes=[
-                        PermissionMode.BYPASS,
-                        PermissionMode.PERMISSIVE,
-                        PermissionMode.MODERATE,
-                    ],
-                    requires_confirmation=False,
-                )
             else:
                 return self._deny(
                     f"未知工具：{tool_name}",
@@ -922,6 +938,7 @@ class PermissionChecker:
                     risk_level=PermissionRiskLevel.HIGH,
                 )
 
+        tool_family = rule.tool_family or tool_name
         language = args.get("language")
         if (
             tool_name == "code_execute"
@@ -932,7 +949,57 @@ class PermissionChecker:
             if isinstance(code, str) and code:
                 cmd_check = self._check_command(
                     code,
-                    tool_family=rule.tool_family or tool_name,
+                    arg_name="code",
+                    tool_family=tool_family,
+                )
+                if not cmd_check.allowed:
+                    return cmd_check
+
+        path_argument_names = tuple(
+            dict.fromkeys(
+                (
+                    *COMMON_PATH_ARGUMENT_NAMES,
+                    *(metadata.path_argument_names if metadata else ()),
+                )
+            )
+        )
+        for arg_name in path_argument_names:
+            if arg_name not in args:
+                continue
+            argument = args[arg_name]
+            if isinstance(argument, str) and not argument:
+                continue
+            path_check = self._check_path_sandbox(
+                argument,
+                arg_name=arg_name,
+                tool_family=tool_family,
+            )
+            if not path_check.allowed:
+                return path_check
+
+        command_argument_names = tuple(
+            dict.fromkeys(
+                (
+                    *COMMON_COMMAND_ARGUMENT_NAMES,
+                    *(metadata.command_argument_names if metadata else ()),
+                )
+            )
+        )
+        if is_dynamic_mcp or tool_name in {
+            "bash_run",
+            "background_run",
+            "runtime_mcp_connect",
+        }:
+            for arg_name in command_argument_names:
+                if arg_name not in args:
+                    continue
+                argument = args[arg_name]
+                if isinstance(argument, str) and not argument:
+                    continue
+                cmd_check = self._check_command(
+                    argument,
+                    arg_name=arg_name,
+                    tool_family=tool_family,
                 )
                 if not cmd_check.allowed:
                     return cmd_check
@@ -942,7 +1009,7 @@ class PermissionChecker:
                 f"工具 `{tool_name}` 不允许在 {self._mode.value} 模式下执行。",
                 code=PermissionReasonCode.MODE_BLOCKED,
                 risk_level=PermissionRiskLevel.HIGH,
-                tool_family=rule.tool_family or tool_name,
+                tool_family=tool_family,
             )
 
         # 调用次数检查
@@ -952,47 +1019,17 @@ class PermissionChecker:
                 f"工具 `{tool_name}` 已达到本会话最大调用次数（{rule.max_calls_per_session}）。",
                 code=PermissionReasonCode.MAX_CALLS_EXCEEDED,
                 risk_level=PermissionRiskLevel.MEDIUM,
-                tool_family=rule.tool_family or tool_name,
+                tool_family=tool_family,
             )
-
-        # 文件路径沙箱检查
-        path_argument_names = (
-            metadata.path_argument_names if metadata else ("path", "cwd")
-        )
-        for arg_name in path_argument_names:
-            if arg_name not in args or not args[arg_name]:
-                continue
-            path_check = self._check_path_sandbox(
-                args[arg_name],
-                arg_name=arg_name,
-                tool_family=rule.tool_family or tool_name,
-            )
-            if not path_check.allowed:
-                return path_check
-
-        # 命令检查
-        command_argument_names = (
-            metadata.command_argument_names if metadata else ("command",)
-        )
-        if tool_name.startswith("mcp__") or tool_name in {
-            "bash_run",
-            "background_run",
-            "runtime_mcp_connect",
-        }:
-            for arg_name in command_argument_names:
-                if arg_name not in args or not args[arg_name]:
-                    continue
-                cmd_check = self._check_command(
-                    args[arg_name],
-                    tool_family=rule.tool_family or tool_name,
-                )
-                if not cmd_check.allowed:
-                    return cmd_check
 
         # 记录调用
         self._call_counts[tool_name] = count + 1
         requires_confirmation = rule.requires_confirmation
-        if metadata and metadata.requires_confirmation is not None:
+        if (
+            not is_dynamic_mcp
+            and metadata
+            and metadata.requires_confirmation is not None
+        ):
             requires_confirmation = metadata.requires_confirmation
         risk_level = rule.risk_level
         if requires_confirmation and risk_level == PermissionRiskLevel.LOW:
@@ -1001,7 +1038,6 @@ class PermissionChecker:
             risk_level = PermissionRiskLevel.HIGH
             requires_confirmation = True
 
-        tool_family = rule.tool_family or tool_name
         requires_double_confirm = risk_level == PermissionRiskLevel.HIGH and requires_confirmation
         allow_session_grant = (
             risk_level == PermissionRiskLevel.MEDIUM and rule.allow_session_grant
@@ -1054,8 +1090,22 @@ class PermissionChecker:
             tool_family=tool_family,
         )
 
-    def _check_command(self, command: str, *, tool_family: str = "") -> PermissionDecision:
+    def _check_command(
+        self,
+        command: Any,
+        *,
+        arg_name: str = "command",
+        tool_family: str = "",
+    ) -> PermissionDecision:
         """检查 shell 命令是否安全."""
+        if not isinstance(command, str):
+            return self._deny(
+                f"命令参数 `{arg_name}` 必须是字符串。",
+                code=PermissionReasonCode.INVALID_COMMAND_ARGUMENT,
+                risk_level=PermissionRiskLevel.MEDIUM,
+                tool_family=tool_family,
+            )
+
         cmd_lower = command.lower().strip()
         for blocked in BLOCKED_COMMANDS:
             if blocked.lower() in cmd_lower:
