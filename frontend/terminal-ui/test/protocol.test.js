@@ -75,8 +75,10 @@ test("protocol contract drives client and server event validation", () => {
   assert.equal(PROTOCOL_VERSION, PROTOCOL_CONTRACT.version);
   assert(PROTOCOL_CONTRACT.client_events.includes("submit"));
   assert(PROTOCOL_CONTRACT.client_events.includes("task_panel"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("run_cancel"));
   assert(PROTOCOL_CONTRACT.server_events.includes("ui/message"));
   assert(PROTOCOL_CONTRACT.server_events.includes("runtime/status"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("run/cancelled"));
   assert.deepEqual(PROTOCOL_CONTRACT.ui_messages.tool_prepare.phases, ["start", "snapshot", "end"]);
   assert(PROTOCOL_CONTRACT.ui_messages.tool_prepare.fields.includes("tool_call_id"));
   assert(PROTOCOL_CONTRACT.ui_messages.tool_prepare.fields.includes("content_lines"));

@@ -352,6 +352,7 @@ class JsonlEngineBridge:
         self._writer: TextIO | None = None
         self._writer_lock = asyncio.Lock()
         self._run_task: asyncio.Task[Any] | None = None
+        self._active_run_context: dict[str, str] = {}
         self._cli_supported_commands = _load_cli_slash_commands_with_alias()
         self._pending_permissions: dict[str, asyncio.Future[str]] = {}
         self._pending_permission_payloads: dict[str, dict[str, Any]] = {}
@@ -552,6 +553,10 @@ class JsonlEngineBridge:
             await self.submit_task(payload, request_id=request_id)
             return
 
+        if event_type == ClientEventType.RUN_CANCEL:
+            await self.cancel_run(payload, request_id=request_id)
+            return
+
         if event_type == ClientEventType.RESUME:
             await self.resume_session(payload, request_id=request_id)
             return
@@ -652,8 +657,14 @@ class JsonlEngineBridge:
                     request_id=request_id,
                 )
             finally:
+                if self._active_run_context.get("request_id") == request_id:
+                    self._active_run_context = {}
                 await self.emit(ServerEventType.STATUS, self.status_payload())
 
+        self._active_run_context = {
+            "request_id": request_id,
+            "intent": "chat",
+        }
         self._run_task = asyncio.create_task(run())
 
     async def submit_task(self, payload: dict[str, Any], *, request_id: str) -> None:
@@ -803,9 +814,70 @@ class JsonlEngineBridge:
                     },
                 )
             finally:
+                if self._active_run_context.get("request_id") == request_id:
+                    self._active_run_context = {}
                 await self.emit(ServerEventType.STATUS, self.status_payload())
 
+        self._active_run_context = {
+            "request_id": request_id,
+            "intent": "task",
+            "task_id": task_id,
+            "mission_id": mission_id,
+        }
         self._run_task = asyncio.create_task(run())
+
+    async def cancel_run(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Cancel the active Agent run without shutting down the Bridge."""
+        run_task = self._run_task
+        if run_task is None or run_task.done():
+            await self.emit_error(
+                "当前没有正在运行的任务。",
+                code="no_active_run",
+                request_id=request_id,
+            )
+            return
+
+        context = dict(self._active_run_context)
+        target_request_id = context.get("request_id", "")
+        reason = str(payload.get("reason") or "").strip() or "用户取消了当前运行。"
+        await self.emit(
+            ServerEventType.ACK,
+            {
+                "event": ClientEventType.RUN_CANCEL,
+                "status": "accepted",
+                "target_request_id": target_request_id,
+            },
+            request_id=request_id,
+        )
+        run_task.cancel()
+        try:
+            await run_task
+        except asyncio.CancelledError:
+            pass
+
+        cancelled = {
+            "status": "cancelled",
+            "target_request_id": target_request_id,
+            "intent": context.get("intent", "chat"),
+            "reason": reason,
+        }
+        if context.get("task_id"):
+            cancelled.update({
+                "task_id": context["task_id"],
+                "mission_id": context.get("mission_id", ""),
+                "task_status": TaskStatus.BLOCKED.value,
+            })
+        await self.emit(
+            ServerEventType.RUN_CANCELLED,
+            cancelled,
+            request_id=request_id,
+        )
+        await self.emit(ServerEventType.STATUS, self.status_payload())
 
     async def _resolve_task_mission(
         self,

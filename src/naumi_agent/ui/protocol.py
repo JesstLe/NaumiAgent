@@ -26,6 +26,7 @@ class ClientEventType(StrEnum):
     HELLO = "hello"
     SUBMIT = "submit"
     TASK_SUBMIT = "task_submit"
+    RUN_CANCEL = "run_cancel"
     SET_MODE = "set_mode"
     CYCLE_MODE = "cycle_mode"
     SET_REASONING = "set_reasoning"
@@ -59,6 +60,7 @@ class ServerEventType(StrEnum):
     ENGINE_EVENT = "engine/event"
     RUN_STARTED = "run/started"
     RUN_COMPLETED = "run/completed"
+    RUN_CANCELLED = "run/cancelled"
     SESSION_REPLAYED = "session/replayed"
     STATUS = "runtime/status"
     MODE_CHANGED = "mode/changed"
@@ -203,6 +205,12 @@ def _normalize_client_payload(
             "parallel_mode": parallel_mode,
             "risk_level": risk_level,
         }
+
+    if event_type == ClientEventType.RUN_CANCEL:
+        reason = str(payload.get("reason") or "").strip()
+        if len(reason) > 500:
+            raise ValueError("取消原因不能超过 500 个字符。")
+        return {"reason": reason}
 
     if event_type == ClientEventType.SET_MODE:
         return {"mode": str(payload.get("mode") or "").strip().lower()}

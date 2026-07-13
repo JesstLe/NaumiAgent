@@ -111,6 +111,36 @@ test("terminal UI process creates one workbench task from the composer", async (
   }
 });
 
+test("terminal UI process cancels one run without exiting the session", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    app.stdin.write("需要取消的运行\n");
+    await waitForOutput(output, "permission: bash_run", 7000);
+
+    app.stdin.write("\x03");
+    await waitForOutput(output, "正在停止当前运行", 7000);
+    await waitForOutput(output, "运行已取消", 7000);
+    await waitForOutput(output, "运行: 空闲", 7000);
+
+    app.stdin.write("/doctor\n");
+    await waitForOutput(output, "环境诊断存在提醒", 7000);
+
+    const code = await stopTerminalUi(app);
+    assert.equal(code, 0);
+    const events = readDebugEvents(app.debugLogPath);
+    const cancels = events.filter(
+      (record) => record.event === "protocol.send" && record.payload.record.type === "run_cancel",
+    );
+    assert.equal(cancels.length, 1);
+    assert.equal(cancels[0].payload.record.payload.reason, "用户按下 Ctrl+C");
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process keeps explicit plan mode across status refreshes", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);
