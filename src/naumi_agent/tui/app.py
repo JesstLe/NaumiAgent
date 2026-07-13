@@ -38,6 +38,7 @@ from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.clipboard import copy_or_save_transcript, strip_ansi
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.tui.agent_control import AgentControlScreen
 from naumi_agent.tui.completion_receipt import (
     completion_outcome_label,
     format_completion_receipt_markdown,
@@ -205,8 +206,9 @@ class _TuiSlashCommandFrontend:
         todo = self._app.query_one(TodoBar)
         todo.todo_text = text
 
+_TUI_LOCAL_COMMANDS = ("/agents",)
 _SLASH_SUGGESTIONS = SuggestFromList(
-    [cmd for cmd, _, _ in COMMANDS],
+    [*_TUI_LOCAL_COMMANDS, *(cmd for cmd, _, _ in COMMANDS)],
     case_sensitive=True,
 )
 
@@ -1025,7 +1027,7 @@ class InputBar(Horizontal):
     def _build_slash_candidates(self, query: str) -> list[str]:
         candidates = [
             cmd
-            for cmd, _, _ in COMMANDS
+            for cmd in [*_TUI_LOCAL_COMMANDS, *(item[0] for item in COMMANDS)]
             if _matches_slash_command(query, cmd)
         ]
         return sorted(candidates)
@@ -1526,6 +1528,9 @@ class NaumiApp(App):
         raw = text.strip()
         if not raw:
             return
+        if raw.split(maxsplit=1)[0].lower() == "/agents":
+            self._open_agent_control()
+            return
         self._run_cli_slash_command(raw)
 
     @work(exclusive=True, exit_on_error=False)
@@ -1645,6 +1650,21 @@ class NaumiApp(App):
                 )
             runtime_mode = getattr(self.engine, "runtime_mode", None)
             status.mode_text = getattr(runtime_mode, "value", str(runtime_mode or "default"))
+            if (
+                isinstance(self.screen, AgentControlScreen)
+                and event_type in {
+                    "subagent_event",
+                    "team_event",
+                    "tool_prepare_start",
+                    "tool_prepare_snapshot",
+                    "tool_prepare_end",
+                    "tool_start",
+                    "tool_end",
+                    "permission_bubble",
+                    "completion_receipt",
+                }
+            ):
+                self.screen.refresh_snapshot()
 
             match event_type:
                 case "run_started":
@@ -2041,6 +2061,19 @@ class NaumiApp(App):
         if isinstance(current, ModalScreen):
             return
         self.push_screen(RuntimeInspectorScreen(self.engine))
+
+    def action_toggle_agents(self) -> None:
+        current = self.screen
+        if isinstance(current, AgentControlScreen):
+            self.pop_screen()
+            return
+        self._open_agent_control()
+
+    def _open_agent_control(self) -> None:
+        current = self.screen
+        if isinstance(current, AgentControlScreen | ModalScreen):
+            return
+        self.push_screen(AgentControlScreen(self.engine))
 
     def action_toggle_browser(self) -> None:
         browser = self.query_one(BrowserPanel)
