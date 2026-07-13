@@ -12,7 +12,7 @@ import {
 } from "../ansi.js";
 import { boxLines } from "./core.js";
 import { renderInputLinesWithCursor } from "../input-buffer.js";
-import { getSlashCommandCompletions } from "../state.js";
+import { getSlashCompletionItems } from "../slash-completion.js";
 
 export function Footer({ state, env = {} }) {
   return {
@@ -161,11 +161,12 @@ export function CommandCompletionFooter({ state }) {
   return {
     render(ctx) {
       if (state.historySearch?.open) return [];
-      const completions = getSlashCommandCompletions(state.input, state.slashCommands);
+      const completions = getSlashCompletionItems(state);
       if (!completions.length) return [];
       const rows = completions.map((item, index) => {
         const alias = item.aliases.length ? `(${item.aliases.join(", ")})` : "";
-        const text = `${String(index + 1).padStart(2, "0")}. ${item.command} ${alias} ${item.description}`;
+        const marker = item.selected ? ">" : " ";
+        const text = `${marker} ${String(index + 1).padStart(2, "0")}. ${item.command} ${alias} ${item.description}`;
         return color(ANSI.cyan, text.trim());
       });
       return boxLines("命令补全", rows, ctx.width);
