@@ -376,6 +376,19 @@ class TestPermissionChecker:
         assert result.allowed
         assert not result.requires_confirmation
 
+    def test_metadata_cannot_weaken_high_rule_confirmation_in_bypass(self) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+        tool = SimpleNamespace(metadata=ToolMetadata(requires_confirmation=False))
+
+        decision = checker.check("session_delete", {}, tool=tool)
+
+        assert decision.allowed
+        assert decision.outcome is PermissionOutcome.CONFIRM
+        assert decision.risk_level is PermissionRiskLevel.HIGH
+        assert decision.requires_confirmation
+        assert decision.requires_double_confirm
+        assert decision.allow_session_grant is False
+
     def test_shell_confirmation_is_medium_and_session_grantable(self, tmp_path) -> None:
         checker = PermissionChecker(
             PermissionMode.MODERATE,
@@ -438,6 +451,31 @@ class TestPermissionChecker:
         assert decision.risk_level is PermissionRiskLevel.HIGH
         assert decision.requires_double_confirm is True
         assert decision.allow_session_grant is False
+
+    @pytest.mark.parametrize(
+        ("tool_name", "args", "requires_confirmation"),
+        [
+            ("background_run", {"command": "echo ok"}, True),
+            ("background_status", {}, False),
+            ("background_list", {}, False),
+            ("background_cancel", {}, False),
+            ("background_cleanup", {}, False),
+            ("background_read_output", {}, False),
+        ],
+    )
+    def test_background_tools_share_canonical_process_family(
+        self,
+        tool_name: str,
+        args: dict[str, str],
+        requires_confirmation: bool,
+    ) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+
+        decision = checker.check(tool_name, args)
+
+        assert decision.allowed, tool_name
+        assert decision.tool_family == "background_process"
+        assert decision.requires_confirmation is requires_confirmation
 
     def test_task_tracking_tools_allowed_without_confirmation(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)

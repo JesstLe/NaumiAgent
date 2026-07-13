@@ -614,6 +614,7 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
             PermissionMode.LOCKDOWN,
         ],
         requires_confirmation=False,
+        tool_family="background_process",
     ),
     "background_list": PermissionRule(
         tool_name="background_list",
@@ -625,6 +626,7 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
             PermissionMode.LOCKDOWN,
         ],
         requires_confirmation=False,
+        tool_family="background_process",
     ),
     "background_cancel": PermissionRule(
         tool_name="background_cancel",
@@ -635,6 +637,7 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
             PermissionMode.STRICT,
         ],
         requires_confirmation=False,
+        tool_family="background_process",
     ),
     "background_cleanup": PermissionRule(
         tool_name="background_cleanup",
@@ -645,6 +648,7 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
             PermissionMode.STRICT,
         ],
         requires_confirmation=False,
+        tool_family="background_process",
     ),
     "background_read_output": PermissionRule(
         tool_name="background_read_output",
@@ -656,6 +660,7 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
             PermissionMode.LOCKDOWN,
         ],
         requires_confirmation=False,
+        tool_family="background_process",
     ),
     "schedule_create": PermissionRule(
         tool_name="schedule_create",
@@ -1024,19 +1029,19 @@ class PermissionChecker:
 
         # 记录调用
         self._call_counts[tool_name] = count + 1
-        requires_confirmation = rule.requires_confirmation
-        if (
-            not is_dynamic_mcp
-            and metadata
-            and metadata.requires_confirmation is not None
-        ):
-            requires_confirmation = metadata.requires_confirmation
         risk_level = rule.risk_level
-        if requires_confirmation and risk_level == PermissionRiskLevel.LOW:
-            risk_level = PermissionRiskLevel.MEDIUM
         if metadata and metadata.destructive:
             risk_level = PermissionRiskLevel.HIGH
-            requires_confirmation = True
+        metadata_requires_confirmation = bool(
+            metadata and metadata.requires_confirmation is True
+        )
+        requires_confirmation = (
+            rule.requires_confirmation
+            or metadata_requires_confirmation
+            or risk_level == PermissionRiskLevel.HIGH
+        )
+        if requires_confirmation and risk_level == PermissionRiskLevel.LOW:
+            risk_level = PermissionRiskLevel.MEDIUM
 
         requires_double_confirm = risk_level == PermissionRiskLevel.HIGH and requires_confirmation
         allow_session_grant = (
