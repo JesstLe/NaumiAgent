@@ -97,6 +97,7 @@ export function getInputCursor(state) {
 export function setInputText(state, text, cursor = null) {
   state.input = String(text ?? "");
   state.inputCursor = clampCursor(state.input, cursor ?? Array.from(state.input).length);
+  state.inputPreferredColumn = null;
 }
 
 export function clearInput(state) {
@@ -105,6 +106,7 @@ export function clearInput(state) {
 
 export function insertInputText(state, text) {
   resetInputHistoryNavigation(state);
+  resetPreferredColumn(state);
   const chars = Array.from(state.input ?? "");
   const insertChars = Array.from(String(text ?? ""));
   const cursor = getInputCursor(state);
@@ -115,6 +117,7 @@ export function insertInputText(state, text) {
 
 export function backspaceInput(state) {
   resetInputHistoryNavigation(state);
+  resetPreferredColumn(state);
   const chars = Array.from(state.input ?? "");
   const cursor = getInputCursor(state);
   if (cursor <= 0) return false;
@@ -126,6 +129,7 @@ export function backspaceInput(state) {
 
 export function deleteInputForward(state) {
   resetInputHistoryNavigation(state);
+  resetPreferredColumn(state);
   const chars = Array.from(state.input ?? "");
   const cursor = getInputCursor(state);
   if (cursor >= chars.length) return false;
@@ -136,11 +140,57 @@ export function deleteInputForward(state) {
 }
 
 export function moveInputCursor(state, direction) {
+  resetPreferredColumn(state);
   const cursor = getInputCursor(state);
   if (direction === "left") state.inputCursor = clampCursor(state.input, cursor - 1);
   if (direction === "right") state.inputCursor = clampCursor(state.input, cursor + 1);
   if (direction === "home") state.inputCursor = 0;
   if (direction === "end") state.inputCursor = Array.from(state.input ?? "").length;
+}
+
+export function insertInputNewline(state) {
+  insertInputText(state, "\n");
+}
+
+export function getInputCursorLocation(state) {
+  const chars = Array.from(state.input ?? "");
+  const before = chars.slice(0, getInputCursor(state));
+  let line = 0;
+  let column = 0;
+  for (const char of before) {
+    if (char === "\n") {
+      line += 1;
+      column = 0;
+    } else {
+      column += 1;
+    }
+  }
+  return { line, column };
+}
+
+export function moveInputCursorVertical(state, direction) {
+  if (direction !== "up" && direction !== "down") return false;
+  const lines = String(state.input ?? "").split("\n").map((line) => Array.from(line));
+  const location = getInputCursorLocation(state);
+  const targetLine = location.line + (direction === "up" ? -1 : 1);
+  if (targetLine < 0 || targetLine >= lines.length) return false;
+
+  const preferredColumn = Number.isFinite(state.inputPreferredColumn)
+    ? state.inputPreferredColumn
+    : location.column;
+  const targetColumn = Math.min(preferredColumn, lines[targetLine].length);
+  state.inputPreferredColumn = preferredColumn;
+  state.inputCursor = inputLineOffset(lines, targetLine) + targetColumn;
+  return true;
+}
+
+export function moveInputCursorToLineBoundary(state, boundary) {
+  const lines = String(state.input ?? "").split("\n").map((line) => Array.from(line));
+  const location = getInputCursorLocation(state);
+  const line = lines[location.line] ?? [];
+  const column = boundary === "end" ? line.length : 0;
+  state.inputCursor = inputLineOffset(lines, location.line) + column;
+  resetPreferredColumn(state);
 }
 
 export function renderInputWithCursor(state) {
@@ -193,6 +243,16 @@ export function navigateInputHistory(state, direction) {
 export function resetInputHistoryNavigation(state) {
   state.inputHistoryCursor = null;
   state.inputHistoryDraft = "";
+}
+
+function inputLineOffset(lines, lineIndex) {
+  return lines
+    .slice(0, lineIndex)
+    .reduce((total, line) => total + line.length + 1, 0);
+}
+
+function resetPreferredColumn(state) {
+  state.inputPreferredColumn = null;
 }
 
 function clampCursor(text, cursor) {

@@ -145,6 +145,7 @@ export function createInitialState() {
     currentSessionId: "",
     input: "",
     inputCursor: null,
+    inputPreferredColumn: null,
     inputHistory: [],
     inputHistoryCursor: null,
     inputHistoryDraft: "",
