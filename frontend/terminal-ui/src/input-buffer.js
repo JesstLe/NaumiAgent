@@ -23,6 +23,7 @@ export const INPUT_KEYS = {
   delete: "\x1b[3~",
   ctrlA: "\x01",
   ctrlE: "\x05",
+  ctrlL: "\x0c",
 };
 
 const BRACKETED_PASTE_START = "\x1b[200~";

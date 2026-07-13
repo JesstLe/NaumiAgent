@@ -43,7 +43,12 @@ import {
   createUiSnapshot,
   applyUiSnapshot,
 } from "./state.js";
-import { renderScreen } from "./render.js";
+import { captureViewportAnchor, renderScreen, restoreViewportAnchor } from "./render.js";
+import {
+  jumpTimelineToLatest,
+  markTimelineOutput,
+  scrollTimeline,
+} from "./timeline-follow.js";
 import { getUiSnapshot, loadUiStateStore, saveUiStateStore, setUiSnapshot } from "./ui-state-store.js";
 
 const args = parseArgs(process.argv.slice(2));
@@ -57,6 +62,8 @@ let send = null;
 let redrawTimer = null;
 let uiSnapshotTimer = null;
 let quitting = false;
+let viewportWidth = null;
+let viewportHeight = null;
 const inputTokenizer = createInputTokenizerState();
 
 main();
@@ -120,7 +127,7 @@ function setupTerminal() {
   process.stdin.resume();
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", handleKeyInput);
-  process.stdout.on("resize", scheduleRedraw);
+  process.stdout.on("resize", handleTerminalResize);
   process.on("SIGINT", exit);
   process.on("SIGTERM", exit);
 }
@@ -167,6 +174,12 @@ function handleBridgeLine(line) {
   if (state.currentSessionId !== previousSessionId) {
     setUiSnapshot(uiStateStore, previousSessionId, previousSnapshot);
     restoreUiSnapshot(state.currentSessionId);
+  }
+  if (record.type === "session/replayed") {
+    jumpTimelineToLatest(state);
+  }
+  if (!(record.type === "ui/message" && record.payload?.type === "thinking" && !state.showReasoning)) {
+    markTimelineOutput(state, record, timelineEntryId(record));
   }
   for (const action of actions) {
     if (action.type === "refresh_task_panel") {
@@ -324,24 +337,35 @@ function handleSingleKeyInput(chunk) {
     scheduleRedraw();
     return;
   }
+  if (chunk === INPUT_KEYS.ctrlL) {
+    jumpTimelineToLatest(state);
+    persistUiSnapshot();
+    scheduleRedraw();
+    return;
+  }
   if (chunk === INPUT_KEYS.home || chunk === INPUT_KEYS.homeAlt || chunk === INPUT_KEYS.homeSs3) {
     moveInputCursorToLineBoundary(state, "start");
     scheduleRedraw();
     return;
   }
   if (chunk === INPUT_KEYS.end || chunk === INPUT_KEYS.endAlt || chunk === INPUT_KEYS.endSs3) {
-    moveInputCursorToLineBoundary(state, "end");
+    if (state.input) {
+      moveInputCursorToLineBoundary(state, "end");
+    } else {
+      jumpTimelineToLatest(state);
+      persistUiSnapshot();
+    }
     scheduleRedraw();
     return;
   }
   if (chunk === INPUT_KEYS.pageUp) {
-    state.scrollOffset += Math.max(3, Math.floor((process.stdout.rows ?? 24) / 2));
+    scrollTimeline(state, Math.max(3, Math.floor((process.stdout.rows ?? 24) / 2)));
     persistUiSnapshot();
     scheduleRedraw();
     return;
   }
   if (chunk === INPUT_KEYS.pageDown) {
-    state.scrollOffset = Math.max(0, state.scrollOffset - Math.max(3, Math.floor((process.stdout.rows ?? 24) / 2)));
+    scrollTimeline(state, -Math.max(3, Math.floor((process.stdout.rows ?? 24) / 2)));
     persistUiSnapshot();
     scheduleRedraw();
     return;
@@ -361,7 +385,7 @@ function submitComposer() {
   handleSubmitText(state, text, send);
   rememberSubmittedInput(state, text);
   clearInput(state);
-  state.scrollOffset = 0;
+  jumpTimelineToLatest(state);
   persistUiSnapshot();
   scheduleRedraw();
   return true;
@@ -370,10 +394,38 @@ function submitComposer() {
 function adjustScrollOffset(state, direction) {
   const step = Math.max(3, Math.floor((process.stdout.rows ?? 24) / 2));
   if (direction === "up") {
-    state.scrollOffset += step;
+    scrollTimeline(state, step);
   } else {
-    state.scrollOffset = Math.max(0, state.scrollOffset - step);
+    scrollTimeline(state, -step);
   }
+}
+
+function timelineEntryId(record) {
+  const payload = record.payload ?? {};
+  if (record.type === "ui/message" && payload.type === "assistant_stream") {
+    return state.activeAssistant?.id
+      || latestMessageId("assistant")
+      || `assistant-${record.seq ?? "unknown"}`;
+  }
+  if (record.type === "ui/message" && payload.type === "thinking") {
+    return state.activeThinking?.id
+      || latestMessageId("thinking")
+      || `thinking-${record.seq ?? "unknown"}`;
+  }
+  if (record.type === "ui/message" && ["tool_prepare", "tool_use", "tool_result"].includes(payload.type)) {
+    return payload.tool_call_id || "";
+  }
+  if (record.type === "permission/request") {
+    return record.request_id || record.id || "";
+  }
+  if (record.type === "ui/message" && payload.type === "permission_bubble") {
+    return payload.request_id || record.request_id || record.seq || "";
+  }
+  return record.request_id || record.seq || "";
+}
+
+function latestMessageId(kind) {
+  return [...state.messages].reverse().find((message) => message.kind === kind)?.id || "";
 }
 
 function handleTaskPanelFocusedKey(chunk) {
@@ -452,11 +504,57 @@ function scheduleRedraw() {
   }, 16);
 }
 
+function handleTerminalResize() {
+  const width = Math.max(60, process.stdout.columns ?? 100);
+  const height = Math.max(12, process.stdout.rows ?? 30);
+  if (viewportWidth === null || viewportHeight === null) {
+    viewportWidth = width;
+    viewportHeight = height;
+    scheduleRedraw();
+    return;
+  }
+  if (width === viewportWidth && height === viewportHeight) return;
+
+  const previousWidth = viewportWidth;
+  const previousHeight = viewportHeight;
+  const anchor = captureViewportAnchor(
+    state,
+    previousWidth,
+    previousHeight,
+    { cwd: process.cwd(), home: process.env.HOME },
+  );
+  const previousOffset = state.scrollOffset;
+  restoreViewportAnchor(
+    state,
+    anchor,
+    width,
+    height,
+    { cwd: process.cwd(), home: process.env.HOME },
+  );
+  viewportWidth = width;
+  viewportHeight = height;
+  debugLog?.log("viewport.resize_anchor", {
+    previous_width: previousWidth,
+    previous_height: previousHeight,
+    width,
+    height,
+    message_id: anchor?.messageId ?? "",
+    message_index: anchor?.messageIndex ?? null,
+    previous_offset: previousOffset,
+    scroll_offset: state.scrollOffset,
+    follow_tail: state.followTail,
+  });
+  scheduleUiSnapshotPersist();
+  scheduleRedraw();
+}
+
 function redraw() {
   const width = Math.max(60, process.stdout.columns ?? 100);
   const height = Math.max(12, process.stdout.rows ?? 30);
   try {
     const lines = renderScreen(state, width, height, { cwd: process.cwd(), home: process.env.HOME });
+    viewportWidth = width;
+    viewportHeight = height;
     debugLog?.log("render.screen", {
       width,
       height,
@@ -465,6 +563,8 @@ function redraw() {
       running: state.running,
       mode: state.mode,
       scroll_offset: state.scrollOffset,
+      follow_tail: state.followTail,
+      unread_output_count: state.unreadOutputCount,
     });
     process.stdout.write(ANSI.clear + lines.join("\n"));
   } catch (error) {
