@@ -8,7 +8,7 @@ import logging
 import subprocess
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
@@ -41,6 +41,7 @@ _TERMINAL_MISSION_STATUSES = frozenset({
     "closed",
     "archived",
 })
+_SUPPORTED_PERMISSION_CHOICES = frozenset({"allow_once", "deny", "grant_session"})
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
@@ -74,7 +75,35 @@ def _challenge_error_message(status: str) -> str:
 def _backend_choices_error_message(kind: str) -> str:
     if kind == "missing":
         return "后端权限选择缺失，系统已拒绝本次操作。"
+    if kind == "invalid":
+        return "后端权限选择格式或内容无效，系统已拒绝本次操作。"
+    if kind == "high_risk_unusable":
+        return "后端权限选择无法完成高风险确认，系统已拒绝本次操作。"
     return "后端权限选择为空或无效，系统已拒绝本次操作。"
+
+
+def _normalize_backend_choices(raw_choices: Any) -> tuple[str, ...] | None:
+    if (
+        not isinstance(raw_choices, Collection)
+        or isinstance(raw_choices, (str, bytes, bytearray, Mapping))
+    ):
+        return None
+
+    values = (
+        sorted(raw_choices, key=lambda choice: str(choice))
+        if isinstance(raw_choices, (set, frozenset))
+        else raw_choices
+    )
+    choices: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            return None
+        choice = value.strip().lower()
+        if not choice or choice not in _SUPPORTED_PERMISSION_CHOICES:
+            return None
+        if choice not in choices:
+            choices.append(choice)
+    return tuple(choices)
 
 
 _SLASH_ALIAS_MAP: dict[str, str] = {
@@ -1375,9 +1404,9 @@ class JsonlEngineBridge:
 
     async def confirm_permission(self, payload: dict[str, Any]) -> str:
         call_id = str(payload.get("call_id") or "").strip()
-        request_id = call_id or f"perm-{uuid4().hex}"
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[str] = loop.create_future()
+        request_id = call_id
+        if not request_id or request_id in self._pending_permissions:
+            request_id = self._next_permission_request_id()
         if "choices" not in payload:
             await self.emit_error(
                 _backend_choices_error_message("missing"),
@@ -1385,12 +1414,14 @@ class JsonlEngineBridge:
                 request_id=request_id,
             )
             return "deny"
-        raw_choices = payload["choices"]
-        choices = (
-            tuple(str(choice).strip().lower() for choice in raw_choices)
-            if isinstance(raw_choices, (list, tuple, set, frozenset))
-            else ()
-        )
+        choices = _normalize_backend_choices(payload["choices"])
+        if choices is None:
+            await self.emit_error(
+                _backend_choices_error_message("invalid"),
+                code="permission_choices_invalid",
+                request_id=request_id,
+            )
+            return "deny"
         if not choices:
             await self.emit_error(
                 _backend_choices_error_message("empty"),
@@ -1401,8 +1432,18 @@ class JsonlEngineBridge:
         requires_double_confirm = bool(payload.get("requires_double_confirm"))
         if requires_double_confirm:
             choices = tuple(choice for choice in choices if choice != "grant_session")
+            if not {"allow_once", "deny"}.issubset(choices):
+                await self.emit_error(
+                    _backend_choices_error_message("high_risk_unusable"),
+                    code="permission_choices_high_risk_unusable",
+                    request_id=request_id,
+                )
+                return "deny"
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[str] = loop.create_future()
         public_payload = {
             "request_id": request_id,
+            "call_id": call_id,
             "session_id": str(payload.get("session_id") or ""),
             "run_id": str(payload.get("run_id") or ""),
             "agent_name": str(payload.get("agent_name") or payload.get("agent") or "main"),
@@ -1417,7 +1458,7 @@ class JsonlEngineBridge:
             "requires_double_confirm": requires_double_confirm,
             "status": "needs_confirmation",
         }
-        self._pending_permissions[request_id] = PendingPermission(
+        pending = PendingPermission(
             future=future,
             public_payload=public_payload,
             choices=choices,
@@ -1425,12 +1466,20 @@ class JsonlEngineBridge:
             session_id=public_payload["session_id"],
             call_id=call_id,
         )
+        self._pending_permissions[request_id] = pending
         await self.emit(ServerEventType.PERMISSION_REQUEST, public_payload, request_id=request_id)
         try:
             return await future
         finally:
-            self._pending_permissions.pop(request_id, None)
-            self._permission_challenges.discard_request(request_id)
+            if self._pending_permissions.get(request_id) is pending:
+                self._pending_permissions.pop(request_id, None)
+                self._permission_challenges.discard_request(request_id)
+
+    def _next_permission_request_id(self) -> str:
+        while True:
+            request_id = f"perm-{uuid4().hex}"
+            if request_id not in self._pending_permissions:
+                return request_id
 
     async def resolve_permission(self, payload: dict[str, Any], *, request_id: str) -> None:
         permission_id = str(payload.get("request_id") or request_id)

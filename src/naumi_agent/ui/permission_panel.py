@@ -234,5 +234,5 @@ def _render_grant(grant: dict[str, Any]) -> str:
     grant_id = str(grant.get("grant_id") or "?")
     tool_family = str(grant.get("tool_family") or "tool")
     expires_at = grant.get("expires_at")
-    scope = "session" if expires_at is None else f"until {expires_at}"
+    scope = "本会话" if expires_at is None else f"有效至 {expires_at}"
     return f"  - {grant_id} {tool_family} [{scope}]"
