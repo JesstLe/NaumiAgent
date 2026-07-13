@@ -8,7 +8,7 @@ Complete the existing slash-command footer with deterministic keyboard ownership
 
 - The panel is open only when the composer begins with `/`, contains no whitespace, has candidates, and has not been dismissed for the current input.
 - `Down` and `Tab` select the next candidate; `Up` selects the previous candidate. Selection wraps at both ends.
-- `Enter` accepts the selected canonical command into the composer with one trailing space. It never sends during acceptance.
+- `Enter` accepts a selected canonical command when the composer is still partial and dismisses completion for that input. If the composer already equals the selected canonical command, Enter falls through to normal submission.
 - `Ctrl+Enter` remains the explicit unconditional submit shortcut.
 - `Esc` dismisses the panel while preserving the exact composer text and cursor.
 - Any composer edit after dismissal re-enables completion and resets selection to the first candidate.
