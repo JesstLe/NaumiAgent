@@ -1,6 +1,7 @@
 """Session-scoped permission grant tests."""
 
 from dataclasses import FrozenInstanceError
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -28,6 +29,25 @@ class TestPermissionGrantStore:
         assert store.revoke_session("session-a") == 1
         assert store.revoke_session("session-a") == 0
 
+    def test_revoke_rejects_a_grant_from_another_session(self) -> None:
+        store = PermissionGrantStore()
+        grant = store.create("session-a", "shell", "call-1")
+
+        assert store.revoke(grant.grant_id, "session-b") is False
+        assert store.allows("session-a", "shell") is True
+
+    def test_clear_removes_every_grant(self) -> None:
+        store = PermissionGrantStore()
+        store.create("session-a", "shell", "call-1")
+        store.create("session-b", "code_execution", "call-2")
+
+        store.clear()
+
+        assert store.allows("session-a", "shell") is False
+        assert store.allows("session-b", "code_execution") is False
+        assert store.list_session("session-a") == ()
+        assert store.list_session("session-b") == ()
+
     def test_create_deduplicates_a_session_and_family(self) -> None:
         store = PermissionGrantStore()
 
@@ -36,6 +56,18 @@ class TestPermissionGrantStore:
 
         assert second == first
         assert store.list_session("session-a") == (first,)
+
+    def test_created_grant_has_uuid_hex_and_timezone_aware_utc_timestamp(self) -> None:
+        store = PermissionGrantStore()
+
+        grant = store.create("session-a", "shell", "call-1")
+        created_at = datetime.fromisoformat(grant.created_at)
+
+        assert len(grant.grant_id) == 32
+        assert all(character in "0123456789abcdef" for character in grant.grant_id)
+        assert created_at.tzinfo is not None
+        assert created_at.utcoffset() == timedelta(0)
+        assert grant.expires_at is None
 
     @pytest.mark.parametrize(
         ("session_id", "tool_family"),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
@@ -823,6 +824,30 @@ COMMON_PATH_ARGUMENT_NAMES = (
 )
 
 COMMON_COMMAND_ARGUMENT_NAMES = ("command", "cmd", "shell", "script")
+SHELL_COMMAND_SEPARATORS = frozenset({";", "&&", "||", "|", "&"})
+SUDO_OPTIONS_WITH_VALUE = frozenset(
+    {
+        "-C",
+        "-D",
+        "-g",
+        "-h",
+        "-p",
+        "-r",
+        "-t",
+        "-u",
+        "-U",
+        "--chroot",
+        "--close-from",
+        "--command-timeout",
+        "--group",
+        "--host",
+        "--login-class",
+        "--other-user",
+        "--role",
+        "--type",
+        "--user",
+    }
+)
 
 
 class PermissionChecker:
@@ -1111,8 +1136,19 @@ class PermissionChecker:
                 tool_family=tool_family,
             )
 
+        destructive_rm = self._contains_destructive_rm_command(command)
+        if destructive_rm:
+            return self._deny(
+                "命令包含高风险模式：递归强制删除绝对路径，已阻止执行。",
+                code=PermissionReasonCode.DANGEROUS_COMMAND,
+                risk_level=PermissionRiskLevel.HIGH,
+                tool_family=tool_family,
+            )
+
         cmd_lower = command.lower().strip()
         for blocked in BLOCKED_COMMANDS:
+            if blocked == "rm -rf /" and destructive_rm is not None:
+                continue
             if blocked.lower() in cmd_lower:
                 return self._deny(
                     f"命令包含高风险模式 `{blocked}`，已阻止执行。",
@@ -1121,6 +1157,98 @@ class PermissionChecker:
                     tool_family=tool_family,
                 )
         return PermissionDecision(allowed=True)
+
+    @staticmethod
+    def _contains_destructive_rm_command(command: str) -> bool | None:
+        """Return None when shell tokenization fails so callers can use literal fallback."""
+        try:
+            lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+            lexer.commenters = ""
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError:
+            return None
+
+        simple_command: list[str] = []
+        for token in [*tokens, ";"]:
+            if token in SHELL_COMMAND_SEPARATORS:
+                if PermissionChecker._is_destructive_rm_simple_command(simple_command):
+                    return True
+                simple_command = []
+            else:
+                simple_command.append(token)
+        return False
+
+    @staticmethod
+    def _is_destructive_rm_simple_command(tokens: list[str]) -> bool:
+        """Detect a recursive, forced rm targeting an absolute path."""
+        rm_arguments = PermissionChecker._rm_arguments_at_command_position(tokens)
+        if rm_arguments is None:
+            return False
+
+        recursive = False
+        force = False
+        option_parsing = True
+        targets: list[str] = []
+        for argument in rm_arguments:
+            if option_parsing and argument == "--":
+                option_parsing = False
+            elif option_parsing and argument == "--recursive":
+                recursive = True
+            elif option_parsing and argument == "--force":
+                force = True
+            elif option_parsing and argument.startswith("-") and argument != "-":
+                short_options = argument[1:]
+                recursive = recursive or "r" in short_options or "R" in short_options
+                force = force or "f" in short_options
+            else:
+                targets.append(argument)
+
+        if not (recursive and force):
+            return False
+        return any(PermissionChecker._is_dangerous_rm_target(target) for target in targets)
+
+    @staticmethod
+    def _rm_arguments_at_command_position(tokens: list[str]) -> list[str] | None:
+        """Return rm arguments when rm starts a simple command or follows sudo options."""
+        if not tokens:
+            return None
+
+        command_index = 0
+        if tokens[command_index] == "sudo":
+            command_index += 1
+            while command_index < len(tokens):
+                option = tokens[command_index]
+                if option == "--":
+                    command_index += 1
+                    break
+                if option == "-" or not option.startswith("-"):
+                    break
+                if option in SUDO_OPTIONS_WITH_VALUE:
+                    command_index += 1
+                    if command_index >= len(tokens):
+                        return None
+                command_index += 1
+
+        if command_index >= len(tokens) or tokens[command_index] != "rm":
+            return None
+        return tokens[command_index + 1 :]
+
+    @staticmethod
+    def _is_dangerous_rm_target(target: str) -> bool:
+        """Preserve the existing absolute-path hard block, including root aliases."""
+        expanded_target = os.path.expanduser(target)
+        if not os.path.isabs(expanded_target):
+            return False
+        return (
+            PermissionChecker._is_root_equivalent_target(expanded_target)
+            or os.path.isabs(expanded_target)
+        )
+
+    @staticmethod
+    def _is_root_equivalent_target(target: str) -> bool:
+        """Recognize lexical spellings of the filesystem root without executing a command."""
+        return not target.rstrip(os.path.sep) or os.path.normpath(target) == os.path.sep
 
     def get_call_counts(self) -> dict[str, int]:
         return dict(self._call_counts)

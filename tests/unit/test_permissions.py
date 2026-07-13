@@ -148,6 +148,64 @@ class TestPermissionChecker:
         assert not result.allowed
         assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            pytest.param("rm -rf -- /", id="end-of-options-before-root"),
+            pytest.param("rm -fr /", id="combined-short-options-reversed"),
+            pytest.param("rm -r -f /", id="separate-short-options"),
+            pytest.param("rm --recursive --force /", id="long-options"),
+            pytest.param("sudo -n rm -fr /", id="sudo-wrapper"),
+            pytest.param("printf safe; rm -fr /", id="second-command-after-semicolon"),
+            pytest.param(
+                "printf safe && rm --recursive --force /",
+                id="second-command-after-and",
+            ),
+            pytest.param("rm -rf /.", id="root-equivalent-target"),
+        ],
+    )
+    def test_bypass_blocks_structurally_destructive_rm_commands(self, command: str) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check("bash_run", {"command": command})
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+        assert "高风险" in result.reason
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            pytest.param("rm -f ./file", id="force-only-local-file"),
+            pytest.param("rm -r ./build", id="recursive-only-local-directory"),
+            pytest.param("echo 'rm -rf /'", id="quoted-text-not-command"),
+        ],
+    )
+    def test_bypass_allows_safe_rm_neighbors(self, command: str) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check("bash_run", {"command": command})
+
+        assert result.allowed
+        assert result.code is PermissionReasonCode.ALLOWED
+
+    def test_malformed_shell_uses_normalized_literal_dangerous_fallback(self) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check("bash_run", {"command": "rm -rf / 'unterminated"})
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_malformed_safe_shell_keeps_normal_confirmation_policy(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+
+        result = checker.check("bash_run", {"command": "echo 'unterminated"})
+
+        assert result.allowed
+        assert result.outcome is PermissionOutcome.CONFIRM
+        assert result.risk_level is PermissionRiskLevel.MEDIUM
+
     def test_strict_bash_dangerous_command_blocks_before_mode_rejection(self) -> None:
         checker = PermissionChecker(PermissionMode.STRICT)
 
