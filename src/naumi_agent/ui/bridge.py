@@ -1405,6 +1405,9 @@ class JsonlEngineBridge:
             )
 
     async def confirm_permission(self, payload: dict[str, Any]) -> str:
+        if self._closed:
+            return "deny"
+
         call_id = str(payload.get("call_id") or "").strip()
         request_id = call_id
         if not request_id or request_id in self._pending_permissions:

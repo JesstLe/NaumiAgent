@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -13,6 +14,13 @@ from naumi_agent.ui.protocol import (
     ServerEventType,
     normalize_client_record,
 )
+
+
+def _assert_bounded_strict_json(summary: dict[str, object]) -> str:
+    encoded = json.dumps(summary, ensure_ascii=False, allow_nan=False)
+    assert len(encoded) <= 1200
+    assert json.loads(encoded) == summary
+    return encoded
 
 
 @pytest.mark.parametrize(
@@ -158,6 +166,48 @@ def test_argument_summary_normalizes_non_finite_floats_to_strict_json(value: flo
     assert "NaN" not in encoded
     assert "Infinity" not in encoded
     assert json.loads(encoded) == summary
+
+
+def test_argument_summary_bounds_a_1000_layer_json_value() -> None:
+    previous_limit = sys.getrecursionlimit()
+    try:
+        sys.setrecursionlimit(max(previous_limit, 5000))
+        value = json.loads("[" * 1000 + "0" + "]" * 1000)
+    finally:
+        sys.setrecursionlimit(previous_limit)
+
+    summary = summarize_arguments(value)
+
+    encoded = _assert_bounded_strict_json(summary)
+    assert "[已达深度上限]" in encoded
+
+
+@pytest.mark.parametrize("sign", [1, -1])
+def test_argument_summary_normalizes_oversized_integers(sign: int) -> None:
+    value = sign * 10**5000
+    summary = summarize_arguments({"value": value})
+
+    assert summary["value"] == "[整数过大]"
+    _assert_bounded_strict_json(summary)
+
+
+@pytest.mark.parametrize("container_kind", ["list", "dict"])
+def test_argument_summary_terminates_for_self_referential_containers(
+    container_kind: str,
+) -> None:
+    if container_kind == "list":
+        cyclic_list: list[object] = []
+        cyclic_list.append(cyclic_list)
+        value: object = cyclic_list
+    else:
+        cyclic_dict: dict[str, object] = {}
+        cyclic_dict["self"] = cyclic_dict
+        value = cyclic_dict
+
+    summary = summarize_arguments(value)
+
+    encoded = _assert_bounded_strict_json(summary)
+    assert "[循环引用]" in encoded
 
 
 def test_permission_challenge_is_one_use_and_request_bound() -> None:
