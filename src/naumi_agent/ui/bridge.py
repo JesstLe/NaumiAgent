@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, TextIO
 from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
+from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.log_setup import setup_logging
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.tasks.models import TaskStatus
@@ -364,6 +365,8 @@ class JsonlEngineBridge:
         self._run_task: asyncio.Task[Any] | None = None
         self._active_run_context: dict[str, str] = {}
         self._active_completion_receipt: CompletionReceipt | None = None
+        self._inspector_subscribed = False
+        self._inspector_snapshot: RuntimeInspectorSnapshot | None = None
         self._cli_supported_commands = _load_cli_slash_commands_with_alias()
         self._pending_permissions: dict[str, asyncio.Future[str]] = {}
         self._pending_permission_payloads: dict[str, dict[str, Any]] = {}
@@ -569,6 +572,9 @@ class JsonlEngineBridge:
             return
         if event_type == ClientEventType.RECEIPT_REQUEST:
             await self.resend_completion_receipt(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.INSPECTOR_REQUEST:
+            await self.show_inspector(payload, request_id=request_id)
             return
 
         if event_type == ClientEventType.RESUME:
@@ -951,6 +957,100 @@ class JsonlEngineBridge:
             request_id=request_id,
         )
 
+    async def show_inspector(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Open, refresh, or close the current session Inspector subscription."""
+        if not bool(payload.get("open", True)):
+            self._inspector_subscribed = False
+            revision = (
+                self._inspector_snapshot.revision
+                if self._inspector_snapshot is not None
+                else 0
+            )
+            self._inspector_snapshot = None
+            await self.emit(
+                ServerEventType.ACK,
+                {
+                    "event": str(ClientEventType.INSPECTOR_REQUEST),
+                    "open": False,
+                    "revision": revision,
+                },
+                request_id=request_id,
+            )
+            return
+
+        session = getattr(self.engine, "_session", None)
+        if session is None:
+            session = await self.engine.get_or_create_session()
+        session_id = str(getattr(session, "id", "") or "")
+        requested_session_id = str(payload.get("session_id") or "")
+        if requested_session_id and requested_session_id != session_id:
+            await self.emit_error(
+                "Inspector 只能读取当前会话。",
+                code="inspector_session_mismatch",
+                request_id=request_id,
+            )
+            return
+
+        snapshot = await self.engine.runtime_inspector.snapshot()
+        if snapshot.session_id != session_id:
+            await self.emit_error(
+                "Inspector 快照会话与当前会话不一致。",
+                code="inspector_session_mismatch",
+                request_id=request_id,
+            )
+            return
+        self._inspector_subscribed = True
+        self._inspector_snapshot = snapshot
+        await self.emit(
+            ServerEventType.INSPECTOR_SNAPSHOT,
+            snapshot.to_dict(),
+            request_id=request_id,
+        )
+
+    async def _emit_inspector_update(self) -> None:
+        if not self._inspector_subscribed:
+            return
+        try:
+            current = await self.engine.runtime_inspector.snapshot()
+            previous = self._inspector_snapshot
+            if previous is None or previous.session_id != current.session_id:
+                self._inspector_snapshot = current
+                await self.emit(ServerEventType.INSPECTOR_SNAPSHOT, current.to_dict())
+                return
+            changed_tabs = self.engine.runtime_inspector.changed_tabs(previous, current)
+            if not changed_tabs and current.revision == previous.revision:
+                return
+            self._inspector_snapshot = current
+            if not changed_tabs or current.revision != previous.revision + 1:
+                await self.emit(ServerEventType.INSPECTOR_SNAPSHOT, current.to_dict())
+                return
+            payload = current.to_dict()
+            await self.emit(
+                ServerEventType.INSPECTOR_UPDATE,
+                {
+                    "schema_version": payload["schema_version"],
+                    "session_id": payload["session_id"],
+                    "revision": payload["revision"],
+                    "generated_at": payload["generated_at"],
+                    "active_run_id": payload["active_run_id"],
+                    "changed_tabs": {
+                        name: payload[name]
+                        for name in changed_tabs
+                    },
+                },
+            )
+        except Exception:
+            logger.exception("Runtime Inspector refresh failed")
+            await self.emit_error(
+                "Inspector 刷新失败，已保留上一次快照。",
+                code="inspector_refresh_failed",
+            )
+
     async def _resolve_task_mission(
         self,
         service: Any,
@@ -1044,6 +1144,9 @@ class JsonlEngineBridge:
                 request_id=request_id,
             )
             return
+
+        self._inspector_subscribed = False
+        self._inspector_snapshot = None
 
         session = getattr(self.engine, "_session", None)
         raw_messages = list(getattr(session, "messages", []) or [])
@@ -1423,6 +1526,20 @@ class JsonlEngineBridge:
                 ServerEventType.STATUS,
                 self.status_payload(include_slash_commands=False),
             )
+        if event in {
+            "run_started",
+            "turn_start",
+            "tool_start",
+            "tool_end",
+            "tool_error",
+            "task_snapshot",
+            "permission_bubble",
+            "context_compacted",
+            "response_end",
+            "completion_receipt",
+            "error",
+        }:
+            await self._emit_inspector_update()
 
     async def confirm_permission(self, payload: dict[str, Any]) -> str:
         request_id = (

@@ -6,6 +6,8 @@ export const PROTOCOL_VERSION = Number(PROTOCOL_CONTRACT.version);
 
 const CLIENT_EVENT_TYPES = new Set(PROTOCOL_CONTRACT.client_events ?? []);
 const SERVER_EVENT_TYPES = new Set(PROTOCOL_CONTRACT.server_events ?? []);
+const INSPECTOR_TAB_NAMES = ["plan", "tools", "context", "changes", "tests"];
+const INSPECTOR_STATES = new Set(["ready", "empty", "loading", "stale", "error"]);
 
 export function parseArgs(argv) {
   const parsed = { config: "config.yaml", bridgeCommand: "", bridgeCommandJson: "" };
@@ -134,6 +136,12 @@ function normalizeServerPayload(type, payload) {
   if (type === "completion/receipt") {
     return normalizeCompletionReceipt(payload);
   }
+  if (type === "inspector/snapshot") {
+    return normalizeInspectorSnapshot(payload);
+  }
+  if (type === "inspector/update") {
+    return normalizeInspectorUpdate(payload);
+  }
   if (type === "ui/message") {
     const messageType = String(payload.type ?? "");
     if (!messageType) {
@@ -257,6 +265,226 @@ function normalizeCompletionReceipt(payload) {
     completed_at: String(payload.completed_at ?? ""),
     duration_ms: nonnegativeNumber(payload.duration_ms),
   };
+}
+
+function normalizeInspectorSnapshot(payload) {
+  const header = normalizeInspectorHeader(payload);
+  const normalized = { ...header };
+  for (const tab of INSPECTOR_TAB_NAMES) {
+    if (!Object.hasOwn(payload, tab)) {
+      throw new Error(`inspector/snapshot 缺少 ${tab} 标签`);
+    }
+    normalized[tab] = normalizeInspectorTab(tab, payload[tab]);
+  }
+  return normalized;
+}
+
+function normalizeInspectorUpdate(payload) {
+  const header = normalizeInspectorHeader(payload);
+  const rawTabs = requireObject(payload.changed_tabs, "inspector/update changed_tabs");
+  const changedTabs = {};
+  for (const [tab, value] of Object.entries(rawTabs)) {
+    if (!INSPECTOR_TAB_NAMES.includes(tab)) {
+      throw new Error(`未知 Inspector 标签: ${tab}`);
+    }
+    changedTabs[tab] = normalizeInspectorTab(tab, value);
+  }
+  if (Object.keys(changedTabs).length === 0) {
+    throw new Error("inspector/update changed_tabs 不能为空");
+  }
+  return { ...header, changed_tabs: changedTabs };
+}
+
+function normalizeInspectorHeader(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`Inspector schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const revision = strictNonnegativeInteger(payload.revision, "Inspector revision");
+  return {
+    schema_version: 1,
+    session_id: publicText(payload.session_id),
+    revision,
+    generated_at: publicText(payload.generated_at),
+    active_run_id: publicText(payload.active_run_id),
+  };
+}
+
+function normalizeInspectorTab(name, value) {
+  const tab = requireObject(value, `${name} 标签`);
+  const state = publicText(tab.state).toLowerCase();
+  if (!INSPECTOR_STATES.has(state)) {
+    throw new Error(`Inspector ${name}.state 无效: ${state}`);
+  }
+  const warnings = strictTextArray(tab.warnings, `${name}.warnings`, 20);
+  if (name === "plan") {
+    return {
+      state,
+      items: strictObjectArray(tab.items, "plan.items", 50).map(normalizeInspectorTodo),
+      next_actions: strictObjectArray(tab.next_actions, "plan.next_actions", 50).map(normalizeInspectorAction),
+      warnings,
+    };
+  }
+  if (name === "tools") {
+    return {
+      state,
+      items: strictObjectArray(tab.items, "tools.items", 50).map(normalizeInspectorTool),
+      approvals: strictObjectArray(tab.approvals, "tools.approvals", 50).map(normalizeInspectorApproval),
+      warnings,
+    };
+  }
+  if (name === "context") {
+    return {
+      state,
+      workspace_root: publicText(tab.workspace_root),
+      branch: publicText(tab.branch),
+      commit: publicText(tab.commit),
+      git_available: toBool(tab.git_available),
+      git_dirty: toBool(tab.git_dirty),
+      model: publicText(tab.model),
+      runtime_mode: publicText(tab.runtime_mode),
+      permission_mode: publicText(tab.permission_mode),
+      context_used: strictNonnegativeInteger(tab.context_used, "context.context_used"),
+      context_window: strictNonnegativeInteger(tab.context_window, "context.context_window"),
+      context_percentage: nonnegativeNumber(tab.context_percentage),
+      budget_used_usd: nonnegativeNumber(tab.budget_used_usd),
+      budget_max_usd: nonnegativeNumber(tab.budget_max_usd),
+      budget_percentage: nonnegativeNumber(tab.budget_percentage),
+      input_tokens: strictNonnegativeInteger(tab.input_tokens, "context.input_tokens"),
+      output_tokens: strictNonnegativeInteger(tab.output_tokens, "context.output_tokens"),
+      turns: strictNonnegativeInteger(tab.turns, "context.turns"),
+      warnings,
+    };
+  }
+  if (name === "changes") {
+    const git = requireObject(tab.git_state, "changes.git_state");
+    return {
+      state,
+      source_run_id: publicText(tab.source_run_id),
+      receipt_id: publicText(tab.receipt_id),
+      summary: publicText(tab.summary),
+      items: strictObjectArray(tab.items, "changes.items", 100).map(normalizeInspectorChange),
+      git_state: {
+        available: toBool(git.available),
+        branch: publicText(git.branch),
+        dirty: toBool(git.dirty),
+        commit: publicText(git.commit),
+        ahead: strictNonnegativeInteger(git.ahead ?? 0, "changes.git_state.ahead"),
+        behind: strictNonnegativeInteger(git.behind ?? 0, "changes.git_state.behind"),
+      },
+      warnings,
+    };
+  }
+  return {
+    state,
+    source_run_id: publicText(tab.source_run_id),
+    receipt_id: publicText(tab.receipt_id),
+    validations: strictObjectArray(tab.validations, "tests.validations", 50).map(normalizeInspectorValidation),
+    unverified: strictTextArray(tab.unverified, "tests.unverified", 50),
+    next_actions: strictObjectArray(tab.next_actions, "tests.next_actions", 50).map(normalizeInspectorAction),
+    warnings,
+  };
+}
+
+function normalizeInspectorTodo(item) {
+  return {
+    id: publicText(item.id),
+    subject: publicText(item.subject),
+    status: publicText(item.status),
+    active_form: publicText(item.active_form),
+    owner: publicText(item.owner),
+    blocked_by: strictTextArray(item.blocked_by, "plan.item.blocked_by", 50),
+  };
+}
+
+function normalizeInspectorTool(item) {
+  return {
+    call_id: publicText(item.call_id),
+    name: publicText(item.name),
+    status: publicText(item.status),
+    summary: publicText(item.summary),
+    duration_ms: strictNonnegativeInteger(item.duration_ms ?? 0, "tools.item.duration_ms"),
+    run_id: publicText(item.run_id),
+  };
+}
+
+function normalizeInspectorApproval(item) {
+  return {
+    request_id: publicText(item.request_id),
+    tool_name: publicText(item.tool_name),
+    decision: publicText(item.decision),
+    reason: publicText(item.reason),
+    run_id: publicText(item.run_id),
+  };
+}
+
+function normalizeInspectorChange(item) {
+  return {
+    path: publicText(item.path),
+    status: publicText(item.status),
+    source_tool: publicText(item.source_tool),
+    additions: strictNonnegativeInteger(item.additions ?? 0, "changes.item.additions"),
+    deletions: strictNonnegativeInteger(item.deletions ?? 0, "changes.item.deletions"),
+  };
+}
+
+function normalizeInspectorValidation(item) {
+  return {
+    command: publicText(item.command),
+    scope: publicText(item.scope),
+    status: publicText(item.status),
+    exit_code: item.exit_code == null
+      ? null
+      : strictInteger(item.exit_code, "tests.validation.exit_code"),
+    passed: strictNonnegativeInteger(item.passed ?? 0, "tests.validation.passed"),
+    failed: strictNonnegativeInteger(item.failed ?? 0, "tests.validation.failed"),
+    skipped: strictNonnegativeInteger(item.skipped ?? 0, "tests.validation.skipped"),
+    log_ref: publicText(item.log_ref),
+  };
+}
+
+function normalizeInspectorAction(item) {
+  return {
+    id: publicText(item.id),
+    label: publicText(item.label),
+    kind: publicText(item.kind),
+  };
+}
+
+function strictObjectArray(value, name, limit) {
+  if (!Array.isArray(value)) throw new Error(`Inspector ${name} 必须是数组`);
+  return value.slice(0, limit).map((item) => requireObject(item, name));
+}
+
+function strictTextArray(value, name, limit) {
+  if (!Array.isArray(value)) throw new Error(`Inspector ${name} 必须是数组`);
+  return value.slice(0, limit).map((item) => publicText(item));
+}
+
+function requireObject(value, name) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Inspector ${name} 必须是对象`);
+  }
+  return value;
+}
+
+function strictNonnegativeInteger(value, name) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${name} 必须是非负整数`);
+  }
+  return parsed;
+}
+
+function strictInteger(value, name) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`${name} 必须是整数`);
+  }
+  return parsed;
+}
+
+function publicText(value) {
+  return String(value ?? "").trim().slice(0, 500);
 }
 
 function normalizeObjectArray(value, limit) {

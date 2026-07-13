@@ -77,10 +77,13 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.client_events.includes("task_panel"));
   assert(PROTOCOL_CONTRACT.client_events.includes("run_cancel"));
   assert(PROTOCOL_CONTRACT.client_events.includes("receipt/request"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("inspector/request"));
   assert(PROTOCOL_CONTRACT.server_events.includes("ui/message"));
   assert(PROTOCOL_CONTRACT.server_events.includes("runtime/status"));
   assert(PROTOCOL_CONTRACT.server_events.includes("run/cancelled"));
   assert(PROTOCOL_CONTRACT.server_events.includes("completion/receipt"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("inspector/snapshot"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("inspector/update"));
   assert.deepEqual(PROTOCOL_CONTRACT.ui_messages.tool_prepare.phases, ["start", "snapshot", "end"]);
   assert(PROTOCOL_CONTRACT.ui_messages.tool_prepare.fields.includes("tool_call_id"));
   assert(PROTOCOL_CONTRACT.ui_messages.tool_prepare.fields.includes("content_lines"));
@@ -96,6 +99,119 @@ test("protocol contract drives client and server event validation", () => {
   );
   assert.equal(chunks.length, 0);
 });
+
+test("normalizes strict runtime inspector snapshots and updates", () => {
+  const snapshot = inspectorSnapshotFixture(4);
+  const normalized = normalizeServerRecord({
+    type: "inspector/snapshot",
+    payload: snapshot,
+  }).payload;
+  assert.equal(normalized.revision, 4);
+  assert.equal(normalized.context.git_available, false);
+  assert.equal(normalized.plan.items[0].subject, "实现 Inspector");
+
+  const update = normalizeServerRecord({
+    type: "inspector/update",
+    payload: {
+      schema_version: 1,
+      session_id: "session-1",
+      revision: 5,
+      generated_at: "2026-07-13T00:00:01+00:00",
+      changed_tabs: { tools: snapshot.tools },
+    },
+  }).payload;
+  assert.deepEqual(Object.keys(update.changed_tabs), ["tools"]);
+  assert.equal(update.changed_tabs.tools.items[0].call_id, "read-1");
+});
+
+test("rejects malformed runtime inspector state and unknown changed tabs", () => {
+  const invalidState = inspectorSnapshotFixture(1);
+  invalidState.plan.state = "invented";
+  assert.throws(
+    () => normalizeServerRecord({ type: "inspector/snapshot", payload: invalidState }),
+    /plan.state/,
+  );
+
+  const snapshot = inspectorSnapshotFixture(1);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "inspector/update",
+      payload: {
+        schema_version: 1,
+        session_id: "session-1",
+        revision: 2,
+        generated_at: "now",
+        changed_tabs: { surprise: snapshot.plan },
+      },
+    }),
+    /未知 Inspector 标签/,
+  );
+
+  const invalidExitCode = inspectorSnapshotFixture(1);
+  invalidExitCode.tests.validations = [{
+    command: "pytest",
+    scope: "unit",
+    status: "failed",
+    exit_code: "not-an-integer",
+  }];
+  assert.throws(
+    () => normalizeServerRecord({ type: "inspector/snapshot", payload: invalidExitCode }),
+    /exit_code 必须是整数/,
+  );
+});
+
+function inspectorSnapshotFixture(revision) {
+  return {
+    schema_version: 1,
+    session_id: "session-1",
+    revision,
+    generated_at: "2026-07-13T00:00:00+00:00",
+    active_run_id: "run-1",
+    plan: {
+      state: "ready",
+      items: [{ id: "1", subject: "实现 Inspector", status: "in_progress", blocked_by: [] }],
+      next_actions: [],
+      warnings: [],
+    },
+    tools: {
+      state: "ready",
+      items: [{ call_id: "read-1", name: "file_read", status: "success", duration_ms: 4 }],
+      approvals: [],
+      warnings: [],
+    },
+    context: {
+      state: "ready",
+      workspace_root: "/tmp/project",
+      branch: "main",
+      commit: "abc",
+      git_available: false,
+      git_dirty: false,
+      context_used: 12,
+      context_window: 100,
+      context_percentage: 12,
+      budget_used_usd: 0,
+      budget_max_usd: 5,
+      budget_percentage: 0,
+      input_tokens: 1,
+      output_tokens: 2,
+      turns: 1,
+      warnings: [],
+    },
+    changes: {
+      state: "empty",
+      items: [],
+      git_state: { available: false, dirty: false },
+      warnings: [],
+    },
+    tests: {
+      state: "empty",
+      validations: [],
+      unverified: [],
+      next_actions: [],
+      warnings: [],
+    },
+  };
+}
 
 test("normalizeServerRecord stabilizes bridge payloads", () => {
   assert.deepEqual(normalizeServerRecord({

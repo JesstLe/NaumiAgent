@@ -28,6 +28,7 @@ class ClientEventType(StrEnum):
     TASK_SUBMIT = "task_submit"
     RUN_CANCEL = "run_cancel"
     RECEIPT_REQUEST = "receipt/request"
+    INSPECTOR_REQUEST = "inspector/request"
     SET_MODE = "set_mode"
     CYCLE_MODE = "cycle_mode"
     SET_REASONING = "set_reasoning"
@@ -60,6 +61,8 @@ class ServerEventType(StrEnum):
     UI_MESSAGE = "ui/message"
     ENGINE_EVENT = "engine/event"
     COMPLETION_RECEIPT = "completion/receipt"
+    INSPECTOR_SNAPSHOT = "inspector/snapshot"
+    INSPECTOR_UPDATE = "inspector/update"
     RUN_STARTED = "run/started"
     RUN_COMPLETED = "run/completed"
     RUN_CANCELLED = "run/cancelled"
@@ -223,6 +226,25 @@ def _normalize_client_payload(
             "session_id": str(payload.get("session_id") or "").strip(),
             "receipt_id": receipt_id,
             "run_id": run_id,
+        }
+
+    if event_type == ClientEventType.INSPECTOR_REQUEST:
+        raw_revision = payload.get("known_revision", 0)
+        if isinstance(raw_revision, bool):
+            raise ValueError("Inspector known_revision 必须是非负整数。")
+        try:
+            known_revision = int(raw_revision)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Inspector known_revision 必须是非负整数。") from exc
+        if known_revision < 0 or known_revision > 2_147_483_647:
+            raise ValueError("Inspector known_revision 必须是非负整数。")
+        session_id = str(payload.get("session_id") or "").strip()
+        if len(session_id) > 500:
+            raise ValueError("Inspector session_id 不能超过 500 个字符。")
+        return {
+            "open": _to_bool(payload.get("open", True)),
+            "known_revision": known_revision,
+            "session_id": session_id,
         }
 
     if event_type == ClientEventType.SET_MODE:
