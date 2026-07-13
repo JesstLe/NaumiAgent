@@ -36,6 +36,46 @@ attachJsonlLineReader(process.stdin, (line) => {
     return;
   }
 
+  if (record.type === "task_submit") {
+    const text = payload.text ?? "";
+    const mission = { id: "mission-1", title: "终端任务", status: "active" };
+    const task = { id: "41", subject: text, status: "in_progress" };
+    const issue = {
+      task_id: "41",
+      mission_id: "mission-1",
+      title: text,
+      parallel_mode: payload.parallel_mode ?? "exclusive",
+      risk_level: payload.risk_level ?? "medium",
+    };
+    emit("user/message", { content: text, intent: "task", task_id: "41" }, record.id);
+    emit("task/created", {
+      mission,
+      task,
+      issue,
+      workbench_snapshot: workbenchSnapshot(mission, task, issue),
+    }, record.id);
+    emit("run/started", {
+      task: text,
+      task_id: "41",
+      mission_id: "mission-1",
+      intent: "task",
+    }, record.id);
+    emitUi({ type: "assistant_stream", phase: "start" });
+    emitUi({ type: "assistant_stream", phase: "token", content: "任务已创建，正在执行。" });
+    emitUi({ type: "assistant_stream", phase: "end" });
+    setTimeout(() => {
+      const completedTask = { ...task, status: "completed" };
+      emit("workbench/snapshot", workbenchSnapshot(mission, completedTask, issue), record.id);
+      emit("run/completed", {
+        status: "completed",
+        task_id: "41",
+        mission_id: "mission-1",
+        intent: "task",
+      }, record.id);
+    }, 120);
+    return;
+  }
+
   if (record.type === "submit") {
     if ((payload.text ?? "").includes("bad bridge event")) {
       process.stdout.write('{"type":"unknown/server","payload":{}}\n');
@@ -257,5 +297,16 @@ function statusPayload(overrides = {}) {
     ui: { show_reasoning: showReasoning },
     git: { branch: "main", dirty: true },
     ...overrides,
+  };
+}
+
+function workbenchSnapshot(mission, task, issue) {
+  return {
+    session_id: sessionId,
+    missions: [mission],
+    tasks: [task],
+    issues: [issue],
+    failures: [],
+    events: [{ id: "event-41", type: "issue.created" }],
   };
 }

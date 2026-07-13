@@ -74,6 +74,11 @@ function renderUserMessage(message, width) {
     const role = index === 0 ? `${color(ANSI.green, "你")}  ` : "    ";
     return rightAlign(`${role}${line}`, width);
   });
+  if (message.intent === "task") {
+    const taskId = message.taskId ? ` #${message.taskId}` : "";
+    const lifecycle = taskLifecycleLabel(message);
+    rendered.unshift(rightAlign(color(ANSI.cyan, `任务${taskId} · ${lifecycle}`), width));
+  }
   const status = userDeliveryStatus(message);
   if (status) {
     rendered.push(...wrapAnsiLine(status.text, blockWidth).map(
@@ -81,6 +86,14 @@ function renderUserMessage(message, width) {
     ));
   }
   return ["", ...rendered];
+}
+
+function taskLifecycleLabel(message) {
+  const status = String(message.taskStatus ?? "");
+  if (status === "completed") return "已完成";
+  if (status === "blocked" || status === "failed") return "阻塞";
+  if (status === "running" || status === "in_progress") return "进行中";
+  return "创建中";
 }
 
 function userDeliveryStatus(message) {

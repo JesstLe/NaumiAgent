@@ -2,7 +2,7 @@
 
 ## 实施状态（2026-07-13）
 
-已完成五个独立切片：“多行输入器与草稿恢复”“时间线跟随与缩放锚点”“用户消息发送生命周期”“项目输入历史搜索”和“斜杠命令键盘补全”。
+已完成六个独立切片：“多行输入器与草稿恢复”“时间线跟随与缩放锚点”“用户消息发送生命周期”“项目输入历史搜索”“斜杠命令键盘补全”和“对话转 Workbench 任务”。
 
 多行输入器与草稿恢复：
 
@@ -56,18 +56,31 @@
 - 权限确认和 `Ctrl+R` 历史搜索拥有更高键盘优先级；从历史接受斜杠命令不会被补全面板重复拦截。
 - 真实 `.venv` Bridge 验收已证明 `/do -> /doctor` 接受阶段零协议调用，提交阶段恰好一次调用并正常退出。
 
+对话转 Workbench 任务：
+
+- Composer 使用 `chat >` / `task >` 明文标识输入意图；runtime 的 `default / plan / bypass` 继续独立显示在状态栏。
+- `Ctrl+T` 切换持续输入意图，`/chat` 返回普通对话；`/task <内容>` 与 `/task create <内容>` 执行一次显式任务提交。
+- `/task 17` 与 `/task #17` 保留任务详情入口，数字 ID 不再被误解析为任务面板条数；`/tasks` 继续负责完整任务页。
+- `task_submit` 由 Bridge 先创建真实 Mission、Issue 和 backing Task，再复用当前 `AgentEngine.run_streaming()` 执行；不存在前端假任务或第二套执行引擎。
+- 自动 Mission 解析只考虑开放 Mission：无开放 Mission 时创建新的 Mission，多个开放 Mission 时要求用户明确选择，已完成/已取消 Mission 不接受新任务。
+- 本地任务消息复用 queued/accepted/failed/uncertain 发送状态；`task/created` 原地补入任务 ID，不重复显示用户内容，并在 Bridge 接受后自动回到 `chat >`。
+- Agent 成功时 backing Task 进入 `completed`；失败、取消或 Bridge shutdown 时进入 `blocked`，不会残留 `in_progress`。错误事件携带 `task_id`，前端任务卡同步显示“阻塞”。
+- 未发送任务草稿按会话保存 task 意图；已创建任务保存受限的权威任务身份，重启不会自动重发或暗中创建重复 Issue。
+- 完整 Terminal Node 门禁 206 项、Bridge/Workbench 定向门禁 113 项通过；真实 SQLite 已验证 Mission、Issue、Task 和审计事件持久化，真实进程测试验证只发送一次 `task_submit`。
+
 本模块仍未整体完成。后续切片依次为：
 
-1. `chat | task` 输入模式、`/task` 创建及对话上下文联动。
-2. Bridge v2 幂等请求、断线增量重放和多客户端 outbox 调和。
+1. Bridge v2 幂等请求、断线增量重放和多客户端 outbox 调和。
+2. Agent 在普通对话中提出“转为任务”后的结构化确认卡，以及既有任务的 follow-up run 关联。
 
-五个切片的权威实现计划与验证证据见：
+六个切片的权威实现计划与验证证据见：
 
 - `docs/superpowers/plans/2026-07-13-terminal-multiline-composer.md`
 - `docs/superpowers/plans/2026-07-13-terminal-follow-tail.md`
 - `docs/superpowers/plans/2026-07-13-terminal-send-lifecycle.md`
 - `docs/superpowers/plans/2026-07-13-terminal-history-search.md`
 - `docs/superpowers/plans/2026-07-13-terminal-slash-completion.md`
+- `docs/superpowers/plans/2026-07-13-terminal-task-submit.md`
 
 ## 1. 目标
 

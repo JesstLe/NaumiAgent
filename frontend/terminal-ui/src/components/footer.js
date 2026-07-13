@@ -119,7 +119,8 @@ export function StatusFooter({ state, env = {} }) {
 export function PromptFooter({ state }) {
   return {
     render(ctx) {
-      const prefix = `${color(ANSI.green, state.mode)} ${state.running ? color(ANSI.dim, "running") : ">"} `;
+      const intent = state.composerIntent === "task" ? "task" : "chat";
+      const prefix = `${color(intent === "task" ? ANSI.cyan : ANSI.green, intent)} ${state.running ? color(ANSI.dim, "running") : ">"} `;
       const indent = " ".repeat(visibleWidth(prefix));
       const inputWidth = Math.max(1, ctx.width - visibleWidth(prefix));
       return renderInputLinesWithCursor(state, inputWidth, 6).map(
@@ -132,7 +133,7 @@ export function PromptFooter({ state }) {
 export function HelpFooter() {
   return {
     render(ctx) {
-      return wrapAnsiLine(color(ANSI.dim, "Shift+Tab 模式 · Enter 发送 · Shift+Enter 换行 · Ctrl+R 历史 · ↑/↓ 导航 · PgUp/PgDn 滚动 · Ctrl+C 退出"), ctx.width);
+      return wrapAnsiLine(color(ANSI.dim, "Ctrl+T 对话/任务 · Shift+Tab 模式 · Enter 发送 · Shift+Enter 换行 · Ctrl+R 历史 · ↑/↓ 导航 · PgUp/PgDn 滚动 · Ctrl+C 退出"), ctx.width);
     },
   };
 }

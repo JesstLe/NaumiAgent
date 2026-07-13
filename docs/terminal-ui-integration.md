@@ -61,6 +61,8 @@ uv run naumi-ui-bridge --config config.yaml
 - `runtime/status`
 - `mode/changed`
 - `user/message`
+- `task/created`
+- `workbench/snapshot`
 - `ui/message`
 - `engine/event`
 - `permission/request`
@@ -74,6 +76,7 @@ uv run naumi-ui-bridge --config config.yaml
 
 - `hello`
 - `submit`
+- `task_submit`
 - `set_mode`
 - `cycle_mode`
 - `permission_response`
@@ -132,6 +135,9 @@ naumi chat --tui
 - footer 根据窗口宽度截断。
 - 输入栏使用独立 input buffer，支持批量粘贴、Unicode 字符、Backspace/Delete、Left/Right、Home/End、Ctrl+A/Ctrl+E 与 Up/Down 历史导航。
 - `Shift+Tab` 发送 `cycle_mode`，底栏显示 `default / plan / bypass`。
+- 输入提示使用 `chat >` / `task >` 区分对话与任务意图；`Ctrl+T` 可切换，任务被 Bridge 接受后自动回到对话。
+- `/task <内容>` 与 `/task create <内容>` 创建真实 Workbench Issue 和 backing Task；`/task <id>` 打开已有任务详情，`/tasks` 打开任务页。
+- 任务提交与普通对话共用当前会话、权限模式、AgentEngine 和时间线；任务 ID、Mission ID、终态与错误均通过协议关联。
 - 权限请求出现后可按 `y` 允许、`n` 拒绝、`b` bypass。
 - Markdown 代码块默认只展示前 40 行。
 - unified diff 使用增删行颜色。
@@ -149,7 +155,8 @@ naumi chat --tui
 - `/resume` 目前是消息级 replay，已修复历史 assistant 消息拼接问题；滚动位置和 fold state 已在前端本地持久化，但尚未写入 Python 会话数据库。
 - 新前端已有轻量组件层，但尚未迁入完整 Ink/pi-tui 组件体系。
 - 前端状态、协议、组件、渲染、渲染缓存、viewport 窗口渲染已经拆分为可测试模块。
-- 输入栏已支持 cursor-aware 单行编辑；真正多行编辑器、历史命令搜索和 slash command palette 仍在后续阶段。
+- 输入栏已支持 grapheme-aware 多行编辑、项目级 `Ctrl+R` 历史搜索和键盘斜杠补全。
+- Bridge v1 仍缺少跨客户端幂等键、断线增量重放和 accepted task 的服务端 resume/link 协议；当前客户端不会自动重发 uncertain 请求。
 - 工具调用卡片已优先通过稳定 `tool_call_id` 关联结果，缺失时才回退到 tool name。
 - 代码高亮是内置轻量关键词高亮，不等价于 Pygments/Tree-sitter。
 

@@ -4,6 +4,7 @@
   "client_events": [
     "hello",
     "submit",
+    "task_submit",
     "set_mode",
     "cycle_mode",
     "set_reasoning",
@@ -22,6 +23,7 @@
     "error",
     "pong",
     "user/message",
+    "task/created",
     "ui/message",
     "engine/event",
     "run/started",
