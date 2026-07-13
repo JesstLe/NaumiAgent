@@ -178,6 +178,20 @@ function normalizeServerPayload(type, payload) {
       choice: String(payload.choice ?? "").trim().toLowerCase(),
     };
   }
+  if (type === "permission/grants_changed") {
+    return {
+      revoked: Number(payload.revoked ?? 0),
+      grants: Array.isArray(payload.grants)
+        ? payload.grants
+          .filter((grant) => grant && typeof grant === "object" && !Array.isArray(grant))
+          .map((grant) => ({
+            ...grant,
+            grant_id: String(grant.grant_id ?? ""),
+            tool_family: String(grant.tool_family ?? ""),
+          }))
+        : [],
+    };
+  }
   if (type === "session/replayed") {
     return {
       ...payload,

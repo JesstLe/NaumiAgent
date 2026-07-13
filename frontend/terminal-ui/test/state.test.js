@@ -554,7 +554,11 @@ test("permission request creates an updatable history card", () => {
   reduceServerEvent(state, {
     type: "permission/request",
     request_id: "perm-1",
-    payload: { tool_name: "bash_run", reason: "需要启动本地服务。" },
+    payload: {
+      tool_name: "bash_run",
+      reason: "需要启动本地服务。",
+      choices: ["allow_once", "deny", "grant_session"],
+    },
   });
 
   const card = state.messages.at(-1);
@@ -566,13 +570,29 @@ test("permission request creates an updatable history card", () => {
 
   reduceServerEvent(state, {
     type: "permission/resolved",
-    payload: { request_id: "perm-1", choice: "allow" },
+    payload: { request_id: "perm-1", choice: "allow_once" },
   });
 
   assert.equal(state.permission, null);
   assert.equal(state.messages.at(-1), card);
   assert.equal(card.message.status, "allowed");
   assert.equal(card.message.requires_confirmation, false);
+});
+
+test("permission grant changes are visible without disturbing the composer", () => {
+  const state = createInitialState();
+  state.input = "保留草稿";
+
+  reduceServerEvent(state, {
+    type: "permission/grants_changed",
+    payload: { revoked: 2, grants: [] },
+  });
+
+  assert.equal(state.input, "保留草稿");
+  const notice = state.messages.at(-1);
+  assert.equal(notice.kind, "system");
+  assert.equal(notice.title, "permissions");
+  assert(String(notice.content).includes("已撤销 2 项"));
 });
 
 test("mode changed emits one visible notice only when mode changes", () => {
@@ -1064,6 +1084,8 @@ test("slash commands route through protocol without adding chat noise", () => {
   handleSubmitText(state, "/load abc123", send);
   handleSubmitText(state, "/tasks 5", send);
   handleSubmitText(state, "/permissions 6", send);
+  handleSubmitText(state, "/permissions revoke grant-1", send);
+  handleSubmitText(state, "/permissions revoke all", send);
   handleSubmitText(state, "/doctor", send);
   handleSubmitText(state, "/reasoning on", send);
   state.messages.push({ kind: "assistant", content: "old" });
@@ -1078,6 +1100,8 @@ test("slash commands route through protocol without adding chat noise", () => {
     { type: "resume", payload: { session_id: "abc123" } },
     { type: "task_panel", payload: { limit: 5, source: "all", status: "all", pinned: false, refresh: false } },
     { type: "permissions_panel", payload: { limit: 6 } },
+    { type: "permission_revoke", payload: { grant_id: "grant-1" } },
+    { type: "permission_revoke", payload: { scope: "all" } },
     { type: "doctor", payload: {} },
     { type: "set_reasoning", payload: { enabled: true } },
     { type: "submit", payload: { text: "/clear" } },

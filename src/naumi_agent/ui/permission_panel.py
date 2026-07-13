@@ -21,6 +21,7 @@ class PermissionPanelSnapshot:
     runtime_mode: str = ""
     permission_mode: str = ""
     pending: tuple[dict[str, Any], ...] = ()
+    grants: tuple[dict[str, Any], ...] = ()
     history: tuple[dict[str, Any], ...] = ()
     warnings: tuple[str, ...] = ()
 
@@ -51,12 +52,24 @@ def build_permission_panel_snapshot(
     except Exception as exc:
         warnings.append(f"权限历史读取失败：{type(exc).__name__}: {exc}")
 
+    grants: tuple[dict[str, Any], ...] = ()
+    try:
+        getter = getattr(engine, "list_permission_grants", None)
+        if callable(getter):
+            grants = tuple(
+                _grant_item(item)
+                for item in getter()
+            )
+    except Exception as exc:
+        warnings.append(f"有效授权读取失败：{type(exc).__name__}: {exc}")
+
     runtime_mode = getattr(engine, "runtime_mode", "")
     permission_mode = getattr(engine, "permission_mode", "")
     return PermissionPanelSnapshot(
         runtime_mode=str(getattr(runtime_mode, "value", runtime_mode)),
         permission_mode=str(getattr(permission_mode, "value", permission_mode)),
         pending=pending_items[-safe_limit:],
+        grants=grants[-safe_limit:],
         history=history[-safe_limit:],
         warnings=tuple(warnings),
     )
@@ -76,6 +89,13 @@ def render_permission_panel_snapshot(snapshot: PermissionPanelSnapshot) -> str:
             lines.append(_render_permission_item(item))
     else:
         lines.append("\033[2m  暂无待确认权限\033[0m")
+
+    lines.extend(["", "\033[1m有效授权\033[0m"])
+    if snapshot.grants:
+        for grant in snapshot.grants:
+            lines.append(_render_grant(grant))
+    else:
+        lines.append("\033[2m  暂无本会话有效授权\033[0m")
 
     lines.extend(["", "\033[1mHistory\033[0m"])
     if snapshot.history:
@@ -113,6 +133,14 @@ def _pending_item(request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _grant_item(grant: Any) -> dict[str, Any]:
+    return {
+        "grant_id": str(getattr(grant, "grant_id", "")),
+        "tool_family": str(getattr(grant, "tool_family", "")),
+        "expires_at": getattr(grant, "expires_at", None),
+    }
+
+
 def _with_policy(item: dict[str, Any]) -> dict[str, Any]:
     policy = _policy_for_tool(str(item.get("tool_name") or ""))
     return {**item, "policy": policy}
@@ -133,8 +161,8 @@ def _policy_for_tool(tool_name: str) -> dict[str, str]:
             "source": "unknown_tool",
             "risk": PermissionRiskLevel.HIGH.value,
             "modes": "-",
-            "confirmation": "未知工具会被拒绝",
-            "bypass": "无规则，不应静默放行",
+            "confirmation": "其他模式未知工具会被拒绝",
+            "bypass": "bypass 全权限放行",
         }
 
     return {
@@ -175,12 +203,8 @@ def _risk_for_rule(rule: PermissionRule) -> PermissionRiskLevel:
     return PermissionRiskLevel.LOW
 
 
-def _bypass_scope(rule: PermissionRule) -> str:
-    if PermissionMode.BYPASS not in rule.allowed_modes:
-        return "bypass 不在规则允许模式"
-    if rule.requires_confirmation:
-        return "bypass 允许；跳过逐次确认和路径沙箱，危险命令仍拦截"
-    return "bypass 允许；路径沙箱放宽，危险命令仍拦截"
+def _bypass_scope(_rule: PermissionRule) -> str:
+    return "bypass 全权限放行；不执行确认、路径、命令与次数检查"
 
 
 def _render_permission_item(item: dict[str, Any]) -> str:
@@ -200,3 +224,11 @@ def _render_permission_item(item: dict[str, Any]) -> str:
         f" · {policy.get('bypass', '-')}"
     )
     return f"  - {request_id} {agent} -> {tool} [{status}] {policy_text} | {reason}"
+
+
+def _render_grant(grant: dict[str, Any]) -> str:
+    grant_id = str(grant.get("grant_id") or "?")
+    tool_family = str(grant.get("tool_family") or "tool")
+    expires_at = grant.get("expires_at")
+    scope = "本会话" if expires_at is None else f"有效至 {expires_at}"
+    return f"  - {grant_id} {tool_family} [{scope}]"

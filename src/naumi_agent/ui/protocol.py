@@ -35,6 +35,7 @@ class ClientEventType(StrEnum):
     CYCLE_MODE = "cycle_mode"
     SET_REASONING = "set_reasoning"
     PERMISSION_RESPONSE = "permission_response"
+    PERMISSION_REVOKE = "permission_revoke"
     RESUME = "resume"
     TASK_PANEL = "task_panel"
     TASK_CANCEL = "task_cancel"
@@ -76,6 +77,7 @@ class ServerEventType(StrEnum):
     MODE_CHANGED = "mode/changed"
     PERMISSION_REQUEST = "permission/request"
     PERMISSION_RESOLVED = "permission/resolved"
+    PERMISSION_GRANTS_CHANGED = "permission/grants_changed"
     DEBUG_TRACE = "debug/trace"
     WORKBENCH_SNAPSHOT = "workbench/snapshot"
     WORKBENCH_EVENT = "workbench/event"
@@ -297,12 +299,24 @@ def _normalize_client_payload(
 
     if event_type == ClientEventType.PERMISSION_RESPONSE:
         choice = str(payload.get("choice") or "").strip().lower()
-        if choice not in {"allow", "deny", "bypass"}:
-            raise ValueError("权限选择无效，可用值: allow / deny / bypass。")
-        return {
+        if choice not in {"allow_once", "deny", "grant_session", "allow", "bypass"}:
+            raise ValueError(
+                "权限选择无效，可用值: allow_once / deny / grant_session / bypass。"
+            )
+        normalized = {
             "request_id": str(payload.get("request_id") or ""),
             "choice": choice,
         }
+        return normalized
+
+    if event_type == ClientEventType.PERMISSION_REVOKE:
+        grant_id = str(payload.get("grant_id") or "").strip()
+        if grant_id:
+            return {"grant_id": grant_id}
+        scope = str(payload.get("scope") or "").strip().lower()
+        if scope == "all":
+            return {"scope": "all"}
+        raise ValueError("撤销权限必须提供 grant_id 或 scope=all。")
 
     if event_type == ClientEventType.RESUME:
         normalized: dict[str, Any] = {

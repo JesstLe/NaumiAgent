@@ -20,7 +20,11 @@ export function renderPermissionCard(permission, width, ctx = { width }) {
     line(color(ANSI.dim, `原因: ${reason}`)),
   ];
   if (payload.requires_confirmation) {
-    children.push(line(color(ANSI.yellow, "操作: y=允许一次  n=拒绝  b/Shift+Tab=切换 bypass")));
+    const grant = payload.choices?.includes("grant_session") ? "  g=本会话授权" : "";
+    children.push(line(color(
+      ANSI.yellow,
+      `操作: y=允许一次  n=拒绝${grant}  b/Shift+Tab=全权限`,
+    )));
   } else if (payload.choice) {
     children.push(line(color(ANSI.dim, `结果: ${choiceLabel(payload.choice)}`)));
   }
@@ -28,7 +32,7 @@ export function renderPermissionCard(permission, width, ctx = { width }) {
 }
 
 function permissionStatusStyle(status) {
-  if (status === "allowed" || status === "bypass_enabled") return ANSI.green;
+  if (["allowed", "granted", "bypass_enabled"].includes(status)) return ANSI.green;
   if (status === "denied") return ANSI.red;
   return ANSI.yellow;
 }
@@ -36,14 +40,16 @@ function permissionStatusStyle(status) {
 function statusLabel(status) {
   if (status === "needs_confirmation") return "需要确认";
   if (status === "allowed") return "已允许";
+  if (status === "granted") return "本会话已授权";
   if (status === "denied") return "已拒绝";
   if (status === "bypass_enabled") return "bypass";
   return status;
 }
 
 function choiceLabel(choice) {
-  if (choice === "allow") return "允许";
+  if (choice === "allow" || choice === "allow_once") return "允许";
   if (choice === "deny") return "拒绝";
+  if (choice === "grant_session") return "本会话授权";
   if (choice === "bypass") return "bypass";
   return String(choice);
 }

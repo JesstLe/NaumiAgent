@@ -1,5 +1,7 @@
 # Terminal Scoped Permissions Implementation Plan
 
+> 历史执行计划：2026-07-14 用户取消了高风险二次确认，并将 bypass 定义为全权限通过。本文保留原执行记录，不再代表当前权限语义；当前行为见 `docs/product/terminal-ui/03-execution-timeline-and-permissions.md`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build revocable session-scoped tool-family grants, non-bypassable high-risk double confirmation, and a parallel-safe Terminal permission queue.
