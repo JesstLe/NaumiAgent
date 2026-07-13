@@ -479,6 +479,19 @@ class TestReset:
         engine.reset()
         assert engine._usage.total_input_tokens == 0
 
+    @pytest.mark.asyncio
+    async def test_reset_clears_permission_grants_for_the_active_session(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        engine._permission_grant_store.create(session.id, "shell", "reset-call")
+
+        engine.reset()
+
+        assert engine.list_permission_grants() == ()
+        assert engine._permission_grant_store.list_session(session.id) == ()
+
 
 class TestContextVisualPayloads:
     @pytest.mark.asyncio
@@ -714,6 +727,43 @@ class TestSessionLoading:
         assert engine._messages[-1]["tool_call_id"] == "call_1"
         await engine.shutdown()
 
+    @pytest.mark.asyncio
+    async def test_load_session_revokes_previous_session_permission_grants(
+        self,
+        tmp_path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        try:
+            previous = await engine.get_or_create_session()
+            engine._permission_grant_store.create(
+                previous.id,
+                "shell",
+                "previous-call",
+            )
+            replacement = await engine.session_store.create_session(title="replacement")
+
+            assert await engine.load_session(replacement.id) is True
+            assert engine.list_permission_grants() == ()
+            assert engine._permission_grant_store.list_session(previous.id) == ()
+        finally:
+            await engine.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_clears_all_permission_grants(self, tmp_path) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        session = await engine.get_or_create_session()
+        engine._permission_grant_store.create(session.id, "shell", "shutdown-call")
+
+        await engine.shutdown()
+
+        assert engine._permission_grant_store.list_session(session.id) == ()
+
 
 class TestToolCallParsing:
     def test_valid_tool_call(self, engine: AgentEngine) -> None:
@@ -753,7 +803,7 @@ class TestToolExecution:
 
     @pytest.mark.asyncio
     async def test_decoded_dict_args_execute_normally(self, engine: AgentEngine) -> None:
-        engine._permission_checker = PermissionChecker(PermissionMode.BYPASS)
+        engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
         tc = ToolCall(
             id="x",
             name="file_read",
@@ -869,18 +919,195 @@ class TestToolExecution:
         assert payloads[0]["tool_name"] == "bash_run"
 
     @pytest.mark.asyncio
-    async def test_confirmation_callback_can_enable_bypass(self, engine: AgentEngine) -> None:
+    async def test_legacy_bypass_grants_only_the_current_session_tool_family(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        payloads: list[dict[str, object]] = []
+
         async def confirm(payload: dict[str, object]) -> str:
+            payloads.append(payload)
             return "bypass"
 
         engine.set_permission_confirmer(confirm)
-        tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo bypass_now"}')
-        result = await engine._execute_tool(tc)
+        first = await engine._execute_tool(
+            ToolCall(
+                id="shell-1",
+                name="bash_run",
+                arguments='{"command": "printf first"}',
+            )
+        )
+        second = await engine._execute_tool(
+            ToolCall(
+                id="shell-2",
+                name="bash_run",
+                arguments='{"command": "printf second"}',
+            )
+        )
 
-        assert result.status == "success"
-        assert "bypass_now" in result.content
-        assert engine.permission_mode == PermissionMode.BYPASS
+        assert first.status == "success"
+        assert second.status == "success"
+        assert len(payloads) == 1
+        assert payloads[0]["session_id"] == session.id
+        assert payloads[0]["tool_family"] == "shell"
+        assert payloads[0]["choices"] == ["allow_once", "deny", "grant_session"]
+        assert payloads[0]["scope"] == "session"
+        assert payloads[0]["expires_at"] is None
+        assert payloads[0]["requires_double_confirm"] is False
+        assert engine.runtime_mode == AgentRuntimeMode.DEFAULT
+        assert engine.permission_mode == PermissionMode.MODERATE
+        grants = engine.list_permission_grants()
+        assert len(grants) == 1
+        assert grants[0].session_id == session.id
+        assert grants[0].tool_family == "shell"
+
+    @pytest.mark.asyncio
+    async def test_permission_grant_does_not_match_another_tool_family(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        await engine.get_or_create_session()
+        payloads: list[dict[str, object]] = []
+        responses = iter(["grant_session", "deny"])
+
+        async def confirm(payload: dict[str, object]) -> str:
+            payloads.append(payload)
+            return next(responses)
+
+        engine.set_permission_confirmer(confirm)
+        shell = await engine._execute_tool(
+            ToolCall(
+                id="shell-1",
+                name="bash_run",
+                arguments='{"command": "printf shell"}',
+            )
+        )
+        background = await engine._execute_tool(
+            ToolCall(
+                id="background-1",
+                name="background_run",
+                arguments='{"command": "printf background"}',
+            )
+        )
+
+        assert shell.status == "success"
+        assert background.status == "error"
+        assert len(payloads) == 2
+        assert payloads[1]["tool_family"] == "background_process"
+        assert engine.list_permission_grants()[0].tool_family == "shell"
+
+    @pytest.mark.asyncio
+    async def test_grant_session_without_an_active_session_is_denied(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        async def confirm(payload: dict[str, object]) -> str:
+            assert payload["session_id"] == ""
+            return "grant_session"
+
+        engine.set_permission_confirmer(confirm)
+        result = await engine._execute_tool(
+            ToolCall(
+                id="no-session",
+                name="bash_run",
+                arguments='{"command": "printf should_not_run"}',
+            )
+        )
+
+        assert result.status == "error"
+        assert "没有活动会话" in result.content
+        assert engine.list_permission_grants() == ()
+
+    @pytest.mark.asyncio
+    async def test_grant_session_is_rejected_when_the_session_changes_during_confirmation(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        original = await engine.get_or_create_session()
+        replacement = await engine.session_store.create_session(title="replacement")
+
+        async def confirm(payload: dict[str, object]) -> str:
+            assert payload["session_id"] == original.id
+            assert await engine.load_session(replacement.id) is True
+            return "grant_session"
+
+        engine.set_permission_confirmer(confirm)
+        result = await engine._execute_tool(
+            ToolCall(
+                id="session-changed",
+                name="bash_run",
+                arguments='{"command": "printf should_not_run"}',
+            )
+        )
+
+        assert result.status == "error"
+        assert "会话已切换" in result.content
+        assert engine._permission_grant_store.list_session(original.id) == ()
+        assert engine._permission_grant_store.list_session(replacement.id) == ()
+
+    @pytest.mark.asyncio
+    async def test_high_risk_legacy_bypass_is_rejected_without_creating_a_grant(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        await engine.get_or_create_session()
+        payloads: list[dict[str, object]] = []
+
+        async def confirm(payload: dict[str, object]) -> str:
+            payloads.append(payload)
+            return "bypass"
+
+        engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
+        engine.set_permission_confirmer(confirm)
+        result = await engine._execute_tool(
+            ToolCall(
+                id="high-risk",
+                name="session_delete",
+                arguments='{"session_id": "missing-session"}',
+            )
+        )
+
+        assert result.status == "error"
+        assert "不支持本会话授权" in result.content
+        assert payloads[0]["choices"] == ["allow_once", "deny"]
+        assert payloads[0]["scope"] == "call"
+        assert payloads[0]["requires_double_confirm"] is True
+        assert engine.list_permission_grants() == ()
         assert engine.runtime_mode == AgentRuntimeMode.BYPASS
+        assert engine.permission_mode == PermissionMode.BYPASS
+
+    @pytest.mark.asyncio
+    async def test_current_session_permission_grant_apis_cannot_touch_other_sessions(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        current = engine._permission_grant_store.create(
+            session.id,
+            "shell",
+            "current-call",
+        )
+        other = engine._permission_grant_store.create(
+            "another-session",
+            "shell",
+            "other-call",
+        )
+
+        assert engine.list_permission_grants() == (current,)
+        assert engine.revoke_permission_grant(other.grant_id) is False
+        assert engine.revoke_permission_grant(current.grant_id) is True
+        assert engine.list_permission_grants() == ()
+
+        engine._permission_grant_store.create(session.id, "shell", "shell-call")
+        engine._permission_grant_store.create(
+            session.id,
+            "background_process",
+            "background-call",
+        )
+        assert engine.revoke_all_permission_grants() == 2
+        assert engine.list_permission_grants() == ()
+        assert engine._permission_grant_store.list_session("another-session") == (other,)
 
     @pytest.mark.asyncio
     async def test_plan_runtime_mode_blocks_write_tools(
@@ -988,18 +1215,18 @@ class TestToolExecution:
         assert bubbles[0]["status"] == "needs_confirmation"
         assert bubbles[0]["call_id"] == "x"
         assert bubbles[0]["session_id"] == engine._session.id
-        assert bubbles[0]["risk_level"] == "low"
+        assert bubbles[0]["risk_level"] == "medium"
 
     @pytest.mark.asyncio
     async def test_bypass_mode_runs_confirmation_tool(self, engine: AgentEngine) -> None:
-        engine._permission_checker = PermissionChecker(PermissionMode.BYPASS)
+        engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
         tc = ToolCall(id="x", name="bash_run", arguments='{"command": "echo bypass_ok"}')
         result = await engine._execute_tool(tc)
         assert result.status == "success"
         assert "bypass_ok" in result.content
 
     @pytest.mark.asyncio
-    async def test_bypass_mode_runs_dangerous_shell_command(
+    async def test_bypass_mode_blocks_dangerous_shell_command(
         self,
         engine: AgentEngine,
         tmp_path: Path,
@@ -1018,9 +1245,9 @@ class TestToolExecution:
 
         result = await engine._execute_tool(tc)
 
-        assert result.status == "success"
-        assert "removed" in result.content
-        assert not target.exists()
+        assert result.status == "error"
+        assert "高风险模式" in result.content
+        assert target.exists()
 
     @pytest.mark.asyncio
     async def test_task_create_tool_passes_permission_layer(self, tmp_path) -> None:
