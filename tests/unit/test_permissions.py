@@ -149,6 +149,54 @@ class TestPermissionChecker:
         assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
 
     @pytest.mark.parametrize(
+        ("mode", "command"),
+        [
+            pytest.param(
+                PermissionMode.MODERATE,
+                "sudo rm /tmp/direct-file",
+                id="moderate-direct-sudo-rm",
+            ),
+            pytest.param(
+                PermissionMode.BYPASS,
+                "sudo rm -f /tmp/direct-file",
+                id="bypass-direct-sudo-rm-force",
+            ),
+            pytest.param(
+                PermissionMode.BYPASS,
+                "sudo -n rm /tmp/direct-file",
+                id="bypass-sudo-non-interactive",
+            ),
+            pytest.param(
+                PermissionMode.BYPASS,
+                "sudo -u root rm /tmp/direct-file",
+                id="bypass-sudo-user",
+            ),
+        ],
+    )
+    def test_direct_sudo_rm_remains_a_hard_block(
+        self,
+        mode: PermissionMode,
+        command: str,
+    ) -> None:
+        checker = PermissionChecker(mode)
+
+        result = checker.check("bash_run", {"command": command})
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_quoted_direct_sudo_rm_text_remains_allowed(self) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check(
+            "bash_run",
+            {"command": "echo 'sudo rm /tmp/direct-file'"},
+        )
+
+        assert result.allowed
+        assert result.code is PermissionReasonCode.ALLOWED
+
+    @pytest.mark.parametrize(
         "command",
         [
             pytest.param("rm -rf -- /", id="end-of-options-before-root"),
