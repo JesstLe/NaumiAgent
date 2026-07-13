@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+import naumi_agent.config.configurator as configurator
 from naumi_agent.config.configurator import ConfigurationError, configure_project
 
 
@@ -44,6 +45,26 @@ def test_configure_kimi_updates_models_and_preserves_other_sections(tmp_path: Pa
     assert persisted["safety"] == {"permission_mode": "strict"}
     assert persisted["custom_feature"] == {"enabled": True}
     assert "api_key" not in persisted["models"]
+
+
+def test_configure_stores_credential_for_selected_provider(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    stored: list[tuple[str | None, str]] = []
+
+    def capture(value: str, *, provider: str | None = None) -> None:
+        stored.append((provider, value))
+
+    monkeypatch.setattr(configurator, "store_model_api_key", capture)
+
+    configure_project(
+        tmp_path / "config.yaml",
+        provider="openai",
+        api_key="openai-secret",
+    )
+
+    assert stored == [("openai", "openai-secret")]
 
 
 def test_configure_custom_requires_model_and_api_base(tmp_path: Path) -> None:

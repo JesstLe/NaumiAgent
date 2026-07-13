@@ -189,7 +189,9 @@ class AppConfig(BaseSettings):
         config = cls(**data)
         if not config.models.api_key:
             try:
-                config.models.api_key = load_model_api_key()
+                config.models.api_key = load_model_api_key(
+                    provider=config.models.provider,
+                )
             except CredentialStoreError as exc:
                 logger.warning("System credential store unavailable: %s", exc)
         config._resolve_runtime_paths(p.parent)

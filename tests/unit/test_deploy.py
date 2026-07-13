@@ -39,7 +39,10 @@ def test_validate_deployment_creates_required_dirs(tmp_path) -> None:
 def test_validate_deployment_requires_api_key(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("NAUMI_MODELS__API_KEY", raising=False)
     monkeypatch.setitem(AppConfig.model_config, "env_file", None)
-    monkeypatch.setattr("naumi_agent.config.settings.load_model_api_key", lambda: None)
+    monkeypatch.setattr(
+        "naumi_agent.config.settings.load_model_api_key",
+        lambda *, provider=None: None,
+    )
     config_path = tmp_path / "config.yaml"
     _write_config(config_path, tmp_path)
     content = yaml.safe_load(config_path.read_text(encoding="utf-8"))
