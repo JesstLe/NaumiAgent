@@ -53,10 +53,11 @@ class SafetyConfig(BaseSettings):
 
     permission_mode: str = "moderate"
     allowed_dirs: list[str] = Field(default_factory=lambda: ["/workspace", str(Path.cwd())])
-    max_budget_usd: float = 5.0
-    max_turns: int = 30
+    max_budget_usd: float | None = Field(default=None, ge=0)
+    max_turns: int = Field(default=50, ge=1)
     max_parallel_tools: int = Field(default=4, ge=1, le=16)
-    max_input_tokens: int = 500_000
+    max_input_tokens: int | None = Field(default=None, ge=0)
+    max_output_tokens: int | None = Field(default=None, ge=0)
 
 
 class MCPConfig(BaseSettings):
