@@ -129,6 +129,16 @@ class _FakeRouter:
     def resolve_model(self, tier: str) -> str:
         return f"fake-{tier}"
 
+    def get_runtime_identity(self, model: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            requested_model=model,
+            canonical_model="nvidia/fake-capable",
+            upstream_model="z-ai/glm4.7",
+            provider="nvidia",
+            api_format="openai_responses",
+            source="catalog",
+        )
+
 
 class _FakeEngine:
     def __init__(self) -> None:
@@ -1225,9 +1235,27 @@ def test_bridge_status_payload_exposes_authoritative_product_identity() -> None:
 
     assert payload["version"] == __version__
     assert payload["model"] == "fake-capable"
+    assert payload["provider"] == "nvidia"
+    assert payload["api_format"] == "openai_responses"
+    assert payload["upstream_model"] == "z-ai/glm4.7"
     assert payload["workspace_root"]
     assert payload["mode"] == "default"
     assert payload["permission_mode"] == "moderate"
+
+
+def test_bridge_status_payload_keeps_model_when_runtime_identity_fails() -> None:
+    engine = _FakeEngine()
+
+    def fail_identity(_model: str) -> None:
+        raise ValueError("invalid catalog")
+
+    engine.router.get_runtime_identity = fail_identity  # type: ignore[method-assign]
+    payload = JsonlEngineBridge(engine, config_path="config.yaml").status_payload()
+
+    assert payload["model"] == "fake-capable"
+    assert payload["provider"] == ""
+    assert payload["api_format"] == ""
+    assert payload["upstream_model"] == ""
 
 
 @pytest.mark.asyncio

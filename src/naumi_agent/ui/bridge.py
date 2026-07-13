@@ -476,6 +476,17 @@ class JsonlEngineBridge:
             model = self.engine.router.resolve_model("capable")
         except Exception:
             model = ""
+        provider = ""
+        api_format = ""
+        upstream_model = ""
+        if model:
+            try:
+                identity = self.engine.router.get_runtime_identity(model)
+                provider = identity.provider
+                api_format = identity.api_format
+                upstream_model = identity.upstream_model
+            except Exception:
+                pass
         try:
             context = self.engine.get_context_info()
         except Exception:
@@ -493,6 +504,9 @@ class JsonlEngineBridge:
             ),
             "session_id": str(getattr(getattr(self.engine, "_session", None), "id", "")),
             "model": model,
+            "provider": provider,
+            "api_format": api_format,
+            "upstream_model": upstream_model,
             "workspace_root": str(workspace_root),
             "usage": {
                 "input_tokens": usage.total_input_tokens,

@@ -12,6 +12,7 @@ import { boxLines } from "./core.js";
 import { renderInputLinesWithCursor } from "../input-buffer.js";
 import { getSlashCompletionItems } from "../slash-completion.js";
 import { formatBudgetStatus } from "./budget-status.js";
+import { formatProviderIdentity } from "./provider-identity.js";
 
 export function Footer({ state, env = {} }) {
   return {
@@ -113,6 +114,9 @@ export function StatusFooter({ state, env = {} }) {
         Number.isFinite(lastFirstTokenLatencyMs) && lastFirstTokenLatencyMs > 0
           ? `首字: ${(lastFirstTokenLatencyMs / 1000).toFixed(1)}s`
           : null;
+      const providerIdentity = status.provider || status.api_format
+        ? formatProviderIdentity(status)
+        : null;
       const parts = [
         time,
         `mode: ${state.mode}`,
@@ -120,6 +124,7 @@ export function StatusFooter({ state, env = {} }) {
         `运行: ${state.cancelPending ? "正在停止" : state.running ? "进行中" : "空闲"}`,
         session,
         ...(tasks ? [`tasks: ${tasks}`] : []),
+        ...(providerIdentity ? [`提供方: ${providerIdentity}`] : []),
         status.model || "model: -",
         `工作区: ${shortPath(status.workspace_root || env.cwd || process.cwd(), env.home ?? process.env.HOME)}`,
         `Token: ${status.usage?.total_tokens ?? 0}`,
