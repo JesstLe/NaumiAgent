@@ -35,6 +35,12 @@ from naumi_agent.orchestrator.system_prompt import (
     build_system_prompt,
     is_generated_system_prompt,
 )
+from naumi_agent.orchestrator.tool_batches import (
+    ScheduledToolCall,
+    ToolBatch,
+    build_tool_batches,
+    execute_tool_batch,
+)
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
@@ -2180,6 +2186,190 @@ class AgentEngine:
             return False
         return history[-1] == sig and history[-2] == sig
 
+    async def _execute_tool_calls(
+        self,
+        raw_calls: list[dict[str, Any]],
+        *,
+        tool_call_history: list[str],
+        session_id: str,
+        turn: int,
+        on_event: EventCallback | None = None,
+    ) -> list[str]:
+        """Execute one model tool-call response with deterministic ordering."""
+        scheduled: list[ScheduledToolCall] = []
+        outcomes: dict[int, ToolResult] = {}
+        signatures: list[str] = []
+        skip_remaining_reason = ""
+
+        for index, raw_call in enumerate(raw_calls):
+            call = self._parse_tool_call(raw_call)
+            if call is None:
+                call_id = self._extract_tool_call_id(raw_call)
+                if call_id:
+                    outcomes[index] = ToolResult(
+                        call_id=call_id,
+                        status="error",
+                        content="工具调用格式无效，无法解析函数名称或参数。",
+                    )
+                continue
+
+            signatures.append(f"{call.name}:{call.arguments}")
+            if skip_remaining_reason:
+                outcomes[index] = ToolResult(
+                    call_id=call.id,
+                    status="skipped",
+                    content=skip_remaining_reason,
+                )
+                continue
+            if self._is_repeated_tool_call(
+                call.name,
+                call.arguments,
+                tool_call_history,
+            ):
+                logger.warning(
+                    "Repeated tool call detected: %s, injecting stop",
+                    call.name,
+                )
+                skip_remaining_reason = _REPEATED_TOOL_CALL_MESSAGE
+                outcomes[index] = ToolResult(
+                    call_id=call.id,
+                    status="skipped",
+                    content=skip_remaining_reason,
+                )
+                continue
+            scheduled.append(ScheduledToolCall(index=index, call=call))
+
+        batches = build_tool_batches(
+            scheduled,
+            self._tool_registry,
+            max_parallel_tools=self._config.safety.max_parallel_tools,
+        )
+        for batch_number, batch in enumerate(batches, start=1):
+            batch_id = f"turn-{turn}-batch-{batch_number}"
+            batch_started_at = time.perf_counter()
+            metadata = {
+                "batch_id": batch_id,
+                "batch_size": len(batch.calls),
+                "parallel": batch.parallel,
+            }
+            logger.debug(
+                "Tool batch started: id=%s size=%d parallel=%s",
+                batch_id,
+                len(batch.calls),
+                batch.parallel,
+            )
+            ready: list[ScheduledToolCall] = []
+            for item in batch.calls:
+                if on_event is not None:
+                    await on_event(
+                        "tool_start",
+                        {
+                            "name": item.call.name,
+                            "call_id": item.call.id,
+                            "args": item.call.arguments,
+                            **metadata,
+                        },
+                    )
+                hook_ctx = await self._fire_hook(
+                    HookContext(
+                        point=HookPoint.TOOL_EXECUTE_START,
+                        data={
+                            "tool_name": item.call.name,
+                            "arguments": item.call.arguments,
+                        },
+                        session_id=session_id,
+                    ),
+                    on_event,
+                )
+                if hook_ctx.should_abort:
+                    reason = hook_ctx.data.get("abort_reason", "未提供原因")
+                    outcomes[item.index] = ToolResult(
+                        call_id=item.call.id,
+                        status="aborted",
+                        content=f"被 Hook 中止：{reason}",
+                    )
+                    continue
+                ready.append(item)
+
+            if ready:
+                executable_batch = ToolBatch(
+                    calls=tuple(ready),
+                    parallel=batch.parallel and len(ready) > 1,
+                )
+                executed = await execute_tool_batch(
+                    executable_batch,
+                    lambda call: self._execute_tool(call, on_event=on_event),
+                )
+                for item in executed:
+                    if item.result is not None:
+                        outcomes[item.index] = item.result
+                    else:
+                        assert item.exception is not None
+                        logger.error(
+                            "Parallel tool execution failed: %s",
+                            item.call.name,
+                            exc_info=(
+                                type(item.exception),
+                                item.exception,
+                                item.exception.__traceback__,
+                            ),
+                        )
+                        outcomes[item.index] = ToolResult(
+                            call_id=item.call.id,
+                            status="error",
+                            content=(
+                                "工具执行失败："
+                                f"{type(item.exception).__name__}"
+                            ),
+                        )
+
+            for item in batch.calls:
+                result = outcomes[item.index]
+                if on_event is not None:
+                    await on_event(
+                        "tool_end",
+                        {
+                            "name": item.call.name,
+                            "call_id": item.call.id,
+                            "status": result.status,
+                            "duration_ms": result.duration_ms,
+                            "content": result.content[:2000],
+                            **metadata,
+                        },
+                    )
+                await self._fire_hook(
+                    HookContext(
+                        point=HookPoint.TOOL_EXECUTE_END,
+                        data={
+                            "tool_name": item.call.name,
+                            "status": result.status,
+                            "duration_ms": result.duration_ms,
+                            "content_length": len(result.content),
+                        },
+                        session_id=session_id,
+                    ),
+                    on_event,
+                )
+            logger.debug(
+                "Tool batch completed: id=%s elapsed_ms=%d",
+                batch_id,
+                int((time.perf_counter() - batch_started_at) * 1000),
+            )
+
+        for index, raw_call in enumerate(raw_calls):
+            result = outcomes.get(index)
+            if result is None:
+                continue
+            self._append_message(
+                {
+                    "role": "tool",
+                    "tool_call_id": result.call_id,
+                    "content": result.content,
+                }
+            )
+
+        return signatures
+
     def _format_plan_as_guidance(self, plan: Plan) -> str | None:
         """Format a plan as system message guidance for decision commitment."""
         if plan.approach == "直接执行" or len(plan.steps) <= 1:
@@ -2280,89 +2470,12 @@ class AgentEngine:
                     assistant_msg["reasoning_content"] = response.reasoning_content
                 self._append_message(assistant_msg)
 
-                cur_calls: list[str] = []
-                skip_remaining_reason = ""
-                for tc_raw in response.tool_calls:
-                    tc = self._parse_tool_call(tc_raw)
-                    if tc is None:
-                        call_id = self._extract_tool_call_id(tc_raw)
-                        if call_id:
-                            self._append_message(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": call_id,
-                                    "content": "工具调用格式无效，无法解析函数名称或参数。",
-                                }
-                            )
-                        continue
-
-                    call_sig = f"{tc.name}:{tc.arguments}"
-                    cur_calls.append(call_sig)
-
-                    if skip_remaining_reason:
-                        self._append_message(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "content": skip_remaining_reason,
-                            }
-                        )
-                        continue
-
-                    if self._is_repeated_tool_call(
-                        tc.name, tc.arguments, tool_call_history
-                    ):
-                        logger.warning(
-                            "Repeated tool call detected: %s, injecting stop",
-                            tc.name,
-                        )
-                        skip_remaining_reason = _REPEATED_TOOL_CALL_MESSAGE
-                        self._append_message(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "content": skip_remaining_reason,
-                            }
-                        )
-                        continue
-
-                    hook_ctx = await self._fire_hook(HookContext(
-                        point=HookPoint.TOOL_EXECUTE_START,
-                        data={"tool_name": tc.name, "arguments": tc.arguments},
-                        session_id=session_id,
-                    ))
-                    if hook_ctx.should_abort:
-                        self._append_message(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "content": (
-                                    "被 Hook 中止："
-                                    f"{hook_ctx.data.get('abort_reason', '未提供原因')}"
-                                ),
-                            }
-                        )
-                        continue
-
-                    result = await self._execute_tool(tc)
-                    await self._fire_hook(HookContext(
-                        point=HookPoint.TOOL_EXECUTE_END,
-                        data={
-                            "tool_name": tc.name,
-                            "status": result.status,
-                            "duration_ms": result.duration_ms,
-                            "content_length": len(result.content) if result.content else 0,
-                        },
-                        session_id=session_id,
-                    ))
-                    self._append_message(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": result.content,
-                        }
-                    )
-
+                cur_calls = await self._execute_tool_calls(
+                    response.tool_calls,
+                    tool_call_history=tool_call_history,
+                    session_id=session_id,
+                    turn=turn + 1,
+                )
                 tool_call_history.extend(cur_calls)
 
                 exceeded = self._check_budget()
@@ -2707,116 +2820,13 @@ class AgentEngine:
                     assistant_msg["reasoning_content"] = thinking_content
                 self._append_message(assistant_msg)
 
-                cur_calls: list[str] = []
-                skip_remaining_reason = ""
-                for tc_raw in collected_tool_calls.values():
-                    tc = self._parse_tool_call(tc_raw)
-                    if tc is None:
-                        call_id = self._extract_tool_call_id(tc_raw)
-                        if call_id:
-                            self._append_message(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": call_id,
-                                    "content": "工具调用格式无效，无法解析函数名称或参数。",
-                                }
-                            )
-                        continue
-
-                    call_sig = f"{tc.name}:{tc.arguments}"
-                    cur_calls.append(call_sig)
-
-                    if skip_remaining_reason:
-                        await on_event("tool_end", {
-                            "name": tc.name,
-                            "call_id": tc.id,
-                            "status": "skipped",
-                            "duration_ms": 0,
-                            "content": skip_remaining_reason,
-                        })
-                        self._append_message(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "content": skip_remaining_reason,
-                            }
-                        )
-                        continue
-
-                    if self._is_repeated_tool_call(
-                        tc.name, tc.arguments, tool_call_history
-                    ):
-                        logger.warning(
-                            "Repeated tool call detected: %s, injecting stop",
-                            tc.name,
-                        )
-                        skip_remaining_reason = _REPEATED_TOOL_CALL_MESSAGE
-                        self._append_message(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "content": skip_remaining_reason,
-                            }
-                        )
-                        continue
-
-                    await on_event(
-                        "tool_start",
-                        {"name": tc.name, "call_id": tc.id, "args": tc.arguments},
-                    )
-
-                    hook_ctx = await self._fire_hook(HookContext(
-                        point=HookPoint.TOOL_EXECUTE_START,
-                        data={"tool_name": tc.name, "arguments": tc.arguments},
-                        session_id=session_id,
-                    ), on_event)
-                    if hook_ctx.should_abort:
-                        abort_reason = hook_ctx.data.get("abort_reason", "未提供原因")
-                        await on_event("tool_end", {
-                            "name": tc.name,
-                            "call_id": tc.id,
-                            "status": "aborted",
-                            "duration_ms": 0,
-                            "content": f"被 Hook 中止：{abort_reason}",
-                        })
-                        self._append_message(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc.id,
-                                "content": f"被 Hook 中止：{abort_reason}",
-                            }
-                        )
-                        continue
-
-                    result = await self._execute_tool(tc, on_event=on_event)
-                    await on_event(
-                        "tool_end",
-                        {
-                            "name": tc.name,
-                            "call_id": tc.id,
-                            "status": result.status,
-                            "duration_ms": result.duration_ms,
-                            "content": result.content[:2000] if result.content else "",
-                        },
-                    )
-                    await self._fire_hook(HookContext(
-                        point=HookPoint.TOOL_EXECUTE_END,
-                        data={
-                            "tool_name": tc.name,
-                            "status": result.status,
-                            "duration_ms": result.duration_ms,
-                            "content_length": len(result.content) if result.content else 0,
-                        },
-                        session_id=session_id,
-                    ), on_event)
-                    self._append_message(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": result.content,
-                        }
-                    )
-
+                cur_calls = await self._execute_tool_calls(
+                    list(collected_tool_calls.values()),
+                    tool_call_history=tool_call_history,
+                    session_id=session_id,
+                    turn=turn + 1,
+                    on_event=on_event,
+                )
                 tool_call_history.extend(cur_calls)
 
                 exceeded = self._check_budget()
