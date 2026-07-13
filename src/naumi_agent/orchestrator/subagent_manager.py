@@ -12,7 +12,13 @@ from enum import StrEnum
 from inspect import signature
 from typing import TYPE_CHECKING, Any
 
-from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult, BaseAgent
+from naumi_agent.agents.base import (
+    AgentCapability,
+    AgentConfig,
+    AgentResult,
+    BaseAgent,
+    resolve_agent_tool_names,
+)
 from naumi_agent.agents.factory import DynamicAgentFactory
 from naumi_agent.agents.message_bus import AgentMessageBus
 from naumi_agent.agents.presets import ALL_AGENT_CONFIGS
@@ -92,6 +98,7 @@ class AgentExecutionRecord:
     """Public immutable snapshot of one delegated execution."""
 
     task_id: str
+    session_id: str
     agent_name: str
     description: str
     status: str
@@ -123,6 +130,7 @@ class StopExecutionResult:
 @dataclass
 class _ActiveExecution:
     task_id: str
+    session_id: str
     agent_name: str
     description: str
     started_at: float = field(default_factory=time.time)
@@ -458,6 +466,9 @@ class SubAgentManager:
                 return False
             self._active_executions[task.id] = _ActiveExecution(
                 task_id=task.id,
+                session_id=str(
+                    getattr(getattr(self._engine, "_session", None), "id", "") or ""
+                ),
                 agent_name=agent_name,
                 description=task.description,
             )
@@ -1006,6 +1017,17 @@ class SubAgentManager:
             result.append(entry)
         return result
 
+    def list_agent_configs(self) -> tuple[AgentConfig, ...]:
+        """Return immutable Agent configs without instantiating idle presets."""
+        return tuple(self._configs.values())
+
+    def agent_tool_names(self, name: str) -> tuple[str, ...]:
+        """Return effective registered tools without changing lifecycle state."""
+        config = self._configs.get(name)
+        if config is None:
+            return ()
+        return resolve_agent_tool_names(config, self._engine.tool_registry.names)
+
 
 async def _emit_subagent_event(
     callback: EventCallback | None,
@@ -1062,6 +1084,7 @@ def _execution_record(
     status = result.status if result is not None else execution.status
     return AgentExecutionRecord(
         task_id=execution.task_id,
+        session_id=execution.session_id,
         agent_name=execution.agent_name,
         description=execution.description,
         status=status,

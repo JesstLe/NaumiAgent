@@ -14,6 +14,7 @@ from inspect import signature
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.agent_control import AgentControlService
 from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
@@ -607,6 +608,10 @@ class AgentEngine:
         from naumi_agent.tools.subagent import create_subagent_tools
 
         self.subagent_manager = SubAgentManager(self)
+        self.agent_control = AgentControlService(
+            self,
+            session_id_getter=lambda: self._session.id if self._session else "",
+        )
         set_analysis_subagent_manager(self.subagent_manager)
         for tool in create_subagent_tools(self.subagent_manager):
             self._tool_registry.register(tool)
