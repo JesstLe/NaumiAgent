@@ -163,6 +163,9 @@ class TestPermissionChecker:
                 id="sudo-bash-c-wrapper",
             ),
             pytest.param("env SAFE=1 rm -fr /", id="env-assignment-wrapper"),
+            pytest.param("env -u SAFE rm -rf /absolute", id="env-unset-wrapper"),
+            pytest.param("env --chdir /tmp rm -rf /absolute", id="env-chdir-wrapper"),
+            pytest.param("exec -a cleanup rm -rf /absolute", id="exec-argv0-wrapper"),
             pytest.param("command rm -fr /", id="command-wrapper"),
             pytest.param("/bin/rm -fr /", id="absolute-rm-wrapper"),
             pytest.param("printf safe; rm -fr /", id="second-command-after-semicolon"),
@@ -181,6 +184,30 @@ class TestPermissionChecker:
         assert not result.allowed
         assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
         assert "高风险" in result.reason
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            pytest.param("env -u", id="env-short-unset"),
+            pytest.param("env --unset", id="env-long-unset"),
+            pytest.param("env -C", id="env-short-chdir"),
+            pytest.param("env --chdir", id="env-long-chdir"),
+            pytest.param("env -S", id="env-short-split-string"),
+            pytest.param("env --split-string", id="env-long-split-string"),
+            pytest.param("env --unset=", id="env-long-unset-empty-value"),
+            pytest.param("env --chdir=", id="env-long-chdir-empty-value"),
+            pytest.param("env --split-string=", id="env-long-split-string-empty-value"),
+            pytest.param("exec -a", id="exec-argv0"),
+            pytest.param("command --", id="command-end-of-options"),
+        ],
+    )
+    def test_incomplete_shell_wrapper_options_fail_closed(self, command: str) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check("bash_run", {"command": command})
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
 
     @pytest.mark.parametrize(
         "command",
@@ -223,6 +250,14 @@ class TestPermissionChecker:
         [
             pytest.param("rm -f ./file", id="force-only-local-file"),
             pytest.param("rm -r ./build", id="recursive-only-local-directory"),
+            pytest.param(
+                "rm -f --preserve-root /absolute/file",
+                id="force-with-non-recursive-long-option",
+            ),
+            pytest.param(
+                "rm -r --one-file-system /absolute",
+                id="recursive-with-non-force-long-option",
+            ),
             pytest.param("echo 'rm -rf /'", id="quoted-text-not-command"),
             pytest.param(
                 "echo 'sudo rm -rf /tmp/example'",
@@ -231,6 +266,18 @@ class TestPermissionChecker:
             pytest.param(
                 "echo 'safe\n\nrm -rf /absolute'",
                 id="quoted-double-newline-not-command",
+            ),
+            pytest.param(
+                "echo '&&' rm -rf /absolute",
+                id="quoted-and-not-command-boundary",
+            ),
+            pytest.param(
+                "echo ';' rm -rf /absolute",
+                id="quoted-semicolon-not-command-boundary",
+            ),
+            pytest.param(
+                r"echo $'\n' rm -rf /absolute",
+                id="ansi-c-quoted-newline-not-command-boundary",
             ),
             pytest.param("bash -c \"echo 'rm -rf /'\"", id="quoted-rm-in-shell-payload"),
         ],

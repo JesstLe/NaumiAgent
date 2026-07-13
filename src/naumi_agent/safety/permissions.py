@@ -1211,30 +1211,64 @@ class PermissionChecker:
         if recursion_depth >= MAX_SHELL_COMMAND_RECURSION:
             return True
 
-        try:
-            lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|\n")
-            lexer.commenters = ""
-            lexer.whitespace = lexer.whitespace.replace("\n", "")
-            lexer.whitespace_split = True
-            tokens = list(lexer)
-        except ValueError:
+        segments = PermissionChecker._split_shell_command_segments(command)
+        if segments is None:
             return None
 
         malformed_payload = False
-        simple_command: list[str] = []
-        for token in [*tokens, ";"]:
-            if token and all(character in SHELL_COMMAND_SEPARATOR_CHARS for character in token):
-                destructive = PermissionChecker._is_destructive_rm_simple_command(
-                    simple_command,
-                    recursion_depth=recursion_depth,
-                )
-                if destructive:
-                    return True
-                malformed_payload = malformed_payload or destructive is None
-                simple_command = []
-            else:
-                simple_command.append(token)
+        for segment in segments:
+            try:
+                simple_command = shlex.split(segment, posix=True, comments=False)
+            except ValueError:
+                return None
+
+            destructive = PermissionChecker._is_destructive_rm_simple_command(
+                simple_command,
+                recursion_depth=recursion_depth,
+            )
+            if destructive:
+                return True
+            malformed_payload = malformed_payload or destructive is None
         return None if malformed_payload else False
+
+    @staticmethod
+    def _split_shell_command_segments(command: str) -> list[str] | None:
+        """Split only unquoted shell command boundaries without interpreting shell syntax."""
+        segments: list[str] = []
+        segment: list[str] = []
+        quote: str | None = None
+        escaped = False
+
+        for character in command:
+            if escaped:
+                segment.append(character)
+                escaped = False
+                continue
+            if character == "\\" and quote != "'":
+                segment.append(character)
+                escaped = True
+                continue
+            if quote is not None:
+                segment.append(character)
+                if character == quote:
+                    quote = None
+                continue
+            if character in {"'", '"'}:
+                segment.append(character)
+                quote = character
+                continue
+            if character in SHELL_COMMAND_SEPARATOR_CHARS:
+                if segment:
+                    segments.append("".join(segment))
+                    segment = []
+                continue
+            segment.append(character)
+
+        if quote is not None or escaped:
+            return None
+        if segment:
+            segments.append("".join(segment))
+        return segments
 
     @staticmethod
     def _is_destructive_rm_simple_command(
@@ -1245,7 +1279,7 @@ class PermissionChecker:
         """Detect a recursive, forced rm targeting an absolute path."""
         command_index = PermissionChecker._unwrap_command_position(tokens)
         if command_index is None:
-            return False
+            return True
 
         command = tokens[command_index]
         command_basename = os.path.basename(command)
@@ -1270,7 +1304,12 @@ class PermissionChecker:
                 recursive = True
             elif option_parsing and argument == "--force":
                 force = True
-            elif option_parsing and argument.startswith("-") and argument != "-":
+            elif (
+                option_parsing
+                and argument.startswith("-")
+                and not argument.startswith("--")
+                and argument != "-"
+            ):
                 short_options = argument[1:]
                 recursive = recursive or "r" in short_options or "R" in short_options
                 force = force or "f" in short_options
@@ -1297,10 +1336,10 @@ class PermissionChecker:
             elif wrapper == "command":
                 command_index = PermissionChecker._skip_command_options(tokens, command_index + 1)
             elif wrapper == "exec":
-                command_index += 1
+                command_index = PermissionChecker._skip_exec_options(tokens, command_index + 1)
             else:
                 return command_index
-            if command_index is None:
+            if command_index is None or command_index >= len(tokens):
                 return None
         return None
 
@@ -1322,13 +1361,30 @@ class PermissionChecker:
 
     @staticmethod
     def _skip_env_assignments(tokens: list[str], command_index: int) -> int | None:
-        """Skip env flags and NAME=VALUE assignments without parsing shell syntax."""
+        """Skip env options and NAME=VALUE assignments without parsing shell syntax."""
         while command_index < len(tokens):
             token = tokens[command_index]
             if token == "--":
-                return command_index + 1
-            if token.startswith("-") and token != "-":
                 command_index += 1
+                return command_index if command_index < len(tokens) else None
+            if token in {"--unset", "--chdir", "--split-string"}:
+                command_index += 1
+                if command_index >= len(tokens):
+                    return None
+                command_index += 1
+                continue
+            if token.startswith(("--unset=", "--chdir=", "--split-string=")):
+                if token.endswith("="):
+                    return None
+                command_index += 1
+                continue
+            if token.startswith("-") and token != "-":
+                command_index = PermissionChecker._skip_env_short_option(
+                    tokens,
+                    command_index,
+                )
+                if command_index is None:
+                    return None
                 continue
             if "=" in token and not token.startswith("="):
                 command_index += 1
@@ -1337,15 +1393,66 @@ class PermissionChecker:
         return None
 
     @staticmethod
+    def _skip_env_short_option(tokens: list[str], command_index: int) -> int | None:
+        """Skip one env short-option bundle, consuming operands for u, C, and S."""
+        option_bundle = tokens[command_index][1:]
+        for option_index, option in enumerate(option_bundle):
+            if option not in {"u", "C", "S"}:
+                continue
+            attached_operand = option_bundle[option_index + 1 :]
+            if attached_operand:
+                return command_index + 1
+            operand_index = command_index + 1
+            if operand_index >= len(tokens):
+                return None
+            return operand_index + 1
+        return command_index + 1
+
+    @staticmethod
     def _skip_command_options(tokens: list[str], command_index: int) -> int | None:
-        """Skip command's options before its delegated executable."""
+        """Skip command's supported options before its delegated executable."""
         while command_index < len(tokens):
             option = tokens[command_index]
             if option == "--":
-                return command_index + 1
+                command_index += 1
+                return command_index if command_index < len(tokens) else None
             if option == "-" or not option.startswith("-"):
                 return command_index
+            if option.startswith("--") or not set(option[1:]) <= {"p", "v", "V"}:
+                return None
             command_index += 1
+        return None
+
+    @staticmethod
+    def _skip_exec_options(tokens: list[str], command_index: int) -> int | None:
+        """Skip exec options, consuming the required argv[0] operand for -a."""
+        while command_index < len(tokens):
+            option = tokens[command_index]
+            if option == "--":
+                command_index += 1
+                return command_index if command_index < len(tokens) else None
+            if option == "-" or not option.startswith("-"):
+                return command_index
+            if option.startswith("--"):
+                return None
+
+            option_bundle = option[1:]
+            for option_index, short_option in enumerate(option_bundle):
+                if short_option in {"c", "l"}:
+                    continue
+                if short_option != "a":
+                    return None
+                attached_operand = option_bundle[option_index + 1 :]
+                if attached_operand:
+                    command_index += 1
+                    break
+                command_index += 1
+                if command_index >= len(tokens):
+                    return None
+                command_index += 1
+                break
+            else:
+                command_index += 1
         return None
 
     @staticmethod
