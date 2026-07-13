@@ -824,9 +824,10 @@ COMMON_PATH_ARGUMENT_NAMES = (
 )
 
 COMMON_COMMAND_ARGUMENT_NAMES = ("command", "cmd", "shell", "script")
-SHELL_COMMAND_SEPARATORS = frozenset({";", "&&", "||", "|", "&"})
+SHELL_COMMAND_SEPARATORS = frozenset({";", "&&", "||", "|", "&", "\n"})
 SHELL_EXECUTABLES = frozenset({"sh", "bash", "zsh"})
 MAX_SHELL_COMMAND_RECURSION = 3
+STRUCTURAL_COMMAND_LITERAL_FALLBACKS = frozenset({"rm -rf /", "sudo rm"})
 SUDO_OPTIONS_WITH_VALUE = frozenset(
     {
         "-C",
@@ -1149,7 +1150,10 @@ class PermissionChecker:
 
         cmd_lower = command.lower().strip()
         for blocked in BLOCKED_COMMANDS:
-            if blocked == "rm -rf /" and destructive_rm is not None:
+            if (
+                destructive_rm is not None
+                and blocked in STRUCTURAL_COMMAND_LITERAL_FALLBACKS
+            ):
                 continue
             if blocked.lower() in cmd_lower:
                 return self._deny(
@@ -1170,8 +1174,9 @@ class PermissionChecker:
             return True
 
         try:
-            lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+            lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|\n")
             lexer.commenters = ""
+            lexer.whitespace = lexer.whitespace.replace("\n", "")
             lexer.whitespace_split = True
             tokens = list(lexer)
         except ValueError:
@@ -1253,6 +1258,8 @@ class PermissionChecker:
                 command_index = PermissionChecker._skip_env_assignments(tokens, command_index + 1)
             elif wrapper == "command":
                 command_index = PermissionChecker._skip_command_options(tokens, command_index + 1)
+            elif wrapper == "exec":
+                command_index += 1
             else:
                 return command_index
             if command_index is None:
@@ -1310,16 +1317,21 @@ class PermissionChecker:
         recursion_depth: int,
     ) -> bool | None:
         """Inspect a shell -c payload with a deliberately bounded recursion depth."""
-        try:
-            command_index = arguments.index("-c")
-        except ValueError:
-            return False
-        if command_index + 1 >= len(arguments):
-            return False
-        return PermissionChecker._contains_destructive_rm_command(
-            arguments[command_index + 1],
-            recursion_depth=recursion_depth + 1,
-        )
+        for command_index, argument in enumerate(arguments):
+            if argument == "--":
+                return False
+            if (
+                argument.startswith("-")
+                and not argument.startswith("--")
+                and "c" in argument[1:]
+            ):
+                if command_index + 1 >= len(arguments):
+                    return False
+                return PermissionChecker._contains_destructive_rm_command(
+                    arguments[command_index + 1],
+                    recursion_depth=recursion_depth + 1,
+                )
+        return False
 
     @staticmethod
     def _is_dangerous_rm_target(target: str) -> bool:

@@ -185,9 +185,46 @@ class TestPermissionChecker:
     @pytest.mark.parametrize(
         "command",
         [
+            pytest.param("printf safe\nrm -fr /absolute", id="newline-command-boundary"),
+            pytest.param("bash -lc 'rm -fr /absolute'", id="shell-option-bundle"),
+            pytest.param("exec rm -fr /absolute", id="exec-wrapper"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        ("tool_name", "argument_name", "tool"),
+        [
+            pytest.param("bash_run", "command", None, id="bash-run"),
+            pytest.param("background_run", "command", None, id="background-run"),
+            pytest.param("code_execute", "code", CodeExecuteTool(), id="bash-code-execute"),
+        ],
+    )
+    def test_mainstream_shell_syntax_blocks_across_builtin_command_surfaces(
+        self,
+        command: str,
+        tool_name: str,
+        argument_name: str,
+        tool: CodeExecuteTool | None,
+    ) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+        args = {argument_name: command}
+        if tool_name == "code_execute":
+            args["language"] = "Bash"
+
+        result = checker.check(tool_name, args, tool=tool)
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    @pytest.mark.parametrize(
+        "command",
+        [
             pytest.param("rm -f ./file", id="force-only-local-file"),
             pytest.param("rm -r ./build", id="recursive-only-local-directory"),
             pytest.param("echo 'rm -rf /'", id="quoted-text-not-command"),
+            pytest.param(
+                "echo 'sudo rm -rf /tmp/example'",
+                id="quoted-sudo-rm-text-not-command",
+            ),
             pytest.param("bash -c \"echo 'rm -rf /'\"", id="quoted-rm-in-shell-payload"),
         ],
     )
