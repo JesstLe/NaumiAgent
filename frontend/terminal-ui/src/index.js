@@ -30,6 +30,14 @@ import {
   resetHistorySearch,
 } from "./history-search.js";
 import {
+  acceptSlashCompletion,
+  dismissSlashCompletion,
+  isSlashCompletionOpen,
+  moveSlashCompletionSelection,
+  resetSlashCompletion,
+  syncSlashCompletion,
+} from "./slash-completion.js";
+import {
   attachJsonlLineReader,
   createEventSender,
   normalizeServerRecord,
@@ -274,6 +282,7 @@ function handleKeyInput(chunk) {
     }, 30);
   }
   if (state.input !== previousInput || state.inputCursor !== previousCursor) {
+    syncSlashCompletion(state);
     scheduleUiSnapshotPersist();
   }
 }
@@ -320,6 +329,10 @@ function handleSingleKeyInput(chunk) {
   }
   if (chunk === INPUT_KEYS.ctrlEnter) {
     submitComposer();
+    return;
+  }
+  if (isSlashCompletionOpen(state) && handleSlashCompletionKey(chunk)) {
+    scheduleRedraw();
     return;
   }
   if (!state.input.trim() && hasTaskPanelFocus(state) && handleTaskPanelFocusedKey(chunk)) {
@@ -461,7 +474,12 @@ function handleHistorySearchKey(chunk) {
     return moveHistorySearchSelection(state, "older") || true;
   }
   if (chunk === "\r" || chunk === "\n" || chunk === INPUT_KEYS.ctrlEnter) {
-    return acceptHistorySearch(state) || true;
+    const accepted = acceptHistorySearch(state);
+    if (accepted) {
+      syncSlashCompletion(state);
+      dismissSlashCompletion(state);
+    }
+    return true;
   }
   if (chunk === "\u007f" || chunk === "\b") {
     return backspaceHistorySearchQuery(state) || true;
@@ -471,6 +489,16 @@ function handleHistorySearchKey(chunk) {
     return true;
   }
   return true;
+}
+
+function handleSlashCompletionKey(chunk) {
+  if (chunk === INPUT_KEYS.escape) return dismissSlashCompletion(state);
+  if (chunk === INPUT_KEYS.up) return moveSlashCompletionSelection(state, "previous");
+  if (chunk === INPUT_KEYS.down || chunk === INPUT_KEYS.tab) {
+    return moveSlashCompletionSelection(state, "next");
+  }
+  if (chunk === "\r" || chunk === "\n") return acceptSlashCompletion(state);
+  return false;
 }
 
 function adjustScrollOffset(state, direction) {
@@ -549,6 +577,7 @@ function handleTaskPanelFocusedKey(chunk) {
 
 function restoreUiSnapshot(sessionId) {
   resetHistorySearch(state);
+  resetSlashCompletion(state);
   applyUiSnapshot(state, getUiSnapshot(uiStateStore, sessionId));
 }
 

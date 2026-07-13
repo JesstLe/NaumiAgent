@@ -572,6 +572,42 @@ test("terminal UI process opens doctor diagnostics through bridge protocol", asy
   }
 });
 
+test("terminal UI process selects slash completion before deliberate submit", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。");
+    app.stdin.write("/d");
+    await waitForLatestScreen(output, "命令补全");
+    app.stdin.write("\x1b[B");
+    await waitForLatestScreen(output, "> 02. /doctor");
+
+    app.stdin.write("\n");
+    await waitForLatestScreenWithout(output, "命令补全");
+    await waitForLatestScreen(output, "/doctor▌");
+    await delay(120);
+    assert.equal(
+      readDebugEvents(app.debugLogPath).filter(
+        (record) => record.event === "protocol.send" && record.payload.record.type === "doctor",
+      ).length,
+      0,
+    );
+
+    app.stdin.write("\n");
+    await waitForOutput(output, "doctor: ## 环境诊断存在提醒");
+    assert.equal(
+      readDebugEvents(app.debugLogPath).filter(
+        (record) => record.event === "protocol.send" && record.payload.record.type === "doctor",
+      ).length,
+      1,
+    );
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process opens permission panel through bridge protocol", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);
@@ -842,6 +878,8 @@ test("terminal UI process restores project history and accepts search without se
 
   try {
     await waitForOutput(firstOutput, "新终端 UI 已连接 Python bridge。");
+    first.stdin.write("/doctor\x1b[13;5u");
+    await delay(120);
     first.stdin.write("历史 alpha\n");
     await waitForLatestScreen(firstOutput, "已确认普通消息");
     first.stdin.write("历史 beta\n");
@@ -874,6 +912,27 @@ test("terminal UI process restores project history and accepts search without se
       );
       assert.equal(submits.length, 1);
       assert.equal(submits[0].payload.record.payload.text, "历史 alpha");
+
+      second.stdin.write("\x12doctor");
+      await waitForLatestScreen(secondOutput, "历史搜索");
+      await waitForLatestScreen(secondOutput, "/doctor");
+      second.stdin.write("\n");
+      await waitForLatestScreenWithout(secondOutput, "历史搜索");
+      await delay(120);
+      assert.equal(
+        readDebugEvents(second.debugLogPath).filter(
+          (record) => record.event === "protocol.send" && record.payload.record.type === "doctor",
+        ).length,
+        0,
+      );
+      second.stdin.write("\n");
+      await delay(120);
+      assert.equal(
+        readDebugEvents(second.debugLogPath).filter(
+          (record) => record.event === "protocol.send" && record.payload.record.type === "doctor",
+        ).length,
+        1,
+      );
 
       second.stdin.write("新的草稿");
       second.stdin.write("\x12beta");

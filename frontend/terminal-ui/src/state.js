@@ -123,8 +123,8 @@ function hasAlias(alias, query) {
 
 export function getSlashCommandCompletions(input, slashCommands) {
   if (!String(input || "").startsWith("/")) return [];
-  const raw = String(input).slice(1).trim();
-  if (raw.includes(" ")) return [];
+  const raw = String(input).slice(1);
+  if (/\s/.test(raw)) return [];
 
   const query = raw.toLowerCase();
   const candidates = normalizeSlashCommandList(slashCommands);
@@ -168,6 +168,11 @@ export function createInitialState() {
     status: {},
     showReasoning: false,
     slashCommands: DEFAULT_SLASH_COMMAND_CANDIDATES,
+    slashCompletion: {
+      input: "",
+      selectedIndex: 0,
+      dismissedInput: null,
+    },
     currentTurnStartedAtMs: null,
     currentTurnFirstTokenAtMs: null,
     lastFirstTokenLatencyMs: null,

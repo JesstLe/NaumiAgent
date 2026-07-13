@@ -1367,6 +1367,7 @@ test("slash completion filters by partial command", () => {
 
 test("slash completion closes after typing argument separator", () => {
   assert.equal(getSlashCommandCompletions("/help foo").length, 0);
+  assert.equal(getSlashCommandCompletions("/help ").length, 0);
 });
 
 test("initial state includes empty workbench bucket", () => {
