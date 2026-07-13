@@ -36,6 +36,7 @@ from naumi_agent.safety.permissions import (
 )
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tools.base import Tool, ToolCall, ToolMetadata, ToolResult
+from naumi_agent.tools.builtin import BashRunTool
 
 
 class FakeTool(Tool):
@@ -428,6 +429,23 @@ class TestEngineInit:
         assert "file_write" in names
         assert "file_edit" in names
         assert "bash_run" in names
+
+    @pytest.mark.asyncio
+    async def test_bash_output_dir_stays_readable_inside_workspace(self, tmp_path) -> None:
+        state_dir = tmp_path / "runtime-data"
+        engine = AgentEngine(
+            AppConfig(
+                workspace_root=str(tmp_path),
+                memory=MemoryConfig(session_db_path=str(state_dir / "sessions.db")),
+            )
+        )
+        try:
+            tool = engine.tool_registry.get("bash_run")
+
+            assert isinstance(tool, BashRunTool)
+            assert tool.output_dir == (tmp_path / ".naumi" / "shell-output").resolve()
+        finally:
+            await engine.shutdown()
 
     def test_has_browser_tools(self, engine: AgentEngine) -> None:
         assert "browser_goto" in engine.tool_registry.names
