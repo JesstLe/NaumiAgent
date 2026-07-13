@@ -27,6 +27,9 @@ def test_default_keybindings_include_cli_permission_and_mode_scopes() -> None:
         KeybindingAction.MODE_CYCLE,
         interface="cli",
     )
+    assert bindings.keys_for(KeybindingAction.TOGGLE_INSPECTOR, interface="tui") == (
+        "c-i",
+    )
 
 
 def test_key_name_normalization_accepts_user_friendly_aliases() -> None:

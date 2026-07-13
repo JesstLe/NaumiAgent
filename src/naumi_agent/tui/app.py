@@ -42,6 +42,7 @@ from naumi_agent.tui.completion_receipt import (
     completion_outcome_label,
     format_completion_receipt_markdown,
 )
+from naumi_agent.tui.runtime_inspector import RuntimeInspectorScreen
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
 from naumi_agent.ui.history_screen import build_history_snapshot, render_history_preview
@@ -1711,6 +1712,8 @@ class NaumiApp(App):
                     status.status_text = (
                         f"完成回执：{completion_outcome_label(receipt)}"
                     )
+                    if isinstance(self.screen, RuntimeInspectorScreen):
+                        self.screen.refresh_snapshot()
                 case "tool_prepare_start" | "tool_prepare_snapshot":
                     prepare_text = format_tool_prepare_status(data)
                     chat.update_tool_prepare(prepare_text)
@@ -2029,6 +2032,15 @@ class NaumiApp(App):
     def action_toggle_activity(self) -> None:
         activity = self.query_one(ActivityPanel)
         activity.show_panel = not activity.show_panel
+
+    def action_toggle_inspector(self) -> None:
+        current = self.screen
+        if isinstance(current, RuntimeInspectorScreen):
+            self.pop_screen()
+            return
+        if isinstance(current, ModalScreen):
+            return
+        self.push_screen(RuntimeInspectorScreen(self.engine))
 
     def action_toggle_browser(self) -> None:
         browser = self.query_one(BrowserPanel)

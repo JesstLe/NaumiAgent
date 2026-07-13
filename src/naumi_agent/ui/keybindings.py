@@ -29,6 +29,7 @@ class KeybindingAction(StrEnum):
     COPY_TRANSCRIPT = "copy_transcript"
     TUI_QUIT = "tui_quit"
     TOGGLE_ACTIVITY = "toggle_activity"
+    TOGGLE_INSPECTOR = "toggle_inspector"
     TOGGLE_HISTORY = "toggle_history"
     CLEAR_CHAT = "clear_chat"
     SHOW_TOOLS = "show_tools"
@@ -201,6 +202,14 @@ KEYBINDING_DEFINITIONS: tuple[KeybindingDefinition, ...] = (
         ("tab",),
         interfaces=("tui",),
         textual_action="toggle_activity",
+    ),
+    KeybindingDefinition(
+        KeybindingAction.TOGGLE_INSPECTOR,
+        "打开/关闭 Runtime Inspector",
+        ("c-i",),
+        interfaces=("tui",),
+        textual_action="toggle_inspector",
+        textual_priority=True,
     ),
     KeybindingDefinition(
         KeybindingAction.TOGGLE_HISTORY,

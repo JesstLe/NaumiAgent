@@ -11,6 +11,7 @@ from naumi_agent.tui.app import (
     ActivityPanel,
     ChatPanel,
     NaumiApp,
+    PermissionConfirmScreen,
     StatusBar,
     TodoBar,
     _build_textual_bindings,
@@ -262,6 +263,9 @@ class TestNaumiApp:
                 )
             )
             await pilot.pause(0.1)
+            await pilot.press("ctrl+i")
+            await pilot.pause(0.05)
+            assert isinstance(app.screen, PermissionConfirmScreen)
             await pilot.click("#allow")
             choice = await asyncio.wait_for(task, timeout=2)
 
