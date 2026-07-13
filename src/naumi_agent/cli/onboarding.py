@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
+from naumi_agent.config.configurator import PROVIDER_PROFILES
 from naumi_agent.config.credentials import (
     CredentialStoreError,
     load_model_api_key,
@@ -23,36 +24,30 @@ from naumi_agent.config.credentials import (
 console = Console()
 
 
+_PROVIDER_NAMES = {
+    "kimi": "Kimi Coding API",
+    "openai": "OpenAI",
+    "anthropic": "Anthropic",
+}
 _PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
-    "kimi": {
-        "name": "Kimi Coding API",
-        "default_model": "openai/kimi-for-coding",
-        "fast_model": "openai/kimi-for-coding",
-        "reasoning_model": "openai/kimi-for-coding",
-        "api_base": "https://api.kimi.com/coding/v1",
-    },
-    "openai": {
-        "name": "OpenAI",
-        "default_model": "gpt-4o",
-        "fast_model": "gpt-4o-mini",
-        "reasoning_model": "o3-mini",
-        "api_base": "https://api.openai.com/v1",
-    },
-    "anthropic": {
-        "name": "Anthropic (OpenAI-compatible)",
-        "default_model": "claude-sonnet-4-6",
-        "fast_model": "claude-haiku-4-5",
-        "reasoning_model": "claude-opus-4-7",
-        "api_base": "https://api.anthropic.com/v1",
-    },
-    "custom": {
-        "name": "自定义 OpenAI-compatible API",
+    key: {
+        "name": _PROVIDER_NAMES[key],
+        "default_model": profile.default_model,
+        "fast_model": profile.fast_model,
+        "reasoning_model": profile.reasoning_model,
+        "api_base": profile.api_base,
+        "temperature": profile.temperature,
+    }
+    for key, profile in PROVIDER_PROFILES.items()
+}
+_PROVIDER_PRESETS["custom"] = {
+        "name": "自定义 API",
         "default_model": "custom-model",
         "fast_model": "custom-model",
         "reasoning_model": "custom-model",
         "api_base": "",
-    },
-}
+        "temperature": 1.0,
+    }
 
 _PERMISSION_MODES = {
     "strict": "严格 — 每次文件/Shell 操作都需确认",
@@ -185,11 +180,12 @@ def _build_config(
 ) -> dict[str, Any]:
     return {
         "models": {
+            "provider": provider,
             "default_model": preset["default_model"],
             "fast_model": preset["fast_model"],
             "reasoning_model": preset["reasoning_model"],
             "max_tokens": 4096,
-            "temperature": 0.7,
+            "temperature": preset.get("temperature", 1.0),
             "api_base": preset["api_base"],
             "model_info": {
                 preset["default_model"]: {"max_context": 256000},

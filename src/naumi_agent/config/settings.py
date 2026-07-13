@@ -27,6 +27,7 @@ class ModelMeta(BaseSettings):
 class ModelConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NAUMI_MODEL__")
 
+    provider: str | None = None
     default_model: str = "claude-sonnet-4-6"
     fast_model: str = "claude-haiku-4-5"
     reasoning_model: str = "claude-opus-4-7"
