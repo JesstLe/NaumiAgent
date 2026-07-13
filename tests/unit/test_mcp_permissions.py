@@ -75,6 +75,25 @@ class TestMCPToolPermissions:
         assert not decision.allowed
         assert decision.code is expected_code
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            pytest.param("printf safe\nrm -fr /absolute", id="newline-command-boundary"),
+            pytest.param("bash -lc 'rm -fr /absolute'", id="shell-option-bundle"),
+            pytest.param("exec rm -fr /absolute", id="exec-wrapper"),
+        ],
+    )
+    @pytest.mark.parametrize("argument_name", ["command", "cmd"])
+    def test_mcp_dynamic_command_aliases_block_mainstream_shell_syntax(
+        self, command, argument_name
+    ):
+        checker = PermissionChecker(mode=PermissionMode.BYPASS)
+
+        decision = checker.check("mcp__terminal__run", {argument_name: command})
+
+        assert not decision.allowed
+        assert decision.code is PermissionReasonCode.DANGEROUS_COMMAND
+
     def test_mcp_tool_blocked_strict(self):
         checker = PermissionChecker(mode=PermissionMode.STRICT)
         decision = checker.check("mcp__dangerous", {"cmd": "echo safe"})
