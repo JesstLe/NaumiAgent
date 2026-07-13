@@ -43,4 +43,3 @@ terminal UI never infers run completion from a generic error.
 - [ ] Execute a real Windows TUI browser task, submit a second message, exit, and inspect
       remaining processes.
 - [ ] Commit the completed lifecycle behavior.
-

@@ -67,4 +67,3 @@ without presenting them as an installation blocker.
 - Onboarding and doctor tests prove search keys remain optional and readiness is accurate.
 - A real clean-environment run with search keys removed returns current search results on
   Windows and leaves no browser process or locked conversation.
-
