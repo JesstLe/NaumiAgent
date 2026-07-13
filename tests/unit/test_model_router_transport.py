@@ -8,12 +8,15 @@ from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 from naumi_agent.config.settings import ModelConfig
 from naumi_agent.model.catalog import parse_provider_catalog_json
+from naumi_agent.model.discovery import ModelDiscoveryService
 from naumi_agent.model.provider_runtime import ProviderRuntimeError
 from naumi_agent.model.router import ModelRouter
+from naumi_agent.model.targets import ModelResolutionError
 
 
 def _chat_catalog(*, source: str = "/tmp/providers.json"):
@@ -115,6 +118,53 @@ def _google_catalog():
     )
 
 
+def _discovery_chat_catalog(*, static: bool = False):
+    models = {"static": {"upstreamId": "static-upstream"}} if static else {}
+    return parse_provider_catalog_json(
+        json.dumps(
+            {
+                "providers": {
+                    "vendor": {
+                        "apiFormat": "openai_chat",
+                        "baseURL": "https://discovery.vendor.example/v1",
+                        "auth": {"type": "none"},
+                        "models": models,
+                        "discovery": {
+                            "enabled": True,
+                            "path": "/models",
+                            "ttlSeconds": 60,
+                        },
+                    }
+                }
+            }
+        ),
+        source="/tmp/providers.json",
+    )
+
+
+def _filtered_discovery_catalog():
+    return parse_provider_catalog_json(
+        json.dumps(
+            {
+                "providers": {
+                    "vendor": {
+                        "apiFormat": "openai_chat",
+                        "baseURL": "https://discovery.vendor.example/v1",
+                        "auth": {"type": "none"},
+                        "models": {"hidden": {"upstreamId": "hidden-upstream"}},
+                        "blacklist": ["hidden"],
+                        "discovery": {
+                            "enabled": True,
+                            "path": "/models",
+                            "ttlSeconds": 60,
+                        },
+                    }
+                }
+            }
+        )
+    )
+
+
 def _completion_response(content: str = "adapter-ok") -> SimpleNamespace:
     return SimpleNamespace(
         choices=[
@@ -150,6 +200,219 @@ async def _completion_stream() -> AsyncIterator[SimpleNamespace]:
             )
         ],
     )
+
+
+@pytest.mark.asyncio
+async def test_static_catalog_call_never_triggers_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    discovery_requests = 0
+    captured: dict[str, Any] = {}
+    catalog = _discovery_chat_catalog(static=True)
+
+    def discovery_handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal discovery_requests
+        discovery_requests += 1
+        return httpx.Response(500)
+
+    async def fake_acompletion(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return _completion_response()
+
+    monkeypatch.setattr("naumi_agent.model.router.litellm.get_model_info", lambda _: {})
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.acompletion",
+        fake_acompletion,
+    )
+    router = ModelRouter(
+        ModelConfig(provider="vendor", default_model="static"),
+        catalog=catalog,
+        discovery_service=ModelDiscoveryService(
+            catalog,
+            transport=httpx.MockTransport(discovery_handler),
+        ),
+    )
+
+    await router.call([{"role": "user", "content": "hello"}])
+
+    assert captured["model"] == "openai/static-upstream"
+    assert discovery_requests == 0
+
+
+@pytest.mark.asyncio
+async def test_filtered_static_model_is_rejected_without_discovery() -> None:
+    discovery_requests = 0
+    catalog = _filtered_discovery_catalog()
+
+    def discovery_handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal discovery_requests
+        discovery_requests += 1
+        return httpx.Response(200, json={"data": [{"id": "hidden"}]})
+
+    router = ModelRouter(
+        ModelConfig(provider="vendor", default_model="hidden"),
+        catalog=catalog,
+        discovery_service=ModelDiscoveryService(
+            catalog,
+            transport=httpx.MockTransport(discovery_handler),
+        ),
+    )
+
+    with pytest.raises(ModelResolutionError, match="过滤"):
+        await router.call([{"role": "user", "content": "hello"}])
+
+    assert discovery_requests == 0
+
+
+@pytest.mark.asyncio
+async def test_unknown_catalog_model_is_discovered_before_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    discovery_requests = 0
+    captured: dict[str, Any] = {}
+    catalog = _discovery_chat_catalog()
+
+    def discovery_handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal discovery_requests
+        discovery_requests += 1
+        return httpx.Response(200, json={"data": [{"id": "org/remote"}]})
+
+    async def fake_acompletion(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return _completion_response("dynamic-ok")
+
+    monkeypatch.setattr("naumi_agent.model.router.litellm.get_model_info", lambda _: {})
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.acompletion",
+        fake_acompletion,
+    )
+    router = ModelRouter(
+        ModelConfig(provider="vendor", default_model="org/remote"),
+        catalog=catalog,
+        discovery_service=ModelDiscoveryService(
+            catalog,
+            transport=httpx.MockTransport(discovery_handler),
+        ),
+    )
+
+    response = await router.call([{"role": "user", "content": "hello"}])
+
+    assert captured["model"] == "openai/org/remote"
+    assert captured["api_base"] == "https://discovery.vendor.example/v1"
+    assert response.content == "dynamic-ok"
+    assert discovery_requests == 1
+
+
+@pytest.mark.asyncio
+async def test_unknown_catalog_model_is_discovered_before_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    catalog = _discovery_chat_catalog()
+
+    def discovery_handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"id": "remote-stream"}]})
+
+    async def fake_acompletion(**kwargs: Any):
+        captured.update(kwargs)
+        return _completion_stream()
+
+    monkeypatch.setattr("naumi_agent.model.router.litellm.get_model_info", lambda _: {})
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.acompletion",
+        fake_acompletion,
+    )
+    router = ModelRouter(
+        ModelConfig(provider="vendor", default_model="remote-stream"),
+        catalog=catalog,
+        discovery_service=ModelDiscoveryService(
+            catalog,
+            transport=httpx.MockTransport(discovery_handler),
+        ),
+    )
+
+    chunks = [
+        chunk
+        async for chunk in router.stream([{"role": "user", "content": "hello"}])
+    ]
+
+    assert captured["model"] == "openai/remote-stream"
+    assert [chunk.token for chunk in chunks] == ["stream-ok"]
+
+
+@pytest.mark.asyncio
+async def test_model_missing_from_discovery_is_rejected_before_litellm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    litellm_called = False
+    catalog = _discovery_chat_catalog()
+
+    def discovery_handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"id": "different-model"}]})
+
+    async def fake_acompletion(**_kwargs: Any) -> SimpleNamespace:
+        nonlocal litellm_called
+        litellm_called = True
+        return _completion_response()
+
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.acompletion",
+        fake_acompletion,
+    )
+    router = ModelRouter(
+        ModelConfig(provider="vendor", default_model="missing-model"),
+        catalog=catalog,
+        discovery_service=ModelDiscoveryService(
+            catalog,
+            transport=httpx.MockTransport(discovery_handler),
+        ),
+    )
+
+    with pytest.raises(ModelResolutionError, match="未发现模型"):
+        await router.call([{"role": "user", "content": "hello"}])
+
+    assert litellm_called is False
+
+
+@pytest.mark.asyncio
+async def test_concurrent_dynamic_calls_share_one_discovery_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    discovery_requests = 0
+    catalog = _discovery_chat_catalog()
+
+    async def discovery_handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal discovery_requests
+        discovery_requests += 1
+        await asyncio.sleep(0.02)
+        return httpx.Response(200, json={"data": [{"id": "remote-concurrent"}]})
+
+    async def fake_acompletion(**_kwargs: Any) -> SimpleNamespace:
+        return _completion_response()
+
+    monkeypatch.setattr("naumi_agent.model.router.litellm.get_model_info", lambda _: {})
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.acompletion",
+        fake_acompletion,
+    )
+    router = ModelRouter(
+        ModelConfig(provider="vendor", default_model="remote-concurrent"),
+        catalog=catalog,
+        discovery_service=ModelDiscoveryService(
+            catalog,
+            transport=httpx.MockTransport(discovery_handler),
+        ),
+    )
+
+    responses = await asyncio.gather(
+        *(
+            router.call([{"role": "user", "content": str(index)}])
+            for index in range(20)
+        )
+    )
+
+    assert len(responses) == 20
+    assert discovery_requests == 1
 
 
 @pytest.mark.asyncio

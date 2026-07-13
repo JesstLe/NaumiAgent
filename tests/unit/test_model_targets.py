@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+from types import MappingProxyType
 
 import pytest
 
-from naumi_agent.model.catalog import parse_provider_catalog_json
+from naumi_agent.model.catalog import ProviderModelSpec, parse_provider_catalog_json
 from naumi_agent.model.targets import ModelResolutionError, resolve_model_target
 
 
@@ -118,3 +119,67 @@ def test_catalog_none_preserves_trimmed_legacy_model() -> None:
     assert target.canonical_model == "openai/gpt-4o"
     assert target.upstream_model == "openai/gpt-4o"
     assert target.source == "legacy"
+
+
+def test_resolves_dynamic_model_for_qualified_and_active_provider(catalog) -> None:
+    remote = ProviderModelSpec(
+        id="remote/model",
+        upstream_id="remote/model",
+        name="Remote model",
+    )
+    dynamic_models = {
+        "nvidia": MappingProxyType({remote.id: remote}),
+    }
+
+    qualified = resolve_model_target(
+        "nvidia/remote/model",
+        provider=None,
+        catalog=catalog,
+        dynamic_models=dynamic_models,
+    )
+    active = resolve_model_target(
+        "remote/model",
+        provider="nvidia",
+        catalog=catalog,
+        dynamic_models=dynamic_models,
+    )
+
+    assert qualified.canonical_model == "nvidia/remote/model"
+    assert qualified.upstream_model == "remote/model"
+    assert qualified.model is remote
+    assert active == qualified.__class__(
+        requested_model="remote/model",
+        canonical_model="nvidia/remote/model",
+        upstream_model="remote/model",
+        provider=catalog.providers["nvidia"],
+        model=remote,
+        source="catalog",
+    )
+
+
+def test_dynamic_model_still_obeys_provider_visibility_rules(catalog) -> None:
+    hidden = ProviderModelSpec(
+        id="hidden/glm",
+        upstream_id="remote-hidden",
+        name="Hidden",
+    )
+
+    with pytest.raises(ModelResolutionError, match="过滤"):
+        resolve_model_target(
+            "hidden/glm",
+            provider="nvidia",
+            catalog=catalog,
+            dynamic_models={"nvidia": {hidden.id: hidden}},
+        )
+
+
+def test_dynamic_models_never_leak_between_providers(catalog) -> None:
+    remote = ProviderModelSpec("remote", "remote", "Remote")
+
+    with pytest.raises(ModelResolutionError, match="未声明"):
+        resolve_model_target(
+            "builtin/remote",
+            provider=None,
+            catalog=catalog,
+            dynamic_models={"nvidia": {remote.id: remote}},
+        )

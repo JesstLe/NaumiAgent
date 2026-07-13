@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -27,6 +28,7 @@ def resolve_model_target(
     *,
     provider: str | None,
     catalog: ProviderCatalog | None,
+    dynamic_models: Mapping[str, Mapping[str, ProviderModelSpec]] | None = None,
 ) -> ResolvedModelTarget:
     """Resolve a requested model without performing I/O or credential lookup."""
     requested = model.strip()
@@ -38,31 +40,50 @@ def resolve_model_target(
     prefix, separator, alias = requested.partition("/")
     selected = catalog.providers.get(prefix.lower()) if separator else None
     if selected is not None:
-        return _catalog_target(selected, alias, requested)
+        return _catalog_target(
+            selected,
+            alias,
+            requested,
+            dynamic_models=_provider_dynamic_models(dynamic_models, selected.id),
+        )
 
     active = catalog.providers.get((provider or "").strip().lower())
     if active is None:
         return _legacy_target(requested)
-    if requested in active.models:
-        return _catalog_target(active, requested, requested)
+    active_dynamic = _provider_dynamic_models(dynamic_models, active.id)
+    if requested in active.models or requested in active_dynamic:
+        return _catalog_target(
+            active,
+            requested,
+            requested,
+            dynamic_models=active_dynamic,
+        )
     if separator:
         return _legacy_target(requested)
-    return _catalog_target(active, requested, requested)
+    return _catalog_target(
+        active,
+        requested,
+        requested,
+        dynamic_models=active_dynamic,
+    )
 
 
 def _catalog_target(
     provider: ProviderSpec,
     alias: str,
     requested: str,
+    *,
+    dynamic_models: Mapping[str, ProviderModelSpec],
 ) -> ResolvedModelTarget:
-    model = provider.models.get(alias)
+    model = provider.models.get(alias) or dynamic_models.get(alias)
     if model is None:
         raise ModelResolutionError(
             f'provider "{provider.id}" 未声明模型别名 "{alias}"。'
         )
 
-    visible_ids = {visible.id for visible in provider.visible_models()}
-    if alias not in visible_ids:
+    allowed = set(provider.whitelist)
+    blocked = set(provider.blacklist)
+    if alias in blocked or (allowed and alias not in allowed):
         raise ModelResolutionError(
             f'provider "{provider.id}" 的模型别名 "{alias}" 已被可见性规则过滤。'
         )
@@ -75,6 +96,15 @@ def _catalog_target(
         model=model,
         source="catalog",
     )
+
+
+def _provider_dynamic_models(
+    dynamic_models: Mapping[str, Mapping[str, ProviderModelSpec]] | None,
+    provider_id: str,
+) -> Mapping[str, ProviderModelSpec]:
+    if dynamic_models is None:
+        return {}
+    return dynamic_models.get(provider_id, {})
 
 
 def _legacy_target(requested: str) -> ResolvedModelTarget:
