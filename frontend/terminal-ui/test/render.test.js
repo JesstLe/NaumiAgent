@@ -3,7 +3,16 @@ import assert from "node:assert/strict";
 import { ANSI, stripAnsi, visibleWidth } from "../src/ansi.js";
 import { createInitialState, reduceServerEvent } from "../src/state.js";
 import { setInputText } from "../src/input-buffer.js";
-import { renderFooter, renderMarkdownExcerpt, renderScreen, renderToolCard, renderToolOutput } from "../src/render.js";
+import {
+  captureViewportAnchor,
+  renderFooter,
+  renderMarkdownExcerpt,
+  renderScreen,
+  renderToolCard,
+  renderToolOutput,
+  restoreViewportAnchor,
+} from "../src/render.js";
+import { detachTimeline } from "../src/timeline-follow.js";
 
 test("markdown code blocks show a bounded excerpt with lightweight highlighting", () => {
   const codeLines = Array.from({ length: 45 }, (_, index) => `const value${index} = ${index};`);
@@ -282,4 +291,58 @@ test("footer renders session id from state.currentSessionId", () => {
 
   assert(footer.includes("会话:sess-abc"));
   assert(footer.includes("mode: default"));
+});
+
+test("resize anchor preserves the top visible message across width changes", () => {
+  const state = createInitialState();
+  state.messages = Array.from({ length: 12 }, (_, index) => ({
+    kind: "assistant",
+    id: `assistant-${index}`,
+    content: `消息 ${index}: ${"这是一段用于验证终端宽度变化后阅读位置保持稳定的内容。".repeat(4)}`,
+  }));
+  detachTimeline(state, 16);
+
+  const wideAnchor = captureViewportAnchor(state, 120, 16);
+  assert(wideAnchor);
+  assert.match(wideAnchor.messageId, /^assistant-/);
+
+  const narrowOffset = restoreViewportAnchor(state, wideAnchor, 60, 16);
+  const narrowAnchor = captureViewportAnchor(state, 60, 16);
+  assert(narrowOffset > 0);
+  assert.equal(narrowAnchor.messageId, wideAnchor.messageId);
+
+  const restoredOffset = restoreViewportAnchor(state, narrowAnchor, 120, 16);
+  const restoredAnchor = captureViewportAnchor(state, 120, 16);
+  assert(restoredOffset > 0);
+  assert.equal(restoredAnchor.messageId, wideAnchor.messageId);
+});
+
+test("resize anchor falls back to message index when ids are absent", () => {
+  const state = createInitialState();
+  state.messages = Array.from({ length: 10 }, (_, index) => ({
+    kind: "assistant",
+    content: `无 ID 消息 ${index}: ${"内容 ".repeat(30)}`,
+  }));
+  detachTimeline(state, 12);
+
+  const anchor = captureViewportAnchor(state, 100, 14);
+  assert(anchor);
+  assert.equal(anchor.messageId, "");
+  restoreViewportAnchor(state, anchor, 60, 14);
+
+  assert.equal(captureViewportAnchor(state, 60, 14).messageIndex, anchor.messageIndex);
+});
+
+test("resize anchor keeps follow mode pinned to the latest output", () => {
+  const state = createInitialState();
+  state.messages = Array.from({ length: 20 }, (_, index) => ({
+    kind: "assistant",
+    id: `assistant-${index}`,
+    content: `跟随消息 ${index} ${"正文 ".repeat(20)}`,
+  }));
+
+  assert.equal(captureViewportAnchor(state, 120, 16), null);
+  assert.equal(restoreViewportAnchor(state, null, 60, 16), 0);
+  assert.equal(state.followTail, true);
+  assert.equal(state.scrollOffset, 0);
 });
