@@ -3,6 +3,8 @@
 
 models:
   provider: "kimi"
+  # 可选：provider catalog 路径；相对路径以此配置文件所在目录为基准。
+  # catalog_path: "catalogs/providers.json"
   default_model: "openai/kimi-for-coding"
   fast_model: "openai/kimi-for-coding"
   reasoning_model: "openai/kimi-for-coding"

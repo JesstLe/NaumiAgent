@@ -53,6 +53,19 @@ class TestAppConfig:
         assert config.memory.session_db_path == str(tmp_path / "data" / "sessions.db")
         assert config.memory.vector_db_path == str(tmp_path / "data" / "chroma")
 
+    def test_from_yaml_anchors_model_catalog_path(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "config.yaml"
+        yaml_path.write_text(
+            "models:\n  catalog_path: catalogs/providers.json\n",
+            encoding="utf-8",
+        )
+
+        config = AppConfig.from_yaml(yaml_path)
+
+        assert config.models.catalog_path == str(
+            tmp_path / "catalogs" / "providers.json"
+        )
+
     def test_from_yaml_loads_model_key_from_system_credential_store(
         self,
         tmp_path,
