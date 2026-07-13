@@ -219,7 +219,12 @@ def diff_run_changes(
         if previous == current:
             continue
         if current is None:
-            changes.append(ReceiptChange(path=path, status="restored"))
+            status = (
+                "removed_untracked"
+                if previous is not None and previous.status == "untracked"
+                else "restored"
+            )
+            changes.append(ReceiptChange(path=path, status=status))
             continue
         changes.append(
             ReceiptChange(

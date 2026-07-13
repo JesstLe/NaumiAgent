@@ -381,13 +381,17 @@ function normalizeCompletionReceipt(payload) {
     throw new Error(`completion/receipt outcome 无效: ${outcome}`);
   }
   const gitState = normalizeObject(payload.git_state);
+  const changes = normalizeObjectArray(payload.changes, 100).map((item) => ({
+    ...item,
+    scope: item.scope === "background" ? "background" : "task",
+  }));
   return {
     schema_version: 1,
     receipt_id: receiptId,
     run_id: runId,
     outcome,
     summary: String(payload.summary ?? ""),
-    changes: normalizeObjectArray(payload.changes, 100),
+    changes,
     validations: normalizeObjectArray(payload.validations, 50),
     unverified: normalizeTextArray(payload.unverified, 50),
     approvals: normalizeObjectArray(payload.approvals, 50),
