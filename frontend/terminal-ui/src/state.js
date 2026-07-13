@@ -2,6 +2,7 @@ import { looksLikeDiff } from "./ansi.js";
 import { getInputCursor, setInputText, truncateInputText } from "./input-buffer.js";
 import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
 import { clearRenderCache, createRenderCache } from "./render-cache.js";
+import { jumpTimelineToLatest } from "./timeline-follow.js";
 
 export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/help", aliases: ["/h"], description: "显示帮助" },
@@ -183,6 +184,9 @@ export function createInitialState() {
     permission: null,
     running: false,
     scrollOffset: 0,
+    followTail: true,
+    unreadOutputCount: 0,
+    unreadOutputKeys: {},
     bridgeReady: false,
     debugTrace: null,
     frontendDebugLogPath: "",
@@ -259,6 +263,7 @@ export function reduceServerEvent(state, record) {
       state.permission = null;
       return state.taskPanel.pinned ? [taskPanelRefreshAction(state)] : [];
     case "session/replayed":
+      jumpTimelineToLatest(state);
       state.currentSessionId = payload.session_id || state.currentSessionId;
       state.running = false;
       state.currentTurnStartedAtMs = null;
