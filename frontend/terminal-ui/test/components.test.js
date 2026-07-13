@@ -13,6 +13,7 @@ import {
 } from "../src/components/footer.js";
 import { Message } from "../src/components/message.js";
 import { ActivityCard } from "../src/components/activity-card.js";
+import { CompletionReceiptCard } from "../src/components/completion-receipt-card.js";
 import { RunActivityCard } from "../src/components/run-activity-card.js";
 import { PermissionCard } from "../src/components/permission-card.js";
 import { parsePermissionPanel, PermissionPanel } from "../src/components/permission-panel.js";
@@ -39,6 +40,53 @@ test("component core composes nested stacks and boxes within width", () => {
   assert(lines.some((item) => stripAnsi(item).includes("group")));
   assert(lines.some((item) => stripAnsi(item).includes("第一行")));
   assert(lines.every((item) => visibleWidth(item) <= 48));
+});
+
+test("completion receipt card exposes evidence, risk, and recovery in Chinese", () => {
+  const rendered = renderComponent(CompletionReceiptCard({
+    receipt: {
+      outcome: "partial",
+      summary: "实现已落盘，但验证尚未通过。",
+      changes: [{ path: "src/naumi_agent/example.py", status: "modified", additions: 8, deletions: 2 }],
+      validations: [{ command: "pytest tests/unit/test_example.py -q", status: "failed", exit_code: 1, passed: 3, failed: 1, skipped: 0 }],
+      unverified: ["尚未执行端到端真实场景。"],
+      approvals: [{ tool_name: "bash_run", decision: "allowed_once" }],
+      risks: [{ level: "high", message: "1 项验证失败。" }],
+      git_state: { available: true, branch: "codex/receipt", dirty: true, ahead: 1, behind: 0 },
+      next_actions: [{ label: "重试失败验证", kind: "retry_validation" }],
+      duration_ms: 1530,
+    },
+  }), { width: 72 }).map(stripAnsi);
+  const text = rendered.join("\n");
+
+  assert.match(text, /完成回执/);
+  assert.match(text, /部分完成/);
+  assert.match(text, /改动 1/);
+  assert.match(text, /pytest tests\/unit\/test_example.py -q/);
+  assert.match(text, /风险.*1 项验证失败/);
+  assert.match(text, /审批.*bash_run.*仅本次允许/);
+  assert.match(text, /下一步.*重试失败验证/);
+  assert(rendered.every((line) => visibleWidth(line) <= 72));
+});
+
+test("completion receipt card states when Git and validation evidence are absent", () => {
+  const rendered = renderComponent(CompletionReceiptCard({
+    receipt: {
+      outcome: "failed",
+      summary: "运行失败。",
+      changes: [],
+      validations: [],
+      unverified: [],
+      approvals: [],
+      risks: [],
+      git_state: { available: false, dirty: false },
+      next_actions: [],
+      duration_ms: 0,
+    },
+  }), { width: 48 }).map(stripAnsi).join("\n");
+
+  assert.match(rendered, /Git 未核查/);
+  assert.match(rendered, /未记录验证命令/);
 });
 
 test("semantic message component delegates tool cards and markdown text", () => {

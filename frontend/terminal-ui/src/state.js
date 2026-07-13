@@ -310,6 +310,9 @@ export function reduceServerEvent(state, record) {
     case "permission/resolved":
       handlePermissionResolved(state, payload);
       break;
+    case "completion/receipt":
+      addCompletionReceipt(state, payload, record.request_id);
+      break;
     case "run/started":
       resetRunCancellation(state);
       startRunActivity(state, record, payload);
@@ -324,6 +327,7 @@ export function reduceServerEvent(state, record) {
       state.running = false;
       resetRunCancellation(state);
       finishRunActivity(state, terminalStatus);
+      moveCompletionReceiptToEnd(state, payload.receipt_id, payload.run_id);
       if (payload.intent === "task" && state.activeTaskSubmission) {
         const taskState = terminalStatus === "completed" ? "completed" : "blocked";
         state.activeTaskSubmission.state = taskState;
@@ -373,6 +377,7 @@ export function reduceServerEvent(state, record) {
         `运行已取消。${payload.reason ? ` ${payload.reason}` : ""}`,
         "warning",
       );
+      moveCompletionReceiptToEnd(state, payload.receipt_id, payload.run_id);
       return state.taskPanel.pinned ? [taskPanelRefreshAction(state)] : [];
     case "session/replayed":
       jumpTimelineToLatest(state);
@@ -434,6 +439,7 @@ export function reduceServerEvent(state, record) {
         message: payload.message ?? "发送失败。",
       });
       pushSystemMessage(state, "error", payload.message ?? "未知错误", "error");
+      moveCompletionReceiptToEnd(state, payload.receipt_id, payload.run_id);
       break;
     }
     case "shutdown":
@@ -520,6 +526,46 @@ function finishRunActivity(state, status) {
   state.activeRunActivity = null;
   clearRenderCache(state.renderCache);
   return activity;
+}
+
+function addCompletionReceipt(state, receipt, requestId) {
+  const receiptId = String(receipt.receipt_id ?? "");
+  const runId = String(receipt.run_id ?? "");
+  if (!receiptId || !runId) return null;
+  const existing = state.messages.find(
+    (message) => message.kind === "completion_receipt"
+      && message.receiptId === receiptId,
+  );
+  if (existing) return existing;
+  const message = {
+    kind: "completion_receipt",
+    id: nextMessageId(state, "completion_receipt"),
+    requestId: String(requestId ?? ""),
+    receiptId,
+    runId,
+    receipt,
+  };
+  state.messages.push(message);
+  clearRenderCache(state.renderCache);
+  return message;
+}
+
+function moveCompletionReceiptToEnd(state, receiptId, runId) {
+  const normalizedReceiptId = String(receiptId ?? "");
+  const normalizedRunId = String(runId ?? "");
+  if (!normalizedReceiptId && !normalizedRunId) return null;
+  const index = state.messages.findIndex(
+    (message) => message.kind === "completion_receipt"
+      && (
+        (normalizedReceiptId && message.receiptId === normalizedReceiptId)
+        || (normalizedRunId && message.runId === normalizedRunId)
+      ),
+  );
+  if (index < 0) return null;
+  const [message] = state.messages.splice(index, 1);
+  state.messages.push(message);
+  clearRenderCache(state.renderCache);
+  return message;
 }
 
 function discardActiveRunActivity(state) {
