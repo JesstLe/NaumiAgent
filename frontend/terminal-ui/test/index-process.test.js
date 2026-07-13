@@ -84,6 +84,33 @@ test("terminal UI process can launch bridge from JSON argv", async () => {
   }
 });
 
+test("terminal UI process creates one workbench task from the composer", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    app.stdin.write("\x14");
+    await waitForOutput(output, "task >");
+
+    app.stdin.write("实现终端任务闭环\n");
+    await waitForOutput(output, "任务 #41 · 进行中", 7000);
+    await waitForOutput(output, "任务 #41 · 已完成", 7000);
+    await waitForOutput(output, "chat >", 7000);
+
+    const code = await stopTerminalUi(app);
+    assert.equal(code, 0);
+    const events = readDebugEvents(app.debugLogPath);
+    const submits = events.filter(
+      (record) => record.event === "protocol.send" && record.payload.record.type === "task_submit",
+    );
+    assert.equal(submits.length, 1);
+    assert.equal(submits[0].payload.record.payload.text, "实现终端任务闭环");
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process keeps explicit plan mode across status refreshes", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);

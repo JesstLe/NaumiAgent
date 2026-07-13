@@ -109,6 +109,15 @@ function normalizeServerPayload(type, payload) {
   if (type === "user/message") {
     return { ...payload, content: String(payload.content ?? "") };
   }
+  if (type === "task/created") {
+    return {
+      ...payload,
+      mission: normalizeObject(payload.mission),
+      task: normalizeObject(payload.task),
+      issue: normalizeObject(payload.issue),
+      workbench_snapshot: normalizeObject(payload.workbench_snapshot),
+    };
+  }
   if (type === "ui/message") {
     const messageType = String(payload.type ?? "");
     if (!messageType) {

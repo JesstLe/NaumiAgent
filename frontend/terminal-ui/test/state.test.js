@@ -15,6 +15,9 @@ import {
   reduceServerEvent,
   selectTaskPanelOffset,
   setTaskPanelFocus,
+  retryUserMessage,
+  submitTaskMessage,
+  toggleComposerIntent,
 } from "../src/state.js";
 
 test("assistant stream updates one active message", () => {
@@ -1177,6 +1180,13 @@ test("ui snapshots persist folds, scroll offset, and multiline composer draft", 
   state.input = "第一行\n第二行";
   state.inputCursor = 3;
   state.inputPreferredColumn = 2;
+  state.composerIntent = "task";
+  state.activeTaskSubmission = {
+    requestId: "submit-4",
+    taskId: "task-4",
+    missionId: "mission-2",
+    state: "running",
+  };
 
   const restored = createInitialState();
   applyUiSnapshot(restored, createUiSnapshot(state));
@@ -1187,6 +1197,36 @@ test("ui snapshots persist folds, scroll offset, and multiline composer draft", 
   assert.equal(restored.input, "第一行\n第二行");
   assert.equal(restored.inputCursor, 3);
   assert.equal(restored.inputPreferredColumn, 2);
+  assert.equal(restored.composerIntent, "task");
+  assert.deepEqual(restored.activeTaskSubmission, state.activeTaskSubmission);
+});
+
+test("snapshot does not persist task intent without an unsent draft", () => {
+  const state = createInitialState();
+  state.composerIntent = "task";
+  state.input = "";
+
+  const snapshot = createUiSnapshot(state);
+  const restored = createInitialState();
+  applyUiSnapshot(restored, snapshot);
+
+  assert.equal(snapshot.composer.intent, "chat");
+  assert.equal(restored.composerIntent, "chat");
+});
+
+test("snapshot rejects malformed active task submission metadata", () => {
+  const restored = createInitialState();
+
+  applyUiSnapshot(restored, {
+    activeTaskSubmission: {
+      requestId: "x".repeat(500),
+      taskId: ["invalid"],
+      missionId: "mission-9",
+      state: "mystery",
+    },
+  });
+
+  assert.equal(restored.activeTaskSubmission, null);
 });
 
 test("follow tail snapshot derives detached state without stale unread", () => {
@@ -1404,6 +1444,208 @@ test("workbench snapshot replaces dashboard state", () => {
   assert.equal(state.workbench.issues[0].risk_level, "high");
   assert.equal(state.workbench.failures[0].kind, "test_failed");
   assert.equal(state.workbench.events[0].type, "issue.created");
+});
+
+test("task submit reuses optimistic delivery and task created accepts it in place", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload, options = {}) => {
+    sent.push({ type, payload, options });
+    return options.id;
+  };
+
+  const message = submitTaskMessage(state, "实现任务联动", send, {
+    mission_id: "mission-1",
+    acceptance_criteria: ["测试通过"],
+    parallel_mode: "cooperative",
+    risk_level: "high",
+  });
+
+  assert.equal(message.intent, "task");
+  assert.equal(message.deliveryStatus, "queued");
+  assert.equal(sent[0].type, "task_submit");
+  assert.equal(sent[0].payload.text, "实现任务联动");
+  assert.equal(sent[0].payload.mission_id, "mission-1");
+  assert.equal(sent[0].options.id, message.requestId);
+
+  reduceServerEvent(state, {
+    type: "task/created",
+    request_id: message.requestId,
+    payload: {
+      mission: { id: "mission-1", title: "任务联动" },
+      task: { id: "7", subject: "实现任务联动", status: "in_progress" },
+      issue: { task_id: "7", mission_id: "mission-1", risk_level: "high" },
+      workbench_snapshot: {
+        session_id: "session-1",
+        missions: [{ id: "mission-1" }],
+        tasks: [{ id: "7", status: "in_progress" }],
+        issues: [{ task_id: "7" }],
+        failures: [],
+        events: [],
+      },
+    },
+  });
+
+  assert.equal(state.messages.length, 1);
+  assert.equal(message.deliveryStatus, "accepted");
+  assert.equal(message.taskId, "7");
+  assert.equal(message.missionId, "mission-1");
+  assert.equal(state.activeTaskSubmission.taskId, "7");
+  assert.equal(state.activeTaskSubmission.state, "running");
+  assert.equal(state.composerIntent, "chat");
+  assert.equal(state.workbench.tasks[0].id, "7");
+
+  reduceServerEvent(state, {
+    type: "run/completed",
+    request_id: message.requestId,
+    payload: { status: "completed", task_id: "7", mission_id: "mission-1", intent: "task" },
+  });
+  assert.equal(state.activeTaskSubmission.state, "completed");
+  assert.equal(message.taskStatus, "completed");
+});
+
+test("composer intent and task commands route without stealing task detail", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload, options = {}) => {
+    sent.push({ type, payload, options });
+    return options.id;
+  };
+
+  assert.equal(toggleComposerIntent(state), "task");
+  handleSubmitText(state, "持续任务模式提交", send);
+  handleSubmitText(state, "/chat", send);
+  handleSubmitText(state, "/task create 显式创建任务", send);
+  handleSubmitText(state, "/task 17", send);
+  handleSubmitText(state, "/task #18", send);
+
+  assert.equal(state.composerIntent, "chat");
+  assert.equal(sent[0].type, "task_submit");
+  assert.equal(sent[0].payload.text, "持续任务模式提交");
+  assert.equal(sent[1].type, "task_submit");
+  assert.equal(sent[1].payload.text, "显式创建任务");
+  assert.deepEqual(sent[2], {
+    type: "task_panel",
+    payload: { limit: 12, source: "all", status: "all", detail_id: "17", pinned: false, refresh: false },
+    options: {},
+  });
+  assert.deepEqual(sent[3], {
+    type: "task_panel",
+    payload: { limit: 12, source: "all", status: "all", detail_id: "18", pinned: false, refresh: false },
+    options: {},
+  });
+  assert(state.messages.some((message) => message.kind === "system" && message.content.includes("对话模式")));
+});
+
+test("task command validates missing content and persistent intent waits for acceptance", () => {
+  const state = createInitialState();
+  const sent = [];
+  toggleComposerIntent(state);
+
+  handleSubmitText(state, "/task create", (type, payload) => sent.push({ type, payload }));
+
+  assert.equal(sent.length, 0);
+  assert.equal(state.composerIntent, "task");
+  assert(state.messages.some((message) => message.kind === "system" && message.level === "warning"));
+
+  const message = handleSubmitText(state, "等待 Bridge 接受", (type, payload, options = {}) => {
+    sent.push({ type, payload, options });
+    return options.id;
+  });
+  assert.equal(state.composerIntent, "task");
+  reduceServerEvent(state, {
+    type: "task/created",
+    request_id: message.requestId,
+    payload: { mission: { id: "m1" }, task: { id: "9", status: "in_progress" }, issue: {} },
+  });
+  assert.equal(state.composerIntent, "chat");
+});
+
+test("retry preserves task submit intent and structured draft", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload, options = {}) => {
+    sent.push({ type, payload, options });
+    return options.id;
+  };
+  const message = submitTaskMessage(state, "修复任务", send, {
+    mission_id: "mission-2",
+    acceptance_criteria: ["pytest 通过"],
+    risk_level: "high",
+  });
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: message.requestId,
+    payload: { code: "task_create_failed", message: "创建失败" },
+  });
+
+  retryUserMessage(state, send, message.requestId);
+
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].type, "task_submit");
+  assert.equal(sent[1].payload.text, "修复任务");
+  assert.equal(sent[1].payload.mission_id, "mission-2");
+  assert.deepEqual(sent[1].payload.acceptance_criteria, ["pytest 通过"]);
+  assert.equal(message.intent, "task");
+  assert.equal(message.attempt, 2);
+});
+
+test("task execution error blocks the accepted task instead of making it retry-create", () => {
+  const state = createInitialState();
+  const message = submitTaskMessage(state, "执行后失败", (_type, _payload, options = {}) => options.id);
+  reduceServerEvent(state, {
+    type: "task/created",
+    request_id: message.requestId,
+    payload: {
+      mission: { id: "mission-4" },
+      task: { id: "11", status: "in_progress" },
+      issue: { task_id: "11" },
+    },
+  });
+
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: message.requestId,
+    payload: {
+      code: "run_failed",
+      message: "模型执行失败",
+      intent: "task",
+      task_id: "11",
+      mission_id: "mission-4",
+      task_status: "blocked",
+    },
+  });
+
+  assert.equal(state.activeTaskSubmission.state, "blocked");
+  assert.equal(message.taskStatus, "blocked");
+  assert.equal(message.deliveryStatus, "accepted");
+  assert.equal(message.localOutbox, false);
+});
+
+test("outbox snapshot restores task intent without automatic downgrade", () => {
+  const source = createInitialState();
+  submitTaskMessage(source, "持久化任务", () => {}, {
+    mission_id: "mission-3",
+    title: "任务标题",
+    acceptance_criteria: ["验证通过"],
+    parallel_mode: "exclusive",
+    risk_level: "medium",
+  });
+  const snapshot = createUiSnapshot(source);
+  assert.equal(snapshot.outbox[0].submitType, "task_submit");
+  assert.equal(snapshot.outbox[0].taskDraft.mission_id, "mission-3");
+
+  const restored = createInitialState();
+  applyUiSnapshot(restored, snapshot);
+  const message = restored.messages.find((item) => item.localOutbox);
+  assert.equal(message.intent, "task");
+  assert.equal(message.submitType, "task_submit");
+  assert.equal(message.deliveryStatus, "uncertain");
+
+  const sent = [];
+  retryUserMessage(restored, (type, payload) => sent.push({ type, payload }));
+  assert.equal(sent[0].type, "task_submit");
+  assert.equal(sent[0].payload.mission_id, "mission-3");
 });
 
 test("workbench event appends to event log and keeps last 100", () => {

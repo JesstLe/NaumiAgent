@@ -965,6 +965,52 @@ async def test_bridge_task_submit_rejects_ambiguous_missions_without_issue() -> 
 
 
 @pytest.mark.asyncio
+async def test_bridge_task_submit_ignores_terminal_missions_when_auto_resolving() -> None:
+    engine = _TaskSubmitFakeEngine([
+        {"id": "mission-closed", "title": "旧任务", "status": "completed"},
+        {"id": "mission-open", "title": "当前任务", "status": "active"},
+    ])
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "task-submit-open-mission",
+        "type": ClientEventType.TASK_SUBMIT,
+        "payload": {"text": "继续当前目标"},
+    })
+    assert bridge._run_task is not None
+    await bridge._run_task
+
+    assert engine.workbench_service.created_issues[0]["mission_id"] == "mission-open"
+
+
+@pytest.mark.asyncio
+async def test_bridge_task_submit_rejects_explicit_terminal_mission() -> None:
+    engine = _TaskSubmitFakeEngine([
+        {"id": "mission-closed", "title": "旧任务", "status": "cancelled"},
+    ])
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "task-submit-closed-mission",
+        "type": ClientEventType.TASK_SUBMIT,
+        "payload": {
+            "text": "错误挂载",
+            "mission_id": "mission-closed",
+        },
+    })
+
+    assert bridge._run_task is None
+    assert engine.workbench_service.created_issues == []
+    error = next(record for record in _records(writer) if record["type"] == "error")
+    assert error["payload"]["code"] == "mission_closed"
+    assert "已结束" in error["payload"]["message"]
+
+
+@pytest.mark.asyncio
 async def test_bridge_task_submit_uses_explicit_owned_mission() -> None:
     engine = _TaskSubmitFakeEngine([
         {"id": "mission-1", "title": "前端", "status": "planning"},
@@ -1008,6 +1054,10 @@ async def test_bridge_task_submit_failure_blocks_backing_task() -> None:
     error = next(record for record in _records(writer) if record["type"] == "error")
     assert error["request_id"] == "task-submit-failed"
     assert error["payload"]["code"] == "run_failed"
+    assert error["payload"]["task_id"] == "1"
+    assert error["payload"]["mission_id"] == "mission-auto"
+    assert error["payload"]["intent"] == "task"
+    assert error["payload"]["task_status"] == "blocked"
     assert len([
         record for record in _records(writer) if record["type"] == "workbench/snapshot"
     ]) == 2

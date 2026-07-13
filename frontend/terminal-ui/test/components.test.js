@@ -89,6 +89,31 @@ test("queued and uncertain user deliveries have distinct text status", () => {
   assert.match(uncertain, /发送状态待确认.*可能重复发送/);
 });
 
+test("task user message exposes task identity and lifecycle without color", () => {
+  const running = renderComponent(Message({
+    message: {
+      kind: "user",
+      content: "实现任务联动",
+      intent: "task",
+      taskId: "7",
+      taskStatus: "running",
+      deliveryStatus: "accepted",
+    },
+  }), { width: 72 }).map(stripAnsi).join("\n");
+  const queued = renderComponent(Message({
+    message: {
+      kind: "user",
+      content: "创建任务",
+      intent: "task",
+      deliveryStatus: "queued",
+    },
+  }), { width: 72 }).map(stripAnsi).join("\n");
+
+  assert.match(running, /任务 #7 · 进行中/);
+  assert.match(queued, /任务 · 创建中/);
+  assert.match(queued, /发送中/);
+});
+
 test("footer components can render independently or as a full footer", () => {
   const state = createInitialState();
   state.permission = { requestId: "p1", payload: { tool_name: "bash_run", reason: "需要确认" } };
@@ -102,6 +127,18 @@ test("footer components can render independently or as a full footer", () => {
   assert(stripAnsi(todo.join("\n")).includes("todo: 1/2 完成"));
   assert(stripAnsi(full.join("\n")).includes("Shift+Tab 模式"));
   assert(full.every((item) => visibleWidth(item) <= 80));
+});
+
+test("composer prompt states chat or task intent in text", () => {
+  const state = createInitialState();
+  state.mode = "bypass";
+
+  const chat = PromptFooter({ state }).render({ width: 60 }).map(stripAnsi).join("\n");
+  state.composerIntent = "task";
+  const task = PromptFooter({ state }).render({ width: 60 }).map(stripAnsi).join("\n");
+
+  assert.match(chat, /^chat > /);
+  assert.match(task, /^task > /);
 });
 
 test("new output footer appears only while detached with unread output", () => {

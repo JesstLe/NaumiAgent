@@ -32,6 +32,14 @@ from naumi_agent.workbench.models import ParallelMode, RiskLevel
 
 logger = logging.getLogger(__name__)
 
+_TERMINAL_MISSION_STATUSES = frozenset({
+    "completed",
+    "cancelled",
+    "canceled",
+    "closed",
+    "archived",
+})
+
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
 
@@ -783,7 +791,17 @@ class JsonlEngineBridge:
                     request_id=request_id,
                 )
                 message, code = _present_run_error(exc)
-                await self.emit_error(message, code=code, request_id=request_id)
+                await self.emit_error(
+                    message,
+                    code=code,
+                    request_id=request_id,
+                    details={
+                        "task_id": task_id,
+                        "mission_id": mission_id,
+                        "intent": "task",
+                        "task_status": TaskStatus.BLOCKED.value,
+                    },
+                )
             finally:
                 await self.emit(ServerEventType.STATUS, self.status_payload())
 
@@ -816,10 +834,25 @@ class JsonlEngineBridge:
                     code="mission_not_found",
                     request_id=request_id,
                 )
+                return None
+            status = str(_public_mapping(match).get("status") or "").strip().lower()
+            if status in _TERMINAL_MISSION_STATUSES:
+                await self.emit_error(
+                    f"Mission 已结束，不能创建新任务: {mission_id}",
+                    code="mission_closed",
+                    request_id=request_id,
+                )
+                return None
             return match
-        if len(missions) == 1:
-            return missions[0]
-        if not missions:
+        open_missions = [
+            mission
+            for mission in missions
+            if str(_public_mapping(mission).get("status") or "").strip().lower()
+            not in _TERMINAL_MISSION_STATUSES
+        ]
+        if len(open_missions) == 1:
+            return open_missions[0]
+        if not open_missions:
             return await service.create_mission(
                 session_id=session_id,
                 title=title[:80],
@@ -827,7 +860,7 @@ class JsonlEngineBridge:
             )
         candidates = "、".join(
             f"{data.get('id')}({data.get('title') or '未命名'})"
-            for data in (_public_mapping(mission) for mission in missions[:8])
+            for data in (_public_mapping(mission) for mission in open_missions[:8])
         )
         await self.emit_error(
             f"当前会话有多个 Mission，请指定 mission_id。可选: {candidates}",
@@ -1276,10 +1309,14 @@ class JsonlEngineBridge:
         *,
         code: str = "error",
         request_id: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
+        payload = {"message": message, "code": code}
+        if details:
+            payload.update(details)
         await self.emit(
             ServerEventType.ERROR,
-            {"message": message, "code": code},
+            payload,
             request_id=request_id,
         )
 
