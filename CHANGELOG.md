@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.213] - 2026-07-13
+
+### Added
+- **Authoritative Runtime Inspector** — 后端从真实 TaskStore、运行/工具/审批事件、完成回执和 Git 工作区生成 Plan、Tools、Context、Changes、Tests 五标签版本化快照；JSONL Bridge 支持严格 schema、revision 增量、断序全量恢复和会话隔离。
+- **Responsive Terminal UI / Textual Inspector Parity** — 新 Terminal UI 通过 `Ctrl+I` 在并排抽屉、覆盖层和窄屏全页间响应式切换，并持久化标签、焦点和展开状态；Textual TUI 读取同一后端快照，保留刷新错误证据与权限交互优先级。
+
+### Tests
+- **Real Cross-Frontend Inspector E2E** — 在真实临时 Git 仓库、TaskStore、pytest 子进程和 SQLite 完成回执上验证 Python Bridge、新 UI 三档布局与 Textual formatter，并覆盖无 Git、空状态、失败验证、revision 断序和跨会话拒绝。
+
 ## [0.1.212] - 2026-07-13
 
 ### Added

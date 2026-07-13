@@ -185,6 +185,11 @@ test("terminal UI process talks to the Python JSONL bridge fixture", async () =>
 
   try {
     await waitForOutput(output, "新终端 UI 已连接 Python bridge。", 7000);
+    app.stdin.write("\x1b[105;5u");
+    await waitForLatestScreen(output, "Runtime Inspector", 7000);
+    await waitForLatestScreen(output, "同步 Python Bridge", 7000);
+    app.stdin.write("\x1b[105;5u");
+    await waitForLatestScreenWithout(output, "Runtime Inspector", 7000);
     app.stdin.write("\x1b[Z");
     await waitForOutput(output, "mode: plan");
     app.stdin.write("\x1b[Z");
