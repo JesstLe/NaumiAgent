@@ -260,6 +260,18 @@ class _SlowFakeEngine(_FakeEngine):
         return AgentResult(status="completed", response="完成", usage=self.usage)
 
 
+class _BlockingShutdownEngine(_FakeEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.shutdown_started = asyncio.Event()
+        self.release_shutdown = asyncio.Event()
+
+    async def shutdown(self) -> None:
+        self.shutdown_called = True
+        self.shutdown_started.set()
+        await self.release_shutdown.wait()
+
+
 class _FailingFakeEngine(_FakeEngine):
     async def run_streaming(self, task: str, on_event: Any) -> AgentResult:
         raise RuntimeError(
@@ -1988,6 +2000,61 @@ async def test_bridge_shutdown_denies_each_pending_permission_and_clears_challen
     assert await medium_risk == "deny"
     assert bridge._pending_permissions == {}
     assert bridge._permission_challenges.count == 0
+
+
+@pytest.mark.asyncio
+async def test_bridge_denies_permission_requested_after_shutdown_without_publication() -> None:
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    writer = io.StringIO()
+    bridge.bind_writer(writer)
+    await bridge.shutdown()
+
+    late_permission = asyncio.create_task(
+        bridge.confirm_permission(_permission_payload("late-after-shutdown"))
+    )
+    await asyncio.sleep(0)
+    try:
+        assert late_permission.done()
+        assert await late_permission == "deny"
+        assert bridge._pending_permissions == {}
+        assert bridge._permission_challenges.count == 0
+        assert not any(
+            record["type"] == "permission/request" for record in _records(writer)
+        )
+    finally:
+        if not late_permission.done():
+            late_permission.cancel()
+            await asyncio.gather(late_permission, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_bridge_denies_permission_arriving_after_shutdown_cleanup() -> None:
+    engine = _BlockingShutdownEngine()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    writer = io.StringIO()
+    bridge.bind_writer(writer)
+    shutdown_task = asyncio.create_task(bridge.shutdown())
+    await engine.shutdown_started.wait()
+
+    late_permission = asyncio.create_task(
+        bridge.confirm_permission(_permission_payload("late-during-shutdown"))
+    )
+    await asyncio.sleep(0)
+    try:
+        assert bridge._closed is True
+        assert late_permission.done()
+        assert await late_permission == "deny"
+        assert bridge._pending_permissions == {}
+        assert bridge._permission_challenges.count == 0
+        assert not any(
+            record["type"] == "permission/request" for record in _records(writer)
+        )
+    finally:
+        if not late_permission.done():
+            late_permission.cancel()
+            await asyncio.gather(late_permission, return_exceptions=True)
+        engine.release_shutdown.set()
+        await shutdown_task
 
 
 @pytest.mark.asyncio
