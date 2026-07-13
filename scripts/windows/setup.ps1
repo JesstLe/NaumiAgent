@@ -89,6 +89,12 @@ if ($LASTEXITCODE -ne 0) {
     throw "uv sync 执行失败，退出码：$LASTEXITCODE"
 }
 
+Write-Step "安装浏览器运行时"
+& $uv.Source run playwright install chromium
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Chromium 下载失败；将尝试使用系统 Chrome/Edge。退出码：$LASTEXITCODE"
+}
+
 Write-Step "安装 naumiagent 用户命令"
 & $uv.Source tool install --editable --force --python 3.12 $repoRoot
 if ($LASTEXITCODE -ne 0) {

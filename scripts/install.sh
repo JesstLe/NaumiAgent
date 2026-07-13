@@ -81,6 +81,11 @@ else
     naumi_bin="$INSTALL_DIR/.venv/bin/naumi"
 fi
 
+log_info "安装 Chromium 浏览器运行时..."
+if ! .venv/bin/playwright install chromium; then
+    log_warn "Chromium 下载失败；运行时将尝试使用系统 Chrome/Edge。"
+fi
+
 # 5. 创建命令入口
 mkdir -p "$BIN_DIR"
 ln -sf "$naumi_bin" "$BIN_DIR/naumi"
