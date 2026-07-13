@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 from uuid import uuid4
 
+from naumi_agent import __version__
 from naumi_agent.agent_control import AgentControlSnapshot
 from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.settings import AppConfig
@@ -485,6 +486,7 @@ class JsonlEngineBridge:
             budget = {}
         workspace_root = Path(getattr(self.engine, "workspace_root", Path.cwd()))
         payload = {
+            "version": __version__,
             "mode": str(getattr(self.engine.runtime_mode, "value", self.engine.runtime_mode)),
             "permission_mode": str(
                 getattr(self.engine.permission_mode, "value", self.engine.permission_mode)

@@ -12,7 +12,9 @@ attachJsonlLineReader(process.stdin, (line) => {
 
   if (record.type === "hello") {
     emit("ready", {
+      version: "0.1.214",
       mode: "default",
+      permission_mode: "moderate",
       model: "openai/kimi-for-coding",
       workspace_root: "/Users/lv/Workspace/NaumiAgent",
       usage: { total_tokens: 0 },

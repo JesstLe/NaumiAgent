@@ -18,7 +18,8 @@ attachJsonlLineReader(process.stdin, (line) => {
   const payload = record.payload ?? {};
 
   if (record.type === "hello") {
-    emit("ready", statusPayload());
+    const delayMs = Math.max(0, Number(process.env.NAUMI_TEST_READY_DELAY_MS) || 0);
+    setTimeout(() => emit("ready", statusPayload()), delayMs);
     emit("debug/trace", { events_path: "/tmp/naumi-terminal-ui-test/events.jsonl" });
     return;
   }
@@ -421,6 +422,7 @@ function permissionModeFor(currentMode) {
 
 function statusPayload(overrides = {}) {
   return {
+    version: "0.1.214",
     session_id: sessionId,
     mode,
     permission_mode: permissionModeFor(mode),

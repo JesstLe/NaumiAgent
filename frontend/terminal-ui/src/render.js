@@ -11,6 +11,10 @@ import { renderFooter, renderFooterSections } from "./components/footer.js";
 import { Message } from "./components/message.js";
 import { renderAgentControlPage } from "./components/agent-control-page.js";
 import { renderRuntimeInspector } from "./components/runtime-inspector.js";
+import {
+  renderWelcomeScreen,
+  shouldRenderWelcome,
+} from "./components/welcome-screen.js";
 import { renderCachedMessage } from "./render-cache.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
 
@@ -37,6 +41,9 @@ export function renderScreen(state, width, height, env = {}) {
 }
 
 function renderMainViewport(state, width, bodyHeight, env) {
+  if (shouldRenderWelcome(state)) {
+    return renderWelcomeScreen(state, width, bodyHeight, env);
+  }
   const ctx = createRenderContext({ width, env, state });
   ctx.bodyHeight = bodyHeight;
   const bodyLines = renderBodyWindow(state, width, bodyHeight, state.scrollOffset, ctx);

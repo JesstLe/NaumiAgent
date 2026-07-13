@@ -463,6 +463,69 @@ test("normalizeServerRecord rejects invalid bridge records", () => {
   );
 });
 
+test("normalizes authoritative terminal welcome identity fields", () => {
+  const ready = normalizeServerRecord({
+    type: "ready",
+    version: 1,
+    payload: {
+      version: " 0.1.214 ",
+      workspace_root: " /tmp/project ",
+      model: " openai/gpt-5.4 ",
+      mode: " DEFAULT ",
+      permission_mode: " MODERATE ",
+    },
+  });
+  const changed = normalizeServerRecord({
+    type: "mode/changed",
+    version: 1,
+    payload: {
+      mode: "bypass",
+      status: {
+        version: "0.1.214",
+        workspace_root: "/tmp/project",
+        model: "anthropic/claude-opus-4-6",
+        mode: "bypass",
+        permission_mode: "bypass",
+      },
+    },
+  });
+  const partial = normalizeServerRecord({
+    type: "runtime/status",
+    version: 1,
+    payload: { model: " openai/gpt-5.4-mini " },
+  });
+
+  assert.deepEqual(
+    {
+      version: ready.payload.version,
+      workspace_root: ready.payload.workspace_root,
+      model: ready.payload.model,
+      mode: ready.payload.mode,
+      permission_mode: ready.payload.permission_mode,
+    },
+    {
+      version: "0.1.214",
+      workspace_root: "/tmp/project",
+      model: "openai/gpt-5.4",
+      mode: "default",
+      permission_mode: "moderate",
+    },
+  );
+  assert.equal(changed.payload.status.model, "anthropic/claude-opus-4-6");
+  assert.deepEqual(partial.payload, { model: "openai/gpt-5.4-mini" });
+});
+
+test("rejects non-string terminal welcome identity fields", () => {
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "ready",
+      version: 1,
+      payload: { version: { injected: true } },
+    }),
+    /ready.version 必须是字符串/,
+  );
+});
+
 test("event sender accepts explicit missing-receipt recovery requests", () => {
   const chunks = [];
   const send = createEventSender({ write: (chunk) => chunks.push(chunk) });

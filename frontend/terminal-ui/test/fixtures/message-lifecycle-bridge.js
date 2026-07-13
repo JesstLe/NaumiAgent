@@ -54,7 +54,9 @@ function emit(type, payload, requestId = "") {
 
 function statusPayload() {
   return {
+    version: "0.1.214",
     mode: "default",
+    permission_mode: "moderate",
     model: "test/lifecycle",
     workspace_root: process.cwd(),
     usage: { total_tokens: 0 },
