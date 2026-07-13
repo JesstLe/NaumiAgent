@@ -1320,6 +1320,7 @@ def test_bridge_status_payload_exposes_runtime_slash_commands() -> None:
     assert "/tasks" in command_names
     assert "/scan-full" in command_names
     assert "/btemplate-list" in command_names
+    assert "/models" in command_names
 
 
 def test_bridge_status_payload_can_omit_static_slash_commands() -> None:

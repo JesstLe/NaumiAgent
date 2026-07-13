@@ -174,13 +174,21 @@ class ModelInfo(BaseModel):
     name: str
     provider: str
     tier: str
+    upstream_id: str
+    source: str
+    max_context: int | None = None
+    max_output: int | None = None
+    supports_tools: bool | None = None
+    supports_reasoning: bool | None = None
+    supports_vision: bool | None = None
 
 
 class ConfigResponse(BaseModel):
     models: list[ModelInfo]
+    model_warnings: list[str] = Field(default_factory=list)
     tools: list[ToolInfo]
     permission_mode: str
-    max_budget_usd: float
+    max_budget_usd: float | None
     max_turns: int
 
 

@@ -52,6 +52,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/pwd", description: "显示工作区与会话库路径" },
   { command: "/tools", description: "列出可用工具" },
   { command: "/model", aliases: ["/m"], description: "查看当前模型配置" },
+  { command: "/models", description: "列出 provider 可用模型" },
   { command: "/usage", aliases: ["/u"], description: "查看 Token 与费用" },
   { command: "/version", aliases: ["/v"], description: "查看当前版本" },
 ];

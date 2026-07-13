@@ -55,6 +55,7 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/exit", "退出", readonly=False, category="基础"),
         CommandMeta("/tools", "列出可用工具", readonly=True, category="基础"),
         CommandMeta("/model", "显示模型配置", readonly=True, category="基础"),
+        CommandMeta("/models", "列出 provider 可用模型", takes_arg=True, arg_hint="[provider] [--refresh]", readonly=True, category="基础"),
         CommandMeta("/version", "显示版本号", readonly=True, category="基础"),
         CommandMeta("/usage", "显示 token 用量", readonly=True, category="基础"),
         CommandMeta("/hooks", "显示已注册的钩子", readonly=True, category="基础"),
