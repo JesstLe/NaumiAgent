@@ -55,6 +55,7 @@ state.frontendDebugLogPath = debugLog?.path ?? "";
 let bridge = null;
 let send = null;
 let redrawTimer = null;
+let uiSnapshotTimer = null;
 let quitting = false;
 const inputTokenizer = createInputTokenizerState();
 
@@ -135,6 +136,7 @@ function exit() {
   if (quitting) return;
   quitting = true;
   debugLog?.log("terminal_ui.exit", {});
+  persistUiSnapshot();
   try {
     send("shutdown", {});
   } catch {
@@ -159,11 +161,14 @@ function handleBridgeLine(line) {
     return;
   }
   debugLog?.log("protocol.receive.record", { type: record.type, request_id: record.request_id, seq: record.seq, payload: record.payload });
+  const previousSessionId = state.currentSessionId;
+  const previousSnapshot = createUiSnapshot(state);
   const actions = reduceServerEvent(state, record);
+  if (state.currentSessionId !== previousSessionId) {
+    setUiSnapshot(uiStateStore, previousSessionId, previousSnapshot);
+    restoreUiSnapshot(state.currentSessionId);
+  }
   for (const action of actions) {
-    if (action.type === "session_replayed") {
-      restoreUiSnapshot(action.sessionId);
-    }
     if (action.type === "refresh_task_panel") {
       send("task_panel", {
         limit: action.limit ?? 12,
@@ -180,11 +185,13 @@ function handleBridgeLine(line) {
     exit();
     return;
   }
-  persistUiSnapshot();
+  scheduleUiSnapshotPersist();
   scheduleRedraw();
 }
 
 function handleKeyInput(chunk) {
+  const previousInput = state.input;
+  const previousCursor = state.inputCursor;
   const tokens = tokenizeInputChunk(chunk, inputTokenizer);
   debugLog?.log("input.chunk", {
     chars: String(chunk),
@@ -201,6 +208,9 @@ function handleKeyInput(chunk) {
       continue;
     }
     handleSingleKeyInput(token.value);
+  }
+  if (state.input !== previousInput || state.inputCursor !== previousCursor) {
+    scheduleUiSnapshotPersist();
   }
 }
 
@@ -408,12 +418,30 @@ function restoreUiSnapshot(sessionId) {
 }
 
 function persistUiSnapshot() {
+  if (uiSnapshotTimer) {
+    clearTimeout(uiSnapshotTimer);
+    uiSnapshotTimer = null;
+  }
   setUiSnapshot(uiStateStore, state.currentSessionId, createUiSnapshot(state));
   try {
     saveUiStateStore(uiStateStore);
   } catch (error) {
     pushSystemMessage(state, "ui state", `无法保存终端 UI 状态: ${error.message}`, "warning");
   }
+}
+
+function scheduleUiSnapshotPersist() {
+  setUiSnapshot(uiStateStore, state.currentSessionId, createUiSnapshot(state));
+  if (uiSnapshotTimer) clearTimeout(uiSnapshotTimer);
+  uiSnapshotTimer = setTimeout(() => {
+    uiSnapshotTimer = null;
+    try {
+      saveUiStateStore(uiStateStore);
+    } catch (error) {
+      pushSystemMessage(state, "ui state", `无法保存终端 UI 状态: ${error.message}`, "warning");
+      scheduleRedraw();
+    }
+  }, 100);
 }
 
 function scheduleRedraw() {

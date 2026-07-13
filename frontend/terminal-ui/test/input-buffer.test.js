@@ -20,6 +20,7 @@ import {
   splitInputChunk,
   splitInputStreamChunk,
   tokenizeInputChunk,
+  truncateInputText,
 } from "../src/input-buffer.js";
 import { createInitialState } from "../src/state.js";
 
@@ -246,4 +247,9 @@ test("modified enter sequences normalize to explicit composer keys", () => {
       { type: "key", value: INPUT_KEYS.ctrlEnter },
     ],
   );
+});
+
+test("draft truncation respects grapheme boundaries", () => {
+  assert.equal(truncateInputText("Ae\u0301你", 2), "Ae\u0301");
+  assert.equal(truncateInputText("Ae\u0301你", 0), "");
 });

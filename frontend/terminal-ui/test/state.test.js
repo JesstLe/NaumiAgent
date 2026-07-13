@@ -987,12 +987,14 @@ test("fold commands list and toggle fold entries without backend calls", () => {
   assert(state.messages.some((message) => message.kind === "system" && String(message.content).includes("assistant code")));
 });
 
-test("ui snapshots persist folds and scroll offset only", () => {
+test("ui snapshots persist folds, scroll offset, and multiline composer draft", () => {
   const state = createInitialState();
   state.scrollOffset = 9;
   state.foldCursor = 2;
   state.folds = { "message:assistant-1:code:0": { expanded: true } };
-  state.input = "不会持久化";
+  state.input = "第一行\n第二行";
+  state.inputCursor = 3;
+  state.inputPreferredColumn = 2;
 
   const restored = createInitialState();
   applyUiSnapshot(restored, createUiSnapshot(state));
@@ -1000,7 +1002,36 @@ test("ui snapshots persist folds and scroll offset only", () => {
   assert.equal(restored.scrollOffset, 9);
   assert.equal(restored.foldCursor, 2);
   assert.deepEqual(restored.folds, { "message:assistant-1:code:0": { expanded: true } });
-  assert.equal(restored.input, "");
+  assert.equal(restored.input, "第一行\n第二行");
+  assert.equal(restored.inputCursor, 3);
+  assert.equal(restored.inputPreferredColumn, 2);
+});
+
+test("applying a missing snapshot clears presentation state for a new session", () => {
+  const state = createInitialState();
+  state.input = "旧会话草稿";
+  state.inputCursor = 4;
+  state.scrollOffset = 8;
+  state.folds = { stale: { expanded: true } };
+
+  applyUiSnapshot(state, null);
+
+  assert.equal(state.input, "");
+  assert.equal(state.inputCursor, 0);
+  assert.equal(state.scrollOffset, 0);
+  assert.deepEqual(state.folds, {});
+});
+
+test("composer snapshot preserves an absent preferred column as null", () => {
+  const state = createInitialState();
+
+  applyUiSnapshot(state, {
+    composer: { text: "草稿", cursor: 2, preferredColumn: null },
+  });
+
+  assert.equal(state.input, "草稿");
+  assert.equal(state.inputCursor, 2);
+  assert.equal(state.inputPreferredColumn, null);
 });
 
 test("slash completion lists candidates when input is only slash", () => {
