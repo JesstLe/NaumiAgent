@@ -66,6 +66,21 @@ def test_unknown_alias_raises_resolution_error(catalog) -> None:
         resolve_model_target("nvidia/unknown", provider=None, catalog=catalog)
 
 
+def test_qualified_legacy_model_bypasses_active_catalog_provider(catalog) -> None:
+    target = resolve_model_target(
+        "openai/gpt-4o",
+        provider="nvidia",
+        catalog=catalog,
+    )
+
+    assert target.source == "legacy"
+    assert target.requested_model == "openai/gpt-4o"
+    assert target.canonical_model == "openai/gpt-4o"
+    assert target.upstream_model == "openai/gpt-4o"
+    assert target.provider is None
+    assert target.model is None
+
+
 def test_filtered_alias_raises_distinct_resolution_error(catalog) -> None:
     with pytest.raises(ModelResolutionError, match="过滤"):
         resolve_model_target("hidden/glm", provider="nvidia", catalog=catalog)

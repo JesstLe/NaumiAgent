@@ -43,6 +43,10 @@ def resolve_model_target(
     active = catalog.providers.get((provider or "").strip().lower())
     if active is None:
         return _legacy_target(requested)
+    if requested in active.models:
+        return _catalog_target(active, requested, requested)
+    if separator:
+        return _legacy_target(requested)
     return _catalog_target(active, requested, requested)
 
 

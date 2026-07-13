@@ -101,7 +101,7 @@ class ModelRouter:
     # --- 模型元数据 ---
 
     def get_model_info(self, model: str) -> dict[str, Any]:
-        """三级查找: config 覆盖 → litellm 内置 → fallback."""
+        """逐字段合并元数据：请求 config > canonical config > catalog > LiteLLM > fallback."""
         if model in self._info_cache:
             return self._info_cache[model]
 
