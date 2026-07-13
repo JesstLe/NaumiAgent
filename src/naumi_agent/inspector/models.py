@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Literal
 
@@ -47,9 +48,26 @@ def _integer(value: Any, name: str) -> int:
 
 
 def _number(value: Any, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < 0
+    ):
         raise ValueError(f"{name} must be a non-negative number")
     return float(value)
+
+
+def _optional_number(value: Any, name: str) -> float | None:
+    if value is None:
+        return None
+    return _number(value, name)
+
+
+def _optional_integer(value: Any, name: str) -> int | None:
+    if value is None:
+        return None
+    return _integer(value, name)
 
 
 def _boolean(value: Any, name: str) -> bool:
@@ -207,9 +225,12 @@ class InspectorContext:
     context_used: int = 0
     context_window: int = 0
     context_percentage: float = 0.0
+    budget_enabled: bool = False
     budget_used_usd: float = 0.0
-    budget_max_usd: float = 0.0
-    budget_percentage: float = 0.0
+    budget_max_usd: float | None = None
+    budget_percentage: float | None = None
+    budget_max_input_tokens: int | None = None
+    budget_max_output_tokens: int | None = None
     input_tokens: int = 0
     output_tokens: int = 0
     turns: int = 0
@@ -233,10 +254,23 @@ class InspectorContext:
             context_percentage=_number(
                 data.get("context_percentage", 0), "context.context_percentage"
             ),
+            budget_enabled=_boolean(
+                data.get("budget_enabled", False), "context.budget_enabled"
+            ),
             budget_used_usd=_number(data.get("budget_used_usd", 0), "context.budget_used_usd"),
-            budget_max_usd=_number(data.get("budget_max_usd", 0), "context.budget_max_usd"),
-            budget_percentage=_number(
-                data.get("budget_percentage", 0), "context.budget_percentage"
+            budget_max_usd=_optional_number(
+                data.get("budget_max_usd"), "context.budget_max_usd"
+            ),
+            budget_percentage=_optional_number(
+                data.get("budget_percentage"), "context.budget_percentage"
+            ),
+            budget_max_input_tokens=_optional_integer(
+                data.get("budget_max_input_tokens"),
+                "context.budget_max_input_tokens",
+            ),
+            budget_max_output_tokens=_optional_integer(
+                data.get("budget_max_output_tokens"),
+                "context.budget_max_output_tokens",
             ),
             input_tokens=_integer(data.get("input_tokens", 0), "context.input_tokens"),
             output_tokens=_integer(data.get("output_tokens", 0), "context.output_tokens"),

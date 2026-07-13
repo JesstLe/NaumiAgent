@@ -43,6 +43,25 @@ def test_runtime_inspector_formatter_states_authoritative_empty_data() -> None:
     assert "尚未记录验证" in format_runtime_inspector_markdown(snapshot, "tests")
 
 
+def test_runtime_inspector_formatter_renders_unlimited_budget() -> None:
+    payload = _snapshot().to_dict()
+    payload["context"].update(
+        {
+            "budget_enabled": False,
+            "budget_used_usd": 0.0123,
+            "budget_max_usd": None,
+            "budget_percentage": None,
+            "budget_max_input_tokens": None,
+            "budget_max_output_tokens": None,
+        }
+    )
+
+    rendered = format_runtime_inspector_markdown(payload, "context")
+
+    assert "预算：不限 · 已用 $0.0123" in rendered
+    assert "$0.0000" not in rendered
+
+
 @pytest.mark.asyncio
 async def test_textual_runtime_inspector_loads_switches_and_closes() -> None:
     engine = AgentEngine(AppConfig())

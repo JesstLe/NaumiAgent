@@ -11,6 +11,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, Markdown, Static, Tab, Tabs
 
 from naumi_agent.inspector import INSPECTOR_TAB_NAMES, RuntimeInspectorSnapshot
+from naumi_agent.ui.budget import format_budget_detail
 
 _TAB_LABELS = {
     "plan": "Plan",
@@ -233,10 +234,16 @@ def _format_context(section: Any) -> list[str]:
             f"- 上下文：{section.context_used}/{section.context_window}"
             f"（{section.context_percentage:.1f}%）"
         ),
-        (
-            f"- 预算：${section.budget_used_usd:.4f}/${section.budget_max_usd:.4f}"
-            f"（{section.budget_percentage:.1f}%）"
-        ),
+        "- 预算：" + format_budget_detail({
+            "enabled": section.budget_enabled,
+            "used_usd": section.budget_used_usd,
+            "max_usd": section.budget_max_usd,
+            "cost_percentage": section.budget_percentage,
+            "input_tokens": section.input_tokens,
+            "max_input_tokens": section.budget_max_input_tokens,
+            "output_tokens": section.output_tokens,
+            "max_output_tokens": section.budget_max_output_tokens,
+        }),
         (
             f"- Token：输入 {section.input_tokens} · "
             f"输出 {section.output_tokens} · 轮次 {section.turns}"

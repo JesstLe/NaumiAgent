@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 from datetime import UTC, datetime
 from typing import Any
 
@@ -174,9 +175,12 @@ class RuntimeInspectorService:
             context_used=_int(context.get("used")),
             context_window=_int(context.get("window")),
             context_percentage=_float(context.get("percentage")),
+            budget_enabled=budget.get("enabled") is True,
             budget_used_usd=_float(budget.get("used_usd")),
-            budget_max_usd=_float(budget.get("max_usd")),
-            budget_percentage=_float(budget.get("percentage")),
+            budget_max_usd=_optional_float(budget.get("max_usd")),
+            budget_percentage=_optional_float(budget.get("percentage")),
+            budget_max_input_tokens=_optional_int(budget.get("max_input_tokens")),
+            budget_max_output_tokens=_optional_int(budget.get("max_output_tokens")),
             input_tokens=_int(usage.total_input_tokens),
             output_tokens=_int(usage.total_output_tokens),
             turns=_int(usage.turns),
@@ -251,9 +255,30 @@ def _float(value: Any) -> float:
     if isinstance(value, bool):
         return 0.0
     try:
-        return max(0.0, float(value or 0.0))
+        result = float(value or 0.0)
     except (TypeError, ValueError):
         return 0.0
+    return result if math.isfinite(result) and result >= 0 else 0.0
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        return None
+    return result if result >= 0 else None
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) and result >= 0 else None
 
 
 __all__ = ["RuntimeInspectorService"]

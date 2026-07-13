@@ -27,6 +27,7 @@ from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.config.configurator import ConfigurationError, configure_project
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.log_setup import suppress_startup_import_warnings
+from naumi_agent.ui.budget import format_budget_detail
 from naumi_agent.ui.code_excerpt import (
     DEFAULT_CODE_BLOCK_MAX_LINES,
     excerpt_markdown_code_blocks,
@@ -278,7 +279,7 @@ def _show_cli_status(cli: Any, engine: Any) -> None:
     window_k = ctx["window"] / 1000
     parts.append(f"上下文: {used_k:.0f}K/{window_k:.0f}K ({ctx['percentage']}%)")
     budget = engine.get_budget_info()
-    parts.append(f"预算: ${budget['used_usd']:.4f}/${budget['max_usd']:.2f}")
+    parts.append(f"预算: {format_budget_detail(budget)}")
     git = _get_git_info()
     if git["branch"]:
         tag = git["branch"] + ("*" if git["dirty"] else "")
@@ -1712,10 +1713,14 @@ def _render_result(
         # Budget
         budget = engine.get_budget_info()
         budget_pct = budget["percentage"]
-        budget_style = "yellow" if budget_pct > 80 else "dim"
+        budget_style = (
+            "yellow"
+            if isinstance(budget_pct, int | float) and budget_pct > 80
+            else "dim"
+        )
         line2.append(" | ", style="dim")
         line2.append(
-            f"预算: ${budget['used_usd']:.4f}/${budget['max_usd']:.2f} ({budget_pct}%)",
+            f"预算: {format_budget_detail(budget)}",
             style=budget_style,
         )
         has_line2 = True
@@ -3920,7 +3925,7 @@ def _build_session_stats(session: Any, engine: Any = None) -> str:
         window_k = ctx["window"] / 1000
         parts.append(f"上下文: {used_k:.0f}K/{window_k:.0f}K ({ctx_pct}%)")
         budget = engine.get_budget_info()
-        parts.append(f"预算: ${budget['used_usd']:.4f}/${budget['max_usd']:.2f}")
+        parts.append(f"预算: {format_budget_detail(budget)}")
     # Git
     git = _get_git_info()
     if git["branch"]:

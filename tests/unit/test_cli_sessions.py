@@ -59,8 +59,8 @@ class _ReplayEngine:
     def get_context_info(self) -> dict[str, int]:
         return {"used": 1000, "window": 2000, "percentage": 50}
 
-    def get_budget_info(self) -> dict[str, float]:
-        return {"used_usd": 0.1, "max_usd": 5.0}
+    def get_budget_info(self) -> dict[str, object]:
+        return {"enabled": False, "used_usd": 0.1, "max_usd": None}
 
 
 class _FakeEngine:
@@ -130,6 +130,7 @@ class TestResumeLatest:
         assert "Token: 999" not in transcript
         assert "上下文:" not in transcript
         assert "test-model" in cli.status
+        assert "预算: 不限 · 已用 $0.1000" in cli.status
 
     def test_replay_session_uses_engine_full_history_when_available(self) -> None:
         cli = _ReplayCLI()
