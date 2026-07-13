@@ -69,7 +69,7 @@ def test_permission_panel_renders_real_policy_metadata_for_pending_tool() -> Non
     assert "风险:high" in rendered
     assert "来源:TOOL_PERMISSIONS:bash_run" in rendered
     assert "确认:需要确认" in rendered
-    assert "bypass 允许；跳过逐次确认和路径沙箱，危险命令仍拦截" in rendered
+    assert "bypass 全权限放行；不执行确认、路径、命令与次数检查" in rendered
 
 
 def test_permission_panel_resolves_prefix_and_unknown_tool_policy() -> None:
@@ -87,7 +87,8 @@ def test_permission_panel_resolves_prefix_and_unknown_tool_policy() -> None:
     assert "风险:low" in rendered
     assert "perm-unknown main -> unknown_tool [needs_confirmation]" in rendered
     assert "来源:unknown_tool" in rendered
-    assert "未知工具会被拒绝" in rendered
+    assert "其他模式未知工具会被拒绝" in rendered
+    assert "bypass 全权限放行" in rendered
 
 
 def test_permission_panel_includes_active_session_grants() -> None:

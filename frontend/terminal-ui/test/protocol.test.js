@@ -398,6 +398,14 @@ test("normalizeServerRecord stabilizes bridge payloads", () => {
   });
 
   assert.deepEqual(normalizeServerRecord({
+    type: "permission/grants_changed",
+    payload: { revoked: "2", grants: [{ grant_id: 7, tool_family: "shell" }, null] },
+  }).payload, {
+    revoked: 2,
+    grants: [{ grant_id: "7", tool_family: "shell" }],
+  });
+
+  assert.deepEqual(normalizeServerRecord({
     type: "completion/receipt",
     payload: {
       schema_version: 1,

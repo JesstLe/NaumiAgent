@@ -41,7 +41,6 @@ from naumi_agent.ui.messages.events import (
     ToolResultMessage,
     ToolUseMessage,
 )
-from naumi_agent.ui.permission_confirmation import PermissionChallengeStore
 from naumi_agent.ui.protocol import (
     ClientEventType,
     ServerEventType,
@@ -478,20 +477,8 @@ def test_protocol_contract_matches_python_enums() -> None:
 
     assert contract["version"] == 1
     assert contract["transport"] == "jsonl"
-    assert contract["client_events"] == [
-        str(event)
-        for event in ClientEventType
-        if event != ClientEventType.PERMISSION_REVOKE
-    ]
-    assert contract["server_events"] == [
-        str(event)
-        for event in ServerEventType
-        if event
-        not in {
-            ServerEventType.PERMISSION_CONFIRMATION_REQUIRED,
-            ServerEventType.PERMISSION_GRANTS_CHANGED,
-        }
-    ]
+    assert contract["client_events"] == [str(event) for event in ClientEventType]
+    assert contract["server_events"] == [str(event) for event in ServerEventType]
 
 
 def test_protocol_contract_ui_message_fields_match_python_messages() -> None:
@@ -2096,6 +2083,36 @@ async def test_bridge_mode_and_permission_round_trip() -> None:
     assert any(record["type"] == "permission/resolved" for record in _records(writer))
 
 
+@pytest.mark.asyncio
+async def test_bridge_bypass_response_switches_mode_and_allows_current_request() -> None:
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    permission_task = asyncio.create_task(
+        bridge.confirm_permission(_permission_payload("call-bypass"))
+    )
+    await asyncio.sleep(0)
+
+    await bridge.handle_client_record({
+        "id": "response-bypass",
+        "type": ClientEventType.PERMISSION_RESPONSE,
+        "payload": {"request_id": "call-bypass", "choice": "bypass"},
+    })
+
+    assert await asyncio.wait_for(permission_task, timeout=1) == "allow_once"
+    assert engine.runtime_mode is AgentRuntimeMode.BYPASS
+    assert engine.permission_mode is PermissionMode.BYPASS
+    records = _records(writer)
+    assert any(record["type"] == "mode/changed" for record in records)
+    resolved = next(record for record in records if record["type"] == "permission/resolved")
+    assert resolved["payload"] == {
+        "request_id": "call-bypass",
+        "choice": "bypass",
+        "status": "bypass_enabled",
+    }
+
+
 def _permission_payload(
     call_id: str,
     *,
@@ -2197,7 +2214,6 @@ async def test_bridge_keeps_equal_call_id_requests_independently_addressable() -
     assert await shutdown_first == "deny"
     assert await shutdown_second == "deny"
     assert bridge._pending_permissions == {}
-    assert bridge._permission_challenges.count == 0
 
 
 @pytest.mark.asyncio
@@ -2223,7 +2239,7 @@ async def test_bridge_rejects_grant_session_absent_from_backend_choices() -> Non
 
 
 @pytest.mark.asyncio
-async def test_bridge_requires_second_confirmation_for_high_risk_permission() -> None:
+async def test_bridge_resolves_high_risk_permission_with_one_confirmation() -> None:
     engine = _FakeEngine()
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
     writer = io.StringIO()
@@ -2243,118 +2259,9 @@ async def test_bridge_requires_second_confirmation_for_high_risk_permission() ->
         {"request_id": "call-danger", "choice": "allow_once"}, request_id="response-1"
     )
 
-    confirmation = next(
-        record
-        for record in _records(writer)
-        if record["type"] == "permission/confirmation_required"
-    )
-    token = confirmation["payload"]["confirmation_token"]
-    assert not task.done()
+    assert await task == "allow_once"
     assert engine.runtime_mode == AgentRuntimeMode.DEFAULT
-
-    await bridge.resolve_permission(
-        {
-            "request_id": "call-danger",
-            "choice": "confirm",
-            "confirmation_token": token,
-        },
-        request_id="response-2",
-    )
-
-    assert await task == "allow_once"
     assert any(record["type"] == "permission/resolved" for record in _records(writer))
-
-
-@pytest.mark.asyncio
-async def test_bridge_replaces_high_risk_challenge_and_rejects_superseded_token() -> None:
-    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
-    writer = io.StringIO()
-    bridge.bind_writer(writer)
-    task = asyncio.create_task(
-        bridge.confirm_permission(
-            _permission_payload(
-                "call-danger",
-                choices=["allow_once", "deny"],
-                requires_double_confirm=True,
-            )
-        )
-    )
-    await asyncio.sleep(0)
-
-    for response_id in ("first-stage-1", "first-stage-2"):
-        await bridge.resolve_permission(
-            {"request_id": "call-danger", "choice": "allow_once"}, request_id=response_id
-        )
-    tokens = [
-        record["payload"]["confirmation_token"]
-        for record in _records(writer)
-        if record["type"] == "permission/confirmation_required"
-    ]
-    superseded, current = tokens
-
-    assert superseded != current
-    assert bridge._permission_challenges.count == 1
-    await bridge.resolve_permission(
-        {
-            "request_id": "call-danger",
-            "choice": "confirm",
-            "confirmation_token": superseded,
-        },
-        request_id="superseded-token",
-    )
-
-    assert not task.done()
-    assert _records(writer)[-1]["payload"]["code"] == "permission_challenge_mismatch"
-    await bridge.resolve_permission(
-        {
-            "request_id": "call-danger",
-            "choice": "confirm",
-            "confirmation_token": current,
-        },
-        request_id="current-token",
-    )
-
-    assert await task == "allow_once"
-
-
-@pytest.mark.asyncio
-async def test_bridge_rejects_replay_after_valid_confirmation() -> None:
-    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
-    writer = io.StringIO()
-    bridge.bind_writer(writer)
-    task = asyncio.create_task(
-        bridge.confirm_permission(
-            _permission_payload(
-                "call-danger",
-                choices=["allow_once", "deny"],
-                requires_double_confirm=True,
-            )
-        )
-    )
-    await asyncio.sleep(0)
-    await bridge.resolve_permission(
-        {"request_id": "call-danger", "choice": "allow_once"}, request_id="first-stage"
-    )
-    token = next(
-        record["payload"]["confirmation_token"]
-        for record in _records(writer)
-        if record["type"] == "permission/confirmation_required"
-    )
-
-    await bridge.resolve_permission(
-        {"request_id": "call-danger", "choice": "confirm", "confirmation_token": token},
-        request_id="valid-confirmation",
-    )
-    assert await task == "allow_once"
-
-    await bridge.resolve_permission(
-        {"request_id": "call-danger", "choice": "confirm", "confirmation_token": token},
-        request_id="replayed-confirmation",
-    )
-
-    resolved = [record for record in _records(writer) if record["type"] == "permission/resolved"]
-    assert len(resolved) == 1
-    assert _records(writer)[-1]["payload"]["code"] == "unknown_permission_request"
 
 
 @pytest.mark.asyncio
@@ -2450,7 +2357,9 @@ async def test_bridge_deduplicates_valid_backend_choices_in_backend_order() -> N
         ["deny", "grant_session"],
     ],
 )
-async def test_bridge_fails_closed_for_unusable_high_risk_choices(choices: list[str]) -> None:
+async def test_bridge_legacy_high_risk_flag_still_requires_complete_choices(
+    choices: list[str],
+) -> None:
     bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
     writer = io.StringIO()
     bridge.bind_writer(writer)
@@ -2469,7 +2378,7 @@ async def test_bridge_fails_closed_for_unusable_high_risk_choices(choices: list[
     assert await task == "deny"
     assert bridge._pending_permissions == {}
     records = _records(writer)
-    assert records[-1]["payload"]["code"] == "permission_choices_high_risk_unusable"
+    assert records[-1]["payload"]["code"] == "permission_choices_medium_risk_unusable"
     assert "后端权限选择" in records[-1]["payload"]["message"]
     assert not any(record["type"] == "permission/request" for record in records)
 
@@ -2522,7 +2431,7 @@ async def test_bridge_only_publishes_semantically_complete_medium_backend_choice
 
 
 @pytest.mark.asyncio
-async def test_bridge_allows_valid_high_risk_handshake_choices_after_filtering() -> None:
+async def test_bridge_legacy_high_risk_flag_does_not_add_a_second_confirmation() -> None:
     bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
     writer = io.StringIO()
     bridge.bind_writer(writer)
@@ -2538,83 +2447,13 @@ async def test_bridge_allows_valid_high_risk_handshake_choices_after_filtering()
     await asyncio.sleep(0)
 
     request = next(record for record in _records(writer) if record["type"] == "permission/request")
-    assert request["payload"]["choices"] == ["allow_once", "deny"]
-    assert "grant_session" not in request["payload"]["choices"]
+    assert request["payload"]["choices"] == ["grant_session", "allow_once", "deny"]
+    assert request["payload"]["requires_double_confirm"] is False
 
     await bridge.resolve_permission(
-        {"request_id": "call-high-valid", "choice": "deny"}, request_id="response"
+        {"request_id": "call-high-valid", "choice": "allow_once"}, request_id="response"
     )
-    assert await task == "deny"
-
-
-@pytest.mark.asyncio
-async def test_bridge_fails_closed_for_bad_cross_expired_and_reused_challenges() -> None:
-    clock = [100.0]
-    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
-    bridge._permission_challenges = PermissionChallengeStore(clock=lambda: clock[0])
-    writer = io.StringIO()
-    bridge.bind_writer(writer)
-    first = asyncio.create_task(
-        bridge.confirm_permission(
-            _permission_payload(
-                "call-1",
-                choices=["allow_once", "deny"],
-                requires_double_confirm=True,
-            )
-        )
-    )
-    second = asyncio.create_task(
-        bridge.confirm_permission(
-            _permission_payload(
-                "call-2",
-                choices=["allow_once", "deny"],
-                requires_double_confirm=True,
-            )
-        )
-    )
-    await asyncio.sleep(0)
-    for call_id in ("call-1", "call-2"):
-        await bridge.resolve_permission(
-            {"request_id": call_id, "choice": "allow_once"}, request_id=f"start-{call_id}"
-        )
-    confirmations = {
-        record["payload"]["request_id"]: record["payload"]["confirmation_token"]
-        for record in _records(writer)
-        if record["type"] == "permission/confirmation_required"
-    }
-
-    await bridge.resolve_permission(
-        {"request_id": "call-1", "choice": "confirm", "confirmation_token": "unknown"},
-        request_id="bad-token",
-    )
-    await bridge.resolve_permission(
-        {
-            "request_id": "call-2",
-            "choice": "confirm",
-            "confirmation_token": confirmations["call-1"],
-        },
-        request_id="cross-token",
-    )
-    clock[0] += 31
-    await bridge.resolve_permission(
-        {
-            "request_id": "call-1",
-            "choice": "confirm",
-            "confirmation_token": confirmations["call-1"],
-        },
-        request_id="expired-token",
-    )
-    assert not first.done()
-    assert not second.done()
-
-    await bridge.resolve_permission(
-        {"request_id": "call-1", "choice": "deny"}, request_id="deny-1"
-    )
-    assert await first == "deny"
-    await bridge.resolve_permission(
-        {"request_id": "call-2", "choice": "deny"}, request_id="deny-2"
-    )
-    assert await second == "deny"
+    assert await task == "allow_once"
 
 
 @pytest.mark.asyncio
@@ -2647,7 +2486,7 @@ async def test_bridge_revokes_one_or_all_grants_and_emits_changes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bridge_shutdown_denies_each_pending_permission_and_clears_challenges() -> None:
+async def test_bridge_shutdown_denies_each_pending_permission() -> None:
     bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
     bridge.bind_writer(io.StringIO())
     high_risk = asyncio.create_task(
@@ -2661,16 +2500,11 @@ async def test_bridge_shutdown_denies_each_pending_permission_and_clears_challen
     )
     medium_risk = asyncio.create_task(bridge.confirm_permission(_permission_payload("call-medium")))
     await asyncio.sleep(0)
-    await bridge.resolve_permission(
-        {"request_id": "call-danger", "choice": "allow_once"}, request_id="first-stage"
-    )
-
     await bridge.shutdown()
 
     assert await high_risk == "deny"
     assert await medium_risk == "deny"
     assert bridge._pending_permissions == {}
-    assert bridge._permission_challenges.count == 0
 
 
 @pytest.mark.asyncio
@@ -2688,7 +2522,6 @@ async def test_bridge_denies_permission_requested_after_shutdown_without_publica
         assert late_permission.done()
         assert await late_permission == "deny"
         assert bridge._pending_permissions == {}
-        assert bridge._permission_challenges.count == 0
         assert not any(
             record["type"] == "permission/request" for record in _records(writer)
         )
@@ -2716,7 +2549,6 @@ async def test_bridge_denies_permission_arriving_after_shutdown_cleanup() -> Non
         assert late_permission.done()
         assert await late_permission == "deny"
         assert bridge._pending_permissions == {}
-        assert bridge._permission_challenges.count == 0
         assert not any(
             record["type"] == "permission/request" for record in _records(writer)
         )

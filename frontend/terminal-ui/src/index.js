@@ -350,7 +350,7 @@ function handleSingleKeyInput(chunk) {
       return;
     }
     if (key === "y" || key === "a") {
-      send("permission_response", { request_id: state.permission.requestId, choice: "allow" });
+      send("permission_response", { request_id: state.permission.requestId, choice: "allow_once" });
       return;
     }
     if (key === "n" || key === "d" || key === "\u001b") {
@@ -359,6 +359,10 @@ function handleSingleKeyInput(chunk) {
     }
     if (key === "b") {
       send("permission_response", { request_id: state.permission.requestId, choice: "bypass" });
+      return;
+    }
+    if (key === "g" && state.permission.payload.choices?.includes("grant_session")) {
+      send("permission_response", { request_id: state.permission.requestId, choice: "grant_session" });
       return;
     }
     if (

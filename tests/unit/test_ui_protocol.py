@@ -5,10 +5,7 @@ import sys
 
 import pytest
 
-from naumi_agent.ui.permission_confirmation import (
-    PermissionChallengeStore,
-    summarize_arguments,
-)
+from naumi_agent.ui.permission_confirmation import summarize_arguments
 from naumi_agent.ui.protocol import (
     ClientEventType,
     ServerEventType,
@@ -24,24 +21,20 @@ def _assert_bounded_strict_json(summary: dict[str, object]) -> str:
 
 
 @pytest.mark.parametrize(
-    ("choice", "token", "expected"),
+    ("choice", "expected"),
     [
-        ("allow_once", None, "allow_once"),
-        ("deny", None, "deny"),
-        ("grant_session", None, "grant_session"),
-        ("confirm", "challenge-token", "confirm"),
-        ("allow", None, "allow"),
-        ("bypass", None, "bypass"),
+        ("allow_once", "allow_once"),
+        ("deny", "deny"),
+        ("grant_session", "grant_session"),
+        ("allow", "allow"),
+        ("bypass", "bypass"),
     ],
 )
 def test_permission_choice_normalization_preserves_supported_choices(
     choice: str,
-    token: str | None,
     expected: str,
 ) -> None:
     payload: dict[str, object] = {"request_id": 123, "choice": choice.upper()}
-    if token is not None:
-        payload["confirmation_token"] = f"  {token}  "
 
     record = normalize_client_record(
         {"type": ClientEventType.PERMISSION_RESPONSE, "payload": payload}
@@ -50,23 +43,7 @@ def test_permission_choice_normalization_preserves_supported_choices(
     assert record["payload"] == {
         "request_id": "123",
         "choice": expected,
-        **({"confirmation_token": token} if token is not None else {}),
     }
-
-
-@pytest.mark.parametrize("token", [None, "", "   "])
-def test_permission_choice_confirm_requires_a_token(token: str | None) -> None:
-    with pytest.raises(ValueError, match="确认令牌不能为空"):
-        normalize_client_record(
-            {
-                "type": ClientEventType.PERMISSION_RESPONSE,
-                "payload": {
-                    "request_id": "perm-1",
-                    "choice": "confirm",
-                    "confirmation_token": token,
-                },
-            }
-        )
 
 
 @pytest.mark.parametrize(
@@ -94,8 +71,7 @@ def test_permission_revoke_rejects_empty_or_unsupported_scope(payload: dict[str,
         )
 
 
-def test_protocol_exposes_confirmation_and_grant_events() -> None:
-    assert ServerEventType.PERMISSION_CONFIRMATION_REQUIRED == "permission/confirmation_required"
+def test_protocol_exposes_permission_grant_events() -> None:
     assert ServerEventType.PERMISSION_GRANTS_CHANGED == "permission/grants_changed"
 
 
@@ -208,34 +184,3 @@ def test_argument_summary_terminates_for_self_referential_containers(
 
     encoded = _assert_bounded_strict_json(summary)
     assert "[循环引用]" in encoded
-
-
-def test_permission_challenge_is_one_use_and_request_bound() -> None:
-    clock = [100.0]
-    store = PermissionChallengeStore(clock=lambda: clock[0])
-    token = store.issue("request-1", "session-1", "call-1")
-
-    assert store.consume(token, "request-1", "session-1", "call-1") == "valid"
-    assert store.consume(token, "request-1", "session-1", "call-1") == "consumed"
-
-
-def test_permission_challenge_replaces_the_prior_token_for_a_request() -> None:
-    store = PermissionChallengeStore(clock=lambda: 100.0)
-    superseded = store.issue("request-1", "session-1", "call-1")
-    current = store.issue("request-1", "session-1", "call-1")
-
-    assert current != superseded
-    assert store.count == 1
-    assert store.consume(superseded, "request-1", "session-1", "call-1") == "unknown"
-    assert store.consume(current, "request-1", "session-1", "call-1") == "valid"
-
-
-def test_permission_challenge_reports_unknown_mismatch_and_expiry() -> None:
-    clock = [100.0]
-    store = PermissionChallengeStore(clock=lambda: clock[0])
-    token = store.issue("request-1", "session-1", "call-1")
-
-    assert store.consume("unknown", "request-1", "session-1", "call-1") == "unknown"
-    assert store.consume(token, "request-2", "session-1", "call-1") == "mismatch"
-    clock[0] += 31
-    assert store.consume(token, "request-1", "session-1", "call-1") == "expired"

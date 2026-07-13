@@ -874,7 +874,7 @@ class PermissionConfirmScreen(ModalScreen[str]):
             with Horizontal():
                 yield Button("允许一次", variant="success", id="allow")
                 yield Button("拒绝", variant="error", id="deny")
-                yield Button("Bypass 并执行", variant="warning", id="bypass")
+                yield Button("Bypass 全权限执行", variant="warning", id="bypass")
 
     @on(Button.Pressed)
     def on_button_pressed(self, event: Button.Pressed) -> None:

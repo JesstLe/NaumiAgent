@@ -76,7 +76,6 @@ class ServerEventType(StrEnum):
     STATUS = "runtime/status"
     MODE_CHANGED = "mode/changed"
     PERMISSION_REQUEST = "permission/request"
-    PERMISSION_CONFIRMATION_REQUIRED = "permission/confirmation_required"
     PERMISSION_RESOLVED = "permission/resolved"
     PERMISSION_GRANTS_CHANGED = "permission/grants_changed"
     DEBUG_TRACE = "debug/trace"
@@ -300,19 +299,14 @@ def _normalize_client_payload(
 
     if event_type == ClientEventType.PERMISSION_RESPONSE:
         choice = str(payload.get("choice") or "").strip().lower()
-        if choice not in {"allow_once", "deny", "grant_session", "confirm", "allow", "bypass"}:
+        if choice not in {"allow_once", "deny", "grant_session", "allow", "bypass"}:
             raise ValueError(
-                "权限选择无效，可用值: allow_once / deny / grant_session / confirm。"
+                "权限选择无效，可用值: allow_once / deny / grant_session / bypass。"
             )
         normalized = {
             "request_id": str(payload.get("request_id") or ""),
             "choice": choice,
         }
-        if choice == "confirm":
-            token = str(payload.get("confirmation_token") or "").strip()
-            if not token:
-                raise ValueError("确认令牌不能为空。")
-            normalized["confirmation_token"] = token
         return normalized
 
     if event_type == ClientEventType.PERMISSION_REVOKE:

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
-from textual.widgets import Markdown, Static, TabbedContent
+from textual.widgets import Button, Markdown, Static, TabbedContent
 
 from naumi_agent.agent_control import AgentControlSnapshot
 from naumi_agent.config.settings import AppConfig
-from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
 from naumi_agent.orchestrator.subagent_manager import StopExecutionResult
+from naumi_agent.safety.permissions import PermissionMode
+from naumi_agent.tools.base import ToolCall
 from naumi_agent.tui.agent_control import (
     AgentControlScreen,
     format_agent_control_markdown,
@@ -158,6 +161,29 @@ async def test_textual_agents_slash_route_and_permission_modal_priority() -> Non
         await pilot.pause(0.05)
         assert isinstance(app.screen, PermissionConfirmScreen)
         engine.subagent_manager.stop_execution.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_textual_bypass_confirmation_enables_full_permission_mode() -> None:
+    engine = AgentEngine(AppConfig())
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(110, 34)) as pilot:
+        execution = asyncio.create_task(engine._execute_tool(ToolCall(
+            id="tui-bypass",
+            name="bash_run",
+            arguments='{"command": "printf tui-bypass"}',
+        )))
+        await pilot.pause(0.05)
+        assert isinstance(app.screen, PermissionConfirmScreen)
+        assert "全权限" in str(app.screen.query_one("#bypass", Button).label)
+        await pilot.click("#bypass")
+        result = await execution
+
+        assert result.status == "success"
+        assert "tui-bypass" in result.content
+        assert engine.runtime_mode is AgentRuntimeMode.BYPASS
+        assert engine.permission_mode is PermissionMode.BYPASS
 
 
 def _snapshot() -> AgentControlSnapshot:

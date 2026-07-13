@@ -427,6 +427,7 @@ test("permission card renders confirmation path as a structured dialog", () => {
           status: "needs_confirmation",
           reason: "需要启动本地预览服务。",
           requires_confirmation: true,
+          choices: ["allow_once", "deny", "grant_session"],
         },
       },
     }),
@@ -438,6 +439,8 @@ test("permission card renders confirmation path as a structured dialog", () => {
   assert(plain.includes("需要确认 permission: bash_run"));
   assert(plain.includes("原因: 需要启动本地预览服务。"));
   assert(plain.includes("y=允许一次"));
+  assert(plain.includes("g=本会话授权"));
+  assert(plain.includes("b/Shift+Tab=全权限"));
   assert(card.every((item) => visibleWidth(item) <= 78));
 });
 
@@ -450,7 +453,7 @@ test("permission messages delegate to the structured permission card", () => {
         message: {
           tool_name: "file_write",
           status: "allowed",
-          choice: "allow",
+          choice: "allow_once",
           reason: "写入 demo 文件。",
           requires_confirmation: false,
         },
@@ -470,7 +473,7 @@ test("permission panel summarizes pending and history sections", () => {
     "权限面板",
     "mode: bypass | permission: bypass",
     "Pending",
-    "  - perm-1 main -> bash_run [needs_confirmation] 风险:high · 来源:TOOL_PERMISSIONS:bash_run · 模式:bypass/permissive/moderate · 确认:需要确认 · bypass 允许；跳过逐次确认和路径沙箱，危险命令仍拦截 | 需要确认",
+    "  - perm-1 main -> bash_run [needs_confirmation] 风险:high · 来源:TOOL_PERMISSIONS:bash_run · 模式:bypass/permissive/moderate · 确认:需要确认 · bypass 全权限放行；不执行确认、路径、命令与次数检查 | 需要确认",
     "History",
     "  - hist-1 coder -> file_write [confirmed] 用户已允许",
   ].join("\n");
@@ -484,7 +487,7 @@ test("permission panel summarizes pending and history sections", () => {
   assert(plain.includes("perm-1 main -> bash_run"));
   assert(plain.includes("来源:TOOL_PERMISSIONS:bash_run"));
   assert(plain.includes("确认:需要确认"));
-  assert(plain.includes("bypass 允许"));
+  assert(plain.includes("bypass 全权限放行"));
   assert(rendered.every((item) => visibleWidth(item) <= 90));
 });
 

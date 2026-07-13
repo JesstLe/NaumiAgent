@@ -23,7 +23,7 @@ from naumi_agent.log_setup import setup_logging
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNoticeMessage
-from naumi_agent.ui.permission_confirmation import PermissionChallengeStore, summarize_arguments
+from naumi_agent.ui.permission_confirmation import summarize_arguments
 from naumi_agent.ui.protocol import (
     ClientEventType,
     ServerEventType,
@@ -59,20 +59,8 @@ class PendingPermission:
     future: asyncio.Future[str]
     public_payload: dict[str, Any]
     choices: tuple[str, ...]
-    requires_double_confirm: bool
     session_id: str
     call_id: str
-    challenge_token: str | None = None
-
-
-def _challenge_error_message(status: str) -> str:
-    messages = {
-        "unknown": "确认令牌无效，请重新发起二次确认。",
-        "mismatch": "确认令牌与当前权限请求不匹配。",
-        "expired": "确认令牌已过期，请重新发起二次确认。",
-        "consumed": "确认令牌已使用，不能重复确认。",
-    }
-    return messages.get(status, "确认令牌无效，请重新发起二次确认。")
 
 
 def _backend_choices_error_message(kind: str) -> str:
@@ -80,8 +68,6 @@ def _backend_choices_error_message(kind: str) -> str:
         return "后端权限选择缺失，系统已拒绝本次操作。"
     if kind == "invalid":
         return "后端权限选择格式或内容无效，系统已拒绝本次操作。"
-    if kind == "high_risk_unusable":
-        return "后端权限选择无法完成高风险确认，系统已拒绝本次操作。"
     if kind == "medium_risk_unusable":
         return "后端权限选择无法同时提供批准与拒绝，系统已拒绝本次操作。"
     return "后端权限选择为空或无效，系统已拒绝本次操作。"
@@ -435,7 +421,6 @@ class JsonlEngineBridge:
         self._agents_snapshot: AgentControlSnapshot | None = None
         self._cli_supported_commands = _load_cli_slash_commands_with_alias()
         self._pending_permissions: dict[str, PendingPermission] = {}
-        self._permission_challenges = PermissionChallengeStore()
         config = getattr(self.engine, "_config", None)
         ui_config = getattr(config, "ui", None)
         self._show_reasoning = bool(getattr(ui_config, "show_reasoning", False))
@@ -1829,17 +1814,7 @@ class JsonlEngineBridge:
                 request_id=request_id,
             )
             return "deny"
-        requires_double_confirm = bool(payload.get("requires_double_confirm"))
-        if requires_double_confirm:
-            choices = tuple(choice for choice in choices if choice != "grant_session")
-            if not {"allow_once", "deny"}.issubset(choices):
-                await self.emit_error(
-                    _backend_choices_error_message("high_risk_unusable"),
-                    code="permission_choices_high_risk_unusable",
-                    request_id=request_id,
-                )
-                return "deny"
-        elif not {"allow_once", "deny"}.issubset(choices):
+        if not {"allow_once", "deny"}.issubset(choices):
             await self.emit_error(
                 _backend_choices_error_message("medium_risk_unusable"),
                 code="permission_choices_medium_risk_unusable",
@@ -1862,14 +1837,13 @@ class JsonlEngineBridge:
             "choices": list(choices),
             "scope": "session" if "grant_session" in choices else "call",
             "expires_at": payload.get("expires_at"),
-            "requires_double_confirm": requires_double_confirm,
+            "requires_double_confirm": False,
             "status": "needs_confirmation",
         }
         pending = PendingPermission(
             future=future,
             public_payload=public_payload,
             choices=choices,
-            requires_double_confirm=requires_double_confirm,
             session_id=public_payload["session_id"],
             call_id=call_id,
         )
@@ -1880,7 +1854,6 @@ class JsonlEngineBridge:
         finally:
             if self._pending_permissions.get(request_id) is pending:
                 self._pending_permissions.pop(request_id, None)
-                self._permission_challenges.discard_request(request_id)
 
     def _next_permission_request_id(self) -> str:
         while True:
@@ -1902,63 +1875,25 @@ class JsonlEngineBridge:
         if choice == "allow":
             choice = "allow_once"
         elif choice == "bypass":
-            if pending.requires_double_confirm:
-                await self.emit_error(
-                    "高风险操作必须完成二次确认，不能使用 bypass。",
-                    code="double_confirmation_required",
-                    request_id=request_id,
-                )
-                return
-            choice = "grant_session"
-
-        if choice == "confirm":
-            token = str(payload.get("confirmation_token") or "").strip()
-            if not pending.challenge_token or token != pending.challenge_token:
-                challenge_status = "mismatch"
-            else:
-                challenge_status = self._permission_challenges.consume(
-                    token,
-                    permission_id,
-                    pending.session_id,
-                    pending.call_id,
-                )
-            if challenge_status != "valid":
-                await self.emit_error(
-                    _challenge_error_message(challenge_status),
-                    code=f"permission_challenge_{challenge_status}",
-                    request_id=request_id,
-                )
-                return
+            runtime_mode = self.engine.set_runtime_mode("bypass")
+            await self.emit(
+                ServerEventType.MODE_CHANGED,
+                {"mode": runtime_mode.value, "status": self.status_payload()},
+                request_id=request_id,
+            )
+            await self.emit(ServerEventType.STATUS, self.status_payload())
             await self._resolve_pending_permission(
                 permission_id,
                 pending,
                 "allow_once",
                 response_request_id=request_id,
+                public_choice="bypass",
             )
             return
-
         if choice not in pending.choices:
             await self.emit_error(
                 "当前权限请求不支持该选择。",
                 code="permission_choice_unavailable",
-                request_id=request_id,
-            )
-            return
-        if choice == "allow_once" and pending.requires_double_confirm:
-            token = self._permission_challenges.issue(
-                permission_id,
-                pending.session_id,
-                pending.call_id,
-            )
-            pending.challenge_token = token
-            pending.public_payload["status"] = "awaiting_second_confirmation"
-            await self.emit(
-                ServerEventType.PERMISSION_CONFIRMATION_REQUIRED,
-                {
-                    "request_id": permission_id,
-                    "confirmation_token": token,
-                    "requires_double_confirm": True,
-                },
                 request_id=request_id,
             )
             return
@@ -1976,16 +1911,19 @@ class JsonlEngineBridge:
         choice: str,
         *,
         response_request_id: str,
+        public_choice: str | None = None,
     ) -> None:
         pending.future.set_result(choice)
+        resolved_choice = public_choice or choice
         status = {
             "allow_once": "allowed",
             "deny": "denied",
             "grant_session": "granted",
-        }[choice]
+            "bypass": "bypass_enabled",
+        }[resolved_choice]
         await self.emit(
             ServerEventType.PERMISSION_RESOLVED,
-            {"request_id": permission_id, "choice": choice, "status": status},
+            {"request_id": permission_id, "choice": resolved_choice, "status": status},
             request_id=response_request_id,
         )
 
@@ -2032,7 +1970,6 @@ class JsonlEngineBridge:
             if not pending.future.done():
                 pending.future.set_result("deny")
         self._pending_permissions.clear()
-        self._permission_challenges.clear()
         if self._run_task is not None and not self._run_task.done():
             self._run_task.cancel()
             try:

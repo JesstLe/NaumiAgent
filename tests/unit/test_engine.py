@@ -1988,7 +1988,7 @@ class TestToolExecution:
         ]
 
     @pytest.mark.asyncio
-    async def test_legacy_bypass_grants_only_the_current_session_tool_family(
+    async def test_bypass_confirmation_switches_the_runtime_mode_globally(
         self,
         engine: AgentEngine,
     ) -> None:
@@ -2029,16 +2029,13 @@ class TestToolExecution:
         assert payloads[0]["scope"] == "session"
         assert payloads[0]["expires_at"] is None
         assert payloads[0]["requires_double_confirm"] is False
-        assert engine.runtime_mode == AgentRuntimeMode.DEFAULT
-        assert engine.permission_mode == PermissionMode.MODERATE
-        grants = engine.list_permission_grants()
-        assert len(grants) == 1
-        assert grants[0].session_id == session.id
-        assert grants[0].tool_family == "shell"
+        assert engine.runtime_mode == AgentRuntimeMode.BYPASS
+        assert engine.permission_mode == PermissionMode.BYPASS
+        assert engine.list_permission_grants() == ()
         bubbles = [data for event, data in events if event == "permission_bubble"]
         assert [(bubble["status"], bubble["session_id"]) for bubble in bubbles] == [
             ("needs_confirmation", session.id),
-            ("session_granted", session.id),
+            ("bypass_enabled", session.id),
         ]
 
     @pytest.mark.asyncio
@@ -2273,7 +2270,7 @@ class TestToolExecution:
         ]
 
     @pytest.mark.asyncio
-    async def test_high_risk_legacy_bypass_is_rejected_without_creating_a_grant(
+    async def test_high_risk_tool_in_bypass_skips_confirmation(
         self,
         engine: AgentEngine,
     ) -> None:
@@ -2294,11 +2291,8 @@ class TestToolExecution:
             )
         )
 
-        assert result.status == "error"
-        assert "不支持本会话授权" in result.content
-        assert payloads[0]["choices"] == ["allow_once", "deny"]
-        assert payloads[0]["scope"] == "call"
-        assert payloads[0]["requires_double_confirm"] is True
+        assert result.status == "success"
+        assert payloads == []
         assert engine.list_permission_grants() == ()
         assert engine.runtime_mode == AgentRuntimeMode.BYPASS
         assert engine.permission_mode == PermissionMode.BYPASS
@@ -2463,7 +2457,7 @@ class TestToolExecution:
         assert "bypass_ok" in result.content
 
     @pytest.mark.asyncio
-    async def test_bypass_mode_blocks_dangerous_shell_command(
+    async def test_bypass_mode_runs_dangerous_shell_command_without_confirmation(
         self,
         engine: AgentEngine,
         tmp_path: Path,
@@ -2482,9 +2476,9 @@ class TestToolExecution:
 
         result = await engine._execute_tool(tc)
 
-        assert result.status == "error"
-        assert "高风险模式" in result.content
-        assert target.exists()
+        assert result.status == "success"
+        assert "removed" in result.content
+        assert not target.exists()
 
     @pytest.mark.asyncio
     async def test_task_create_tool_passes_permission_layer(self, tmp_path) -> None:

@@ -345,6 +345,14 @@ export function reduceServerEvent(state, record) {
     case "permission/resolved":
       handlePermissionResolved(state, payload);
       break;
+    case "permission/grants_changed":
+      pushSystemMessage(
+        state,
+        "permissions",
+        `已撤销 ${Number(payload.revoked) || 0} 项权限授权，当前剩余 ${payload.grants?.length ?? 0} 项。`,
+        "info",
+      );
+      break;
     case "completion/receipt":
       addCompletionReceipt(state, payload, record.request_id);
       break;
@@ -1321,9 +1329,10 @@ export function handlePermissionResolved(state, payload) {
 }
 
 function permissionChoiceStatus(choice) {
-  if (choice === "allow") return "allowed";
+  if (choice === "allow" || choice === "allow_once") return "allowed";
   if (choice === "deny") return "denied";
   if (choice === "bypass") return "bypass_enabled";
+  if (choice === "grant_session") return "granted";
   return String(choice || "resolved");
 }
 
@@ -1332,7 +1341,7 @@ function modeNoticeText(mode) {
     return "已切换到 plan：只读规划模式，写文件和执行命令会被拦截。";
   }
   if (mode === "bypass") {
-    return "已切换到 bypass：高风险工具将不再逐次确认，请只在可信工作区使用。";
+    return "已切换到 bypass：所有工具权限直接放行，请只在可信工作区使用。";
   }
   return "已切换到 default：高风险工具会按权限策略请求确认。";
 }
@@ -1670,6 +1679,17 @@ export function handleSubmitText(state, text, send) {
   }
   if (text === "/permissions" || text.startsWith("/permissions ")) {
     const raw = text.slice("/permissions".length).trim();
+    if (raw === "revoke all") {
+      send("permission_revoke", { scope: "all" });
+      return;
+    }
+    if (raw.startsWith("revoke ")) {
+      const grantId = raw.slice("revoke ".length).trim();
+      if (grantId) {
+        send("permission_revoke", { grant_id: grantId });
+        return;
+      }
+    }
     const limit = Number.parseInt(raw, 10);
     if (raw && Number.isFinite(limit) && limit > 0) {
       send("permissions_panel", { limit });
