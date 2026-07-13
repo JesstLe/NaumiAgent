@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ import pytest
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.inspector import (
     INSPECTOR_SCHEMA_VERSION,
+    InspectorContext,
     RuntimeInspectorService,
     RuntimeInspectorSnapshot,
     RuntimeInspectorTracker,
@@ -134,6 +136,27 @@ def test_snapshot_round_trip_uses_five_fixed_tabs() -> None:
         restored.to_dict()[tab]["state"] == "empty"
         for tab in ("plan", "tools", "context", "changes", "tests")
     )
+
+
+def test_context_round_trip_preserves_nullable_budget() -> None:
+    context = InspectorContext.from_dict(
+        {
+            "state": "ready",
+            "budget_enabled": False,
+            "budget_used_usd": 0.0123,
+            "budget_max_usd": None,
+            "budget_percentage": None,
+            "budget_max_input_tokens": None,
+            "budget_max_output_tokens": None,
+        }
+    )
+    snapshot = RuntimeInspectorSnapshot.empty(session_id="session-budget")
+    snapshot = replace(snapshot, context=context)
+
+    assert context.budget_enabled is False
+    assert context.budget_max_usd is None
+    restored = RuntimeInspectorSnapshot.from_dict(snapshot.to_dict())
+    assert restored == snapshot
 
 
 def test_tracker_bounds_redacts_and_correlates_tools_and_approvals() -> None:
