@@ -76,6 +76,71 @@ class TestResolveTier:
         assert target.upstream_model == "z-ai/glm4.7"
         assert router.resolve_model(ModelTier.CAPABLE) == "local-glm"
 
+    def test_runtime_identity_exposes_catalog_provider_protocol_and_upstream(self) -> None:
+        catalog = parse_provider_catalog_json(
+            json.dumps(
+                {
+                    "providers": {
+                        "nvidia": {
+                            "apiFormat": "openai_responses",
+                            "baseURL": "https://integrate.api.nvidia.com/v1",
+                            "models": {
+                                "local-glm": {"upstreamId": "z-ai/glm4.7"},
+                            },
+                        }
+                    }
+                }
+            )
+        )
+        router = ModelRouter(
+            ModelConfig(provider="nvidia", default_model="local-glm"),
+            catalog=catalog,
+        )
+
+        identity = router.get_runtime_identity("local-glm")
+
+        assert identity.requested_model == "local-glm"
+        assert identity.canonical_model == "nvidia/local-glm"
+        assert identity.upstream_model == "z-ai/glm4.7"
+        assert identity.provider == "nvidia"
+        assert identity.api_format == "openai_responses"
+        assert identity.source == "catalog"
+
+    def test_runtime_identity_keeps_legacy_provider_without_guessing_protocol(self) -> None:
+        router = ModelRouter(
+            ModelConfig(provider="custom-gateway", default_model="vendor/model")
+        )
+
+        identity = router.get_runtime_identity("vendor/model")
+
+        assert identity.provider == "custom-gateway"
+        assert identity.api_format == "legacy"
+        assert identity.upstream_model == "vendor/model"
+        assert identity.source == "legacy"
+
+    def test_runtime_identity_does_not_invent_missing_catalog_protocol(self) -> None:
+        catalog = parse_provider_catalog_json(
+            json.dumps(
+                {
+                    "provider": {
+                        "custom": {
+                            "models": {"model-a": {"upstreamId": "model-a-v2"}},
+                        }
+                    }
+                }
+            )
+        )
+        router = ModelRouter(
+            ModelConfig(provider="custom", default_model="model-a"),
+            catalog=catalog,
+        )
+
+        identity = router.get_runtime_identity("model-a")
+
+        assert identity.provider == "custom"
+        assert identity.api_format == ""
+        assert identity.upstream_model == "model-a-v2"
+
 
 class TestModelInfo:
     def test_litellm_known_model(self, router: ModelRouter) -> None:

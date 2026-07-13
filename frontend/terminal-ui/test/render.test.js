@@ -24,6 +24,9 @@ test("conversation viewport renders welcome before the timeline and keeps footer
       version: "0.1.214",
       workspace_root: "/Users/lv/Workspace/NaumiAgent",
       model: "openai/gpt-5.4",
+      provider: "openai",
+      api_format: "openai_responses",
+      upstream_model: "gpt-5.4-2026-06-01",
       mode: "default",
       permission_mode: "moderate",
     },
@@ -36,6 +39,8 @@ test("conversation viewport renders welcome before the timeline and keeps footer
   const plain = lines.map(stripAnsi).join("\n");
   assert.match(plain, /NaumiAgent v0\.1\.214/);
   assert.match(plain, /模型 openai\/gpt-5\.4/);
+  assert.match(plain, /提供方 openai · 接口 OpenAI Responses/);
+  assert.match(plain, /提供方: openai\/OpenAI Responses/);
   assert.match(plain, /chat >/);
   assert.equal(lines.length, 24);
   assert(lines.every((line) => visibleWidth(line) <= 120));
@@ -196,6 +201,8 @@ test("footer wraps complete status fields without ellipsis", () => {
   state.mode = "bypass";
   state.status = {
     model: "openai/kimi-for-coding",
+    provider: "openai",
+    api_format: "openai_chat",
     workspace_root: "/Users/lv/Workspace/NaumiAgent/some/extremely/long/workspace/path",
     usage: { total_tokens: 12345 },
     context: { used: 88000, window: 256000, percentage: 34.5 },
@@ -209,6 +216,8 @@ test("footer wraps complete status fields without ellipsis", () => {
   assert(stripAnsi(footer[0]).includes("mode: bypass"));
   const plain = footer.map(stripAnsi).join("\n");
   assert.match(plain, /预算: \$0\.3000\/\$5\.00/);
+  assert.match(plain, /提供方: openai\/OpenAI Chat/);
+  assert.match(plain, /openai\/kimi-for-coding/);
   assert.match(plain, /main\*/);
   assert.doesNotMatch(plain, /…/);
 });

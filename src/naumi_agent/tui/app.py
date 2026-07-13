@@ -61,6 +61,22 @@ from naumi_agent.ui.tool_activity import format_tool_prepare_status
 logger = logging.getLogger(__name__)
 
 _TERMINAL_NOISE_LOGGERS = ("litellm", "LiteLLM", "naumi_agent")
+_API_FORMAT_LABELS = {
+    "openai_chat": "OpenAI Chat",
+    "openai_responses": "OpenAI Responses",
+    "anthropic_messages": "Anthropic Messages",
+    "google_genai": "Google GenAI",
+    "azure_openai": "Azure OpenAI",
+    "ollama": "Ollama",
+    "legacy": "兼容模式",
+}
+
+
+def _format_api_format_label(value: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return "未解析"
+    return _API_FORMAT_LABELS.get(normalized, normalized)
 
 
 async def _find_latest_user_session_id(
@@ -1468,12 +1484,23 @@ class NaumiApp(App):
             runtime_mode = getattr(self.engine, "runtime_mode", None)
             status.mode_text = getattr(runtime_mode, "value", str(runtime_mode or "default"))
             model = self.engine.router.resolve_model("capable")
+            model_display = model
+            provider_display = ""
+            try:
+                identity = self.engine.router.get_runtime_identity(model)
+                provider = identity.provider or "未解析"
+                api_format = _format_api_format_label(identity.api_format)
+                provider_display = f"提供方: {provider}/{api_format} | "
+                if identity.upstream_model and identity.upstream_model != model:
+                    model_display = f"{model} → {identity.upstream_model}"
+            except Exception:
+                pass
             budget = self.engine.get_budget_info()
             ctx = self.engine.get_context_info()
             window_k = ctx["window"] / 1000
             workspace_root = getattr(self.engine, "workspace_root", Path.cwd())
             status.status_text = (
-                f"{model} | "
+                f"{provider_display}模型: {model_display} | "
                 f"工作区: {workspace_root} | "
                 f"上下文: 0K/{window_k:.0f}K | "
                 f"预算: {format_budget_detail(budget)}"

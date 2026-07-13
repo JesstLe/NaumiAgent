@@ -1,11 +1,12 @@
 """TUI 组件测试."""
 
 import asyncio
+import json
 import logging
 
 import pytest
 
-from naumi_agent.config.settings import AppConfig
+from naumi_agent.config.settings import AppConfig, ModelConfig
 from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
 from naumi_agent.tui.app import (
     ActivityPanel,
@@ -300,6 +301,66 @@ class TestNaumiApp:
 
             assert "预算: 不限 · 已用 $0.0000" in rendered
             assert "/$0.00" not in rendered
+
+    @pytest.mark.asyncio
+    async def test_startup_status_renders_catalog_provider_protocol_and_upstream(
+        self,
+        tmp_path,
+    ) -> None:
+        catalog_path = tmp_path / "providers.json"
+        catalog_path.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "nvidia": {
+                            "apiFormat": "openai_responses",
+                            "baseURL": "https://integrate.api.nvidia.com/v1",
+                            "models": {
+                                "local-glm": {"upstreamId": "z-ai/glm4.7"},
+                            },
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        engine = AgentEngine(
+            AppConfig(
+                models=ModelConfig(
+                    provider="nvidia",
+                    catalog_path=str(catalog_path),
+                    default_model="local-glm",
+                )
+            )
+        )
+        app = NaumiApp(engine)
+
+        async with app.run_test(size=(120, 30)) as pilot:
+            await pilot.pause(0.1)
+            rendered = str(app.query_one(StatusBar).render())
+
+            assert "提供方: nvidia/OpenAI Responses" in rendered
+            assert "模型: local-glm → z-ai/glm4.7" in rendered
+
+    @pytest.mark.asyncio
+    async def test_startup_status_keeps_model_when_runtime_identity_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine = AgentEngine(AppConfig())
+
+        def fail_identity(_model: str) -> None:
+            raise ValueError("invalid catalog")
+
+        monkeypatch.setattr(engine.router, "get_runtime_identity", fail_identity)
+        app = NaumiApp(engine)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause(0.1)
+            rendered = str(app.query_one(StatusBar).render())
+
+            assert f"模型: {engine.router.resolve_model('capable')}" in rendered
+            assert "工作区:" in rendered
 
     @pytest.mark.asyncio
     async def test_todo_bar_is_hidden_until_it_has_open_tasks(self) -> None:

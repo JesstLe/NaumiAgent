@@ -511,6 +511,9 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       version: " 0.1.214 ",
       workspace_root: " /tmp/project ",
       model: " openai/gpt-5.4 ",
+      provider: " openai ",
+      api_format: " openai_responses ",
+      upstream_model: " gpt-5.4-2026-06-01 ",
       mode: " DEFAULT ",
       permission_mode: " MODERATE ",
     },
@@ -540,6 +543,9 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       version: ready.payload.version,
       workspace_root: ready.payload.workspace_root,
       model: ready.payload.model,
+      provider: ready.payload.provider,
+      api_format: ready.payload.api_format,
+      upstream_model: ready.payload.upstream_model,
       mode: ready.payload.mode,
       permission_mode: ready.payload.permission_mode,
     },
@@ -547,6 +553,9 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       version: "0.1.214",
       workspace_root: "/tmp/project",
       model: "openai/gpt-5.4",
+      provider: "openai",
+      api_format: "openai_responses",
+      upstream_model: "gpt-5.4-2026-06-01",
       mode: "default",
       permission_mode: "moderate",
     },
@@ -563,6 +572,14 @@ test("rejects non-string terminal welcome identity fields", () => {
       payload: { version: { injected: true } },
     }),
     /ready.version 必须是字符串/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "ready",
+      version: 1,
+      payload: { api_format: { injected: true } },
+    }),
+    /ready.api_format 必须是字符串/,
   );
 });
 
