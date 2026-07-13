@@ -1360,7 +1360,7 @@ class JsonlEngineBridge:
                 request_id=self._active_run_context.get("request_id") or None,
             )
         message = self.adapter.adapt(event, data)
-        if message is not None:
+        if message is not None and event != "completion_receipt":
             await self.emit(ServerEventType.UI_MESSAGE, ui_message_payload(message))
 
         if event in {

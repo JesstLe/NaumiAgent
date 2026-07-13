@@ -19,6 +19,7 @@ from naumi_agent.tui.app import (
     _find_latest_user_session_id,
     _format_tool_output_markdown,
 )
+from naumi_agent.tui.completion_receipt import format_completion_receipt_markdown
 from naumi_agent.ui.keybindings import build_keybindings
 from naumi_agent.ui.theme import build_ui_style_config
 
@@ -52,6 +53,70 @@ class _PagedSessionEngine:
 
 
 class TestNaumiApp:
+    def test_completion_receipt_markdown_matches_terminal_evidence(self) -> None:
+        rendered = format_completion_receipt_markdown(
+            {
+                "schema_version": 1,
+                "receipt_id": "receipt-tui",
+                "run_id": "run-tui",
+                "outcome": "partial",
+                "summary": "修改已完成，但验证失败。",
+                "changes": [
+                    {
+                        "path": "src/example.py",
+                        "status": "modified",
+                        "source_tool": "file_edit",
+                        "additions": 5,
+                        "deletions": 1,
+                    }
+                ],
+                "validations": [
+                    {
+                        "command": "pytest tests/unit/test_example.py -q",
+                        "scope": "tests/unit/test_example.py",
+                        "status": "failed",
+                        "exit_code": 1,
+                        "passed": 2,
+                        "failed": 1,
+                    }
+                ],
+                "unverified": ["端到端场景尚未执行。"],
+                "approvals": [
+                    {
+                        "call_id": "test-1",
+                        "tool_name": "bash_run",
+                        "decision": "allowed_once",
+                    }
+                ],
+                "risks": [
+                    {
+                        "code": "validation_failed",
+                        "level": "high",
+                        "message": "1 项验证失败。",
+                    }
+                ],
+                "git_state": {
+                    "available": True,
+                    "branch": "codex/receipt",
+                    "dirty": True,
+                },
+                "next_actions": [
+                    {
+                        "id": "retry",
+                        "label": "重试失败验证",
+                        "kind": "retry_validation",
+                    }
+                ],
+                "duration_ms": 1200,
+            }
+        )
+
+        assert "完成回执 · 部分完成" in rendered
+        assert "`src/example.py`" in rendered
+        assert "pytest tests/unit/test_example.py -q" in rendered
+        assert "bash_run · 仅本次允许" in rendered
+        assert "风险：1 项验证失败" in rendered
+        assert "下一步：重试失败验证" in rendered
     def test_app_creation(self) -> None:
         config = AppConfig()
         engine = AgentEngine(config)

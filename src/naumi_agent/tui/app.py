@@ -37,6 +37,11 @@ from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.clipboard import copy_or_save_transcript, strip_ansi
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.tui.completion_receipt import (
+    completion_outcome_label,
+    format_completion_receipt_markdown,
+)
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
 from naumi_agent.ui.history_screen import build_history_snapshot, render_history_preview
@@ -1695,6 +1700,17 @@ class NaumiApp(App):
                     chat.add_response_token(content)
                 case "response_end":
                     pass
+                case "completion_receipt":
+                    receipt = CompletionReceipt.from_dict(data)
+                    chat.mount(
+                        Markdown(
+                            format_completion_receipt_markdown(receipt),
+                            classes="agent-msg",
+                        )
+                    )
+                    status.status_text = (
+                        f"完成回执：{completion_outcome_label(receipt)}"
+                    )
                 case "tool_prepare_start" | "tool_prepare_snapshot":
                     prepare_text = format_tool_prepare_status(data)
                     chat.update_tool_prepare(prepare_text)

@@ -7,9 +7,10 @@ data is straightforward and never raises due to missing keys.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.ui.messages.base import MessageType, UIMessage
 
 # ---------------------------------------------------------------------------
@@ -202,6 +203,26 @@ class RuntimeStatusMessage(UIMessage):
         if self.duration_ms:
             parts.append(f"{self.duration_ms}ms")
         return " ".join(parts)
+
+
+@dataclass(frozen=True)
+class CompletionReceiptMessage(UIMessage):
+    """Authoritative backend evidence for one finished run."""
+
+    receipt: CompletionReceipt = field(
+        default_factory=lambda: CompletionReceipt.from_dict(
+            {
+                "schema_version": 1,
+                "receipt_id": "uninitialized",
+                "run_id": "uninitialized",
+                "outcome": "failed",
+                "git_state": {"available": False, "dirty": False},
+            }
+        )
+    )
+
+    def summary(self) -> str:
+        return f"[receipt] {self.receipt.receipt_id} {self.receipt.outcome}"
 
 
 @dataclass(frozen=True)
