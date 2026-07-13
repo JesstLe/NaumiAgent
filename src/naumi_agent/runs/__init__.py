@@ -1,4 +1,4 @@
-"""Compatibility exports for the UI-neutral durable run domain."""
+"""Durable, UI-neutral execution run records and completion receipts."""
 
 from naumi_agent.runs.models import (
     CompletionReceipt,

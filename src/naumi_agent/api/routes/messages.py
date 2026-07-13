@@ -13,7 +13,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from naumi_agent.api.chat_environment import ChatEnvironmentCollector
-from naumi_agent.api.chat_runs import ChatRunRecord, ChatRunStore, SourceReferenceRecord
 from naumi_agent.api.deps import AuthDep
 from naumi_agent.api.schemas import (
     ChatArtifactResponse,
@@ -35,6 +34,7 @@ from naumi_agent.api.schemas import (
     SessionListResponse,
     SessionResponse,
 )
+from naumi_agent.runs.store import ChatRunRecord, ChatRunStore, SourceReferenceRecord
 from naumi_agent.streaming.events import EventType, StreamEvent
 
 router = APIRouter(tags=["sessions", "messages"])
