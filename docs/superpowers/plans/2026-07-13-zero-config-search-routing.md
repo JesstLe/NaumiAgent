@@ -47,4 +47,3 @@ route without model guesswork or retry loops.
 - [ ] Remove search keys from the test environment and complete a real web search through the
       installed Windows TUI.
 - [ ] Commit onboarding/readiness behavior.
-

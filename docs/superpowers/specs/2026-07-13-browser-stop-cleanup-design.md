@@ -68,4 +68,3 @@ the authoritative run lifecycle.
 - Node tests prove generic errors do not render an active run as idle.
 - A real Windows TUI browser search completes, releases the input lock, and exits through
   `/q` without leftover NaumiAgent/Playwright processes.
-
