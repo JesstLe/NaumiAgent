@@ -87,6 +87,56 @@ class SubTask:
             object.__setattr__(self, "depends_on", [])
 
 
+@dataclass(frozen=True)
+class AgentExecutionRecord:
+    """Public immutable snapshot of one delegated execution."""
+
+    task_id: str
+    agent_name: str
+    description: str
+    status: str
+    phase: str
+    started_at: float
+    finished_at: float | None = None
+    elapsed_ms: int = 0
+    heartbeat_age_ms: int = 0
+    current_tool: str = ""
+    recent_tools: tuple[str, ...] = ()
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    turns: int = 0
+    error: str = ""
+    stop_supported: bool = False
+    stop_requested: bool = False
+
+
+@dataclass(frozen=True)
+class StopExecutionResult:
+    """Deterministic outcome of an execution stop request."""
+
+    task_id: str
+    accepted: bool
+    code: str
+    message: str
+
+
+@dataclass
+class _ActiveExecution:
+    task_id: str
+    agent_name: str
+    description: str
+    started_at: float = field(default_factory=time.time)
+    started_mono: float = field(default_factory=time.monotonic)
+    last_updated_mono: float = field(default_factory=time.monotonic)
+    status: str = "running"
+    phase: str = "starting"
+    current_tool: str = ""
+    recent_tools: list[str] = field(default_factory=list)
+    stop_requested: bool = False
+    stop_reason: str = ""
+    execute_task: asyncio.Task[AgentResult] | None = None
+
+
 class SubAgentManager:
     """管理和调度子 Agent（含生命周期状态机 + 自动回收）."""
 
@@ -100,6 +150,9 @@ class SubAgentManager:
         self._event_history: list[dict[str, Any]] = []
         self._reaper_task: asyncio.Task[None] | None = None
         self._hooks: HookManager = engine.hooks
+        self._execution_lock = asyncio.Lock()
+        self._active_executions: dict[str, _ActiveExecution] = {}
+        self._execution_history: list[AgentExecutionRecord] = []
 
     # --- 生命周期状态机 ---
 
@@ -330,6 +383,157 @@ class SubAgentManager:
 
         return best_match
 
+    def list_executions(self, limit: int = 100) -> list[AgentExecutionRecord]:
+        """Return active and recent executions without exposing task handles."""
+        safe_limit = max(1, min(int(limit), 100))
+        now = time.monotonic()
+        active = [
+            _execution_record(item, now=now)
+            for item in self._active_executions.values()
+        ]
+        active.sort(key=lambda item: item.started_at, reverse=True)
+        history = list(reversed(self._execution_history))
+        return (active + history)[:safe_limit]
+
+    async def stop_execution(
+        self,
+        task_id: str,
+        reason: str = "用户请求停止子 Agent。",
+    ) -> StopExecutionResult:
+        """Stop exactly one active execution by task ID."""
+        normalized_id = str(task_id or "").strip()
+        if not normalized_id:
+            return StopExecutionResult(
+                task_id="",
+                accepted=False,
+                code="missing_task_id",
+                message="停止 Agent 执行时缺少 task_id。",
+            )
+
+        execute_task: asyncio.Task[AgentResult] | None = None
+        async with self._execution_lock:
+            execution = self._active_executions.get(normalized_id)
+            if execution is None:
+                finished = any(
+                    item.task_id == normalized_id
+                    for item in self._execution_history
+                )
+                code = "already_finished" if finished else "not_found"
+                message = (
+                    f"Agent 执行 {normalized_id} 已结束。"
+                    if finished
+                    else f"未找到 Agent 执行 {normalized_id}。"
+                )
+                return StopExecutionResult(normalized_id, False, code, message)
+            if execution.stop_requested:
+                return StopExecutionResult(
+                    normalized_id,
+                    False,
+                    "already_requested",
+                    f"Agent 执行 {normalized_id} 已在停止中。",
+                )
+            execution.stop_requested = True
+            execution.stop_reason = str(reason or "用户请求停止子 Agent。").strip()
+            execution.status = "stopping"
+            execution.phase = "stopping"
+            execution.last_updated_mono = time.monotonic()
+            execute_task = execution.execute_task
+
+        if execute_task is not None and not execute_task.done():
+            execute_task.cancel()
+        return StopExecutionResult(
+            normalized_id,
+            True,
+            "accepted",
+            f"已请求停止 Agent 执行 {normalized_id}。",
+        )
+
+    async def _register_execution(
+        self,
+        task: SubTask,
+        agent_name: str,
+    ) -> bool:
+        async with self._execution_lock:
+            if task.id in self._active_executions:
+                return False
+            self._active_executions[task.id] = _ActiveExecution(
+                task_id=task.id,
+                agent_name=agent_name,
+                description=task.description,
+            )
+            return True
+
+    async def _attach_execution_task(
+        self,
+        task_id: str,
+        execute_task: asyncio.Task[AgentResult],
+    ) -> None:
+        should_cancel = False
+        async with self._execution_lock:
+            execution = self._active_executions.get(task_id)
+            if execution is not None:
+                execution.execute_task = execute_task
+                execution.phase = "running"
+                execution.last_updated_mono = time.monotonic()
+                should_cancel = execution.stop_requested
+        if should_cancel and not execute_task.done():
+            execute_task.cancel()
+
+    async def _observe_execution_event(
+        self,
+        task_id: str,
+        event: str,
+        data: dict[str, Any],
+    ) -> None:
+        async with self._execution_lock:
+            execution = self._active_executions.get(task_id)
+            if execution is None:
+                return
+            execution.last_updated_mono = time.monotonic()
+            tool_name = str(data.get("tool_name") or data.get("name") or "").strip()
+            if event.startswith("tool_prepare"):
+                execution.phase = "preparing_tool"
+            elif event == "tool_use":
+                execution.phase = "running_tool"
+            elif event == "tool_result":
+                execution.phase = "running"
+            if tool_name:
+                execution.current_tool = tool_name if event != "tool_result" else ""
+                if not execution.recent_tools or execution.recent_tools[-1] != tool_name:
+                    execution.recent_tools.append(tool_name)
+                    execution.recent_tools = execution.recent_tools[-20:]
+
+    async def _finish_execution(
+        self,
+        task_id: str,
+        result: AgentResult,
+    ) -> None:
+        async with self._execution_lock:
+            execution = self._active_executions.pop(task_id, None)
+            if execution is None:
+                return
+            now_mono = time.monotonic()
+            record = _execution_record(
+                execution,
+                now=now_mono,
+                result=result,
+                finished_at=time.time(),
+            )
+            self._execution_history.append(record)
+            self._execution_history = self._execution_history[-100:]
+
+            if any(
+                item.agent_name == execution.agent_name
+                for item in self._active_executions.values()
+            ):
+                lifecycle = self._lifecycle.get(execution.agent_name)
+                if lifecycle is not None:
+                    lifecycle.state = AgentState.RUNNING
+                    lifecycle.last_updated = time.monotonic()
+                    lifecycle.idle_since = None
+            else:
+                self._transition(execution.agent_name, AgentState.IDLE)
+
     async def delegate(
         self,
         task: SubTask,
@@ -403,25 +607,52 @@ class SubAgentManager:
 
         context = "\n\n".join(context_parts) if context_parts else ""
 
+        if not await self._register_execution(task, agent_name):
+            await self._emit_subagent_event(
+                event_callback,
+                status="failed",
+                task_id=task.id,
+                agent_name=agent_name,
+                description=task.description,
+                message=f"任务 ID {task.id} 已有正在运行的 Agent 执行。",
+            )
+            return AgentResult(
+                status="error",
+                error=f"Duplicate active sub-agent task id: {task.id}",
+            )
+
         logger.info("Delegating task %s to agent %s", task.id, agent_name)
         self._ensure_lifecycle(agent_name)
         self._transition(agent_name, AgentState.RUNNING)
-        await self._emit_subagent_event(
-            event_callback,
-            status="started",
-            task_id=task.id,
-            agent_name=agent_name,
-            description=task.description,
-            message="子 Agent 已开始执行。",
-        )
-
-        await self._hooks.fire(HookContext(
-            point=HookPoint.DELEGATE_START,
-            data={"task_id": task.id, "agent_name": agent_name, "description": task.description},
-            agent_name=agent_name,
-        ))
-        result: AgentResult
         try:
+            await self._emit_subagent_event(
+                event_callback,
+                status="started",
+                task_id=task.id,
+                agent_name=agent_name,
+                description=task.description,
+                message="子 Agent 已开始执行。",
+            )
+        except BaseException as exc:
+            startup_result = AgentResult(
+                status="cancelled" if isinstance(exc, asyncio.CancelledError) else "error",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            await self._finish_execution(task.id, startup_result)
+            raise
+
+        result: AgentResult
+        terminal_result: AgentResult | None = None
+        try:
+            await self._hooks.fire(HookContext(
+                point=HookPoint.DELEGATE_START,
+                data={
+                    "task_id": task.id,
+                    "agent_name": agent_name,
+                    "description": task.description,
+                },
+                agent_name=agent_name,
+            ))
             await self._hooks.fire(HookContext(
                 point=HookPoint.AGENT_EXECUTE_START,
                 data={"task_id": task.id, "agent_name": agent_name, "task": task.description},
@@ -431,19 +662,27 @@ class SubAgentManager:
                 "task": task.description,
                 "context": context,
             }
-            if (
-                event_callback is not None
-                and "event_callback" in signature(agent.execute).parameters
-            ):
-                execute_kwargs["event_callback"] = event_callback
+            if "event_callback" in signature(agent.execute).parameters:
+                async def observed_event(
+                    event: str,
+                    data: dict[str, Any],
+                ) -> None:
+                    await self._observe_execution_event(task.id, event, data)
+                    if event_callback is not None:
+                        await event_callback(event, data)
+
+                execute_kwargs["event_callback"] = observed_event
+            execute_task = asyncio.create_task(agent.execute(**execute_kwargs))
+            await self._attach_execution_task(task.id, execute_task)
             timeout_seconds = _agent_timeout_seconds(agent)
             if timeout_seconds > 0 and math.isfinite(timeout_seconds):
                 result = await asyncio.wait_for(
-                    agent.execute(**execute_kwargs),
+                    execute_task,
                     timeout=timeout_seconds,
                 )
             else:
-                result = await agent.execute(**execute_kwargs)
+                result = await execute_task
+            terminal_result = result
             await self._hooks.fire(HookContext(
                 point=HookPoint.AGENT_EXECUTE_END,
                 data={
@@ -455,6 +694,22 @@ class SubAgentManager:
                 },
                 agent_name=agent_name,
             ))
+        except asyncio.CancelledError:
+            parent_task = asyncio.current_task()
+            if parent_task is not None and parent_task.cancelling():
+                terminal_result = AgentResult(
+                    status="cancelled",
+                    error="父运行已取消。",
+                )
+                raise
+            execution = self._active_executions.get(task.id)
+            reason = (
+                execution.stop_reason
+                if execution is not None and execution.stop_reason
+                else "用户请求停止子 Agent。"
+            )
+            result = AgentResult(status="cancelled", error=reason)
+            terminal_result = result
         except TimeoutError:
             timeout_seconds = _agent_timeout_seconds(agent)
             logger.warning(
@@ -467,6 +722,7 @@ class SubAgentManager:
                 status="timeout",
                 error=f"子 Agent 执行超时：超过 {timeout_seconds:g} 秒未完成。",
             )
+            terminal_result = result
             await self._hooks.fire(HookContext(
                 point=HookPoint.AGENT_EXECUTE_END,
                 data={
@@ -482,6 +738,7 @@ class SubAgentManager:
         except Exception as exc:
             logger.exception("Agent %s failed while executing task %s", agent_name, task.id)
             result = AgentResult(status="error", error=f"{type(exc).__name__}: {exc}")
+            terminal_result = result
             await self._hooks.fire(HookContext(
                 point=HookPoint.AGENT_EXECUTE_END,
                 data={
@@ -495,7 +752,8 @@ class SubAgentManager:
                 agent_name=agent_name,
             ))
         finally:
-            self._transition(agent_name, AgentState.IDLE)
+            if terminal_result is not None:
+                await self._finish_execution(task.id, terminal_result)
 
         await self._emit_subagent_event(
             event_callback,
@@ -790,3 +1048,34 @@ def _agent_result_message(result: AgentResult) -> str:
     if result.status == "completed":
         return "子 Agent 已完成任务。"
     return result.error or result.response[:300] or "子 Agent 未完成任务。"
+
+
+def _execution_record(
+    execution: _ActiveExecution,
+    *,
+    now: float,
+    result: AgentResult | None = None,
+    finished_at: float | None = None,
+) -> AgentExecutionRecord:
+    elapsed_ms = max(0, round((now - execution.started_mono) * 1000))
+    heartbeat_age_ms = max(0, round((now - execution.last_updated_mono) * 1000))
+    status = result.status if result is not None else execution.status
+    return AgentExecutionRecord(
+        task_id=execution.task_id,
+        agent_name=execution.agent_name,
+        description=execution.description,
+        status=status,
+        phase="finished" if finished_at is not None else execution.phase,
+        started_at=execution.started_at,
+        finished_at=finished_at,
+        elapsed_ms=elapsed_ms,
+        heartbeat_age_ms=heartbeat_age_ms,
+        current_tool=execution.current_tool,
+        recent_tools=tuple(execution.recent_tools),
+        total_tokens=result.total_tokens if result is not None else 0,
+        total_cost_usd=result.total_cost_usd if result is not None else 0.0,
+        turns=result.turns if result is not None else 0,
+        error=(result.error or "") if result is not None else "",
+        stop_supported=finished_at is None,
+        stop_requested=execution.stop_requested,
+    )
