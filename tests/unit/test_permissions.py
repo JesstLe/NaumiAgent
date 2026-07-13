@@ -8,9 +8,11 @@ import pytest
 from naumi_agent.safety.permissions import (
     PermissionChecker,
     PermissionMode,
+    PermissionOutcome,
     PermissionReasonCode,
     PermissionRiskLevel,
 )
+from naumi_agent.tools.base import ToolMetadata
 from naumi_agent.tools.builtin import YamlMicroVerifyTool, YamlValidateTool
 from naumi_agent.tools.forge import ForgeTool
 from naumi_agent.tools.hotreload import HotReloadTool
@@ -137,14 +139,418 @@ class TestPermissionChecker:
             assert result.risk_level == PermissionRiskLevel.HIGH
             assert "高风险模式" in result.reason
 
-    def test_bypass_skips_dangerous_command_filter(self) -> None:
+    def test_bypass_cannot_skip_dangerous_command_filter(self) -> None:
         checker = PermissionChecker(PermissionMode.BYPASS)
         result = checker.check(
             "bash_run",
             {"command": "rm -rf /Users/lv/Workspace/showcase-page && echo done"},
         )
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    @pytest.mark.parametrize(
+        ("mode", "command"),
+        [
+            pytest.param(
+                PermissionMode.MODERATE,
+                "sudo rm /tmp/direct-file",
+                id="moderate-direct-sudo-rm",
+            ),
+            pytest.param(
+                PermissionMode.BYPASS,
+                "sudo rm -f /tmp/direct-file",
+                id="bypass-direct-sudo-rm-force",
+            ),
+            pytest.param(
+                PermissionMode.BYPASS,
+                "sudo -n rm /tmp/direct-file",
+                id="bypass-sudo-non-interactive",
+            ),
+            pytest.param(
+                PermissionMode.BYPASS,
+                "sudo -u root rm /tmp/direct-file",
+                id="bypass-sudo-user",
+            ),
+        ],
+    )
+    def test_direct_sudo_rm_remains_a_hard_block(
+        self,
+        mode: PermissionMode,
+        command: str,
+    ) -> None:
+        checker = PermissionChecker(mode)
+
+        result = checker.check("bash_run", {"command": command})
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_quoted_direct_sudo_rm_text_remains_allowed(self) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check(
+            "bash_run",
+            {"command": "echo 'sudo rm /tmp/direct-file'"},
+        )
+
         assert result.allowed
+        assert result.code is PermissionReasonCode.ALLOWED
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            pytest.param("rm -rf -- /", id="end-of-options-before-root"),
+            pytest.param("rm -fr /", id="combined-short-options-reversed"),
+            pytest.param("rm -r -f /", id="separate-short-options"),
+            pytest.param("rm --recursive --force /", id="long-options"),
+            pytest.param("sudo -n rm -fr /", id="sudo-wrapper"),
+            pytest.param("bash -c 'rm -fr /'", id="bash-c-wrapper"),
+            pytest.param("sh -c 'rm -r -f /'", id="sh-c-wrapper"),
+            pytest.param(
+                "sudo bash -c 'rm --recursive --force /'",
+                id="sudo-bash-c-wrapper",
+            ),
+            pytest.param("env SAFE=1 rm -fr /", id="env-assignment-wrapper"),
+            pytest.param("env -u SAFE rm -rf /absolute", id="env-unset-wrapper"),
+            pytest.param("env --chdir /tmp rm -rf /absolute", id="env-chdir-wrapper"),
+            pytest.param("exec -a cleanup rm -rf /absolute", id="exec-argv0-wrapper"),
+            pytest.param("command rm -fr /", id="command-wrapper"),
+            pytest.param("/bin/rm -fr /", id="absolute-rm-wrapper"),
+            pytest.param("printf safe; rm -fr /", id="second-command-after-semicolon"),
+            pytest.param(
+                "printf safe && rm --recursive --force /",
+                id="second-command-after-and",
+            ),
+            pytest.param("rm -rf /.", id="root-equivalent-target"),
+        ],
+    )
+    def test_bypass_blocks_structurally_destructive_rm_commands(self, command: str) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check("bash_run", {"command": command})
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+        assert "高风险" in result.reason
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            pytest.param("env -u", id="env-short-unset"),
+            pytest.param("env --unset", id="env-long-unset"),
+            pytest.param("env -C", id="env-short-chdir"),
+            pytest.param("env --chdir", id="env-long-chdir"),
+            pytest.param("env -S", id="env-short-split-string"),
+            pytest.param("env --split-string", id="env-long-split-string"),
+            pytest.param("env --unset=", id="env-long-unset-empty-value"),
+            pytest.param("env --chdir=", id="env-long-chdir-empty-value"),
+            pytest.param("env --split-string=", id="env-long-split-string-empty-value"),
+            pytest.param("exec -a", id="exec-argv0"),
+            pytest.param("command --", id="command-end-of-options"),
+        ],
+    )
+    def test_incomplete_shell_wrapper_options_fail_closed(self, command: str) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check("bash_run", {"command": command})
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            pytest.param("printf safe\nrm -fr /absolute", id="newline-command-boundary"),
+            pytest.param("printf safe\n\nrm -fr /absolute", id="double-newline-boundary"),
+            pytest.param("printf safe;\nrm -fr /absolute", id="semicolon-newline-boundary"),
+            pytest.param("printf safe &&\nrm -fr /absolute", id="and-newline-boundary"),
+            pytest.param("bash -lc 'rm -fr /absolute'", id="shell-option-bundle"),
+            pytest.param("exec rm -fr /absolute", id="exec-wrapper"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        ("tool_name", "argument_name", "tool"),
+        [
+            pytest.param("bash_run", "command", None, id="bash-run"),
+            pytest.param("background_run", "command", None, id="background-run"),
+            pytest.param("code_execute", "code", CodeExecuteTool(), id="bash-code-execute"),
+        ],
+    )
+    def test_mainstream_shell_syntax_blocks_across_builtin_command_surfaces(
+        self,
+        command: str,
+        tool_name: str,
+        argument_name: str,
+        tool: CodeExecuteTool | None,
+    ) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+        args = {argument_name: command}
+        if tool_name == "code_execute":
+            args["language"] = "Bash"
+
+        result = checker.check(tool_name, args, tool=tool)
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            pytest.param("rm -f ./file", id="force-only-local-file"),
+            pytest.param("rm -r ./build", id="recursive-only-local-directory"),
+            pytest.param(
+                "rm -f --preserve-root /absolute/file",
+                id="force-with-non-recursive-long-option",
+            ),
+            pytest.param(
+                "rm -r --one-file-system /absolute",
+                id="recursive-with-non-force-long-option",
+            ),
+            pytest.param("echo 'rm -rf /'", id="quoted-text-not-command"),
+            pytest.param(
+                "echo 'sudo rm -rf /tmp/example'",
+                id="quoted-sudo-rm-text-not-command",
+            ),
+            pytest.param(
+                "echo 'safe\n\nrm -rf /absolute'",
+                id="quoted-double-newline-not-command",
+            ),
+            pytest.param(
+                "echo '&&' rm -rf /absolute",
+                id="quoted-and-not-command-boundary",
+            ),
+            pytest.param(
+                "echo ';' rm -rf /absolute",
+                id="quoted-semicolon-not-command-boundary",
+            ),
+            pytest.param(
+                r"echo $'\n' rm -rf /absolute",
+                id="ansi-c-quoted-newline-not-command-boundary",
+            ),
+            pytest.param("bash -c \"echo 'rm -rf /'\"", id="quoted-rm-in-shell-payload"),
+        ],
+    )
+    def test_bypass_allows_safe_rm_neighbors(self, command: str) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check("bash_run", {"command": command})
+
+        assert result.allowed
+        assert result.code is PermissionReasonCode.ALLOWED
+
+    def test_malformed_shell_uses_normalized_literal_dangerous_fallback(self) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check("bash_run", {"command": "rm -rf / 'unterminated"})
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_malformed_safe_shell_keeps_normal_confirmation_policy(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+
+        result = checker.check("bash_run", {"command": "echo 'unterminated"})
+
+        assert result.allowed
+        assert result.outcome is PermissionOutcome.CONFIRM
+        assert result.risk_level is PermissionRiskLevel.MEDIUM
+
+    def test_strict_bash_dangerous_command_blocks_before_mode_rejection(self) -> None:
+        checker = PermissionChecker(PermissionMode.STRICT)
+
+        decision = checker.check("bash_run", {"command": "rm -rf /"})
+
+        assert not decision.allowed
+        assert decision.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_lockdown_background_dangerous_command_blocks_before_mode_rejection(self) -> None:
+        checker = PermissionChecker(PermissionMode.LOCKDOWN)
+
+        decision = checker.check("background_run", {"command": "rm -rf /"})
+
+        assert not decision.allowed
+        assert decision.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_non_string_command_argument_is_denied_without_raising(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+
+        decision = checker.check("bash_run", {"command": ["echo", "safe"]})
+
+        assert not decision.allowed
+        assert decision.code.value == "invalid_command_argument"
+        assert "命令参数 `command` 必须是字符串" in decision.reason
+
+    def test_metadata_named_non_string_command_argument_is_denied_without_raising(
+        self,
+    ) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+        tool = SimpleNamespace(
+            metadata=ToolMetadata(command_argument_names=("shell_input",))
+        )
+
+        decision = checker.check(
+            "bash_run",
+            {"shell_input": ["echo", "safe"]},
+            tool=tool,
+        )
+
+        assert not decision.allowed
+        assert decision.code.value == "invalid_command_argument"
+        assert "命令参数 `shell_input` 必须是字符串" in decision.reason
+
+    @pytest.mark.parametrize("language", [" Bash ", "BASH", "bash\n"])
+    def test_normalized_bash_code_execute_blocks_dangerous_commands_in_bypass(
+        self, language: str
+    ) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check(
+            "code_execute",
+            {"language": language, "code": "rm -rf / && echo done"},
+            tool=CodeExecuteTool(),
+        )
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    @pytest.mark.parametrize("mode", list(PermissionMode))
+    def test_bash_code_execute_blocks_dangerous_commands_in_every_mode(
+        self, mode: PermissionMode
+    ) -> None:
+        checker = PermissionChecker(mode)
+
+        result = checker.check(
+            "code_execute",
+            {"language": "bash", "code": "rm -rf / && echo done"},
+            tool=CodeExecuteTool(),
+        )
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_bash_code_execute_rejects_list_code_before_confirmation(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+
+        result = checker.check(
+            "code_execute",
+            {"language": "Bash", "code": ["echo", "safe"]},
+            tool=CodeExecuteTool(),
+        )
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.INVALID_COMMAND_ARGUMENT
         assert not result.requires_confirmation
+
+    @pytest.mark.parametrize("mode", [PermissionMode.BYPASS, PermissionMode.STRICT])
+    def test_runtime_mcp_connect_blocks_destructive_executable_and_args_before_mode(
+        self, mode: PermissionMode
+    ) -> None:
+        checker = PermissionChecker(mode)
+
+        result = checker.check(
+            "runtime_mcp_connect",
+            {"command": "/bin/rm", "args": ["-rf", "/absolute"]},
+        )
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            pytest.param("-rf /absolute", id="argv-not-list"),
+            pytest.param(["-rf", 1], id="argv-item-not-string"),
+        ],
+    )
+    def test_runtime_mcp_connect_rejects_invalid_argv_before_confirmation(self, argv) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+
+        result = checker.check(
+            "runtime_mcp_connect",
+            {"command": "echo", "args": argv},
+        )
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.INVALID_COMMAND_ARGUMENT
+        assert result.reason == "命令参数 `args` 必须是字符串数组。"
+        assert not result.requires_confirmation
+
+    def test_non_shell_code_execute_does_not_scan_code_as_a_shell_command(self) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        result = checker.check(
+            "code_execute",
+            {"language": "python", "code": "command = 'rm -rf /'"},
+            tool=CodeExecuteTool(),
+        )
+
+        assert result.allowed
+        assert result.code is PermissionReasonCode.ALLOWED
+
+    @pytest.mark.parametrize(
+        "mode",
+        [PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
+    )
+    def test_dynamic_mcp_tool_blocks_dangerous_commands_in_every_allowed_mode(
+        self, mode: PermissionMode
+    ) -> None:
+        checker = PermissionChecker(mode)
+
+        result = checker.check("mcp__terminal__run", {"command": "rm -rf /"})
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    @pytest.mark.parametrize(
+        "mode",
+        [PermissionMode.BYPASS, PermissionMode.PERMISSIVE, PermissionMode.MODERATE],
+    )
+    def test_dynamic_mcp_tool_blocks_outside_sandbox_cwd_in_every_allowed_mode(
+        self, mode: PermissionMode, tmp_path
+    ) -> None:
+        checker = PermissionChecker(
+            mode,
+            allowed_dirs=[str(tmp_path / "allowed")],
+            workspace_root=str(tmp_path / "allowed"),
+        )
+
+        result = checker.check(
+            "mcp__terminal__run",
+            {"cwd": str(tmp_path / "outside")},
+        )
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.PATH_OUTSIDE_SANDBOX
+
+    def test_dynamic_mcp_tool_uses_common_mode_count_and_session_grant_policy(self) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+
+        allowed = checker.check("mcp__terminal__run", {"command": "echo hi"})
+        checker.set_mode(PermissionMode.STRICT)
+        blocked = checker.check("mcp__terminal__run", {"command": "echo hi"})
+
+        assert allowed.allowed
+        assert allowed.allow_session_grant is False
+        assert checker.get_call_counts() == {"mcp__terminal__run": 1}
+        assert not blocked.allowed
+        assert blocked.code is PermissionReasonCode.MODE_BLOCKED
+
+    def test_path_sandbox_blocks_symlink_escape(self, tmp_path) -> None:
+        allowed_dir = tmp_path / "allowed"
+        outside_dir = tmp_path / "outside"
+        allowed_dir.mkdir()
+        outside_dir.mkdir()
+        (allowed_dir / "escape").symlink_to(outside_dir, target_is_directory=True)
+        checker = PermissionChecker(
+            PermissionMode.MODERATE,
+            allowed_dirs=[str(allowed_dir)],
+            workspace_root=str(allowed_dir),
+        )
+
+        result = checker.check("file_read", {"path": str(allowed_dir / "escape" / "secret.txt")})
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.PATH_OUTSIDE_SANDBOX
 
     def test_safe_commands(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
@@ -223,6 +629,107 @@ class TestPermissionChecker:
         result = checker.check("bash_run", {"command": "echo test"})
         assert result.allowed
         assert not result.requires_confirmation
+
+    def test_metadata_cannot_weaken_high_rule_confirmation_in_bypass(self) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+        tool = SimpleNamespace(metadata=ToolMetadata(requires_confirmation=False))
+
+        decision = checker.check("session_delete", {}, tool=tool)
+
+        assert decision.allowed
+        assert decision.outcome is PermissionOutcome.CONFIRM
+        assert decision.risk_level is PermissionRiskLevel.HIGH
+        assert decision.requires_confirmation
+        assert decision.requires_double_confirm
+        assert decision.allow_session_grant is False
+
+    def test_shell_confirmation_is_medium_and_session_grantable(self, tmp_path) -> None:
+        checker = PermissionChecker(
+            PermissionMode.MODERATE,
+            allowed_dirs=[str(tmp_path)],
+            workspace_root=str(tmp_path),
+        )
+
+        decision = checker.check(
+            "bash_run",
+            {"command": "git status", "cwd": str(tmp_path)},
+        )
+
+        assert decision.outcome is PermissionOutcome.CONFIRM
+        assert decision.risk_level is PermissionRiskLevel.MEDIUM
+        assert decision.tool_family == "shell"
+        assert decision.allow_session_grant is True
+        assert decision.requires_double_confirm is False
+
+    def test_dangerous_command_remains_blocked_in_bypass(self, tmp_path) -> None:
+        checker = PermissionChecker(
+            PermissionMode.BYPASS,
+            allowed_dirs=[str(tmp_path)],
+            workspace_root=str(tmp_path),
+        )
+
+        decision = checker.check(
+            "bash_run",
+            {"command": "sudo rm -rf /", "cwd": str(tmp_path)},
+        )
+
+        assert decision.outcome is PermissionOutcome.BLOCK
+        assert decision.code is PermissionReasonCode.DANGEROUS_COMMAND
+
+    def test_path_violation_remains_blocked_in_bypass(self, tmp_path) -> None:
+        checker = PermissionChecker(
+            PermissionMode.BYPASS,
+            allowed_dirs=[str(tmp_path)],
+            workspace_root=str(tmp_path),
+        )
+
+        decision = checker.check("file_read", {"path": str(tmp_path.parent / "outside.txt")})
+
+        assert decision.outcome is PermissionOutcome.BLOCK
+        assert decision.code is PermissionReasonCode.PATH_OUTSIDE_SANDBOX
+
+    def test_destructive_metadata_requires_double_confirmation_in_bypass(self) -> None:
+        checker = PermissionChecker(PermissionMode.BYPASS)
+
+        decision = checker.check(
+            "self_modify",
+            {
+                "target_file": "tools/example.py",
+                "new_content": "x = 1\n",
+                "description": "example",
+            },
+            tool=SelfModifyTool(),
+        )
+
+        assert decision.outcome is PermissionOutcome.CONFIRM
+        assert decision.risk_level is PermissionRiskLevel.HIGH
+        assert decision.requires_double_confirm is True
+        assert decision.allow_session_grant is False
+
+    @pytest.mark.parametrize(
+        ("tool_name", "args", "requires_confirmation"),
+        [
+            ("background_run", {"command": "echo ok"}, True),
+            ("background_status", {}, False),
+            ("background_list", {}, False),
+            ("background_cancel", {}, False),
+            ("background_cleanup", {}, False),
+            ("background_read_output", {}, False),
+        ],
+    )
+    def test_background_tools_share_canonical_process_family(
+        self,
+        tool_name: str,
+        args: dict[str, str],
+        requires_confirmation: bool,
+    ) -> None:
+        checker = PermissionChecker(PermissionMode.MODERATE)
+
+        decision = checker.check(tool_name, args)
+
+        assert decision.allowed, tool_name
+        assert decision.tool_family == "background_process"
+        assert decision.requires_confirmation is requires_confirmation
 
     def test_task_tracking_tools_allowed_without_confirmation(self) -> None:
         checker = PermissionChecker(PermissionMode.MODERATE)
