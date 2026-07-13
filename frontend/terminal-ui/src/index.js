@@ -8,12 +8,16 @@ import {
   INPUT_KEYS,
   backspaceInput,
   clearInput,
+  createInputTokenizerState,
   deleteInputForward,
+  insertInputNewline,
   insertInputText,
   moveInputCursor,
+  moveInputCursorToLineBoundary,
+  moveInputCursorVertical,
   navigateInputHistory,
   rememberSubmittedInput,
-  splitInputStreamChunk,
+  tokenizeInputChunk,
 } from "./input-buffer.js";
 import {
   attachJsonlLineReader,
@@ -52,7 +56,7 @@ let bridge = null;
 let send = null;
 let redrawTimer = null;
 let quitting = false;
-let pendingInputEscape = "";
+const inputTokenizer = createInputTokenizerState();
 
 main();
 
@@ -108,7 +112,7 @@ function startBridge() {
 }
 
 function setupTerminal() {
-  process.stdout.write(ANSI.altOn + ANSI.hideCursor);
+  process.stdout.write(ANSI.altOn + ANSI.bracketedPasteOn + ANSI.hideCursor);
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(true);
   }
@@ -121,7 +125,7 @@ function setupTerminal() {
 }
 
 function restoreTerminal() {
-  process.stdout.write(ANSI.showCursor + ANSI.altOff + ANSI.reset);
+  process.stdout.write(ANSI.bracketedPasteOff + ANSI.showCursor + ANSI.altOff + ANSI.reset);
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(false);
   }
@@ -181,15 +185,22 @@ function handleBridgeLine(line) {
 }
 
 function handleKeyInput(chunk) {
-  const parsed = splitInputStreamChunk(chunk, pendingInputEscape);
-  pendingInputEscape = parsed.pending;
+  const tokens = tokenizeInputChunk(chunk, inputTokenizer);
   debugLog?.log("input.chunk", {
     chars: String(chunk),
     char_count: Array.from(String(chunk)).length,
-    pending_escape_chars: pendingInputEscape.length,
+    pending_escape_chars: inputTokenizer.pendingEscape.length,
+    paste_chars: inputTokenizer.pasteBuffer === null
+      ? 0
+      : Array.from(inputTokenizer.pasteBuffer).length,
   });
-  for (const key of parsed.keys) {
-    handleSingleKeyInput(key);
+  for (const token of tokens) {
+    if (token.type === "paste") {
+      insertInputText(state, token.value);
+      scheduleRedraw();
+      continue;
+    }
+    handleSingleKeyInput(token.value);
   }
 }
 
@@ -218,22 +229,26 @@ function handleSingleKeyInput(chunk) {
     send("cycle_mode", {});
     return;
   }
+  if (chunk === INPUT_KEYS.shiftEnter) {
+    insertInputNewline(state);
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.ctrlEnter) {
+    submitComposer();
+    return;
+  }
   if (!state.input.trim() && hasTaskPanelFocus(state) && handleTaskPanelFocusedKey(chunk)) {
     scheduleRedraw();
     return;
   }
   if (chunk === "\r" || chunk === "\n") {
-    const text = state.input.trim();
-    if (text) {
-      handleSubmitText(state, text, send);
-      rememberSubmittedInput(state, text);
-      clearInput(state);
-      state.scrollOffset = 0;
-      persistUiSnapshot();
+    if (state.input.trim()) {
+      submitComposer();
     } else if (hasTaskPanelFocus(state)) {
       openSelectedTaskPanelItem(state, send);
+      scheduleRedraw();
     }
-    scheduleRedraw();
     return;
   }
   if (chunk === "\u007f" || chunk === "\b") {
@@ -257,12 +272,20 @@ function handleSingleKeyInput(chunk) {
     return;
   }
   if (chunk === INPUT_KEYS.up) {
-    navigateInputHistory(state, "up");
+    if (state.input.includes("\n")) {
+      moveInputCursorVertical(state, "up");
+    } else {
+      navigateInputHistory(state, "up");
+    }
     scheduleRedraw();
     return;
   }
   if (chunk === INPUT_KEYS.down) {
-    navigateInputHistory(state, "down");
+    if (state.input.includes("\n")) {
+      moveInputCursorVertical(state, "down");
+    } else {
+      navigateInputHistory(state, "down");
+    }
     scheduleRedraw();
     return;
   }
@@ -281,13 +304,23 @@ function handleSingleKeyInput(chunk) {
   if (/^[Oo][ABab]$/.test(chunk)) {
     return;
   }
-  if (chunk === INPUT_KEYS.home || chunk === INPUT_KEYS.homeAlt || chunk === INPUT_KEYS.homeSs3 || chunk === INPUT_KEYS.ctrlA) {
+  if (chunk === INPUT_KEYS.ctrlA) {
     moveInputCursor(state, "home");
     scheduleRedraw();
     return;
   }
-  if (chunk === INPUT_KEYS.end || chunk === INPUT_KEYS.endAlt || chunk === INPUT_KEYS.endSs3 || chunk === INPUT_KEYS.ctrlE) {
+  if (chunk === INPUT_KEYS.ctrlE) {
     moveInputCursor(state, "end");
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.home || chunk === INPUT_KEYS.homeAlt || chunk === INPUT_KEYS.homeSs3) {
+    moveInputCursorToLineBoundary(state, "start");
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.end || chunk === INPUT_KEYS.endAlt || chunk === INPUT_KEYS.endSs3) {
+    moveInputCursorToLineBoundary(state, "end");
     scheduleRedraw();
     return;
   }
@@ -307,6 +340,21 @@ function handleSingleKeyInput(chunk) {
     insertInputText(state, chunk);
     scheduleRedraw();
   }
+}
+
+function submitComposer() {
+  if (!state.input.trim()) {
+    scheduleRedraw();
+    return false;
+  }
+  const text = state.input;
+  handleSubmitText(state, text, send);
+  rememberSubmittedInput(state, text);
+  clearInput(state);
+  state.scrollOffset = 0;
+  persistUiSnapshot();
+  scheduleRedraw();
+  return true;
 }
 
 function adjustScrollOffset(state, direction) {
