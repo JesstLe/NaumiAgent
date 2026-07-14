@@ -1,12 +1,12 @@
 import { useEffect } from 'react'
 import { BrowserRouter } from 'react-router-dom'
-import { AppRoutes } from '@/routes'
+import { ConnectionBootstrap } from '@/components/ConnectionBootstrap'
 import { PlatformProvider, usePlatform } from '@/platform'
 import { useLocaleStore } from '@/stores/localeStore'
 import '@/i18n'
 import '@/index.css'
 
-function AppInitializer() {
+function LocaleInitializer() {
   const platform = usePlatform()
   const initializeLocale = useLocaleStore((state) => state.initialize)
 
@@ -22,14 +22,14 @@ function AppInitializer() {
     }
   }, [platform, initializeLocale])
 
-  return <AppRoutes />
+  return <ConnectionBootstrap />
 }
 
 function App() {
   return (
     <BrowserRouter>
       <PlatformProvider>
-        <AppInitializer />
+        <LocaleInitializer />
       </PlatformProvider>
     </BrowserRouter>
   )

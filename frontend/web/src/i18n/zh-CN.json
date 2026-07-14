@@ -18,6 +18,7 @@
     "createLinkedIssue": "同时创建任务"
   },
   "chat": {
+    "title": "对话",
     "composerPlaceholder": "输入问题或指令...",
     "emptyState": "开始与 Agent 对话，或发送一条指令。"
   },
@@ -27,7 +28,19 @@
     "starting": "启动中",
     "unknown": "未知"
   },
+  "connection": {
+    "connecting": "正在连接后端服务...",
+    "failed": "连接失败",
+    "retry": "重试",
+    "retrying": "重试中...",
+    "reconnecting": "后端连接已断开，正在尝试重连..."
+  },
   "panel": {
     "context": "页面上下文"
+  },
+  "session": {
+    "title": "会话",
+    "new": "新建会话",
+    "newTitle": "新会话"
   }
 }
