@@ -55,6 +55,7 @@ function phaseLabel(activity) {
     generating: "生成响应",
     executing: "执行工具",
     awaiting_permission: "等待权限",
+    awaiting_input: "等待用户输入",
     summarizing: "整理结果",
     completed: "执行完成",
     failed: "执行失败",

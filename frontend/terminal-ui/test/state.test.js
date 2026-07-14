@@ -13,6 +13,7 @@ import {
   getFoldEntries,
   handleAgentControlKey,
   handleRuntimeInspectorKey,
+  handleInteractionKey,
   handleSubmitText,
   hasTaskPanelFocus,
   getSlashCommandCompletions,
@@ -28,6 +29,25 @@ import {
   toggleAgentControlCenter,
   toggleRuntimeInspector,
 } from "../src/state.js";
+
+function interactionRecord(requestId, question = "请选择方案") {
+  return {
+    type: "interaction/request",
+    request_id: requestId,
+    payload: {
+      request_id: requestId,
+      header: "实现策略",
+      question,
+      options: [
+        { value: "safe", label: "安全方案", description: "保留兼容路径" },
+        { value: "fast", label: "快速方案", description: "优先交付速度" },
+      ],
+      allow_custom: true,
+      custom_label: "其他方案",
+      status: "needs_input",
+    },
+  };
+}
 
 test("welcome becomes ready without creating a timeline message", () => {
   const state = createInitialState();
@@ -104,6 +124,92 @@ test("working animation frame resets at every run lifecycle boundary", () => {
   });
   assert.equal(state.running, false);
   assert.equal(state.workingAnimationFrame, 0);
+});
+
+test("interaction requests queue in arrival order and promote after resolution", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, interactionRecord("ask-1"));
+  reduceServerEvent(state, interactionRecord("ask-2", "第二个问题"));
+
+  assert.equal(state.interaction.requestId, "ask-1");
+  assert.deepEqual(state.interactionQueue.map((item) => item.requestId), ["ask-2"]);
+  assert.equal(state.messages.filter((message) => message.kind === "interaction").length, 2);
+  assert.equal(
+    state.messages.find((message) => message.requestId === "ask-2").message.status,
+    "queued",
+  );
+
+  reduceServerEvent(state, {
+    type: "interaction/resolved",
+    payload: { request_id: "ask-1", status: "answered", kind: "option", value: "fast", label: "快速方案" },
+  });
+
+  assert.equal(state.interaction.requestId, "ask-2");
+  assert.deepEqual(state.interactionQueue, []);
+  const firstCard = state.messages.find((message) => message.requestId === "ask-1");
+  assert.equal(firstCard.message.status, "answered");
+  assert.equal(firstCard.message.label, "快速方案");
+  assert.equal(
+    state.messages.find((message) => message.requestId === "ask-2").message.status,
+    "needs_input",
+  );
+});
+
+test("interaction keyboard selects options once and supports custom input editing", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+  reduceServerEvent(state, interactionRecord("ask-option"));
+
+  assert.equal(handleInteractionKey(state, INPUT_KEYS.down, send), true);
+  assert.equal(handleInteractionKey(state, "\r", send), true);
+  assert.deepEqual(sent, [{
+    type: "interaction_response",
+    payload: { request_id: "ask-option", kind: "option", value: "fast" },
+  }]);
+  handleInteractionKey(state, "\r", send);
+  assert.equal(sent.length, 1);
+
+  reduceServerEvent(state, {
+    type: "interaction/resolved",
+    payload: { request_id: "ask-option", status: "answered", kind: "option", value: "fast", label: "快速方案" },
+  });
+  reduceServerEvent(state, interactionRecord("ask-custom"));
+  handleInteractionKey(state, "3", send);
+  handleInteractionKey(state, "\r", send);
+  assert.equal(state.interaction.customMode, true);
+  handleInteractionKey(state, "工作区保存x", send);
+  handleInteractionKey(state, "\u007f", send);
+  handleInteractionKey(state, "\r", send);
+
+  assert.deepEqual(sent.at(-1), {
+    type: "interaction_response",
+    payload: { request_id: "ask-custom", kind: "custom", custom_text: "工作区保存" },
+  });
+});
+
+test("run cancellation clears active and queued interactions", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "run-with-input",
+    payload: { task: "需要选择" },
+  });
+  reduceServerEvent(state, interactionRecord("ask-cancel-1"));
+  reduceServerEvent(state, interactionRecord("ask-cancel-2"));
+
+  reduceServerEvent(state, {
+    type: "run/cancelled",
+    request_id: "run-with-input",
+    payload: { target_request_id: "run-with-input", status: "cancelled", reason: "用户取消" },
+  });
+
+  assert.equal(state.interaction, null);
+  assert.deepEqual(state.interactionQueue, []);
+  assert(state.messages
+    .filter((message) => message.kind === "interaction")
+    .every((message) => message.message.status === "cancelled"));
 });
 
 test("chat and task submissions dismiss welcome before transport completion", () => {

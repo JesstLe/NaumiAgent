@@ -89,6 +89,7 @@ from naumi_agent.worktree import WorktreeManager, create_worktree_tools
 
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 PermissionConfirmationCallback = Callable[[dict[str, Any]], Awaitable[str | bool]]
+UserInteractionCallback = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 
 logger = logging.getLogger(__name__)
 
@@ -495,6 +496,7 @@ class AgentEngine:
         self._harness_context = HarnessContextAssembler()
         self._permission_bubble_history: list[dict[str, Any]] = []
         self._permission_confirmer: PermissionConfirmationCallback | None = None
+        self._user_interaction_handler: UserInteractionCallback | None = None
 
         self.task_store = TaskStore(config.memory.session_db_path)
         self.workbench_store = WorkbenchStore(config.memory.session_db_path)
@@ -613,8 +615,10 @@ class AgentEngine:
         from naumi_agent.tools.runtime import create_runtime_tools
         from naumi_agent.tools.search import create_tool_search_tools
         from naumi_agent.tools.session import create_session_tools
+        from naumi_agent.tools.user_interaction import RequestUserInputTool
 
         self._tool_registry.register(DoctorDiagnosticsTool(self))
+        self._tool_registry.register(RequestUserInputTool(self))
         for tool in create_session_tools(self):
             self._tool_registry.register(tool)
         for tool in create_runtime_tools(self):
@@ -831,6 +835,21 @@ class AgentEngine:
     ) -> None:
         """Register a UI callback used when a tool needs user confirmation."""
         self._permission_confirmer = confirmer
+
+    def set_user_interaction_handler(
+        self,
+        handler: UserInteractionCallback | None,
+    ) -> None:
+        """Register the active UI callback for structured user decisions."""
+        self._user_interaction_handler = handler
+
+    async def request_user_input(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Pause one tool call until the active UI returns a validated response."""
+        if self._user_interaction_handler is None:
+            from naumi_agent.user_interaction import UserInteractionUnavailableError
+
+            raise UserInteractionUnavailableError("当前界面不支持结构化交互")
+        return await self._user_interaction_handler(payload)
 
     def list_permission_grants(self) -> tuple[PermissionGrant, ...]:
         """Return active grants for the current session only."""

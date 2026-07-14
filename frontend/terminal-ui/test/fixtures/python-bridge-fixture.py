@@ -265,6 +265,7 @@ class FakeEngine:
         self.agent_control = FakeAgentControl(self)
         self.subagent_manager = FakeSubAgentManager(self)
         self.permission_confirmer = None
+        self.user_interaction_handler = None
         self._session = None
 
     async def get_or_create_session(self) -> Any:
@@ -278,6 +279,9 @@ class FakeEngine:
 
     def set_permission_confirmer(self, confirmer: Any) -> None:
         self.permission_confirmer = confirmer
+
+    def set_user_interaction_handler(self, handler: Any) -> None:
+        self.user_interaction_handler = handler
 
     def set_runtime_mode(self, mode: str) -> AgentRuntimeMode:
         self.runtime_mode = AgentRuntimeMode(mode)

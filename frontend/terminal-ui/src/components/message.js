@@ -5,6 +5,7 @@ import { ActivityCard } from "./activity-card.js";
 import { CompletionReceiptCard } from "./completion-receipt-card.js";
 import { EventCard } from "./event-card.js";
 import { PermissionCard } from "./permission-card.js";
+import { InteractionCard } from "./interaction-card.js";
 import { PermissionPanel } from "./permission-panel.js";
 import { RunActivityCard } from "./run-activity-card.js";
 import { TaskPanel } from "./task-panel.js";
@@ -44,6 +45,9 @@ export function renderMessage(message, width, ctx = { width }) {
   }
   if (message.kind === "permission") {
     return renderComponent(PermissionCard({ permission: message }), ctx);
+  }
+  if (message.kind === "interaction") {
+    return renderComponent(InteractionCard({ interaction: message }), ctx);
   }
   if (message.kind === "system") {
     if (message.title === "tasks") {

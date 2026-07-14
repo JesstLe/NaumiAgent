@@ -160,6 +160,24 @@ attachJsonlLineReader(process.stdin, (line) => {
     if (payload.text === "保持未确认") {
       return;
     }
+    if (payload.text === "需要选择") {
+      activeRun = { requestId: record.id, intent: "chat" };
+      emit("run/started", {}, record.id);
+      emit("user/message", { content: payload.text }, record.id);
+      emit("interaction/request", {
+        request_id: "ask-fixture-1",
+        header: "实现策略",
+        question: "请选择执行方案",
+        options: [
+          { value: "safe", label: "安全方案", description: "保留兼容路径" },
+          { value: "fast", label: "快速方案", description: "优先交付速度" },
+        ],
+        allow_custom: true,
+        custom_label: "其他方案",
+        status: "needs_input",
+      }, "ask-fixture-1");
+      return;
+    }
     if ((payload.text ?? "").includes("bad bridge event")) {
       process.stdout.write('{"type":"unknown/server","payload":{}}\n');
       return;
@@ -185,6 +203,25 @@ attachJsonlLineReader(process.stdin, (line) => {
       tool_name: "bash_run",
       reason: "需要启动本地预览服务。",
     }, "perm-1");
+    return;
+  }
+
+  if (record.type === "interaction_response") {
+    const value = String(payload.value ?? "");
+    const label = value === "fast" ? "快速方案" : "安全方案";
+    emit("interaction/resolved", {
+      request_id: payload.request_id,
+      status: "answered",
+      kind: payload.kind || "option",
+      value,
+      label,
+      custom_text: payload.custom_text || "",
+    }, record.id);
+    emitUi({ type: "assistant_stream", phase: "start" });
+    emitUi({ type: "assistant_stream", phase: "token", content: `已按${label}继续。` });
+    emitUi({ type: "assistant_stream", phase: "end" });
+    emit("run/completed", { status: "completed" }, activeRun?.requestId);
+    activeRun = null;
     return;
   }
 

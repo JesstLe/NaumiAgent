@@ -56,6 +56,7 @@ from naumi_agent.ui.protocol import (
     make_envelope,
     normalize_client_record,
 )
+from naumi_agent.user_interaction import UserInteractionUnavailableError
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 
@@ -186,6 +187,7 @@ class _FakeEngine:
         self.usage = AgentUsage(total_input_tokens=12, total_output_tokens=3, turns=1)
         self.router = _FakeRouter()
         self.permission_confirmer = None
+        self.user_interaction_handler = None
         self.shutdown_called = False
         self._session = None
         self._config = SimpleNamespace(ui=SimpleNamespace(show_reasoning=False))
@@ -193,6 +195,9 @@ class _FakeEngine:
 
     def set_permission_confirmer(self, confirmer: Any) -> None:
         self.permission_confirmer = confirmer
+
+    def set_user_interaction_handler(self, handler: Any) -> None:
+        self.user_interaction_handler = handler
 
     def reset(self) -> None:
         self._session = None
@@ -3270,3 +3275,156 @@ async def test_bridge_renders_doctor_report_as_system_notice(
     assert message["level"] == "warn"
     assert "browser daemon" in message["content"]
     assert any(record["type"] == "runtime/status" for record in records)
+
+
+def _interaction_payload() -> dict[str, Any]:
+    return {
+        "header": "实现策略",
+        "question": "请选择持久化范围",
+        "options": [
+            {"value": "workspace", "label": "工作区", "description": "仓库共享"},
+            {"value": "session", "label": "当前会话", "description": "仅本会话"},
+        ],
+        "allow_custom": True,
+        "custom_label": "其他方案",
+    }
+
+
+@pytest.mark.asyncio
+async def test_bridge_suspends_interaction_until_matching_response() -> None:
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    pending = asyncio.create_task(engine.user_interaction_handler(_interaction_payload()))
+    await asyncio.sleep(0)
+    request = next(record for record in _records(writer) if record["type"] == "interaction/request")
+    assert request["payload"]["options"][0]["value"] == "workspace"
+    assert pending.done() is False
+
+    await bridge.handle_client_record(
+        {
+            "id": "interaction-answer-1",
+            "type": "interaction_response",
+            "payload": {
+                "request_id": request["payload"]["request_id"],
+                "kind": "option",
+                "value": "session",
+            },
+        }
+    )
+
+    assert await pending == {
+        "kind": "option",
+        "value": "session",
+        "label": "当前会话",
+        "custom_text": "",
+    }
+    resolved = next(
+        record for record in _records(writer)
+        if record["type"] == "interaction/resolved"
+    )
+    assert resolved["payload"]["value"] == "session"
+
+
+@pytest.mark.asyncio
+async def test_bridge_rejects_invalid_interaction_without_resolving_pending() -> None:
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    pending = asyncio.create_task(engine.user_interaction_handler(_interaction_payload()))
+    await asyncio.sleep(0)
+    request = next(record for record in _records(writer) if record["type"] == "interaction/request")
+
+    await bridge.handle_client_record(
+        {
+            "id": "interaction-answer-bad",
+            "type": "interaction_response",
+            "payload": {
+                "request_id": request["payload"]["request_id"],
+                "kind": "option",
+                "value": "unknown",
+            },
+        }
+    )
+
+    assert pending.done() is False
+    error = next(record for record in _records(writer) if record["type"] == "error")
+    assert error["payload"]["code"] == "interaction_response_invalid"
+
+    await bridge.handle_client_record(
+        {
+            "id": "interaction-answer-good",
+            "type": "interaction_response",
+            "payload": {
+                "request_id": request["payload"]["request_id"],
+                "kind": "custom",
+                "custom_text": "由配置决定",
+            },
+        }
+    )
+    assert (await pending)["custom_text"] == "由配置决定"
+
+
+@pytest.mark.asyncio
+async def test_bridge_keeps_parallel_interaction_responses_isolated() -> None:
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    first = asyncio.create_task(engine.user_interaction_handler(_interaction_payload()))
+    second = asyncio.create_task(engine.user_interaction_handler({
+        **_interaction_payload(),
+        "question": "第二个问题",
+    }))
+    await asyncio.sleep(0)
+    requests = [record for record in _records(writer) if record["type"] == "interaction/request"]
+    assert len(requests) == 2
+    first_request = next(
+        record for record in requests if record["payload"]["question"] == "请选择持久化范围"
+    )
+    second_request = next(
+        record for record in requests if record["payload"]["question"] == "第二个问题"
+    )
+
+    await bridge.handle_client_record({
+        "id": "answer-second",
+        "type": "interaction_response",
+        "payload": {
+            "request_id": second_request["payload"]["request_id"],
+            "kind": "option",
+            "value": "session",
+        },
+    })
+    assert (await asyncio.wait_for(second, timeout=2))["value"] == "session"
+    assert first.done() is False
+
+    await bridge.handle_client_record({
+        "id": "answer-first",
+        "type": "interaction_response",
+        "payload": {
+            "request_id": first_request["payload"]["request_id"],
+            "kind": "option",
+            "value": "workspace",
+        },
+    })
+    assert (await asyncio.wait_for(first, timeout=2))["value"] == "workspace"
+
+
+@pytest.mark.asyncio
+async def test_bridge_shutdown_releases_pending_interaction() -> None:
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    pending = asyncio.create_task(engine.user_interaction_handler(_interaction_payload()))
+    await asyncio.sleep(0)
+    await bridge.shutdown()
+
+    with pytest.raises(UserInteractionUnavailableError, match="界面已关闭"):
+        await pending

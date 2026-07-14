@@ -39,6 +39,40 @@ export function PermissionFooter({ permission }) {
   };
 }
 
+export function InteractionFooter({ interaction }) {
+  return {
+    render(ctx) {
+      if (!interaction) return [];
+      const payload = interaction.payload ?? {};
+      const options = Array.isArray(payload.options) ? payload.options : [];
+      const rows = [
+        color(ANSI.cyan, compactText(payload.header || "需要你的选择", 80)),
+        compactText(payload.question || "请选择一个选项。", 500),
+      ];
+      if (interaction.customMode) {
+        rows.push(color(ANSI.yellow, payload.custom_label || "其他"));
+        rows.push(...renderInputLinesWithCursor(interaction, Math.max(1, ctx.width - 8), 4));
+        rows.push(color(ANSI.dim, "Enter 提交 · Esc 返回选项 · Ctrl+C 取消运行"));
+      } else {
+        options.forEach((option, index) => {
+          const marker = interaction.selectedIndex === index ? "›" : " ";
+          const description = option.description ? ` · ${compactText(option.description, 180)}` : "";
+          rows.push(`${color(interaction.selectedIndex === index ? ANSI.yellow : ANSI.dim, marker)} ${index + 1}. ${compactText(option.label, 80)}${description}`);
+        });
+        if (payload.allow_custom) {
+          const index = options.length;
+          const marker = interaction.selectedIndex === index ? "›" : " ";
+          rows.push(`${color(interaction.selectedIndex === index ? ANSI.yellow : ANSI.dim, marker)} ${index + 1}. ${payload.custom_label || "其他"}`);
+        }
+        rows.push(color(ANSI.dim, interaction.submitting
+          ? "正在提交回答..."
+          : "↑/↓ 选择 · 数字定位 · Enter 确认 · Ctrl+C 取消运行"));
+      }
+      return boxLines("需要你的选择", rows, ctx.width);
+    },
+  };
+}
+
 export function TodoFooter({ todo }) {
   return {
     render(ctx) {
@@ -235,6 +269,7 @@ export function renderFooterSections(state, width, env = {}) {
   const ctx = { width };
   return [
     { name: "permission", lines: PermissionFooter({ permission: state.permission }).render(ctx) },
+    { name: "interaction", lines: state.permission ? [] : InteractionFooter({ interaction: state.interaction }).render(ctx) },
     { name: "agents", lines: AgentControlFooter({ agents: state.agents }).render(ctx) },
     { name: "todo", lines: TodoFooter({ todo: state.todo }).render(ctx) },
     { name: "task-selection", lines: TaskSelectionFooter({ taskPanel: state.taskPanel }).render(ctx) },
@@ -244,9 +279,9 @@ export function renderFooterSections(state, width, env = {}) {
     { name: "status", lines: StatusFooter({ state, env }).render(ctx) },
     {
       name: "prompt",
-      lines: state.agents?.open ? [] : PromptFooter({ state }).render(ctx),
+      lines: state.agents?.open || state.interaction ? [] : PromptFooter({ state }).render(ctx),
     },
-    { name: "help", lines: state.agents?.open ? [] : HelpFooter().render(ctx) },
+    { name: "help", lines: state.agents?.open || state.interaction ? [] : HelpFooter().render(ctx) },
   ].filter((section) => section.lines.length > 0);
 }
 
@@ -258,5 +293,6 @@ function formatTaskActivity(tasks) {
   if (Number(tasks.subagents_active) > 0) parts.push(`agent ${Number(tasks.subagents_active)}`);
   if (Number(tasks.browser_active) > 0) parts.push(`browser ${Number(tasks.browser_active)}`);
   if (Number(tasks.permissions_pending) > 0) parts.push(`perm ${Number(tasks.permissions_pending)}`);
+  if (Number(tasks.interactions_pending) > 0) parts.push(`ask ${Number(tasks.interactions_pending)}`);
   return parts.join(" ");
 }

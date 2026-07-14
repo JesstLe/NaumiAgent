@@ -5,6 +5,7 @@ import json
 import logging
 
 import pytest
+from textual.widgets import Input
 
 from naumi_agent.config.settings import AppConfig, ModelConfig, ModelMeta
 from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
@@ -16,6 +17,7 @@ from naumi_agent.tui.app import (
     PermissionConfirmScreen,
     StatusBar,
     TodoBar,
+    UserInteractionScreen,
     _build_textual_bindings,
     _capture_tui_terminal_noise,
     _captured_terminal_text,
@@ -396,6 +398,53 @@ class TestNaumiApp:
             choice = await asyncio.wait_for(task, timeout=2)
 
         assert choice == "allow"
+
+    @pytest.mark.asyncio
+    async def test_user_interaction_modal_supports_arrow_choice(self) -> None:
+        engine = AgentEngine(AppConfig())
+        app = NaumiApp(engine)
+        async with app.run_test(size=(100, 30)) as pilot:
+            task = asyncio.create_task(engine.request_user_input({
+                "header": "实现策略",
+                "question": "请选择执行方案",
+                "options": [
+                    {"value": "safe", "label": "安全方案", "description": "保留兼容路径"},
+                    {"value": "fast", "label": "快速方案", "description": "优先交付速度"},
+                ],
+                "allow_custom": True,
+                "custom_label": "其他方案",
+            }))
+            await pilot.pause(0.1)
+            assert isinstance(app.screen, UserInteractionScreen)
+            await pilot.press("down", "enter")
+            result = await asyncio.wait_for(task, timeout=2)
+
+        assert result == {"kind": "option", "value": "fast"}
+
+    @pytest.mark.asyncio
+    async def test_user_interaction_modal_accepts_custom_text(self) -> None:
+        engine = AgentEngine(AppConfig())
+        app = NaumiApp(engine)
+        async with app.run_test(size=(100, 30)) as pilot:
+            task = asyncio.create_task(engine.request_user_input({
+                "header": "实现策略",
+                "question": "请选择执行方案",
+                "options": [
+                    {"value": "safe", "label": "安全方案", "description": "保留兼容路径"},
+                    {"value": "fast", "label": "快速方案", "description": "优先交付速度"},
+                ],
+                "allow_custom": True,
+                "custom_label": "其他方案",
+            }))
+            await pilot.pause(0.1)
+            await pilot.click("#interaction-custom")
+            custom = app.screen.query_one("#interaction-custom-input", Input)
+            custom.value = "仅当前工作区"
+            custom.focus()
+            await pilot.press("enter")
+            result = await asyncio.wait_for(task, timeout=2)
+
+        assert result == {"kind": "custom", "custom_text": "仅当前工作区"}
 
     @pytest.mark.asyncio
     async def test_shift_tab_cycles_runtime_mode_in_status_bar(self) -> None:

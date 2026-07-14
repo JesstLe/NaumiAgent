@@ -444,6 +444,25 @@ test("normalizeServerRecord stabilizes bridge payloads", () => {
   });
 
   assert.deepEqual(normalizeServerRecord({
+    type: "interaction/request",
+    payload: {
+      request_id: 7,
+      header: "实现策略",
+      question: "请选择",
+      options: [{ value: 1, label: "A", description: null }],
+      allow_custom: 1,
+      custom_label: null,
+    },
+  }).payload, {
+    request_id: "7",
+    header: "实现策略",
+    question: "请选择",
+    options: [{ value: "1", label: "A", description: "" }],
+    allow_custom: true,
+    custom_label: "其他",
+  });
+
+  assert.deepEqual(normalizeServerRecord({
     type: "permission/grants_changed",
     payload: { revoked: "2", grants: [{ grant_id: 7, tool_family: "shell" }, null] },
   }).payload, {

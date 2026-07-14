@@ -35,6 +35,12 @@ from naumi_agent.ui.protocol import (
     normalize_client_record,
     ui_message_payload,
 )
+from naumi_agent.user_interaction import (
+    UserInteractionRequest,
+    UserInteractionUnavailableError,
+    normalize_interaction_request,
+    normalize_interaction_response,
+)
 from naumi_agent.workbench.models import ParallelMode, RiskLevel
 
 logger = logging.getLogger(__name__)
@@ -63,6 +69,15 @@ class PendingPermission:
     choices: tuple[str, ...]
     session_id: str
     call_id: str
+
+
+@dataclass
+class PendingInteraction:
+    """One model-initiated question waiting for an exact frontend response."""
+
+    future: asyncio.Future[dict[str, str]]
+    request: UserInteractionRequest
+    public_payload: dict[str, Any]
 
 
 def _backend_choices_error_message(kind: str) -> str:
@@ -410,12 +425,14 @@ class JsonlEngineBridge:
         self._agents_snapshot: AgentControlSnapshot | None = None
         self._cli_supported_commands = _load_cli_slash_commands_with_alias()
         self._pending_permissions: dict[str, PendingPermission] = {}
+        self._pending_interactions: dict[str, PendingInteraction] = {}
         config = getattr(self.engine, "_config", None)
         ui_config = getattr(config, "ui", None)
         self._show_reasoning = bool(getattr(ui_config, "show_reasoning", False))
         self._closed = False
 
         self.engine.set_permission_confirmer(self.confirm_permission)
+        self.engine.set_user_interaction_handler(self.request_user_interaction)
 
     def bind_writer(self, writer: TextIO) -> None:
         self._writer = writer
@@ -538,6 +555,7 @@ class JsonlEngineBridge:
             "subagents_active": 0,
             "browser_active": 0,
             "permissions_pending": len(self._pending_permissions),
+            "interactions_pending": len(self._pending_interactions),
         }
 
         try:
@@ -627,6 +645,10 @@ class JsonlEngineBridge:
 
         if event_type == ClientEventType.PERMISSION_RESPONSE:
             await self.resolve_permission(payload, request_id=request_id)
+            return
+
+        if event_type == ClientEventType.INTERACTION_RESPONSE:
+            await self.resolve_user_interaction(payload, request_id=request_id)
             return
 
         if event_type == ClientEventType.PERMISSION_REVOKE:
@@ -1874,6 +1896,76 @@ class JsonlEngineBridge:
             if self._pending_permissions.get(request_id) is pending:
                 self._pending_permissions.pop(request_id, None)
 
+    async def request_user_interaction(self, payload: dict[str, Any]) -> dict[str, str]:
+        """Emit one validated interaction and suspend its calling tool."""
+        if self._closed:
+            raise UserInteractionUnavailableError("界面已关闭，无法继续询问用户")
+        request = normalize_interaction_request(payload)
+        request_id = self._next_interaction_request_id()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict[str, str]] = loop.create_future()
+        public_payload = {
+            "request_id": request_id,
+            "session_id": str(getattr(getattr(self.engine, "_session", None), "id", "") or ""),
+            "run_id": str(self._active_run_context.get("run_id") or ""),
+            "agent_name": str(payload.get("agent_name") or "main"),
+            **request.to_public_dict(),
+            "status": "needs_input",
+        }
+        pending = PendingInteraction(
+            future=future,
+            request=request,
+            public_payload=public_payload,
+        )
+        self._pending_interactions[request_id] = pending
+        await self.emit(
+            ServerEventType.INTERACTION_REQUEST,
+            public_payload,
+            request_id=request_id,
+        )
+        try:
+            return await future
+        finally:
+            if self._pending_interactions.get(request_id) is pending:
+                self._pending_interactions.pop(request_id, None)
+
+    def _next_interaction_request_id(self) -> str:
+        while True:
+            request_id = f"ask-{uuid4().hex}"
+            if request_id not in self._pending_interactions:
+                return request_id
+
+    async def resolve_user_interaction(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        interaction_id = str(payload.get("request_id") or "").strip()
+        pending = self._pending_interactions.get(interaction_id)
+        if pending is None or pending.future.done():
+            await self.emit_error(
+                f"未找到待回答的用户交互: {interaction_id or '-'}",
+                code="unknown_interaction_request",
+                request_id=request_id,
+            )
+            return
+        try:
+            response = normalize_interaction_response(pending.request, payload)
+        except ValueError as exc:
+            await self.emit_error(
+                str(exc),
+                code="interaction_response_invalid",
+                request_id=request_id,
+            )
+            return
+        pending.future.set_result(response)
+        await self.emit(
+            ServerEventType.INTERACTION_RESOLVED,
+            {"request_id": interaction_id, "status": "answered", **response},
+            request_id=request_id,
+        )
+
     def _next_permission_request_id(self) -> str:
         while True:
             request_id = f"perm-{uuid4().hex}"
@@ -1989,6 +2081,12 @@ class JsonlEngineBridge:
             if not pending.future.done():
                 pending.future.set_result("deny")
         self._pending_permissions.clear()
+        for pending in list(self._pending_interactions.values()):
+            if not pending.future.done():
+                pending.future.set_exception(
+                    UserInteractionUnavailableError("界面已关闭，无法继续询问用户")
+                )
+        self._pending_interactions.clear()
         if self._run_task is not None and not self._run_task.done():
             self._run_task.cancel()
             try:

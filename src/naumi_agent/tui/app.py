@@ -898,6 +898,134 @@ class PermissionConfirmScreen(ModalScreen[str]):
         self.dismiss(str(event.button.id or "deny"))
 
 
+class UserInteractionScreen(ModalScreen[dict[str, str]]):
+    """Structured choice and custom-input modal for model questions."""
+
+    DEFAULT_CSS = """
+    UserInteractionScreen {
+        align: center middle;
+    }
+    UserInteractionScreen > Container {
+        width: 78;
+        max-width: 92%;
+        height: auto;
+        max-height: 90%;
+        padding: 1 2;
+        border: thick $accent 80%;
+        background: $surface;
+    }
+    UserInteractionScreen Label {
+        width: 1fr;
+        margin: 0 0 1 0;
+    }
+    UserInteractionScreen Button {
+        width: 1fr;
+        margin: 0 0 1 0;
+    }
+    UserInteractionScreen Input {
+        width: 1fr;
+        margin: 0 0 1 0;
+    }
+    UserInteractionScreen .interaction-help {
+        color: $text-muted;
+        margin: 0;
+    }
+    UserInteractionScreen .interaction-error {
+        color: $error;
+        margin: 0 0 1 0;
+    }
+    """
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        super().__init__()
+        self.payload = payload
+
+    def compose(self) -> ComposeResult:
+        from textual.widgets import Label
+
+        with Container():
+            yield Label(f"[bold]{self.payload.get('header') or '需要你的选择'}[/bold]")
+            yield Label(str(self.payload.get("question") or "请选择一个选项。"))
+            for index, option in enumerate(self.payload.get("options") or []):
+                description = str(option.get("description") or "")
+                suffix = f"\n[dim]{description}[/dim]" if description else ""
+                yield Button(
+                    f"{index + 1}. {option.get('label') or option.get('value')}{suffix}",
+                    id=f"interaction-choice-{index}",
+                )
+            if self.payload.get("allow_custom", True):
+                yield Button(
+                    str(self.payload.get("custom_label") or "其他"),
+                    id="interaction-custom",
+                )
+            custom_input = Input(
+                placeholder="输入自定义答案后按 Enter",
+                id="interaction-custom-input",
+                max_length=4_000,
+            )
+            custom_input.display = False
+            yield custom_input
+            error = Static("", id="interaction-error", classes="interaction-error")
+            error.display = False
+            yield error
+            yield Static(
+                "↑/↓ 选择 · Enter 确认 · Ctrl+C 取消运行",
+                classes="interaction-help",
+            )
+
+    def on_mount(self) -> None:
+        buttons = list(self.query(Button))
+        if buttons:
+            buttons[0].focus()
+
+    def on_key(self, event: Key) -> None:
+        custom_input = self.query_one("#interaction-custom-input", Input)
+        if custom_input.display:
+            if event.key == "escape":
+                custom_input.display = False
+                custom_input.value = ""
+                buttons = list(self.query(Button))
+                if buttons:
+                    buttons[0].focus()
+                event.stop()
+            return
+        if event.key not in {"up", "down"}:
+            return
+        buttons = list(self.query(Button))
+        if not buttons:
+            return
+        focused = self.focused
+        index = buttons.index(focused) if focused in buttons else 0
+        offset = -1 if event.key == "up" else 1
+        buttons[(index + offset) % len(buttons)].focus()
+        event.stop()
+
+    @on(Button.Pressed)
+    def on_interaction_button(self, event: Button.Pressed) -> None:
+        button_id = str(event.button.id or "")
+        if button_id == "interaction-custom":
+            custom_input = self.query_one("#interaction-custom-input", Input)
+            custom_input.display = True
+            custom_input.focus()
+            return
+        if not button_id.startswith("interaction-choice-"):
+            return
+        index = int(button_id.rsplit("-", 1)[-1])
+        options = self.payload.get("options") or []
+        if 0 <= index < len(options):
+            self.dismiss({"kind": "option", "value": str(options[index].get("value") or "")})
+
+    @on(Input.Submitted, "#interaction-custom-input")
+    def on_custom_submitted(self, event: Input.Submitted) -> None:
+        text = event.value.strip()
+        error = self.query_one("#interaction-error", Static)
+        if not text:
+            error.update("自定义答案不能为空。")
+            error.display = True
+            return
+        self.dismiss({"kind": "custom", "custom_text": text})
+
+
 class SessionEntry(Static):
     """单个会话条目 — 可点击加载，右侧删除按钮."""
 
@@ -1426,7 +1554,9 @@ class NaumiApp(App):
         self.debug_trace = debug_trace
         self._show_reasoning = show_reasoning
         self._slash_frontend = _TuiSlashCommandFrontend(self)
+        self._interaction_lock = asyncio.Lock()
         self.engine.set_permission_confirmer(self.confirm_permission)
+        self.engine.set_user_interaction_handler(self.request_user_interaction)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -1493,6 +1623,19 @@ class NaumiApp(App):
                 {"tool_name": payload.get("tool_name"), "choice": choice},
             )
         return choice
+
+    async def request_user_interaction(self, payload: dict[str, Any]) -> dict[str, str]:
+        """Serialize model questions and return the exact modal response."""
+        async with self._interaction_lock:
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future[dict[str, str]] = loop.create_future()
+
+            def on_answer(answer: dict[str, str] | None) -> None:
+                if not future.done():
+                    future.set_result(dict(answer or {}))
+
+            self.push_screen(UserInteractionScreen(payload), on_answer)
+            return await future
 
     def _show_startup_status(self) -> None:
         """Show model, budget, and context info in status bar on startup."""
