@@ -33,6 +33,7 @@ from naumi_agent.api.schemas import (
     SessionCreate,
     SessionListResponse,
     SessionResponse,
+    SessionUpdate,
 )
 from naumi_agent.runs.store import ChatRunRecord, ChatRunStore, SourceReferenceRecord
 from naumi_agent.streaming.events import EventType, StreamEvent
@@ -51,6 +52,36 @@ async def create_session(body: SessionCreate, request: Request, auth: str = Auth
         model=body.model,
         system_prompt=body.system_prompt,
     )
+    return _session_to_response(session)
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionResponse)
+async def update_session(
+    session_id: str,
+    body: SessionUpdate,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if body.model is not None:
+        session.model = body.model
+    if body.title is not None:
+        session.title = body.title
+    if body.system_prompt is not None:
+        # Re-write system message if one exists, otherwise append.
+        system_index = next(
+            (i for i, m in enumerate(session.messages) if m.get("role") == "system"),
+            None,
+        )
+        if system_index is not None:
+            session.messages[system_index]["content"] = body.system_prompt
+        else:
+            session.add_message("system", body.system_prompt)
+    session.updated_at = datetime.now()
+    await engine.session_store.save(session)
     return _session_to_response(session)
 
 

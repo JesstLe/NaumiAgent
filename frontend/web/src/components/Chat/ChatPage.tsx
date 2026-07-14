@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Send, PlusCircle, Loader2, Brain, Cpu, Zap } from 'lucide-react'
 import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
@@ -12,13 +12,34 @@ const MODE_ICON: Record<RuntimeMode, typeof Brain> = {
   bypass: Zap,
 }
 
+// Supported models exposed by the workbench. In a future phase this list
+// should come from the backend capabilities endpoint.
+const AVAILABLE_MODELS = [
+  { id: 'kimi-for-coding', label: 'Kimi Coding' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet' },
+  { id: 'gpt-4o', label: 'GPT-4o' },
+]
+
 export function ChatPage() {
   const { t } = useTranslation()
   const { client, currentSessionId, snapshot } = useWorkbenchConnection()
+  const sessions = useSessionStore((state) => state.sessions)
   const messages = useSessionStore((state) => state.messages)
   const appendMessage = useSessionStore((state) => state.appendMessage)
   const setMessages = useSessionStore((state) => state.setMessages)
   const setError = useSessionStore((state) => state.setError)
+  const currentSession = useMemo(
+    () => sessions.find((s) => s.id === currentSessionId),
+    [sessions, currentSessionId],
+  )
+  const currentModel = currentSession?.model ?? 'kimi-for-coding'
+  const [selectedModel, setSelectedModel] = useState(currentModel)
+  const [savingModel, setSavingModel] = useState(false)
+
+  useEffect(() => {
+    setSelectedModel(currentModel)
+  }, [currentModel])
+
   const [input, setInput] = useState('')
   const [createIssue, setCreateIssue] = useState(false)
   const [isSending, setIsSending] = useState(false)
@@ -96,6 +117,19 @@ export function ChatPage() {
     }
   }, [client, currentSessionId, input, isSending, runtimeMode, createIssue, snapshot, appendMessage, setError])
 
+  const handleModelChange = async (modelId: string) => {
+    if (!client || !currentSessionId || savingModel) return
+    setSavingModel(true)
+    try {
+      const updated = await client.updateSession(currentSessionId, { model: modelId })
+      setSelectedModel(updated.model)
+    } catch (error) {
+      setError(isApiException(error) ? error.message : String(error))
+    } finally {
+      setSavingModel(false)
+    }
+  }
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
@@ -121,7 +155,22 @@ export function ChatPage() {
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs text-neutral-600">
             <span>{t('chat.model')}:</span>
-            <span className="font-medium text-neutral-900">{snapshot?.summary.current_mission_title ? 'kimi' : '—'}</span>
+            {savingModel ? (
+              <Loader2 className="w-3 h-3 animate-spin text-neutral-500" />
+            ) : (
+              <select
+                value={selectedModel}
+                onChange={(e) => handleModelChange(e.target.value)}
+                disabled={savingModel}
+                className="bg-transparent font-medium text-neutral-900 focus:outline-none text-xs"
+              >
+                {AVAILABLE_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
           <button className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-md">
             <PlusCircle className="w-4 h-4" /> {t('action.newMission')}

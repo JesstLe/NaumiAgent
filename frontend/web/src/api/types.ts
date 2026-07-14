@@ -380,6 +380,12 @@ export interface PermissionResolution {
   decision: 'allow' | 'deny' | 'bypass'
 }
 
+export interface SessionUpdate {
+  title?: string
+  model?: string
+  system_prompt?: string
+}
+
 export interface ChatEnvironmentResponse {
   session_id: string
   workspace_root: string
