@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from naumi_agent.api.chat_environment import ChatEnvironmentCollector
@@ -25,6 +25,8 @@ from naumi_agent.api.schemas import (
     ChatRunStepResponse,
     ChatSourceCreate,
     ChatSourceReferenceResponse,
+    GitDiffFileResponse,
+    GitDiffResponse,
     MessageCreate,
     MessageListResponse,
     MessageResponse,
@@ -33,6 +35,7 @@ from naumi_agent.api.schemas import (
     SessionCreate,
     SessionListResponse,
     SessionResponse,
+    SessionUpdate,
 )
 from naumi_agent.runs.store import ChatRunRecord, ChatRunStore, SourceReferenceRecord
 from naumi_agent.streaming.events import EventType, StreamEvent
@@ -51,6 +54,36 @@ async def create_session(body: SessionCreate, request: Request, auth: str = Auth
         model=body.model,
         system_prompt=body.system_prompt,
     )
+    return _session_to_response(session)
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionResponse)
+async def update_session(
+    session_id: str,
+    body: SessionUpdate,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if body.model is not None:
+        session.model = body.model
+    if body.title is not None:
+        session.title = body.title
+    if body.system_prompt is not None:
+        # Re-write system message if one exists, otherwise append.
+        system_index = next(
+            (i for i, m in enumerate(session.messages) if m.get("role") == "system"),
+            None,
+        )
+        if system_index is not None:
+            session.messages[system_index]["content"] = body.system_prompt
+        else:
+            session.add_message("system", body.system_prompt)
+    session.updated_at = datetime.now()
+    await engine.session_store.save(session)
     return _session_to_response(session)
 
 
@@ -256,6 +289,97 @@ async def get_chat_environment(
         sources=[
             ChatSourceReferenceResponse(**asdict(source)) for source in snapshot.sources
         ],
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/git-diff",
+    response_model=GitDiffResponse,
+)
+async def get_git_diff(
+    session_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    if not await engine.session_store.load(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        diff = await ChatEnvironmentCollector(
+            workspace_root=engine.workspace_root,
+            background_store=engine.background_runner.store,
+            chat_run_store=_chat_run_store(request),
+        ).collect_diff()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Git diff failed: {exc}") from exc
+    return GitDiffResponse(
+        available=diff.available,
+        branch=diff.branch,
+        upstream=diff.upstream,
+        ahead=diff.ahead,
+        behind=diff.behind,
+        error=diff.error,
+        files=[
+            GitDiffFileResponse(
+                path=file.path,
+                status=file.status,
+                stage=file.stage,
+                additions=file.additions,
+                deletions=file.deletions,
+                patch=file.patch,
+            )
+            for file in diff.files
+        ],
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/upload",
+    response_model=ChatSourceReferenceResponse,
+    status_code=201,
+)
+async def upload_chat_source(
+    session_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if file.filename is None:
+        raise HTTPException(status_code=400, detail="Missing filename")
+
+    workspace_root = Path(engine.workspace_root).expanduser().resolve()
+    upload_dir = workspace_root / ".naumi" / "uploads" / session_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    target_path = upload_dir / Path(file.filename).name
+
+    try:
+        content = await file.read()
+        target_path.write_bytes(content)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {exc}") from exc
+
+    try:
+        relative_path = str(target_path.resolve().relative_to(workspace_root))
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="Upload path is outside workspace") from exc
+
+    source = await _chat_run_store(request).add_source(
+        session_id=session_id,
+        kind="file",
+        title=target_path.name,
+        path=relative_path,
+    )
+    return ChatSourceReferenceResponse(
+        id=source.id,
+        kind=source.kind,
+        title=source.title,
+        path=source.path,
+        run_id=source.run_id,
+        created_at=source.created_at,
     )
 
 

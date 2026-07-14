@@ -1,21 +1,71 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Send, PlusCircle, Loader2 } from 'lucide-react'
+import { Send, PlusCircle, Loader2, Brain, Cpu, Zap, Paperclip, X } from 'lucide-react'
 import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
 import { useSessionStore } from '@/stores/sessionStore'
 import { isApiException } from '@/api/ApiException'
+import { MessageBubble } from './MessageBubble'
+import type { RuntimeMode, ChatSource } from '@/api/types'
+
+const MODE_ICON: Record<RuntimeMode, typeof Brain> = {
+  default: Brain,
+  plan: Cpu,
+  bypass: Zap,
+}
+
+// Supported models exposed by the workbench. In a future phase this list
+// should come from the backend capabilities endpoint.
+const AVAILABLE_MODELS = [
+  { id: 'kimi-for-coding', label: 'Kimi Coding' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet' },
+  { id: 'gpt-4o', label: 'GPT-4o' },
+]
 
 export function ChatPage() {
   const { t } = useTranslation()
   const { client, currentSessionId, snapshot } = useWorkbenchConnection()
+  const sessions = useSessionStore((state) => state.sessions)
   const messages = useSessionStore((state) => state.messages)
   const appendMessage = useSessionStore((state) => state.appendMessage)
   const setMessages = useSessionStore((state) => state.setMessages)
   const setError = useSessionStore((state) => state.setError)
+  const currentSession = useMemo(
+    () => sessions.find((s) => s.id === currentSessionId),
+    [sessions, currentSessionId],
+  )
+  const currentModel = currentSession?.model ?? 'kimi-for-coding'
+  const [selectedModel, setSelectedModel] = useState(currentModel)
+  const [savingModel, setSavingModel] = useState(false)
+
+  useEffect(() => {
+    setSelectedModel(currentModel)
+  }, [currentModel])
+
   const [input, setInput] = useState('')
   const [createIssue, setCreateIssue] = useState(false)
   const [isSending, setIsSending] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>('default')
+  const [sources, setSources] = useState<ChatSource[]>([])
+  const pendingPermissions = useSessionStore((state) => state.pendingPermissions)
+  const removePendingPermission = useSessionStore((state) => state.removePendingPermission)
+  const [resolvingId, setResolvingId] = useState<string | null>(null)
+
+  const handleResolvePermission = async (callId: string, decision: 'allow' | 'deny' | 'bypass') => {
+    if (!client || !currentSessionId || resolvingId) return
+    setResolvingId(callId)
+    try {
+      await client.resolvePermission(currentSessionId, callId, { decision })
+      removePendingPermission(callId)
+    } catch (error) {
+      setError(isApiException(error) ? error.message : String(error))
+    } finally {
+      setResolvingId(null)
+    }
+  }
+
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -51,7 +101,47 @@ export function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const handleSend = async () => {
+  useEffect(() => {
+    if (!client || !currentSessionId) {
+      setSources([])
+      return
+    }
+    let cancelled = false
+    client
+      .fetchChatEnvironment(currentSessionId)
+      .then((env) => {
+        if (!cancelled) setSources(env.sources)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [client, currentSessionId])
+
+  const handleUpload = async (file: File) => {
+    if (!client || !currentSessionId) return
+    setUploading(true)
+    try {
+      const source = await client.uploadChatSource(currentSessionId, file)
+      setSources((prev) => [...prev, source])
+    } catch (error) {
+      setError(isApiException(error) ? error.message : String(error))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) void handleUpload(file)
+    e.target.value = ''
+  }
+
+  const handleRemoveSource = (sourceId: string) => {
+    setSources((prev) => prev.filter((s) => s.id !== sourceId))
+  }
+
+  const handleSend = useCallback(async () => {
     if (!client || !currentSessionId || !input.trim() || isSending) return
 
     const content = input.trim()
@@ -71,6 +161,8 @@ export function ChatPage() {
     try {
       const response = await client.sendMessage(currentSessionId, {
         content,
+        runtime_mode: runtimeMode,
+        source_ids: sources.map((s) => s.id),
         workbench_issue: createIssue
           ? {
               mission_id: snapshot?.missions[0]?.id ?? 'default',
@@ -85,6 +177,34 @@ export function ChatPage() {
     } finally {
       setIsSending(false)
     }
+  }, [client, currentSessionId, input, isSending, runtimeMode, createIssue, snapshot, appendMessage, setError])
+
+  const handleModelChange = async (modelId: string) => {
+    if (!client || !currentSessionId || savingModel) return
+    setSavingModel(true)
+    try {
+      const updated = await client.updateSession(currentSessionId, { model: modelId })
+      setSelectedModel(updated.model)
+    } catch (error) {
+      setError(isApiException(error) ? error.message : String(error))
+    } finally {
+      setSavingModel(false)
+    }
+  }
+
+  const handleEditMessage = async (message: { id: string; content: string }, newContent: string) => {
+    if (!client || !currentSessionId || newContent === message.content) return
+    // Truncate the conversation to just before this message, then resend the
+    // edited message. This is a frontend-driven edit: we drop everything after
+    // the edited user message and re-run the turn.
+    const index = messages.findIndex((m) => m.id === message.id)
+    if (index === -1) return
+    const keptMessages = messages.slice(0, index)
+    setMessages(keptMessages)
+    setInput(newContent)
+    // The user can press send to dispatch the edited message; this keeps the
+    // edit flow explicit and lets the user review before regenerating.
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
   }
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -109,9 +229,30 @@ export function ChatPage() {
           <div className="font-medium text-neutral-900">{snapshot?.summary.current_mission_title || t('chat.title')}</div>
           <div className="text-xs text-neutral-500">{currentSessionId}</div>
         </div>
-        <button className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-md">
-          <PlusCircle className="w-4 h-4" /> {t('action.newMission')}
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs text-neutral-600">
+            <span>{t('chat.model')}:</span>
+            {savingModel ? (
+              <Loader2 className="w-3 h-3 animate-spin text-neutral-500" />
+            ) : (
+              <select
+                value={selectedModel}
+                onChange={(e) => handleModelChange(e.target.value)}
+                disabled={savingModel}
+                className="bg-transparent font-medium text-neutral-900 focus:outline-none text-xs"
+              >
+                {AVAILABLE_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+          <button className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-md">
+            <PlusCircle className="w-4 h-4" /> {t('action.newMission')}
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-neutral-50">
@@ -124,22 +265,101 @@ export function ChatPage() {
           <div className="text-center text-sm text-neutral-500 py-12">{t('chat.emptyState')}</div>
         )}
         {messages.map((message) => (
-          <div
+          <MessageBubble
             key={message.id}
-            className={`max-w-3xl rounded-lg px-4 py-3 text-sm ${
-              message.role === 'user'
-                ? 'ml-auto bg-blue-600 text-white'
-                : 'bg-white text-neutral-800 shadow-sm'
-            }`}
-          >
-            {message.content}
-          </div>
+            message={message}
+            onEdit={message.role === 'user' ? handleEditMessage : undefined}
+          />
         ))}
         <div ref={bottomRef} />
       </div>
 
       <div className="p-4 border-t border-neutral-200 bg-white">
+        {pendingPermissions.length > 0 && (
+          <div className="mb-3 space-y-2">
+            {pendingPermissions.map((permission) => (
+              <div
+                key={permission.call_id}
+                className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm"
+              >
+                <div className="font-medium text-amber-900">
+                  {t('chat.permission')} · {permission.agent_name} / {permission.tool_name}
+                </div>
+                {permission.reason && (
+                  <div className="mt-1 text-amber-800">
+                    {t('chat.permissionReason')}: {permission.reason}
+                  </div>
+                )}
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleResolvePermission(permission.call_id, 'allow')}
+                    disabled={resolvingId === permission.call_id}
+                    className="rounded-md bg-success px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+                  >
+                    {t('chat.permissionAllow')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleResolvePermission(permission.call_id, 'deny')}
+                    disabled={resolvingId === permission.call_id}
+                    className="rounded-md border border-danger px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
+                  >
+                    {t('chat.permissionDeny')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleResolvePermission(permission.call_id, 'bypass')}
+                    disabled={resolvingId === permission.call_id}
+                    className="rounded-md border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                  >
+                    {t('chat.permissionBypass')}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-xs text-neutral-500">{t('chat.thinking')}:</span>
+          {(['default', 'plan', 'bypass'] as RuntimeMode[]).map((mode) => {
+            const Icon = MODE_ICON[mode]
+            const active = runtimeMode === mode
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setRuntimeMode(mode)}
+                disabled={isSending}
+                className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs border transition-colors ${
+                  active
+                    ? 'bg-blue-50 border-blue-200 text-blue-700'
+                    : 'bg-white border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+                } disabled:opacity-50`}
+              >
+                <Icon className="w-3 h-3" />
+                {t(`chat.thinking${mode.charAt(0).toUpperCase() + mode.slice(1)}` as const)}
+              </button>
+            )
+          })}
+        </div>
         <div className="flex items-start gap-3">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            title={t('chat.uploadFile')}
+            className="flex items-center justify-center w-9 h-9 rounded-md border border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0"
+          >
+            {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+          </button>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -149,6 +369,28 @@ export function ChatPage() {
             className="flex-1 min-h-[80px] max-h-40 px-3 py-2 rounded-md border border-neutral-200 bg-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50"
           />
         </div>
+
+        {sources.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            <span className="text-xs text-neutral-500">{t('chat.sources')}:</span>
+            {sources.map((source) => (
+              <span
+                key={source.id}
+                className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-0.5 text-xs text-blue-700 border border-blue-100"
+              >
+                {source.title}
+                <button
+                  type="button"
+                  onClick={() => handleRemoveSource(source.id)}
+                  className="text-blue-400 hover:text-blue-700"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
         <div className="flex items-center justify-between mt-3">
           <label className="flex items-center gap-2 text-sm text-neutral-600 cursor-pointer select-none">
             <input

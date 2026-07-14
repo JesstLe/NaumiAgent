@@ -213,6 +213,32 @@ const messages = {
   total: 0,
 }
 
+const chatEnvironment = {
+  session_id: SESSION_ID,
+  workspace_root: '.',
+  workspace_name: 'naumiagent',
+  sources: [],
+}
+
+const gitDiff = {
+  available: true,
+  branch: 'main',
+  upstream: 'origin/main',
+  ahead: 1,
+  behind: 0,
+  error: '',
+  files: [
+    {
+      path: 'src/main.py',
+      status: 'M',
+      stage: 'unstaged',
+      additions: 12,
+      deletions: 4,
+      patch: '@@ -1,4 +1,12 @@\n+def hello():\n+    pass\n',
+    },
+  ],
+}
+
 /**
  * Install route handlers that mock the full Workbench API.
  * WebSocket upgrade requests are aborted so the coordinator's event stream
@@ -243,6 +269,12 @@ export async function mockWorkbenchApi(page: Page): Promise<void> {
     }
     if (url.includes('/sessions/') && url.includes('/messages')) {
       return route.fulfill({ status: 200, json: messages })
+    }
+    if (url.includes('/sessions/') && url.includes('/environment')) {
+      return route.fulfill({ status: 200, json: chatEnvironment })
+    }
+    if (url.includes('/sessions/') && url.includes('/git-diff')) {
+      return route.fulfill({ status: 200, json: gitDiff })
     }
     if (url.includes('/issues') && !url.includes('/claim')) {
       return route.fulfill({ status: 200, json: { issues: snapshot.issues, mission_id: null, risk_level: null, status: null, limit: 100 } })

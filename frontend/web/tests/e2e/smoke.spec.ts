@@ -55,7 +55,7 @@ test.describe('Workbench smoke', () => {
   test('task market shows the create-issue button', async ({ page }) => {
     await expect(page.getByPlaceholder('输入问题或指令...')).toBeVisible({ timeout: 15000 })
     await page.getByRole('link', { name: '任务市场' }).click()
-    await expect(page.getByRole('button', { name: '新建任务' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '新建任务' }).first()).toBeVisible()
   })
 
   test('can switch language to English', async ({ page }) => {

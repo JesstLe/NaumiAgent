@@ -358,7 +358,61 @@ export interface MessageResponse {
   content: string
   timestamp: string
   metadata: Record<string, unknown>
+  model?: string
 }
+
+export interface ChatSource {
+  id: string
+  kind: 'file' | 'screenshot'
+  title: string
+  path: string
+  run_id: string
+  created_at: string
+}
+
+export interface ChatSourceCreate {
+  path: string
+  kind?: 'file' | 'screenshot'
+  title?: string
+}
+
+export interface PermissionResolution {
+  decision: 'allow' | 'deny' | 'bypass'
+}
+
+export interface SessionUpdate {
+  title?: string
+  model?: string
+  system_prompt?: string
+}
+
+export interface ChatEnvironmentResponse {
+  session_id: string
+  workspace_root: string
+  workspace_name: string
+  sources: ChatSource[]
+}
+
+export interface GitDiffFile {
+  path: string
+  status: string
+  stage: string
+  additions: number
+  deletions: number
+  patch: string
+}
+
+export interface GitDiffResponse {
+  available: boolean
+  branch: string
+  upstream: string
+  ahead: number
+  behind: number
+  error: string
+  files: GitDiffFile[]
+}
+
+export type RuntimeMode = 'default' | 'plan' | 'bypass'
 
 export interface MissionsResponse {
   missions: Mission[]
