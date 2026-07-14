@@ -1274,6 +1274,33 @@ test("slash commands route through protocol without adding chat noise", () => {
   assert.deepEqual(state.folds, {});
 });
 
+test("local exit commands never enter transport or the outbox", () => {
+  for (const command of ["/q", "/quit", "/exit", "  /Q  "]) {
+    const state = createInitialState();
+    const sent = [];
+
+    const action = handleSubmitText(state, command, (type, payload) => sent.push({ type, payload }));
+
+    assert.deepEqual(action, { type: "exit" });
+    assert.deepEqual(sent, []);
+    assert.equal(state.messages.some((message) => message.localOutbox), false);
+  }
+});
+
+test("commands that only start like an exit command remain user messages", () => {
+  const state = createInitialState();
+  const sent = [];
+
+  const message = handleSubmitText(state, "/query current status", (type, payload, options = {}) => {
+    sent.push({ type, payload });
+    return options.id;
+  });
+
+  assert.equal(message.content, "/query current status");
+  assert.deepEqual(sent, [{ type: "submit", payload: { text: "/query current status" } }]);
+  assert.equal(state.messages.filter((item) => item.localOutbox).length, 1);
+});
+
 test("task panel can be pinned, refreshed, and updated in place", () => {
   const state = createInitialState();
   const sent = [];

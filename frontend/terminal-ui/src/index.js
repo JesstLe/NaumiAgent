@@ -91,6 +91,11 @@ const args = parseArgs(process.argv.slice(2));
 const terminalCapabilities = detectTerminalCapabilities();
 const state = createInitialState();
 const uiStateStore = loadUiStateStore(process.cwd());
+const launchUiStateStore = {
+  ...uiStateStore,
+  sessions: { ...uiStateStore.sessions },
+};
+const explicitlyRestoredSessionIds = new Set();
 state.inputHistory = getProjectInputHistory(uiStateStore);
 let debugLog = null;
 
@@ -185,9 +190,7 @@ function main() {
   });
 
   setupTerminal();
-  restoreUiSnapshot(state.currentSessionId);
   send("hello", { client: "naumi-terminal-ui" });
-  if (state.inspector.open) requestRuntimeInspectorSnapshot();
   redraw();
 }
 
@@ -309,19 +312,13 @@ function handleBridgeLine(line) {
   syncWorkingAnimation();
   if (state.currentSessionId !== previousSessionId) {
     setUiSnapshot(uiStateStore, previousSessionId, previousSnapshot);
-    restoreUiSnapshot(state.currentSessionId);
-    if (state.inspector.open) requestRuntimeInspectorSnapshot();
-    if (state.agents.open) requestAgentControlSnapshot();
   }
   if (record.type === "session/replayed") {
+    restoreUiSnapshot(state.currentSessionId, { preferLaunchSnapshot: true });
     resetHistorySearch(state);
     jumpTimelineToLatest(state);
-    if (state.inspector.open && state.currentSessionId === previousSessionId) {
-      requestRuntimeInspectorSnapshot();
-    }
-    if (state.agents.open && state.currentSessionId === previousSessionId) {
-      requestAgentControlSnapshot();
-    }
+    if (state.inspector.open) requestRuntimeInspectorSnapshot();
+    if (state.agents.open) requestAgentControlSnapshot();
   }
   if (!(record.type === "ui/message" && record.payload?.type === "thinking" && !state.showReasoning)) {
     markTimelineOutput(state, record, timelineEntryId(record));
@@ -639,7 +636,12 @@ function submitComposer() {
     return false;
   }
   const text = state.input;
-  handleSubmitText(state, text, send);
+  const action = handleSubmitText(state, text, send);
+  if (action?.type === "exit") {
+    clearInput(state);
+    exit();
+    return true;
+  }
   rememberSubmittedInput(state, text);
   setProjectInputHistory(uiStateStore, state.inputHistory);
   clearInput(state);
@@ -749,10 +751,16 @@ function handleTaskPanelFocusedKey(chunk) {
   return false;
 }
 
-function restoreUiSnapshot(sessionId) {
+function restoreUiSnapshot(sessionId, { preferLaunchSnapshot = false } = {}) {
   resetHistorySearch(state);
   resetSlashCompletion(state);
-  applyUiSnapshot(state, getUiSnapshot(uiStateStore, sessionId));
+  const normalizedSessionId = String(sessionId || "");
+  const launchSnapshot = preferLaunchSnapshot
+    && !explicitlyRestoredSessionIds.has(normalizedSessionId)
+    ? getUiSnapshot(launchUiStateStore, normalizedSessionId)
+    : null;
+  applyUiSnapshot(state, launchSnapshot ?? getUiSnapshot(uiStateStore, normalizedSessionId));
+  if (preferLaunchSnapshot) explicitlyRestoredSessionIds.add(normalizedSessionId);
 }
 
 function requestRuntimeInspectorSnapshot() {

@@ -65,6 +65,33 @@ test("terminal UI effort command uses shared Python backend and refreshed status
   }
 });
 
+test("terminal UI exits locally on slash q without submitting it", async () => {
+  const app = launchTerminalUi("fake-bridge.js");
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    app.stdin.write("/q\n");
+    const [code] = await once(app, "exit");
+
+    assert.equal(code, 0);
+    const events = readDebugEvents(app.debugLogPath);
+    assert.equal(
+      events.filter(
+        (record) => record.event === "protocol.send"
+          && record.payload.record.type === "submit",
+      ).length,
+      0,
+    );
+    assert(events.some(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "shutdown",
+    ));
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process handles submit, mode switch, permission, and tool rendering", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);
@@ -848,7 +875,7 @@ test("terminal UI process inserts Shift Enter and submits multiline text with Ct
   }
 });
 
-test("terminal UI process restores an unsubmitted multiline draft after restart", async () => {
+test("terminal UI process starts with an empty composer instead of restoring a draft", async () => {
   const statePath = path.join(
     tmpdir(),
     `naumi-terminal-ui-draft-${Date.now()}-${Math.random()}.json`,
@@ -866,8 +893,11 @@ test("terminal UI process restores an unsubmitted multiline draft after restart"
     const second = launchTerminalUi("fake-bridge.js", { statePath });
     const secondOutput = collectOutput(second);
     try {
-      await waitForOutput(secondOutput, "保留第一行", 3000);
-      await waitForOutput(secondOutput, "保留第二行▌", 3000);
+      await waitForReadyWelcome(secondOutput, 7000);
+      await delay(200);
+      assert.equal(latestScreen(secondOutput).includes("保留第一行"), false);
+      assert.equal(latestScreen(secondOutput).includes("保留第二行"), false);
+      assert(latestScreen(secondOutput).includes("chat > ▌"));
       assert.equal(await stopTerminalUi(second), 0);
     } finally {
       forceKill(second);
@@ -971,25 +1001,28 @@ test("terminal UI process shows queued, accepted, failed, and retried delivery l
   }
 });
 
-test("terminal UI process restores queued outbox as uncertain without automatic resend", async () => {
+test("terminal UI keeps queued outbox hidden until an explicit session load", async () => {
   const statePath = path.join(
     tmpdir(),
     `naumi-terminal-ui-outbox-${Date.now()}-${Math.random()}.json`,
   );
-  const first = launchTerminalUi("message-lifecycle-bridge.js", { statePath });
+  const first = launchTerminalUi("fake-bridge.js", { statePath });
   const firstOutput = collectOutput(first);
 
   try {
     await waitForReadyWelcome(firstOutput, 7000);
-    first.stdin.write("等待重启确认\n");
+    first.stdin.write("/load archived-outbox-session\n");
+    await waitForLatestScreen(firstOutput, "已恢复会话", 7000);
+    first.stdin.write("保持未确认\n");
     await waitForLatestScreen(firstOutput, "发送中...");
     assert.equal(await stopTerminalUi(first), 0);
 
-    const second = launchTerminalUi("message-lifecycle-bridge.js", { statePath });
+    const second = launchTerminalUi("fake-bridge.js", { statePath });
     const secondOutput = collectOutput(second);
     try {
-      await waitForLatestScreen(secondOutput, "发送状态待确认");
-      await delay(250);
+      await waitForReadyWelcome(secondOutput, 7000);
+      await delay(200);
+      assert.equal(latestScreen(secondOutput).includes("保持未确认"), false);
       assert.equal(
         readDebugEvents(second.debugLogPath).filter(
           (record) => record.event === "protocol.send" && record.payload.record.type === "submit",
@@ -997,13 +1030,15 @@ test("terminal UI process restores queued outbox as uncertain without automatic 
         0,
       );
 
-      second.stdin.write("/retry\n");
-      await waitForLatestScreen(secondOutput, "已确认普通消息");
-      const retrySubmit = readDebugEvents(second.debugLogPath).find(
-        (record) => record.event === "protocol.send" && record.payload.record.type === "submit",
+      second.stdin.write("/load archived-outbox-session\n");
+      await waitForLatestScreen(secondOutput, "发送状态待确认", 7000);
+      assert(latestScreen(secondOutput).includes("保持未确认"));
+      assert.equal(
+        readDebugEvents(second.debugLogPath).filter(
+          (record) => record.event === "protocol.send" && record.payload.record.type === "submit",
+        ).length,
+        0,
       );
-      assert(retrySubmit);
-      assert.equal(retrySubmit.payload.record.payload.text, "等待重启确认");
       assert.equal(await stopTerminalUi(second), 0);
     } finally {
       forceKill(second);
@@ -1259,7 +1294,7 @@ test("terminal UI permission modal wins over agent page action keys", async () =
   }
 });
 
-test("terminal UI process restores an open agent page with a fresh backend snapshot", async () => {
+test("terminal UI agent page only restores after an explicit session load", async () => {
   const statePath = path.join(
     tmpdir(),
     `naumi-terminal-ui-agents-${Date.now()}-${Math.random()}.json`,
@@ -1276,6 +1311,18 @@ test("terminal UI process restores an open agent page with a fresh backend snaps
     const second = launchTerminalUi("fake-bridge.js", { statePath });
     const secondOutput = collectOutput(second);
     try {
+      await waitForReadyWelcome(secondOutput, 7000);
+      await delay(200);
+      assert.equal(latestScreen(secondOutput).includes("Agent Control Center"), false);
+      assert.equal(
+        readDebugEvents(second.debugLogPath).some(
+          (record) => record.event === "protocol.send"
+            && record.payload.record.type === "agents/request",
+        ),
+        false,
+      );
+
+      second.stdin.write("/load session-fake-1\n");
       await waitForLatestScreen(secondOutput, "Agent Control Center", 7000);
       await waitForLatestScreen(secondOutput, "真实编程 Agent", 7000);
       const request = readDebugEvents(second.debugLogPath).find(
@@ -1295,7 +1342,7 @@ test("terminal UI process restores an open agent page with a fresh backend snaps
   }
 });
 
-test("terminal UI process restores an open session inspector with a fresh backend snapshot", async () => {
+test("terminal UI inspector only restores after an explicit session load", async () => {
   const statePath = path.join(
     tmpdir(),
     `naumi-terminal-ui-inspector-${Date.now()}-${Math.random()}.json`,
@@ -1305,6 +1352,8 @@ test("terminal UI process restores an open session inspector with a fresh backen
 
   try {
     await waitForReadyWelcome(firstOutput, 7000);
+    first.stdin.write("/load archived-inspector-session\n");
+    await waitForLatestScreen(firstOutput, "已恢复会话", 7000);
     first.stdin.write("\x1b[105;5u");
     await waitForLatestScreen(firstOutput, "Runtime Inspector");
     assert.equal(await stopTerminalUi(first), 0);
@@ -1312,6 +1361,18 @@ test("terminal UI process restores an open session inspector with a fresh backen
     const second = launchTerminalUi("fake-bridge.js", { statePath });
     const secondOutput = collectOutput(second);
     try {
+      await waitForReadyWelcome(secondOutput, 7000);
+      await delay(200);
+      assert.equal(latestScreen(secondOutput).includes("Runtime Inspector"), false);
+      assert.equal(
+        readDebugEvents(second.debugLogPath).some(
+          (record) => record.event === "protocol.send"
+            && record.payload.record.type === "inspector/request",
+        ),
+        false,
+      );
+
+      second.stdin.write("/load archived-inspector-session\n");
       await waitForLatestScreen(secondOutput, "Runtime Inspector", 7000);
       await waitForLatestScreen(secondOutput, "保持运行检查器实时更新", 7000);
       const request = readDebugEvents(second.debugLogPath).find(
@@ -1320,7 +1381,7 @@ test("terminal UI process restores an open session inspector with a fresh backen
           && record.payload.record.payload.open === true,
       );
       assert(request);
-      assert.equal(request.payload.record.payload.session_id, "session-fake-1");
+      assert.equal(request.payload.record.payload.session_id, "archived-inspector-session");
       assert.equal(await stopTerminalUi(second), 0);
     } finally {
       forceKill(second);

@@ -157,6 +157,9 @@ attachJsonlLineReader(process.stdin, (line) => {
   }
 
   if (record.type === "submit") {
+    if (payload.text === "保持未确认") {
+      return;
+    }
     if ((payload.text ?? "").includes("bad bridge event")) {
       process.stdout.write('{"type":"unknown/server","payload":{}}\n');
       return;
