@@ -1,5 +1,8 @@
 # NaumiAgent Harness 知识地图
 
+> H4.5 之后的开发模块、交接和验收见 `docs/development/harness/README.md`；自进化闭环见
+> `docs/development/self-evolution/README.md`。
+
 本文是仓库 Harness 的权威入口。它描述已经存在的 H1/H2 能力，以及 H3 已落地并接入
 Engine final 的安全 CheckRunner 与 Completion Gate；未来阶段记录在
 [debt.md](debt.md)，不会伪装成已实现功能。

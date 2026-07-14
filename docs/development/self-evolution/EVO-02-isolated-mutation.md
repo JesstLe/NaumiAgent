@@ -1,0 +1,31 @@
+# EVO-02 隔离变异与补丁生成
+
+## 目标
+
+所有自我修改在专用临时 worktree/沙箱中进行，保护主工作树、用户未提交改动和受保护模块；变异
+以 patch artifact 表示，可审查、可复现、可丢弃。
+
+## 子模块
+
+- EVO-02.1 Experiment contract：candidate、baseline commit、scope、budget、allowed tools/checks。
+- EVO-02.2 Worktree lease：唯一目录、branch、owner、expiry、cleanup/tombstone。
+- EVO-02.3 Source snapshot：baseline tree/profile/config/tool versions digest。
+- EVO-02.4 Mutation planner：最小变更、目标文件、测试先行、禁止无关重构。
+- EVO-02.5 Patch writer：原子修改、diff size/file count/API change 限制。
+- EVO-02.6 Static guard：protected modules、path escape、secret、binary、generated file。
+- EVO-02.7 Mutation receipt：diff digest、files、rationale、attempt、tool evidence。
+
+## 安全边界
+
+- 不在当前 checkout 直接写；不使用 `git checkout` 覆盖用户改动。
+- 安全、权限、更新签名、secret storage、migration runner 默认为 protected。
+- bypass 只允许已授权 experiment scope，不扩大 protected scope。
+- 网络默认关闭；安装依赖必须在 contract 声明并记录 lockfile 差异。
+
+## 验收标准
+
+- 主工作树 dirty 时 experiment 仍隔离，结束后原字节和 index 不变。
+- 进程崩溃后 lease/tombstone 可清理，不误删其他 worktree。
+- 越界路径、symlink escape、protected module、超文件/行数变更被机械拒绝。
+- 同 baseline+candidate+seed 可重建相同 experiment manifest。
+- 失败 patch 保留证据但不进入验证/推广。

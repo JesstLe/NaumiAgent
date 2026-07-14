@@ -1,5 +1,8 @@
 # Claude Code 终端 UI 源码审计与迁入映射
 
+> 后续开发权威入口：`docs/development/claude-source/README.md`。本文是 2026-06-02 附近的
+> 审计快照；继续迁入前必须执行 `CC-01` 重新核对 source commit、dirty 状态和许可证证据。
+
 ## 结论
 
 本地源码位置：`/Users/lv/Workspace/claude-code`。

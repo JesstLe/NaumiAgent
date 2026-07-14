@@ -1,5 +1,8 @@
 # NaumiAgent CLI/TUI Claude Code 化路线图
 
+> 后续开发权威入口：`docs/development/cli-ui/README.md`。本文保留历史路线和已完成事实；
+> 2026-07-15 之后的新模块、依赖与验收以 `UI-10` 至 `UI-17` 模块册为准。
+
 本文档规划 NaumiAgent CLI/TUI 交互层的三阶段重构路线。早期假设是不引入 Claude Code 源码；当前用户已确认本地 `/Users/lv/Workspace/claude-code` 可开源复用，因此路线调整为：审查并映射迁入 Claude Code 的终端 UI 结构、状态模型、组件设计和交互细节，同时保持 NaumiAgent 的 Python `AgentEngine/tools/memory/safety/task/background/debug_trace` 作为后端能力核心。
 
 本轮源码审计和迁入映射见 `docs/14-claude-code-source-audit.md` 与 `frontend/terminal-ui/cc-source-map.json`。

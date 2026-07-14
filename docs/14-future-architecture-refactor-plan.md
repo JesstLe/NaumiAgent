@@ -1,5 +1,8 @@
 # NaumiAgent 未来架构重构方案
 
+> 后续开发权威入口：`docs/development/architecture/README.md`。本文保留总体架构论证；
+> 实施以 `ARC-01` 至 `ARC-08` 的独立模块、依赖门和验收标准为准。
+
 本文档从 NaumiAgent 的终极产品形态出发，规划未来架构重构路线，并回答一个核心问题：
 
 > NaumiAgent 是否有必要重构？是否应该换语言？
