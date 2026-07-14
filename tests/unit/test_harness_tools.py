@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from naumi_agent.harness.service import HarnessService
+from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.tools import create_harness_tools
 from naumi_agent.harness.trust import HarnessTrustStore
 
@@ -16,6 +17,7 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
     service = HarnessService(
         workspace_root=workspace,
         trust_store=HarnessTrustStore(tmp_path / "trust.db"),
+        store=HarnessStore(tmp_path / "harness.db"),
     )
 
     tools = create_harness_tools(service)
@@ -23,11 +25,12 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
     assert [tool.name for tool in tools] == [
         "harness_status",
         "harness_doctor",
+        "harness_explain",
         "harness_read_knowledge",
         "harness_run_check",
     ]
-    assert all(tool.metadata.read_only for tool in tools[:3])
-    assert not tools[3].metadata.read_only
+    assert all(tool.metadata.read_only for tool in tools[:4])
+    assert not tools[4].metadata.read_only
     assert all(tool.metadata.concurrency_safe for tool in tools)
     assert all(
         tool.parameters_schema == {"type": "object", "properties": {}}
@@ -35,6 +38,7 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
     )
     assert "尚未配置" in await tools[0].execute()
     assert "诊断" in await tools[1].execute()
+    assert "没有找到" in await tools[2].execute()
     assert all(tool.name not in {"harness_trust", "harness_untrust"} for tool in tools)
 
 
@@ -48,9 +52,31 @@ async def test_harness_check_tool_uses_service_and_validates_arguments(
         workspace_root=workspace,
         trust_store=HarnessTrustStore(tmp_path / "trust.db"),
     )
-    tool = create_harness_tools(service)[3]
+    tool = create_harness_tools(service)[4]
 
     assert tool.metadata.concurrency_safe
     assert tool.parameters_schema["required"] == ["check_id", "run_id"]
     assert "参数无效" in await tool.execute(check_id=1, run_id="run-1")
     assert "尚未配置" in await tool.execute(check_id="unit", run_id="run-1")
+
+
+@pytest.mark.asyncio
+async def test_harness_explain_tool_validates_run_id(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    service = HarnessService(
+        workspace_root=workspace,
+        trust_store=HarnessTrustStore(tmp_path / "trust.db"),
+        store=HarnessStore(tmp_path / "harness.db"),
+    )
+    tool = next(
+        item for item in create_harness_tools(service)
+        if item.name == "harness_explain"
+    )
+
+    assert tool.metadata.read_only
+    assert tool.metadata.concurrency_safe
+    assert set(tool.parameters_schema["properties"]) == {"run_id"}
+    assert tool.parameters_schema["additionalProperties"] is False
+    assert "参数无效" in await tool.execute(run_id=1)
+    assert "没有找到" in await tool.execute(run_id="latest")

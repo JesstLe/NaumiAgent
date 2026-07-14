@@ -44,6 +44,7 @@ async def test_knowledge_tool_schema_metadata_and_shared_service(tmp_path: Path)
     assert [item.name for item in tools] == [
         "harness_status",
         "harness_doctor",
+        "harness_explain",
         "harness_read_knowledge",
         "harness_run_check",
     ]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from naumi_agent.harness.explain import render_harness_explanation
 from naumi_agent.harness.service import (
     HarnessService,
     render_harness_check,
@@ -18,6 +19,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
     return [
         HarnessStatusTool(service),
         HarnessDoctorTool(service),
+        HarnessExplainTool(service),
         HarnessReadKnowledgeTool(service),
         HarnessRunCheckTool(service),
     ]
@@ -65,6 +67,52 @@ class HarnessDoctorTool(_HarnessReadOnlyTool):
 
     async def execute(self, **kwargs: Any) -> str:
         return render_harness_doctor(await self._service.doctor())
+
+
+class HarnessExplainTool(_HarnessReadOnlyTool):
+    @property
+    def name(self) -> str:
+        return "harness_explain"
+
+    @property
+    def description(self) -> str:
+        return "解释当前工作区最近一次或指定 Harness 运行的完成与失败原因"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name=self.description,
+            search_hint=(
+                "harness explain run failure receipt check evidence why status"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "run_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": "可选 Harness run id；省略或 latest 表示当前工作区最新运行",
+                }
+            },
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        run_id = kwargs.get("run_id")
+        if run_id is not None and not isinstance(run_id, str):
+            return "Harness 解释参数无效：run_id 必须是字符串。"
+        try:
+            result = await self._service.explain_run(run_id)
+        except ValueError as exc:
+            return f"Harness 解释参数无效：{exc}"
+        return render_harness_explanation(result)
 
 
 class HarnessReadKnowledgeTool(_HarnessReadOnlyTool):

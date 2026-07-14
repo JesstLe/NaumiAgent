@@ -9,6 +9,16 @@ import pytest
 
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.harness.checks import HarnessCheckResult, HarnessCheckStatus
+from naumi_agent.harness.completion import (
+    HarnessCompletionReceipt,
+    HarnessReceiptCheck,
+)
+from naumi_agent.harness.models import HarnessCompletionContract, HarnessTaskKind
+from naumi_agent.harness.service import HarnessService
+from naumi_agent.harness.store import HarnessStore
+from naumi_agent.harness.tools import create_harness_tools
+from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.orchestrator.engine import AgentEngine
 
 PROFILE = """\
@@ -71,10 +81,13 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
     try:
         status = engine.tool_registry.get("harness_status")
         doctor = engine.tool_registry.get("harness_doctor")
+        explain = engine.tool_registry.get("harness_explain")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
         check = engine.tool_registry.get("harness_run_check")
         assert status is not None and status.metadata.read_only
         assert doctor is not None and doctor.metadata.read_only
+        assert explain is not None and explain.metadata.read_only
+        assert explain.metadata.concurrency_safe
         assert knowledge is not None and knowledge.metadata.read_only
         assert knowledge.metadata.concurrency_safe
         assert check is not None and not check.metadata.read_only
@@ -148,5 +161,93 @@ async def test_harness_slash_doctor_and_invalid_usage_are_actionable(
         assert "用法" in missing_knowledge
         assert "用法" in invalid_knowledge
         assert "No closing quotation" not in malformed
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> None:
+    engine = _engine(tmp_path)
+    store = engine.harness_service.store
+    assert store is not None
+    contract = HarnessCompletionContract(
+        run_id="slash-failed-run",
+        session_id="slash-session",
+        task_kind=HarnessTaskKind.CHANGE,
+        objective="通过命令解释失败检查",
+        required_checks=("unit",),
+    )
+    try:
+        await store.start_run(
+            workspace_root=engine.workspace_root,
+            contract=contract,
+            tree_fingerprint_before="a" * 64,
+            started_at="2026-07-15T10:00:00+00:00",
+        )
+        check = HarnessCheckResult(
+            check_id="unit",
+            run_id=contract.run_id,
+            status=HarnessCheckStatus.FAILED,
+            tree_fingerprint="b" * 64,
+            profile_digest="c" * 64,
+            message="检查失败",
+            output="raw output must not be rendered",
+            exit_code=1,
+            duration_ms=9,
+        )
+        await store.record_check(
+            result=check,
+            argv=("python3", "-m", "pytest", "tests/unit/test_small.py"),
+            cwd=engine.workspace_root,
+            started_at="2026-07-15T10:00:01+00:00",
+            completed_at="2026-07-15T10:00:02+00:00",
+        )
+        await store.finish_run(
+            run_id=contract.run_id,
+            receipt=HarnessCompletionReceipt(
+                run_id=contract.run_id,
+                status="completed_unverified",
+                task_kind=HarnessTaskKind.CHANGE,
+                changed_files=("source.py",),
+                checks=(
+                    HarnessReceiptCheck(
+                        id="unit",
+                        status="failed",
+                        tree_fingerprint="b" * 64,
+                    ),
+                ),
+                criteria=(),
+                warnings=("必需检查 unit 状态为 failed，不能作为通过证据。",),
+                tree_fingerprint="b" * 64,
+            ),
+            completed_at="2026-07-15T10:00:03+00:00",
+        )
+        restored_service = HarnessService(
+            workspace_root=engine.workspace_root,
+            trust_store=HarnessTrustStore(tmp_path / "restored-trust.db"),
+            store=HarnessStore(store.db_path),
+        )
+        engine.harness_service = restored_service
+        for tool in create_harness_tools(restored_service):
+            engine.tool_registry.register(tool)
+
+        explained = _plain(
+            await execute_slash_command(engine, "/harness explain latest")
+        )
+        explain_tool = engine.tool_registry.get("harness_explain")
+        assert explain_tool is not None
+        tool_explained = await explain_tool.execute(run_id=contract.run_id)
+        invalid = _plain(
+            await execute_slash_command(engine, "/harness explain one two")
+        )
+
+        assert "slash-failed-run" in explained
+        assert "verification_failure" in explained
+        assert "重新运行" in explained
+        assert "raw output must not be rendered" not in explained
+        assert "slash-failed-run" in tool_explained
+        assert "verification_failure" in tool_explained
+        assert "raw output must not be rendered" not in tool_explained
+        assert "用法" in invalid
     finally:
         await engine.shutdown()
