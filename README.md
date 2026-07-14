@@ -10,7 +10,7 @@
 
 核心能力包括：
 
-- **多模型路由**：通过 LiteLLM 统一调用模型，支持 fast/capable/reasoning tier。
+- **多模型路由**：通过 LiteLLM 统一调用模型，支持 fast/capable/reasoning tier、模型发现与能力校验后的思考强度。
 - **工具执行**：文件读写、代码执行、shell、Web、浏览器、记忆、任务、调度等工具走统一权限与预算控制。
 - **会话与记忆**：SQLite 会话历史、Chroma 长期记忆、上下文压缩、`/resume` 与 `/history` 恢复链路。
 - **运行态面板**：`/todo`、`/tasks`、`/runtime` 汇总 todo、subagent、后台任务、浏览器任务和 hook 状态。
@@ -114,11 +114,18 @@ models:
   default_model: "openai/kimi-for-coding"
   fast_model: "openai/kimi-for-coding"
   reasoning_model: "openai/kimi-for-coding"
+  reasoning_effort: auto
   temperature: 1.0
   api_base: "https://api.kimi.com/coding/v1"
 ```
 
 `workspace_root: "."` 表示文件工具和 shell 默认作用于启动 `naumi` 时的当前目录。
+
+项目配置、provider 目录和运行数据分别建议放在 `.naumi/config.yaml`、
+`.naumi/providers.json` 和 `.naumi/data/`；密钥只放系统凭据库或环境变量。支持思考强度的
+模型需要在 provider catalog 的 `capabilities.reasoning` 或 `models.model_info` 中声明真实
+可用档位，NaumiAgent 不会盲目透传未验证值。完整配置见
+[模型、Provider 与思考强度配置](docs/15-model-provider-configuration.md)。
 
 ### 启动
 
@@ -160,7 +167,8 @@ NAUMI_SHOW_STARTUP_WARNINGS=1 naumi chat
 
 | 类别 | 命令 | 用途 |
 | --- | --- | --- |
-| 基础 | `/help` `/keybindings` `/style` `/doctor` | 查看帮助、快捷键、主题与运行环境诊断 |
+| 基础 | `/help` `/keybindings` `/style` `/doctor` `/model` | 查看帮助、快捷键、主题、诊断与模型配置 |
+| 模型 | `/models` `/effort` `/reasoning` | 发现模型、切换模型思考强度、显示或隐藏思考文本 |
 | 文件 | `/glob` `/grep` `/read` `/write` `/edit` | 通过 Agent 工具路径搜索、读取和修改文件 |
 | 会话 | `/history` `/resume` `/load <id>` `/new` `/clear` | 查看、恢复、加载、保存新开或清空当前会话 |
 | 调试 | `/copy <all|last|error>` `/debug` `/debug-replay` `/diff` | 导出 transcript、查看结构化调试日志与 git diff |
@@ -229,6 +237,7 @@ docker compose up --build
 - [安全与护栏](docs/07-safety-guardrails.md)
 - [终端 UI 集成](docs/terminal-ui-integration.md)
 - [CLI/TUI 路线图](docs/13-cli-tui-claude-code-roadmap.md)
+- [模型、Provider 与思考强度配置](docs/15-model-provider-configuration.md)
 
 ## License
 

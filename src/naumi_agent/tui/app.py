@@ -1223,6 +1223,8 @@ class StatusBar(Static):
     status_text: reactive[str] = reactive("就绪")
     mode_text: reactive[str] = reactive("default")
     session_text: reactive[str] = reactive("会话:-")
+    reasoning_text: reactive[str] = reactive("off")
+    effort_text: reactive[str] = reactive("auto")
     debug_trace: Any | None = None
 
     def watch_mode_text(self, text: str) -> None:
@@ -1235,8 +1237,19 @@ class StatusBar(Static):
             self.debug_trace.event("tui.status", {"text": text})
         self._refresh()
 
+    def watch_reasoning_text(self, _text: str) -> None:
+        self._refresh()
+
+    def watch_effort_text(self, _text: str) -> None:
+        self._refresh()
+
     def _refresh(self) -> None:
-        self.update(f"mode: {self.mode_text} | {self.status_text} | {self.session_text}")
+        self.update(
+            f"mode: {self.mode_text} | "
+            f"思考文本: {self.reasoning_text} | "
+            f"强度: {self.effort_text} | "
+            f"{self.status_text} | {self.session_text}"
+        )
 
 
 class TodoBar(Static):
@@ -1440,6 +1453,7 @@ class NaumiApp(App):
         status.debug_trace = self.debug_trace
         current_session = self.engine._session.id if self.engine._session else None
         status.session_text = f"会话:{current_session[:8]}" if current_session else "会话:-"
+        self._sync_model_control_status(status)
         todo = self.query_one(TodoBar)
         todo.debug_trace = self.debug_trace
         if self.debug_trace is not None:
@@ -1508,6 +1522,16 @@ class NaumiApp(App):
         except Exception:
             pass
 
+    def _sync_model_control_status(self, status: StatusBar | None = None) -> None:
+        """Refresh persistent reasoning visibility and effort from authoritative state."""
+        status = status or self.query_one(StatusBar)
+        status.reasoning_text = "on" if self._show_reasoning else "off"
+        try:
+            effort = self.engine.router.get_reasoning_effort_status()
+            status.effort_text = effort.effective.value
+        except Exception:
+            status.effort_text = "auto"
+
     def _update_git_title(self) -> None:
         """Update sub-title with git branch info."""
         from naumi_agent.main import _get_git_info
@@ -1552,8 +1576,14 @@ class NaumiApp(App):
         raw = text.strip()
         if not raw:
             return
-        if raw.split(maxsplit=1)[0].lower() == "/agents":
+        parts = raw.split(maxsplit=1)
+        command = parts[0].lower()
+        arg = parts[1] if len(parts) > 1 else ""
+        if command == "/agents":
             self._open_agent_control()
+            return
+        if command == "/reasoning":
+            self._handle_reasoning_command(arg)
             return
         self._run_cli_slash_command(raw)
 
@@ -1611,6 +1641,7 @@ class NaumiApp(App):
             chat.mount(
                 Markdown(f"**命令已执行**: `{text}`", classes="agent-msg")
             )
+        self._sync_model_control_status(status)
         status.status_text = "就绪"
 
     def _handle_reasoning_command(self, arg: str) -> None:
@@ -1634,11 +1665,13 @@ class NaumiApp(App):
             config.ui.show_reasoning = enabled
         chat.mount(
             Markdown(
-                "reasoning 文本显示已开启。" if enabled else "reasoning 文本显示已关闭。",
+                "思考文本显示已开启。" if enabled else "思考文本显示已关闭。",
                 classes="agent-msg",
             )
         )
-        self.query_one(StatusBar).status_text = "reasoning: on" if enabled else "reasoning: off"
+        status = self.query_one(StatusBar)
+        status.reasoning_text = "on" if enabled else "off"
+        status.status_text = "就绪"
 
     @work(exclusive=True, exit_on_error=False)
     async def _run_agent(self, task: str) -> None:

@@ -22,6 +22,7 @@
 - [第十二部分：优化路线图](./12-optimization-roadmap.md)
 - [第十三部分：CLI/TUI Claude Code 化路线图](./13-cli-tui-claude-code-roadmap.md)
 - [第十四部分：未来架构重构方案](./14-future-architecture-refactor-plan.md)
+- [第十五部分：模型、Provider 与思考强度配置](./15-model-provider-configuration.md)
 
 ## Mac Agent Workbench
 
