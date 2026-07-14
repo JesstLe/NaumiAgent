@@ -17,6 +17,22 @@ const PORT_PROBE_TIMEOUT_MS: u64 = 100;
 const PROCESS_TERMINATION_RETRIES: u32 = 20;
 const PROCESS_TERMINATION_DELAY_MS: u64 = 100;
 
+// Windows-specific flag: do not create a console window for the child process.
+// This applies both to the daemon executable and to the taskkill helper.
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// Configure a Command so it does not spawn a visible console window on Windows.
+/// On other platforms this is a no-op.
+#[cfg(target_os = "windows")]
+fn suppress_console_window(cmd: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn suppress_console_window(_cmd: &mut Command) {}
+
 /// Status returned to the frontend describing the local daemon.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonStatus {
@@ -259,6 +275,7 @@ pub async fn start_daemon(config: DaemonLaunchConfig) -> Result<DaemonStatus, St
     cmd.args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    suppress_console_window(&mut cmd);
 
     if let Some(working_dir) = &config.working_dir {
         cmd.current_dir(working_dir);
@@ -333,11 +350,12 @@ async fn stop_daemon_internal() -> Result<(), String> {
 
     if let Some(handle) = handle {
         // Use taskkill /T /F to terminate the whole process tree on Windows.
-        let _ = Command::new("taskkill")
-            .args(["/T", "/F", "/PID", &handle.pid.to_string()])
+        let mut cmd = Command::new("taskkill");
+        cmd.args(["/T", "/F", "/PID", &handle.pid.to_string()])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .output();
+            .stderr(Stdio::null());
+        suppress_console_window(&mut cmd);
+        let _ = cmd.output();
 
         for _ in 0..PROCESS_TERMINATION_RETRIES {
             if !is_process_running(handle.pid) {

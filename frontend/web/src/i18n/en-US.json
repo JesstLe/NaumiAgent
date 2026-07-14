@@ -15,12 +15,37 @@
     "syncContext": "Sync Context",
     "search": "Search",
     "send": "Send",
-    "createLinkedIssue": "Create linked issue"
+    "createLinkedIssue": "Create linked issue",
+    "newTask": "New Task",
+    "review": "Review",
+    "close": "Close",
+    "delete": "Delete",
+    "more": "More",
+    "refresh": "Refresh",
+    "minimize": "Minimize",
+    "maximize": "Maximize"
   },
   "chat": {
     "title": "Chat",
     "composerPlaceholder": "Type a question or command...",
-    "emptyState": "Start a conversation with the Agent, or send a command."
+    "emptyState": "Start a conversation with the Agent, or send a command.",
+    "thinking": "Thinking level",
+    "thinkingDefault": "Default",
+    "thinkingPlan": "Plan",
+    "thinkingBypass": "Bypass",
+    "model": "Model",
+    "copyOutput": "Copy output",
+    "copyImage": "Copy image",
+    "editMessage": "Edit",
+    "retryMessage": "Retry",
+    "permission": "Permission",
+    "permissionAllow": "Allow",
+    "permissionDeny": "Deny",
+    "permissionBypass": "Bypass",
+    "permissionReason": "Reason",
+    "uploadFile": "Upload file",
+    "sources": "Sources",
+    "noSources": "No attached sources"
   },
   "status": {
     "online": "Online",
@@ -136,7 +161,59 @@
     "tokenRemoved": "Token removed"
   },
   "panel": {
-    "context": "Context"
+    "context": "Page Context",
+    "goal": "Goal",
+    "review": "Review Panel"
+  },
+  "goal": {
+    "currentMission": "Current Mission",
+    "noMission": "No mission selected",
+    "progress": "Progress",
+    "completed": "completed",
+    "todo": "To do",
+    "allClear": "No pending items",
+    "empty": "Select a session to view goals",
+    "agents": "Active Agents"
+  },
+  "project": {
+    "group": "Groups",
+    "project": "Projects",
+    "unknown": "Unknown project",
+    "deleteConfirm": "Delete session \"{{title}}\"? This cannot be undone.",
+    "empty": "No projects",
+    "noSessions": "No sessions"
+  },
+  "review": {
+    "unstaged": "Unstaged",
+    "staged": "Staged",
+    "allChanges": "All Changes",
+    "emptySession": "Select a session to view Git changes",
+    "loading": "Loading Git changes...",
+    "loadError": "Unable to load Git changes",
+    "noGit": "Current workspace is not a Git repository",
+    "noChanges": "No changes"
+  },
+  "sideTool": {
+
+    "projects": "Projects",
+    "groups": "Groups",
+    "skills": "Skills",
+    "search": "Search"
+  },
+  "group": {
+    "empty": "No tasks in this group",
+    "orphan": "Ungrouped tasks"
+  },
+  "skill": {
+    "empty": "No agent skills available"
+  },
+  "search": {
+    "placeholder": "Search projects, issues, agents...",
+    "hint": "Type to search",
+    "projects": "Projects",
+    "issues": "Issues",
+    "agents": "Agents",
+    "noResults": "No matching results"
   },
   "session": {
     "title": "Sessions",

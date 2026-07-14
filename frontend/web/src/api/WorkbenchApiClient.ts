@@ -6,6 +6,7 @@ import type {
   WorkbenchCapabilitiesResponse,
   WorkbenchSnapshot,
   SessionListResponse,
+  Session,
   WorkbenchBootstrapResponse,
   MessageListResponse,
   MessageCreate,
@@ -31,6 +32,12 @@ import type {
   IntentLocksResponse,
   Decision,
   IntentLock,
+  ChatSource,
+  ChatSourceCreate,
+  PermissionResolution,
+  ChatEnvironmentResponse,
+  SessionUpdate,
+  GitDiffResponse,
 } from './types'
 
 export type TokenProvider = () => Promise<string | null>
@@ -140,6 +147,21 @@ export class WorkbenchApiClient {
     })
   }
 
+  async updateSession(sessionId: string, body: SessionUpdate): Promise<Session> {
+    return this.request<Session>({
+      method: 'PATCH',
+      url: this.route('sessions', { session_id: sessionId }),
+      data: body,
+    })
+  }
+
+  async deleteSession(sessionId: string): Promise<unknown> {
+    return this.request<unknown>({
+      method: 'DELETE',
+      url: this.route('sessions', { session_id: sessionId }),
+    })
+  }
+
   async fetchMessages(sessionId: string, page = 1, pageSize = 50): Promise<MessageListResponse> {
     return this.request<MessageListResponse>({
       method: 'GET',
@@ -153,6 +175,47 @@ export class WorkbenchApiClient {
       method: 'POST',
       url: this.route('send_message', { session_id: sessionId }),
       data: payload,
+    })
+  }
+
+  async fetchChatEnvironment(sessionId: string): Promise<ChatEnvironmentResponse> {
+    return this.request<ChatEnvironmentResponse>({
+      method: 'GET',
+      url: this.route('chat_environment', { session_id: sessionId }),
+    })
+  }
+
+  async fetchGitDiff(sessionId: string): Promise<GitDiffResponse> {
+    return this.request<GitDiffResponse>({
+      method: 'GET',
+      url: this.route('git_diff', { session_id: sessionId }),
+    })
+  }
+
+  async addChatSource(sessionId: string, source: ChatSourceCreate): Promise<ChatSource> {
+    return this.request<ChatSource>({
+      method: 'POST',
+      url: this.route('add_chat_source', { session_id: sessionId }),
+      data: source,
+    })
+  }
+
+  async uploadChatSource(sessionId: string, file: File): Promise<ChatSource> {
+    const formData = new FormData()
+    formData.append('file', file)
+    return this.request<ChatSource>({
+      method: 'POST',
+      url: this.route('upload_chat_source', { session_id: sessionId }),
+      data: formData,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  }
+
+  async resolvePermission(sessionId: string, callId: string, resolution: PermissionResolution): Promise<{ status: string }> {
+    return this.request<{ status: string }>({
+      method: 'POST',
+      url: this.route('resolve_permission', { session_id: sessionId, call_id: callId }),
+      data: resolution,
     })
   }
 

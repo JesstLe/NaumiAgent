@@ -27,6 +27,27 @@ class GitEnvironment:
 
 
 @dataclass(frozen=True, slots=True)
+class GitDiffFile:
+    path: str
+    status: str
+    stage: str
+    additions: int = 0
+    deletions: int = 0
+    patch: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class GitDiff:
+    available: bool = False
+    branch: str = ""
+    upstream: str = ""
+    ahead: int = 0
+    behind: int = 0
+    error: str = ""
+    files: list[GitDiffFile] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
 class BackgroundProcessEnvironment:
     id: str
     command: str
@@ -80,6 +101,36 @@ class ChatEnvironmentCollector:
             sources=await self._collect_sources(session_id),
         )
 
+    async def collect_diff(self) -> GitDiff:
+        """Return a structured diff/status view for the workspace."""
+        inside = await self._git("rev-parse", "--is-inside-work-tree")
+        if inside != "true":
+            return GitDiff(available=False)
+
+        branch = await self._git("branch", "--show-current") or "HEAD"
+        upstream = await self._git("rev-parse", "--abbrev-ref", "@{upstream}") or ""
+        ahead, behind = await self._ahead_behind()
+
+        try:
+            files = await self._collect_diff_files()
+        except OSError as exc:
+            return GitDiff(
+                available=True,
+                branch=branch,
+                upstream=upstream,
+                ahead=ahead,
+                behind=behind,
+                error=f"Git diff failed: {exc}",
+            )
+        return GitDiff(
+            available=True,
+            branch=branch,
+            upstream=upstream,
+            ahead=ahead,
+            behind=behind,
+            files=files,
+        )
+
     async def _collect_git(self) -> GitEnvironment:
         inside = await self._git("rev-parse", "--is-inside-work-tree")
         if inside != "true":
@@ -116,6 +167,100 @@ class ChatEnvironmentCollector:
                     deletions += int(parts[1])
         return additions, deletions
 
+    async def _collect_diff_files(self) -> list[GitDiffFile]:
+        """Parse porcelain status and fetch per-file patches."""
+        output = await self._git("status", "--porcelain=v1")
+        files: list[GitDiffFile] = []
+        seen_paths: set[str] = set()
+        for line in output.splitlines():
+            if len(line) < 4:
+                continue
+            index_status = line[0]
+            worktree_status = line[1]
+            raw_path = line[3:]
+            # Porcelain may include rename/copy origin after ' -> '.
+            path = raw_path.split(" -> ", 1)[-1]
+            if index_status not in (" ", "?"):
+                files.append(
+                    await self._collect_file_diff(path, index_status, "staged")
+                )
+                seen_paths.add(f"{path}:staged")
+            if worktree_status not in (" ", "?"):
+                files.append(
+                    await self._collect_file_diff(path, worktree_status, "unstaged")
+                )
+                seen_paths.add(f"{path}:unstaged")
+            if index_status == "?" and worktree_status == "?":
+                files.append(
+                    await self._collect_file_diff(path, "A", "unstaged", untracked=True)
+                )
+                seen_paths.add(f"{path}:unstaged")
+        # Preserve the order Git reports.
+        files.sort(key=lambda f: (f.stage, f.path))
+        return files
+
+    async def _collect_file_diff(
+        self,
+        path: str,
+        status: str,
+        stage: str,
+        *,
+        untracked: bool = False,
+    ) -> GitDiffFile:
+        if untracked:
+            patch = await self._untracked_patch(path)
+        elif stage == "staged":
+            patch = await self._git("diff", "--cached", "--", path)
+        else:
+            patch = await self._git("diff", "--", path)
+        additions, deletions = await self._numstat_for_path(path, stage, untracked)
+        return GitDiffFile(
+            path=path,
+            status=status,
+            stage=stage,
+            additions=additions,
+            deletions=deletions,
+            patch=patch,
+        )
+
+    async def _untracked_patch(self, path: str) -> str:
+        """Return the raw content of an untracked file as its 'patch'."""
+        target = self._workspace_root / path
+        try:
+            if target.is_file() and target.stat().st_size <= 1_000_000:
+                text = target.read_text(encoding="utf-8", errors="replace")
+                # Prefix every line so it looks like a diff for display.
+                return "".join(f"+{line}\n" for line in text.splitlines()) + "\n"
+        except (OSError, UnicodeError):
+            pass
+        return ""
+
+    async def _numstat_for_path(
+        self, path: str, stage: str, untracked: bool
+    ) -> tuple[int, int]:
+        if untracked:
+            target = self._workspace_root / path
+            try:
+                if target.is_file():
+                    text = target.read_text(encoding="utf-8", errors="replace")
+                    lines = text.splitlines()
+                    return len(lines), 0
+            except (OSError, UnicodeError):
+                pass
+            return 0, 0
+
+        args = ("diff", "--numstat", "--", path)
+        if stage == "staged":
+            args = ("diff", "--cached", "--numstat", "--", path)
+        output = await self._git(*args)
+        for line in output.splitlines():
+            parts = line.split("\t", 2)
+            if len(parts) < 2:
+                continue
+            if parts[0].isdigit() and parts[1].isdigit():
+                return int(parts[0]), int(parts[1])
+        return 0, 0
+
     async def _ahead_behind(self) -> tuple[int, int]:
         output = await self._git(
             "rev-list", "--left-right", "--count", "@{upstream}...HEAD"
@@ -140,7 +285,8 @@ class ChatEnvironmentCollector:
         stdout, _ = await process.communicate()
         if process.returncode != 0:
             return ""
-        return stdout.decode("utf-8", errors="replace").strip()
+        # Only strip trailing newlines: leading spaces matter for status and diff output.
+        return stdout.decode("utf-8", errors="replace").rstrip("\n")
 
     def _collect_processes(self) -> list[BackgroundProcessEnvironment]:
         processes: list[BackgroundProcessEnvironment] = []

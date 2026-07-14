@@ -111,3 +111,41 @@ async def test_non_git_workspace_returns_explicit_empty_git_state(tmp_path: Path
     assert snapshot.git.changed_files == 0
     assert snapshot.processes == []
     assert snapshot.sources == []
+
+
+@pytest.mark.asyncio
+async def test_collect_diff_returns_staged_and_unstaged_files(tmp_path: Path) -> None:
+    repo = tmp_path / "workspace"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    source = repo / "src" / "app.py"
+    source.parent.mkdir()
+    source.write_text("print('one')\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+
+    source.write_text("print('one')\nprint('two')\n", encoding="utf-8")
+    (repo / "notes.md").write_text("new\n", encoding="utf-8")
+    staged = repo / "staged.txt"
+    staged.write_text("staged\n", encoding="utf-8")
+    _git(repo, "add", "staged.txt")
+
+    diff = await ChatEnvironmentCollector(
+        workspace_root=repo,
+        background_store=BackgroundTaskStore(tmp_path / "background"),
+        chat_run_store=ChatRunStore(tmp_path / "runs.db"),
+    ).collect_diff()
+
+    assert diff.available is True
+    assert diff.branch == "main"
+    assert any(
+        f.path == "src/app.py" and f.stage == "unstaged" for f in diff.files
+    )
+    assert any(
+        f.path == "notes.md" and f.stage == "unstaged" for f in diff.files
+    )
+    assert any(
+        f.path == "staged.txt" and f.stage == "staged" for f in diff.files
+    )

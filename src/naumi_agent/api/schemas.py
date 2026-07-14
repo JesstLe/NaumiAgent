@@ -15,6 +15,12 @@ class SessionCreate(BaseModel):
     model: str | None = None
 
 
+class SessionUpdate(BaseModel):
+    title: str | None = None
+    model: str | None = None
+    system_prompt: str | None = None
+
+
 class SessionResponse(BaseModel):
     id: str
     title: str | None
@@ -116,6 +122,25 @@ class ChatGitEnvironmentResponse(BaseModel):
     ahead: int = 0
     behind: int = 0
     dirty: bool = False
+
+
+class GitDiffFileResponse(BaseModel):
+    path: str
+    status: str
+    stage: str
+    additions: int = 0
+    deletions: int = 0
+    patch: str = ""
+
+
+class GitDiffResponse(BaseModel):
+    available: bool = False
+    branch: str = ""
+    upstream: str = ""
+    ahead: int = 0
+    behind: int = 0
+    error: str = ""
+    files: list[GitDiffFileResponse] = Field(default_factory=list)
 
 
 class ChatBackgroundProcessResponse(BaseModel):
