@@ -4,11 +4,26 @@ knowledge:
   entrypoints:
     - AGENTS.md
     - README.md
+    - docs/harness/index.md
+    - docs/harness/architecture.md
+    - docs/harness/golden-principles.md
+    - docs/harness/debt.md
     - docs/superpowers/specs/2026-07-14-harness-engineering-design.md
   include:
+    - docs/harness/**/*.md
     - src/naumi_agent/harness/**/*.py
     - src/naumi_agent/orchestrator/**/*.py
+    - src/naumi_agent/workbench/**/*.py
+    - frontend/terminal-ui/src/**/*.js
+    - frontend/terminal-ui/test/**/*.js
+    - apps/macos/NaumiAgentWorkbench/Sources/NaumiAgentWorkbenchCore/App/**/*.swift
+    - apps/macos/NaumiAgentWorkbench/Sources/NaumiAgentWorkbenchCore/Daemon/**/*.swift
+    - apps/macos/NaumiAgentWorkbench/Sources/NaumiAgentWorkbenchCore/Features/Dashboard/**/*.swift
+    - apps/macos/NaumiAgentWorkbench/Sources/NaumiAgentWorkbenchCore/API/**/*.swift
+    - apps/macos/NaumiAgentWorkbench/Tests/NaumiAgentWorkbenchCoreTests/*Workbench*.swift
+    - apps/macos/NaumiAgentWorkbench/Tests/NaumiAgentWorkbenchCoreTests/*Dashboard*.swift
     - tests/unit/test_harness_*.py
+    - tests/unit/test_context_assembly.py
     - tests/integration/test_harness_*.py
   exclude:
     - .naumi/data/**
@@ -16,7 +31,7 @@ knowledge:
     - .venv/**
     - frontend/terminal-ui/node_modules/**
   max_turn_tokens: 8000
-  max_file_bytes: 131072
+  max_file_bytes: 262144
 
 completion:
   require_todo_reconciliation: true
@@ -26,7 +41,7 @@ completion:
 
 checks:
   - id: harness_python
-    label: Harness H1 Python 定向测试
+    label: Harness H2 Python 定向测试
     argv:
       - uv
       - run
@@ -37,7 +52,13 @@ checks:
       - tests/unit/test_harness_service.py
       - tests/unit/test_harness_tools.py
       - tests/unit/test_harness_surfaces.py
+      - tests/unit/test_harness_knowledge.py
+      - tests/unit/test_harness_knowledge_context.py
+      - tests/unit/test_harness_knowledge_integration.py
+      - tests/unit/test_harness_knowledge_tool.py
+      - tests/unit/test_context_assembly.py
       - tests/integration/test_harness_h1_real_workspace.py
+      - tests/integration/test_harness_h2_real_workspace.py
     timeout_seconds: 180
     when_changed:
       - src/naumi_agent/harness/**/*.py
@@ -47,7 +68,7 @@ checks:
       - change
 
   - id: harness_lint
-    label: Harness H1 静态检查
+    label: Harness H2 静态检查
     argv:
       - uv
       - run
@@ -59,12 +80,33 @@ checks:
       - tests/unit/test_harness_service.py
       - tests/unit/test_harness_tools.py
       - tests/unit/test_harness_surfaces.py
+      - tests/unit/test_harness_knowledge.py
+      - tests/unit/test_harness_knowledge_context.py
+      - tests/unit/test_harness_knowledge_integration.py
+      - tests/unit/test_harness_knowledge_tool.py
+      - tests/unit/test_context_assembly.py
       - tests/integration/test_harness_h1_real_workspace.py
+      - tests/integration/test_harness_h2_real_workspace.py
     timeout_seconds: 120
     when_changed:
       - src/naumi_agent/harness/**/*.py
       - tests/unit/test_harness_*.py
       - tests/integration/test_harness_*.py
+    required_for:
+      - change
+
+  - id: harness_terminal_ui
+    label: Harness 新 UI 命令元数据测试
+    argv:
+      - node
+      - --test
+      - --test-name-pattern
+      - harness
+      - frontend/terminal-ui/test/state.test.js
+    timeout_seconds: 60
+    when_changed:
+      - frontend/terminal-ui/src/**/*.js
+      - frontend/terminal-ui/test/**/*.js
     required_for:
       - change
 

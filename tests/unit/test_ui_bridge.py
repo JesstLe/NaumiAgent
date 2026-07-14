@@ -1414,6 +1414,8 @@ def test_bridge_status_payload_exposes_runtime_slash_commands() -> None:
     assert "/btemplate-list" in command_names
     assert "/models" in command_names
     assert "/harness" in command_names
+    harness = next(item for item in slash_commands if item["command"] == "/harness")
+    assert "知识" in harness["description"]
 
 
 def test_bridge_status_payload_can_omit_static_slash_commands() -> None:

@@ -3,7 +3,7 @@
 ## 文档状态
 
 - 日期：2026-07-14
-- 状态：已批准；H1 已实现，H2-H7 待实施
+- 状态：已批准；H1-H2 已实现，H3-H7 待实施
 - 范围：设计 NaumiAgent 的 Harness Engineering 子系统，并记录各阶段真实落地状态
 - 目标读者：NaumiAgent 维护者、实现 Agent、测试与安全审查者
 - 推荐结论：建立独立的 `harness` 工程域，复用现有引擎、权限、任务、Worktree、Workbench 和 DebugTrace；不把 Harness 简化成更大的 Prompt，也不复制一套新的调度系统
@@ -1045,7 +1045,8 @@ Harness 配置未受信任
 schema、256 KiB 有界读取、路径与 symlink containment、用户级 Trust Store、
 digest 变化失效、共享 HarnessService、`/harness status|doctor|trust|untrust`
 以及只读 `harness_status`、`harness_doctor` Agent Tools。H1 只展示检查命令，
-不会执行命令；H2/H3 的上下文注入和 Check Runner 尚未启用。
+不会执行命令；H2 已启用受信任、临时且有预算的仓库知识上下文，H3 Check
+Runner 尚未启用。
 
 **用户价值**：用户能确认仓库 Harness 配置是否有效、安全、可执行。
 
@@ -1063,6 +1064,12 @@ digest 变化失效、共享 HarnessService、`/harness status|doctor|trust|untr
 
 ### H2：Repository Knowledge Plane
 
+**实施状态（2026-07-14）**：已完成。实现包含安全发现与嵌套 `AGENTS.md`
+作用域、确定性相关性排序、L0/L1/L2 渐进披露、模型窗口与硬预算、临时
+Engine 注入、只读 `harness_read_knowledge`、`/harness knowledge`、并发构建与
+进程内选择缓存，以及写工具成功后的即时失效。用户命令、Agent Tool 和 Engine
+共用 `HarnessService`；H2 不执行 Profile checks、不调用模型、不持久化知识正文。
+
 **用户价值**：Agent 能按任务获得正确的仓库入口、规则和相关文档。
 
 **范围**：
@@ -1076,6 +1083,14 @@ digest 变化失效、共享 HarnessService、`/harness status|doctor|trust|untr
 **不包含**：自动 checks 和 Eval。
 
 **真实验证**：用真实 NaumiAgent 任务查询 engine、Terminal UI、Mac Workbench 三个不同路径，确认选择不同知识且不超预算。
+
+**验收证据（2026-07-14）**：103 项 H1/H2 Python 定向测试通过，Terminal UI
+Harness 命令元数据 Node 测试 1 项通过，Ruff 与 `git diff --check` 通过；真实
+NaumiAgent 仓库的 Engine、Terminal UI、Mac Workbench 三类任务选择了互不相同
+的适用 source 集合：分别命中 `orchestrator/engine.py`、Terminal UI `state.js`/
+`state.test.js`、Workbench Issue DTO/command；三者均包含根 `AGENTS.md` 并满足
+1K/8K/12K/15% 预算。100 次暖缓存组装的本机 P95 为 20.155 ms。按用户约束未
+运行全量测试。
 
 ### H3：Completion Contract + Check Runner
 
@@ -1315,9 +1330,9 @@ Harness H5 落地前先修复现有 CI 覆盖缺口：
 
 ## 28. 下一步
 
-H1 完成、验证并提交后，下一步只为 **H2：Repository Knowledge Plane**
-编写逐步实施计划。H2 必须继续复用现有 Runtime Snapshot，不得提前实现 H3
-Check Runner，也不得预先创建 H4-H7 空壳模块。
+H1-H2 完成后，下一步只为 **H3：Completion Contract + Check Runner** 编写逐步
+实施计划。H3 必须复用现有 Workbench ValidationRunner 的 executor/policy，且不
+得提前创建 H4-H7 空壳模块。
 
 ---
 
@@ -1325,7 +1340,7 @@ Check Runner，也不得预先创建 H4-H7 空壳模块。
 
 - 完整性：无未决项；阶段边界已明确。
 - 一致性：推荐方案、文件布局、信任模型和实施顺序一致。
-- Scope：本文覆盖完整 Harness 目标，但实现被拆成 H1-H7；下一份计划只允许覆盖 H1。
+- Scope：本文覆盖完整 Harness 目标，但实现被拆成 H1-H7；下一份计划只允许覆盖 H3。
 - 安全：Profile trust、命令、路径、Replay 和反馈提升均有明确边界。
 - 可验证性：每个阶段都有真实用户价值、非目标、测试和验收条件。
 - 复用：没有创建第二套任务、权限、事件、Worktree 或 Workbench。

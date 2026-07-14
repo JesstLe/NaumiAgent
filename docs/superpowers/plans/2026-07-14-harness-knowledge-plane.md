@@ -37,7 +37,7 @@
 - Produces `estimate_knowledge_tokens(text)`, `clip_text_to_token_budget(text, budget)`, canonical path/ID helpers, and stable SHA-256 fingerprints.
 - Every selection/result reports estimated tokens, applied budget, truncation state, source paths, digests, and deterministic relevance reasons.
 
-- [ ] **Step 1: Write failing contract and budget tests**
+- [x] **Step 1: Write failing contract and budget tests**
 
 Cover empty and Unicode text, ASCII/code/Chinese estimates, zero/negative boundaries, exact-fit and truncated excerpts, stable IDs/digests, immutable results, deterministic ordering, and the 1K/8K/12K/15% budget calculation.
 
@@ -48,17 +48,17 @@ assert budget.total_tokens == 4_800
 assert budget.l1_tokens == 3_800
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest -q tests/unit/test_harness_knowledge.py -k 'budget or contract or token'`
 
 Expected: collection fails because `naumi_agent.harness.knowledge` does not exist.
 
-- [ ] **Step 3: Implement contracts and budget primitives**
+- [x] **Step 3: Implement contracts and budget primitives**
 
 Keep token estimation independent from vendor tokenizers so it works offline and across model providers. Clip on Unicode-safe line boundaries, include an explicit truncation marker, and prove the clipped result itself remains within the estimate.
 
-- [ ] **Step 4: Verify GREEN and Ruff**
+- [x] **Step 4: Verify GREEN and Ruff**
 
 Run: `uv run pytest -q tests/unit/test_harness_knowledge.py -k 'budget or contract or token'`
 
@@ -77,7 +77,7 @@ Run: `uv run ruff check src/naumi_agent/harness/knowledge.py tests/unit/test_har
 - Discovers root/nested `AGENTS.md`, trusted Profile entrypoints/include globs, `pyproject.toml`, `package.json`, `Package.swift`, related source/tests, Git HEAD, and changed paths.
 - Builds metadata once and never reads an excluded or unsafe candidate body during ranking.
 
-- [ ] **Step 1: Write failing discovery tests**
+- [x] **Step 1: Write failing discovery tests**
 
 Use real temporary directories and Git repositories. Cover root and three-level nested `AGENTS.md`, descendant scope, exact path precedence, Profile entrypoints, include/exclude conflicts, build manifests, changed/untracked files, missing Git, Git timeout, unreadable files, too-large files, binary/NUL data, image/base64/log/diff suppression, Unicode names, symlink escape, broken symlink, secret-like paths, duplicate aliases, and concurrent index builds.
 
@@ -90,15 +90,15 @@ assert [item.path for item in snapshot.instructions_for("src/pkg/api.py")] == [
 ]
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest -q tests/unit/test_harness_knowledge.py -k 'discover or agents or git or unsafe'`
 
-- [ ] **Step 3: Implement bounded discovery**
+- [x] **Step 3: Implement bounded discovery**
 
 Use `Path.rglob` only for scoped instruction/build manifests and Profile globs for source/test candidates. Use `subprocess.run(["git", ...], cwd=workspace, timeout=...)` with `shell=False`, NUL-delimited porcelain output, stable POSIX-relative paths, and structured warnings. Never follow directory symlinks.
 
-- [ ] **Step 4: Verify GREEN and Ruff**
+- [x] **Step 4: Verify GREEN and Ruff**
 
 Run the command from Step 2, then the Task 1 Ruff command.
 
@@ -117,7 +117,7 @@ Run the command from Step 2, then the Task 1 Ruff command.
 - `HarnessKnowledgeContextComposer.compose(task, snapshot, model_window)` returns one L0 manifest and one L1 relevant bundle with separate and total token accounting.
 - `RepositoryKnowledgeIndex.read(query=None, path=None, max_tokens=...)` implements bounded L2 lookup and reports ambiguity/missing/unsafe states without throwing raw filesystem errors.
 
-- [ ] **Step 1: Write failing ranking and context tests**
+- [x] **Step 1: Write failing ranking and context tests**
 
 Cover different Engine, terminal UI, and Mac Workbench tasks selecting different files; exact path outranking fuzzy text; nested instruction inclusion; source-test/import relationships; changed-file boosts; stable tie-breaking; no-match fallback; ambiguous query; budget exhaustion; small model windows; repeated calls; malicious prompt text; and L2 path/query reads.
 
@@ -129,15 +129,15 @@ assert engine.total_tokens <= 12_000
 assert terminal.total_tokens <= 12_000
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest -q tests/unit/test_harness_knowledge.py tests/unit/test_harness_knowledge_context.py -k 'rank or select or context or read'`
 
-- [ ] **Step 3: Implement selection, excerpts, and rendering**
+- [x] **Step 3: Implement selection, excerpts, and rendering**
 
 Normalize task tokens without erasing Chinese or path punctuation. Rank from metadata first, then read only top candidates for bounded match excerpts. L0 lists project identity, applicable instruction chain, entrypoints, checks-as-names-only, and available knowledge IDs. L1 labels repository content as data/instructions from trusted files and includes path, line range, digest, score reasons, and bounded text. L2 never returns more than the requested bounded budget.
 
-- [ ] **Step 4: Verify GREEN, determinism, and Ruff**
+- [x] **Step 4: Verify GREEN, determinism, and Ruff**
 
 Run the command from Step 2 twice and require byte-identical rendered selections for unchanged inputs.
 
@@ -160,7 +160,7 @@ Run: `uv run ruff check src/naumi_agent/harness/knowledge.py src/naumi_agent/har
 - Engine derives the current task from the latest user message, resolves the capable model window through `ModelRouter`, and appends H2 text to the existing marked Harness snapshot.
 - H2 content exists in `_messages` only. It is removed/rebuilt on every snapshot refresh, excluded from `_full_history`, and dropped before reactive compaction.
 
-- [ ] **Step 1: Write failing service and Engine tests**
+- [x] **Step 1: Write failing service and Engine tests**
 
 Cover missing/invalid/untrusted/trusted/digest-changed Profiles; trust database failure; cache hit/miss/invalidation; changed knowledge bytes without Profile change; 50 concurrent readers; Engine non-streaming/streaming refresh; latest-user-task selection; no duplicate snapshots; compaction reinjection; Hook extra sections; shutdown; and disabled compatibility.
 
@@ -172,15 +172,15 @@ assert "Repository Knowledge" in active[0]["content"]
 assert not any("Repository Knowledge" in str(m) for m in engine._full_history)
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest -q tests/unit/test_harness_service.py tests/unit/test_harness_knowledge_integration.py tests/unit/test_context_assembly.py -k 'knowledge or harness_context'`
 
-- [ ] **Step 3: Implement trusted cache and injection**
+- [x] **Step 3: Implement trusted cache and injection**
 
 Keep one async lock per service cache, avoid holding it while doing slow file reads, and double-check fingerprints before publishing a snapshot. Missing/untrusted states return an empty knowledge section plus structured diagnostics to manual callers; they do not inject repository bodies. Append H2 via the existing `_append_harness_context_sections` path so Hook ordering and compaction semantics remain intact.
 
-- [ ] **Step 4: Verify GREEN, concurrency, and performance**
+- [x] **Step 4: Verify GREEN, concurrency, and performance**
 
 Run the command from Step 2.
 
@@ -210,21 +210,21 @@ Run: `uv run ruff check src/naumi_agent/harness src/naumi_agent/orchestrator/con
 - `/harness knowledge <query-or-relative-path>` calls the same `HarnessService.read_knowledge()` and renders path/digest/relevance/truncation clearly.
 - Classic completion, Textual bridge metadata, and new terminal UI advertise the new Harness subcommand consistently; no separate UI-side knowledge implementation exists.
 
-- [ ] **Step 1: Write failing tool and surface tests**
+- [x] **Step 1: Write failing tool and surface tests**
 
 Assert tool schema, metadata, bounded defaults, query/path validation, trusted/untrusted behavior, concurrent calls, Chinese errors, slash quoting/Unicode, missing argument/unknown option usage, and identical service output semantics. Assert all command registries show `[status|doctor|knowledge|trust|untrust]`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest -q tests/unit/test_harness_knowledge_tool.py tests/unit/test_harness_surfaces.py tests/unit/test_cli_completer.py tests/unit/test_ui_bridge.py -k 'harness or knowledge'`
 
 Run: `node --test --test-name-pattern 'harness' frontend/terminal-ui/test/state.test.js`
 
-- [ ] **Step 3: Implement the shared tool and slash command**
+- [x] **Step 3: Implement the shared tool and slash command**
 
 Reject calls that provide neither query nor path, calls that try to escape the workspace, and `max_tokens` outside the bounded range. Keep trust/untrust user-only. Render file bodies as fenced excerpts with source identity, never as an unlabeled system instruction.
 
-- [ ] **Step 4: Verify GREEN and Ruff**
+- [x] **Step 4: Verify GREEN and Ruff**
 
 Run both Step 2 commands.
 
@@ -249,7 +249,7 @@ Run: `uv run ruff check src/naumi_agent/harness/tools.py src/naumi_agent/main.py
 - The real profile adds the canonical Harness docs and H2-targeted test/lint paths, while retaining bounded include/exclude policy.
 - The integration scenario uses the actual NaumiAgent checkout and a temporary trust database; it never mutates the live trust database.
 
-- [ ] **Step 1: Write the failing real-workspace scenario**
+- [x] **Step 1: Write the failing real-workspace scenario**
 
 Query three real tasks:
 
@@ -259,15 +259,15 @@ Query three real tasks:
 
 Assert the selected path sets differ, each includes applicable root instructions, all L0/L1/total budgets hold, the warmed no-change path is measured, and an exact copied Profile edit revokes trust. Use real Git/filesystem/YAML/SQLite and no model or network.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest -q tests/integration/test_harness_h2_real_workspace.py`
 
-- [ ] **Step 3: Write truthful canonical docs and update Profile**
+- [x] **Step 3: Write truthful canonical docs and update Profile**
 
 Document only current H1/H2 behavior, ownership, trust boundary, temporary context, budgets, extension rules, and known debt. Add H2 knowledge files and targeted checks to the Profile; do not add a full-suite command.
 
-- [ ] **Step 4: Update status and focused acceptance evidence**
+- [x] **Step 4: Update status and focused acceptance evidence**
 
 Mark H2 complete in the design only after all focused tests pass. Record exact test counts, P95 timing, three selected path summaries, and remaining H3-H7 debt.
 
@@ -281,11 +281,20 @@ Run: `git diff --check`
 
 Expected: all focused checks pass; no full repository suite runs.
 
-- [ ] **Step 5: Manual real command smoke test**
+Evidence: 103 focused H1/H2 Python tests passed; Ruff passed; the one filtered
+Terminal UI Node test passed; `git diff --check` passed. The real warm path was
+sampled 100 times at P50 19.183 ms, P95 20.155 ms, max 23.244 ms.
+
+- [x] **Step 5: Manual real command smoke test**
 
 Run `/harness doctor`, `/harness knowledge AgentEngine`, and the `harness_read_knowledge` service path against a temporary copied trust DB. Confirm Chinese actionable output, bounded excerpts, stable digests, no Profile command execution, no persistent Harness messages, and no changed live trust record.
 
-- [ ] **Step 6: Multi-round self-review**
+Evidence: real `/harness doctor`, exact-path `/harness knowledge`, and the Agent
+Tool returned the same stable source digest; a 240-token request rendered 233
+tokens. Temporary state was removed, live trust was untouched, and
+`_full_history` was unchanged.
+
+- [x] **Step 6: Multi-round self-review**
 
 Review at least these questions and record fixes before commit:
 
@@ -298,6 +307,12 @@ Review at least these questions and record fixes before commit:
 - Does the cache invalidate on Profile, HEAD, changed paths, or knowledge bytes?
 - Are CLI, TUI, new terminal UI, and Agent tool semantics backed by one service?
 - Did H2 accidentally execute checks, call a model, persist context, or add H3-H7 shells?
+
+Fixes from review: rechecked trust after same-metadata digest rebuilds, removed
+slow filesystem work from cache locks, switched discovery/L2 to bounded stream
+reads, made Markdown evidence fences longer than source backtick runs, aligned
+cache documentation with periodic Git audits, and synchronized CLI/TUI/new UI
+command metadata.
 
 - [ ] **Step 7: Commit, merge, and push the feature**
 
