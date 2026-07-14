@@ -22,6 +22,7 @@ from naumi_agent.model.provider_runtime import (
     ProviderRuntimeError,
     build_provider_http_config,
 )
+from naumi_agent.model.reasoning import ReasoningEffort
 
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 _MAX_REMOTE_MODELS = 500
@@ -49,6 +50,8 @@ class AvailableModel:
     max_output: int | None = None
     supports_tools: bool | None = None
     supports_reasoning: bool | None = None
+    reasoning_efforts: tuple[ReasoningEffort, ...] = ()
+    default_reasoning_effort: ReasoningEffort | None = None
     supports_vision: bool | None = None
     input_modalities: tuple[str, ...] = ()
     output_modalities: tuple[str, ...] = ()
@@ -67,6 +70,8 @@ class AvailableModel:
             max_output=self.max_output,
             supports_tools=self.supports_tools,
             supports_reasoning=self.supports_reasoning,
+            reasoning_efforts=self.reasoning_efforts,
+            default_reasoning_effort=self.default_reasoning_effort,
             supports_vision=self.supports_vision,
             input_modalities=self.input_modalities,
             output_modalities=self.output_modalities,
@@ -500,6 +505,8 @@ def _available_static(provider_id: str, model: ProviderModelSpec) -> AvailableMo
         max_output=model.max_output,
         supports_tools=model.supports_tools,
         supports_reasoning=model.supports_reasoning,
+        reasoning_efforts=model.reasoning_efforts,
+        default_reasoning_effort=model.default_reasoning_effort,
         supports_vision=model.supports_vision,
         input_modalities=model.input_modalities,
         output_modalities=model.output_modalities,
