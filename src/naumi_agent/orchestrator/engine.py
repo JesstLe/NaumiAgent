@@ -11,7 +11,6 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from inspect import signature
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +64,7 @@ from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.runtime.ports.permission import PermissionPort
 from naumi_agent.runtime.ports.session import SessionPort
+from naumi_agent.runtime.ports.tool_execution import ToolExecutionPort
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permission_grants import PermissionGrant, PermissionGrantStore
@@ -88,6 +88,7 @@ from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
 from naumi_agent.tools.browser.tools import create_browser_tools
 from naumi_agent.tools.browser_daemon import BrowserDaemonClient, create_browser_daemon_tools
 from naumi_agent.tools.builtin import create_builtin_tools
+from naumi_agent.tools.execution import LocalToolExecutor
 from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
 from naumi_agent.tools.web import create_web_tools
@@ -432,6 +433,7 @@ class AgentEngine:
         session_port: SessionPort[Session] | None = None,
         permission_port: PermissionPort | None = None,
         model_port: ModelPort | None = None,
+        tool_execution_port: ToolExecutionPort | None = None,
     ) -> None:
         self._config = config
         resolved_session_port = (
@@ -485,6 +487,16 @@ class AgentEngine:
                 "metadata/routing/capability/discovery/reasoning/call/stream"
             )
         self._model_port = resolved_model_port
+        resolved_tool_execution_port = (
+            LocalToolExecutor()
+            if tool_execution_port is None
+            else tool_execution_port
+        )
+        if not isinstance(resolved_tool_execution_port, ToolExecutionPort):
+            raise TypeError(
+                "tool_execution_port 必须实现完整的 ToolExecutionPort 契约：invoke"
+            )
+        self._tool_execution_port = resolved_tool_execution_port
         self.harness_service = HarnessService(
             workspace_root=self.workspace_root,
             trust_store=HarnessTrustStore(
@@ -865,6 +877,11 @@ class AgentEngine:
     def _router(self) -> ModelPort:
         """Return the legacy read-only alias for the injected model port."""
         return self._model_port
+
+    @property
+    def tool_executor(self) -> ToolExecutionPort:
+        """Return the authorized tool invocation port."""
+        return self._tool_execution_port
 
     @property
     def session_store(self) -> SessionPort[Session]:
@@ -3784,6 +3801,20 @@ class AgentEngine:
             usage=self._usage,
         )
 
+    async def execute_tool(
+        self,
+        tool_call: ToolCall,
+        *,
+        on_event: EventCallback | None = None,
+        agent_name: str | None = None,
+    ) -> ToolResult:
+        """Execute one tool call through the authoritative runtime pipeline."""
+        return await self._execute_tool(
+            tool_call,
+            on_event=on_event,
+            agent_name=agent_name,
+        )
+
     async def _execute_tool(
         self,
         tc: ToolCall,
@@ -4031,11 +4062,13 @@ class AgentEngine:
             )
 
         try:
-            start = time.time()
-            if on_event is not None and "event_callback" in signature(tool.execute).parameters:
-                args["event_callback"] = on_event
-            output = await tool.execute(**args)
-            duration = int((time.time() - start) * 1000)
+            outcome = await self._tool_execution_port.invoke(
+                tool,
+                args,
+                event_callback=on_event,
+            )
+            output = outcome.content
+            duration = outcome.duration_ms
 
             logger.info("Tool %s executed in %dms", tc.name, duration)
             if not tool.metadata.read_only:
