@@ -109,31 +109,32 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     fi
 fi
 
-# 7. Node.js 检查（默认终端 UI 必需）
-if ! command -v node >/dev/null 2>&1; then
-    log_error "未检测到 Node.js 20+。默认终端 UI 无法启动。"
-    exit 1
+# 7. Node.js 检查（可选；缺失时保留 Textual fallback）
+terminal_ui_available=0
+if command -v node >/dev/null 2>&1; then
+    node_version=$(node -p 'process.versions.node')
+    node_major=${node_version%%.*}
+    if [ "$node_major" -ge 20 ] && command -v npm >/dev/null 2>&1; then
+        terminal_ui_available=1
+        log_info "检测到 Node.js $node_version"
+    else
+        log_warn "Node.js 20+ 与 npm 不完整，将使用 Textual TUI fallback。"
+    fi
+else
+    log_warn "未检测到 Node.js 20+，将使用 Textual TUI fallback。"
 fi
-node_version=$(node -p 'process.versions.node')
-node_major=${node_version%%.*}
-if [ "$node_major" -lt 20 ]; then
-    log_error "Node.js 20+ 为必需，当前版本为 $node_version。"
-    exit 1
+
+if [ "$terminal_ui_available" = 1 ]; then
+    ui_dir="$INSTALL_DIR/frontend/terminal-ui"
+    log_info "安装 Node UI 依赖..."
+    (cd "$ui_dir" && npm install --no-audit --no-fund)
+    log_info "Node UI 依赖安装完成"
 fi
-if ! command -v npm >/dev/null 2>&1; then
-    log_error "检测到 Node.js，但未找到 npm。请安装完整 Node.js 20+ 发行版。"
-    exit 1
-fi
-log_info "检测到 Node.js $node_version"
-ui_dir="$INSTALL_DIR/frontend/terminal-ui"
-log_info "安装 Node UI 依赖..."
-(cd "$ui_dir" && npm install --no-audit --no-fund)
-log_info "Node UI 依赖安装完成"
 
 log_info "安装完成"
 log_info "首次运行请执行:"
 log_info "  export PATH=\"$BIN_DIR:\$PATH\"  # 如未自动生效"
 log_info "  naumi"
-log_info "兼容入口:"
-log_info "  naumi chat --classic"
-log_info "  naumi ui --legacy"
+log_info "默认入口启动失败时会自动回退到 Textual TUI。"
+log_info "显式 Textual 入口:"
+log_info "  naumi tui"

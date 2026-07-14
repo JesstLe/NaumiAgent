@@ -226,7 +226,7 @@ def test_main_prepares_legacy_credentials_before_onboarding_check(
     assert calls == ["migrate", "check"]
 
 
-def test_node_check_recommends_only_explicit_legacy_fallbacks(
+def test_node_check_recommends_automatic_and_explicit_textual_fallback(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -237,9 +237,10 @@ def test_node_check_recommends_only_explicit_legacy_fallbacks(
     onboarding._check_node_ui(tmp_path)
 
     text = output.getvalue()
-    assert "naumi chat --classic" in text
-    assert "naumi ui --legacy" in text
-    assert "全屏 CLI（naumi）" not in text
+    assert "自动回退到 Textual TUI" in text
+    assert "naumi tui" in text
+    assert "naumi chat --classic" not in text
+    assert "naumi ui --legacy" not in text
 
 
 def test_missing_key_message_does_not_recommend_plaintext_yaml(monkeypatch) -> None:

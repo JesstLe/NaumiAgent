@@ -17,7 +17,7 @@ def test_setup_script_checks_required_runtimes() -> None:
 
     assert 'Require-Command "python"' in script
     assert 'Require-Command "uv"' in script
-    assert 'Require-Command "node"' in script
+    assert 'Get-Command "node" -ErrorAction SilentlyContinue' in script
     assert "Resolve-GitBash" in script
     assert "uv.Source sync --python 3.12 --extra dev" in script
     assert "uv.Source run playwright install chromium" in script
@@ -25,9 +25,21 @@ def test_setup_script_checks_required_runtimes() -> None:
         "uv.Source tool install --editable --force --python 3.12 $repoRoot"
         in script
     )
+    assert 'Get-Command "naumi" -ErrorAction SilentlyContinue' in script
     assert 'Get-Command "naumiagent"' in script
-    assert 'Write-Host "  TUI:  naumi"' in script
-    assert "Windows compatibility alias:  naumiagent --tui" in script
+    assert 'Write-Host "  默认入口:  naumi"' in script
+    assert 'Write-Host "  Textual:  naumi tui"' in script
+
+
+def test_setup_script_keeps_textual_available_without_node() -> None:
+    script = _script()
+
+    assert 'Get-Command "node" -ErrorAction SilentlyContinue' in script
+    assert 'Write-Warning "未检测到 Node.js 20+' in script
+    assert 'Get-Command "naumi" -ErrorAction SilentlyContinue' in script
+    assert 'Write-Host "  默认入口:  naumi"' in script
+    assert 'Write-Host "  Textual:  naumi tui"' in script
+    assert "Windows compatibility alias:  naumiagent --tui" not in script
 
 
 def test_setup_script_creates_config_only_when_missing() -> None:
