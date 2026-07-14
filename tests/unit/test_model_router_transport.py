@@ -136,11 +136,45 @@ def _google_catalog():
         json.dumps(
             {
                 "providers": {
-                    "vendor": {
+                    "google": {
                         "apiFormat": "google_genai",
-                        "baseURL": "https://google.vendor.example/v1",
+                        "baseURL": (
+                            "https://generativelanguage.googleapis.com/v1beta"
+                        ),
+                        "auth": {
+                            "type": "api_key_header",
+                            "env": "GOOGLE_ROUTER_KEY",
+                            "header": "X-Goog-Api-Key",
+                        },
+                        "headers": {"X-Tenant": "tenant-a"},
+                        "models": {
+                            "flash": {
+                                "upstreamId": "gemini-3.5-flash",
+                                "capabilities": {
+                                    "reasoning": {
+                                        "efforts": ["low", "high"],
+                                        "defaultEffort": "low",
+                                    }
+                                },
+                            }
+                        },
+                    }
+                }
+            }
+        )
+    )
+
+
+def _unsupported_catalog():
+    return parse_provider_catalog_json(
+        json.dumps(
+            {
+                "providers": {
+                    "vendor": {
+                        "apiFormat": "azure_openai",
+                        "baseURL": "https://azure.vendor.example/v1",
                         "auth": {"type": "none"},
-                        "models": {"chat": {"upstreamId": "vendor/model-v2"}},
+                        "models": {"chat": {"upstreamId": "deployment-a"}},
                     }
                 }
             }
@@ -972,6 +1006,199 @@ async def test_stream_uses_catalog_anthropic_transport_with_usage_control(
 
 
 @pytest.mark.asyncio
+async def test_call_uses_catalog_google_genai_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GOOGLE_ROUTER_KEY", "selected-google-secret")
+    captured: dict[str, Any] = {}
+    registrations: list[dict[str, dict[str, Any]]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return _completion_response("google-ok")
+
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.get_model_info",
+        lambda _model: {},
+    )
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.acompletion",
+        fake_acompletion,
+    )
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.register_model",
+        lambda model_cost: registrations.append(model_cost),
+    )
+    router = ModelRouter(
+        ModelConfig(
+            provider="google",
+            default_model="flash",
+            reasoning_effort="high",
+        ),
+        catalog=_google_catalog(),
+    )
+
+    response = await router.call([{"role": "user", "content": "hello"}])
+
+    assert captured["model"] == "gemini/gemini-3.5-flash"
+    assert captured["api_base"] == (
+        "https://generativelanguage.googleapis.com/v1beta"
+    )
+    assert captured["api_key"] == "selected-google-secret"
+    assert captured["extra_headers"] == {"X-Tenant": "tenant-a"}
+    assert captured["reasoning_effort"] == "high"
+    assert "temperature" not in captured
+    assert response.content == "google-ok"
+    assert response.model == "flash"
+    assert registrations == [
+        {
+            "gemini/gemini-3.5-flash": {
+                "litellm_provider": "gemini",
+                "mode": "chat",
+                "supports_system_messages": True,
+            }
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stream_uses_catalog_google_genai_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GOOGLE_ROUTER_KEY", "selected-google-secret")
+    captured: dict[str, Any] = {}
+    registrations: list[dict[str, dict[str, Any]]] = []
+
+    async def fake_acompletion(**kwargs: Any):
+        captured.update(kwargs)
+        return _completion_stream()
+
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.get_model_info",
+        lambda _model: {},
+    )
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.acompletion",
+        fake_acompletion,
+    )
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.register_model",
+        lambda model_cost: registrations.append(model_cost),
+    )
+    router = ModelRouter(
+        ModelConfig(provider="google", default_model="flash"),
+        catalog=_google_catalog(),
+    )
+
+    async def collect(content: str):
+        return [
+            chunk
+            async for chunk in router.stream(
+                [{"role": "user", "content": content}]
+            )
+        ]
+
+    chunks, second_chunks = await asyncio.gather(
+        collect("hello"),
+        collect("hello again"),
+    )
+
+    assert captured["model"] == "gemini/gemini-3.5-flash"
+    assert captured["api_base"] == (
+        "https://generativelanguage.googleapis.com/v1beta"
+    )
+    assert captured["api_key"] == "selected-google-secret"
+    assert captured["extra_headers"] == {"X-Tenant": "tenant-a"}
+    assert captured["stream"] is True
+    assert [chunk.token for chunk in chunks] == ["stream-ok"]
+    assert [chunk.token for chunk in second_chunks] == ["stream-ok"]
+    assert registrations == [
+        {
+            "gemini/gemini-3.5-flash": {
+                "litellm_provider": "gemini",
+                "mode": "chat",
+                "supports_system_messages": True,
+            }
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_google_model_registration_failure_is_sanitized_before_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GOOGLE_ROUTER_KEY", "selected-google-secret")
+    called = False
+    leaked = "registration-internal-secret"
+
+    async def fake_acompletion(**_kwargs: Any) -> SimpleNamespace:
+        nonlocal called
+        called = True
+        return _completion_response()
+
+    def fail_registration(_model_cost: dict[str, Any]) -> None:
+        raise RuntimeError(leaked)
+
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.get_model_info",
+        lambda _model: {},
+    )
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.acompletion",
+        fake_acompletion,
+    )
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.register_model",
+        fail_registration,
+    )
+    router = ModelRouter(
+        ModelConfig(provider="google", default_model="flash"),
+        catalog=_google_catalog(),
+    )
+
+    with pytest.raises(ProviderRuntimeError, match="无法注册模型能力") as error:
+        await router.call([{"role": "user", "content": "hello"}])
+
+    assert leaked not in str(error.value)
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_google_genai_rejects_unsupported_reasoning_before_litellm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GOOGLE_ROUTER_KEY", "selected-google-secret")
+    called = False
+
+    async def fake_acompletion(**_kwargs: Any) -> SimpleNamespace:
+        nonlocal called
+        called = True
+        return _completion_response()
+
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.get_model_info",
+        lambda _model: {},
+    )
+    monkeypatch.setattr(
+        "naumi_agent.model.router.litellm.acompletion",
+        fake_acompletion,
+    )
+    router = ModelRouter(
+        ModelConfig(
+            provider="google",
+            default_model="flash",
+            reasoning_effort="xhigh",
+        ),
+        catalog=_google_catalog(),
+    )
+
+    with pytest.raises(ReasoningEffortError, match="不支持思考强度"):
+        await router.call([{"role": "user", "content": "hello"}])
+
+    assert called is False
+
+
+@pytest.mark.asyncio
 async def test_unsupported_catalog_format_fails_before_litellm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -992,10 +1219,10 @@ async def test_unsupported_catalog_format_fails_before_litellm(
     )
     router = ModelRouter(
         ModelConfig(provider="vendor", default_model="chat"),
-        catalog=_google_catalog(),
+        catalog=_unsupported_catalog(),
     )
 
-    with pytest.raises(ProviderRuntimeError, match="google_genai.*尚未实现"):
+    with pytest.raises(ProviderRuntimeError, match="azure_openai.*尚未实现"):
         await router.call([{"role": "user", "content": "hello"}])
 
     assert called is False
