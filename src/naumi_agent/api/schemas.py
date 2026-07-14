@@ -124,6 +124,25 @@ class ChatGitEnvironmentResponse(BaseModel):
     dirty: bool = False
 
 
+class GitDiffFileResponse(BaseModel):
+    path: str
+    status: str
+    stage: str
+    additions: int = 0
+    deletions: int = 0
+    patch: str = ""
+
+
+class GitDiffResponse(BaseModel):
+    available: bool = False
+    branch: str = ""
+    upstream: str = ""
+    ahead: int = 0
+    behind: int = 0
+    error: str = ""
+    files: list[GitDiffFileResponse] = Field(default_factory=list)
+
+
 class ChatBackgroundProcessResponse(BaseModel):
     id: str
     command: str

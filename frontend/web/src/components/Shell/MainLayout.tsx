@@ -22,7 +22,7 @@ import { ProjectPanel } from './ProjectPanel'
 import { GroupPanel } from './GroupPanel'
 import { SkillPanel } from './SkillPanel'
 import { SearchPanel } from './SearchPanel'
-import { GoalPanel } from './GoalPanel'
+import { ReviewPanel } from './ReviewPanel'
 import { TopBar } from './TopBar'
 import { isApiException } from '@/api/ApiException'
 import type { ElementType } from 'react'
@@ -172,9 +172,9 @@ export function MainLayout() {
         <Outlet />
       </main>
 
-      {/* Right goal panel */}
+      {/* Right review panel */}
       <aside className="w-80 border-l border-border bg-panel shrink-0 flex flex-col">
-        <GoalPanel />
+        <ReviewPanel />
       </aside>
     </div>
   )

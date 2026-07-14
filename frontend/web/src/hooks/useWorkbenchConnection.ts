@@ -149,6 +149,7 @@ export function useWorkbenchConnection(options: ConnectionCoordinatorOptions = {
       snapshot: next,
       error: null,
     }
+    useSessionStore.getState().setCurrentSessionId(sessionId)
     notifyListeners()
   }, [])
 
@@ -163,6 +164,9 @@ export function useWorkbenchConnection(options: ConnectionCoordinatorOptions = {
         snapshot: result.snapshot,
         isReady: true,
         error: null,
+      }
+      if (result.sessionId) {
+        useSessionStore.getState().setCurrentSessionId(result.sessionId)
       }
       notifyListeners()
     } catch (err) {

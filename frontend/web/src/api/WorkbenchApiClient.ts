@@ -37,6 +37,7 @@ import type {
   PermissionResolution,
   ChatEnvironmentResponse,
   SessionUpdate,
+  GitDiffResponse,
 } from './types'
 
 export type TokenProvider = () => Promise<string | null>
@@ -154,6 +155,13 @@ export class WorkbenchApiClient {
     })
   }
 
+  async deleteSession(sessionId: string): Promise<unknown> {
+    return this.request<unknown>({
+      method: 'DELETE',
+      url: this.route('sessions', { session_id: sessionId }),
+    })
+  }
+
   async fetchMessages(sessionId: string, page = 1, pageSize = 50): Promise<MessageListResponse> {
     return this.request<MessageListResponse>({
       method: 'GET',
@@ -174,6 +182,13 @@ export class WorkbenchApiClient {
     return this.request<ChatEnvironmentResponse>({
       method: 'GET',
       url: this.route('chat_environment', { session_id: sessionId }),
+    })
+  }
+
+  async fetchGitDiff(sessionId: string): Promise<GitDiffResponse> {
+    return this.request<GitDiffResponse>({
+      method: 'GET',
+      url: this.route('git_diff', { session_id: sessionId }),
     })
   }
 

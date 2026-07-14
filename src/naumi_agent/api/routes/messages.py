@@ -25,6 +25,8 @@ from naumi_agent.api.schemas import (
     ChatRunStepResponse,
     ChatSourceCreate,
     ChatSourceReferenceResponse,
+    GitDiffFileResponse,
+    GitDiffResponse,
     MessageCreate,
     MessageListResponse,
     MessageResponse,
@@ -286,6 +288,47 @@ async def get_chat_environment(
         ],
         sources=[
             ChatSourceReferenceResponse(**asdict(source)) for source in snapshot.sources
+        ],
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/git-diff",
+    response_model=GitDiffResponse,
+)
+async def get_git_diff(
+    session_id: str,
+    request: Request,
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    if not await engine.session_store.load(session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        diff = await ChatEnvironmentCollector(
+            workspace_root=engine.workspace_root,
+            background_store=engine.background_runner.store,
+            chat_run_store=_chat_run_store(request),
+        ).collect_diff()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Git diff failed: {exc}") from exc
+    return GitDiffResponse(
+        available=diff.available,
+        branch=diff.branch,
+        upstream=diff.upstream,
+        ahead=diff.ahead,
+        behind=diff.behind,
+        error=diff.error,
+        files=[
+            GitDiffFileResponse(
+                path=file.path,
+                status=file.status,
+                stage=file.stage,
+                additions=file.additions,
+                deletions=file.deletions,
+                patch=file.patch,
+            )
+            for file in diff.files
         ],
     )
 

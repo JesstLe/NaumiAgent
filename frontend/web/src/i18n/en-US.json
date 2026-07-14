@@ -18,7 +18,12 @@
     "createLinkedIssue": "Create linked issue",
     "newTask": "New Task",
     "review": "Review",
-    "close": "Close"
+    "close": "Close",
+    "delete": "Delete",
+    "more": "More",
+    "refresh": "Refresh",
+    "minimize": "Minimize",
+    "maximize": "Maximize"
   },
   "chat": {
     "title": "Chat",
@@ -156,8 +161,9 @@
     "tokenRemoved": "Token removed"
   },
   "panel": {
-    "context": "Context",
-    "goal": "Goal"
+    "context": "Page Context",
+    "goal": "Goal",
+    "review": "Review Panel"
   },
   "goal": {
     "currentMission": "Current Mission",
@@ -169,7 +175,26 @@
     "empty": "Select a session to view goals",
     "agents": "Active Agents"
   },
+  "project": {
+    "group": "Groups",
+    "project": "Projects",
+    "unknown": "Unknown project",
+    "deleteConfirm": "Delete session \"{{title}}\"? This cannot be undone.",
+    "empty": "No projects",
+    "noSessions": "No sessions"
+  },
+  "review": {
+    "unstaged": "Unstaged",
+    "staged": "Staged",
+    "allChanges": "All Changes",
+    "emptySession": "Select a session to view Git changes",
+    "loading": "Loading Git changes...",
+    "loadError": "Unable to load Git changes",
+    "noGit": "Current workspace is not a Git repository",
+    "noChanges": "No changes"
+  },
   "sideTool": {
+
     "projects": "Projects",
     "groups": "Groups",
     "skills": "Skills",

@@ -18,7 +18,12 @@
     "createLinkedIssue": "同时创建任务",
     "newTask": "新建任务",
     "review": "审查",
-    "close": "关闭"
+    "close": "关闭",
+    "delete": "删除",
+    "more": "更多",
+    "refresh": "刷新",
+    "minimize": "最小化",
+    "maximize": "最大化"
   },
   "chat": {
     "title": "对话",
@@ -157,7 +162,8 @@
   },
   "panel": {
     "context": "页面上下文",
-    "goal": "目标"
+    "goal": "目标",
+    "review": "审查面板"
   },
   "goal": {
     "currentMission": "当前 Mission",
@@ -168,6 +174,24 @@
     "allClear": "当前没有待办事项",
     "empty": "选择一个会话来查看目标",
     "agents": "活跃 Agent"
+  },
+  "project": {
+    "group": "分组",
+    "project": "项目",
+    "unknown": "未知项目",
+    "deleteConfirm": "确定删除会话 \"{{title}}\" 吗？此操作不可撤销。",
+    "empty": "暂无项目",
+    "noSessions": "暂无会话"
+  },
+  "review": {
+    "unstaged": "未暂存",
+    "staged": "已暂存",
+    "allChanges": "全部改动",
+    "emptySession": "选择一个会话查看 Git 改动",
+    "loading": "正在加载 Git 改动...",
+    "loadError": "无法加载 Git 改动",
+    "noGit": "当前工作区不是 Git 仓库",
+    "noChanges": "暂无改动"
   },
   "sideTool": {
     "projects": "项目",

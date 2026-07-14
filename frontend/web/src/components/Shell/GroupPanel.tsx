@@ -3,7 +3,11 @@ import { useTranslation } from 'react-i18next'
 import { LayoutGrid } from 'lucide-react'
 import { useSessionStore } from '@/stores/sessionStore'
 
-export function GroupPanel() {
+export interface GroupPanelProps {
+  showHeader?: boolean
+}
+
+export function GroupPanel({ showHeader = true }: GroupPanelProps) {
   const { t } = useTranslation()
   const snapshot = useSessionStore((state) => state.snapshot)
   const missions = snapshot?.missions ?? []
@@ -21,7 +25,9 @@ export function GroupPanel() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 py-3 border-b border-border font-medium text-sm">{t('sideTool.groups')}</div>
+      {showHeader && (
+        <div className="px-4 py-3 border-b border-border font-medium text-sm">{t('sideTool.groups')}</div>
+      )}
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
         {missions.map((mission) => (
           <div key={mission.id} className="rounded-md border border-border bg-bg p-2">

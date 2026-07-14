@@ -393,6 +393,25 @@ export interface ChatEnvironmentResponse {
   sources: ChatSource[]
 }
 
+export interface GitDiffFile {
+  path: string
+  status: string
+  stage: string
+  additions: number
+  deletions: number
+  patch: string
+}
+
+export interface GitDiffResponse {
+  available: boolean
+  branch: string
+  upstream: string
+  ahead: number
+  behind: number
+  error: string
+  files: GitDiffFile[]
+}
+
 export type RuntimeMode = 'default' | 'plan' | 'bypass'
 
 export interface MissionsResponse {
