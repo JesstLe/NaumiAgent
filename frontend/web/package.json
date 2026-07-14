@@ -30,6 +30,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "globals": "^15.15.0",
     "jsdom": "^29.1.1",
+    "msw": "^2.15.0",
     "tailwindcss": "^4.3.2",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
