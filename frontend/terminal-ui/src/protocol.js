@@ -183,6 +183,34 @@ function normalizeServerPayload(type, payload) {
       choice: String(payload.choice ?? "").trim().toLowerCase(),
     };
   }
+  if (type === "interaction/request") {
+    return {
+      request_id: String(payload.request_id ?? ""),
+      header: String(payload.header ?? ""),
+      question: String(payload.question ?? ""),
+      options: Array.isArray(payload.options)
+        ? payload.options
+          .filter((option) => option && typeof option === "object" && !Array.isArray(option))
+          .map((option) => ({
+            value: String(option.value ?? ""),
+            label: String(option.label ?? ""),
+            description: String(option.description ?? ""),
+          }))
+        : [],
+      allow_custom: toBool(payload.allow_custom),
+      custom_label: String(payload.custom_label ?? "其他"),
+    };
+  }
+  if (type === "interaction/resolved") {
+    return {
+      request_id: String(payload.request_id ?? ""),
+      status: String(payload.status ?? "answered"),
+      kind: String(payload.kind ?? "option"),
+      value: String(payload.value ?? ""),
+      label: String(payload.label ?? ""),
+      custom_text: String(payload.custom_text ?? ""),
+    };
+  }
   if (type === "permission/grants_changed") {
     return {
       revoked: Number(payload.revoked ?? 0),

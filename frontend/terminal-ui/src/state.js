@@ -1,5 +1,14 @@
 import { looksLikeDiff } from "./ansi.js";
-import { INPUT_KEYS, getInputCursor, setInputText, truncateInputText } from "./input-buffer.js";
+import {
+  INPUT_KEYS,
+  backspaceInput,
+  deleteInputForward,
+  getInputCursor,
+  insertInputText,
+  moveInputCursor,
+  setInputText,
+  truncateInputText,
+} from "./input-buffer.js";
 import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
 import { clearRenderCache, createRenderCache } from "./render-cache.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
@@ -18,6 +27,7 @@ const RUN_ACTIVITY_PHASE_LABELS = Object.freeze({
   generating: "生成响应",
   executing: "执行工具",
   awaiting_permission: "等待权限",
+  awaiting_input: "等待用户输入",
   summarizing: "整理结果",
   completed: "执行完成",
   failed: "执行失败",
@@ -259,6 +269,8 @@ export function createInitialState() {
       actionMessage: "",
     },
     permission: null,
+    interaction: null,
+    interactionQueue: [],
     running: false,
     scrollOffset: 0,
     followTail: true,
@@ -361,6 +373,12 @@ export function reduceServerEvent(state, record) {
       break;
     case "permission/resolved":
       handlePermissionResolved(state, payload);
+      break;
+    case "interaction/request":
+      handleInteractionRequest(state, record);
+      break;
+    case "interaction/resolved":
+      handleInteractionResolved(state, payload);
       break;
     case "permission/grants_changed":
       pushSystemMessage(
@@ -502,6 +520,7 @@ export function reduceServerEvent(state, record) {
       state.activeToolPrepare = null;
       state.activeRuntimePhase = "";
       state.permission = null;
+      clearPendingInteractions(state, "cancelled");
       return terminalRunActions(state, payload);
     }
     case "run/cancelled":
@@ -514,6 +533,7 @@ export function reduceServerEvent(state, record) {
       state.activeToolPrepare = null;
       state.activeRuntimePhase = "";
       state.permission = null;
+      clearPendingInteractions(state, "cancelled");
       if (payload.intent === "task" && state.activeTaskSubmission) {
         state.activeTaskSubmission.state = "blocked";
         const taskId = String(payload.task_id ?? state.activeTaskSubmission.taskId);
@@ -542,6 +562,7 @@ export function reduceServerEvent(state, record) {
       state.currentTurnFirstTokenAtMs = null;
       state.lastFirstTokenLatencyMs = null;
       state.permission = null;
+      clearPendingInteractions(state, "cancelled");
       resetRunCancellation(state);
       state.todo = null;
       state.activeToolPrepare = null;
@@ -1350,6 +1371,167 @@ export function handlePermissionResolved(state, payload) {
     return;
   }
   pushSystemMessage(state, "permission", `权限已处理: ${payload.choice}`, "info");
+}
+
+export function handleInteractionRequest(state, record) {
+  const payload = record.payload ?? {};
+  const requestId = String(payload.request_id ?? record.request_id ?? record.id ?? "");
+  if (
+    !requestId
+    || findInteraction(state, requestId)
+    || state.messages.some(
+      (message) => message.kind === "interaction" && message.requestId === requestId,
+    )
+  ) return;
+  const queued = Boolean(state.interaction);
+  const interaction = {
+    requestId,
+    payload,
+    selectedIndex: 0,
+    customMode: false,
+    input: "",
+    inputCursor: 0,
+    inputPreferredColumn: null,
+    inputHistoryCursor: null,
+    inputHistoryDraft: "",
+    submitting: false,
+  };
+  state.messages.push({
+    kind: "interaction",
+    id: nextMessageId(state, "interaction"),
+    requestId,
+    message: { ...payload, request_id: requestId, status: queued ? "queued" : "needs_input" },
+  });
+  if (queued) {
+    state.interactionQueue.push(interaction);
+  } else {
+    state.interaction = interaction;
+  }
+  updateRunActivityPhase(state, "awaiting_input");
+  clearRenderCache(state.renderCache);
+}
+
+export function handleInteractionResolved(state, payload) {
+  const requestId = String(payload.request_id ?? "");
+  const card = state.messages.find(
+    (message) => message.kind === "interaction" && message.requestId === requestId,
+  );
+  if (card) card.message = { ...(card.message ?? {}), ...payload, status: "answered" };
+  if (state.interaction?.requestId === requestId) {
+    state.interaction = state.interactionQueue.shift() ?? null;
+    if (state.interaction) {
+      const nextCard = state.messages.find(
+        (message) => message.kind === "interaction"
+          && message.requestId === state.interaction.requestId,
+      );
+      if (nextCard) {
+        nextCard.message = { ...(nextCard.message ?? {}), status: "needs_input" };
+      }
+    }
+  } else {
+    state.interactionQueue = state.interactionQueue.filter((item) => item.requestId !== requestId);
+  }
+  updateRunActivityPhase(state, state.interaction ? "awaiting_input" : "executing");
+  clearRenderCache(state.renderCache);
+}
+
+export function handleInteractionKey(state, chunk, send) {
+  const interaction = state.interaction;
+  if (!interaction) return false;
+  if (interaction.submitting) return true;
+  const options = Array.isArray(interaction.payload?.options) ? interaction.payload.options : [];
+  const choiceCount = options.length + (interaction.payload?.allow_custom ? 1 : 0);
+  if (choiceCount <= 0) return true;
+
+  if (interaction.customMode) {
+    if (chunk === INPUT_KEYS.escape) {
+      interaction.customMode = false;
+      return true;
+    }
+    if (chunk === "\r" || chunk === "\n" || chunk === INPUT_KEYS.ctrlEnter) {
+      const customText = String(interaction.input ?? "").trim();
+      if (!customText) return true;
+      interaction.submitting = true;
+      send("interaction_response", {
+        request_id: interaction.requestId,
+        kind: "custom",
+        custom_text: customText,
+      });
+      return true;
+    }
+    if (chunk === "\u007f" || chunk === "\b") return backspaceInput(interaction) || true;
+    if (chunk === INPUT_KEYS.delete) return deleteInputForward(interaction) || true;
+    if ([INPUT_KEYS.left, INPUT_KEYS.leftAlt].includes(chunk)) {
+      moveInputCursor(interaction, "left");
+      return true;
+    }
+    if ([INPUT_KEYS.right, INPUT_KEYS.rightAlt].includes(chunk)) {
+      moveInputCursor(interaction, "right");
+      return true;
+    }
+    if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3, INPUT_KEYS.ctrlA].includes(chunk)) {
+      moveInputCursor(interaction, "home");
+      return true;
+    }
+    if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3, INPUT_KEYS.ctrlE].includes(chunk)) {
+      moveInputCursor(interaction, "end");
+      return true;
+    }
+    if (chunk >= " " && chunk !== "\x7f") {
+      insertInputText(interaction, chunk);
+      interaction.input = Array.from(interaction.input).slice(0, 4_000).join("");
+      interaction.inputCursor = Math.min(interaction.inputCursor, Array.from(interaction.input).length);
+    }
+    return true;
+  }
+
+  if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(chunk)) {
+    interaction.selectedIndex = (interaction.selectedIndex - 1 + choiceCount) % choiceCount;
+    return true;
+  }
+  if ([INPUT_KEYS.down, INPUT_KEYS.downAlt, INPUT_KEYS.tab].includes(chunk)) {
+    interaction.selectedIndex = (interaction.selectedIndex + 1) % choiceCount;
+    return true;
+  }
+  if (/^[1-9]$/.test(chunk)) {
+    const index = Number(chunk) - 1;
+    if (index < choiceCount) interaction.selectedIndex = index;
+    return true;
+  }
+  if (chunk === "\r" || chunk === "\n") {
+    if (interaction.selectedIndex >= options.length) {
+      interaction.customMode = true;
+      return true;
+    }
+    const option = options[interaction.selectedIndex];
+    interaction.submitting = true;
+    send("interaction_response", {
+      request_id: interaction.requestId,
+      kind: "option",
+      value: String(option.value ?? ""),
+    });
+    return true;
+  }
+  return true;
+}
+
+function findInteraction(state, requestId) {
+  if (state.interaction?.requestId === requestId) return state.interaction;
+  return state.interactionQueue.find((item) => item.requestId === requestId) ?? null;
+}
+
+function clearPendingInteractions(state, status) {
+  const requestIds = new Set([
+    state.interaction?.requestId,
+    ...(state.interactionQueue ?? []).map((item) => item.requestId),
+  ].filter(Boolean));
+  for (const message of state.messages) {
+    if (message.kind !== "interaction" || !requestIds.has(message.requestId)) continue;
+    message.message = { ...(message.message ?? {}), status };
+  }
+  state.interaction = null;
+  state.interactionQueue = [];
+  clearRenderCache(state.renderCache);
 }
 
 function permissionChoiceStatus(choice) {

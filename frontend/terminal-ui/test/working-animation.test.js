@@ -121,6 +121,21 @@ test("working indicator distinguishes tool permission and cancellation phases", 
   assert.equal(cancelling.animate, false);
 });
 
+test("working indicator stays static while waiting for structured user input", () => {
+  const state = runningState("awaiting_input", { interaction: { requestId: "ask-1" } });
+  const first = renderWorkingIndicator({ ...state, workingAnimationFrame: 0 }, 90, { bodyHeight: 20 });
+  const last = renderWorkingIndicator({ ...state, workingAnimationFrame: 3 }, 90, { bodyHeight: 20 });
+
+  assert.equal(stripAnsi(first.join("\n")), stripAnsi(last.join("\n")));
+  assert.match(stripAnsi(first.join("\n")), /等待用户输入/);
+  assert.equal(shouldAnimateWorkingIndicator(state, {
+    isTTY: true,
+    term: "xterm-256color",
+    ci: false,
+    reduceMotion: false,
+  }), false);
+});
+
 test("working indicator animation capability follows terminal and run state", () => {
   const capable = { isTTY: true, term: "xterm-256color", ci: false, reduceMotion: false };
 

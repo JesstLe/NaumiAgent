@@ -92,6 +92,32 @@ test("terminal UI exits locally on slash q without submitting it", async () => {
   }
 });
 
+test("terminal UI completes a structured interaction with arrow selection", async () => {
+  const app = launchTerminalUi("fake-bridge.js");
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    app.stdin.write("需要选择\n");
+    await waitForLatestScreen(output, "需要你的选择", 7000);
+    await waitForLatestScreen(output, "安全方案", 7000);
+    app.stdin.write("\x1b[B\r");
+    await waitForLatestScreen(output, "已回答", 7000);
+    await waitForLatestScreen(output, "快速方案", 7000);
+    await waitForLatestScreen(output, "已按快速方案继续", 7000);
+
+    const response = readDebugEvents(app.debugLogPath).find(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "interaction_response",
+    );
+    assert(response);
+    assert.equal(response.payload.record.payload.value, "fast");
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process handles submit, mode switch, permission, and tool rendering", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);

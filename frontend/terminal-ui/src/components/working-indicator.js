@@ -38,6 +38,9 @@ export function workingIndicatorStatus(state) {
   if (state?.permission || phase === "awaiting_permission") {
     return { visible: true, animate: false, label: "等待权限确认", phaseLabel, style: ANSI.yellow };
   }
+  if (state?.interaction || phase === "awaiting_input") {
+    return { visible: true, animate: false, label: "等待用户输入", phaseLabel, style: ANSI.yellow };
+  }
   if (phase === "executing") {
     return { visible: true, animate: true, label: "工具执行中", phaseLabel, style: ANSI.cyan };
   }
@@ -129,6 +132,7 @@ function phaseLabelFor(phase) {
     generating: "生成响应",
     executing: "执行工具",
     awaiting_permission: "等待权限",
+    awaiting_input: "等待用户输入",
     summarizing: "整理结果",
   }[phase] ?? "运行中";
 }

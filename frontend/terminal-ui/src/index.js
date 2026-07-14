@@ -47,6 +47,7 @@ import {
 } from "./protocol.js";
 import {
   handleAgentControlKey,
+  handleInteractionKey,
   handleSubmitText,
   handleRuntimeInspectorKey,
   hasTaskPanelFocus,
@@ -383,7 +384,9 @@ function handleKeyInput(chunk) {
   });
   for (const token of tokens) {
     if (token.type === "paste") {
-      if (state.historySearch?.open) {
+      if (state.interaction) {
+        handleInteractionKey(state, token.value, send);
+      } else if (state.historySearch?.open) {
         appendHistorySearchQuery(state, token.value);
       } else {
         insertInputText(state, token.value);
@@ -462,6 +465,10 @@ function handleSingleKeyInput(chunk) {
         INPUT_KEYS.rightAlt,
       ].includes(chunk)
     ) return;
+  }
+  if (state.interaction && handleInteractionKey(state, chunk, send)) {
+    scheduleRedraw();
+    return;
   }
   if (state.agents?.open && handleAgentControlKey(state, chunk, send)) {
     persistUiSnapshot();

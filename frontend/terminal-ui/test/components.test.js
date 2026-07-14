@@ -6,6 +6,7 @@ import {
   CommandCompletionFooter,
   Footer,
   HistorySearchFooter,
+  InteractionFooter,
   NewOutputFooter,
   PermissionFooter,
   PromptFooter,
@@ -16,6 +17,7 @@ import { ActivityCard } from "../src/components/activity-card.js";
 import { CompletionReceiptCard } from "../src/components/completion-receipt-card.js";
 import { RunActivityCard } from "../src/components/run-activity-card.js";
 import { PermissionCard } from "../src/components/permission-card.js";
+import { InteractionCard } from "../src/components/interaction-card.js";
 import { parsePermissionPanel, PermissionPanel } from "../src/components/permission-panel.js";
 import { ToolCard } from "../src/components/tool-card.js";
 import { parseTaskPanel, renderTaskPanel, TaskPanel } from "../src/components/task-panel.js";
@@ -40,6 +42,46 @@ test("component core composes nested stacks and boxes within width", () => {
   assert(lines.some((item) => stripAnsi(item).includes("group")));
   assert(lines.some((item) => stripAnsi(item).includes("第一行")));
   assert(lines.every((item) => visibleWidth(item) <= 48));
+});
+
+test("interaction card and footer expose choices, custom input, and answered state", () => {
+  const payload = {
+    header: "实现策略",
+    question: "请选择持久化范围",
+    options: [
+      { value: "workspace", label: "工作区", description: "同一仓库共享" },
+      { value: "session", label: "当前会话", description: "仅本会话" },
+    ],
+    allow_custom: true,
+    custom_label: "其他方案",
+    status: "needs_input",
+  };
+  const card = renderComponent(InteractionCard({ interaction: payload }), { width: 52 })
+    .map(stripAnsi)
+    .join("\n");
+  assert.match(card, /等待你的选择/);
+  assert.match(card, /工作区.*同一仓库共享/);
+  assert.match(card, /其他方案/);
+
+  const interaction = {
+    payload,
+    selectedIndex: 1,
+    customMode: false,
+    input: "",
+    inputCursor: 0,
+  };
+  const footer = InteractionFooter({ interaction }).render({ width: 64 }).map(stripAnsi).join("\n");
+  assert.match(footer, /› 2\. 当前会话/);
+  assert.match(footer, /↑\/↓ 选择/);
+
+  const answered = renderComponent(InteractionCard({ interaction: {
+    ...payload,
+    status: "answered",
+    kind: "custom",
+    custom_text: "由配置决定",
+  } }), { width: 52 }).map(stripAnsi).join("\n");
+  assert.match(answered, /已回答/);
+  assert.match(answered, /由配置决定/);
 });
 
 test("completion receipt card exposes evidence, risk, and recovery in Chinese", () => {
