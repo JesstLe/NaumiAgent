@@ -7,6 +7,10 @@ from enum import StrEnum
 from typing import Literal
 
 
+class ReasoningEffortError(ValueError):
+    """Raised when an effort selection cannot be sent safely."""
+
+
 class ReasoningEffort(StrEnum):
     """Provider reasoning intensity values supported by NaumiAgent."""
 
