@@ -11,6 +11,7 @@ const DEFAULT_SESSION_KEY = "__default__";
 const MAX_HISTORY_ENTRIES = 100;
 const MAX_HISTORY_ENTRY_CHARS = 200_000;
 const MAX_HISTORY_TOTAL_CHARS = 1_000_000;
+let temporaryFileSequence = 0;
 
 export function loadUiStateStore(cwd) {
   const filePath = process.env.NAUMI_TERMINAL_UI_STATE_PATH || path.join(cwd, STORE_PATH);
@@ -79,15 +80,54 @@ export function loadUiStateStore(cwd) {
 
 export function saveUiStateStore(store) {
   if (store.writable === false) return false;
-  fs.mkdirSync(path.dirname(store.filePath), { recursive: true });
-  const tmpPath = `${store.filePath}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify({
-    version: STORE_VERSION,
-    sessions: store.sessions,
-    input_history: sanitizeInputHistory(store.inputHistory),
-  }, null, 2), "utf8");
-  fs.renameSync(tmpPath, store.filePath);
-  return true;
+  const tmpPath = temporaryStatePath(store.filePath);
+  try {
+    fs.mkdirSync(path.dirname(store.filePath), { recursive: true });
+    fs.writeFileSync(tmpPath, JSON.stringify({
+      version: STORE_VERSION,
+      sessions: store.sessions,
+      input_history: sanitizeInputHistory(store.inputHistory),
+    }, null, 2), "utf8");
+    replaceUiStateFile(tmpPath, store.filePath);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    removeFileQuietly(fs, tmpPath);
+  }
+}
+
+export function replaceUiStateFile(
+  temporaryPath,
+  destinationPath,
+  { fileSystem = fs, platform = process.platform } = {},
+) {
+  try {
+    fileSystem.renameSync(temporaryPath, destinationPath);
+    return;
+  } catch (error) {
+    if (platform !== "win32" || !isWindowsReplacementError(error)) throw error;
+  }
+
+  const backupPath = `${temporaryPath}.replace-backup`;
+  let backupCreated = false;
+  try {
+    fileSystem.renameSync(destinationPath, backupPath);
+    backupCreated = true;
+    fileSystem.renameSync(temporaryPath, destinationPath);
+  } catch (error) {
+    if (backupCreated) {
+      try {
+        fileSystem.renameSync(backupPath, destinationPath);
+        backupCreated = false;
+      } catch (restoreError) {
+        error.cause = restoreError;
+      }
+    }
+    throw error;
+  } finally {
+    if (backupCreated) removeFileQuietly(fileSystem, backupPath);
+  }
 }
 
 export function getUiSnapshot(store, sessionId) {
@@ -116,6 +156,23 @@ export function sessionKey(sessionId) {
 
 function createEmptyStore(filePath, { writable = true } = {}) {
   return { filePath, sessions: {}, inputHistory: [], writable };
+}
+
+function temporaryStatePath(filePath) {
+  temporaryFileSequence = (temporaryFileSequence + 1) % Number.MAX_SAFE_INTEGER;
+  return `${filePath}.${process.pid}.${Date.now()}.${temporaryFileSequence}.tmp`;
+}
+
+function isWindowsReplacementError(error) {
+  return ["EACCES", "EEXIST", "EPERM"].includes(String(error?.code ?? ""));
+}
+
+function removeFileQuietly(fileSystem, filePath) {
+  try {
+    fileSystem.rmSync(filePath, { force: true });
+  } catch {
+    // A failed best-effort cleanup must not terminate the interactive UI.
+  }
 }
 
 function migrateLegacySnapshot(snapshot) {

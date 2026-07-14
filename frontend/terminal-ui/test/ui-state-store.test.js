@@ -7,10 +7,61 @@ import {
   getProjectInputHistory,
   getUiSnapshot,
   loadUiStateStore,
+  replaceUiStateFile,
   saveUiStateStore,
   setProjectInputHistory,
   setUiSnapshot,
 } from "../src/ui-state-store.js";
+
+test("Windows replacement uses a rollback backup instead of deleting state", () => {
+  const calls = [];
+  let renameAttempts = 0;
+  const fileSystem = {
+    renameSync(source, destination) {
+      calls.push(["rename", source, destination]);
+      renameAttempts += 1;
+      if (renameAttempts === 1) {
+        const error = new Error("destination exists");
+        error.code = "EPERM";
+        throw error;
+      }
+    },
+    rmSync(destination, options) {
+      calls.push(["remove", destination, options]);
+    },
+  };
+
+  replaceUiStateFile("state.tmp", "state.json", {
+    fileSystem,
+    platform: "win32",
+  });
+
+  assert.deepEqual(calls, [
+    ["rename", "state.tmp", "state.json"],
+    ["rename", "state.json", "state.tmp.replace-backup"],
+    ["rename", "state.tmp", "state.json"],
+    ["remove", "state.tmp.replace-backup", { force: true }],
+  ]);
+});
+
+test("ui state store contains persistence errors and removes temporary files", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "naumi-ui-state-error-"));
+  const destinationDirectory = path.join(dir, "state.json");
+  fs.mkdirSync(destinationDirectory);
+  const previous = process.env.NAUMI_TERMINAL_UI_STATE_PATH;
+  process.env.NAUMI_TERMINAL_UI_STATE_PATH = destinationDirectory;
+
+  try {
+    const store = loadUiStateStore(process.cwd());
+    setUiSnapshot(store, "session-a", { scrollOffset: 1 });
+    assert.equal(saveUiStateStore(store), false);
+    assert.deepEqual(fs.readdirSync(dir), ["state.json"]);
+  } finally {
+    if (previous === undefined) delete process.env.NAUMI_TERMINAL_UI_STATE_PATH;
+    else process.env.NAUMI_TERMINAL_UI_STATE_PATH = previous;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("ui state store saves session-scoped snapshots atomically", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "naumi-ui-state-"));
