@@ -330,7 +330,7 @@ class SystemNoticeMessage(UIMessage):
 
     title: str = ""
     content: str = ""
-    level: str = "info"  # "info" | "warning" | "debug"
+    level: str = "info"  # "success" | "info" | "warning" | "error" | "debug"
 
     def summary(self) -> str:
         label = self.title or self.level

@@ -20,6 +20,7 @@ class TreeFingerprint:
     digest: str
     head: str
     dirty_paths: tuple[str, ...]
+    path_digests: tuple[tuple[str, str], ...]
 
 
 class _Digest(Protocol):
@@ -40,21 +41,66 @@ def compute_tree_fingerprint(workspace_root: str | Path) -> TreeFingerprint:
         "-z",
         "--untracked-files=all",
     )
-    dirty_paths = _parse_dirty_paths(status_bytes)
+    dirty_records = _parse_dirty_records(status_bytes)
+    dirty_paths = tuple(sorted(dirty_records))
 
     digest = hashlib.sha256()
     _update_field(digest, b"head", head.encode("ascii"))
     _update_field(digest, b"index", index)
     _update_field(digest, b"status", status_bytes)
+    path_digests: list[tuple[str, str]] = []
     for relative in dirty_paths:
         encoded = relative.encode("utf-8", errors="surrogateescape")
         _update_field(digest, b"path", encoded)
-        _hash_worktree_path(digest, root, relative)
+        path_digest = hashlib.sha256()
+        _update_field(path_digest, b"status", dirty_records[relative])
+        _hash_worktree_path(path_digest, root, relative)
+        path_digest_text = f"sha256:{path_digest.hexdigest()}"
+        path_digests.append((relative, path_digest_text))
+        _update_field(digest, b"path_digest", path_digest_text.encode("ascii"))
     return TreeFingerprint(
         digest=f"sha256:{digest.hexdigest()}",
         head=head,
         dirty_paths=dirty_paths,
+        path_digests=tuple(path_digests),
     )
+
+
+def changed_paths_between(
+    workspace_root: str | Path,
+    before: TreeFingerprint,
+    after: TreeFingerprint,
+) -> tuple[str, ...]:
+    """Return paths whose repository state changed during one Harness run."""
+    root = Path(workspace_root).expanduser().resolve(strict=True)
+    before_paths = dict(before.path_digests)
+    after_paths = dict(after.path_digests)
+    changed = {
+        path
+        for path in before_paths.keys() | after_paths.keys()
+        if before_paths.get(path) != after_paths.get(path)
+    }
+    if before.head != after.head:
+        committed = _git(
+            root,
+            "diff",
+            "--name-only",
+            "-z",
+            before.head,
+            after.head,
+            "--",
+        )
+        changed.update(
+            record.decode("utf-8", errors="surrogateescape")
+            for record in committed.split(b"\0")
+            if record
+        )
+    if before.digest != after.digest and not changed:
+        # Conservative fallback for Git metadata transitions not represented by
+        # worktree bytes. It may request extra validation, but never reuses stale proof.
+        changed.update(before.dirty_paths)
+        changed.update(after.dirty_paths)
+    return tuple(sorted(changed))
 
 
 def _git(root: Path, *args: str) -> bytes:
@@ -77,9 +123,9 @@ def _git(root: Path, *args: str) -> bytes:
     return completed.stdout
 
 
-def _parse_dirty_paths(status_bytes: bytes) -> tuple[str, ...]:
+def _parse_dirty_records(status_bytes: bytes) -> dict[str, bytes]:
     records = status_bytes.split(b"\0")
-    paths: set[str] = set()
+    paths: dict[str, bytes] = {}
     index = 0
     while index < len(records):
         record = records[index]
@@ -89,13 +135,15 @@ def _parse_dirty_paths(status_bytes: bytes) -> tuple[str, ...]:
         if len(record) < 4 or record[2:3] != b" ":
             raise TreeFingerprintError("Git 状态输出格式无法识别，已停止验证。")
         path_bytes = record[3:]
-        paths.add(path_bytes.decode("utf-8", errors="surrogateescape"))
+        path = path_bytes.decode("utf-8", errors="surrogateescape")
+        paths[path] = record[:2]
         if b"R" in record[:2] or b"C" in record[:2]:
             if index >= len(records) or not records[index]:
                 raise TreeFingerprintError("Git rename 状态不完整，已停止验证。")
-            paths.add(records[index].decode("utf-8", errors="surrogateescape"))
+            source = records[index].decode("utf-8", errors="surrogateescape")
+            paths[source] = b"rename-source:" + record[:2]
             index += 1
-    return tuple(sorted(paths))
+    return paths
 
 
 def _hash_worktree_path(digest: _Digest, root: Path, relative: str) -> None:

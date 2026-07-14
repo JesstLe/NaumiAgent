@@ -75,7 +75,9 @@ def _render_user(msg: UserMessage) -> str | None:
 
 def _render_system_notice(msg: SystemNoticeMessage) -> str | None:
     color = {
+        "success": "32",
         "warning": "33",
+        "error": "31",
         "debug": "2",
     }.get(msg.level, "36")
     return f"\033[{color}m{msg.content}\033[0m\n"

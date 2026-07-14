@@ -76,6 +76,22 @@ function subagentRecord({
   };
 }
 
+test("system notice preserves semantic color level", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: {
+      type: "system_notice",
+      title: "Harness 完成回执",
+      content: "已验证完成",
+      level: "success",
+    },
+  });
+
+  assert.equal(state.messages.at(-1).level, "success");
+});
+
 test("subagent lifecycle events aggregate into one task activity", () => {
   const state = createInitialState();
 

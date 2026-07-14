@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
@@ -70,7 +71,11 @@ class HarnessCheckRunner:
             tuple[str, str, str, str],
             asyncio.Task[HarnessCheckResult],
         ] = {}
-        self._cache: dict[tuple[str, str, str, str], HarnessCheckResult] = {}
+        self._cache: OrderedDict[
+            tuple[str, str, str, str],
+            HarnessCheckResult,
+        ] = OrderedDict()
+        self._max_cache_entries = 256
 
     async def run(
         self,
@@ -98,6 +103,7 @@ class HarnessCheckRunner:
         async with self._lock:
             cached = self._cache.get(key)
             if cached is not None:
+                self._cache.move_to_end(key)
                 return replace(cached, cached=True)
             task = self._inflight.get(key)
             if task is None:
@@ -135,6 +141,9 @@ class HarnessCheckRunner:
             async with self._lock:
                 if result.status is HarnessCheckStatus.PASSED:
                     self._cache[key] = result
+                    self._cache.move_to_end(key)
+                    while len(self._cache) > self._max_cache_entries:
+                        self._cache.popitem(last=False)
             return result
         finally:
             async with self._lock:

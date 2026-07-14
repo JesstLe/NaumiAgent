@@ -17,6 +17,7 @@ from naumi_agent.ui.messages import (
     RuntimeNotificationMessage,
     RuntimeStatusMessage,
     SubagentEventMessage,
+    SystemNoticeMessage,
     TeamEventMessage,
     ThinkingMessage,
     TodoStatusMessage,
@@ -78,6 +79,59 @@ class TestAdapterBasics:
         })
         assert msg is not None
         assert msg.raw_data is None
+
+
+class TestHarnessCompletionMessages:
+    def test_correction_is_visible_warning(
+        self,
+        adapter: EngineEventAdapter,
+    ) -> None:
+        msg = adapter.adapt(
+            "harness_completion_correction",
+            {"message": "缺少必需检查 unit。", "run_id": "run-1"},
+        )
+
+        assert isinstance(msg, SystemNoticeMessage)
+        assert msg.level == "warning"
+        assert msg.title == "Harness 完成门禁"
+        assert "unit" in msg.content
+
+    def test_verified_receipt_exposes_checks_changes_and_fingerprint(
+        self,
+        adapter: EngineEventAdapter,
+    ) -> None:
+        msg = adapter.adapt(
+            "harness_completion_receipt",
+            {
+                "run_id": "run-1",
+                "status": "completed_verified",
+                "checks": [{"id": "unit", "status": "passed"}],
+                "changed_files": ["source.py"],
+                "warnings": [],
+                "tree_fingerprint": "sha256:abc",
+            },
+        )
+
+        assert isinstance(msg, SystemNoticeMessage)
+        assert msg.level == "success"
+        assert "已验证完成" in msg.content
+        assert "unit=passed" in msg.content
+        assert "source.py" in msg.content
+        assert "sha256:abc" in msg.content
+
+    def test_blocked_receipt_is_error(self, adapter: EngineEventAdapter) -> None:
+        msg = adapter.adapt(
+            "harness_completion_receipt",
+            {
+                "run_id": "run-2",
+                "status": "blocked",
+                "warnings": ["工作树不可读取。"],
+            },
+        )
+
+        assert isinstance(msg, SystemNoticeMessage)
+        assert msg.level == "error"
+        assert "工作树不可读取" in msg.content
 
 
 # ---------------------------------------------------------------------------
@@ -652,6 +706,8 @@ class TestDispatchCoverage:
     # These are all events emitted by the engine (from engine.py analysis).
     ENGINE_EVENTS = [
         "completion_receipt",
+        "harness_completion_correction",
+        "harness_completion_receipt",
         "run_started",
         "turn_start",
         "perf_phase",

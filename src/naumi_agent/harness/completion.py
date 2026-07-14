@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from naumi_agent.harness.checks import HarnessCheckResult, HarnessCheckStatus
+from naumi_agent.harness.fingerprint import TreeFingerprint
 from naumi_agent.harness.models import (
     HarnessCompletionContract,
     HarnessTaskKind,
@@ -43,6 +45,20 @@ class HarnessEvidenceRef(_CompletionModel):
         return normalized
 
 
+@dataclass
+class HarnessRunState:
+    """Ephemeral completion state for one Agent run."""
+
+    contract: HarnessCompletionContract
+    initial_tree: TreeFingerprint
+    available_check_ids: tuple[str, ...]
+    context: str
+    correction_attempt: int = 0
+    mutating_tool_used: bool = False
+    finalized: bool = False
+    receipt: HarnessCompletionReceipt | None = None
+
+
 class CompletionGateInput(_CompletionModel):
     current_tree_fingerprint: str
     current_profile_digest: str | None = None
@@ -52,6 +68,7 @@ class CompletionGateInput(_CompletionModel):
     pending_todo_ids: tuple[str, ...] = ()
     known_failure_ids: tuple[str, ...] = ()
     disclosed_failure_ids: tuple[str, ...] = ()
+    infrastructure_errors: tuple[str, ...] = ()
     mutating_tool_used: bool = False
 
     @field_validator("current_tree_fingerprint")
@@ -75,6 +92,7 @@ class CompletionGateInput(_CompletionModel):
             "pending_todo_ids",
             "known_failure_ids",
             "disclosed_failure_ids",
+            "infrastructure_errors",
         ):
             values = getattr(self, field_name)
             if len(values) != len(set(values)):
@@ -179,6 +197,14 @@ class CompletionGate:
         facts: CompletionGateInput,
     ) -> tuple[_GateIssue, ...]:
         issues: list[_GateIssue] = []
+        issues.extend(
+            _GateIssue(
+                code="infrastructure_error",
+                message=message,
+                hard_block=True,
+            )
+            for message in facts.infrastructure_errors
+        )
         if contract.profile_digest is not None and (
             facts.current_profile_digest != contract.profile_digest
         ):
@@ -384,6 +410,28 @@ class CompletionGate:
 def build_completion_contract(**values: object) -> HarnessCompletionContract:
     """Build one strict contract without silently accepting unknown fields."""
     return HarnessCompletionContract.model_validate(values)
+
+
+def render_completion_contract_context(
+    contract: HarnessCompletionContract,
+    *,
+    available_check_ids: tuple[str, ...],
+) -> str:
+    """Render an ephemeral, non-persistent contract instruction for the model."""
+    available = "、".join(available_check_ids) or "无"
+    required = "、".join(contract.required_checks) or "尚未选择"
+    return (
+        "<naumi_harness_completion_contract>\n"
+        f"run_id: {contract.run_id}\n"
+        f"task_kind: {contract.task_kind.value}\n"
+        f"objective: {contract.objective}\n"
+        f"available_checks: {available}\n"
+        f"required_checks: {required}\n"
+        "在声称完成前，必须满足 Harness 完成门禁。若门禁要求检查，"
+        "只能调用 harness_run_check，并原样传入上述 run_id 与 check_id；"
+        "不得把旧运行、旧工作树或旧 Profile 的结果当作当前证据。\n"
+        "</naumi_harness_completion_contract>"
+    )
 
 
 def _safe_changed_path(path: str) -> str | None:

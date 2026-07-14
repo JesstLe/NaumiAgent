@@ -1450,7 +1450,12 @@ export function handleUiMessage(state, message) {
       state.messages.push({ kind: message.type, message });
       break;
     case "system_notice":
-      pushSystemMessage(state, message.title ?? "notice", message.content ?? message.message ?? "", "info");
+      pushSystemMessage(
+        state,
+        message.title ?? "notice",
+        message.content ?? message.message ?? "",
+        message.level ?? "info",
+      );
       break;
     default:
       break;
