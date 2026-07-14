@@ -48,6 +48,64 @@ test("welcome becomes ready without creating a timeline message", () => {
   assert.equal(state.messages.length, 0);
 });
 
+test("working animation frame resets at every run lifecycle boundary", () => {
+  const state = createInitialState();
+  assert.equal(state.workingAnimationFrame, 0);
+
+  state.workingAnimationFrame = 3;
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "run-animation-1",
+    payload: { task: "验证动态图" },
+  });
+  assert.equal(state.running, true);
+  assert.equal(state.workingAnimationFrame, 0);
+
+  state.workingAnimationFrame = 2;
+  reduceServerEvent(state, {
+    type: "run/completed",
+    request_id: "run-animation-1",
+    payload: { status: "completed" },
+  });
+  assert.equal(state.running, false);
+  assert.equal(state.workingAnimationFrame, 0);
+
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "run-animation-2",
+    payload: { task: "取消动态图" },
+  });
+  state.workingAnimationFrame = 1;
+  reduceServerEvent(state, {
+    type: "run/cancelled",
+    request_id: "run-animation-2",
+    payload: { status: "cancelled" },
+  });
+  assert.equal(state.workingAnimationFrame, 0);
+
+  state.workingAnimationFrame = 3;
+  reduceServerEvent(state, {
+    type: "session/replayed",
+    payload: { session_id: "session-animation", title: "动画会话" },
+  });
+  assert.equal(state.workingAnimationFrame, 0);
+  assert.equal("workingAnimationFrame" in createUiSnapshot(state), false);
+
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "run-animation-error",
+    payload: { task: "错误终态" },
+  });
+  state.workingAnimationFrame = 2;
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: "run-animation-error",
+    payload: { code: "model_failed", message: "模型调用失败" },
+  });
+  assert.equal(state.running, false);
+  assert.equal(state.workingAnimationFrame, 0);
+});
+
 test("chat and task submissions dismiss welcome before transport completion", () => {
   for (const intent of ["chat", "task"]) {
     const state = createInitialState();

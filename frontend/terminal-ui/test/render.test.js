@@ -69,6 +69,92 @@ test("welcome resize tiers stay bounded and dismissed state reveals the timeline
   assert.match(dismissed, /正常时间线/);
 });
 
+test("active working tail renders responsive image through run phases", () => {
+  const state = createInitialState();
+  state.welcome = { phase: "dismissed", dismissed: true };
+  state.status = {
+    model: "openai/kimi-for-coding",
+    workspace_root: "/Users/lv/Workspace/NaumiAgent",
+    usage: { total_tokens: 0 },
+    context: { used: 0, window: 256000, percentage: 0 },
+    budget: { enabled: false, used_usd: 0, max_usd: null },
+  };
+
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "run-working-tail",
+    payload: { task: "渲染动态图" },
+  });
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "assistant_stream", phase: "start" },
+  });
+  state.workingAnimationFrame = 1;
+
+  const wide = renderScreen(state, 100, 30, { term: "xterm-256color" }).map(stripAnsi);
+  assert(wide.some((line) => line.includes("╭─────╮")));
+  assert(wide.some((line) => line.includes("◓")));
+  assert(wide.some((line) => line.includes("模型工作中 · 生成响应")));
+
+  const compact = renderScreen(state, 60, 12, { term: "xterm-256color" }).map(stripAnsi);
+  assert(compact.some((line) => line.includes("◓ 模型工作中 · 生成响应")));
+  assert(!compact.some((line) => line.includes("╭─────╮")));
+
+  reduceServerEvent(state, {
+    type: "permission/request",
+    request_id: "permission-working-tail",
+    payload: { tool_name: "bash_run", reason: "需要确认" },
+  });
+  const waiting = renderScreen(state, 100, 30, { term: "xterm-256color" }).map(stripAnsi);
+  assert(waiting.some((line) => line.includes("等待权限确认")));
+  assert(!waiting.some((line) => line.includes("模型工作中")));
+
+  reduceServerEvent(state, {
+    type: "permission/resolved",
+    payload: { request_id: "permission-working-tail", choice: "allow_once" },
+  });
+  const resumed = renderScreen(state, 100, 30, { term: "xterm-256color" }).map(stripAnsi);
+  assert(resumed.some((line) => line.includes("工具执行中")));
+
+  reduceServerEvent(state, {
+    type: "run/completed",
+    request_id: "run-working-tail",
+    payload: { status: "completed" },
+  });
+  const completed = renderScreen(state, 100, 30, { term: "xterm-256color" }).map(stripAnsi);
+  assert(!completed.some((line) => /模型工作中|工具执行中|等待权限确认/.test(line)));
+});
+
+test("active working tail keeps scroll anchors stable across frames", () => {
+  const state = createInitialState();
+  state.welcome = { phase: "dismissed", dismissed: true };
+  state.messages = Array.from({ length: 12 }, (_, index) => ({
+    kind: "assistant",
+    id: `working-anchor-${index}`,
+    content: `动画锚点消息 ${index}: ${"稳定正文 ".repeat(30)}`,
+  }));
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "run-working-anchor",
+    payload: { task: "验证动画滚动锚点" },
+  });
+  detachTimeline(state, 16);
+
+  state.workingAnimationFrame = 0;
+  const first = captureViewportAnchor(state, 100, 16, { term: "xterm" });
+  state.workingAnimationFrame = 3;
+  const second = captureViewportAnchor(state, 100, 16, { term: "xterm" });
+
+  assert(first);
+  assert.equal(second.messageId, first.messageId);
+  assert.equal(second.messageIndex, first.messageIndex);
+  assert(restoreViewportAnchor(state, second, 60, 16, { term: "xterm" }) > 0);
+  assert.equal(
+    captureViewportAnchor(state, 60, 16, { term: "xterm" }).messageId,
+    first.messageId,
+  );
+});
+
 test("inspector and agent pages take priority over the startup welcome", () => {
   const state = createInitialState();
   state.inspector.open = true;

@@ -58,7 +58,10 @@ export function renderWorkingIndicator(state, width, options = {}) {
   if (!status.visible) return [];
 
   const safeWidth = Math.max(1, Number(width) || 1);
-  const safeBodyHeight = Math.max(1, Number(options.bodyHeight) || 1);
+  const requestedBodyHeight = Number(options.bodyHeight);
+  const safeBodyHeight = Number.isFinite(requestedBodyHeight)
+    ? Math.max(1, requestedBodyHeight)
+    : Number.POSITIVE_INFINITY;
   const ascii = options.ascii === true || String(options.term ?? "").toLowerCase() === "dumb";
   if (ascii) {
     const base = `[o] ${status.label}`;
