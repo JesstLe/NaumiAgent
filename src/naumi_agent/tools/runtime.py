@@ -449,6 +449,10 @@ class _RuntimeSnapshot:
         schedules = self.engine.scheduler_runner.list_jobs(include_inactive=False)
         background_counts = Counter(task.status for task in background_tasks)
         schedule_counts = Counter(job.status for job in schedules)
+        browser_runner = getattr(self.engine, "_task_runner", None)
+        browser_limit = self.engine._config.browser.max_concurrent_runs
+        browser_active = browser_runner.active_slots if browser_runner else 0
+        browser_queued = browser_runner.queued_run_count if browser_runner else 0
         lines = [
             "### 资源与后台",
             "- 后台任务："
@@ -460,6 +464,9 @@ class _RuntimeSnapshot:
             f"{schedule_counts[ScheduleStatus.ACTIVE]} 启用中，"
             f"{schedule_counts[ScheduleStatus.PAUSED]} 暂停，"
             f"{schedule_counts[ScheduleStatus.COMPLETED]} 完成",
+            "- 浏览器队列："
+            f"{browser_active}/{browser_limit} 活跃 · "
+            f"{browser_queued} 排队",
             f"- MCP：{_mcp_summary(self.engine)}",
         ]
         for task in background_tasks[: self.limit]:

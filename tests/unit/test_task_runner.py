@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -528,6 +529,267 @@ class TestTaskRunnerCreateRun:
             "Task", options={"handoffTimeoutMs": 10000}
         )
         assert run["handoffTimeoutMs"] == 10000
+
+    @pytest.mark.parametrize("value", [0, 9, "many"])
+    def test_rejects_invalid_concurrency_option(self, tmp_path, value):
+        rt = _make_mock_runtime()
+        with pytest.raises(ValueError, match="max_concurrent_runs"):
+            TaskRunner(
+                str(tmp_path),
+                options={**_make_runner_options(rt), "max_concurrent_runs": value},
+            )
+
+    @pytest.mark.asyncio
+    async def test_parallel_runs_are_bounded_isolated_and_fully_cleaned(
+        self,
+        tmp_path,
+    ):
+        shared_runtime = _make_mock_runtime()
+        created_runtimes: dict[str, MagicMock] = {}
+        active = 0
+        peak = 0
+        started: list[str] = []
+        start_sources: list[str] = []
+        release = asyncio.Event()
+        first_wave = asyncio.Event()
+        all_finished = asyncio.Event()
+        finished = 0
+
+        def runtime_factory(run_id: str):
+            runtime = _make_mock_runtime()
+            runtime.run_id = run_id
+            created_runtimes[run_id] = runtime
+            return runtime
+
+        class FakeBrowserSubagent:
+            def __init__(self, runtime):
+                self.runtime = runtime
+                self.planner = MagicMock()
+
+            async def delegate_task(self, instruction, options):
+                nonlocal active, peak
+                active += 1
+                peak = max(peak, active)
+                started.append(self.runtime.run_id)
+                start_sources.append(options["startOptions"]["source"])
+                if len(started) == 2:
+                    first_wave.set()
+                try:
+                    await release.wait()
+                    return _completed_result()
+                finally:
+                    active -= 1
+
+        def subagent_factory(runtime):
+            return FakeBrowserSubagent(runtime)
+
+        runner = TaskRunner(
+            str(tmp_path),
+            options={
+                "runtime": shared_runtime,
+                "planner": MagicMock(),
+                "max_concurrent_runs": 2,
+                "runtime_factory": runtime_factory,
+                "subagent_factory": subagent_factory,
+            },
+        )
+
+        def on_update(event):
+            nonlocal finished
+            if event["type"] == "run_finished":
+                finished += 1
+                if finished == 3:
+                    all_finished.set()
+
+        runner.subscribe(on_update)
+        runs = [runner.create_run(f"Task {index}") for index in range(3)]
+
+        await asyncio.wait_for(first_wave.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert peak == 2
+        assert runner.active_slots == 2
+        assert runner.queued_run_count == 1
+        assert len(set(started)) == 2
+        assert set(started) == set(created_runtimes)
+        assert started == [runs[0]["id"], runs[1]["id"]]
+
+        release.set()
+        await asyncio.wait_for(all_finished.wait(), timeout=2)
+
+        assert peak == 2
+        assert runner.active_slots == 0
+        assert runner.queued_run_count == 0
+        assert {run["status"] for run in runs} == {"completed"}
+        assert started == [run["id"] for run in runs]
+        assert start_sources == ["managed", "managed", "managed"]
+        assert len(created_runtimes) == 3
+        assert len({id(runtime) for runtime in created_runtimes.values()}) == 3
+        for runtime in created_runtimes.values():
+            runtime.stop.assert_awaited_once()
+        shared_runtime.stop.assert_not_awaited()
+
+    def test_isolated_runtime_seeds_shared_login_state(self, tmp_path):
+        shared_runtime = _make_mock_runtime()
+        state = tmp_path / "storage_state.json"
+        state.write_text('{"cookies": [{"name": "session"}]}', encoding="utf-8")
+        runner = TaskRunner(
+            str(tmp_path),
+            options={
+                **_make_runner_options(shared_runtime),
+                "max_concurrent_runs": 2,
+            },
+        )
+
+        runtime = runner._create_isolated_runtime("run-a")
+
+        assert runtime.base_dir == tmp_path / "runs" / "run-a"
+        assert runtime.storage_state_path.read_text(encoding="utf-8") == (
+            state.read_text(encoding="utf-8")
+        )
+
+    @pytest.mark.asyncio
+    async def test_runtime_allocation_failure_does_not_block_following_run(
+        self,
+        tmp_path,
+    ):
+        shared_runtime = _make_mock_runtime()
+        allocated_runtime = _make_mock_runtime()
+        allocation_count = 0
+        all_finished = asyncio.Event()
+        finished_count = 0
+
+        def runtime_factory(run_id: str):
+            nonlocal allocation_count
+            allocation_count += 1
+            if allocation_count == 1:
+                raise RuntimeError("runtime allocation failed")
+            allocated_runtime.run_id = run_id
+            return allocated_runtime
+
+        class FakeBrowserSubagent:
+            def __init__(self, runtime):
+                self.runtime = runtime
+                self.planner = MagicMock()
+
+            async def delegate_task(self, instruction, options):
+                return _completed_result()
+
+        runner = TaskRunner(
+            str(tmp_path),
+            options={
+                "runtime": shared_runtime,
+                "planner": MagicMock(),
+                "max_concurrent_runs": 2,
+                "runtime_factory": runtime_factory,
+                "subagent_factory": FakeBrowserSubagent,
+            },
+        )
+
+        def on_update(event):
+            nonlocal finished_count
+            if event["type"] == "run_finished":
+                finished_count += 1
+                if finished_count == 2:
+                    all_finished.set()
+
+        runner.subscribe(on_update)
+        first = runner.create_run("First")
+        second = runner.create_run("Second")
+
+        await asyncio.wait_for(all_finished.wait(), timeout=2)
+
+        assert first["status"] == "failed"
+        assert first["summary"] == "runtime allocation failed"
+        assert second["status"] == "completed"
+        assert runner.active_slots == 0
+        assert runner.queued_run_count == 0
+        allocated_runtime.stop.assert_awaited_once()
+        shared_runtime.stop.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_attached_runs_serialize_without_blocking_managed_work(
+        self,
+        tmp_path,
+    ):
+        shared_runtime = _make_mock_runtime()
+        active_attached = 0
+        peak_attached = 0
+        started: list[tuple[str, str]] = []
+        first_attached_started = asyncio.Event()
+        release_first_attached = asyncio.Event()
+        all_finished = asyncio.Event()
+        finished_count = 0
+
+        def runtime_factory(run_id: str):
+            runtime = _make_mock_runtime()
+            runtime.run_id = run_id
+            return runtime
+
+        class FakeBrowserSubagent:
+            def __init__(self, runtime):
+                self.runtime = runtime
+                self.planner = MagicMock()
+
+            async def delegate_task(self, instruction, options):
+                nonlocal active_attached, peak_attached
+                source = options["startOptions"]["source"]
+                started.append((self.runtime.run_id, source))
+                if source == "attached":
+                    active_attached += 1
+                    peak_attached = max(peak_attached, active_attached)
+                    try:
+                        if not first_attached_started.is_set():
+                            first_attached_started.set()
+                            await release_first_attached.wait()
+                    finally:
+                        active_attached -= 1
+                return _completed_result()
+
+        runner = TaskRunner(
+            str(tmp_path),
+            options={
+                "runtime": shared_runtime,
+                "planner": MagicMock(),
+                "max_concurrent_runs": 2,
+                "runtime_factory": runtime_factory,
+                "subagent_factory": FakeBrowserSubagent,
+            },
+        )
+
+        def on_update(event):
+            nonlocal finished_count
+            if event["type"] == "run_finished":
+                finished_count += 1
+                if finished_count == 3:
+                    all_finished.set()
+
+        runner.subscribe(on_update)
+        attached_one = runner.create_run(
+            "Attached one", options={"browserSource": "attached"}
+        )
+        attached_two = runner.create_run(
+            "Attached two", options={"browserSource": "attached"}
+        )
+        managed = runner.create_run(
+            "Managed", options={"browserSource": "managed"}
+        )
+
+        await asyncio.wait_for(first_attached_started.wait(), timeout=1)
+        await asyncio.sleep(0.05)
+
+        assert peak_attached == 1
+        assert (managed["id"], "managed") in started
+        assert (attached_two["id"], "attached") not in started
+        assert runner.queued_run_count == 1
+
+        release_first_attached.set()
+        await asyncio.wait_for(all_finished.wait(), timeout=2)
+
+        assert peak_attached == 1
+        assert started[0] == (attached_one["id"], "attached")
+        assert started[-1] == (attached_two["id"], "attached")
+        assert runner.active_slots == 0
+        assert runner.queued_run_count == 0
 
 
 class TestTaskRunnerAbortRun:

@@ -85,4 +85,11 @@ browser_daemon:
   base_url: "http://127.0.0.1:3005"
   project_dir: "/workspace/browser-debugging-daemon"
 
+browser:
+  # 同时执行的浏览器任务；每个任务使用独立运行时和产物目录。
+  # 默认 2，范围 1-8；设为 1 可串行排障。
+  max_concurrent_runs: 2
+  # 保留的浏览器运行记录数量，范围 20-5000。
+  run_history_limit: 200
+
 log_level: "INFO"

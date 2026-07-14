@@ -236,6 +236,15 @@ class BrowserDaemonConfig(BaseSettings):
     startup_timeout_seconds: float = 8.0
 
 
+class BrowserAutomationConfig(BaseSettings):
+    """In-process browser task queue and isolation limits."""
+
+    model_config = SettingsConfigDict(env_prefix="NAUMI_BROWSER__")
+
+    max_concurrent_runs: int = Field(default=2, ge=1, le=8)
+    run_history_limit: int = Field(default=200, ge=20, le=5000)
+
+
 class BraveSearchConfig(BaseSettings):
     """Brave Web Search options with an environment-only secret reference."""
 
@@ -371,6 +380,7 @@ class AppConfig(BaseSettings):
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     browser_daemon: BrowserDaemonConfig = Field(default_factory=BrowserDaemonConfig)
+    browser: BrowserAutomationConfig = Field(default_factory=BrowserAutomationConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
     keybindings: dict[str, str | list[str]] = Field(default_factory=dict)

@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
+import shutil
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from naumi_agent.tools.browser.orchestrator.run_template_store import (
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "aborted"})
 _INTERRUPTED_STATUSES = frozenset({
+    "starting",
     "running",
     "aborting",
     "waiting_for_instruction",
@@ -32,6 +34,8 @@ _INTERRUPTED_STATUSES = frozenset({
     "manual_control",
 })
 _RULE_KINDS = frozenset({"url_includes", "title_includes", "text_includes"})
+_MAX_BROWSER_CONCURRENCY = 8
+_MAX_RUN_HISTORY = 5000
 
 
 def _safe_create_task(coro_factory: Callable[[], Any]) -> bool:
@@ -67,6 +71,20 @@ def _normalize_positive_int(
     except (TypeError, ValueError):
         pass
     return fallback
+
+
+def _require_bounded_int(
+    value: Any,
+    *,
+    name: str,
+    minimum: int,
+    maximum: int,
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} 必须是 {minimum}-{maximum} 的整数")
+    if value < minimum or value > maximum:
+        raise ValueError(f"{name} 必须在 {minimum}-{maximum} 之间")
+    return value
 
 
 def _normalize_template_rule(
@@ -325,7 +343,23 @@ class TaskRunner:
 
             router = options.get("model_router") or ModelRouter(ModelConfig())
             planner = LLMPlanner(router)
-        self.subagent = BrowserSubagent(self.runtime, planner)
+        self._planner = planner
+
+        subagent_factory = options.get("subagent_factory")
+        if subagent_factory is not None and not callable(subagent_factory):
+            raise ValueError("subagent_factory 必须可调用")
+        self._subagent_factory: Callable[[Any], Any] = (
+            subagent_factory
+            or (lambda run_runtime: BrowserSubagent(run_runtime, self._planner))
+        )
+        self.subagent = self._subagent_factory(self.runtime)
+
+        runtime_factory = options.get("runtime_factory")
+        if runtime_factory is not None and not callable(runtime_factory):
+            raise ValueError("runtime_factory 必须可调用")
+        self._runtime_factory: Callable[[str], Any] = (
+            runtime_factory or self._create_isolated_runtime
+        )
 
         self._store = TaskRunStore(base_dir)
         self._template_store = RunTemplateStore(base_dir)
@@ -339,8 +373,12 @@ class TaskRunner:
 
         self._processing = False
         self._active_slots = 0
-        self._max_concurrent = int(
-            os.environ.get("BROWSER_MAX_CONCURRENT_RUNS", "1") or "1"
+        self._attached_slot_run_id: str | None = None
+        self._max_concurrent = _require_bounded_int(
+            options.get("max_concurrent_runs", 1),
+            name="max_concurrent_runs",
+            minimum=1,
+            maximum=_MAX_BROWSER_CONCURRENCY,
         )
         self._listeners: list[Callable[..., Any]] = []
         self._pending_replies: dict[str, asyncio.Future[Any]] = {}
@@ -350,12 +388,43 @@ class TaskRunner:
             "handoff_timeout_ms", 5 * 60 * 1000
         )
 
-        env_limit = os.environ.get("BROWSER_RUN_HISTORY_LIMIT")
-        self._run_history_limit = (
-            int(env_limit) if env_limit and int(env_limit) > 0 else 200
+        self._run_history_limit = _require_bounded_int(
+            options.get("run_history_limit", 200),
+            name="run_history_limit",
+            minimum=1,
+            maximum=_MAX_RUN_HISTORY,
         )
 
         self._recover_persisted_runs()
+
+    def _create_isolated_runtime(self, run_id: str) -> BrowserRuntime:
+        """Create a run-owned runtime while seeding trusted login state."""
+        run_dir = Path(self._base_dir) / "runs" / run_id
+        shared_state = Path(self._base_dir) / "storage_state.json"
+        if shared_state.is_file():
+            run_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(shared_state, run_dir / shared_state.name)
+        return BrowserRuntime(run_dir)
+
+    @property
+    def max_concurrent_runs(self) -> int:
+        return self._max_concurrent
+
+    @property
+    def active_slots(self) -> int:
+        return self._active_slots
+
+    @property
+    def queued_run_count(self) -> int:
+        return sum(1 for run in self.runs if run.get("status") == "queued")
+
+    @staticmethod
+    def _requests_attached_browser(run: dict[str, Any]) -> bool:
+        return str(run.get("browserSource", "auto")).strip().lower() == "attached"
+
+    def _release_attached_slot(self, run_id: str) -> None:
+        if self._attached_slot_run_id == run_id:
+            self._attached_slot_run_id = None
 
     # ── History management ──
 
@@ -628,7 +697,7 @@ class TaskRunner:
         if run["status"] in _TERMINAL_STATUSES:
             raise ValueError(f"Run {run_id} is already finished.")
 
-        if run["status"] == "queued":
+        if run["status"] in {"queued", "starting"}:
             raise ValueError(
                 f"Run {run_id} has not started yet, so manual "
                 f"control is not available."
@@ -712,7 +781,7 @@ class TaskRunner:
             {"runId": run_id, "reason": reason},
         )
 
-        if run["status"] == "queued":
+        if run["status"] in {"queued", "starting"}:
             run["status"] = "aborted"
             run["summary"] = reason
             run["finishedAt"] = _now_iso()
@@ -750,30 +819,48 @@ class TaskRunner:
             while True:
                 if self._active_slots >= self._max_concurrent:
                     break
-                next_run = None
-                for r in self.runs:
-                    if r["status"] == "queued":
-                        next_run = r
-                        break
+                next_run = next((
+                    run
+                    for run in reversed(self.runs)
+                    if run["status"] == "queued"
+                    and not (
+                        self._max_concurrent > 1
+                        and self._requests_attached_browser(run)
+                        and self._attached_slot_run_id is not None
+                    )
+                ), None)
                 if not next_run:
                     break
+                claims_attached_slot = (
+                    self._max_concurrent > 1
+                    and self._requests_attached_browser(next_run)
+                )
+                if claims_attached_slot:
+                    self._attached_slot_run_id = next_run["id"]
+                next_run["status"] = "starting"
+                self._store.persist(self.runs)
                 self._active_slots += 1
                 if not _safe_create_task(lambda: self._execute_run(next_run)):
                     self._active_slots = max(0, self._active_slots - 1)
+                    self._release_attached_slot(next_run["id"])
+                    next_run["status"] = "queued"
+                    self._store.persist(self.runs)
         finally:
             self._processing = False
 
     async def _execute_run(self, run: dict[str, Any]) -> None:
-        if self._get_run_control(run["id"]).get("aborted"):
+        if (
+            run.get("status") == "aborted"
+            or self._get_run_control(run["id"]).get("aborted")
+        ):
             self._active_slots = max(0, self._active_slots - 1)
+            self._release_attached_slot(run["id"])
             await self.process_queue()
             return
 
-        is_parallel = (
-            self._max_concurrent > 1 and self._active_slots > 1
-        )
-        run_runtime = self.runtime
-        run_subagent = self.subagent
+        use_isolated_runtime = self._max_concurrent > 1
+        run_runtime: Any | None = None
+        run_subagent: Any | None = None
 
         run["status"] = "running"
         run["startedAt"] = _now_iso()
@@ -795,12 +882,15 @@ class TaskRunner:
         self._emit_update("run_started", run)
 
         try:
-            if is_parallel:
-                run_runtime = BrowserRuntime(self._base_dir)
-                run_subagent = BrowserSubagent(
-                    run_runtime,
-                    self.subagent.planner,
-                )
+            if use_isolated_runtime:
+                run_runtime = self._runtime_factory(run["id"])
+                run_subagent = self._subagent_factory(run_runtime)
+            else:
+                run_runtime = self.runtime
+                run_subagent = self.subagent
+            browser_source = str(run["browserSource"]).strip().lower()
+            if use_isolated_runtime and browser_source == "auto":
+                browser_source = "managed"
             effective_instruction = build_templated_instruction(
                 run["taskInstruction"], run.get("template")
             )
@@ -914,7 +1004,7 @@ class TaskRunner:
                 options={
                     "maxSteps": run["maxSteps"],
                     "startOptions": {
-                        "source": run["browserSource"],
+                        "source": browser_source,
                         "cdpEndpoint": run.get("cdpEndpoint"),
                     },
                     "onProgress": _on_progress,
@@ -964,16 +1054,21 @@ class TaskRunner:
             self._emit_update("run_updated", run)
 
         finally:
-            try:
-                stop_result = await run_runtime.stop()
-                if stop_result and stop_result.get("artifacts"):
-                    run["artifacts"] = stop_result["artifacts"]
-                    if run.get("result"):
-                        run["result"]["artifacts"] = (
-                            stop_result["artifacts"]
-                        )
-            except Exception:
-                pass
+            if run_runtime is not None:
+                try:
+                    stop_result = await run_runtime.stop()
+                    if stop_result and stop_result.get("artifacts"):
+                        run["artifacts"] = stop_result["artifacts"]
+                        if run.get("result"):
+                            run["result"]["artifacts"] = (
+                                stop_result["artifacts"]
+                            )
+                except Exception:
+                    logger.debug(
+                        "Browser runtime cleanup failed for run %s",
+                        run["id"],
+                        exc_info=True,
+                    )
 
             run["finishedAt"] = _now_iso()
 
@@ -986,6 +1081,7 @@ class TaskRunner:
             self._store.persist(self.runs)
             self._emit_update("run_finished", run)
             self._active_slots = max(0, self._active_slots - 1)
+            self._release_attached_slot(run["id"])
             await self.process_queue()
 
     # ── Templates ──
