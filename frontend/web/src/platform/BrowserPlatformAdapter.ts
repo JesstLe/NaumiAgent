@@ -7,6 +7,9 @@ function resolveKey(key: string): string {
 }
 
 export class BrowserPlatformAdapter implements PlatformAdapter {
+  readonly supportsDaemon: boolean = false
+  readonly supportsShell: boolean = false
+
   async getSetting(key: string): Promise<string | null> {
     return localStorage.getItem(resolveKey(key))
   }
