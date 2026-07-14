@@ -21,6 +21,7 @@ from naumi_agent.config.credentials import (
     store_model_api_key,
 )
 from naumi_agent.config.settings import DEFAULT_RUNTIME_MAX_TURNS
+from naumi_agent.ui.selection import TerminalChoice, select_terminal_choice
 
 console = Console()
 
@@ -145,18 +146,34 @@ def run_onboarding(config_path: Path, *, project_root: Path | None = None) -> bo
 
 
 def _choose_provider() -> str:
-    choices = list(_PROVIDER_PRESETS.keys())
-    console.print("\n[bold]选择模型提供商:[/bold]")
-    for idx, key in enumerate(choices, 1):
-        preset = _PROVIDER_PRESETS[key]
-        console.print(f"  {idx}. {preset['name']}")
-
-    selection = Prompt.ask(
-        "输入编号或名称",
-        choices=choices,
-        default="kimi",
+    options = tuple(
+        TerminalChoice(key, str(preset["name"]))
+        for key, preset in _PROVIDER_PRESETS.items()
     )
-    return selection
+
+    def rich_fallback(choices: tuple[TerminalChoice, ...], default: str) -> str:
+        console.print("\n[bold]选择模型提供商:[/bold]")
+        for index, option in enumerate(choices, 1):
+            console.print(f"  {index}. {option.display_label}")
+        raw = Prompt.ask(
+            "输入编号或名称",
+            choices=[
+                *(str(index) for index in range(1, len(choices) + 1)),
+                *(option.value for option in choices),
+            ],
+            default=default,
+            case_sensitive=False,
+        )
+        if raw.isdigit():
+            return choices[int(raw) - 1].value
+        return raw.lower()
+
+    return select_terminal_choice(
+        "选择模型提供商",
+        options,
+        default="kimi",
+        fallback=rich_fallback,
+    )
 
 
 def _prompt_api_key(provider_name: str) -> str:
