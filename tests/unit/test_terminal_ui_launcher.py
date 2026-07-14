@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
+from naumi_agent.config.paths import DEFAULT_CONFIG_PATH
 from naumi_agent.main import (
     TerminalUiLaunchError,
     _build_terminal_ui_command,
@@ -220,7 +221,7 @@ def test_naumi_without_subcommand_launches_terminal_ui(
     result = runner.invoke(naumi_app, [])
 
     assert result.exit_code == 0
-    assert calls == ["config.yaml"]
+    assert calls == [DEFAULT_CONFIG_PATH]
 
 
 def test_chat_command_launches_terminal_ui_by_default(
@@ -255,7 +256,7 @@ def test_chat_classic_uses_prompt_toolkit_cli(
     result = runner.invoke(naumi_app, ["chat", "--classic"])
 
     assert result.exit_code == 0
-    assert calls == ["config.yaml"]
+    assert calls == [DEFAULT_CONFIG_PATH]
 
 
 def test_ui_command_launches_next_terminal_ui_by_default(
@@ -323,7 +324,7 @@ def test_naumiagent_tui_launches_new_terminal_ui(
     result = runner.invoke(naumiagent_app, ["--tui"])
 
     assert result.exit_code == 0
-    assert calls == ["config.yaml"]
+    assert calls == [DEFAULT_CONFIG_PATH]
 
 
 def test_naumiagent_tui_forwards_custom_config(

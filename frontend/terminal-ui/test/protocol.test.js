@@ -67,6 +67,10 @@ test("parseArgs supports config and bridge command", () => {
   });
 });
 
+test("parseArgs defaults to the project Naumi config", () => {
+  assert.equal(parseArgs([]).config, ".naumi/config.yaml");
+});
+
 test("parseBridgeCommandJson decodes argv without shell splitting", () => {
   assert.deepEqual(
     parseBridgeCommandJson("[\"/path with spaces/python\",\"-m\",\"naumi_agent.ui.bridge\"]"),

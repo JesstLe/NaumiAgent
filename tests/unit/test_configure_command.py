@@ -54,6 +54,28 @@ def test_configure_non_interactive_requires_provider(tmp_path: Path) -> None:
     assert "非交互模式必须指定 --provider" in result.output
 
 
+def test_configure_default_updates_active_legacy_config(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    legacy = tmp_path / "config.yaml"
+    legacy.write_text(
+        "models:\n  provider: kimi\n  default_model: old-model\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["configure", "--non-interactive", "--provider", "openai"],
+    )
+
+    assert result.exit_code == 0
+    persisted = yaml.safe_load(legacy.read_text(encoding="utf-8"))
+    assert persisted["models"]["provider"] == "openai"
+    assert not (tmp_path / ".naumi" / "config.yaml").exists()
+
+
 def test_configure_help_does_not_offer_plaintext_key_argument() -> None:
     result = runner.invoke(app, ["configure", "--help"])
 

@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path
 from naumi_agent.config.settings import AppConfig
 
 
@@ -46,7 +47,7 @@ def validate_deployment(
 ) -> ValidationReport:
     """Validate the deployment config and optionally create runtime directories."""
     report = ValidationReport(ok=True)
-    path = Path(config_path).expanduser()
+    path = Path(resolve_config_path(config_path)).expanduser()
     if not path.exists() or not path.is_file():
         report.ok = False
         report.errors.append(f"配置文件不存在: {path}")
@@ -92,7 +93,11 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     validate = subparsers.add_parser("validate", help="校验部署配置和运行目录")
-    validate.add_argument("--config", default="config.yaml", help="配置文件路径")
+    validate.add_argument(
+        "--config",
+        default=DEFAULT_CONFIG_PATH,
+        help="配置文件路径",
+    )
     validate.add_argument("--create-dirs", action="store_true", help="缺失目录时自动创建")
     validate.add_argument("--require-api-key", action="store_true", help="缺少模型 API Key 时失败")
     return parser

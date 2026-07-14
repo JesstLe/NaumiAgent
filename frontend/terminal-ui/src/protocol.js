@@ -16,7 +16,7 @@ const EXECUTION_PHASES = new Set(["starting", "running", "preparing_tool", "runn
 const TEAM_PRIORITIES = new Set(["low", "normal", "high", "critical"]);
 
 export function parseArgs(argv) {
-  const parsed = { config: "config.yaml", bridgeCommand: "", bridgeCommandJson: "" };
+  const parsed = { config: ".naumi/config.yaml", bridgeCommand: "", bridgeCommandJson: "" };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if ((arg === "--config" || arg === "-c") && argv[i + 1]) {

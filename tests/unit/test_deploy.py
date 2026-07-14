@@ -6,8 +6,33 @@ from pathlib import Path
 
 import yaml
 
+from naumi_agent.config.paths import DEFAULT_CONFIG_PATH
 from naumi_agent.config.settings import AppConfig
-from naumi_agent.deploy import validate_deployment
+from naumi_agent.deploy import _build_parser, validate_deployment
+
+
+def test_validate_parser_defaults_to_project_naumi_config() -> None:
+    args = _build_parser().parse_args(["validate"])
+
+    assert args.config == DEFAULT_CONFIG_PATH
+
+
+def test_validate_default_resolves_active_legacy_config(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    legacy = tmp_path / "config.yaml"
+    _write_config(legacy, tmp_path, include_key=True)
+    monkeypatch.chdir(tmp_path)
+
+    report = validate_deployment(
+        DEFAULT_CONFIG_PATH,
+        create_dirs=True,
+        require_api_key=True,
+    )
+
+    assert report.ok
+    assert f"已加载配置: {legacy}" in report.messages
 
 
 def _write_config(path: Path, root: Path, *, include_key: bool = False) -> None:

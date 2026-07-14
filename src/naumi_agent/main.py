@@ -25,7 +25,7 @@ from rich.text import Text
 
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.config.configurator import ConfigurationError, configure_project
-from naumi_agent.config.paths import resolve_config_path
+from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.log_setup import suppress_startup_import_warnings
 from naumi_agent.ui.budget import format_budget_detail
@@ -145,7 +145,7 @@ def _ensure_onboarding_ready(config: str) -> None:
 @app.callback(invoke_without_command=True)
 def _default_command(
     ctx: typer.Context,
-    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
     classic: bool = typer.Option(False, "--classic", help="启动旧版命令行对话"),
     legacy: bool = typer.Option(False, "--legacy", help="启动旧版 Textual TUI"),
     version: bool = typer.Option(False, "--version", "-v", help="显示版本"),
@@ -340,7 +340,7 @@ def _capture_tui_launch_noise() -> Any:
 
 @app.command("configure")
 def configure_command(
-    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
     provider: str | None = typer.Option(
         None,
         "--provider",
@@ -402,7 +402,7 @@ def configure_command(
 
     try:
         result = configure_project(
-            config,
+            _resolve_config_path(config),
             provider=selected_provider,
             api_key=api_key,
             default_model=default_model,
@@ -427,7 +427,7 @@ def configure_command(
 
 @app.command("doctor")
 def doctor_command(
-    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
     live: bool = typer.Option(
         False,
         "--live",
@@ -451,7 +451,7 @@ def doctor_command(
 
 @app.command()
 def chat(
-    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
     classic: bool = typer.Option(False, "--classic", help="启动旧版命令行对话"),
     tui: bool = typer.Option(
         False,
@@ -474,7 +474,7 @@ def chat(
 
 @app.command("ui")
 def terminal_ui(
-    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
     legacy: bool = typer.Option(
         False,
         "--legacy",
@@ -511,7 +511,7 @@ def naumiagent_entry(
         help="Launch the new Node terminal UI",
     ),
     config: str = typer.Option(
-        "config.yaml",
+        DEFAULT_CONFIG_PATH,
         "--config",
         "-c",
         help="Configuration file path",
@@ -1493,7 +1493,7 @@ async def _chat(config_path: str) -> None:
 @app.command()
 def run(
     task: str = typer.Argument(help="要执行的任务"),
-    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
 ) -> None:
     """执行单个任务."""
     asyncio.run(_run_task(task, config))
@@ -1553,7 +1553,7 @@ def serve(
         "-p",
         help="监听端口（默认 8765，与 Mac Workbench 本地 daemon 一致；支持 --port 显式覆盖）",
     ),
-    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
     reload: bool = typer.Option(False, "--reload", help="开发模式热重载"),
 ) -> None:
     """启动 REST API 服务."""
@@ -4837,7 +4837,7 @@ def export_audit(
     parent_event_id: str | None = typer.Option(None, "--parent-event-id", help="父事件 ID"),
     since: str | None = typer.Option(None, "--since", help="起始时间 ISO 字符串"),
     fmt: str = typer.Option("json", "--format", help="输出格式: json 或 ndjson"),
-    config: str = typer.Option("config.yaml", "--config", "-c", help="配置文件路径"),
+    config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
 ) -> None:
     """导出审计事件到本地文件，并自动脱敏."""
     resolved = _resolve_config_path(config)
