@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
+import { useSessionStore } from '@/stores/sessionStore'
 import { AppRoutes } from '@/routes'
 
 export function ConnectionBootstrap() {
   const { t } = useTranslation()
-  const { status, bootstrap, error, isReady } = useWorkbenchConnection()
+  const setSnapshot = useSessionStore((state) => state.setSnapshot)
+  const { status, bootstrap, error, isReady } = useWorkbenchConnection({
+    onSnapshot: setSnapshot,
+  })
   const [isRetrying, setIsRetrying] = useState(false)
 
   useEffect(() => {

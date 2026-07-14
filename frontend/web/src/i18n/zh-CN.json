@@ -35,6 +35,21 @@
     "retrying": "重试中...",
     "reconnecting": "后端连接已断开，正在尝试重连..."
   },
+  "dashboard": {
+    "activeAgents": "活跃 Agent",
+    "openIssues": "待处理 Issue",
+    "blockedIssues": "已阻塞 Issue",
+    "pendingApprovals": "待审批",
+    "failedValidations": "验证失败"
+  },
+  "taskMarket": {
+    "empty": "当前没有可认领的任务。"
+  },
+  "worktrees": {
+    "empty": "当前没有工作区。",
+    "delete": "删除工作区",
+    "dirtyFiles": "{{count}} 个未提交文件"
+  },
   "panel": {
     "context": "页面上下文"
   },
