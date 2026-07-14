@@ -18,6 +18,7 @@
     "createLinkedIssue": "Create linked issue"
   },
   "chat": {
+    "title": "Chat",
     "composerPlaceholder": "Type a question or command...",
     "emptyState": "Start a conversation with the Agent, or send a command."
   },
@@ -27,7 +28,19 @@
     "starting": "Starting",
     "unknown": "Unknown"
   },
+  "connection": {
+    "connecting": "Connecting to backend...",
+    "failed": "Connection failed",
+    "retry": "Retry",
+    "retrying": "Retrying...",
+    "reconnecting": "Backend connection lost. Reconnecting..."
+  },
   "panel": {
     "context": "Context"
+  },
+  "session": {
+    "title": "Sessions",
+    "new": "New Session",
+    "newTitle": "New Session"
   }
 }

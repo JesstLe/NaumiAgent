@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -15,6 +16,9 @@ import {
   Circle,
 } from 'lucide-react'
 import { useAppStore, type AppRoute } from '@/stores/appStore'
+import { useSessionStore } from '@/stores/sessionStore'
+import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
+import { isApiException } from '@/api/ApiException'
 import type { ElementType } from 'react'
 
 const navItems: { route: AppRoute; path: string; labelKey: string; icon: ElementType }[] = [
@@ -41,19 +45,68 @@ function StatusDot({ status }: { status: string }) {
 
 export function MainLayout() {
   const { t } = useTranslation()
-  const { currentRoute, connectionStatus, openIssues, activeAgents, setCurrentRoute } = useAppStore()
+  const { currentRoute, openIssues, activeAgents, setCurrentRoute } = useAppStore()
+  const sessions = useSessionStore((state) => state.sessions)
+  const currentSessionId = useSessionStore((state) => state.currentSessionId)
+  const setSessions = useSessionStore((state) => state.setSessions)
+  const setCurrentSessionId = useSessionStore((state) => state.setCurrentSessionId)
+  const setSessionError = useSessionStore((state) => state.setError)
+  const { client, status, selectSession } = useWorkbenchConnection()
+
+  const connectionStatus = status.isConnected ? 'online' : status.error ? 'offline' : 'starting'
+
+  useEffect(() => {
+    if (!client) {
+      setSessions([])
+      return
+    }
+    let cancelled = false
+    client
+      .fetchSessions()
+      .then((response) => {
+        if (!cancelled) {
+          setSessions(response.sessions)
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setSessionError(isApiException(error) ? error.message : String(error))
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [client, setSessions, setSessionError])
+
+  const handleCreateSession = async () => {
+    if (!client) return
+    try {
+      const result = await client.createSession(t('session.newTitle'))
+      setSessions([result.sessions[0], ...sessions])
+      await selectSession(result.selected_session_id ?? result.sessions[0].id)
+      setCurrentSessionId(result.selected_session_id ?? result.sessions[0].id)
+    } catch (error) {
+      setSessionError(isApiException(error) ? error.message : String(error))
+    }
+  }
+
+  const handleSelectSession = async (sessionId: string) => {
+    try {
+      await selectSession(sessionId)
+      setCurrentSessionId(sessionId)
+    } catch (error) {
+      setSessionError(isApiException(error) ? error.message : String(error))
+    }
+  }
 
   return (
     <div className="flex h-full w-full bg-bg">
-      {/* Left sidebar */}
       <aside className="flex flex-col w-64 border-r border-border bg-sidebar shrink-0">
-        {/* App title */}
         <div className="px-4 py-3 border-b border-border">
           <div className="font-semibold text-text truncate">{t('appTitle')}</div>
           <div className="text-xs text-text-secondary truncate">NaumiAgent Workspace</div>
         </div>
 
-        {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto py-2">
           <ul className="space-y-0.5 px-2">
             {navItems.map((item) => {
@@ -78,21 +131,42 @@ export function MainLayout() {
             })}
           </ul>
 
-          {/* Workspace / session list placeholder */}
-          <div className="mt-6 px-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">
-            Sessions
+          <div className="mt-6 px-4 flex items-center justify-between">
+            <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+              {t('session.title')}
+            </span>
+            <button
+              type="button"
+              onClick={() => void handleCreateSession()}
+              disabled={!client}
+              className="text-text-secondary hover:text-accent disabled:opacity-50"
+              title={t('session.new')}
+            >
+              <Plus className="w-4 h-4" />
+            </button>
           </div>
-          <ul className="mt-2 px-2">
-            <li className="px-3 py-2 rounded-md text-sm text-text-secondary truncate">
-              default-session
-            </li>
+          <ul className="mt-2 px-2 space-y-0.5">
+            {sessions.map((session) => {
+              const active = session.id === currentSessionId
+              return (
+                <li key={session.id}>
+                  <button
+                    type="button"
+                    onClick={() => void handleSelectSession(session.id)}
+                    className={`w-full text-left px-3 py-2 rounded-md text-sm truncate transition-colors ${
+                      active
+                        ? 'bg-accent/10 text-accent font-medium'
+                        : 'text-text-secondary hover:bg-bg-tertiary hover:text-text'
+                    }`}
+                  >
+                    {session.title || session.id}
+                  </button>
+                </li>
+              )
+            })}
           </ul>
 
-          {/* Global actions */}
           <div className="mt-6 px-2 space-y-1">
-            <button className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-text-secondary hover:bg-bg-tertiary">
-              <Plus className="w-4 h-4" /> {t('action.newMission')}
-            </button>
             <button className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-text-secondary hover:bg-bg-tertiary">
               <Pause className="w-4 h-4" /> {t('action.pauseAgents')}
             </button>
@@ -105,7 +179,6 @@ export function MainLayout() {
           </div>
         </nav>
 
-        {/* Bottom status */}
         <div className="px-4 py-3 border-t border-border text-xs">
           <div className="flex items-center gap-2 text-text-secondary">
             <StatusDot status={connectionStatus} />
@@ -117,12 +190,10 @@ export function MainLayout() {
         </div>
       </aside>
 
-      {/* Center content */}
       <main className="flex-1 min-w-0 flex flex-col bg-bg">
         <Outlet />
       </main>
 
-      {/* Right context panel */}
       <aside className="w-80 border-l border-border bg-panel shrink-0 flex flex-col">
         <div className="px-4 py-3 border-b border-border font-medium text-sm">{t('panel.context')}</div>
         <div className="flex-1 p-4 text-sm text-text-secondary">
