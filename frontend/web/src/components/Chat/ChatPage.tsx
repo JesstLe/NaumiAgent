@@ -1,10 +1,10 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Send, PlusCircle, Loader2, Brain, Cpu, Zap } from 'lucide-react'
+import { Send, PlusCircle, Loader2, Brain, Cpu, Zap, Paperclip, X } from 'lucide-react'
 import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
 import { useSessionStore } from '@/stores/sessionStore'
 import { isApiException } from '@/api/ApiException'
-import type { RuntimeMode } from '@/api/types'
+import type { RuntimeMode, ChatSource } from '@/api/types'
 
 const MODE_ICON: Record<RuntimeMode, typeof Brain> = {
   default: Brain,
@@ -45,6 +45,9 @@ export function ChatPage() {
   const [isSending, setIsSending] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>('default')
+  const [sources, setSources] = useState<ChatSource[]>([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -80,6 +83,46 @@ export function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  useEffect(() => {
+    if (!client || !currentSessionId) {
+      setSources([])
+      return
+    }
+    let cancelled = false
+    client
+      .fetchChatEnvironment(currentSessionId)
+      .then((env) => {
+        if (!cancelled) setSources(env.sources)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [client, currentSessionId])
+
+  const handleUpload = async (file: File) => {
+    if (!client || !currentSessionId) return
+    setUploading(true)
+    try {
+      const source = await client.uploadChatSource(currentSessionId, file)
+      setSources((prev) => [...prev, source])
+    } catch (error) {
+      setError(isApiException(error) ? error.message : String(error))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) void handleUpload(file)
+    e.target.value = ''
+  }
+
+  const handleRemoveSource = (sourceId: string) => {
+    setSources((prev) => prev.filter((s) => s.id !== sourceId))
+  }
+
   const handleSend = useCallback(async () => {
     if (!client || !currentSessionId || !input.trim() || isSending) return
 
@@ -101,6 +144,7 @@ export function ChatPage() {
       const response = await client.sendMessage(currentSessionId, {
         content,
         runtime_mode: runtimeMode,
+        source_ids: sources.map((s) => s.id),
         workbench_issue: createIssue
           ? {
               mission_id: snapshot?.missions[0]?.id ?? 'default',
@@ -227,6 +271,21 @@ export function ChatPage() {
           })}
         </div>
         <div className="flex items-start gap-3">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            title={t('chat.uploadFile')}
+            className="flex items-center justify-center w-9 h-9 rounded-md border border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0"
+          >
+            {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+          </button>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -236,6 +295,28 @@ export function ChatPage() {
             className="flex-1 min-h-[80px] max-h-40 px-3 py-2 rounded-md border border-neutral-200 bg-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50"
           />
         </div>
+
+        {sources.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            <span className="text-xs text-neutral-500">{t('chat.sources')}:</span>
+            {sources.map((source) => (
+              <span
+                key={source.id}
+                className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-0.5 text-xs text-blue-700 border border-blue-100"
+              >
+                {source.title}
+                <button
+                  type="button"
+                  onClick={() => handleRemoveSource(source.id)}
+                  className="text-blue-400 hover:text-blue-700"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
         <div className="flex items-center justify-between mt-3">
           <label className="flex items-center gap-2 text-sm text-neutral-600 cursor-pointer select-none">
             <input
