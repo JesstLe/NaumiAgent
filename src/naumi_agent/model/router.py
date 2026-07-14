@@ -57,6 +57,15 @@ class ModelTier(StrEnum):
     REASONING = "reasoning"
 
 
+class ModelContractStatus(StrEnum):
+    """Trust and compatibility state for one resolved model contract."""
+
+    VERIFIED = "verified"
+    PARTIAL = "partial"
+    UNVERIFIED = "unverified"
+    INCOMPATIBLE = "incompatible"
+
+
 @dataclass(frozen=True)
 class ModelRuntimeIdentity:
     """Safe, side-effect-free identity for one configured model target."""
@@ -67,6 +76,60 @@ class ModelRuntimeIdentity:
     provider: str
     api_format: str
     source: str
+
+
+@dataclass(frozen=True)
+class ModelCapabilityContract:
+    """Safe runtime model facts with per-field provenance."""
+
+    requested_model: str
+    canonical_model: str
+    upstream_model: str
+    provider: str
+    api_format: str
+    max_context: int
+    max_output: int
+    request_max_tokens: int
+    input_cost_per_million: float
+    output_cost_per_million: float
+    supports_tools: bool | None
+    supports_streaming: bool | None
+    supports_parallel_tools: bool | None
+    supports_structured_output: bool | None
+    supports_reasoning: bool | None
+    supports_vision: bool | None
+    input_modalities: tuple[str, ...]
+    output_modalities: tuple[str, ...]
+    field_sources: Mapping[str, str]
+    status: ModelContractStatus
+    warnings: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "requested_model": self.requested_model,
+            "canonical_model": self.canonical_model,
+            "upstream_model": self.upstream_model,
+            "provider": self.provider,
+            "api_format": self.api_format,
+            "max_context": self.max_context,
+            "max_output": self.max_output,
+            "request_max_tokens": self.request_max_tokens,
+            "input_cost_per_million": self.input_cost_per_million,
+            "output_cost_per_million": self.output_cost_per_million,
+            "supports_tools": self.supports_tools,
+            "supports_streaming": self.supports_streaming,
+            "supports_parallel_tools": self.supports_parallel_tools,
+            "supports_structured_output": self.supports_structured_output,
+            "supports_reasoning": self.supports_reasoning,
+            "supports_vision": self.supports_vision,
+            "input_modalities": list(self.input_modalities),
+            "output_modalities": list(self.output_modalities),
+            "field_sources": dict(self.field_sources),
+            "status": self.status.value,
+            "warnings": list(self.warnings),
+            "errors": list(self.errors),
+        }
 
 
 @dataclass(frozen=True)
@@ -147,6 +210,7 @@ class ModelRouter:
             ModelTier.REASONING: config.reasoning_model,
         }
         self._info_cache: dict[str, dict[str, Any]] = {}
+        self._info_sources_cache: dict[str, Mapping[str, str]] = {}
         self._registered_transport_models: set[str] = set()
         self._transport_model_registration_lock = threading.Lock()
         self._registered_native_stream_models: set[str] = set()
@@ -160,8 +224,9 @@ class ModelRouter:
         if model in self._info_cache:
             return self._info_cache[model]
 
-        info = self._resolve_model_info(model)
+        info, sources = self._resolve_model_info(model)
         self._info_cache[model] = info
+        self._info_sources_cache[model] = MappingProxyType(sources)
         return info
 
     def get_context_window(self, model: str) -> int:
@@ -183,13 +248,19 @@ class ModelRouter:
             return {"input": inp * 1_000_000, "output": out * 1_000_000}
         return info.get("cost_rates", _FALLBACK_COST)
 
-    def _resolve_model_info(self, model: str) -> dict[str, Any]:
+    def _resolve_model_info(self, model: str) -> tuple[dict[str, Any], dict[str, str]]:
         target = self.resolve_target(model)
         info: dict[str, Any] = {
             "max_input_tokens": _FALLBACK_CONTEXT,
             "max_output_tokens": _FALLBACK_MAX_OUTPUT,
             "input_cost_per_token": _FALLBACK_COST["input"] / 1_000_000,
             "output_cost_per_token": _FALLBACK_COST["output"] / 1_000_000,
+        }
+        sources = {
+            "max_input_tokens": "fallback",
+            "max_output_tokens": "fallback",
+            "input_cost_per_token": "fallback",
+            "output_cost_per_token": "fallback",
         }
 
         try:
@@ -202,6 +273,18 @@ class ModelRouter:
             ):
                 if raw.get(field_name) is not None:
                     info[field_name] = raw[field_name]
+                    sources[field_name] = "litellm"
+            for source_name, field_name in (
+                ("supports_function_calling", "supports_tools"),
+                ("supports_native_streaming", "supports_streaming"),
+                ("supports_parallel_function_calling", "supports_parallel_tools"),
+                ("supports_response_schema", "supports_structured_output"),
+                ("supports_reasoning", "supports_reasoning"),
+                ("supports_vision", "supports_vision"),
+            ):
+                if isinstance(raw.get(source_name), bool):
+                    info[field_name] = raw[source_name]
+                    sources[field_name] = "litellm"
         except Exception:
             logger.info(
                 "Model %s not in litellm registry, using fallback",
@@ -211,28 +294,195 @@ class ModelRouter:
         if target.model is not None:
             if target.model.max_context is not None:
                 info["max_input_tokens"] = target.model.max_context
+                sources["max_input_tokens"] = "catalog"
             if target.model.max_output is not None:
                 info["max_output_tokens"] = target.model.max_output
+                sources["max_output_tokens"] = "catalog"
+            if target.model.input_cost_per_million is not None:
+                info["input_cost_per_token"] = (
+                    target.model.input_cost_per_million / 1_000_000
+                )
+                sources["input_cost_per_token"] = "catalog"
+            if target.model.output_cost_per_million is not None:
+                info["output_cost_per_token"] = (
+                    target.model.output_cost_per_million / 1_000_000
+                )
+                sources["output_cost_per_token"] = "catalog"
+            for field_name in (
+                "supports_tools",
+                "supports_streaming",
+                "supports_parallel_tools",
+                "supports_structured_output",
+                "supports_reasoning",
+                "supports_vision",
+            ):
+                value = getattr(target.model, field_name)
+                if value is not None:
+                    info[field_name] = value
+                    sources[field_name] = "catalog"
+            for field_name in ("input_modalities", "output_modalities"):
+                value = getattr(target.model, field_name)
+                if value:
+                    info[field_name] = value
+                    sources[field_name] = "catalog"
 
         canonical_meta = self._config.model_info.get(target.canonical_model)
         if canonical_meta is not None:
-            self._merge_config_meta(info, canonical_meta)
+            self._merge_config_meta(info, sources, canonical_meta)
         if target.requested_model != target.canonical_model:
             requested_meta = self._config.model_info.get(target.requested_model)
             if requested_meta is not None:
-                self._merge_config_meta(info, requested_meta)
-        return info
+                self._merge_config_meta(info, sources, requested_meta)
+        return info, sources
 
     @staticmethod
-    def _merge_config_meta(info: dict[str, Any], meta: ModelMeta) -> None:
+    def _merge_config_meta(
+        info: dict[str, Any], sources: dict[str, str], meta: ModelMeta
+    ) -> None:
         if meta.max_context is not None:
             info["max_input_tokens"] = meta.max_context
+            sources["max_input_tokens"] = "config"
         if meta.max_output is not None:
             info["max_output_tokens"] = meta.max_output
+            sources["max_output_tokens"] = "config"
         if meta.input_cost_per_million is not None:
             info["input_cost_per_token"] = meta.input_cost_per_million / 1_000_000
+            sources["input_cost_per_token"] = "config"
         if meta.output_cost_per_million is not None:
             info["output_cost_per_token"] = meta.output_cost_per_million / 1_000_000
+            sources["output_cost_per_token"] = "config"
+        for field_name in (
+            "supports_tools",
+            "supports_streaming",
+            "supports_parallel_tools",
+            "supports_structured_output",
+            "supports_reasoning",
+            "supports_vision",
+            "input_modalities",
+            "output_modalities",
+        ):
+            value = getattr(meta, field_name)
+            if value is not None:
+                info[field_name] = value
+                sources[field_name] = "config"
+
+    def get_model_capability_contract(
+        self,
+        model: str | None = None,
+    ) -> ModelCapabilityContract:
+        """Resolve model limits/capabilities and report trust without network probes."""
+        requested = model or self.resolve_model(ModelTier.CAPABLE)
+        identity = self.get_runtime_identity(requested)
+        info = self.get_model_info(requested)
+        sources = self._info_sources_cache.get(requested, {})
+        max_context = int(info["max_input_tokens"])
+        max_output = int(info["max_output_tokens"])
+        request_max_tokens = min(self._config.max_tokens, max_output)
+
+        field_sources = {
+            "max_context": sources.get("max_input_tokens", "fallback"),
+            "max_output": sources.get("max_output_tokens", "fallback"),
+            "input_cost_per_million": sources.get(
+                "input_cost_per_token", "fallback"
+            ),
+            "output_cost_per_million": sources.get(
+                "output_cost_per_token", "fallback"
+            ),
+        }
+        for field_name in (
+            "supports_tools",
+            "supports_streaming",
+            "supports_parallel_tools",
+            "supports_structured_output",
+            "supports_reasoning",
+            "supports_vision",
+            "input_modalities",
+            "output_modalities",
+        ):
+            if field_name in sources:
+                field_sources[field_name] = sources[field_name]
+
+        warnings: list[str] = []
+        errors: list[str] = []
+        critical_unverified = False
+        if (
+            field_sources["max_context"] == "fallback"
+            or field_sources["max_output"] == "fallback"
+        ):
+            critical_unverified = True
+            warnings.append(
+                "模型 token 上限未验证，当前使用保守 fallback；请在 provider catalog "
+                "或 models.model_info 中声明。"
+            )
+        supports_tools = info.get("supports_tools")
+        supports_streaming = info.get("supports_streaming")
+        if supports_tools is None:
+            critical_unverified = True
+            warnings.append("模型工具调用能力未验证。")
+        elif supports_tools is False:
+            errors.append("模型明确不支持工具调用，无法运行完整 Agent Harness。")
+        if supports_streaming is None:
+            critical_unverified = True
+            warnings.append("模型流式输出能力未验证。")
+        if self._config.max_tokens > max_output:
+            warnings.append(
+                f"配置 max_tokens={self._config.max_tokens} 超过模型输出上限；"
+                f"运行时已安全收紧为 {max_output}。"
+            )
+        if (
+            field_sources["input_cost_per_million"] == "fallback"
+            or field_sources["output_cost_per_million"] == "fallback"
+        ):
+            warnings.append("模型价格未验证，预算估算当前使用 fallback 单价。")
+
+        secondary_fields = (
+            "supports_parallel_tools",
+            "supports_structured_output",
+            "supports_reasoning",
+            "supports_vision",
+            "input_modalities",
+            "output_modalities",
+        )
+        missing_secondary = [name for name in secondary_fields if name not in info]
+        if missing_secondary:
+            warnings.append(
+                "模型扩展能力未完整声明：" + "、".join(missing_secondary) + "。"
+            )
+
+        if errors:
+            status = ModelContractStatus.INCOMPATIBLE
+        elif critical_unverified:
+            status = ModelContractStatus.UNVERIFIED
+        elif warnings:
+            status = ModelContractStatus.PARTIAL
+        else:
+            status = ModelContractStatus.VERIFIED
+
+        return ModelCapabilityContract(
+            requested_model=identity.requested_model,
+            canonical_model=identity.canonical_model,
+            upstream_model=identity.upstream_model,
+            provider=identity.provider,
+            api_format=identity.api_format,
+            max_context=max_context,
+            max_output=max_output,
+            request_max_tokens=request_max_tokens,
+            input_cost_per_million=float(info["input_cost_per_token"]) * 1_000_000,
+            output_cost_per_million=float(info["output_cost_per_token"])
+            * 1_000_000,
+            supports_tools=supports_tools,
+            supports_streaming=supports_streaming,
+            supports_parallel_tools=info.get("supports_parallel_tools"),
+            supports_structured_output=info.get("supports_structured_output"),
+            supports_reasoning=info.get("supports_reasoning"),
+            supports_vision=info.get("supports_vision"),
+            input_modalities=tuple(info.get("input_modalities", ())),
+            output_modalities=tuple(info.get("output_modalities", ())),
+            field_sources=MappingProxyType(field_sources),
+            status=status,
+            warnings=tuple(warnings),
+            errors=tuple(errors),
+        )
 
     def _base_kwargs(self) -> dict[str, Any]:
         """构建底层 API 调用的公共参数（api_base、api_key）."""

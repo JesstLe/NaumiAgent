@@ -198,6 +198,33 @@ class _FakeRouter:
             source="catalog",
         )
 
+    def get_model_capability_contract(self, model: str | None = None) -> SimpleNamespace:
+        payload = {
+            "requested_model": model or "fake-capable",
+            "canonical_model": "nvidia/fake-capable",
+            "upstream_model": "z-ai/glm4.7",
+            "provider": "nvidia",
+            "api_format": "openai_responses",
+            "max_context": 128000,
+            "max_output": 8192,
+            "request_max_tokens": 4096,
+            "input_cost_per_million": 1.0,
+            "output_cost_per_million": 4.0,
+            "supports_tools": True,
+            "supports_streaming": True,
+            "supports_parallel_tools": True,
+            "supports_structured_output": True,
+            "supports_reasoning": True,
+            "supports_vision": False,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "field_sources": {"max_context": "catalog"},
+            "status": "verified",
+            "warnings": [],
+            "errors": [],
+        }
+        return SimpleNamespace(to_dict=lambda: payload)
+
     def get_reasoning_effort_status(
         self,
         model: str | None = None,
@@ -1392,6 +1419,9 @@ def test_bridge_status_payload_exposes_authoritative_product_identity() -> None:
         "default": "medium",
         "warning": None,
     }
+    assert payload["model_contract"]["status"] == "verified"
+    assert payload["model_contract"]["max_context"] == 128000
+    assert payload["model_contract"]["supports_parallel_tools"] is True
 
 
 @pytest.mark.asyncio
@@ -3542,9 +3572,16 @@ async def test_bridge_renders_doctor_report_as_system_notice(
     class FakeReport:
         status = "warn"
 
-    async def fake_run_doctor(config: Any, *, workspace_root: Path, mcp_manager: Any) -> Any:
+    async def fake_run_doctor(
+        config: Any,
+        *,
+        workspace_root: Path,
+        mcp_manager: Any,
+        model_router: Any,
+    ) -> Any:
         assert workspace_root == engine.workspace_root
         assert mcp_manager is None
+        assert model_router is engine.router
         return FakeReport()
 
     def fake_render_doctor_report(report: Any) -> str:

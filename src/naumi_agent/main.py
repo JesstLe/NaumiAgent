@@ -445,11 +445,27 @@ def doctor_command(
     """诊断本机环境，并可显式验证模型连接."""
     resolved = _resolve_config_path(config)
     app_config = AppConfig.from_yaml(resolved)
+    from naumi_agent.model.catalog import load_provider_catalog
+    from naumi_agent.model.router import ModelRouter
+
+    model_router = None
+    model_router_error = None
+    try:
+        catalog = (
+            load_provider_catalog(app_config.models.catalog_path)
+            if app_config.models.catalog_path
+            else None
+        )
+        model_router = ModelRouter(app_config.models, catalog=catalog)
+    except Exception as exc:
+        model_router_error = str(exc)
     report = asyncio.run(
         run_doctor(
             app_config,
             workspace_root=app_config.resolve_workspace_root(),
             live=live,
+            model_router=model_router,
+            model_router_error=model_router_error,
         )
     )
     console.print(Markdown(render_doctor_report(report)))
@@ -2087,6 +2103,7 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 engine._config,
                 workspace_root=getattr(engine, "workspace_root", Path.cwd()),
                 mcp_manager=getattr(engine, "_mcp_manager", None),
+                model_router=engine.router,
             )
             console.print(Markdown(render_doctor_report(report)))
         case "/harness":

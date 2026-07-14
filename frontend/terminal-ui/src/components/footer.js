@@ -155,6 +155,7 @@ export function StatusFooter({ state, env = {} }) {
       const heartbeatWarning = state.bridgeHeartbeat?.status === "stale"
         ? "Bridge: 无响应"
         : null;
+      const modelContractWarning = formatModelContractWarning(status.model_contract);
       const parts = [
         time,
         `mode: ${state.mode}`,
@@ -162,6 +163,7 @@ export function StatusFooter({ state, env = {} }) {
         `强度: ${reasoningEffort}`,
         `运行: ${state.cancelPending ? "正在停止" : state.running ? "进行中" : "空闲"}`,
         ...(heartbeatWarning ? [heartbeatWarning] : []),
+        ...(modelContractWarning ? [modelContractWarning] : []),
         session,
         ...(tasks ? [`tasks: ${tasks}`] : []),
         ...(providerIdentity ? [`提供方: ${providerIdentity}`] : []),
@@ -176,6 +178,16 @@ export function StatusFooter({ state, env = {} }) {
       return packStatusParts(parts, ctx.width).map((line) => color(ANSI.dim, line));
     },
   };
+}
+
+function formatModelContractWarning(contract) {
+  const status = String(contract?.status || "").toLowerCase();
+  const label = {
+    partial: "模型契约: 部分可信",
+    unverified: "模型契约: 未验证",
+    incompatible: "模型契约: 不兼容",
+  }[status];
+  return label ? color(ANSI.yellow, label) : null;
 }
 
 function packStatusParts(parts, width) {

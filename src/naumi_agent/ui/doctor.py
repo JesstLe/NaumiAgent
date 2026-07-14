@@ -22,7 +22,7 @@ from naumi_agent.tools.browser.runtime.chrome_launcher import (
 )
 
 if TYPE_CHECKING:
-    from naumi_agent.model.router import ModelResponse
+    from naumi_agent.model.router import ModelResponse, ModelRouter
 
 DoctorStatus = Literal["pass", "warn", "error"]
 
@@ -56,6 +56,8 @@ async def run_doctor(
     live: bool = False,
     live_probe: Callable[[AppConfig], Awaitable[ModelResponse]] | None = None,
     browser_fallback_available: bool | None = None,
+    model_router: ModelRouter | None = None,
+    model_router_error: str | None = None,
 ) -> DoctorReport:
     """Run local diagnostics and an optional explicit model connectivity probe."""
     root = Path(workspace_root).expanduser()
@@ -68,6 +70,19 @@ async def run_doctor(
         _check_config(config),
         api_key_check,
         provider_check,
+        *(
+            (
+                DoctorCheck(
+                    "模型契约",
+                    "error",
+                    f"provider catalog 无法加载：{model_router_error}",
+                    "修复 catalog 的字段、类型或模型能力声明后重试。",
+                ),
+            )
+            if model_router_error
+            else ()
+        ),
+        *(_check_model_contracts(model_router) if model_router is not None else ()),
         _check_search_readiness(
             search_config=config.search,
             browser_fallback_available=browser_fallback_available,
@@ -101,6 +116,52 @@ async def run_doctor(
         else:
             checks.append(await _check_live_model(config, probe=live_probe))
     return DoctorReport(checks=tuple(checks))
+
+
+def _check_model_contracts(router: ModelRouter) -> tuple[DoctorCheck, ...]:
+    """Summarize unique configured tiers without probing paid provider APIs."""
+    checks: list[DoctorCheck] = []
+    seen: set[str] = set()
+    for tier in ("fast", "capable", "reasoning"):
+        model = router.resolve_model(tier)
+        if model in seen:
+            continue
+        seen.add(model)
+        try:
+            contract = router.get_model_capability_contract(model)
+        except Exception as exc:
+            checks.append(
+                DoctorCheck(
+                    f"模型契约 {tier}",
+                    "error",
+                    f"{model}: 无法解析（{exc}）",
+                    "检查 provider catalog、模型别名和 models.model_info。",
+                )
+            )
+            continue
+        if contract.status.value == "incompatible":
+            status: DoctorStatus = "error"
+            detail = "；".join(contract.errors) or "模型能力与 Agent Harness 不兼容。"
+        elif contract.status.value in {"partial", "unverified"}:
+            status = "warn"
+            detail = "；".join(contract.warnings) or "模型元数据未完整验证。"
+        else:
+            status = "pass"
+            detail = (
+                f"{contract.canonical_model}: context {contract.max_context}，"
+                f"output {contract.max_output}，tools/streaming 已验证。"
+            )
+        checks.append(
+            DoctorCheck(
+                f"模型契约 {tier}",
+                status,
+                f"{model}: {detail}",
+                "在 provider catalog 或 models.model_info 补齐限制、价格、能力和模态。"
+                if status != "pass"
+                else "",
+            )
+        )
+    return tuple(checks)
 
 
 def render_doctor_report(report: DoctorReport) -> str:

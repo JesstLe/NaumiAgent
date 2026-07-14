@@ -521,6 +521,13 @@ class JsonlEngineBridge:
             ).to_dict()
         except Exception:
             pass
+        model_contract: dict[str, Any] | None = None
+        try:
+            model_contract = self.engine.router.get_model_capability_contract(
+                model or None
+            ).to_dict()
+        except Exception:
+            pass
         try:
             context = self.engine.get_context_info()
         except Exception:
@@ -542,6 +549,7 @@ class JsonlEngineBridge:
             "api_format": api_format,
             "upstream_model": upstream_model,
             "reasoning_effort": reasoning_effort,
+            "model_contract": model_contract,
             "workspace_root": str(workspace_root),
             "usage": {
                 "input_tokens": usage.total_input_tokens,
@@ -1822,6 +1830,7 @@ class JsonlEngineBridge:
             config,
             workspace_root=self.engine.workspace_root,
             mcp_manager=getattr(self.engine, "mcp_manager", None),
+            model_router=self.engine.router,
         )
         await self.emit(
             ServerEventType.UI_MESSAGE,

@@ -50,6 +50,9 @@ class AvailableModel:
     max_context: int | None = None
     max_output: int | None = None
     supports_tools: bool | None = None
+    supports_streaming: bool | None = None
+    supports_parallel_tools: bool | None = None
+    supports_structured_output: bool | None = None
     supports_reasoning: bool | None = None
     reasoning_efforts: tuple[ReasoningEffort, ...] = ()
     default_reasoning_effort: ReasoningEffort | None = None
@@ -72,6 +75,9 @@ class AvailableModel:
             max_context=self.max_context,
             max_output=self.max_output,
             supports_tools=self.supports_tools,
+            supports_streaming=self.supports_streaming,
+            supports_parallel_tools=self.supports_parallel_tools,
+            supports_structured_output=self.supports_structured_output,
             supports_reasoning=self.supports_reasoning,
             reasoning_efforts=self.reasoning_efforts,
             default_reasoning_effort=self.default_reasoning_effort,
@@ -578,6 +584,9 @@ def _available_static(provider_id: str, model: ProviderModelSpec) -> AvailableMo
         max_context=model.max_context,
         max_output=model.max_output,
         supports_tools=model.supports_tools,
+        supports_streaming=model.supports_streaming,
+        supports_parallel_tools=model.supports_parallel_tools,
+        supports_structured_output=model.supports_structured_output,
         supports_reasoning=model.supports_reasoning,
         reasoning_efforts=model.reasoning_efforts,
         default_reasoning_effort=model.default_reasoning_effort,

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from naumi_agent.config.settings import AppConfig
-from naumi_agent.model.router import ModelResponse
+from naumi_agent.config.settings import AppConfig, ModelMeta
+from naumi_agent.model.router import ModelResponse, ModelRouter
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.ui.doctor import (
     _check_search_readiness,
@@ -50,6 +50,53 @@ async def test_run_doctor_checks_local_environment(tmp_path) -> None:
     assert names["debug log 写入权限"].status == "pass"
     assert "环境诊断" in rendered
     assert "可直接复制" in rendered
+
+
+@pytest.mark.asyncio
+async def test_doctor_summarizes_unique_model_capability_contract(tmp_path) -> None:
+    config = _config(tmp_path)
+    config.models.model_info["openai/test-model"] = ModelMeta(
+        max_context=128000,
+        max_output=8192,
+        input_cost_per_million=1,
+        output_cost_per_million=4,
+        supports_tools=True,
+        supports_streaming=True,
+        supports_parallel_tools=True,
+        supports_structured_output=True,
+        supports_reasoning=False,
+        supports_vision=False,
+        input_modalities=("text",),
+        output_modalities=("text",),
+    )
+    router = ModelRouter(config.models)
+
+    report = await run_doctor(
+        config,
+        workspace_root=tmp_path,
+        browser_fallback_available=True,
+        model_router=router,
+    )
+
+    contract_checks = [item for item in report.checks if item.name.startswith("模型契约")]
+    assert len(contract_checks) == 1
+    assert contract_checks[0].status == "pass"
+    assert "context 128000" in contract_checks[0].detail
+
+
+@pytest.mark.asyncio
+async def test_doctor_reports_catalog_load_error_without_crashing(tmp_path) -> None:
+    report = await run_doctor(
+        _config(tmp_path),
+        workspace_root=tmp_path,
+        browser_fallback_available=True,
+        model_router_error="provider.vendor.models.bad.limit.context 必须是正整数",
+    )
+
+    check = next(item for item in report.checks if item.name == "模型契约")
+    assert check.status == "error"
+    assert "limit.context" in check.detail
+    assert "修复 catalog" in check.suggestion
 
 
 @pytest.mark.asyncio

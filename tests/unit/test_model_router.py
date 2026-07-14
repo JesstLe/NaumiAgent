@@ -11,7 +11,7 @@ from naumi_agent.config.settings import ModelConfig, ModelMeta
 from naumi_agent.model.catalog import parse_provider_catalog_json
 from naumi_agent.model.discovery import ModelDiscoveryService
 from naumi_agent.model.reasoning import ReasoningEffortError
-from naumi_agent.model.router import ModelRouter, ModelTier
+from naumi_agent.model.router import ModelContractStatus, ModelRouter, ModelTier
 
 
 def _discovery_catalog(*, static: bool = False):
@@ -366,6 +366,116 @@ class TestModelInfo:
         assert copy["max_output_tokens"] == 1_000
         assert primary is not copy
         assert requested_upstreams == ["z-ai/glm4.7", "z-ai/glm4.7"]
+
+    def test_catalog_limits_costs_and_capabilities_form_verified_contract(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        catalog = parse_provider_catalog_json(
+            json.dumps(
+                {
+                    "providers": {
+                        "vendor": {
+                            "apiFormat": "openai_chat",
+                            "baseURL": "https://provider.example/v1",
+                            "auth": {"type": "none"},
+                            "models": {
+                                "complete": {
+                                    "upstreamId": "vendor/complete",
+                                    "limit": {"context": 64_000, "output": 8_192},
+                                    "cost": {"input": 1.25, "output": 5.0},
+                                    "capabilities": {
+                                        "tools": True,
+                                        "streaming": True,
+                                        "parallelTools": True,
+                                        "structuredOutput": True,
+                                        "reasoning": False,
+                                        "vision": False,
+                                    },
+                                    "modalities": {
+                                        "input": ["text"],
+                                        "output": ["text"],
+                                    },
+                                }
+                            },
+                        }
+                    }
+                }
+            )
+        )
+        monkeypatch.setattr(
+            "naumi_agent.model.router.litellm.get_model_info",
+            lambda _model: {},
+        )
+        router = ModelRouter(
+            ModelConfig(provider="vendor", default_model="complete", max_tokens=4096),
+            catalog=catalog,
+        )
+
+        contract = router.get_model_capability_contract()
+
+        assert contract.status is ModelContractStatus.VERIFIED
+        assert contract.max_context == 64_000
+        assert contract.max_output == 8_192
+        assert contract.input_cost_per_million == 1.25
+        assert contract.supports_tools is True
+        assert contract.supports_parallel_tools is True
+        assert contract.supports_structured_output is True
+        assert contract.field_sources["max_context"] == "catalog"
+        assert contract.warnings == ()
+        assert contract.errors == ()
+
+    def test_unknown_model_contract_reports_unverified_fallbacks(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "naumi_agent.model.router.litellm.get_model_info",
+            lambda _model: (_ for _ in ()).throw(KeyError("unknown")),
+        )
+        router = ModelRouter(ModelConfig(default_model="unknown/vendor-model"))
+
+        contract = router.get_model_capability_contract()
+
+        assert contract.status is ModelContractStatus.UNVERIFIED
+        assert contract.field_sources["max_context"] == "fallback"
+        assert contract.field_sources["max_output"] == "fallback"
+        assert contract.supports_tools is None
+        assert any("未验证" in warning for warning in contract.warnings)
+
+    def test_contract_rejects_missing_tools_and_clamps_output_configuration(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "naumi_agent.model.router.litellm.get_model_info",
+            lambda _model: {},
+        )
+        router = ModelRouter(
+            ModelConfig(
+                default_model="vendor/plain",
+                max_tokens=8192,
+                model_info={
+                    "vendor/plain": ModelMeta(
+                        max_context=4096,
+                        max_output=2048,
+                        input_cost_per_million=0,
+                        output_cost_per_million=0,
+                        supports_tools=False,
+                        supports_streaming=True,
+                        supports_reasoning=False,
+                        supports_vision=False,
+                        input_modalities=("text",),
+                        output_modalities=("text",),
+                    )
+                },
+            )
+        )
+
+        contract = router.get_model_capability_contract()
+
+        assert contract.status is ModelContractStatus.INCOMPATIBLE
+        assert any("工具调用" in error for error in contract.errors)
+        assert contract.request_max_tokens == 2048
+        assert any("max_tokens" in warning for warning in contract.warnings)
+        assert contract.field_sources["supports_tools"] == "config"
 
 
 class TestReasoningEffort:
