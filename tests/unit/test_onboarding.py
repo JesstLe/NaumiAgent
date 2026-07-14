@@ -46,6 +46,23 @@ def test_build_config_limits_default_permissions_to_workspace(tmp_path: Path) ->
     assert config["safety"]["allowed_dirs"] == [str(tmp_path)]
 
 
+def test_build_config_keeps_runtime_budgets_unlimited_by_default(
+    tmp_path: Path,
+) -> None:
+    config = _build_config(
+        provider="custom",
+        preset=_preset(),
+        workspace=str(tmp_path),
+        permission_mode="bypass",
+    )
+
+    safety = config["safety"]
+    assert safety["max_turns"] == 50
+    assert "max_budget_usd" not in safety
+    assert "max_input_tokens" not in safety
+    assert "max_output_tokens" not in safety
+
+
 def test_run_onboarding_stores_key_outside_yaml(
     tmp_path: Path,
     monkeypatch,

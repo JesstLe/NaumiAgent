@@ -15,6 +15,8 @@ from naumi_agent.model.reasoning import ReasoningEffort, ReasoningEffortSetting
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_RUNTIME_MAX_TURNS = 50
+
 
 class ModelMeta(BaseSettings):
     """单个模型的元数据覆盖（上下文窗口、价格等）."""
@@ -92,7 +94,7 @@ class SafetyConfig(BaseSettings):
     permission_mode: str = "moderate"
     allowed_dirs: list[str] = Field(default_factory=lambda: ["/workspace", str(Path.cwd())])
     max_budget_usd: float | None = Field(default=None, ge=0)
-    max_turns: int = Field(default=50, ge=1)
+    max_turns: int = Field(default=DEFAULT_RUNTIME_MAX_TURNS, ge=1)
     max_parallel_tools: int = Field(default=4, ge=1, le=16)
     max_input_tokens: int | None = Field(default=None, ge=0)
     max_output_tokens: int | None = Field(default=None, ge=0)
