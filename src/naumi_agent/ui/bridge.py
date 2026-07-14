@@ -238,6 +238,7 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
         {"command": "/task", "description": "查看任务运行详情"},
         {"command": "/permissions", "description": "显示待确认权限面板"},
         {"command": "/doctor", "description": "运行环境诊断"},
+        {"command": "/harness", "description": "Harness Profile 状态、诊断与信任"},
         {
             "command": "/mode",
             "aliases": ["/mode"],

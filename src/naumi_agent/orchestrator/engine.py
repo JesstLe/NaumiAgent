@@ -17,6 +17,12 @@ from typing import Any
 from naumi_agent.agent_control import AgentControlService
 from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.harness.service import HarnessService
+from naumi_agent.harness.tools import create_harness_tools
+from naumi_agent.harness.trust import (
+    HarnessTrustStore,
+    resolve_harness_trust_db_path,
+)
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
 from naumi_agent.inspector import RuntimeInspectorService
 from naumi_agent.mcp.client import MCPClientManager, MCPServerConfig, setup_mcp_servers
@@ -411,6 +417,12 @@ class AgentEngine:
         self.workspace_root = config.resolve_workspace_root()
         self._runtime_data_dir = Path(config.memory.session_db_path).parent
         self._worktree_storage_dir = self._runtime_data_dir / "worktrees"
+        self.harness_service = HarnessService(
+            workspace_root=self.workspace_root,
+            trust_store=HarnessTrustStore(
+                resolve_harness_trust_db_path()
+            ),
+        )
         self.chat_run_store = ChatRunStore(self._runtime_data_dir / "chat-runs.db")
         catalog = (
             load_provider_catalog(config.models.catalog_path)
@@ -539,6 +551,8 @@ class AgentEngine:
         self._register_skills()
 
     def _register_builtin_tools(self) -> None:
+        for tool in create_harness_tools(self.harness_service):
+            self._tool_registry.register(tool)
         for tool in create_builtin_tools(
             self.workspace_root,
             shell_output_dir=self.workspace_root / ".naumi" / "shell-output",

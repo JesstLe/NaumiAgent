@@ -60,6 +60,11 @@ class TestSlashCommandCompleter:
         descriptions = {cmd: desc for cmd, desc, _ in COMMANDS}
         assert "provider" in descriptions["/models"].lower()
 
+    def test_harness_command_registered(self):
+        assert "/harness" in _complete("/")
+        descriptions = {cmd: desc for cmd, desc, _ in COMMANDS}
+        assert "profile" in descriptions["/harness"].lower()
+
     def test_reasoning_effort_command_registered(self):
         assert "/effort" in _complete("/")
 

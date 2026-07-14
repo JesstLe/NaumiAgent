@@ -3,8 +3,8 @@
 ## 文档状态
 
 - 日期：2026-07-14
-- 状态：Draft for review
-- 范围：设计 NaumiAgent 的 Harness Engineering 子系统，不在本轮实现代码
+- 状态：已批准；H1 已实现，H2-H7 待实施
+- 范围：设计 NaumiAgent 的 Harness Engineering 子系统，并记录各阶段真实落地状态
 - 目标读者：NaumiAgent 维护者、实现 Agent、测试与安全审查者
 - 推荐结论：建立独立的 `harness` 工程域，复用现有引擎、权限、任务、Worktree、Workbench 和 DebugTrace；不把 Harness 简化成更大的 Prompt，也不复制一套新的调度系统
 
@@ -1041,6 +1041,12 @@ Harness 配置未受信任
 
 ### H1：Profile Loader + Harness Doctor
 
+**实施状态（2026-07-14）**：已完成。当前主线候选实现包含严格 Profile
+schema、256 KiB 有界读取、路径与 symlink containment、用户级 Trust Store、
+digest 变化失效、共享 HarnessService、`/harness status|doctor|trust|untrust`
+以及只读 `harness_status`、`harness_doctor` Agent Tools。H1 只展示检查命令，
+不会执行命令；H2/H3 的上下文注入和 Check Runner 尚未启用。
+
 **用户价值**：用户能确认仓库 Harness 配置是否有效、安全、可执行。
 
 **范围**：
@@ -1309,9 +1315,9 @@ Harness H5 落地前先修复现有 CI 覆盖缺口：
 
 ## 28. 下一步
 
-用户批准本设计后，下一步只为 **H1：Profile Loader + Harness Doctor** 编写逐步实施计划。计划必须精确到文件、接口、失败测试、最小实现、定向验证、真实场景、自审和单独 commit。
-
-在 H1 完成、验证并提交前，不开始 H2，也不预先创建空壳模块。
+H1 完成、验证并提交后，下一步只为 **H2：Repository Knowledge Plane**
+编写逐步实施计划。H2 必须继续复用现有 Runtime Snapshot，不得提前实现 H3
+Check Runner，也不得预先创建 H4-H7 空壳模块。
 
 ---
 

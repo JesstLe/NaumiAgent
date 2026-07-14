@@ -35,7 +35,7 @@
 - Produces `HarnessProfile`, `HarnessCheckSpec`, `HarnessProfileSnapshot`, `HarnessProfileError`, `load_harness_profile(workspace_root, profile_path=None)`.
 - `HarnessProfileSnapshot` always reports canonical workspace/profile paths and one of `missing`, `valid`, or `invalid`; valid snapshots include the exact raw-byte digest and parsed profile.
 
-- [ ] **Step 1: Write failing profile tests**
+- [x] **Step 1: Write failing profile tests**
 
 Cover a valid profile, missing file, empty file, >256 KiB file, unknown fields, unsupported schema, malicious YAML object tag, non-mapping root, duplicate check IDs, empty/string argv, absolute/parent paths, symlink escape, Unicode paths, and digest changes after one-byte edits.
 
@@ -46,17 +46,17 @@ assert snapshot.profile.checks[0].argv == ("uv", "run", "pytest", "-q")
 assert snapshot.digest == hashlib.sha256(profile_path.read_bytes()).hexdigest()
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest -q tests/unit/test_harness_profile.py`
 
 Expected: collection fails because `naumi_agent.harness.profile` does not exist.
 
-- [ ] **Step 3: Implement strict models and loader**
+- [x] **Step 3: Implement strict models and loader**
 
 Use `ConfigDict(extra="forbid", frozen=True)`, tuple fields, field/model validators, `yaml.safe_load`, byte-size checks before decode, canonical `Path.resolve(strict=False)`, and a shared containment validator that resolves existing symlinks. Convert validation failures into stable `HarnessProfileError(code, message, hint)` records instead of leaking library exceptions.
 
-- [ ] **Step 4: Verify GREEN and Ruff**
+- [x] **Step 4: Verify GREEN and Ruff**
 
 Run: `uv run pytest -q tests/unit/test_harness_profile.py`
 
@@ -76,7 +76,7 @@ Expected: all selected tests and Ruff pass.
 - Produces `HarnessTrustRecord` and `HarnessTrustStore(db_path)` with async `is_trusted(workspace_root, digest)`, `trust(workspace_root, digest, source)`, `get(workspace_root)`, and `untrust(workspace_root)`.
 - SQLite table `harness_profile_trust` has canonical workspace root as primary key, current digest, UTC timestamp, and source.
 
-- [ ] **Step 1: Write failing trust tests**
+- [x] **Step 1: Write failing trust tests**
 
 Cover first trust, idempotent repeat, digest replacement, workspace isolation, untrust, database reopen persistence, invalid empty inputs, and concurrent trust writes.
 
@@ -86,17 +86,17 @@ assert await store.is_trusted(workspace, "a" * 64)
 assert not await store.is_trusted(workspace, "b" * 64)
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest -q tests/unit/test_harness_trust.py`
 
 Expected: import failure for `naumi_agent.harness.trust`.
 
-- [ ] **Step 3: Implement the trust store**
+- [x] **Step 3: Implement the trust store**
 
 Open short-lived `aiosqlite` connections, create the table idempotently, enable `busy_timeout`, use `INSERT ... ON CONFLICT DO UPDATE`, and serialize schema creation inside an async lock. Never store profile bodies or commands.
 
-- [ ] **Step 4: Verify GREEN and Ruff**
+- [x] **Step 4: Verify GREEN and Ruff**
 
 Run: `uv run pytest -q tests/unit/test_harness_trust.py`
 
@@ -118,7 +118,7 @@ Expected: persistence and concurrent-write tests pass.
 - Produces `HarnessService.status()`, `.doctor()`, `.trust()`, `.untrust()`, `render_harness_status()`, `render_harness_doctor()`, and `create_harness_tools(service)`.
 - Registers only `harness_status` and `harness_doctor`; both have `read_only=True` and `concurrency_safe=True`.
 
-- [ ] **Step 1: Write failing service/tool tests**
+- [x] **Step 1: Write failing service/tool tests**
 
 Prove missing, invalid, valid-untrusted, trusted, and digest-changed states; doctor lists bounded command summaries and path findings but does not spawn a process; tools call the same service instance; no `harness_trust` tool exists.
 
@@ -129,21 +129,21 @@ assert all(tool.metadata.read_only for tool in tools)
 assert "下一步" in await tools[1].execute()
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest -q tests/unit/test_harness_service.py tests/unit/test_harness_tools.py`
 
 Expected: missing service/tool modules.
 
-- [ ] **Step 3: Implement service and renderers**
+- [x] **Step 3: Implement service and renderers**
 
 The service reloads profile bytes for every status/doctor/trust decision so stale digests cannot be trusted accidentally. Doctor emits structured findings for profile, trust, entrypoint paths, suite paths, check IDs/argv, and explicit H1 execution-disabled state. Renderers provide concise Chinese summaries and actionable next commands.
 
-- [ ] **Step 4: Implement read-only tools**
+- [x] **Step 4: Implement read-only tools**
 
 Both tools take no arguments, delegate directly to the service, and return renderer output. Do not expose mutation methods through ToolRegistry.
 
-- [ ] **Step 5: Verify GREEN and Ruff**
+- [x] **Step 5: Verify GREEN and Ruff**
 
 Run: `uv run pytest -q tests/unit/test_harness_service.py tests/unit/test_harness_tools.py`
 
@@ -159,7 +159,6 @@ Expected: all selected tests pass and process-spawn sentinels remain untouched.
 - Modify: `src/naumi_agent/orchestrator/engine.py`
 - Modify: `src/naumi_agent/main.py`
 - Modify: `src/naumi_agent/cli/completer.py`
-- Modify: `src/naumi_agent/cli/commands_meta.py`
 - Modify: `src/naumi_agent/ui/bridge.py`
 - Modify: `frontend/terminal-ui/src/state.js`
 - Create: `tests/unit/test_harness_surfaces.py`
@@ -172,11 +171,11 @@ Expected: all selected tests pass and process-spawn sentinels remain untouched.
 - `/harness [status|doctor|trust [--confirm]|untrust]` delegates to that service.
 - Completion registries expose `/harness` consistently in classic CLI, Textual TUI, and new terminal UI.
 
-- [ ] **Step 1: Write failing surface tests**
+- [x] **Step 1: Write failing surface tests**
 
 Assert Engine registers both read-only tools, `/harness status` and `/harness doctor` render service results, `/harness trust` previews without mutation, `--confirm` persists trust, `untrust` removes it, unknown/extra arguments show usage, and all completion registries contain `/harness`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest -q tests/unit/test_harness_surfaces.py tests/unit/test_cli_completer.py tests/unit/test_ui_bridge.py -k 'harness'`
 
@@ -184,19 +183,19 @@ Run: `node --test --test-name-pattern 'harness' frontend/terminal-ui/test/state.
 
 Expected: command/tool/completion entries are absent.
 
-- [ ] **Step 3: Wire service and tools into Engine**
+- [x] **Step 3: Wire service and tools into Engine**
 
 Construct the service before `_register_builtin_tools()` and register only the two read-only Harness tools. Do not import `AgentEngine` from the Harness package.
 
-- [ ] **Step 4: Add the user-only command path**
+- [x] **Step 4: Add the user-only command path**
 
 Parse with `shlex.split`. Status is the default. `trust` without `--confirm` shows profile digest and all argv arrays; only the exact `trust --confirm` form writes trust. `untrust` is only reachable from the user slash command. Render through the existing Rich Markdown path.
 
-- [ ] **Step 5: Synchronize command metadata**
+- [x] **Step 5: Synchronize command metadata**
 
 Add one `/harness` entry with `[status|doctor|trust|untrust]` hint to Python completers, bridge fallback metadata, and terminal UI state defaults.
 
-- [ ] **Step 6: Verify GREEN**
+- [x] **Step 6: Verify GREEN**
 
 Run the Python and Node commands from Step 2 and require clean output.
 
@@ -213,25 +212,25 @@ Run the Python and Node commands from Step 2 and require clean output.
 - The repository profile declares `AGENTS.md`, `README.md`, and the Harness design as entrypoints plus H1-targeted lint/test argv commands.
 - The integration test copies the real profile into a temporary real Git workspace, runs doctor, trusts its digest, mutates one byte, and proves trust invalidation without executing commands.
 
-- [ ] **Step 1: Write the failing real-workspace test**
+- [x] **Step 1: Write the failing real-workspace test**
 
 Use actual filesystem, SQLite, YAML, and Git. Patch no subprocess API; instead install a sentinel that fails if H1 attempts command execution.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `uv run pytest -q tests/integration/test_harness_h1_real_workspace.py`
 
 Expected: failure because the repository profile is absent.
 
-- [ ] **Step 3: Add the real profile**
+- [x] **Step 3: Add the real profile**
 
 Use schema version 1. Keep checks limited to `src/naumi_agent/harness`, H1 tests, and H1 surface tests. Do not configure a full-suite command.
 
-- [ ] **Step 4: Update design status**
+- [x] **Step 4: Update design status**
 
 Change the design status from draft to approved/in progress and record H1 implementation evidence. Do not claim H2-H7 completion.
 
-- [ ] **Step 5: Run focused acceptance checks**
+- [x] **Step 5: Run focused acceptance checks**
 
 Run: `uv run pytest -q tests/unit/test_harness_profile.py tests/unit/test_harness_trust.py tests/unit/test_harness_service.py tests/unit/test_harness_tools.py tests/unit/test_harness_surfaces.py tests/integration/test_harness_h1_real_workspace.py`
 
@@ -243,18 +242,18 @@ Run: `git diff --check`
 
 Expected: all focused tests pass; no full repository suite runs.
 
-- [ ] **Step 6: Real command smoke test**
+- [x] **Step 6: Real command smoke test**
 
 Instantiate `HarnessService` against `/Users/lv/Workspace/NaumiAgent`, render status and doctor, confirm P95 target is comfortably below 2 seconds, trust a temporary copied profile database, mutate the copied profile, and confirm `trusted=False`. Never trust or execute the live repository profile as part of automation.
 
-- [ ] **Step 7: Self-review**
+- [x] **Step 7: Self-review**
 
 Check that H1 never executes configured commands, Agent tools cannot mutate trust, exact-byte changes invalidate trust, errors remain Chinese/actionable, paths are contained after symlink resolution, and no H2/H3 placeholders were introduced.
 
-- [ ] **Step 8: Commit and push**
+- [x] **Step 8: Commit feature branch**
 
 ```bash
-git add .naumi/harness.yaml docs/superpowers/specs/2026-07-14-harness-engineering-design.md docs/superpowers/plans/2026-07-14-harness-profile-doctor.md src/naumi_agent/harness src/naumi_agent/orchestrator/engine.py src/naumi_agent/main.py src/naumi_agent/cli/completer.py src/naumi_agent/cli/commands_meta.py src/naumi_agent/ui/bridge.py frontend/terminal-ui/src/state.js tests/unit/test_harness_*.py tests/unit/test_cli_completer.py tests/unit/test_ui_bridge.py frontend/terminal-ui/test/state.test.js tests/integration/test_harness_h1_real_workspace.py
+git add .naumi/harness.yaml docs/superpowers/specs/2026-07-14-harness-engineering-design.md docs/superpowers/plans/2026-07-14-harness-profile-doctor.md src/naumi_agent/harness src/naumi_agent/orchestrator/engine.py src/naumi_agent/main.py src/naumi_agent/cli/completer.py src/naumi_agent/cli_completer.py src/naumi_agent/ui/bridge.py frontend/terminal-ui/src/state.js tests/unit/test_harness_*.py tests/unit/test_cli_completer.py tests/unit/test_ui_bridge.py frontend/terminal-ui/test/state.test.js tests/integration/test_harness_h1_real_workspace.py
 git commit -m "feat: add trusted harness profile doctor"
 git push origin main
 ```

@@ -1751,6 +1751,13 @@ test("slash completion merges backend and local commands", () => {
   assert.equal(candidates.some((item) => item.command === "/folds"), true);
 });
 
+test("harness command is available before backend metadata arrives", () => {
+  assert.equal(
+    DEFAULT_SLASH_COMMAND_CANDIDATES.some((item) => item.command === "/harness"),
+    true,
+  );
+});
+
 test("slash completion filters by partial command", () => {
   const candidates = getSlashCommandCompletions("/h");
 
