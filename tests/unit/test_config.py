@@ -6,12 +6,14 @@ import pytest
 import yaml
 
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.model.reasoning import ReasoningEffort, ReasoningEffortSetting
 
 
 class TestAppConfig:
     def test_default_config(self) -> None:
         config = AppConfig()
         assert config.models.default_model == "claude-sonnet-4-6"
+        assert config.models.reasoning_effort is ReasoningEffortSetting.AUTO
         assert config.safety.max_turns == 50
         assert config.safety.max_parallel_tools == 4
         assert config.memory.session_db_path == "data/sessions.db"
@@ -198,6 +200,76 @@ class TestAppConfig:
 
         assert "复制为 .naumi/config.yaml" in text
         assert '# catalog_path: "providers.json"' in text
+        assert "reasoning_effort: auto" in text
+        assert "reasoning_efforts:" in text
+        assert "default_reasoning_effort:" in text
+        assert "api_key:" not in text
+
+    @pytest.mark.parametrize(
+        "value",
+        ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"],
+    )
+    def test_reasoning_effort_accepts_public_config_values(self, value: str) -> None:
+        config = AppConfig(models={"reasoning_effort": value})  # type: ignore[arg-type]
+
+        assert config.models.reasoning_effort.value == value
+
+    def test_reasoning_effort_rejects_unknown_config_value(self) -> None:
+        with pytest.raises(ValueError, match="reasoning_effort"):
+            AppConfig(models={"reasoning_effort": "turbo"})  # type: ignore[arg-type]
+
+    def test_reasoning_effort_loads_from_nested_environment(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("NAUMI_MODELS__REASONING_EFFORT", "high")
+        monkeypatch.setitem(AppConfig.model_config, "env_file", None)
+
+        config = AppConfig()
+
+        assert config.models.reasoning_effort is ReasoningEffortSetting.HIGH
+
+    def test_model_info_loads_reasoning_selection_and_capability_override(self) -> None:
+        config = AppConfig(
+            models={
+                "model_info": {
+                    "anthropic/claude-opus-4-6": {
+                        "reasoning_effort": "max",
+                        "reasoning_efforts": ["low", "medium", "high", "max"],
+                        "default_reasoning_effort": "high",
+                    }
+                }
+            }
+        )
+
+        meta = config.models.model_info["anthropic/claude-opus-4-6"]
+        assert meta.reasoning_effort is ReasoningEffortSetting.MAX
+        assert meta.reasoning_efforts == (
+            ReasoningEffort.LOW,
+            ReasoningEffort.MEDIUM,
+            ReasoningEffort.HIGH,
+            ReasoningEffort.MAX,
+        )
+        assert meta.default_reasoning_effort is ReasoningEffort.HIGH
+
+    @pytest.mark.parametrize(
+        "meta",
+        [
+            {"reasoning_efforts": []},
+            {"reasoning_efforts": ["low", "low"]},
+            {
+                "reasoning_efforts": ["low", "high"],
+                "default_reasoning_effort": "medium",
+            },
+            {"default_reasoning_effort": "high"},
+        ],
+    )
+    def test_model_info_rejects_invalid_reasoning_capability_override(
+        self,
+        meta: dict[str, object],
+    ) -> None:
+        with pytest.raises(ValueError):
+            AppConfig(models={"model_info": {"model-a": meta}})  # type: ignore[arg-type]
 
     def test_api_port_from_example_yaml(self) -> None:
         example_path = Path(__file__).resolve().parents[2] / "config.yaml.example"

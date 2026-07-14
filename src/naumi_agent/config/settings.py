@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from naumi_agent.config.credentials import CredentialStoreError, load_model_api_key
+from naumi_agent.model.reasoning import ReasoningEffort, ReasoningEffortSetting
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,41 @@ class ModelMeta(BaseSettings):
     max_output: int | None = None
     input_cost_per_million: float | None = None
     output_cost_per_million: float | None = None
+    reasoning_effort: ReasoningEffortSetting | None = None
+    reasoning_efforts: tuple[ReasoningEffort, ...] | None = None
+    default_reasoning_effort: ReasoningEffort | None = None
+
+    @field_validator("reasoning_efforts", mode="before")
+    @classmethod
+    def _reasoning_efforts_must_be_non_empty(
+        cls,
+        value: object,
+    ) -> object:
+        if value is None:
+            return value
+        if not isinstance(value, (list, tuple)) or not value:
+            raise ValueError("reasoning_efforts 必须是非空数组")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_reasoning_capability(self) -> ModelMeta:
+        efforts = self.reasoning_efforts
+        if efforts is None:
+            if self.default_reasoning_effort is not None:
+                raise ValueError(
+                    "default_reasoning_effort 需要同时声明 reasoning_efforts"
+                )
+            return self
+        if len(set(efforts)) != len(efforts):
+            raise ValueError("reasoning_efforts 不能包含重复值")
+        if (
+            self.default_reasoning_effort is not None
+            and self.default_reasoning_effort not in efforts
+        ):
+            raise ValueError(
+                "default_reasoning_effort 必须出现在 reasoning_efforts 中"
+            )
+        return self
 
 
 class ModelConfig(BaseSettings):
@@ -32,6 +68,7 @@ class ModelConfig(BaseSettings):
     default_model: str = "claude-sonnet-4-6"
     fast_model: str = "claude-haiku-4-5"
     reasoning_model: str = "claude-opus-4-7"
+    reasoning_effort: ReasoningEffortSetting = ReasoningEffortSetting.AUTO
     max_tokens: int = 4096
     temperature: float = 1.0
     api_base: str | None = None

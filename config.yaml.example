@@ -8,6 +8,8 @@ models:
   default_model: "openai/kimi-for-coding"
   fast_model: "openai/kimi-for-coding"
   reasoning_model: "openai/kimi-for-coding"
+  # 模型思考强度；auto 表示不发送强度参数，使用供应商默认值。
+  reasoning_effort: auto
   max_tokens: 4096
   temperature: 1.0
   api_base: "https://api.kimi.com/coding/v1"
@@ -15,6 +17,11 @@ models:
   model_info:
     openai/kimi-for-coding:
       max_context: 256000
+    # 直连模型可在这里声明经过当前 API/LiteLLM 验证的强度能力。
+    # anthropic/claude-opus-4-6:
+    #   reasoning_efforts: [low, medium, high, max]
+    #   default_reasoning_effort: high
+    #   reasoning_effort: high
 
 memory:
   session_db_path: "data/sessions.db"
