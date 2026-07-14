@@ -64,6 +64,7 @@ export function renderMarkdownExcerpt(text, width, options = {}) {
   const raw = sanitizeTerminalText(text).split("\n");
   let inCode = false;
   let codeLanguage = "";
+  let mathBlockClose = "";
   for (let index = 0; index < raw.length; index += 1) {
     const line = raw[index];
     if (line.startsWith("```")) {
@@ -76,6 +77,17 @@ export function renderMarkdownExcerpt(text, width, options = {}) {
       lines.push(codeLanguage === "diff"
         ? renderSemanticDiffLine(line)
         : renderSemanticCodeLine(line, codeLanguage));
+      continue;
+    }
+    if (mathBlockClose) {
+      lines.push(color(ANSI.magenta, line));
+      if (line.trim() === mathBlockClose) mathBlockClose = "";
+      continue;
+    }
+    const mathClose = line.trim() === "$$" ? "$$" : line.trim() === "\\[" ? "\\]" : "";
+    if (mathClose && raw.slice(index + 1).some((candidate) => candidate.trim() === mathClose)) {
+      mathBlockClose = mathClose;
+      lines.push(color(ANSI.magenta, line));
       continue;
     }
     lines.push(renderSemanticMarkdownLine(line, {

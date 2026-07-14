@@ -35,6 +35,24 @@ test("renders inline and block LaTeX without losing source", () => {
   assert.equal(rendered.map(stripAnsi).join("\n"), source);
 });
 
+test("renders multiline dollar and bracket math blocks as one semantic region", () => {
+  const source = [
+    "$$",
+    "E = mc^2",
+    "$$",
+    "正文",
+    "\\[",
+    "a + b = c",
+    "\\]",
+  ].join("\n");
+  const rendered = renderMarkdownExcerpt(source, 120);
+
+  assert(rendered.slice(0, 3).every((line) => line.includes(ANSI.magenta)));
+  assert(!rendered[3].includes(ANSI.magenta));
+  assert(rendered.slice(4, 7).every((line) => line.includes(ANSI.magenta)));
+  assert.equal(rendered.map(stripAnsi).join("\n"), source);
+});
+
 test("code tokenizer keeps strings and comments isolated", () => {
   const rendered = renderMarkdownExcerpt([
     "```python",
