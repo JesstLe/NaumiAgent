@@ -609,12 +609,33 @@ def _build_terminal_ui_command(
     config_path: str,
     *,
     frontend_dir: Path | None = None,
+    terminal_ui_executable: Path | None = None,
+    frozen_backend_executable: Path | None = None,
     node_executable: str | None = None,
     bridge_python_executable: str | None = None,
     project_root: Path | None = None,
     package_root: Path | None = None,
 ) -> list[str]:
     """Build the direct Node command for the next-generation terminal UI."""
+    packaged_ui = _resolve_packaged_terminal_ui(
+        terminal_ui_executable=terminal_ui_executable,
+    )
+    if packaged_ui is not None:
+        backend = frozen_backend_executable or Path(sys.executable)
+        bridge_command = [
+            str(backend),
+            "__ui-bridge",
+            "--config",
+            config_path,
+        ]
+        return [
+            str(packaged_ui),
+            "--config",
+            config_path,
+            "--bridge-command-json",
+            json.dumps(bridge_command, ensure_ascii=False, separators=(",", ":")),
+        ]
+
     frontend = _resolve_terminal_ui_frontend_dir(
         frontend_dir=frontend_dir,
         project_root=project_root,
@@ -646,6 +667,29 @@ def _build_terminal_ui_command(
     ]
 
 
+def _resolve_packaged_terminal_ui(
+    *,
+    terminal_ui_executable: Path | None = None,
+) -> Path | None:
+    """Resolve a compiled UI companion only in explicit or frozen layouts."""
+    candidate = terminal_ui_executable
+    if candidate is None:
+        configured = os.environ.get("NAUMI_TERMINAL_UI_BINARY", "").strip()
+        if configured:
+            candidate = Path(configured).expanduser()
+    if candidate is None and getattr(sys, "frozen", False):
+        name = "naumi-ui.exe" if os.name == "nt" else "naumi-ui"
+        candidate = Path(sys.executable).resolve().with_name(name)
+    if candidate is None:
+        return None
+    candidate = candidate.resolve()
+    if not candidate.is_file():
+        raise TerminalUiLaunchError(f"未找到已编译的新终端 UI：{candidate}")
+    if os.name != "nt" and not os.access(candidate, os.X_OK):
+        raise TerminalUiLaunchError(f"已编译的新终端 UI 不可执行：{candidate}")
+    return candidate
+
+
 def _validate_node_runtime(node_executable: str) -> None:
     """Fail early with a readable message when the terminal UI runtime is too old."""
     try:
@@ -660,25 +704,37 @@ def _validate_node_runtime(node_executable: str) -> None:
             f"无法检测 Node.js 版本，无法启动新一代终端 UI：{exc}"
         ) from exc
 
-    major = _parse_node_major(version)
-    if major is None:
+    parsed_version = _parse_node_version(version)
+    if parsed_version is None:
         raise TerminalUiLaunchError(
-            f"无法识别 Node.js 版本输出：{version or '<empty>'}。请安装 Node.js 20+。"
+            f"无法识别 Node.js 版本输出：{version or '<empty>'}。请安装 Node.js 20.10+。"
         )
-    if major < 20:
+    if parsed_version < (20, 10, 0):
         raise TerminalUiLaunchError(
-            f"当前 Node.js 版本为 {version}，新一代终端 UI 需要 Node.js 20+。"
+            f"当前 Node.js 版本为 {version}，新一代终端 UI 需要 Node.js 20.10+。"
         )
 
 
 def _parse_node_major(version: str) -> int | None:
+    parsed = _parse_node_version(version)
+    if parsed is None:
+        return None
+    return parsed[0]
+
+
+def _parse_node_version(version: str) -> tuple[int, int, int] | None:
     normalized = version.strip()
     if normalized.startswith("v"):
         normalized = normalized[1:]
-    major_text = normalized.split(".", 1)[0]
-    if not major_text.isdigit():
+    normalized = normalized.split("-", 1)[0]
+    components = normalized.split(".")
+    if not 1 <= len(components) <= 3 or not all(
+        component.isdigit() for component in components
+    ):
         return None
-    return int(major_text)
+    parsed = [int(component) for component in components]
+    parsed.extend([0] * (3 - len(parsed)))
+    return parsed[0], parsed[1], parsed[2]
 
 
 def _launch_tui(config_path: str) -> None:

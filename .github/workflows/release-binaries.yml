@@ -1,0 +1,147 @@
+name: Build source-free binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version from pyproject.toml (without v)
+        required: true
+        default: "0.1.214"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "push" ]; then
+            requested=${REF_NAME#v}
+          else
+            requested=$INPUT_VERSION
+          fi
+          declared=$(sed -n 's/^version = "\([^"]*\)"/\1/p' pyproject.toml | head -1)
+          [ "$requested" = "$declared" ] || {
+            printf '请求版本 %s 与 pyproject.toml %s 不一致\n' "$requested" "$declared" >&2
+            exit 1
+          }
+          printf 'value=%s\n' "$requested" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-x64
+            platform: unix
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+            platform: unix
+          - runner: macos-15-intel
+            target: macos-x64
+            platform: unix
+          - runner: macos-15
+            target: macos-arm64
+            platform: unix
+          - runner: windows-2025
+            target: windows-x64
+            platform: windows
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.6"
+      - name: Install release builder
+        run: python -m pip install --upgrade pip ".[release]"
+      - name: Build Unix artifact
+        if: matrix.platform == 'unix'
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          OUTPUT_DIR: ${{ github.workspace }}/release-output
+          PYTHON: python
+        run: scripts/release/build_unix.sh
+      - name: Build Windows artifact
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          OUTPUT_DIR: ${{ github.workspace }}\release-output
+        run: scripts/release/build_windows.ps1
+      - name: Upload only archives and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            release-output/*.tar.gz
+            release-output/*.zip
+            release-output/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-prerelease:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.DISTRIBUTION_GITHUB_TOKEN }}
+      DISTRIBUTION_REPO: ${{ vars.NAUMI_DISTRIBUTION_REPO || 'JesstLe/NaumiAgent-Releases' }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: assets
+          merge-multiple: true
+      - name: Create stable latest aliases
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp scripts/install.sh assets/install.sh
+          cp scripts/install.ps1 assets/install.ps1
+          for archive in assets/naumi-"$VERSION"-*.tar.gz assets/naumi-"$VERSION"-*.zip; do
+            [ -f "$archive" ] || continue
+            stable=${archive/naumi-$VERSION-/naumi-}
+            cp "$archive" "$stable"
+            (
+              cd assets
+              sha256sum "$(basename "$stable")" > "$(basename "$stable").sha256"
+            )
+          done
+      - name: Publish unsigned internal prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "$GH_TOKEN" ] || { printf '缺少 DISTRIBUTION_GITHUB_TOKEN\n' >&2; exit 1; }
+          if gh release view "v$VERSION" --repo "$DISTRIBUTION_REPO" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" assets/* --clobber --repo "$DISTRIBUTION_REPO"
+          else
+            gh release create "v$VERSION" assets/* \
+              --repo "$DISTRIBUTION_REPO" \
+              --title "NaumiAgent v$VERSION internal binary preview" \
+              --notes "Source-free unsigned preview. GA remains blocked until macOS and Windows signing/notarization are configured." \
+              --prerelease
+          fi

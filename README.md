@@ -25,19 +25,32 @@
 
 #### 一键安装（推荐）
 
-像 Claude Code 一样，一条命令完成安装：
+正式签名通道启用后，可以像 Claude Code 一样直接安装平台二进制，不再克隆源码，也不要求
+本机预装 Git、Python 或 Node。当前 `v0.1.214` 是未签名的内部预览版，必须显式固定版本：
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/JesstLe/NaumiAgent/main/scripts/install.sh | bash
+curl -fsSL https://github.com/JesstLe/NaumiAgent-Releases/releases/download/v0.1.214/install.sh \
+  | NAUMI_VERSION=0.1.214 bash
 ```
 
 安装脚本会自动：
-- 检测 Python 3.12+
-- 检测可选的 Node.js 20+；不可用时保留 Textual fallback
-- 使用 `uv` 或 `pip` 安装依赖
-- 安装浏览器自动化与搜索回退所需的 Chromium
-- 将 `naumi` 命令链接到 `~/.local/bin`
-- Node.js 20+ 可用时安装 Node UI 依赖
+
+- 识别 macOS/Linux 与 x64/arm64；
+- 从只包含 Release assets 的发行仓下载编译后端和编译 Terminal UI；
+- 在解压前强制校验 SHA-256；
+- 安装到不可变版本目录，再切换 `~/.local/bin/naumi`；
+- 保留旧版本目录，下载或校验失败不会破坏当前版本。
+
+Windows PowerShell 使用同一发行版本：
+
+```powershell
+$env:NAUMI_VERSION = "0.1.214"
+irm https://github.com/JesstLe/NaumiAgent-Releases/releases/download/v0.1.214/install.ps1 | iex
+```
+
+源码仓已经设为 private；发行包的门禁会拒绝 Naumi 自有 `.py/.js`、测试、文档和 Git 元数据。
+冻结/编译会提高逆向成本，但任何本地二进制都不能承诺绝对不可逆。正式 GA 仍以 macOS
+Developer ID + notarization 和 Windows Authenticode 签名为前置门禁；签名前只发布 prerelease。
 
 安装完成后直接运行：
 
@@ -91,9 +104,11 @@ uv sync --extra dev
 pip install -e ".[dev]"
 ```
 
-### Windows 初始化
+### Windows 源码开发初始化
 
-Windows 原生开发使用 Python/uv，并通过 Git for Windows Bash 保持 Agent 的 Bash 命令语义；Node.js 20+ 用于新 Terminal UI，缺失时仍可运行 Textual。先用隐藏输入保存 Kimi 密钥到当前 Windows 用户环境：
+以下流程只面向拥有私有源码仓权限的开发者。Windows 原生开发使用 Python/uv，并通过
+Git for Windows Bash 保持 Agent 的 Bash 命令语义；Node.js 20+ 用于源码态新 Terminal UI。
+普通用户应使用上一节的二进制安装器。先用隐藏输入保存 Kimi 密钥到当前 Windows 用户环境：
 
 ```powershell
 $kimiKey = Read-Host "Kimi API Key" -MaskInput

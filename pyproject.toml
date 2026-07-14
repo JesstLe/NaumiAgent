@@ -55,6 +55,9 @@ docker = [
 e2b = [
     "e2b-code-interpreter>=1.0",
 ]
+release = [
+    "pyinstaller>=6.12",
+]
 
 [project.scripts]
 naumi = "naumi_agent.main:cli"
