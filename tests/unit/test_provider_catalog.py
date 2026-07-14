@@ -79,6 +79,37 @@ def test_native_catalog_normalizes_provider_model_auth_and_discovery() -> None:
     assert model.default_reasoning_effort is None
 
 
+@pytest.mark.parametrize("field", ["requestTimeoutMs", "request_timeout_ms"])
+def test_native_catalog_parses_positive_request_timeout(field: str) -> None:
+    payload = _native_catalog()
+    provider = payload["providers"]["NVIDIA"]  # type: ignore[index]
+    provider[field] = 12_345  # type: ignore[index]
+
+    parsed = parse_provider_catalog_json(json.dumps(payload)).providers["nvidia"]
+
+    assert parsed.request_timeout_ms == 12_345
+
+
+@pytest.mark.parametrize("value", [0, -1, True, "1000"])
+def test_native_catalog_rejects_invalid_request_timeout(value: object) -> None:
+    payload = _native_catalog()
+    provider = payload["providers"]["NVIDIA"]  # type: ignore[index]
+    provider["requestTimeoutMs"] = value  # type: ignore[index]
+
+    with pytest.raises(ProviderCatalogError, match="requestTimeoutMs.*正整数"):
+        parse_provider_catalog_json(json.dumps(payload))
+
+
+def test_native_catalog_rejects_duplicate_request_timeout_aliases() -> None:
+    payload = _native_catalog()
+    provider = payload["providers"]["NVIDIA"]  # type: ignore[index]
+    provider["requestTimeoutMs"] = 1_000  # type: ignore[index]
+    provider["request_timeout_ms"] = 2_000  # type: ignore[index]
+
+    with pytest.raises(ProviderCatalogError, match="同时声明等价字段"):
+        parse_provider_catalog_json(json.dumps(payload))
+
+
 def test_reasoning_capability_object_parses_ordered_efforts_and_default() -> None:
     payload = _native_catalog()
     model = payload["providers"]["NVIDIA"]["models"]["glm-local"]  # type: ignore[index]
