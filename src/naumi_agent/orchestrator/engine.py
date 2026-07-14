@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -17,6 +18,11 @@ from typing import Any
 from naumi_agent.agent_control import AgentControlService
 from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.harness.completion import (
+    CompletionGateResult,
+    HarnessCompletionReceipt,
+    HarnessRunState,
+)
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.tools import create_harness_tools
 from naumi_agent.harness.trust import (
@@ -409,6 +415,7 @@ class AgentResult:
     error: str | None = None
     task_summary: str | None = None
     receipt: CompletionReceipt | None = None
+    harness_receipt: HarnessCompletionReceipt | None = None
 
 
 class AgentEngine:
@@ -495,6 +502,7 @@ class AgentEngine:
             usage_callback=self._track_model_usage,
         )
         self._harness_context = HarnessContextAssembler()
+        self._active_harness_run: HarnessRunState | None = None
         self._permission_bubble_history: list[dict[str, Any]] = []
         self._permission_confirmer: PermissionConfirmationCallback | None = None
         self._user_interaction_handler: UserInteractionCallback | None = None
@@ -2164,6 +2172,8 @@ class AgentEngine:
             )
         )
         extra_sections: list[str] = []
+        if self._active_harness_run is not None:
+            extra_sections.append(self._active_harness_run.context)
         knowledge_result = None
         try:
             current_task = self._latest_user_task()
@@ -2219,6 +2229,61 @@ class AgentEngine:
             if isinstance(content, str) and content.strip():
                 return content.strip()
         return ""
+
+    async def _begin_harness_completion_run(
+        self,
+        task: str,
+        *,
+        run_id: str,
+    ) -> None:
+        session_id = self._session.id if self._session else ""
+        self._active_harness_run = await self.harness_service.begin_completion_run(
+            task=task,
+            run_id=run_id,
+            session_id=session_id,
+        )
+
+    async def _evaluate_harness_completion(
+        self,
+        on_event: EventCallback | None = None,
+        *,
+        force_final: bool = False,
+    ) -> CompletionGateResult | None:
+        state = self._active_harness_run
+        if state is None:
+            return None
+        if force_final:
+            state.correction_attempt = state.contract.correction_attempts
+        try:
+            tasks = await self.task_store.list_tasks()
+            pending_todo_ids = tuple(
+                task.id for task in tasks if task.status is not TaskStatus.COMPLETED
+            )
+        except Exception:
+            pending_todo_ids = ()
+        result = await self.harness_service.evaluate_completion_run(
+            state,
+            pending_todo_ids=pending_todo_ids,
+        )
+        if result.status == "needs_correction":
+            self._append_message(
+                {"role": "system", "content": result.correction_instruction}
+            )
+            if on_event is not None:
+                await on_event(
+                    "harness_completion_correction",
+                    {
+                        "message": result.correction_instruction,
+                        "run_id": state.contract.run_id,
+                        "attempt": state.correction_attempt,
+                    },
+                )
+        elif result.receipt is not None and on_event is not None:
+            await on_event(
+                "harness_completion_receipt",
+                result.receipt.model_dump(mode="json"),
+            )
+        return result
 
     async def _fire_user_prompt_submit(
         self,
@@ -2375,6 +2440,10 @@ class AgentEngine:
         self._append_message({"role": "user", "content": task})
         if turn_context:
             self._append_message({"role": "system", "content": turn_context})
+        await self._begin_harness_completion_run(
+            task,
+            run_id=f"agent:{uuid.uuid4().hex}",
+        )
         await self._inject_relevant_memories(task)
         tools = self._get_openai_tools_cached()
 
@@ -2397,6 +2466,17 @@ class AgentEngine:
         except Exception as e:
             logger.exception("Agent loop failed")
             result = AgentResult(status="error", error=self._format_error(e))
+
+        if (
+            result.status == "completed"
+            and self._active_harness_run is not None
+            and not self._active_harness_run.finalized
+        ):
+            gate = await self._evaluate_harness_completion(force_final=True)
+            if gate is not None:
+                result.harness_receipt = gate.receipt
+                if gate.status in {"completed_unverified", "blocked"}:
+                    result.status = gate.status
 
         await self._fire_hook(HookContext(
             point=HookPoint.ENGINE_RUN_END,
@@ -2446,6 +2526,7 @@ class AgentEngine:
                 task,
                 recorded_event,
                 turn_context=turn_context,
+                harness_run_id=recorder.run_id,
             )
         except asyncio.CancelledError:
             receipt = await recorder.finish("cancelled", "运行已由用户取消。")
@@ -2479,6 +2560,7 @@ class AgentEngine:
         task: str,
         on_event: EventCallback,
         turn_context: str = "",
+        harness_run_id: str | None = None,
     ) -> AgentResult:
         """执行任务 — 流式 ReAct 主循环，通过回调实时推送事件."""
         perf_start = time.perf_counter()
@@ -2593,6 +2675,10 @@ class AgentEngine:
         self._append_message({"role": "user", "content": task})
         if turn_context:
             self._append_message({"role": "system", "content": turn_context})
+        await self._begin_harness_completion_run(
+            task,
+            run_id=harness_run_id or f"agent:{uuid.uuid4().hex}",
+        )
         phase_start = time.perf_counter()
         await self._inject_relevant_memories(task)
         await emit_perf_phase("memory_recall", "记忆召回", phase_start)
@@ -2644,6 +2730,20 @@ class AgentEngine:
             error_msg = self._format_error(e)
             await emit_event("error", {"message": error_msg})
             result = AgentResult(status="error", error=error_msg)
+
+        if (
+            result.status == "completed"
+            and self._active_harness_run is not None
+            and not self._active_harness_run.finalized
+        ):
+            gate = await self._evaluate_harness_completion(
+                emit_event,
+                force_final=True,
+            )
+            if gate is not None:
+                result.harness_receipt = gate.receipt
+                if gate.status in {"completed_unverified", "blocked"}:
+                    result.status = gate.status
 
         phase_start = time.perf_counter()
         await self._fire_hook(HookContext(
@@ -3073,6 +3173,9 @@ class AgentEngine:
                     {"role": "system", "content": reconciliation.instruction}
                 )
                 continue
+            harness_gate = await self._evaluate_harness_completion()
+            if harness_gate is not None and harness_gate.status == "needs_correction":
+                continue
             final_content = response.content
             if _is_output_truncated(response.finish_reason):
                 final_content = await self._continue_truncated_final_response(
@@ -3081,15 +3184,24 @@ class AgentEngine:
                 )
             safe_content = self._output_guardrail.redact(final_content)
             self._append_message({"role": "assistant", "content": final_content})
+            final_status = (
+                harness_gate.status
+                if harness_gate is not None
+                and harness_gate.status in {"completed_unverified", "blocked"}
+                else "completed"
+            )
             await self._fire_agent_stop(
-                status="completed",
+                status=final_status,
                 response=safe_content,
                 reason="final_response",
             )
             return AgentResult(
-                status="completed",
+                status=final_status,
                 response=safe_content,
                 usage=self._usage,
+                harness_receipt=(
+                    harness_gate.receipt if harness_gate is not None else None
+                ),
             )
 
         await self._block_unreconciled_todos()
@@ -3169,7 +3281,8 @@ class AgentEngine:
                 )
             except Exception:
                 guard_todo_final = False
-            should_guard_text = bool(tools) or guard_todo_final
+            guard_harness_final = self._active_harness_run is not None
+            should_guard_text = bool(tools) or guard_todo_final or guard_harness_final
             tool_call_started = False
             tool_prepare_started = False
             tool_prepare_start = 0.0
@@ -3285,7 +3398,7 @@ class AgentEngine:
                         text_parts.append(chunk.token)
                         if tool_call_started:
                             continue
-                        if guard_todo_final and not got_response:
+                        if (guard_todo_final or guard_harness_final) and not got_response:
                             pending_text_parts.append(chunk.token)
                             continue
                         if should_guard_text and not got_response:
@@ -3439,6 +3552,10 @@ class AgentEngine:
                     on_event,
                     source="todo_reconciliation",
                 )
+            harness_gate = await self._evaluate_harness_completion(on_event)
+            if harness_gate is not None and harness_gate.status == "needs_correction":
+                pending_text_parts.clear()
+                continue
             if pending_text_parts:
                 await flush_pending_text()
             elif text_content and not got_response:
@@ -3465,17 +3582,26 @@ class AgentEngine:
                 await on_event("response_end", {})
             self._append_message({"role": "assistant", "content": text_content})
             safe_content = self._output_guardrail.redact(text_content)
+            final_status = (
+                harness_gate.status
+                if harness_gate is not None
+                and harness_gate.status in {"completed_unverified", "blocked"}
+                else "completed"
+            )
             await self._fire_agent_stop(
-                status="completed",
+                status=final_status,
                 response=safe_content,
                 reason="final_response",
                 streaming=True,
                 on_event=on_event,
             )
             return AgentResult(
-                status="completed",
+                status=final_status,
                 response=safe_content,
                 usage=self._usage,
+                harness_receipt=(
+                    harness_gate.receipt if harness_gate is not None else None
+                ),
             )
 
         await self._block_unreconciled_todos(on_event)
@@ -3747,6 +3873,11 @@ class AgentEngine:
 
             logger.info("Tool %s executed in %dms", tc.name, duration)
             if not tool.metadata.read_only:
+                if (
+                    self._active_harness_run is not None
+                    and tc.name != "harness_run_check"
+                ):
+                    self._active_harness_run.mutating_tool_used = True
                 try:
                     await self.harness_service.invalidate_knowledge_cache()
                     if on_event is not None:

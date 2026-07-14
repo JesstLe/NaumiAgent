@@ -18,10 +18,25 @@ from naumi_agent.harness.checks import (
     select_required_check_ids,
     validate_run_id,
 )
+from naumi_agent.harness.completion import (
+    CompletionGate,
+    CompletionGateInput,
+    CompletionGateResult,
+    HarnessEvidenceRef,
+    HarnessRunState,
+    build_completion_contract,
+    render_completion_contract_context,
+)
 from naumi_agent.harness.context import (
     HarnessKnowledgeContextComposer,
     KnowledgeContextBundle,
     safe_markdown_fence,
+)
+from naumi_agent.harness.fingerprint import (
+    TreeFingerprint,
+    TreeFingerprintError,
+    changed_paths_between,
+    compute_tree_fingerprint,
 )
 from naumi_agent.harness.knowledge import (
     KnowledgeIndexSnapshot,
@@ -32,6 +47,7 @@ from naumi_agent.harness.models import (
     HarnessProfile,
     HarnessProfileSnapshot,
     HarnessProfileStatus,
+    HarnessTaskKind,
 )
 from naumi_agent.harness.profile import load_harness_profile
 from naumi_agent.harness.trust import (
@@ -111,6 +127,13 @@ class HarnessService:
         self._profile_path = profile_path
         self._knowledge_index = RepositoryKnowledgeIndex(self.workspace_root)
         self._check_runner = HarnessCheckRunner(workspace_root=self.workspace_root)
+        self._completion_gate = CompletionGate()
+        self._check_results: OrderedDict[
+            str,
+            OrderedDict[str, HarnessCheckResult],
+        ] = OrderedDict()
+        self._check_results_lock = asyncio.Lock()
+        self._max_check_runs = 128
         self._knowledge_composer = HarnessKnowledgeContextComposer(
             self._knowledge_index
         )
@@ -175,12 +198,171 @@ class HarnessService:
             current = await self.status()
             return current.trusted and current.profile_digest == trusted_digest
 
-        return await self._check_runner.run(
+        result = await self._check_runner.run(
             run_id=normalized_run_id,
             check=check,
             profile_digest=trusted_digest,
             profile_is_current=profile_is_current,
         )
+        await self._record_check_result(result)
+        return result
+
+    async def list_check_results(self, run_id: str) -> tuple[HarnessCheckResult, ...]:
+        """Return the latest result per check for one bounded run history."""
+        normalized_run_id = validate_run_id(run_id)
+        async with self._check_results_lock:
+            results = self._check_results.get(normalized_run_id)
+            if results is None:
+                return ()
+            self._check_results.move_to_end(normalized_run_id)
+            return tuple(results.values())
+
+    async def begin_completion_run(
+        self,
+        *,
+        task: str,
+        run_id: str,
+        session_id: str,
+    ) -> HarnessRunState | None:
+        """Create an ephemeral completion contract for one trusted run."""
+        status = await self.status()
+        profile = status.snapshot.profile
+        if not status.trusted or profile is None or status.profile_digest is None:
+            return None
+        try:
+            initial_tree = await asyncio.to_thread(
+                compute_tree_fingerprint,
+                self.workspace_root,
+            )
+        except TreeFingerprintError:
+            initial_tree = TreeFingerprint(
+                digest="unavailable",
+                head="",
+                dirty_paths=(),
+                path_digests=(),
+            )
+        contract = build_completion_contract(
+            run_id=validate_run_id(run_id),
+            session_id=session_id,
+            profile_digest=status.profile_digest,
+            task_kind=HarnessTaskKind.ANALYSIS,
+            objective=task,
+            correction_attempts=profile.completion.correction_attempts,
+            unverified_status=profile.completion.unverified_status,
+            source_refs=("user:current",),
+        )
+        available_check_ids = tuple(check.id for check in profile.checks)
+        return HarnessRunState(
+            contract=contract,
+            initial_tree=initial_tree,
+            available_check_ids=available_check_ids,
+            context=render_completion_contract_context(
+                contract,
+                available_check_ids=available_check_ids,
+            ),
+        )
+
+    async def evaluate_completion_run(
+        self,
+        state: HarnessRunState,
+        *,
+        pending_todo_ids: tuple[str, ...] = (),
+        known_failure_ids: tuple[str, ...] = (),
+        disclosed_failure_ids: tuple[str, ...] = (),
+        evidence: tuple[HarnessEvidenceRef, ...] = (),
+    ) -> CompletionGateResult:
+        """Evaluate current mechanical evidence and update the run state."""
+        if state.finalized and state.receipt is not None:
+            return CompletionGateResult(
+                status=state.receipt.status,
+                receipt=state.receipt,
+            )
+        infrastructure_errors: tuple[str, ...] = ()
+        try:
+            current_tree = await asyncio.to_thread(
+                compute_tree_fingerprint,
+                self.workspace_root,
+            )
+            changed_paths = await asyncio.to_thread(
+                changed_paths_between,
+                self.workspace_root,
+                state.initial_tree,
+                current_tree,
+            )
+        except TreeFingerprintError as exc:
+            current_tree = state.initial_tree
+            changed_paths = ()
+            infrastructure_errors = (str(exc),)
+
+        status = await self.status()
+        current_profile_digest = status.profile_digest
+        if (
+            status.trusted
+            and status.snapshot.profile is not None
+            and current_profile_digest == state.contract.profile_digest
+        ):
+            effective_kind = (
+                HarnessTaskKind.CHANGE
+                if state.mutating_tool_used or changed_paths
+                else state.contract.task_kind
+            )
+            if state.mutating_tool_used and not changed_paths:
+                required_checks = tuple(
+                    check.id
+                    for check in status.snapshot.profile.checks
+                    if effective_kind.value in check.required_for
+                )
+            else:
+                required_checks = select_required_check_ids(
+                    status.snapshot.profile.checks,
+                    task_kind=effective_kind.value,
+                    changed_paths=changed_paths,
+                )
+            state.contract = state.contract.model_copy(
+                update={
+                    "task_kind": effective_kind,
+                    "required_checks": required_checks,
+                }
+            )
+            state.context = render_completion_contract_context(
+                state.contract,
+                available_check_ids=state.available_check_ids,
+            )
+
+        result = self._completion_gate.evaluate(
+            state.contract,
+            CompletionGateInput(
+                current_tree_fingerprint=current_tree.digest,
+                current_profile_digest=current_profile_digest,
+                changed_paths=changed_paths,
+                checks=await self.list_check_results(state.contract.run_id),
+                evidence=evidence,
+                pending_todo_ids=pending_todo_ids,
+                known_failure_ids=known_failure_ids,
+                disclosed_failure_ids=disclosed_failure_ids,
+                infrastructure_errors=infrastructure_errors,
+                mutating_tool_used=state.mutating_tool_used,
+            ),
+            correction_attempt=state.correction_attempt,
+        )
+        if result.status == "needs_correction":
+            state.correction_attempt += 1
+        else:
+            state.finalized = True
+            state.receipt = result.receipt
+        return result
+
+    async def _record_check_result(self, result: HarnessCheckResult) -> None:
+        async with self._check_results_lock:
+            run_results = self._check_results.setdefault(
+                result.run_id,
+                OrderedDict(),
+            )
+            run_results[result.check_id] = result
+            run_results.move_to_end(result.check_id)
+            self._check_results.move_to_end(result.run_id)
+            while len(self._check_results) > self._max_check_runs:
+                self._check_results.popitem(last=False)
 
     async def required_check_ids(
         self,

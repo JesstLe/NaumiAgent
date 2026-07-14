@@ -6,7 +6,6 @@
 
 | 阶段 | 缺口 | 完成证据要求 |
 |---|---|---|
-| H3（进行中） | CheckRunner 与 Completion 内核已完成；仍缺 Engine final/事件/UI 接入 | 真实 Engine 先被 Gate 要求纠正，补跑检查后输出 verified Receipt |
 | H4 | Evidence Store、artifact、replay | SQLite/文件损坏、脱敏、trace 丢失、重放一致性通过 |
 | H5 | Static/Replay/Live Eval 与 baseline | 离线确定性重跑一致；live 显式预算和 Worktree |
 | H6 | Failure fingerprint、Proposal、人工 promotion | 无自动改 Profile；去重和阈值可审计 |
@@ -22,8 +21,8 @@
 - NaumiAgent 写工具成功后会立即失效缓存；外部编辑器新增未跟踪文件最多等待 30 秒 Git 审计周期才进入候选集。
 - Windows 的路径归一化和 argv 行为有单元边界，仍需要 Windows CI 的真实 Git/NTFS 验证。
 - CheckRunner success cache 只在当前进程内有效；H4 Evidence Store 才会提供跨重启证据。
-- Completion Gate 尚未接到 Engine final，Agent 仍可能在未运行 required check 时结束；这是
-  H3 下一切片必须关闭的核心缺口。
+- H3 check 结果仅保存在有界进程内 run 缓存；应用重启后的可解释、可回放证据要由 H4
+  Evidence Store 提供。
 
 ## 当前不应做的事情
 
@@ -31,5 +30,4 @@
 - 不让 `harness_read_knowledge` 绕开 Profile include/exclude 读取任意工作区文件。
 - 不把 Trust Store 搬进 `.naumi/` 或提交到 Git。
 - 不在 Terminal UI、Mac Workbench 各自维护另一套索引。
-- 不把已存在的 CheckRunner 宣称为完整 H3；Completion Contract/Gate 未完成前不得声称
-  `completed_verified`。
+- 不把 H3 的进程内 Receipt 宣称为 H4 持久证据；跨重启解释必须等待 Evidence Store。

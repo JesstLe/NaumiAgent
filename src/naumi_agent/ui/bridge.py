@@ -1886,6 +1886,8 @@ class JsonlEngineBridge:
             "task_snapshot",
             "permission_bubble",
             "context_compacted",
+            "harness_completion_correction",
+            "harness_completion_receipt",
             "error",
         }:
             await self.emit(
@@ -1902,6 +1904,8 @@ class JsonlEngineBridge:
             "permission_bubble",
             "context_compacted",
             "response_end",
+            "harness_completion_correction",
+            "harness_completion_receipt",
             "completion_receipt",
             "error",
         }:
@@ -1918,6 +1922,8 @@ class JsonlEngineBridge:
             "tool_end",
             "tool_error",
             "permission_bubble",
+            "harness_completion_correction",
+            "harness_completion_receipt",
             "completion_receipt",
             "error",
         }:

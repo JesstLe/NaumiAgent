@@ -60,7 +60,13 @@ export function renderMessage(message, width, ctx = { width }) {
     if (message.title === "permissions") {
       return renderComponent(PermissionPanel({ content: message.content }), ctx);
     }
-    const style = message.level === "error" ? ANSI.red : message.level === "warning" ? ANSI.yellow : ANSI.dim;
+    const style = message.level === "error"
+      ? ANSI.red
+      : message.level === "warning"
+        ? ANSI.yellow
+        : message.level === "success"
+          ? ANSI.green
+          : ANSI.dim;
     const contentLines = String(message.content ?? "").split("\n");
     const first = `${message.title}: ${contentLines.shift() ?? ""}`;
     return ["", color(style, first), ...contentLines.map((item) => color(style, item))];

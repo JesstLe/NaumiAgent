@@ -32,6 +32,7 @@ from naumi_agent.ui.messages.events import (
     RuntimeNotificationMessage,
     RuntimeStatusMessage,
     SubagentEventMessage,
+    SystemNoticeMessage,
     TeamEventMessage,
     ThinkingMessage,
     TodoStatusMessage,
@@ -241,6 +242,66 @@ class EngineEventAdapter:
             type=MessageType.COMPLETION_RECEIPT,
             receipt=CompletionReceipt.from_dict(receipt_data),
             message_id=str(data.get("receipt_id") or ""),
+            raw_event=event,
+            raw_data=None,
+        )
+
+    def _adapt_harness_completion_correction(
+        self,
+        event: str,
+        data: dict[str, Any],
+    ) -> SystemNoticeMessage:
+        return SystemNoticeMessage(
+            type=MessageType.SYSTEM_NOTICE,
+            title="Harness 完成门禁",
+            content=_safe_str(data.get("message")),
+            level="warning",
+            raw_event=event,
+            raw_data=None,
+        )
+
+    def _adapt_harness_completion_receipt(
+        self,
+        event: str,
+        data: dict[str, Any],
+    ) -> SystemNoticeMessage:
+        status = _safe_str(data.get("status"), "completed_unverified")
+        labels = {
+            "completed_verified": "已验证完成",
+            "completed_unverified": "完成但未验证",
+            "blocked": "完成声明已阻塞",
+        }
+        levels = {
+            "completed_verified": "success",
+            "completed_unverified": "warning",
+            "blocked": "error",
+        }
+        checks = _to_tuple(data.get("checks"))
+        changed_files = tuple(str(path) for path in _to_tuple(data.get("changed_files")))
+        warnings = tuple(str(item) for item in _to_tuple(data.get("warnings")))
+        lines = [labels.get(status, status)]
+        if checks:
+            lines.append(
+                "检查 · "
+                + "，".join(
+                    f"{_safe_str(item.get('id'))}={_safe_str(item.get('status'))}"
+                    for item in checks
+                    if isinstance(item, dict)
+                )
+            )
+        lines.append(
+            "变更 · " + ("，".join(changed_files) if changed_files else "无")
+        )
+        fingerprint = _safe_str(data.get("tree_fingerprint"))
+        if fingerprint:
+            lines.append(f"工作树 · {fingerprint}")
+        lines.extend(f"提示 · {warning}" for warning in warnings)
+        return SystemNoticeMessage(
+            type=MessageType.SYSTEM_NOTICE,
+            title="Harness 完成回执",
+            content="\n".join(lines),
+            level=levels.get(status, "warning"),
+            message_id=_safe_str(data.get("run_id")),
             raw_event=event,
             raw_data=None,
         )
@@ -617,6 +678,8 @@ class EngineEventAdapter:
 
     _DISPATCH: dict[str, Any] = {
         "completion_receipt": _adapt_completion_receipt,
+        "harness_completion_correction": _adapt_harness_completion_correction,
+        "harness_completion_receipt": _adapt_harness_completion_receipt,
         "run_started": _adapt_run_started,
         "turn_start": _adapt_turn_start,
         "perf_phase": _adapt_perf_phase,

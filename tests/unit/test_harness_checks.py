@@ -10,7 +10,10 @@ from pathlib import Path
 import pytest
 
 from naumi_agent.harness.checks import HarnessCheckStatus
-from naumi_agent.harness.fingerprint import compute_tree_fingerprint
+from naumi_agent.harness.fingerprint import (
+    changed_paths_between,
+    compute_tree_fingerprint,
+)
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.trust import HarnessTrustStore
 
@@ -107,6 +110,44 @@ def test_tree_fingerprint_handles_git_rename_records(tmp_path: Path) -> None:
     fingerprint = compute_tree_fingerprint(workspace)
 
     assert fingerprint.dirty_paths == ("renamed source.py", "source.py")
+
+
+def test_changed_paths_between_excludes_preexisting_dirty_files(tmp_path: Path) -> None:
+    workspace, _ = _workspace(tmp_path)
+    source = workspace / "source.py"
+    source.write_text("PREEXISTING = True\n", encoding="utf-8")
+    before = compute_tree_fingerprint(workspace)
+
+    (workspace / "new.py").write_text("NEW = True\n", encoding="utf-8")
+    after = compute_tree_fingerprint(workspace)
+
+    assert changed_paths_between(workspace, before, after) == ("new.py",)
+
+
+def test_changed_paths_between_detects_staging_and_commits(tmp_path: Path) -> None:
+    workspace, _ = _workspace(tmp_path)
+    source = workspace / "source.py"
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    unstaged = compute_tree_fingerprint(workspace)
+    _git(workspace, "add", "source.py")
+    staged = compute_tree_fingerprint(workspace)
+
+    assert changed_paths_between(workspace, unstaged, staged) == ("source.py",)
+
+    commit_case = tmp_path / "commit-case"
+    commit_case.mkdir()
+    clean_workspace, _ = _workspace(commit_case)
+    before_commit = compute_tree_fingerprint(clean_workspace)
+    (clean_workspace / "source.py").write_text("VALUE = 9\n", encoding="utf-8")
+    _git(clean_workspace, "add", "source.py")
+    _git(clean_workspace, "commit", "-qm", "change source")
+    after_commit = compute_tree_fingerprint(clean_workspace)
+
+    assert changed_paths_between(
+        clean_workspace,
+        before_commit,
+        after_commit,
+    ) == ("source.py",)
 
 
 @pytest.mark.asyncio
