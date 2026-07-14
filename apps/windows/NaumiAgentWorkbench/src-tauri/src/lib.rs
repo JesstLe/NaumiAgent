@@ -1,6 +1,7 @@
 mod daemon;
 mod logging;
 mod secure_storage;
+mod shell;
 mod storage;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -29,6 +30,8 @@ pub fn run() {
             daemon::stop_daemon,
             daemon::get_daemon_status,
             daemon::get_daemon_logs,
+            shell::open_in_explorer,
+            shell::open_in_terminal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

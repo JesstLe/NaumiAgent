@@ -20,7 +20,9 @@
       "start_daemon",
       "stop_daemon",
       "get_daemon_status",
-      "get_daemon_logs"
+      "get_daemon_logs",
+      "open_in_explorer",
+      "open_in_terminal"
     ]
   }
 }
