@@ -1,3 +1,5 @@
+mod secure_storage;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -11,6 +13,11 @@ pub fn run() {
       }
       Ok(())
     })
+    .invoke_handler(tauri::generate_handler![
+      secure_storage::get_token,
+      secure_storage::set_token,
+      secure_storage::remove_token,
+    ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
