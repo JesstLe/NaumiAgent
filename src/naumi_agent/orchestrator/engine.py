@@ -62,6 +62,7 @@ from naumi_agent.orchestrator.tool_batches import (
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder
 from naumi_agent.runs.store import ChatRunStore
+from naumi_agent.runtime.ports.permission import PermissionPort
 from naumi_agent.runtime.ports.session import SessionPort
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
@@ -428,6 +429,7 @@ class AgentEngine:
         config: AppConfig,
         *,
         session_port: SessionPort[Session] | None = None,
+        permission_port: PermissionPort | None = None,
     ) -> None:
         self._config = config
         resolved_session_port = (
@@ -444,6 +446,25 @@ class AgentEngine:
         self.workspace_root = config.resolve_workspace_root()
         self._runtime_data_dir = Path(config.memory.session_db_path).parent
         self._worktree_storage_dir = self._runtime_data_dir / "worktrees"
+        resolved_permission_port = (
+            PermissionChecker(
+                mode=PermissionMode(config.safety.permission_mode),
+                allowed_dirs=[
+                    *config.safety.allowed_dirs,
+                    str(self.workspace_root),
+                    str(self._worktree_storage_dir),
+                ],
+                workspace_root=str(self.workspace_root),
+            )
+            if permission_port is None
+            else permission_port
+        )
+        if not isinstance(resolved_permission_port, PermissionPort):
+            raise TypeError(
+                "permission_port 必须实现完整的 PermissionPort 契约："
+                "mode/set_mode/check/reset_counts"
+            )
+        self._permission_port = resolved_permission_port
         self.harness_service = HarnessService(
             workspace_root=self.workspace_root,
             trust_store=HarnessTrustStore(
@@ -470,17 +491,8 @@ class AgentEngine:
             )
         )
         self._output_guardrail = OutputGuardrail()
-        self._permission_checker = PermissionChecker(
-            mode=PermissionMode(config.safety.permission_mode),
-            allowed_dirs=[
-                *config.safety.allowed_dirs,
-                str(self.workspace_root),
-                str(self._worktree_storage_dir),
-            ],
-            workspace_root=str(self.workspace_root),
-        )
         self._permission_grant_store = PermissionGrantStore()
-        self._default_permission_mode = self._permission_checker.mode
+        self._default_permission_mode = self._permission_port.mode
         self._runtime_mode = (
             AgentRuntimeMode.BYPASS
             if self._default_permission_mode == PermissionMode.BYPASS
@@ -841,13 +853,18 @@ class AgentEngine:
         return self._session_port
 
     @property
+    def _permission_checker(self) -> PermissionPort:
+        """Return the legacy read-only alias for the injected permission port."""
+        return self._permission_port
+
+    @property
     def usage(self) -> AgentUsage:
         return self._usage
 
     @property
     def permission_mode(self) -> PermissionMode:
         """Return the active permission mode."""
-        return self._permission_checker.mode
+        return self._permission_port.mode
 
     @property
     def runtime_mode(self) -> AgentRuntimeMode:
@@ -864,7 +881,7 @@ class AgentEngine:
             permission_mode = PermissionMode.STRICT
         else:
             permission_mode = PermissionMode.BYPASS
-        self._permission_checker.set_mode(permission_mode)
+        self._permission_port.set_mode(permission_mode)
         self._config.safety.permission_mode = permission_mode.value
         return self._runtime_mode
 
@@ -1037,7 +1054,7 @@ class AgentEngine:
         )
         self._session = None
         self.task_store.set_session("")
-        self._permission_checker.reset_counts()
+        self._permission_port.reset_counts()
 
     async def _shutdown_component(
         self,
@@ -1489,7 +1506,7 @@ class AgentEngine:
                 self._budget_tracker.reset()
                 self._session = None
                 self.task_store.set_session("")
-                self._permission_checker.reset_counts()
+                self._permission_port.reset_counts()
 
         if cancellation_forwarded:
             raise asyncio.CancelledError
@@ -3837,7 +3854,7 @@ class AgentEngine:
         )
         if transition_block is not None:
             return transition_block
-        decision = self._permission_checker.check(tc.name, args, tool=tool)
+        decision = self._permission_port.check(tc.name, args, tool=tool)
         after_ctx = await self._fire_hook(HookContext(
             point=HookPoint.TOOL_PERMISSION_CHECK,
             data={
@@ -4076,7 +4093,7 @@ class AgentEngine:
             "reason": reason,
             "risk_level": risk_level,
             "requires_confirmation": True,
-            "permission_mode": self._permission_checker.mode.value,
+            "permission_mode": self._permission_port.mode.value,
             "session_id": session_id,
             "tool_family": decision.tool_family,
             "choices": choices,

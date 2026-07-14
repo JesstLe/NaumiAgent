@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import shlex
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
@@ -942,7 +943,7 @@ class PermissionChecker:
     def check(
         self,
         tool_name: str,
-        args: dict[str, Any],
+        args: Mapping[str, object],
         tool: PermissionAwareTool | None = None,
     ) -> PermissionDecision:
         """检查工具调用是否被允许."""
@@ -1193,7 +1194,7 @@ class PermissionChecker:
 
     def _check_runtime_mcp_command(
         self,
-        args: dict[str, Any],
+        args: Mapping[str, object],
         *,
         tool_family: str,
     ) -> PermissionDecision:
