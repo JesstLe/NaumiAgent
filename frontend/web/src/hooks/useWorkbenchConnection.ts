@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { usePlatform } from '@/platform/PlatformContext'
 import { WorkbenchConnectionCoordinator } from '@/api/WorkbenchConnectionCoordinator'
 import type { WorkbenchApiClient } from '@/api/WorkbenchApiClient'
-import type { ConnectionStatus } from '@/api/WorkbenchConnectionCoordinator'
+import type { ConnectionCoordinatorOptions, ConnectionStatus } from '@/api/WorkbenchConnectionCoordinator'
 import type { WorkbenchSnapshot } from '@/api/types'
 
 interface UseWorkbenchConnectionResult {
@@ -18,7 +18,7 @@ interface UseWorkbenchConnectionResult {
   disconnect: () => void
 }
 
-export function useWorkbenchConnection(): UseWorkbenchConnectionResult {
+export function useWorkbenchConnection(options: ConnectionCoordinatorOptions = {}): UseWorkbenchConnectionResult {
   const platform = usePlatform()
   const coordinatorRef = useRef<WorkbenchConnectionCoordinator | null>(null)
   const [status, setStatus] = useState<ConnectionStatus>({
@@ -35,7 +35,11 @@ export function useWorkbenchConnection(): UseWorkbenchConnectionResult {
     const coordinator = new WorkbenchConnectionCoordinator(
       async () => platform.getToken(),
       {
-        onSnapshot: (next) => setSnapshot(next),
+        ...options,
+        onSnapshot: (next) => {
+          setSnapshot(next)
+          options.onSnapshot?.(next)
+        },
       },
     )
     coordinatorRef.current = coordinator
@@ -45,7 +49,7 @@ export function useWorkbenchConnection(): UseWorkbenchConnectionResult {
       coordinator.disconnect()
       coordinatorRef.current = null
     }
-  }, [platform])
+  }, [platform, options])
 
   const connect = useCallback(async () => {
     const coordinator = coordinatorRef.current

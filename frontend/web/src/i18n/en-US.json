@@ -35,6 +35,21 @@
     "retrying": "Retrying...",
     "reconnecting": "Backend connection lost. Reconnecting..."
   },
+  "dashboard": {
+    "activeAgents": "Active Agents",
+    "openIssues": "Open Issues",
+    "blockedIssues": "Blocked Issues",
+    "pendingApprovals": "Pending Approvals",
+    "failedValidations": "Failed Validations"
+  },
+  "taskMarket": {
+    "empty": "No tasks available to claim."
+  },
+  "worktrees": {
+    "empty": "No worktrees available.",
+    "delete": "Delete worktree",
+    "dirtyFiles": "{{count}} uncommitted files"
+  },
   "panel": {
     "context": "Context"
   },
