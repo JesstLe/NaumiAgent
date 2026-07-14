@@ -62,6 +62,7 @@ from naumi_agent.orchestrator.tool_batches import (
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder
 from naumi_agent.runs.store import ChatRunStore
+from naumi_agent.runtime.ports.session import SessionPort
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permission_grants import PermissionGrant, PermissionGrantStore
@@ -422,8 +423,24 @@ class AgentResult:
 class AgentEngine:
     """Agent 主引擎 — 管理 LLM 循环和工具调用."""
 
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        session_port: SessionPort[Session] | None = None,
+    ) -> None:
         self._config = config
+        resolved_session_port = (
+            SessionStore(config.memory)
+            if session_port is None
+            else session_port
+        )
+        if not isinstance(resolved_session_port, SessionPort):
+            raise TypeError(
+                "session_port 必须实现完整的 SessionPort 契约："
+                "create_session/save/load/list_sessions/delete/archive/close"
+            )
+        self._session_port = resolved_session_port
         self.workspace_root = config.resolve_workspace_root()
         self._runtime_data_dir = Path(config.memory.session_db_path).parent
         self._worktree_storage_dir = self._runtime_data_dir / "worktrees"
@@ -469,7 +486,6 @@ class AgentEngine:
             if self._default_permission_mode == PermissionMode.BYPASS
             else AgentRuntimeMode.DEFAULT
         )
-        self.session_store = SessionStore(config.memory)
         self.long_term_memory = LongTermMemory(config.memory)
         self._compactor = ContextCompactor(
             config.memory,
@@ -820,6 +836,11 @@ class AgentEngine:
         return self._router
 
     @property
+    def session_store(self) -> SessionPort[Session]:
+        """Return the legacy read-only alias for the injected session port."""
+        return self._session_port
+
+    @property
     def usage(self) -> AgentUsage:
         return self._usage
 
@@ -1095,7 +1116,7 @@ class AgentEngine:
                 )
         await self._shutdown_component(
             "session_store",
-            self.session_store.close,
+            self._session_port.close,
         )
 
     async def reload_tools(self, domain: str = "tools") -> dict[str, Any]:
@@ -1251,7 +1272,7 @@ class AgentEngine:
         if self._session is not None:
             return self._session
         default_prompt = self._build_system_prompt()
-        self._session = await self.session_store.create_session(
+        self._session = await self._session_port.create_session(
             title=title,
             model=self._router.resolve_model(ModelTier.CAPABLE),
             system_prompt=next(
@@ -1290,7 +1311,7 @@ class AgentEngine:
                     self._finish_session_transition("", transition_epoch)
                     transition_epoch = None
 
-                session = await self.session_store.load(session_id)
+                session = await self._session_port.load(session_id)
                 if session is None:
                     return False
                 if previous_session_id != session.id:
@@ -1374,7 +1395,11 @@ class AgentEngine:
         query: str = "",
     ) -> tuple[list[Session], int]:
         """列出历史会话."""
-        return await self.session_store.list_sessions(page=page, page_size=page_size, query=query)
+        return await self._session_port.list_sessions(
+            page=page,
+            page_size=page_size,
+            query=query,
+        )
 
     async def delete_session(self, session_id: str) -> bool:
         """Delete one session and invalidate its scoped runtime state."""
@@ -1429,7 +1454,7 @@ class AgentEngine:
 
     async def _delete_session_and_reconcile(self, session_id: str) -> bool:
         """Own persistence result determination and deleted-session reconciliation."""
-        delete_task = asyncio.create_task(self.session_store.delete(session_id))
+        delete_task = asyncio.create_task(self._session_port.delete(session_id))
         cancellation_forwarded = False
         try:
             deleted = await asyncio.shield(delete_task)
@@ -1448,7 +1473,7 @@ class AgentEngine:
 
             # A store wrapper can be cancelled after SQLite commits but before
             # delivering its result. Persistence is authoritative at this boundary.
-            deleted = await self.session_store.load(session_id) is None
+            deleted = await self._session_port.load(session_id) is None
 
         if deleted:
             self._revoke_permission_grants_for_session(
@@ -1472,7 +1497,7 @@ class AgentEngine:
 
     async def archive_session(self, session_id: str) -> bool:
         """归档指定会话."""
-        return await self.session_store.archive(session_id)
+        return await self._session_port.archive(session_id)
 
     async def _save_session(self) -> None:
         """将完整历史写入持久化存储（不丢失压缩前的消息）."""
@@ -1491,7 +1516,7 @@ class AgentEngine:
                     session.title = m.get("content", "")[:50].split("\n")[0]
                     break
 
-        await self.session_store.save(session)
+        await self._session_port.save(session)
 
     def _current_git_branch(self) -> str:
         """Return current git branch for session history metadata."""

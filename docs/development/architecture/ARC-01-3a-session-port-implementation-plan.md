@@ -45,7 +45,7 @@ UI、CLI、TUI 或其他 Port。
 ```bash
 PYTHONPATH=src python3 -m pytest \
   tests/integration/test_session_store.py \
-  tests/unit/test_engine.py::TestRun::test_streaming_persists_authoritative_completion_receipt \
+  tests/unit/test_engine.py::TestHookIntegration::test_streaming_persists_authoritative_completion_receipt \
   tests/unit/test_engine.py::test_shutdown_continues_after_browser_cleanup_failure -q
 ```
 
@@ -177,7 +177,7 @@ rg -n 'self\.session_store\.' src/naumi_agent/orchestrator/engine.py
 PYTHONPATH=src python3 -m pytest \
   tests/unit/test_session_port.py \
   tests/integration/test_session_store.py \
-  tests/unit/test_engine.py::TestRun::test_streaming_persists_authoritative_completion_receipt \
+  tests/unit/test_engine.py::TestHookIntegration::test_streaming_persists_authoritative_completion_receipt \
   tests/unit/test_engine.py::test_shutdown_continues_after_browser_cleanup_failure -q
 ```
 
