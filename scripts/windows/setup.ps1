@@ -106,11 +106,16 @@ if (-not $naumiagent) {
 }
 Write-Host "  naumiagent: $($naumiagent.Source)"
 
-$configPath = Join-Path $repoRoot "config.yaml"
+$configDir = Join-Path $repoRoot ".naumi"
+$configPath = Join-Path $configDir "config.yaml"
+$legacyConfigPath = Join-Path $repoRoot "config.yaml"
 if (Test-Path -LiteralPath $configPath) {
-    Write-Step "保留现有 config.yaml"
+    Write-Step "保留现有 .naumi/config.yaml"
+} elseif (Test-Path -LiteralPath $legacyConfigPath) {
+    Write-Step "保留并继续使用旧根目录 config.yaml"
 } else {
-    Write-Step "创建无密钥 config.yaml"
+    Write-Step "创建无密钥 .naumi/config.yaml"
+    $null = New-Item -ItemType Directory -Path $configDir -Force
     $config = @'
 models:
   default_model: "openai/kimi-for-coding"
@@ -135,9 +140,10 @@ safety:
   permission_mode: "moderate"
   allowed_dirs:
     - "."
-  max_budget_usd: 5.0
-  max_turns: 30
-  max_input_tokens: 500000
+  max_budget_usd: null
+  max_turns: 50
+  max_input_tokens: null
+  max_output_tokens: null
 
 mcp:
   servers: {}
@@ -166,7 +172,7 @@ if ([string]::IsNullOrWhiteSpace($userKey)) {
     throw @"
 尚未设置 Windows 用户级 NAUMI_MODELS__API_KEY。
 请在 PowerShell 中使用 [Environment]::SetEnvironmentVariable 将密钥写入 User 作用域，
-然后重新打开终端并再次运行此脚本。不要把密钥写入 config.yaml 或命令历史。
+然后重新打开终端并再次运行此脚本。不要把密钥写入 .naumi/config.yaml 或命令历史。
 "@
 }
 
@@ -177,8 +183,9 @@ $env:NAUMI_GIT_BASH = $gitBash
 Write-Step "验证配置（不会显示密钥）"
 $verifyCode = @'
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path
 
-config = AppConfig.from_yaml('config.yaml')
+config = AppConfig.from_yaml(resolve_config_path(DEFAULT_CONFIG_PATH))
 assert config.models.api_key, 'Kimi API key was not loaded'
 assert config.resolve_workspace_root().is_dir()
 assert config.api.host == '127.0.0.1'

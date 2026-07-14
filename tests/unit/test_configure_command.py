@@ -76,6 +76,26 @@ def test_configure_default_updates_active_legacy_config(
     assert not (tmp_path / ".naumi" / "config.yaml").exists()
 
 
+def test_configure_default_creates_project_naumi_config(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["configure", "--non-interactive", "--provider", "kimi"],
+    )
+
+    modern = tmp_path / ".naumi" / "config.yaml"
+    assert result.exit_code == 0
+    assert modern.is_file()
+    assert not (tmp_path / "config.yaml").exists()
+    assert "api_key" not in yaml.safe_load(modern.read_text(encoding="utf-8"))[
+        "models"
+    ]
+
+
 def test_configure_help_does_not_offer_plaintext_key_argument() -> None:
     result = runner.invoke(app, ["configure", "--help"])
 

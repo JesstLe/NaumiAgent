@@ -66,6 +66,30 @@ class TestAppConfig:
             tmp_path / "catalogs" / "providers.json"
         )
 
+    def test_naumi_yaml_anchors_catalog_and_runtime_data(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        project = tmp_path / "project"
+        yaml_path = project / ".naumi" / "config.yaml"
+        yaml_path.parent.mkdir(parents=True)
+        yaml_path.write_text(
+            "models:\n  catalog_path: providers.json\n",
+            encoding="utf-8",
+        )
+
+        config = AppConfig.from_yaml(yaml_path)
+
+        assert config.models.catalog_path == str(
+            project / ".naumi" / "providers.json"
+        )
+        assert config.memory.session_db_path == str(
+            project / ".naumi" / "data" / "sessions.db"
+        )
+        assert config.memory.vector_db_path == str(
+            project / ".naumi" / "data" / "chroma"
+        )
+
     def test_from_yaml_loads_model_key_from_system_credential_store(
         self,
         tmp_path,
@@ -167,6 +191,13 @@ class TestAppConfig:
         assert config.api.host == "127.0.0.1"
         assert config.models.provider == "kimi"
         assert config.models.temperature == 1.0
+
+    def test_example_documents_naumi_config_and_local_catalog(self) -> None:
+        example_path = Path(__file__).resolve().parents[2] / "config.yaml.example"
+        text = example_path.read_text(encoding="utf-8")
+
+        assert "复制为 .naumi/config.yaml" in text
+        assert '# catalog_path: "providers.json"' in text
 
     def test_api_port_from_example_yaml(self) -> None:
         example_path = Path(__file__).resolve().parents[2] / "config.yaml.example"
