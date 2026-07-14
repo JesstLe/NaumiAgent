@@ -206,6 +206,7 @@ export function createInitialState() {
     currentTurnStartedAtMs: null,
     currentTurnFirstTokenAtMs: null,
     lastFirstTokenLatencyMs: null,
+    workingAnimationFrame: 0,
     messages: [],
     tools: [],
     activeAssistant: null,
@@ -466,6 +467,7 @@ export function reduceServerEvent(state, record) {
       startRunActivity(state, record, payload);
       acceptUserMessage(state, record.request_id, payload.task ?? "");
       state.running = true;
+      state.workingAnimationFrame = 0;
       state.currentTurnStartedAtMs = Date.now();
       state.currentTurnFirstTokenAtMs = null;
       break;
@@ -473,6 +475,7 @@ export function reduceServerEvent(state, record) {
       if (!matchesActiveRunActivity(state, record.request_id)) break;
       const terminalStatus = deriveRunCompletionStatus(payload.status);
       state.running = false;
+      state.workingAnimationFrame = 0;
       resetRunCancellation(state);
       finishRunActivity(state, terminalStatus);
       moveCompletionReceiptToEnd(state, payload.receipt_id, payload.run_id);
@@ -504,6 +507,7 @@ export function reduceServerEvent(state, record) {
     case "run/cancelled":
       if (!matchesActiveRunActivity(state, runCancelledTargetRequestId(record, payload))) break;
       state.running = false;
+      state.workingAnimationFrame = 0;
       resetRunCancellation(state);
       finishRunActivity(state, "cancelled");
       finishActiveToolPrepare(state, "本轮执行已取消");
@@ -532,6 +536,7 @@ export function reduceServerEvent(state, record) {
       jumpTimelineToLatest(state);
       state.currentSessionId = payload.session_id || state.currentSessionId;
       state.running = false;
+      state.workingAnimationFrame = 0;
       discardActiveRunActivity(state);
       state.currentTurnStartedAtMs = null;
       state.currentTurnFirstTokenAtMs = null;
@@ -586,6 +591,7 @@ export function reduceServerEvent(state, record) {
         && state.cancelRequestId === errorRequestId;
       if (!hasActiveRunActivity || matchesActiveRun || isCorrelatedCancelError) {
         state.running = false;
+        state.workingAnimationFrame = 0;
       }
       if (isCorrelatedCancelError) {
         resetRunCancellation(state);

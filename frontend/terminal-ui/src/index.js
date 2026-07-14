@@ -74,6 +74,8 @@ import {
   scrollTimeline,
 } from "./timeline-follow.js";
 import { createTrackpadScrollFilter } from "./scroll-input.js";
+import { shouldAnimateWorkingIndicator } from "./components/working-indicator.js";
+import { createWorkingAnimationController } from "./working-animation.js";
 import {
   getProjectInputHistory,
   getUiSnapshot,
@@ -100,6 +102,12 @@ let viewportWidth = null;
 let viewportHeight = null;
 const inputTokenizer = createInputTokenizerState();
 const trackpadScrollFilter = createTrackpadScrollFilter();
+const workingAnimation = createWorkingAnimationController({
+  onFrame(frame) {
+    state.workingAnimationFrame = frame;
+    if (!quitting) scheduleRedraw();
+  },
+});
 
 main();
 
@@ -197,6 +205,7 @@ function setupTerminal() {
 }
 
 function restoreTerminal() {
+  workingAnimation.stop();
   process.stdout.write(
     ANSI.keyboardDisambiguateOff
       + ANSI.bracketedPasteOff
@@ -241,6 +250,7 @@ function handleBridgeLine(line) {
   const previousSessionId = state.currentSessionId;
   const previousSnapshot = createUiSnapshot(state);
   const actions = reduceServerEvent(state, record);
+  syncWorkingAnimation();
   if (state.currentSessionId !== previousSessionId) {
     setUiSnapshot(uiStateStore, previousSessionId, previousSnapshot);
     restoreUiSnapshot(state.currentSessionId);
@@ -348,6 +358,7 @@ function handleSingleKeyInput(chunk) {
   if (chunk === "\u0003") {
     if (state.running && !state.cancelPending) {
       requestRunCancel(state, send);
+      syncWorkingAnimation();
       persistUiSnapshot();
       scheduleRedraw();
       return;
@@ -770,7 +781,7 @@ function handleTerminalResize() {
     state,
     previousWidth,
     previousHeight,
-    { cwd: process.cwd(), home: process.env.HOME },
+    terminalRenderEnvironment(),
   );
   const previousOffset = state.scrollOffset;
   restoreViewportAnchor(
@@ -778,7 +789,7 @@ function handleTerminalResize() {
     anchor,
     width,
     height,
-    { cwd: process.cwd(), home: process.env.HOME },
+    terminalRenderEnvironment(),
   );
   viewportWidth = width;
   viewportHeight = height;
@@ -801,7 +812,7 @@ function redraw() {
   const width = Math.max(60, process.stdout.columns ?? 100);
   const height = Math.max(12, process.stdout.rows ?? 30);
   try {
-    const lines = renderScreen(state, width, height, { cwd: process.cwd(), home: process.env.HOME });
+    const lines = renderScreen(state, width, height, terminalRenderEnvironment());
     viewportWidth = width;
     viewportHeight = height;
     debugLog?.log("render.screen", {
@@ -825,4 +836,26 @@ function redraw() {
     });
     throw error;
   }
+}
+
+function syncWorkingAnimation() {
+  workingAnimation.sync(shouldAnimateWorkingIndicator(state, {
+    isTTY: process.stdout.isTTY === true,
+    term: process.env.TERM,
+    ci: environmentFlag(process.env.CI),
+    reduceMotion: environmentFlag(process.env.NAUMI_REDUCE_MOTION),
+  }));
+}
+
+function terminalRenderEnvironment() {
+  return {
+    cwd: process.cwd(),
+    home: process.env.HOME,
+    term: process.env.TERM,
+  };
+}
+
+function environmentFlag(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return Boolean(normalized) && !["0", "false", "no", "off"].includes(normalized);
 }

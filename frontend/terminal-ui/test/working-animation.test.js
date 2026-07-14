@@ -45,6 +45,10 @@ test("working indicator renders four stable wide image frames", () => {
   assert.deepEqual(widths[0], widths[1]);
   assert.deepEqual(widths[1], widths[2]);
   assert.deepEqual(widths[2], widths[3]);
+  assert.equal(
+    renderWorkingIndicator(runningState(), 100, { term: "xterm-256color" }).length,
+    3,
+  );
 });
 
 test("working indicator uses compact and dumb-terminal fallbacks", () => {

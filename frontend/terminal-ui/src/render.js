@@ -11,6 +11,7 @@ import { renderFooter, renderFooterSections } from "./components/footer.js";
 import { Message } from "./components/message.js";
 import { renderAgentControlPage } from "./components/agent-control-page.js";
 import { renderRuntimeInspector } from "./components/runtime-inspector.js";
+import { renderWorkingIndicator } from "./components/working-indicator.js";
 import {
   renderWelcomeScreen,
   shouldRenderWelcome,
@@ -103,7 +104,7 @@ function clampFooterSections(sections, height) {
 
 export function renderBodyWindow(state, width, bodyHeight, scrollOffset, ctx = createRenderContext({ width, env: {}, state })) {
   const targetLines = Math.max(1, bodyHeight + Math.max(0, scrollOffset));
-  const tail = renderBodyTail(state, width);
+  const tail = renderBodyTail(state, width, { bodyHeight, env: ctx.env });
   const segments = [];
   let collected = tail.length;
 
@@ -131,7 +132,7 @@ export function renderBody(state, width, ctx = createRenderContext({ width, env:
       () => renderComponent(Message({ message }), ctx),
     ));
   }
-  lines.push(...renderBodyTail(state, width));
+  lines.push(...renderBodyTail(state, width, { env: ctx.env }));
   return lines;
 }
 
@@ -217,7 +218,7 @@ function renderViewportLayout(state, width, height, env) {
     ),
   }));
   const messageLines = segments.reduce((total, segment) => total + segment.lines.length, 0);
-  const tailLines = renderBodyTail(state, safeWidth).length;
+  const tailLines = renderBodyTail(state, safeWidth, { bodyHeight, env }).length;
   return {
     segments,
     bodyHeight,
@@ -236,11 +237,10 @@ function findAnchorSegmentIndex(segments, anchor) {
   return messageIndex >= 0 && messageIndex < segments.length ? messageIndex : -1;
 }
 
-function renderBodyTail(state, width) {
-  const lines = [];
-  if (state.running) {
-    const phase = state.activeRuntimePhase ? ` · ${state.activeRuntimePhase}` : "";
-    lines.push(color(ANSI.dim, `运行中...${phase}`));
-  }
-  return lines.flatMap((line) => wrapAnsiLine(line, width));
+function renderBodyTail(state, width, options = {}) {
+  return renderWorkingIndicator(state, width, {
+    bodyHeight: options.bodyHeight,
+    term: options.env?.term,
+    ascii: options.env?.forceAscii === true,
+  }).flatMap((line) => wrapAnsiLine(line, width));
 }
