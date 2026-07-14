@@ -42,8 +42,9 @@ source_paths:
   - src/naumi_agent/orchestrator/engine.py
   - .naumi/harness.yaml
 verified_on: 2026-07-14
-verified_at_commit: 079932413af11f2e1da9a928c23cfe7f2fb5b79d
-evidence: docs/superpowers/plans/2026-07-14-harness-knowledge-plane.md
+verified_at_commit: c444150b080f6372368f14106fc31e828db1e815
+evidence: docs/superpowers/plans/2026-07-14-harness-completion-checks.md
 ```
 
-`verified_at_commit` 指向包含 H2 生产代码与测试的 feature commit；本记录由后续独立证据提交保存，避免在同一提交中写无法成立的自引用 hash。
+`verified_at_commit` 指向包含 H3 Engine/Gate/UI 生产代码与定向测试的 feature commit；
+后续证据提交使用 detached 临时 worktree 验证了纠正、verified、stale 与 Profile 失信路径。
