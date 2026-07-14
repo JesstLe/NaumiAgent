@@ -5,14 +5,15 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.tools.analysis_support.vision import (
     build_vision_report,
     scan_vision,
 )
 from naumi_agent.tools.base import Tool
 
-RouterGetter = Callable[[], Any]
-RunAnalysis = Callable[[Any, str, str], Awaitable[str]]
+RouterGetter = Callable[[], ModelPort | None]
+RunAnalysis = Callable[[ModelPort, str, str], Awaitable[str]]
 
 VISION_SYSTEM = """\
 You are an AI Vision Data Extraction architect designing screen-based

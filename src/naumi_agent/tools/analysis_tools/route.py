@@ -6,14 +6,15 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.tools.analysis_support.route import build_route_report, scan_route
 from naumi_agent.tools.base import Tool
 
-RouterGetter = Callable[[], Any]
-RunAnalysis = Callable[[Any, str, str], Awaitable[str]]
+RouterGetter = Callable[[], ModelPort | None]
+RunAnalysis = Callable[[ModelPort, str, str], Awaitable[str]]
 ResolveTarget = Callable[[str], list[Path]]
 ReadSources = Callable[[list[Path]], str]
-SubagentManagerGetter = Callable[[Any], Any | None]
+SubagentManagerGetter = Callable[[ModelPort], Any | None]
 
 ROUTE_SYSTEM = """\
 You are a Mixture-of-Experts (MoE) orchestrator with semantic routing.
@@ -155,7 +156,7 @@ class MoERouteTool(Tool):
 
     async def _execute_with_agents(
         self,
-        router: Any,
+        router: ModelPort,
         manager: Any,
         task: str,
         scan_evidence: str,

@@ -5,11 +5,12 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.tools.analysis_support.pid import build_pid_report, scan_pid
 from naumi_agent.tools.base import Tool
 
-RouterGetter = Callable[[], Any]
-RunAnalysis = Callable[[Any, str, str], Awaitable[str]]
+RouterGetter = Callable[[], ModelPort | None]
+RunAnalysis = Callable[[ModelPort, str, str], Awaitable[str]]
 
 PID_SYSTEM = """\
 你是一位自动化控制论架构师 (Control Theory Architect)。

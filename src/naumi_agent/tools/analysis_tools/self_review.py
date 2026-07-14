@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.tools import analysis_common
 from naumi_agent.tools.analysis_support.self_review import (
     build_self_review_report,
@@ -14,8 +15,8 @@ from naumi_agent.tools.analysis_support.self_review import (
 )
 from naumi_agent.tools.base import Tool, ToolMetadata
 
-RouterGetter = Callable[[], Any]
-RunAnalysis = Callable[[Any, str, str], Awaitable[str]]
+RouterGetter = Callable[[], ModelPort | None]
+RunAnalysis = Callable[[ModelPort, str, str], Awaitable[str]]
 SourceDirGetter = Callable[[], str]
 
 SELF_REVIEW_SYSTEM = """\

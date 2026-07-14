@@ -5,14 +5,15 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.tools.analysis_support.fusion import (
     build_fusion_report,
     scan_fusion,
 )
 from naumi_agent.tools.base import Tool
 
-RouterGetter = Callable[[], Any]
-RunAnalysis = Callable[[Any, str, str], Awaitable[str]]
+RouterGetter = Callable[[], ModelPort | None]
+RunAnalysis = Callable[[ModelPort, str, str], Awaitable[str]]
 
 FUSION_SYSTEM = """\
 你是一位决定论-概率论融合架构师 (Deterministic-Probabilistic Fusion

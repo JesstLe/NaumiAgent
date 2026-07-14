@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from naumi_agent.tools import analysis_common
 from naumi_agent.tools.analysis_support import autopsy as _autopsy_support
@@ -43,6 +43,9 @@ from naumi_agent.tools.analysis_support import supervisor as _supervisor_support
 from naumi_agent.tools.analysis_support import vibe as _vibe_support
 from naumi_agent.tools.analysis_support import vision as _vision_support
 from naumi_agent.tools.analysis_support import watchdog as _watchdog_support
+
+if TYPE_CHECKING:
+    from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.tools.analysis_support import world as _world_support
 from naumi_agent.tools.analysis_support import zkp as _zkp_support
 from naumi_agent.tools.analysis_tools.autopsy import (
@@ -936,12 +939,12 @@ class AutopsyTool(_AutopsyTool):
 
 
 
-_global_router: Any = None
+_global_router: ModelPort | None = None
 _global_subagent_manager: Any = None
 
 
-def set_analysis_router(router: Any) -> None:
-    """注入 ModelRouter 实例，供工具内部调用 LLM."""
+def set_analysis_router(router: ModelPort) -> None:
+    """注入 ModelPort 实例，供工具内部调用 LLM."""
     global _global_router
     _global_router = router
 
@@ -959,7 +962,7 @@ def clear_analysis_subagent_manager(manager: Any | None = None) -> None:
         _global_subagent_manager = None
 
 
-def _get_analysis_subagent_manager(router: Any) -> Any | None:
+def _get_analysis_subagent_manager(router: ModelPort) -> Any | None:
     """Return a subagent manager only when it belongs to the active router."""
     manager = _global_subagent_manager
     if manager is None:

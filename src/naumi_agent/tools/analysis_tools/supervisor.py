@@ -6,15 +6,16 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.tools.analysis_support.supervisor import (
     build_supervisor_report,
     scan_supervisor,
 )
 from naumi_agent.tools.base import Tool
 
-RouterGetter = Callable[[], Any]
-RunAnalysis = Callable[[Any, str, str], Awaitable[str]]
-SubagentManagerGetter = Callable[[Any], Any | None]
+RouterGetter = Callable[[], ModelPort | None]
+RunAnalysis = Callable[[ModelPort, str, str], Awaitable[str]]
+SubagentManagerGetter = Callable[[ModelPort], Any | None]
 
 SUPERVISOR_SYSTEM = """\
 你是一位 Erlang/OTP 守护者架构师 (Supervisor Tree Architect)。
@@ -160,7 +161,7 @@ class SupervisorTool(Tool):
 
     async def _execute_with_supervisor_tree(
         self,
-        router: Any,
+        router: ModelPort,
         manager: Any,
         target: str,
         scan_evidence: str,

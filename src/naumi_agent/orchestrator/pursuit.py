@@ -26,9 +26,9 @@ from typing import TYPE_CHECKING, Any
 from naumi_agent.tools.base import ToolCall, ToolResult
 
 if TYPE_CHECKING:
-    from naumi_agent.model.router import ModelRouter
     from naumi_agent.orchestrator.pursuit_store import PursuitStore
     from naumi_agent.orchestrator.subagent_manager import SubAgentManager
+    from naumi_agent.runtime.ports.model import ModelPort
     from naumi_agent.tools.base import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -334,7 +334,7 @@ class GoalPursuitLoop:
 
     def __init__(
         self,
-        router: ModelRouter,
+        router: ModelPort,
         tool_registry: ToolRegistry,
         subagent_manager: SubAgentManager,
         store: PursuitStore | None = None,

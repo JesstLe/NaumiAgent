@@ -5,15 +5,16 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.tools.analysis_support.spar import (
     build_spar_report,
     scan_spar,
 )
 from naumi_agent.tools.base import Tool
 
-RouterGetter = Callable[[], Any]
-RunAnalysis = Callable[[Any, str, str], Awaitable[str]]
-SubagentManagerGetter = Callable[[Any], Any | None]
+RouterGetter = Callable[[], ModelPort | None]
+RunAnalysis = Callable[[ModelPort, str, str], Awaitable[str]]
+SubagentManagerGetter = Callable[[ModelPort], Any | None]
 
 SPAR_SYSTEM = """\
 你是一位对抗性自博弈架构师 (Adversarial Self-Play Architect)。
@@ -150,7 +151,7 @@ class SparTool(Tool):
 
     async def _execute_adversarial(
         self,
-        router: Any,
+        router: ModelPort,
         manager: Any,
         task: str,
         scan_evidence: str,

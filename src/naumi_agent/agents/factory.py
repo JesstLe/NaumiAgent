@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from naumi_agent.agents.base import DEFAULT_AGENT_MAX_TURNS, AgentCapability, AgentConfig
 
 if TYPE_CHECKING:
-    from naumi_agent.model.router import ModelRouter
+    from naumi_agent.runtime.ports.model import ModelPort
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +172,7 @@ Keep it under 500 words. Use Chinese for all user-facing text.
 class DynamicAgentFactory:
     """Create AgentConfig dynamically based on task requirements."""
 
-    def __init__(self, router: ModelRouter) -> None:
+    def __init__(self, router: ModelPort) -> None:
         self._router = router
 
     def create_config(

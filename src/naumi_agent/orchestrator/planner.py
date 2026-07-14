@@ -9,7 +9,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from naumi_agent.model.router import ModelRouter, ModelTier, TokenUsage
+from naumi_agent.model.router import ModelTier, TokenUsage
+from naumi_agent.runtime.ports.model import ModelPort
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ _SIMPLE_CHAT_PATTERNS = (
 class IntentClassifier:
     def __init__(
         self,
-        router: ModelRouter,
+        router: ModelPort,
         usage_callback: UsageCallback | None = None,
     ) -> None:
         self._router = router
@@ -181,7 +182,7 @@ class AdaptivePlanner:
 
     def __init__(
         self,
-        router: ModelRouter,
+        router: ModelPort,
         usage_callback: UsageCallback | None = None,
     ) -> None:
         self._router = router

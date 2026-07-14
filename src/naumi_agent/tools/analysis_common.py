@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from naumi_agent.runtime.ports.model import ModelPort
 
 SOURCE_EXTENSIONS = {
     ".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".java", ".rb", ".rs", ".php",
@@ -45,7 +48,7 @@ def read_sources(files: list[Path], max_chars: int = 80000) -> str:
     return "".join(parts)
 
 
-async def run_analysis(router: Any, system_prompt: str, user_msg: str) -> str:
+async def run_analysis(router: ModelPort, system_prompt: str, user_msg: str) -> str:
     """Call the configured model router for analysis synthesis."""
     from naumi_agent.model.router import ModelTier
 

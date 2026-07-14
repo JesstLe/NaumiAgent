@@ -62,6 +62,7 @@ from naumi_agent.orchestrator.tool_batches import (
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder
 from naumi_agent.runs.store import ChatRunStore
+from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.runtime.ports.permission import PermissionPort
 from naumi_agent.runtime.ports.session import SessionPort
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
@@ -430,6 +431,7 @@ class AgentEngine:
         *,
         session_port: SessionPort[Session] | None = None,
         permission_port: PermissionPort | None = None,
+        model_port: ModelPort | None = None,
     ) -> None:
         self._config = config
         resolved_session_port = (
@@ -465,6 +467,24 @@ class AgentEngine:
                 "mode/set_mode/check/reset_counts"
             )
         self._permission_port = resolved_permission_port
+        if model_port is None:
+            catalog = (
+                load_provider_catalog(config.models.catalog_path)
+                if config.models.catalog_path
+                else None
+            )
+            resolved_model_port: ModelPort = ModelRouter(
+                config.models,
+                catalog=catalog,
+            )
+        else:
+            resolved_model_port = model_port
+        if not isinstance(resolved_model_port, ModelPort):
+            raise TypeError(
+                "model_port 必须实现完整的 ModelPort 契约："
+                "metadata/routing/capability/discovery/reasoning/call/stream"
+            )
+        self._model_port = resolved_model_port
         self.harness_service = HarnessService(
             workspace_root=self.workspace_root,
             trust_store=HarnessTrustStore(
@@ -473,12 +493,6 @@ class AgentEngine:
             store=HarnessStore(resolve_harness_db_path()),
         )
         self.chat_run_store = ChatRunStore(self._runtime_data_dir / "chat-runs.db")
-        catalog = (
-            load_provider_catalog(config.models.catalog_path)
-            if config.models.catalog_path
-            else None
-        )
-        self._router = ModelRouter(config.models, catalog=catalog)
         self._tool_registry = ToolRegistry()
         self._messages: list[dict[str, Any]] = []
         self._full_history: list[dict[str, Any]] = []  # untruncated display history
@@ -501,7 +515,7 @@ class AgentEngine:
         self.long_term_memory = LongTermMemory(config.memory)
         self._compactor = ContextCompactor(
             config.memory,
-            self._router,
+            self._model_port,
             threshold=config.memory.compaction_threshold,
             long_term_memory=(
                 self.long_term_memory
@@ -528,7 +542,7 @@ class AgentEngine:
             log_dir=self._runtime_data_dir / "browser-daemon",
         )
         self._planner = AdaptivePlanner(
-            self._router,
+            self._model_port,
             usage_callback=self._track_model_usage,
         )
         self._harness_context = HarnessContextAssembler()
@@ -621,7 +635,7 @@ class AgentEngine:
             set_analysis_router,
         )
 
-        set_analysis_router(self._router)
+        set_analysis_router(self._model_port)
         for tool in create_analysis_tools():
             self._tool_registry.register(tool)
 
@@ -711,7 +725,7 @@ class AgentEngine:
 
         # Goal pursuit tool
         set_pursuit_dependencies(
-            router=self._router,
+            router=self._model_port,
             tool_registry=self._tool_registry,
             subagent_manager=self.subagent_manager,
             store=self.pursuit_store,
@@ -844,8 +858,13 @@ class AgentEngine:
         return self._config
 
     @property
-    def router(self) -> ModelRouter:
-        return self._router
+    def router(self) -> ModelPort:
+        return self._model_port
+
+    @property
+    def _router(self) -> ModelPort:
+        """Return the legacy read-only alias for the injected model port."""
+        return self._model_port
 
     @property
     def session_store(self) -> SessionPort[Session]:
@@ -1023,7 +1042,7 @@ class AgentEngine:
                 base_dir=browser_dir,
                 options={
                     "runtime": self._browser_session,
-                    "model_router": self._router,
+                    "model_router": self._model_port,
                     "max_concurrent_runs": (
                         self._config.browser.max_concurrent_runs
                     ),
@@ -1160,7 +1179,7 @@ class AgentEngine:
                     set_analysis_router,
                 )
 
-                set_analysis_router(self._router)
+                set_analysis_router(self._model_port)
                 for tool in create_analysis_tools():
                     self._tool_registry.register(tool)
             except Exception as e:
@@ -1291,7 +1310,7 @@ class AgentEngine:
         default_prompt = self._build_system_prompt()
         self._session = await self._session_port.create_session(
             title=title,
-            model=self._router.resolve_model(ModelTier.CAPABLE),
+            model=self._model_port.resolve_model(ModelTier.CAPABLE),
             system_prompt=next(
                 (m["content"] for m in self._messages if m.get("role") == "system"),
                 default_prompt,
@@ -1753,7 +1772,7 @@ class AgentEngine:
 
     async def _maybe_compact(self, on_event: EventCallback | None = None) -> None:
         """检查并执行上下文压缩."""
-        model = self._router.resolve_model(ModelTier.CAPABLE)
+        model = self._model_port.resolve_model(ModelTier.CAPABLE)
         context_budget, reserve_tokens = self._compute_context_budget(model)
         if context_budget <= 0:
             logger.warning(
@@ -2047,7 +2066,7 @@ class AgentEngine:
                 messages,
                 update_engine_context=messages is self._messages,
             )
-            return await self._router.call(messages=safe_messages, tier=tier, tools=tools)
+            return await self._model_port.call(messages=safe_messages, tier=tier, tools=tools)
         except Exception as e:
             if not _is_prompt_too_long_error(e):
                 raise
@@ -2062,7 +2081,7 @@ class AgentEngine:
                 self._messages,
                 update_engine_context=True,
             )
-            return await self._router.call(
+            return await self._model_port.call(
                 messages=safe_messages,
                 tier=tier,
                 tools=tools,
@@ -2226,8 +2245,8 @@ class AgentEngine:
         try:
             current_task = self._latest_user_task()
             if current_task:
-                model = self._router.resolve_model(ModelTier.CAPABLE)
-                model_window = self._router.get_context_window(model)
+                model = self._model_port.resolve_model(ModelTier.CAPABLE)
+                model_window = self._model_port.get_context_window(model)
                 knowledge_result = await self.harness_service.knowledge_context(
                     current_task,
                     model_window=model_window,
@@ -3371,7 +3390,7 @@ class AgentEngine:
     ) -> AgentResult:
         """流式 ReAct 循环：通过 router.stream() 逐 token 输出."""
         max_turns = self._config.safety.max_turns
-        model_str = self._router.resolve_model(ModelTier.CAPABLE)
+        model_str = self._model_port.resolve_model(ModelTier.CAPABLE)
         session_id = self._session.id if self._session else ""
         tool_call_history: list[str] = []
         todo_reconciliation_attempted = False
@@ -3461,7 +3480,7 @@ class AgentEngine:
                     self._messages,
                     update_engine_context=True,
                 )
-                async for chunk in self._router.stream(
+                async for chunk in self._model_port.stream(
                     messages=stream_messages,
                     tier=ModelTier.CAPABLE,
                     tools=tools,
@@ -4349,7 +4368,7 @@ class AgentEngine:
 
     def get_context_info(self) -> dict[str, Any]:
         """Return context window usage estimate."""
-        model = self._router.resolve_model(ModelTier.CAPABLE)
+        model = self._model_port.resolve_model(ModelTier.CAPABLE)
         window = self._compute_context_budget(model)[0]
         sanitized, _ = self._compactor.sanitize_visual_payloads(self._messages)
         used = self._compactor._estimate_tokens(sanitized)
@@ -4362,7 +4381,7 @@ class AgentEngine:
 
     def _compute_context_budget(self, model: str) -> tuple[int, int]:
         """计算可用于会话构建的上下文预算（保留输出缓冲区）。"""
-        context_window = self._router.get_context_window(model)
+        context_window = self._model_port.get_context_window(model)
         cumulative_limit = self._config.safety.max_input_tokens
         hard_cap = (
             context_window
@@ -4372,7 +4391,7 @@ class AgentEngine:
         if hard_cap <= 0:
             return 0, 0
 
-        output_cap = self._router.get_max_output(model)
+        output_cap = self._model_port.get_max_output(model)
         reserve = self._config.memory.compaction_reserved_tokens
         if reserve <= 0:
             reserve = _DEFAULT_COMPACTION_RESERVED_TOKENS
