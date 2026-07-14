@@ -1,5 +1,6 @@
-import fs from "node:fs";
 import { StringDecoder } from "node:string_decoder";
+import EMBEDDED_PROTOCOL_CONTRACT from "../protocol-contract.json" with { type: "json" };
+
 
 export const PROTOCOL_CONTRACT = loadProtocolContract();
 export const PROTOCOL_VERSION = Number(PROTOCOL_CONTRACT.version);
@@ -19,7 +20,7 @@ const REASONING_EFFORT_SOURCES = new Set(["runtime", "model", "global", "auto"])
 const MODEL_CONTRACT_STATUSES = new Set(["verified", "partial", "unverified", "incompatible"]);
 
 export function parseArgs(argv) {
-  const parsed = { config: ".naumi/config.yaml", bridgeCommand: "", bridgeCommandJson: "" };
+  const parsed = { config: ".naumi/config.yaml", bridgeCommand: "", bridgeCommandJson: "", selfTest: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if ((arg === "--config" || arg === "-c") && argv[i + 1]) {
@@ -31,6 +32,8 @@ export function parseArgs(argv) {
     } else if (arg === "--bridge-command-json" && argv[i + 1]) {
       parsed.bridgeCommandJson = argv[i + 1];
       i += 1;
+    } else if (arg === "--self-test") {
+      parsed.selfTest = true;
     }
   }
   return parsed;
@@ -70,8 +73,7 @@ export function createEventSender(writable, { debugLog = null } = {}) {
 }
 
 function loadProtocolContract() {
-  const contractUrl = new URL("../protocol-contract.json", import.meta.url);
-  const contract = JSON.parse(fs.readFileSync(contractUrl, "utf8"));
+  const contract = structuredClone(EMBEDDED_PROTOCOL_CONTRACT);
   if (!contract || typeof contract !== "object" || Array.isArray(contract)) {
     throw new Error("protocol-contract.json 必须是对象");
   }

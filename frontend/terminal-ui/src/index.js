@@ -44,6 +44,7 @@ import {
   normalizeServerRecord,
   parseArgs,
   parseBridgeCommandJson,
+  PROTOCOL_VERSION,
   splitShellLike,
 } from "./protocol.js";
 import {
@@ -129,6 +130,14 @@ const workingAnimation = createWorkingAnimationController({
 main();
 
 function main() {
+  if (args.selfTest) {
+    process.stdout.write(JSON.stringify({
+      ok: true,
+      component: "naumi-terminal-ui",
+      protocol_version: PROTOCOL_VERSION,
+    }) + "\n");
+    return;
+  }
   if (!terminalCapabilities.interactive) {
     process.stderr.write(
       "Naumi 新终端 UI 需要交互式 TTY；请在 Terminal、iTerm2、Kitty、WezTerm、Windows Terminal 或常见 Linux 终端中运行。\n",

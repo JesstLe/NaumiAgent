@@ -12,6 +12,6 @@
     "test": "node scripts/run-tests.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.10"
   }
 }

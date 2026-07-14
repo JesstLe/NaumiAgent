@@ -64,11 +64,13 @@ test("parseArgs supports config and bridge command", () => {
     config: "local.yaml",
     bridgeCommand: "node fake.js",
     bridgeCommandJson: "[\"node\",\"fake.js\"]",
+    selfTest: false,
   });
 });
 
 test("parseArgs defaults to the project Naumi config", () => {
   assert.equal(parseArgs([]).config, ".naumi/config.yaml");
+  assert.equal(parseArgs(["--self-test"]).selfTest, true);
 });
 
 test("parseBridgeCommandJson decodes argv without shell splitting", () => {

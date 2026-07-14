@@ -20,6 +20,7 @@ from naumi_agent.main import (
     _launch_terminal_ui,
     _launch_tui,
     _parse_node_major,
+    _parse_node_version,
     _resolve_terminal_ui_frontend_dir,
     naumiagent_app,
 )
@@ -120,6 +121,48 @@ def test_build_terminal_ui_command_uses_direct_node_entry(tmp_path: Path) -> Non
     ]
 
 
+def test_build_terminal_ui_command_prefers_compiled_release_companion(
+    tmp_path: Path,
+) -> None:
+    ui_binary = tmp_path / "naumi-ui"
+    backend = tmp_path / "naumi"
+    ui_binary.write_bytes(b"compiled-ui")
+    backend.write_bytes(b"compiled-backend")
+    ui_binary.chmod(0o755)
+    backend.chmod(0o755)
+
+    cmd = _build_terminal_ui_command(
+        "config.yaml",
+        terminal_ui_executable=ui_binary,
+        frozen_backend_executable=backend,
+        frontend_dir=tmp_path / "source-must-not-be-read",
+        node_executable="/missing/node",
+    )
+
+    assert cmd[:3] == [str(ui_binary), "--config", "config.yaml"]
+    assert cmd[3] == "--bridge-command-json"
+    assert json.loads(cmd[4]) == [
+        str(backend),
+        "__ui-bridge",
+        "--config",
+        "config.yaml",
+    ]
+
+
+def test_build_terminal_ui_command_rejects_non_executable_release_companion(
+    tmp_path: Path,
+) -> None:
+    ui_binary = tmp_path / "naumi-ui"
+    ui_binary.write_bytes(b"not-executable")
+    ui_binary.chmod(0o644)
+
+    with pytest.raises(TerminalUiLaunchError, match="不可执行"):
+        _build_terminal_ui_command(
+            "config.yaml",
+            terminal_ui_executable=ui_binary,
+        )
+
+
 @pytest.mark.parametrize(
     ("version", "major"),
     [
@@ -133,6 +176,23 @@ def test_parse_node_major(version: str, major: int | None) -> None:
     assert _parse_node_major(version) == major
 
 
+@pytest.mark.parametrize(
+    ("version", "parsed"),
+    [
+        ("v20.10.0", (20, 10, 0)),
+        ("22.3.1", (22, 3, 1)),
+        ("v20", (20, 0, 0)),
+        ("node-v20.10.0", None),
+        ("", None),
+    ],
+)
+def test_parse_node_version(
+    version: str,
+    parsed: tuple[int, int, int] | None,
+) -> None:
+    assert _parse_node_version(version) == parsed
+
+
 def test_build_terminal_ui_command_rejects_old_node(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -144,7 +204,26 @@ def test_build_terminal_ui_command_rejects_old_node(
         lambda *args, **kwargs: "v19.9.0\n",
     )
 
-    with pytest.raises(TerminalUiLaunchError, match="需要 Node.js 20\\+"):
+    with pytest.raises(TerminalUiLaunchError, match="需要 Node.js 20\\.10\\+"):
+        _build_terminal_ui_command(
+            "config.yaml",
+            frontend_dir=frontend,
+            node_executable="/opt/bin/node",
+        )
+
+
+def test_build_terminal_ui_command_rejects_old_node_20_minor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frontend = tmp_path / "terminal-ui"
+    _write_terminal_ui_entry(frontend)
+    monkeypatch.setattr(
+        "naumi_agent.main.subprocess.check_output",
+        lambda *args, **kwargs: "v20.9.0\n",
+    )
+
+    with pytest.raises(TerminalUiLaunchError, match="需要 Node.js 20\\.10\\+"):
         _build_terminal_ui_command(
             "config.yaml",
             frontend_dir=frontend,

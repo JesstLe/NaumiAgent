@@ -1,154 +1,106 @@
 #!/usr/bin/env bash
-# NaumiAgent 一键安装脚本
-# 用法: curl -sSL https://raw.githubusercontent.com/JesstLe/NaumiAgent/main/scripts/install.sh | bash
-# 环境变量:
-#   INSTALL_DIR   安装目录，默认 ~/.naumi-agent
-#   BIN_DIR       可执行文件软链目录，默认 ~/.local/bin
-#   USE_UV        1 强制使用 uv，0 强制使用 pip，默认自动检测
+# NaumiAgent binary installer for macOS and Linux.
 
 set -euo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/JesstLe/NaumiAgent.git}"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.naumi-agent}"
-BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
+RELEASE_REPO=${NAUMI_RELEASE_REPO:-JesstLe/NaumiAgent-Releases}
+VERSION=${NAUMI_VERSION:-latest}
+INSTALL_ROOT=${NAUMI_INSTALL_ROOT:-$HOME/.local/share/naumi-agent}
+BIN_DIR=${NAUMI_BIN_DIR:-$HOME/.local/bin}
 
-log_info() { printf '\033[36m[naumi]\033[0m %s\n' "$*"; }
-log_warn() { printf '\033[33m[naumi]\033[0m %s\n' "$*"; }
-log_error() { printf '\033[31m[naumi]\033[0m %s\n' "$*"; }
+info() { printf '\033[36m[naumi]\033[0m %s\n' "$*"; }
+warn() { printf '\033[33m[naumi]\033[0m %s\n' "$*"; }
+fail() { printf '\033[31m[naumi]\033[0m %s\n' "$*" >&2; exit 1; }
 
-# 1. 检测 Python
-python_cmd=""
-for cmd in python3.12 python3.13 python3 python; do
-    if command -v "$cmd" >/dev/null 2>&1; then
-        if "$cmd" -c 'import sys; raise SystemExit(not (sys.version_info >= (3, 12)))' 2>/dev/null; then
-            python_cmd=$cmd
-            break
-        fi
-    fi
-done
+command -v curl >/dev/null 2>&1 || fail "缺少 curl，无法下载安装包。"
+command -v tar >/dev/null 2>&1 || fail "缺少 tar，无法解压安装包。"
 
-if [ -z "$python_cmd" ]; then
-    log_error "未找到 Python 3.12+。请安装后重试："
-    log_error "  macOS: brew install python@3.12"
-    log_error "  Ubuntu: sudo apt install python3.12 python3.12-venv"
-    exit 1
-fi
-log_info "使用 Python: $python_cmd"
+case "$(uname -s)" in
+    Darwin) platform=macos ;;
+    Linux) platform=linux ;;
+    *) fail "当前安装器仅支持 macOS 和 Linux；Windows 请使用 install.ps1。" ;;
+esac
+case "$(uname -m)" in
+    x86_64|amd64) arch=x64 ;;
+    arm64|aarch64) arch=arm64 ;;
+    *) fail "不支持的处理器架构：$(uname -m)" ;;
+esac
 
-# 2. 决定包管理器
-if [ "${USE_UV:-}" = "1" ]; then
-    use_uv=1
-elif [ "${USE_UV:-}" = "0" ]; then
-    use_uv=0
-elif command -v uv >/dev/null 2>&1; then
-    use_uv=1
+if [ -n "${NAUMI_RELEASE_BASE_URL:-}" ]; then
+    base_url=${NAUMI_RELEASE_BASE_URL%/}
+elif [ "$VERSION" = "latest" ]; then
+    base_url="https://github.com/$RELEASE_REPO/releases/latest/download"
 else
-    use_uv=0
-fi
-
-if [ "$use_uv" = 1 ]; then
-    log_info "使用 uv 安装依赖"
-else
-    log_warn "未检测到 uv，使用 pip。推荐安装 uv 以获得更快体验："
-    log_warn "  curl -LsSf https://astral.sh/uv/install.sh | sh"
-fi
-
-# 3. 下载源码
-if [ -d "$INSTALL_DIR/.git" ]; then
-    log_info "更新已有安装目录 $INSTALL_DIR"
-    cd "$INSTALL_DIR"
-    git pull --ff-only
-else
-    log_info "克隆源码到 $INSTALL_DIR"
-    if command -v git >/dev/null 2>&1; then
-        git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
-    else
-        log_error "需要 git 才能克隆仓库。请先安装 git。"
-        exit 1
-    fi
-fi
-
-cd "$INSTALL_DIR"
-
-# 4. 安装 Python 依赖
-if [ "$use_uv" = 1 ]; then
-    uv sync --no-dev
-    naumi_bin="$INSTALL_DIR/.venv/bin/naumi"
-else
-    "$python_cmd" -m venv .venv
-    .venv/bin/pip install --upgrade pip
-    .venv/bin/pip install -e "."
-    naumi_bin="$INSTALL_DIR/.venv/bin/naumi"
-fi
-
-log_info "安装 Chromium 浏览器运行时..."
-if ! .venv/bin/playwright install chromium; then
-    log_warn "Chromium 下载失败；运行时将尝试使用系统 Chrome/Edge。"
-fi
-
-# 5. 创建命令入口
-mkdir -p "$BIN_DIR"
-ln -sf "$naumi_bin" "$BIN_DIR/naumi"
-log_info "已创建 $BIN_DIR/naumi -> $naumi_bin"
-
-# 6. 确保 PATH 包含 BIN_DIR
-if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-    shell_rc=""
-    case "${SHELL:-}" in
-        */zsh) shell_rc="$HOME/.zshrc" ;;
-        */bash) shell_rc="$HOME/.bashrc" ;;
+    case "$VERSION" in
+        *[!A-Za-z0-9._-]*|'') fail "NAUMI_VERSION 含不安全字符。" ;;
     esac
-    if [ -n "$shell_rc" ]; then
-        path_line="export PATH=\"$BIN_DIR:\$PATH\""
-        if ! grep -Fqx "$path_line" "$shell_rc" 2>/dev/null; then
-            printf '%s\n' "$path_line" >> "$shell_rc"
-            log_info "已将 $BIN_DIR 加入 $shell_rc"
-        fi
-    else
-        log_warn "请将 $BIN_DIR 加入你的 PATH"
-    fi
+    base_url="https://github.com/$RELEASE_REPO/releases/download/v$VERSION"
 fi
 
-# 7. Node.js 检查（可选；缺失时保留 Textual fallback）
-terminal_ui_available=0
-if command -v node >/dev/null 2>&1; then
-    if node_version=$(node -p 'process.versions.node' 2>/dev/null); then
-        node_major=${node_version%%.*}
-        case "$node_major" in
-            ''|*[!0-9]*)
-                log_warn "无法识别 Node.js 版本，将使用 Textual TUI fallback。"
-                ;;
-            *)
-                if [ "$node_major" -ge 20 ] && command -v npm >/dev/null 2>&1; then
-                    terminal_ui_available=1
-                    log_info "检测到 Node.js $node_version"
-                else
-                    log_warn "Node.js 20+ 与 npm 不完整，将使用 Textual TUI fallback。"
-                fi
-                ;;
-        esac
-    else
-        log_warn "Node.js 版本检测失败，将使用 Textual TUI fallback。"
-    fi
+if [ "$VERSION" = "latest" ]; then
+    asset="naumi-$platform-$arch.tar.gz"
 else
-    log_warn "未检测到 Node.js 20+，将使用 Textual TUI fallback。"
+    asset="naumi-$VERSION-$platform-$arch.tar.gz"
 fi
 
-if [ "$terminal_ui_available" = 1 ]; then
-    ui_dir="$INSTALL_DIR/frontend/terminal-ui"
-    log_info "安装 Node UI 依赖..."
-    if (cd "$ui_dir" && npm install --no-audit --no-fund); then
-        log_info "Node UI 依赖安装完成"
-    else
-        terminal_ui_available=0
-        log_warn "Node UI 依赖安装失败，将使用 Textual TUI fallback。"
-    fi
-fi
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/naumi-install.XXXXXX")
+cleanup() { rm -rf "$tmp"; }
+trap cleanup EXIT INT TERM
 
-log_info "安装完成"
-log_info "首次运行请执行:"
-log_info "  export PATH=\"$BIN_DIR:\$PATH\"  # 如未自动生效"
-log_info "  naumi"
-log_info "默认入口启动失败时会自动回退到 Textual TUI。"
-log_info "显式 Textual 入口:"
-log_info "  naumi tui"
+info "下载 $asset"
+curl --fail --location --proto '=https' --tlsv1.2 \
+    "$base_url/$asset" --output "$tmp/$asset"
+curl --fail --location --proto '=https' --tlsv1.2 \
+    "$base_url/$asset.sha256" --output "$tmp/$asset.sha256"
+
+expected=$(awk 'NR == 1 { print $1 }' "$tmp/$asset.sha256")
+case "$expected" in
+    *[!0-9A-Fa-f]*|'') fail "checksum 文件格式无效。" ;;
+esac
+[ "${#expected}" -eq 64 ] || fail "checksum 长度无效。"
+if command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "$tmp/$asset" | awk '{ print $1 }')
+elif command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$tmp/$asset" | awk '{ print $1 }')
+else
+    fail "缺少 shasum 或 sha256sum，不能安全校验下载。"
+fi
+[ "$actual" = "$expected" ] || fail "SHA-256 校验失败，已拒绝安装。"
+
+tar -tzf "$tmp/$asset" > "$tmp/archive.list" \
+    || fail "无法读取安装包目录。"
+while IFS= read -r entry; do
+    case "$entry" in
+        /*|../*|*/../*|*/..) fail "安装包含不安全路径：$entry" ;;
+        naumi-*-"$platform-$arch"|naumi-*-"$platform-$arch"/|naumi-*-"$platform-$arch"/*) ;;
+        *) fail "安装包含契约外路径：$entry" ;;
+    esac
+done < "$tmp/archive.list"
+
+mkdir "$tmp/extract"
+tar -xzf "$tmp/$asset" -C "$tmp/extract"
+set -- "$tmp"/extract/naumi-*-$platform-$arch
+[ "$#" -eq 1 ] && [ -d "$1" ] || fail "安装包顶层目录不符合发行契约。"
+bundle=$1
+[ -f "$bundle/manifest.json" ] || fail "安装包缺少 manifest.json。"
+[ -x "$bundle/naumi" ] || fail "安装包缺少可执行后端。"
+[ -x "$bundle/naumi-ui" ] || fail "安装包缺少可执行 Terminal UI。"
+
+mkdir -p "$INSTALL_ROOT/releases" "$BIN_DIR"
+destination="$INSTALL_ROOT/releases/$(basename "$bundle")"
+[ ! -e "$destination" ] || fail "该版本已安装：$destination"
+staged="$INSTALL_ROOT/.install-$(basename "$bundle")-$$"
+mv "$bundle" "$staged"
+mv "$staged" "$destination"
+
+rm -f "$INSTALL_ROOT/current.new" "$BIN_DIR/naumi.new"
+ln -s "$destination" "$INSTALL_ROOT/current.new"
+mv -f "$INSTALL_ROOT/current.new" "$INSTALL_ROOT/current"
+ln -s "$INSTALL_ROOT/current/naumi" "$BIN_DIR/naumi.new"
+mv -f "$BIN_DIR/naumi.new" "$BIN_DIR/naumi"
+
+if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+    warn "$BIN_DIR 尚未在 PATH；请加入 shell 配置后重新打开终端。"
+fi
+info "安装完成：$destination"
+info "运行：naumi"

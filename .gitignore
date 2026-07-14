@@ -27,6 +27,8 @@ chroma/
 
 # Local agent workflow scratch state (PID files, previews, review caches)
 .superpowers/
+.release-smoke/
+frontend/terminal-ui/.packaging-smoke/
 
 # Local dev runtime logs (uvicorn/naumi serve output captured at repo root)
 backend.log
