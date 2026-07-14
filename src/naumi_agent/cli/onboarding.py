@@ -20,6 +20,7 @@ from naumi_agent.config.credentials import (
     load_model_api_key,
     store_model_api_key,
 )
+from naumi_agent.config.settings import DEFAULT_RUNTIME_MAX_TURNS
 
 console = Console()
 
@@ -201,9 +202,7 @@ def _build_config(
         "safety": {
             "permission_mode": permission_mode,
             "allowed_dirs": [workspace],
-            "max_budget_usd": 5.0,
-            "max_turns": 30,
-            "max_input_tokens": 500000,
+            "max_turns": DEFAULT_RUNTIME_MAX_TURNS,
         },
         "mcp": {"servers": {}},
         "api": {
