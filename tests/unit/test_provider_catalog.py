@@ -74,6 +74,61 @@ def test_native_catalog_normalizes_provider_model_auth_and_discovery() -> None:
     assert model.max_output == 8192
     assert model.supports_tools
     assert not model.supports_reasoning
+    assert model.reasoning_efforts == ()
+    assert model.default_reasoning_effort is None
+
+
+def test_reasoning_capability_object_parses_ordered_efforts_and_default() -> None:
+    payload = _native_catalog()
+    model = payload["providers"]["NVIDIA"]["models"]["glm-local"]  # type: ignore[index]
+    model["capabilities"]["reasoning"] = {  # type: ignore[index]
+        "efforts": ["minimal", "low", "high"],
+        "defaultEffort": "low",
+    }
+
+    parsed = parse_provider_catalog_json(json.dumps(payload)).providers["nvidia"].models[
+        "glm-local"
+    ]
+
+    assert parsed.supports_reasoning is True
+    assert tuple(value.value for value in parsed.reasoning_efforts) == (
+        "minimal",
+        "low",
+        "high",
+    )
+    assert parsed.default_reasoning_effort is not None
+    assert parsed.default_reasoning_effort.value == "low"
+
+
+@pytest.mark.parametrize(
+    ("reasoning", "message"),
+    [
+        ({}, "efforts"),
+        ({"efforts": []}, "非空"),
+        ({"efforts": "high"}, "数组"),
+        ({"efforts": ["low", "low"]}, "重复"),
+        ({"efforts": ["turbo"]}, "可选值"),
+        ({"efforts": ["auto"]}, "可选值"),
+        (
+            {"efforts": ["low", "high"], "defaultEffort": "medium"},
+            "必须出现在 efforts",
+        ),
+    ],
+)
+def test_reasoning_capability_object_rejects_invalid_shapes(
+    reasoning: object,
+    message: str,
+) -> None:
+    payload = _native_catalog()
+    model = payload["providers"]["NVIDIA"]["models"]["glm-local"]  # type: ignore[index]
+    model["capabilities"]["reasoning"] = reasoning  # type: ignore[index]
+
+    with pytest.raises(ProviderCatalogError) as exc_info:
+        parse_provider_catalog_json(json.dumps(payload))
+
+    text = str(exc_info.value)
+    assert "models.glm-local.capabilities.reasoning" in text
+    assert message in text
 
 
 def test_visible_models_applies_whitelist_then_blacklist_in_declaration_order() -> None:

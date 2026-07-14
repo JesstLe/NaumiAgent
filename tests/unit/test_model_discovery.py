@@ -19,6 +19,7 @@ from naumi_agent.model.catalog import (
     ProviderSpec,
 )
 from naumi_agent.model.discovery import ModelDiscoveryError, ModelDiscoveryService
+from naumi_agent.model.reasoning import ReasoningEffort
 
 
 def _provider(
@@ -88,6 +89,9 @@ async def test_openai_discovery_merges_static_first_and_sorts_remote_models() ->
         name="Stable model",
         max_context=128_000,
         supports_tools=True,
+        supports_reasoning=True,
+        reasoning_efforts=(ReasoningEffort.LOW, ReasoningEffort.HIGH),
+        default_reasoning_effort=ReasoningEffort.LOW,
     )
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -116,7 +120,14 @@ async def test_openai_discovery_merges_static_first_and_sorts_remote_models() ->
     assert listing.models[0].source == "static"
     assert listing.models[0].max_context == 128_000
     assert listing.models[0].supports_tools is True
+    assert listing.models[0].reasoning_efforts == (
+        ReasoningEffort.LOW,
+        ReasoningEffort.HIGH,
+    )
+    assert listing.models[0].default_reasoning_effort is ReasoningEffort.LOW
     assert listing.models[1].source == "discovered"
+    assert listing.models[1].reasoning_efforts == ()
+    assert listing.models[1].default_reasoning_effort is None
     assert listing.cache_status == "refreshed"
     assert listing.stale is False
     assert listing.warning is None

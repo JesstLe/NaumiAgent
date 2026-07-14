@@ -12,6 +12,8 @@ from types import MappingProxyType
 from typing import Any
 from urllib.parse import parse_qsl, urlparse
 
+from naumi_agent.model.reasoning import ReasoningEffort, reasoning_effort_values
+
 _MAX_CATALOG_BYTES = 2 * 1024 * 1024
 _PROVIDER_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -85,6 +87,8 @@ class ProviderModelSpec:
     max_output: int | None = None
     supports_tools: bool | None = None
     supports_reasoning: bool | None = None
+    reasoning_efforts: tuple[ReasoningEffort, ...] = ()
+    default_reasoning_effort: ReasoningEffort | None = None
     supports_vision: bool | None = None
     input_modalities: tuple[str, ...] = ()
     output_modalities: tuple[str, ...] = ()
@@ -511,8 +515,13 @@ def _parse_models(raw: Any, path: str) -> Mapping[str, ProviderModelSpec]:
             model.pop("capabilities", {}), f"{model_path}.capabilities"
         )
         supports_tools = _optional_bool(capabilities, "tools", f"{model_path}.capabilities")
-        supports_reasoning = _optional_bool(
-            capabilities, "reasoning", f"{model_path}.capabilities"
+        (
+            supports_reasoning,
+            reasoning_efforts,
+            default_reasoning_effort,
+        ) = _parse_reasoning_capability(
+            capabilities,
+            f"{model_path}.capabilities",
         )
         supports_vision = _optional_bool(
             capabilities, "vision", f"{model_path}.capabilities"
@@ -535,6 +544,8 @@ def _parse_models(raw: Any, path: str) -> Mapping[str, ProviderModelSpec]:
             max_output=max_output,
             supports_tools=supports_tools,
             supports_reasoning=supports_reasoning,
+            reasoning_efforts=reasoning_efforts,
+            default_reasoning_effort=default_reasoning_effort,
             supports_vision=supports_vision,
             input_modalities=input_modalities,
             output_modalities=output_modalities,
@@ -678,6 +689,63 @@ def _optional_bool(data: dict[str, Any], key: str, path: str) -> bool | None:
     if not isinstance(value, bool):
         raise ProviderCatalogError(f"{path}.{key} 必须是 boolean。")
     return value
+
+
+def _parse_reasoning_capability(
+    data: dict[str, Any],
+    path: str,
+) -> tuple[bool | None, tuple[ReasoningEffort, ...], ReasoningEffort | None]:
+    key = "reasoning"
+    if key not in data:
+        return None, (), None
+    raw = data.pop(key)
+    reasoning_path = f"{path}.{key}"
+    if isinstance(raw, bool):
+        return raw, (), None
+    value = _mapping(raw, reasoning_path)
+    if "efforts" not in value:
+        raise ProviderCatalogError(f"{reasoning_path}.efforts 为必填字段。")
+    raw_efforts = _parse_string_tuple(
+        value.pop("efforts"),
+        f"{reasoning_path}.efforts",
+    )
+    if not raw_efforts:
+        raise ProviderCatalogError(f"{reasoning_path}.efforts 必须是非空字符串数组。")
+    efforts: list[ReasoningEffort] = []
+    seen: set[ReasoningEffort] = set()
+    for raw_effort in raw_efforts:
+        try:
+            effort = ReasoningEffort(raw_effort)
+        except ValueError as exc:
+            raise ProviderCatalogError(
+                f"{reasoning_path}.efforts 不受支持；可选值：{reasoning_effort_values()}。"
+            ) from exc
+        if effort in seen:
+            raise ProviderCatalogError(f"{reasoning_path}.efforts 含重复值：{effort.value}。")
+        seen.add(effort)
+        efforts.append(effort)
+    raw_default = _take_alias(
+        value,
+        ("defaultEffort", "default_effort"),
+        reasoning_path,
+        required=False,
+    )
+    default: ReasoningEffort | None = None
+    if raw_default is not None:
+        default_text = _required_string(raw_default, f"{reasoning_path}.defaultEffort")
+        try:
+            default = ReasoningEffort(default_text)
+        except ValueError as exc:
+            raise ProviderCatalogError(
+                f"{reasoning_path}.defaultEffort 不受支持；"
+                f"可选值：{reasoning_effort_values()}。"
+            ) from exc
+        if default not in seen:
+            raise ProviderCatalogError(
+                f"{reasoning_path}.defaultEffort 必须出现在 efforts 中。"
+            )
+    _reject_unknown(value, reasoning_path)
+    return True, tuple(efforts), default
 
 
 def _parse_string_tuple(raw: Any, path: str) -> tuple[str, ...]:
