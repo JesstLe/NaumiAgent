@@ -23,6 +23,17 @@ export function color(style, text) {
   return `${style}${text}${ANSI.reset}`;
 }
 
+const OSC_PATTERN = /\x1b\][\s\S]*?(?:\x07|\x1b\\)/g;
+const CSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const SGR_AT_START_PATTERN = /^\x1b\[[0-9;]*m/;
+
+export function sanitizeTerminalText(value) {
+  return String(value ?? "")
+    .replace(OSC_PATTERN, "")
+    .replace(CSI_PATTERN, "")
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+}
+
 export function colorDiffLine(line) {
   if (line.startsWith("+") && !line.startsWith("+++")) return color(ANSI.green, line);
   if (line.startsWith("-") && !line.startsWith("---")) return color(ANSI.red, line);
@@ -65,34 +76,42 @@ export function shortPath(value, home = "") {
 }
 
 export function wrapAnsiLine(line, width) {
+  const safeWidth = Math.max(1, Number(width) || 1);
+  const source = String(line ?? "");
   const result = [];
-  let remaining = String(line ?? "");
-  while (visibleWidth(remaining) > width) {
-    let take = 0;
-    let visible = 0;
-    let ansi = false;
-    for (let i = 0; i < remaining.length; i += 1) {
-      const ch = remaining[i];
-      if (ch === "\x1b") ansi = true;
-      if (!ansi) {
-        const nextVisible = visible + charWidth(ch);
-        if (nextVisible > width) {
-          take = visible === 0 ? i + 1 : i;
-          break;
+  const activeSgr = [];
+  let current = "";
+  let visible = 0;
+
+  for (let index = 0; index < source.length;) {
+    if (source[index] === "\x1b") {
+      const sequence = source.slice(index).match(SGR_AT_START_PATTERN)?.[0];
+      if (sequence) {
+        current += sequence;
+        if (sequence === ANSI.reset || /^\x1b\[(?:0|0;.*)?m$/.test(sequence)) {
+          activeSgr.length = 0;
+        } else {
+          activeSgr.push(sequence);
         }
-        visible = nextVisible;
-      }
-      if (ansi && ch === "m") ansi = false;
-      if (visible >= width) {
-        take = i + 1;
-        break;
+        index += sequence.length;
+        continue;
       }
     }
-    if (take <= 0) break;
-    result.push(remaining.slice(0, take));
-    remaining = remaining.slice(take);
+
+    const codePoint = source.codePointAt(index);
+    const ch = String.fromCodePoint(codePoint);
+    const nextWidth = charWidth(ch);
+    if (visible > 0 && visible + nextWidth > safeWidth) {
+      result.push(activeSgr.length ? `${current}${ANSI.reset}` : current);
+      current = activeSgr.join("");
+      visible = 0;
+    }
+    current += ch;
+    visible += nextWidth;
+    index += ch.length;
   }
-  result.push(remaining);
+
+  result.push(current);
   return result;
 }
 
