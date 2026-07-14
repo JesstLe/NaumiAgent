@@ -17,7 +17,7 @@ from uuid import uuid4
 from naumi_agent import __version__
 from naumi_agent.agent_control import AgentControlSnapshot
 from naumi_agent.clipboard import strip_ansi
-from naumi_agent.config.paths import resolve_config_path
+from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
 from naumi_agent.inspector import RuntimeInspectorSnapshot
@@ -2029,7 +2029,12 @@ async def create_bridge(
 
 async def _amain(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="NaumiAgent terminal UI JSONL bridge")
-    parser.add_argument("--config", "-c", default="config.yaml", help="配置文件路径")
+    parser.add_argument(
+        "--config",
+        "-c",
+        default=DEFAULT_CONFIG_PATH,
+        help="配置文件路径",
+    )
     args = parser.parse_args(argv)
     bridge = await create_bridge(config_path=args.config)
     await serve_stdio(bridge)

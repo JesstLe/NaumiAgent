@@ -469,6 +469,26 @@ def test_bridge_resolve_config_path_targets_project_naumi_config(
     assert resolved == tmp_path / ".naumi" / "config.yaml"
 
 
+async def test_bridge_cli_defaults_to_project_naumi_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested: list[str] = []
+
+    async def fake_create_bridge(*, config_path: str):
+        requested.append(config_path)
+        return object()
+
+    async def fake_serve_stdio(_bridge: object) -> None:
+        return None
+
+    monkeypatch.setattr(ui_bridge, "create_bridge", fake_create_bridge)
+    monkeypatch.setattr(ui_bridge, "serve_stdio", fake_serve_stdio)
+
+    await ui_bridge._amain([])
+
+    assert requested == [DEFAULT_CONFIG_PATH]
+
+
 def test_protocol_decodes_strict_jsonl() -> None:
     record = make_envelope(ServerEventType.READY, {"ok": True})
     line = encode_jsonl(record)
