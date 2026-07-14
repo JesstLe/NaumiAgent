@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from naumi_agent.api.chat_environment import ChatEnvironmentCollector
@@ -287,6 +287,56 @@ async def get_chat_environment(
         sources=[
             ChatSourceReferenceResponse(**asdict(source)) for source in snapshot.sources
         ],
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/upload",
+    response_model=ChatSourceReferenceResponse,
+    status_code=201,
+)
+async def upload_chat_source(
+    session_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    auth: str = AuthDep,
+):
+    engine = request.app.state.engine
+    session = await engine.session_store.load(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if file.filename is None:
+        raise HTTPException(status_code=400, detail="Missing filename")
+
+    workspace_root = Path(engine.workspace_root).expanduser().resolve()
+    upload_dir = workspace_root / ".naumi" / "uploads" / session_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    target_path = upload_dir / Path(file.filename).name
+
+    try:
+        content = await file.read()
+        target_path.write_bytes(content)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {exc}") from exc
+
+    try:
+        relative_path = str(target_path.resolve().relative_to(workspace_root))
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="Upload path is outside workspace") from exc
+
+    source = await _chat_run_store(request).add_source(
+        session_id=session_id,
+        kind="file",
+        title=target_path.name,
+        path=relative_path,
+    )
+    return ChatSourceReferenceResponse(
+        id=source.id,
+        kind=source.kind,
+        title=source.title,
+        path=source.path,
+        run_id=source.run_id,
+        created_at=source.created_at,
     )
 
 

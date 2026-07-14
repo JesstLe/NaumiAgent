@@ -43,6 +43,7 @@ export const defaultRouteTemplates: Record<string, string> = {
   send_message_with_issue: '/sessions/{session_id}/messages',
   chat_environment: '/sessions/{session_id}/environment',
   add_chat_source: '/sessions/{session_id}/sources',
+  upload_chat_source: '/sessions/{session_id}/upload',
   resolve_permission: '/sessions/{session_id}/permissions/{call_id}/resolve',
   agents: '/workbench/sessions/{session_id}/agents',
   agent: '/workbench/sessions/{session_id}/agents/{agent_id}',
