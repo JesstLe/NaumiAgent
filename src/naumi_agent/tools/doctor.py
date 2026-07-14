@@ -46,5 +46,6 @@ class DoctorDiagnosticsTool(Tool):
             self._engine._config,
             workspace_root=self._engine.workspace_root,
             mcp_manager=self._engine._mcp_manager,
+            model_router=self._engine.router,
         )
         return render_doctor_report(report)

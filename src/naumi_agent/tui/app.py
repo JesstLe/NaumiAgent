@@ -2587,6 +2587,7 @@ class NaumiApp(App):
             self.engine._config,
             workspace_root=getattr(self.engine, "workspace_root", Path.cwd()),
             mcp_manager=getattr(self.engine, "_mcp_manager", None),
+            model_router=self.engine.router,
         )
         chat.mount(Markdown(render_doctor_report(report), classes="agent-msg"))
         status.status_text = {

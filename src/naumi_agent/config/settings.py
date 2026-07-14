@@ -31,8 +31,20 @@ class ModelMeta(BaseSettings):
 
     max_context: int | None = Field(default=None, gt=0)
     max_output: int | None = Field(default=None, gt=0)
-    input_cost_per_million: float | None = Field(default=None, ge=0)
-    output_cost_per_million: float | None = Field(default=None, ge=0)
+    input_cost_per_million: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False
+    )
+    output_cost_per_million: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False
+    )
+    supports_tools: bool | None = None
+    supports_streaming: bool | None = None
+    supports_parallel_tools: bool | None = None
+    supports_structured_output: bool | None = None
+    supports_reasoning: bool | None = None
+    supports_vision: bool | None = None
+    input_modalities: tuple[str, ...] | None = None
+    output_modalities: tuple[str, ...] | None = None
     reasoning_effort: ReasoningEffortSetting | None = None
     reasoning_efforts: tuple[ReasoningEffort, ...] | None = None
     default_reasoning_effort: ReasoningEffort | None = None
@@ -57,6 +69,33 @@ class ModelMeta(BaseSettings):
             and self.max_output > self.max_context
         ):
             raise ValueError("max_output 不能大于 max_context")
+        for name, modalities in (
+            ("input_modalities", self.input_modalities),
+            ("output_modalities", self.output_modalities),
+        ):
+            if modalities is None:
+                continue
+            if not modalities or any(not value.strip() for value in modalities):
+                raise ValueError(f"{name} 必须是非空字符串数组")
+            if len(set(modalities)) != len(modalities):
+                raise ValueError(f"{name} 不能包含重复值")
+        if self.supports_vision is False and self.input_modalities is not None:
+            if "image" in self.input_modalities:
+                raise ValueError(
+                    "supports_vision=false 时 input_modalities 不能声明 image"
+                )
+        if self.supports_tools is False and self.supports_parallel_tools is True:
+            raise ValueError(
+                "supports_tools=false 时 supports_parallel_tools 不能为 true"
+            )
+        if (
+            self.supports_reasoning is False
+            and self.reasoning_effort is not None
+            and self.reasoning_effort is not ReasoningEffortSetting.AUTO
+        ):
+            raise ValueError(
+                "supports_reasoning=false 时不能设置 reasoning_effort"
+            )
         efforts = self.reasoning_efforts
         if efforts is None:
             if self.default_reasoning_effort is not None:
@@ -64,6 +103,10 @@ class ModelMeta(BaseSettings):
                     "default_reasoning_effort 需要同时声明 reasoning_efforts"
                 )
             return self
+        if self.supports_reasoning is False:
+            raise ValueError(
+                "supports_reasoning=false 时不能声明 reasoning_efforts"
+            )
         if len(set(efforts)) != len(efforts):
             raise ValueError("reasoning_efforts 不能包含重复值")
         if (

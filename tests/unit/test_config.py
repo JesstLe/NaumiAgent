@@ -402,6 +402,24 @@ search:
     @pytest.mark.parametrize(
         "meta",
         [
+            {"input_modalities": ("text", "text")},
+            {"supports_vision": False, "input_modalities": ("text", "image")},
+            {"supports_reasoning": False, "reasoning_efforts": ("low",)},
+            {"supports_reasoning": False, "reasoning_effort": "high"},
+            {"supports_tools": False, "supports_parallel_tools": True},
+            {"input_cost_per_million": float("inf")},
+        ],
+    )
+    def test_model_info_rejects_contradictory_capabilities(
+        self,
+        meta: dict[str, object],
+    ) -> None:
+        with pytest.raises(ValueError):
+            AppConfig(models={"model_info": {"vendor/model": meta}})  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "meta",
+        [
             {"reasoning_efforts": []},
             {"reasoning_efforts": ["low", "low"]},
             {

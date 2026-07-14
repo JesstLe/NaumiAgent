@@ -114,6 +114,35 @@ def test_catalog_rejects_duplicate_modalities_and_vision_contradiction() -> None
         parse_provider_catalog_json(json.dumps(payload))
 
 
+def test_catalog_parses_extended_execution_capabilities() -> None:
+    payload = _native_catalog()
+    model = payload["providers"]["NVIDIA"]["models"]["glm-local"]  # type: ignore[index]
+    model["capabilities"].update(  # type: ignore[index]
+        {
+            "streaming": True,
+            "parallelTools": True,
+            "structuredOutput": False,
+        }
+    )
+
+    catalog = parse_provider_catalog_json(json.dumps(payload))
+    parsed = catalog.providers["nvidia"].models["glm-local"]
+
+    assert parsed.supports_streaming is True
+    assert parsed.supports_parallel_tools is True
+    assert parsed.supports_structured_output is False
+
+
+def test_catalog_rejects_parallel_tools_without_tool_support() -> None:
+    payload = _native_catalog()
+    model = payload["providers"]["NVIDIA"]["models"]["glm-local"]  # type: ignore[index]
+    model["capabilities"]["tools"] = False  # type: ignore[index]
+    model["capabilities"]["parallelTools"] = True  # type: ignore[index]
+
+    with pytest.raises(ProviderCatalogError, match="parallelTools.*tools=false"):
+        parse_provider_catalog_json(json.dumps(payload))
+
+
 @pytest.mark.parametrize("field", ["requestTimeoutMs", "request_timeout_ms"])
 def test_native_catalog_parses_positive_request_timeout(field: str) -> None:
     payload = _native_catalog()

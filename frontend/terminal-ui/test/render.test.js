@@ -360,6 +360,21 @@ test("footer only surfaces heartbeat when the Bridge is stale", () => {
   assert.match(stale, /Bridge: 无响应/);
 });
 
+test("footer only surfaces non-verified model capability contracts", () => {
+  const state = createInitialState();
+  state.status.model_contract = { status: "verified", warnings: [], errors: [] };
+  const verified = renderFooter(state, 160).map(stripAnsi).join("\n");
+  assert.doesNotMatch(verified, /模型契约:/);
+
+  state.status.model_contract = { status: "unverified", warnings: ["token 上限未验证"], errors: [] };
+  const unverified = renderFooter(state, 160).map(stripAnsi).join("\n");
+  assert.match(unverified, /模型契约: 未验证/);
+
+  state.status.model_contract = { status: "incompatible", warnings: [], errors: ["不支持工具调用"] };
+  const incompatible = renderFooter(state, 160).map(stripAnsi).join("\n");
+  assert.match(incompatible, /模型契约: 不兼容/);
+});
+
 test("footer shows 首字时间", () => {
   const state = createInitialState();
   state.status = {

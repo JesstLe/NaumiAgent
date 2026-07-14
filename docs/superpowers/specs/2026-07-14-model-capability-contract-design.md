@@ -20,7 +20,7 @@
 
 - 所有 token 限制必须为正整数，价格不得为负；
 - `max_output <= max_context`；
-- 当前 `max_tokens` 不得超过模型输出上限，超出时报告 incompatible；
+- 当前请求 `max_tokens` 不得超过模型输出上限；全局配置过大时沿用现有安全收紧并报告 warning；
 - tools 明确为 false 时，对完整 Agent Harness 报告 incompatible；
 - reasoning efforts/default 保持现有集合约束；
 - 模态数组不得重复；vision 与显式 image 输入声明不得互相矛盾。

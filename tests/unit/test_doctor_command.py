@@ -15,7 +15,15 @@ def test_doctor_command_forwards_live_flag(tmp_path: Path, monkeypatch) -> None:
     config_path.write_text("workspace_root: .\n", encoding="utf-8")
     calls: list[bool] = []
 
-    async def fake_run_doctor(_config, *, workspace_root, mcp_manager=None, live=False):
+    async def fake_run_doctor(
+        _config,
+        *,
+        workspace_root,
+        mcp_manager=None,
+        live=False,
+        model_router=None,
+        model_router_error=None,
+    ):
         calls.append(live)
         return DoctorReport((DoctorCheck("模型实时连接", "pass", "连接成功"),))
 

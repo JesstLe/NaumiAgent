@@ -87,6 +87,9 @@ class ProviderModelSpec:
     max_context: int | None = None
     max_output: int | None = None
     supports_tools: bool | None = None
+    supports_streaming: bool | None = None
+    supports_parallel_tools: bool | None = None
+    supports_structured_output: bool | None = None
     supports_reasoning: bool | None = None
     reasoning_efforts: tuple[ReasoningEffort, ...] = ()
     default_reasoning_effort: ReasoningEffort | None = None
@@ -549,6 +552,24 @@ def _parse_models(raw: Any, path: str) -> Mapping[str, ProviderModelSpec]:
             model.pop("capabilities", {}), f"{model_path}.capabilities"
         )
         supports_tools = _optional_bool(capabilities, "tools", f"{model_path}.capabilities")
+        supports_streaming = _optional_bool(
+            capabilities, "streaming", f"{model_path}.capabilities"
+        )
+        supports_parallel_tools = _optional_aliased_bool(
+            capabilities,
+            ("parallelTools", "parallel_tools"),
+            f"{model_path}.capabilities",
+        )
+        supports_structured_output = _optional_aliased_bool(
+            capabilities,
+            ("structuredOutput", "structured_output"),
+            f"{model_path}.capabilities",
+        )
+        if supports_tools is False and supports_parallel_tools is True:
+            raise ProviderCatalogError(
+                f"{model_path}.capabilities.parallelTools 在 tools=false 时"
+                "不能为 true。"
+            )
         (
             supports_reasoning,
             reasoning_efforts,
@@ -588,6 +609,9 @@ def _parse_models(raw: Any, path: str) -> Mapping[str, ProviderModelSpec]:
             max_context=max_context,
             max_output=max_output,
             supports_tools=supports_tools,
+            supports_streaming=supports_streaming,
+            supports_parallel_tools=supports_parallel_tools,
+            supports_structured_output=supports_structured_output,
             supports_reasoning=supports_reasoning,
             reasoning_efforts=reasoning_efforts,
             default_reasoning_effort=default_reasoning_effort,
@@ -753,6 +777,17 @@ def _optional_bool(data: dict[str, Any], key: str, path: str) -> bool | None:
     value = data.pop(key)
     if not isinstance(value, bool):
         raise ProviderCatalogError(f"{path}.{key} 必须是 boolean。")
+    return value
+
+
+def _optional_aliased_bool(
+    data: dict[str, Any], aliases: tuple[str, ...], path: str
+) -> bool | None:
+    value = _take_alias(data, aliases, path, required=False)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise ProviderCatalogError(f"{path}.{aliases[0]} 必须是 boolean。")
     return value
 
 

@@ -16,6 +16,7 @@ const EXECUTION_PHASES = new Set(["starting", "running", "preparing_tool", "runn
 const TEAM_PRIORITIES = new Set(["low", "normal", "high", "critical"]);
 const REASONING_EFFORTS = new Set(["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const REASONING_EFFORT_SOURCES = new Set(["runtime", "model", "global", "auto"]);
+const MODEL_CONTRACT_STATUSES = new Set(["verified", "partial", "unverified", "incompatible"]);
 
 export function parseArgs(argv) {
   const parsed = { config: ".naumi/config.yaml", bridgeCommand: "", bridgeCommandJson: "" };
@@ -313,7 +314,76 @@ function normalizeRuntimeStatus(payload, source = "runtime/status") {
       `${source}.reasoning_effort`,
     );
   }
+  if (Object.hasOwn(status, "model_contract") && status.model_contract != null) {
+    normalized.model_contract = normalizeModelContract(
+      status.model_contract,
+      `${source}.model_contract`,
+    );
+  }
   return normalized;
+}
+
+function normalizeModelContract(value, source) {
+  const contract = requireObject(value, source);
+  const status = strictStatusText(contract.status, `${source}.status`).toLowerCase();
+  if (!MODEL_CONTRACT_STATUSES.has(status)) {
+    throw new Error(`${source}.status 无效: ${status}`);
+  }
+  const capability = (name) => {
+    const raw = contract[name];
+    if (raw == null) return null;
+    if (typeof raw !== "boolean") throw new Error(`${source}.${name} 必须是 boolean 或 null`);
+    return raw;
+  };
+  const textArray = (name) => {
+    const raw = contract[name];
+    if (!Array.isArray(raw) || raw.length > 32 || raw.some((item) => typeof item !== "string")) {
+      throw new Error(`${source}.${name} 必须是最多 32 项的字符串数组`);
+    }
+    return raw.map((item) => strictStatusText(item, `${source}.${name}[]`));
+  };
+  const fieldSources = requireObject(contract.field_sources, `${source}.field_sources`);
+  if (Object.keys(fieldSources).length > 32) {
+    throw new Error(`${source}.field_sources 最多 32 项`);
+  }
+  const normalizedSources = {};
+  for (const [key, raw] of Object.entries(fieldSources)) {
+    normalizedSources[strictStatusText(key, `${source}.field_sources key`)] = strictStatusText(
+      raw,
+      `${source}.field_sources.${key}`,
+    );
+  }
+  return {
+    requested_model: strictStatusText(contract.requested_model, `${source}.requested_model`),
+    canonical_model: strictStatusText(contract.canonical_model, `${source}.canonical_model`),
+    upstream_model: strictStatusText(contract.upstream_model, `${source}.upstream_model`),
+    provider: strictStatusText(contract.provider, `${source}.provider`),
+    api_format: strictStatusText(contract.api_format, `${source}.api_format`),
+    max_context: strictPositiveInteger(contract.max_context, `${source}.max_context`),
+    max_output: strictPositiveInteger(contract.max_output, `${source}.max_output`),
+    request_max_tokens: strictPositiveInteger(contract.request_max_tokens, `${source}.request_max_tokens`),
+    input_cost_per_million: strictNonnegativeNumber(contract.input_cost_per_million, `${source}.input_cost_per_million`),
+    output_cost_per_million: strictNonnegativeNumber(contract.output_cost_per_million, `${source}.output_cost_per_million`),
+    supports_tools: capability("supports_tools"),
+    supports_streaming: capability("supports_streaming"),
+    supports_parallel_tools: capability("supports_parallel_tools"),
+    supports_structured_output: capability("supports_structured_output"),
+    supports_reasoning: capability("supports_reasoning"),
+    supports_vision: capability("supports_vision"),
+    input_modalities: textArray("input_modalities"),
+    output_modalities: textArray("output_modalities"),
+    field_sources: normalizedSources,
+    status,
+    warnings: textArray("warnings"),
+    errors: textArray("errors"),
+  };
+}
+
+function strictPositiveInteger(value, name) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} 必须是正整数`);
+  }
+  return value;
 }
 
 function normalizeReasoningEffort(value, source) {
