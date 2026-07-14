@@ -251,6 +251,10 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
             "description": "显示/更新任务面板（支持 list/open/cancel/refresh）",
         },
         {"command": "/task", "description": "查看任务运行详情"},
+        {
+            "command": "/goal",
+            "description": "持久目标 — 跨轮次保持方向，可选启动 Pursuit",
+        },
         {"command": "/permissions", "description": "显示待确认权限面板"},
         {"command": "/doctor", "description": "运行环境诊断"},
         {

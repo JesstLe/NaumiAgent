@@ -38,6 +38,7 @@ from naumi_agent.orchestrator.context_assembly import (
     HarnessContextInput,
     is_harness_context_message,
 )
+from naumi_agent.orchestrator.goal_store import GoalStore
 from naumi_agent.orchestrator.planner import AdaptivePlanner, ExecutionMode, Plan
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.orchestrator.system_prompt import (
@@ -530,6 +531,7 @@ class AgentEngine:
         self.scheduler_runner = SchedulerRunner(
             SchedulerStore(self._runtime_data_dir / "scheduler")
         )
+        self.goal_store = GoalStore(self._runtime_data_dir / "goals")
         self.pursuit_store = PursuitStore(
             self._runtime_data_dir / "pursuit"
         )
@@ -676,6 +678,15 @@ class AgentEngine:
         )
         from naumi_agent.tools.pursuit import create_pursuit_tool
         for tool in create_pursuit_tool():
+            self._tool_registry.register(tool)
+
+        from naumi_agent.tools.goal import create_goal_tools
+
+        for tool in create_goal_tools(
+            self.goal_store,
+            session_id_getter=lambda: self._session.id if self._session else "",
+            pursuit_tool_getter=lambda: self._tool_registry.get("pursue_goal"),
+        ):
             self._tool_registry.register(tool)
 
         self._reaper_started = False
@@ -2142,6 +2153,7 @@ class AgentEngine:
                 background_runner=self.background_runner,
                 scheduler_runner=self.scheduler_runner,
                 worktree_manager=self.worktree_manager,
+                goal_store=self.goal_store,
                 pursuit_store=self.pursuit_store,
                 mcp_manager=self._mcp_manager,
                 context_info=self.get_context_info(),

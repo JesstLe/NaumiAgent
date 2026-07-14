@@ -117,6 +117,7 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/autopsy", "执行迹切片 — SWE-bench 级 Bug 解剖", takes_arg=True, arg_hint="<目标>", readonly=True, category="分析"),
         # 元命令
         CommandMeta("/pursue", "目标追踪 — 自主循环执行直至真正达成", takes_arg=True, arg_hint="<目标>", readonly=False, category="元命令"),
+        CommandMeta("/goal", "持久目标 — 跨轮次保持方向，可选启动 Pursuit", takes_arg=True, arg_hint="[目标|子命令]", readonly=False, category="元命令"),
         CommandMeta("/worktree", "隔离执行区 — create/status/bind/keep/remove", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
         CommandMeta("/background", "后台任务 — run/status/list/cancel/output/cleanup", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
         CommandMeta("/schedule", "调度提醒 — create/list/cancel/pause/resume", takes_arg=True, arg_hint="<子命令>", readonly=False, category="元命令"),
