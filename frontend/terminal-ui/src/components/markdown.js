@@ -1,5 +1,11 @@
-import { ANSI, color, colorCodeLine, colorDiffLine, looksLikeDiff, wrapAnsiLine } from "../ansi.js";
+import { ANSI, color, looksLikeDiff, sanitizeTerminalText, wrapAnsiLine } from "../ansi.js";
 import { CODE_FOLD_VISIBLE_LINES, DIFF_FOLD_VISIBLE_LINES, foldLines } from "./folds.js";
+import {
+  isTableDivider,
+  renderSemanticCodeLine,
+  renderSemanticDiffLine,
+  renderSemanticMarkdownLine,
+} from "./semantic-text.js";
 
 export function MarkdownExcerpt({ text, foldKey = "" }) {
   return {
@@ -31,7 +37,7 @@ export function renderToolOutput(text, width, options = {}) {
       visibleLines: DIFF_FOLD_VISIBLE_LINES,
       hiddenLabel: " diff",
     });
-    const lines = folded.lines.map(colorDiffLine);
+    const lines = folded.lines.map(renderSemanticDiffLine);
     if (folded.notice) {
       lines.push(color(ANSI.dim, folded.notice));
     }
@@ -55,30 +61,26 @@ function normalizeToolOutputText(text, options = {}) {
 
 export function renderMarkdownExcerpt(text, width, options = {}) {
   const lines = [];
-  const raw = String(text ?? "").split("\n");
+  const raw = sanitizeTerminalText(text).split("\n");
   let inCode = false;
-  let codeLineCount = 0;
-  let omitted = 0;
-  for (const line of raw) {
+  let codeLanguage = "";
+  for (let index = 0; index < raw.length; index += 1) {
+    const line = raw[index];
     if (line.startsWith("```")) {
-      if (inCode && omitted) {
-        lines.push(color(ANSI.dim, `... 已隐藏 ${omitted} 行代码`));
-        omitted = 0;
-      }
       inCode = !inCode;
-      codeLineCount = 0;
+      codeLanguage = inCode ? line.slice(3).trim().toLowerCase() : "";
       lines.push(color(ANSI.dim, line));
       continue;
     }
     if (inCode) {
-      lines.push(colorCodeLine(line));
-      codeLineCount += 1;
+      lines.push(codeLanguage === "diff"
+        ? renderSemanticDiffLine(line)
+        : renderSemanticCodeLine(line, codeLanguage));
       continue;
     }
-    lines.push(line);
-  }
-  if (omitted) {
-    lines.push(color(ANSI.dim, `... 已隐藏 ${omitted} 行代码`));
+    lines.push(renderSemanticMarkdownLine(line, {
+      isTableHeader: index + 1 < raw.length && isTableDivider(raw[index + 1]),
+    }));
   }
   return foldMarkdownCodeBlocks(lines, width, options);
 }
