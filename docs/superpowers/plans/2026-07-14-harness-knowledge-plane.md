@@ -314,7 +314,7 @@ reads, made Markdown evidence fences longer than source backtick runs, aligned
 cache documentation with periodic Git audits, and synchronized CLI/TUI/new UI
 command metadata.
 
-- [ ] **Step 7: Commit, merge, and push the feature**
+- [x] **Step 7: Commit, merge, and push the feature**
 
 Commit the isolated branch with:
 
@@ -323,6 +323,12 @@ git commit -m "feat: add repository knowledge plane"
 ```
 
 Fast-forward merge into `main`, re-run only the focused acceptance commands on `main`, and push `origin/main`.
+
+Evidence: feature commit `079932413af11f2e1da9a928c23cfe7f2fb5b79d`
+was fast-forwarded to `main`; the merged tree again passed 103 focused Python
+tests, Ruff, the one filtered Terminal UI Node test, and `git diff --check`, then
+was pushed to `origin/main`. The pre-existing untracked `.superpowers/` directory
+was preserved.
 
 ## Plan Self-Review
 
