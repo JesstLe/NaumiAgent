@@ -12,6 +12,7 @@ from naumi_agent.config.paths import DEFAULT_CONFIG_PATH
 from naumi_agent.main import (
     TerminalUiLaunchError,
     _build_terminal_ui_command,
+    _launch_interactive_ui,
     _launch_terminal_ui,
     _parse_node_major,
     _resolve_terminal_ui_frontend_dir,
@@ -203,6 +204,93 @@ def test_launch_terminal_ui_preserves_invocation_cwd(
             "check": False,
         }
     ]
+
+
+@pytest.mark.parametrize("returncode", [0, 130, 143])
+def test_interactive_launcher_does_not_fallback_for_terminal_exit_codes(
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+) -> None:
+    tui_calls: list[str] = []
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_terminal_ui",
+        lambda _config: returncode,
+    )
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_tui",
+        lambda config: tui_calls.append(config),
+    )
+
+    assert _launch_interactive_ui("project.yaml") == returncode
+    assert tui_calls == []
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [TerminalUiLaunchError("未找到 Node.js"), OSError("spawn failed")],
+)
+def test_interactive_launcher_falls_back_once_for_launch_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+) -> None:
+    tui_calls: list[str] = []
+
+    def fail_terminal(_config: str) -> int:
+        raise failure
+
+    monkeypatch.setattr("naumi_agent.main._launch_terminal_ui", fail_terminal)
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_tui",
+        lambda config: tui_calls.append(config),
+    )
+
+    assert _launch_interactive_ui("project.yaml") == 0
+    assert tui_calls == ["project.yaml"]
+
+
+def test_interactive_launcher_falls_back_once_for_nonzero_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tui_calls: list[str] = []
+    monkeypatch.setattr("naumi_agent.main._launch_terminal_ui", lambda _config: 7)
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_tui",
+        lambda config: tui_calls.append(config),
+    )
+
+    assert _launch_interactive_ui("project.yaml") == 0
+    assert tui_calls == ["project.yaml"]
+
+
+def test_interactive_launcher_reports_tui_failure_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    terminal_calls = 0
+    tui_calls = 0
+    output: list[str] = []
+
+    def fail_terminal(_config: str) -> int:
+        nonlocal terminal_calls
+        terminal_calls += 1
+        raise TerminalUiLaunchError("missing terminal assets")
+
+    def fail_tui(_config: str) -> None:
+        nonlocal tui_calls
+        tui_calls += 1
+        raise RuntimeError("tui failed with sk-abcdefghijklmnopqrstuvwxyz")
+
+    monkeypatch.setattr("naumi_agent.main._launch_terminal_ui", fail_terminal)
+    monkeypatch.setattr("naumi_agent.main._launch_tui", fail_tui)
+    monkeypatch.setattr(
+        "naumi_agent.main.console.print",
+        lambda message: output.append(str(message)),
+    )
+
+    assert _launch_interactive_ui("project.yaml") == 1
+    assert terminal_calls == 1
+    assert tui_calls == 1
+    assert "正在切换到 Textual TUI" in "\n".join(output)
+    assert "sk-abcdefghijklmnopqrstuvwxyz" not in "\n".join(output)
 
 
 def test_naumi_without_subcommand_launches_terminal_ui(
