@@ -15,7 +15,10 @@
     "syncContext": "Sync Context",
     "search": "Search",
     "send": "Send",
-    "createLinkedIssue": "Create linked issue"
+    "createLinkedIssue": "Create linked issue",
+    "newTask": "New Task",
+    "review": "Review",
+    "close": "Close"
   },
   "chat": {
     "title": "Chat",
@@ -136,7 +139,39 @@
     "tokenRemoved": "Token removed"
   },
   "panel": {
-    "context": "Context"
+    "context": "Context",
+    "goal": "Goal"
+  },
+  "goal": {
+    "currentMission": "Current Mission",
+    "noMission": "No mission selected",
+    "progress": "Progress",
+    "completed": "completed",
+    "todo": "To do",
+    "allClear": "No pending items",
+    "empty": "Select a session to view goals",
+    "agents": "Active Agents"
+  },
+  "sideTool": {
+    "projects": "Projects",
+    "groups": "Groups",
+    "skills": "Skills",
+    "search": "Search"
+  },
+  "group": {
+    "empty": "No tasks in this group",
+    "orphan": "Ungrouped tasks"
+  },
+  "skill": {
+    "empty": "No agent skills available"
+  },
+  "search": {
+    "placeholder": "Search projects, issues, agents...",
+    "hint": "Type to search",
+    "projects": "Projects",
+    "issues": "Issues",
+    "agents": "Agents",
+    "noResults": "No matching results"
   },
   "session": {
     "title": "Sessions",
