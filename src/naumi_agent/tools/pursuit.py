@@ -7,7 +7,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
-from naumi_agent.orchestrator.pursuit import GoalPursuitLoop, PursuitConfig
+from naumi_agent.orchestrator.pursuit import GoalPursuitLoop, PursuitConfig, ToolExecutor
 from naumi_agent.orchestrator.pursuit_store import format_run, format_run_list
 from naumi_agent.tools.base import Tool, ToolMetadata
 
@@ -27,7 +27,7 @@ def set_pursuit_dependencies(
     tool_registry: Any,
     subagent_manager: Any,
     store: Any | None = None,
-    execute_tool_call: Any | None = None,
+    execute_tool_call: ToolExecutor | None = None,
 ) -> None:
     """Inject dependencies needed by the pursuit tool."""
     global _global_pursuit_loop

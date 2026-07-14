@@ -264,7 +264,7 @@ class BaseAgent:
                         )
                         continue
 
-                    result = await self.engine._execute_tool(
+                    result = await self.engine.execute_tool(
                         ToolCall(id=call_id, name=tool_name, arguments=args_str),
                         on_event=event_callback,
                         agent_name=self.config.name,
