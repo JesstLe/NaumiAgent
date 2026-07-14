@@ -1,7 +1,7 @@
 """LLM-based planner for the browser subagent.
 
 Ported from browser-debugging-daemon/scripts/subagent/OpenAIPlanner.js (423 lines).
-Uses NaumiAgent's ModelRouter instead of raw API calls.
+Uses NaumiAgent's ModelPort instead of raw API calls.
 """
 
 from __future__ import annotations
@@ -11,7 +11,8 @@ import json
 import logging
 from typing import Any
 
-from naumi_agent.model.router import ModelRouter, ModelTier
+from naumi_agent.model.router import ModelTier
+from naumi_agent.runtime.ports.model import ModelPort
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ def _try_parse_json(text: str) -> dict[str, Any] | None:
 class LLMPlanner:
     def __init__(
         self,
-        model_router: ModelRouter,
+        model_router: ModelPort,
         *,
         tier: str = "capable",
         request_timeout_ms: int = 45000,

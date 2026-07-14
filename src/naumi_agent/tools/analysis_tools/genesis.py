@@ -5,14 +5,15 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.tools.analysis_support.genesis import (
     build_genesis_report,
     scan_genesis,
 )
 from naumi_agent.tools.base import Tool
 
-RouterGetter = Callable[[], Any]
-RunAnalysis = Callable[[Any, str, str], Awaitable[str]]
+RouterGetter = Callable[[], ModelPort | None]
+RunAnalysis = Callable[[ModelPort, str, str], Awaitable[str]]
 
 GENESIS_SYSTEM = """\
 你是一位系统自演化架构师 (Genesis Architect)。

@@ -22,7 +22,8 @@ from naumi_agent.tools.browser.runtime.chrome_launcher import (
 )
 
 if TYPE_CHECKING:
-    from naumi_agent.model.router import ModelResponse, ModelRouter
+    from naumi_agent.model.router import ModelResponse
+    from naumi_agent.runtime.ports.model import ModelPort
 
 DoctorStatus = Literal["pass", "warn", "error"]
 
@@ -56,7 +57,7 @@ async def run_doctor(
     live: bool = False,
     live_probe: Callable[[AppConfig], Awaitable[ModelResponse]] | None = None,
     browser_fallback_available: bool | None = None,
-    model_router: ModelRouter | None = None,
+    model_router: ModelPort | None = None,
     model_router_error: str | None = None,
 ) -> DoctorReport:
     """Run local diagnostics and an optional explicit model connectivity probe."""
@@ -118,7 +119,7 @@ async def run_doctor(
     return DoctorReport(checks=tuple(checks))
 
 
-def _check_model_contracts(router: ModelRouter) -> tuple[DoctorCheck, ...]:
+def _check_model_contracts(router: ModelPort) -> tuple[DoctorCheck, ...]:
     """Summarize unique configured tiers without probing paid provider APIs."""
     checks: list[DoctorCheck] = []
     seen: set[str] = set()

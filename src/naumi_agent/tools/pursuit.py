@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from naumi_agent.orchestrator.pursuit import GoalPursuitLoop, PursuitConfig
 from naumi_agent.orchestrator.pursuit_store import format_run, format_run_list
 from naumi_agent.tools.base import Tool, ToolMetadata
+
+if TYPE_CHECKING:
+    from naumi_agent.runtime.ports.model import ModelPort
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +23,7 @@ PURSUIT_RUN_ID_RE = re.compile(r"^[a-zA-Z0-9_.:-]{1,128}$")
 
 
 def set_pursuit_dependencies(
-    router: Any,
+    router: ModelPort,
     tool_registry: Any,
     subagent_manager: Any,
     store: Any | None = None,

@@ -14,7 +14,8 @@ from typing import Any
 import litellm
 
 from naumi_agent.config.settings import MemoryConfig
-from naumi_agent.model.router import ModelRouter, ModelTier
+from naumi_agent.model.router import ModelTier
+from naumi_agent.runtime.ports.model import ModelPort
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ class ContextCompactor:
     def __init__(
         self,
         config: MemoryConfig,
-        router: ModelRouter,
+        router: ModelPort,
         *,
         threshold: float = 0.75,
         max_messages: int = 50,

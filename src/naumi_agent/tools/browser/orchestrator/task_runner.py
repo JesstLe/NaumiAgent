@@ -341,7 +341,9 @@ class TaskRunner:
             from naumi_agent.config.settings import ModelConfig
             from naumi_agent.model.router import ModelRouter
 
-            router = options.get("model_router") or ModelRouter(ModelConfig())
+            router = options.get("model_router")
+            if router is None:
+                router = ModelRouter(ModelConfig())
             planner = LLMPlanner(router)
         self._planner = planner
 

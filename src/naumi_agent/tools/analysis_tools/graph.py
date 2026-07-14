@@ -6,11 +6,12 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.tools.analysis_support.graph import format_graph_report, scan_graph
 from naumi_agent.tools.base import Tool
 
-RouterGetter = Callable[[], Any]
-RunAnalysis = Callable[[Any, str, str], Awaitable[str]]
+RouterGetter = Callable[[], ModelPort | None]
+RunAnalysis = Callable[[ModelPort, str, str], Awaitable[str]]
 ResolveTarget = Callable[[str], list[Path]]
 ReadSources = Callable[[list[Path]], str]
 CwdGetter = Callable[[], Path]
