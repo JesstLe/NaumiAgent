@@ -1,0 +1,33 @@
+{
+  "appTitle": "NaumiAgent Workbench",
+  "nav": {
+    "dashboard": "Dashboard",
+    "chat": "Chat",
+    "taskMarket": "Task Market",
+    "worktrees": "Worktrees",
+    "reviews": "Reviews",
+    "timeline": "Timeline",
+    "settings": "Settings"
+  },
+  "action": {
+    "newMission": "New Mission",
+    "pauseAgents": "Pause Agents",
+    "syncContext": "Sync Context",
+    "search": "Search",
+    "send": "Send",
+    "createLinkedIssue": "Create linked issue"
+  },
+  "chat": {
+    "composerPlaceholder": "Type a question or command...",
+    "emptyState": "Start a conversation with the Agent, or send a command."
+  },
+  "status": {
+    "online": "Online",
+    "offline": "Offline",
+    "starting": "Starting",
+    "unknown": "Unknown"
+  },
+  "panel": {
+    "context": "Context"
+  }
+}
