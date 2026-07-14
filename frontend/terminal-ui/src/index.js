@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import process from "node:process";
-import { ANSI, configureAnsiColors } from "./ansi.js";
+import { ANSI, configureAnsiColors, sanitizeTerminalText } from "./ansi.js";
 import { bridgeEnvironment, isIgnorableBridgeStderr } from "./bridge-stderr.js";
 import { createDebugLog } from "./debug-log.js";
 import {
@@ -77,6 +77,7 @@ import { createTrackpadScrollFilter } from "./scroll-input.js";
 import { shouldAnimateWorkingIndicator } from "./components/working-indicator.js";
 import { createWorkingAnimationController } from "./working-animation.js";
 import { detectTerminalCapabilities } from "./terminal-capabilities.js";
+import { createTerminalSession } from "./terminal-session.js";
 import {
   getProjectInputHistory,
   getUiSnapshot,
@@ -91,8 +92,7 @@ const terminalCapabilities = detectTerminalCapabilities();
 const state = createInitialState();
 const uiStateStore = loadUiStateStore(process.cwd());
 state.inputHistory = getProjectInputHistory(uiStateStore);
-const debugLog = createDebugLog({ cwd: process.cwd(), env: process.env });
-state.frontendDebugLogPath = debugLog?.path ?? "";
+let debugLog = null;
 
 let bridge = null;
 let send = null;
@@ -104,6 +104,11 @@ let viewportWidth = null;
 let viewportHeight = null;
 const inputTokenizer = createInputTokenizerState();
 const trackpadScrollFilter = createTrackpadScrollFilter();
+const terminalSession = createTerminalSession({
+  stdin: process.stdin,
+  stdout: process.stdout,
+  capabilities: terminalCapabilities,
+});
 const workingAnimation = createWorkingAnimationController({
   onFrame(frame) {
     state.workingAnimationFrame = frame;
@@ -122,8 +127,12 @@ function main() {
     return;
   }
   configureAnsiColors(terminalCapabilities.colors);
+  installProcessHandlers();
+  debugLog = createDebugLog({ cwd: process.cwd(), env: process.env });
+  state.frontendDebugLogPath = debugLog?.path ?? "";
   debugLog?.log("terminal_ui.state", { frontend_debug_log_path: state.frontendDebugLogPath });
   bridge = startBridge();
+  bridge.on("error", handleFatalError);
   send = createEventSender(bridge.stdin, { debugLog });
   attachJsonlLineReader(bridge.stdout, handleBridgeLine);
   bridge.stderr.on("data", (chunk) => {
@@ -200,41 +209,21 @@ function startBridge() {
 }
 
 function setupTerminal() {
-  process.stdout.write(
-    ANSI.altOn
-      + ANSI.bracketedPasteOn
-      + (terminalCapabilities.enhancedKeyboard ? ANSI.keyboardDisambiguateOn : "")
-      + ANSI.hideCursor,
-  );
-  if (process.stdin.isTTY) {
-    process.stdin.setRawMode(true);
-  }
-  process.stdin.resume();
-  process.stdin.setEncoding("utf8");
-  process.stdin.on("data", handleKeyInput);
-  process.stdout.on("resize", handleTerminalResize);
-  process.on("SIGINT", exit);
-  process.on("SIGTERM", exit);
+  terminalSession.setup({
+    onInput: handleKeyInput,
+    onResize: handleTerminalResize,
+  });
 }
 
 function restoreTerminal() {
   workingAnimation.stop();
-  process.stdout.write(
-    (terminalCapabilities.enhancedKeyboard ? ANSI.keyboardDisambiguateOff : "")
-      + ANSI.bracketedPasteOff
-      + ANSI.showCursor
-      + ANSI.altOff
-      + ANSI.reset,
-  );
-  if (process.stdin.isTTY) {
-    process.stdin.setRawMode(false);
-  }
+  terminalSession.restore();
 }
 
 function exit() {
   if (quitting) return;
   quitting = true;
-  debugLog?.log("terminal_ui.exit", {});
+  logDebug("terminal_ui.exit", {});
   persistUiSnapshot();
   try {
     send("shutdown", {});
@@ -243,8 +232,62 @@ function exit() {
   }
   restoreTerminal();
   debugLog?.close();
-  bridge?.kill("SIGTERM");
+  terminateBridge();
   process.exit(0);
+}
+
+function installProcessHandlers() {
+  process.on("SIGINT", exit);
+  process.on("SIGTERM", exit);
+  process.on("uncaughtException", handleFatalError);
+  process.on("unhandledRejection", handleFatalError);
+}
+
+function handleFatalError(reason) {
+  if (quitting) return;
+  quitting = true;
+  const message = safeFatalMessage(reason);
+  logDebug("terminal_ui.fatal", {
+    error: message,
+    stack: reason instanceof Error ? reason.stack : "",
+  });
+  try {
+    persistUiSnapshot();
+  } catch {
+    // State persistence is best effort during a fatal shutdown.
+  }
+  restoreTerminal();
+  terminateBridge();
+  debugLog?.close();
+  try {
+    process.stderr.write(`\nNaumi 终端 UI 已安全退出：${message}\n`);
+  } finally {
+    process.exit(1);
+  }
+}
+
+function terminateBridge() {
+  if (!bridge || bridge.killed) return false;
+  try {
+    return bridge.kill();
+  } catch (error) {
+    logDebug("bridge.terminate.error", { error: safeFatalMessage(error) });
+    return false;
+  }
+}
+
+function safeFatalMessage(reason) {
+  const raw = reason instanceof Error ? reason.message : String(reason ?? "未知错误");
+  return sanitizeTerminalText(raw).replace(/\s+/g, " ").trim().slice(0, 300)
+    || "未知错误";
+}
+
+function logDebug(event, payload) {
+  try {
+    debugLog?.log(event, payload);
+  } catch {
+    // Debug logging must never prevent terminal recovery.
+  }
 }
 
 function handleBridgeLine(line) {
