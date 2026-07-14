@@ -300,7 +300,7 @@ class TestBaseAgent:
                 new_callable=AsyncMock,
                 side_effect=responses,
             ) as call,
-            patch.object(engine, "_execute_tool", new_callable=AsyncMock) as execute_tool,
+            patch.object(engine, "execute_tool", new_callable=AsyncMock) as execute_tool,
         ):
             result = await agent.execute("运行命令")
 

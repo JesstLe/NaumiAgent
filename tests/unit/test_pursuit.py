@@ -1606,7 +1606,7 @@ class TestPursueToolRegistration:
         assert engine.tool_registry.get("pursuit_resume") is not None
         assert hasattr(engine, "pursuit_store")
         assert pursuit_mod._global_pursuit_loop is not None
-        assert pursuit_mod._global_pursuit_loop._execute_tool_call == engine._execute_tool
+        assert pursuit_mod._global_pursuit_loop._execute_tool_call == engine.execute_tool
 
     def test_pursuit_tools_expose_permission_metadata(self) -> None:
         assert PursueTool().metadata.requires_confirmation is True
