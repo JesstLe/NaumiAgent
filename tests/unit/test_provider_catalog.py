@@ -35,6 +35,7 @@ def _native_catalog() -> dict[str, object]:
                         "name": "GLM 4.7",
                         "upstreamId": "z-ai/glm4.7",
                         "limit": {"context": 128000, "output": 8192},
+                        "cost": {"input": 0.5, "output": 1.5},
                         "capabilities": {
                             "tools": True,
                             "reasoning": False,
@@ -73,10 +74,44 @@ def test_native_catalog_normalizes_provider_model_auth_and_discovery() -> None:
     assert model.upstream_id == "z-ai/glm4.7"
     assert model.max_context == 128000
     assert model.max_output == 8192
+    assert model.input_cost_per_million == 0.5
+    assert model.output_cost_per_million == 1.5
     assert model.supports_tools
     assert not model.supports_reasoning
     assert model.reasoning_efforts == ()
     assert model.default_reasoning_effort is None
+
+
+def test_catalog_rejects_output_limit_above_context_window() -> None:
+    payload = _native_catalog()
+    model = payload["providers"]["NVIDIA"]["models"]["glm-local"]  # type: ignore[index]
+    model["limit"] = {"context": 4_096, "output": 8_192}  # type: ignore[index]
+
+    with pytest.raises(ProviderCatalogError, match="output.*context"):
+        parse_provider_catalog_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize("field", ["input", "output"])
+def test_catalog_rejects_negative_model_pricing(field: str) -> None:
+    payload = _native_catalog()
+    model = payload["providers"]["NVIDIA"]["models"]["glm-local"]  # type: ignore[index]
+    model["cost"][field] = -1  # type: ignore[index]
+
+    with pytest.raises(ProviderCatalogError, match=f"cost.{field}"):
+        parse_provider_catalog_json(json.dumps(payload))
+
+
+def test_catalog_rejects_duplicate_modalities_and_vision_contradiction() -> None:
+    payload = _native_catalog()
+    model = payload["providers"]["NVIDIA"]["models"]["glm-local"]  # type: ignore[index]
+    model["modalities"] = {"input": ["text", "text"], "output": ["text"]}  # type: ignore[index]
+
+    with pytest.raises(ProviderCatalogError, match="modalities.input.*重复"):
+        parse_provider_catalog_json(json.dumps(payload))
+
+    model["modalities"] = {"input": ["text", "image"], "output": ["text"]}  # type: ignore[index]
+    with pytest.raises(ProviderCatalogError, match="vision=false.*image"):
+        parse_provider_catalog_json(json.dumps(payload))
 
 
 @pytest.mark.parametrize("field", ["requestTimeoutMs", "request_timeout_ms"])

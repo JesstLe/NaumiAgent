@@ -385,6 +385,23 @@ search:
     @pytest.mark.parametrize(
         "meta",
         [
+            {"max_context": 0},
+            {"max_output": -1},
+            {"input_cost_per_million": -0.01},
+            {"output_cost_per_million": -0.01},
+            {"max_context": 4_096, "max_output": 8_192},
+        ],
+    )
+    def test_model_info_rejects_impossible_limits_and_prices(
+        self,
+        meta: dict[str, int | float],
+    ) -> None:
+        with pytest.raises(ValueError):
+            AppConfig(models={"model_info": {"vendor/model": meta}})  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "meta",
+        [
             {"reasoning_efforts": []},
             {"reasoning_efforts": ["low", "low"]},
             {
