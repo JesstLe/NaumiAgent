@@ -24,7 +24,8 @@
 | 03 执行时间线与权限 | 结构化工具/权限卡、Todo/运行状态、`run_cancel` 安全取消、Workbench 取消终态联动、后端事件驱动的单运行活动组、允许一次/会话授权/撤销、bypass 全权限模式 | 结构化验证阶段 |
 | 04 Inspector 与命令页 | M5 Runtime Inspector；M6 `/agents`：后端权威执行/团队快照、精确停止、revision 增量/断序恢复、新 UI state v5 全屏页、Textual 同源三标签页、真实并发 Agent 跨前端验收 | M6 实现 `/workbench`；后续补 Agent 创建/重配、持久化历史与 Inspector 写操作 |
 | 06 完成收据与验证 | 后端权威回执、SQLite 持久化、`completion/receipt`、缺失补发、历史重放、新 UI 与 Textual 同源展示、真实 Git/pytest 端到端验收 | 接入可点击 next action；不阻塞当前完成闭环 |
-| 05、07-08 | 具备部分基础组件和协议，不视为模块完成 | 按依赖图逐切片推进 |
+| 07 CLI 兼容与迁移 | 默认入口已统一到 Node Terminal UI；Node/资源/普通退出失败自动 fallback 一次到 Textual；`naumi tui` 为显式入口；Prompt Toolkit 代码、测试和依赖保留但无公共入口；macOS/Linux/Windows 安装流程允许无 Node 使用 Textual | 补 wheel/主流终端发布矩阵与兼容遥测 |
+| 05、08 | 具备部分基础组件和协议，不视为模块完成 | 按依赖图逐切片推进 |
 
 “已完成”只描述表中列出的切片，不代表对应模块的全部验收标准已经满足。
 
