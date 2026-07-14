@@ -76,7 +76,7 @@ import Testing
 - Verify: `docs/mac-app/ui-audit/screenshots/compact/01-dashboard-zh.png`
 
 **Interfaces:**
-- Consumes: `docs/assets/mac-agent-workbench/naumiagent-workbench-logo-selected.png`.
+- Consumes: `assets/logo.png` (the selected logo was promoted to the canonical asset).
 - Produces: `AppIcon.icns` in each preview and development app bundle, with `CFBundleIconFile` set to `AppIcon`.
 
 - [ ] Run `test -f dist/NaumiAgentWorkbench.app/Contents/Resources/AppIcon.icns` and confirm it fails before packaging changes.

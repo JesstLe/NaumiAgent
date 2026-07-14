@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo.svg" width="128" height="128" alt="NaumiAgent Logo">
+  <img src="assets/logo.png" width="128" height="128" alt="NaumiAgent Logo">
   <h1>NaumiAgent</h1>
   <p>能阅读、执行、记忆、协作并自我改进的本地 Agent 系统。</p>
 </div>
