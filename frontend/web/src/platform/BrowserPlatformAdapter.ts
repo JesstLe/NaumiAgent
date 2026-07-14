@@ -1,24 +1,30 @@
 import type { PlatformAdapter } from './PlatformAdapter'
 
+const KEY_PREFIX = 'naumi:'
+
+function resolveKey(key: string): string {
+  return `${KEY_PREFIX}${key}`
+}
+
 export class BrowserPlatformAdapter implements PlatformAdapter {
   async getSetting(key: string): Promise<string | null> {
-    return localStorage.getItem(key)
+    return localStorage.getItem(resolveKey(key))
   }
 
   async setSetting(key: string, value: string): Promise<void> {
-    localStorage.setItem(key, value)
+    localStorage.setItem(resolveKey(key), value)
   }
 
   async getToken(): Promise<string | null> {
-    return localStorage.getItem('naumi_token')
+    return localStorage.getItem(resolveKey('token'))
   }
 
   async setToken(token: string): Promise<void> {
-    localStorage.setItem('naumi_token', token)
+    localStorage.setItem(resolveKey('token'), token)
   }
 
   async removeToken(): Promise<void> {
-    localStorage.removeItem('naumi_token')
+    localStorage.removeItem(resolveKey('token'))
   }
 
   async log(level: 'info' | 'warn' | 'error', message: string): Promise<void> {
