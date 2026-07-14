@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,7 +18,7 @@ knowledge:
 checks:
   - id: unit
     label: 单元测试
-    argv: [uv, run, pytest, -q]
+    argv: [python3, -c, "print('surface check ok')"]
 """
 
 
@@ -32,6 +33,23 @@ def _engine(tmp_path: Path) -> AgentEngine:
     profile.parent.mkdir(parents=True)
     profile.write_text(PROFILE, encoding="utf-8")
     (workspace / "AGENTS.md").write_text("HARNESS_SURFACE_RULE", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "tests@example.com"],
+        cwd=workspace,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Harness Tests"],
+        cwd=workspace,
+        check=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=workspace, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "fixture"],
+        cwd=workspace,
+        check=True,
+    )
     config = AppConfig(
         workspace_root=str(workspace),
         memory=MemoryConfig(
@@ -48,16 +66,19 @@ def _engine(tmp_path: Path) -> AgentEngine:
 
 
 @pytest.mark.asyncio
-async def test_engine_registers_only_read_only_harness_tools(tmp_path: Path) -> None:
+async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: Path) -> None:
     engine = _engine(tmp_path)
     try:
         status = engine.tool_registry.get("harness_status")
         doctor = engine.tool_registry.get("harness_doctor")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
+        check = engine.tool_registry.get("harness_run_check")
         assert status is not None and status.metadata.read_only
         assert doctor is not None and doctor.metadata.read_only
         assert knowledge is not None and knowledge.metadata.read_only
         assert knowledge.metadata.concurrency_safe
+        assert check is not None and not check.metadata.read_only
+        assert check.metadata.concurrency_safe
         assert engine.tool_registry.get("harness_trust") is None
         assert engine.tool_registry.get("harness_untrust") is None
     finally:
@@ -80,16 +101,19 @@ async def test_harness_slash_flow_previews_confirms_and_revokes_trust(
         knowledge = _plain(
             await execute_slash_command(engine, "/harness knowledge AGENTS.md")
         )
+        check = _plain(await execute_slash_command(engine, "/harness check unit"))
         revoked = _plain(await execute_slash_command(engine, "/harness untrust"))
 
         assert "配置未受信任" in initial
         assert "仅预览" in preview
-        assert "unit: uv run pytest -q" in preview
+        assert "unit: python3 -c" in preview
         assert not still_untrusted.trusted
         assert "已信任" in confirmed
         assert "Harness 已就绪" in ready
         assert "HARNESS_SURFACE_RULE" in knowledge
         assert "AGENTS.md" in knowledge
+        assert "Harness 检查通过" in check
+        assert "surface check ok" in check
         assert "已撤销" in revoked
         assert not (await engine.harness_service.status()).trusted
     finally:

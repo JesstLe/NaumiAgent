@@ -6,10 +6,12 @@ from pathlib import Path
 
 import pytest
 
+from naumi_agent.harness.checks import HarnessCheckResult, HarnessCheckStatus
 from naumi_agent.harness.service import (
     HarnessKnowledgeStatusCode,
     HarnessService,
     HarnessStatusCode,
+    render_harness_check,
     render_harness_doctor,
     render_harness_status,
 )
@@ -27,6 +29,26 @@ checks:
 evals:
   suites: [docs/evals/core.yaml]
 """
+
+
+def test_check_renderer_redacts_secrets_controls_and_bounds_output() -> None:
+    rendered = render_harness_check(
+        HarnessCheckResult(
+            check_id="unit",
+            run_id="run-1",
+            status=HarnessCheckStatus.FAILED,
+            tree_fingerprint="sha256:test",
+            profile_digest="profile",
+            message="检查失败。",
+            output=("x" * 13_000 + "\napi_key=abcdefghijklmnopqrstuvwxyz\x1b[31m"),
+        )
+    )
+
+    assert "abcdefghijklmnopqrstuvwxyz" not in rendered
+    assert "[REDACTED]" in rendered
+    assert "\x1b" not in rendered
+    assert "已裁剪" in rendered
+    assert len(rendered) < 13_000
 
 
 def _profile_path(workspace: Path) -> Path:

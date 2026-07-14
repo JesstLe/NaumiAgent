@@ -11,6 +11,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
+from naumi_agent.harness.checks import (
+    HarnessCheckResult,
+    HarnessCheckRunner,
+    HarnessCheckStatus,
+    select_required_check_ids,
+    validate_run_id,
+)
 from naumi_agent.harness.context import (
     HarnessKnowledgeContextComposer,
     KnowledgeContextBundle,
@@ -32,6 +39,7 @@ from naumi_agent.harness.trust import (
     HarnessTrustStore,
     HarnessTrustStoreError,
 )
+from naumi_agent.safety.guardrails import OutputGuardrail
 
 
 class HarnessStatusCode(StrEnum):
@@ -102,6 +110,7 @@ class HarnessService:
         self._trust_store = trust_store
         self._profile_path = profile_path
         self._knowledge_index = RepositoryKnowledgeIndex(self.workspace_root)
+        self._check_runner = HarnessCheckRunner(workspace_root=self.workspace_root)
         self._knowledge_composer = HarnessKnowledgeContextComposer(
             self._knowledge_index
         )
@@ -117,6 +126,79 @@ class HarnessService:
         ] = OrderedDict()
         self._last_git_audit_at = 0.0
         self._git_audit_interval_seconds = 30.0
+
+    async def run_check(self, *, check_id: str, run_id: str) -> HarnessCheckResult:
+        """Run one exact check from the currently trusted Profile."""
+        normalized_check_id = check_id.strip()
+        if not normalized_check_id:
+            raise ValueError("check_id 不能为空。")
+        normalized_run_id = validate_run_id(run_id)
+        status = await self.status()
+        if status.code is HarnessStatusCode.MISSING:
+            return _unavailable_check_result(
+                check_id=normalized_check_id,
+                run_id=normalized_run_id,
+                message="当前工作区尚未配置 Harness Profile，检查未执行。",
+            )
+        if status.code is HarnessStatusCode.INVALID:
+            return _unavailable_check_result(
+                check_id=normalized_check_id,
+                run_id=normalized_run_id,
+                message="Harness Profile 无效，检查未执行；请先运行 /harness doctor。",
+            )
+        if not status.trusted or not status.profile_digest:
+            return _unavailable_check_result(
+                check_id=normalized_check_id,
+                run_id=normalized_run_id,
+                profile_digest=status.profile_digest or "-",
+                message=(
+                    "Harness Profile 未受信任，检查未执行。"
+                    "下一步：运行 /harness trust 查看并确认命令。"
+                ),
+            )
+        profile = status.snapshot.profile
+        assert profile is not None
+        check = next(
+            (item for item in profile.checks if item.id == normalized_check_id),
+            None,
+        )
+        if check is None:
+            return _unavailable_check_result(
+                check_id=normalized_check_id,
+                run_id=normalized_run_id,
+                profile_digest=status.profile_digest,
+                message=f"Harness Profile 未声明检查 {normalized_check_id}。",
+            )
+        trusted_digest = status.profile_digest
+
+        async def profile_is_current() -> bool:
+            current = await self.status()
+            return current.trusted and current.profile_digest == trusted_digest
+
+        return await self._check_runner.run(
+            run_id=normalized_run_id,
+            check=check,
+            profile_digest=trusted_digest,
+            profile_is_current=profile_is_current,
+        )
+
+    async def required_check_ids(
+        self,
+        *,
+        task_kind: str,
+        changed_paths: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        """Select required checks from the current trusted Profile."""
+        if task_kind not in {"answer", "analysis", "change", "monitor"}:
+            raise ValueError("task_kind 必须是 answer、analysis、change 或 monitor。")
+        status = await self.status()
+        if not status.trusted or status.snapshot.profile is None:
+            raise ValueError("Harness Profile 未受信任，不能选择必需检查。")
+        return select_required_check_ids(
+            status.snapshot.profile.checks,
+            task_kind=task_kind,
+            changed_paths=changed_paths,
+        )
 
     async def status(self) -> HarnessStatus:
         snapshot = self._load()
@@ -253,13 +335,14 @@ class HarnessService:
 
         findings.append(
             HarnessDoctorFinding(
-                code="execution_disabled",
+                code=("execution_enabled" if status.trusted else "execution_disabled"),
                 level="info",
                 message=(
-                    "H2 只提供 Profile 诊断与只读仓库知识，"
-                    "不会执行其中的任何命令。"
+                    "受信任的 Profile 检查可通过 /harness check <id> 按需执行；"
+                    "系统不会自动运行全部检查。"
+                    if status.trusted
+                    else "Profile 未受信任，不会执行其中的任何命令。"
                 ),
-                hint="命令执行将在 H3 Check Runner 完成后启用。",
             )
         )
         return HarnessDoctorReport(status, tuple(findings), tuple(commands))
@@ -578,7 +661,7 @@ def render_harness_status(status: HarnessStatus) -> str:
     else:
         title = "## Harness 已就绪"
         next_step = (
-            "已启用受信任的只读仓库知识；Profile 中的检查命令仍不会被执行。"
+            "已启用受信任的仓库知识；可按需运行 Profile 中精确声明的检查。"
         )
     return (
         f"{title}\n\n"
@@ -596,8 +679,37 @@ def render_harness_doctor(report: HarnessDoctorReport) -> str:
         suffix = f"；{finding.hint}" if finding.hint else ""
         lines.append(f"- {icons[finding.level]} {finding.message}{suffix}")
     if report.command_summaries:
-        lines.extend(("", "### 配置中的命令（仅展示，不执行）"))
+        lines.extend(("", "### 配置中的命令"))
         lines.extend(f"- `{command}`" for command in report.command_summaries)
+    return "\n".join(lines)
+
+
+def render_harness_check(result: HarnessCheckResult) -> str:
+    """Render a check result without conflating policy and test failures."""
+    titles = {
+        HarnessCheckStatus.PASSED: "Harness 检查通过",
+        HarnessCheckStatus.FAILED: "Harness 检查未通过",
+        HarnessCheckStatus.TIMED_OUT: "Harness 检查超时",
+        HarnessCheckStatus.CANCELLED: "Harness 检查已取消",
+        HarnessCheckStatus.BLOCKED_BY_POLICY: "Harness 检查被安全策略阻止",
+        HarnessCheckStatus.INFRASTRUCTURE_ERROR: "Harness 检查基础设施异常",
+        HarnessCheckStatus.STALE: "Harness 检查结果已失效",
+    }
+    lines = [
+        f"## {titles[result.status]}",
+        "",
+        f"- 检查：`{result.check_id}`",
+        f"- 状态：`{result.status.value}`",
+        f"- Tree fingerprint：`{result.tree_fingerprint}`",
+        f"- 耗时：{result.duration_ms}ms",
+        f"- 缓存复用：{'是' if result.cached else '否'}",
+        "",
+        result.message,
+    ]
+    if result.output:
+        safe_output = _safe_check_output(result.output)
+        fence = safe_markdown_fence(safe_output)
+        lines.extend(("", "### 有界输出尾部", "", fence, safe_output, fence))
     return "\n".join(lines)
 
 
@@ -651,6 +763,37 @@ def _knowledge_unavailable(
             message="Harness Profile 未受信任；不会注入仓库知识。",
         )
     return None
+
+
+def _unavailable_check_result(
+    *,
+    check_id: str,
+    run_id: str,
+    message: str,
+    profile_digest: str = "-",
+) -> HarnessCheckResult:
+    return HarnessCheckResult(
+        check_id=check_id,
+        run_id=run_id,
+        status=HarnessCheckStatus.BLOCKED_BY_POLICY,
+        tree_fingerprint="-",
+        profile_digest=profile_digest,
+        message=message,
+    )
+
+
+def _safe_check_output(output: str, *, max_chars: int = 12_000) -> str:
+    redacted = OutputGuardrail.redact(output)
+    sanitized = "".join(
+        character
+        if character in {"\n", "\t"}
+        or (ord(character) >= 32 and not 127 <= ord(character) <= 159)
+        else "�"
+        for character in redacted
+    )
+    if len(sanitized) <= max_chars:
+        return sanitized
+    return "… 已裁剪，仅显示输出尾部 …\n" + sanitized[-max_chars:]
 
 
 def _with_elapsed(
