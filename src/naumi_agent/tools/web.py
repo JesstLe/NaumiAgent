@@ -18,6 +18,7 @@ import httpx
 from markdownify import markdownify as md
 from readability import Document
 
+from naumi_agent.config.settings import SearchConfig
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 if TYPE_CHECKING:
@@ -121,8 +122,14 @@ def _normalize_public_http_url(raw_url: str) -> str:
 class WebSearchTool(Tool):
     """固定路由搜索，并在直连搜索不可用时至多回退一次浏览器。"""
 
-    def __init__(self, browser_runtime: BrowserRuntime | None = None) -> None:
+    def __init__(
+        self,
+        browser_runtime: BrowserRuntime | None = None,
+        *,
+        search_config: SearchConfig | None = None,
+    ) -> None:
         self._browser_runtime = browser_runtime
+        self._search_config = search_config or SearchConfig()
 
     @property
     def name(self) -> str:
@@ -136,7 +143,10 @@ class WebSearchTool(Tool):
     def metadata(self) -> ToolMetadata:
         return ToolMetadata(
             read_only=True,
-            concurrency_safe=self._browser_runtime is None,
+            concurrency_safe=(
+                self._browser_runtime is None
+                or "browser" not in self._search_config.provider_order
+            ),
             user_facing_name="网络搜索",
             search_hint="web search internet brave duckduckgo current information",
         )
@@ -160,6 +170,8 @@ class WebSearchTool(Tool):
         query = query.strip()
         if not query:
             return "搜索失败：query 不能为空。"
+        if len(query) > 400 or len(query.split()) > 50:
+            return "搜索失败：query 最多 400 个字符和 50 个词。"
         safe_max_results = _clamp_int(
             max_results,
             default=5,
@@ -167,18 +179,23 @@ class WebSearchTool(Tool):
             maximum=MAX_SEARCH_RESULTS,
         )
         attempts: list[SearchOutcome] = []
-        brave_api_key = os.environ.get("BRAVE_SEARCH_API_KEY", "").strip()
-        if brave_api_key:
-            attempts.append(await self._brave_search(query, safe_max_results, brave_api_key))
-            if attempts[-1].status is SearchStatus.SUCCESS:
-                return self._format_success(attempts[-1], attempts)
-
-        attempts.append(await self._ddg_search(query, safe_max_results))
-        if attempts[-1].status is SearchStatus.SUCCESS:
-            return self._format_success(attempts[-1], attempts)
-
-        if self._browser_runtime is not None:
-            attempts.append(await self._browser_search(query, safe_max_results))
+        for provider in self._search_config.provider_order:
+            outcome: SearchOutcome | None = None
+            if provider == "brave":
+                brave_api_key = self._search_config.brave.resolve_api_key()
+                if brave_api_key:
+                    outcome = await self._brave_search(
+                        query,
+                        safe_max_results,
+                        brave_api_key,
+                    )
+            elif provider == "duckduckgo":
+                outcome = await self._ddg_search(query, safe_max_results)
+            elif provider == "browser" and self._browser_runtime is not None:
+                outcome = await self._browser_search(query, safe_max_results)
+            if outcome is None:
+                continue
+            attempts.append(outcome)
             if attempts[-1].status is SearchStatus.SUCCESS:
                 return self._format_success(attempts[-1], attempts)
 
@@ -186,15 +203,30 @@ class WebSearchTool(Tool):
 
     async def _brave_search(self, query: str, max_results: int, api_key: str) -> SearchOutcome:
         try:
+            brave = self._search_config.brave
+            params: dict[str, str | int | bool] = {
+                "q": query,
+                "count": max_results,
+                "safesearch": brave.safesearch,
+                "spellcheck": brave.spellcheck,
+            }
+            for name, value in (
+                ("country", brave.country),
+                ("search_lang", brave.search_lang),
+                ("ui_lang", brave.ui_lang),
+                ("freshness", brave.freshness),
+            ):
+                if value is not None:
+                    params[name] = value
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": max_results},
+                    params=params,
                     headers={
                         "X-Subscription-Token": api_key,
                         "Accept": "application/json",
                     },
-                    timeout=10,
+                    timeout=brave.timeout_seconds,
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -495,5 +527,12 @@ class WebFetchTool(Tool):
             return f"抓取失败: {type(e).__name__}: {e}"
 
 
-def create_web_tools(browser_runtime: BrowserRuntime | None = None) -> list[Tool]:
-    return [WebSearchTool(browser_runtime), WebFetchTool()]
+def create_web_tools(
+    browser_runtime: BrowserRuntime | None = None,
+    *,
+    search_config: SearchConfig | None = None,
+) -> list[Tool]:
+    return [
+        WebSearchTool(browser_runtime, search_config=search_config),
+        WebFetchTool(),
+    ]

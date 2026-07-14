@@ -70,6 +70,27 @@ async def test_doctor_reports_enhanced_search_when_brave_key_exists(
     assert "configured-secret" not in check.detail
 
 
+@pytest.mark.asyncio
+async def test_doctor_uses_custom_brave_environment_reference(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+    monkeypatch.setenv("NAUMI_CUSTOM_BRAVE_KEY", "custom-search-secret")
+    config = _config(tmp_path)
+    config.search.brave.api_key_ref = "{env:NAUMI_CUSTOM_BRAVE_KEY}"
+
+    report = await run_doctor(
+        config,
+        workspace_root=tmp_path,
+        browser_fallback_available=True,
+    )
+
+    check = next(item for item in report.checks if item.name == "网络搜索")
+    assert check.status == "pass"
+    assert "已增强" in check.detail
+    assert "custom-search-secret" not in render_doctor_report(report)
+
+
 def test_search_readiness_reports_restricted_without_any_route(monkeypatch) -> None:
     monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
 

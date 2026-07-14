@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
+from collections.abc import Mapping
+from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import Field, field_validator, model_validator
@@ -16,6 +20,10 @@ from naumi_agent.model.reasoning import ReasoningEffort, ReasoningEffortSetting
 logger = logging.getLogger(__name__)
 
 DEFAULT_RUNTIME_MAX_TURNS = 50
+_ENV_SECRET_REF = re.compile(r"^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$")
+_FRESHNESS = re.compile(
+    r"^(?:pd|pw|pm|py|\d{4}-\d{2}-\d{2}to\d{4}-\d{2}-\d{2})$"
+)
 
 
 class ModelMeta(BaseSettings):
@@ -178,6 +186,114 @@ class BrowserDaemonConfig(BaseSettings):
     startup_timeout_seconds: float = 8.0
 
 
+class BraveSearchConfig(BaseSettings):
+    """Brave Web Search options with an environment-only secret reference."""
+
+    model_config = SettingsConfigDict(hide_input_in_errors=True)
+
+    enabled: bool = True
+    api_key_ref: str = "{env:BRAVE_SEARCH_API_KEY}"
+    country: str | None = None
+    search_lang: str | None = None
+    ui_lang: str | None = None
+    safesearch: Literal["off", "moderate", "strict"] = "moderate"
+    spellcheck: bool = True
+    freshness: str | None = None
+    timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
+
+    @field_validator("api_key_ref")
+    @classmethod
+    def _validate_api_key_ref(cls, value: str) -> str:
+        normalized = value.strip()
+        if not _ENV_SECRET_REF.fullmatch(normalized):
+            raise ValueError("api_key_ref 仅允许 {env:VARIABLE_NAME} 环境变量引用")
+        return normalized
+
+    @field_validator("country")
+    @classmethod
+    def _validate_country(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().upper()
+        if normalized != "ALL" and not re.fullmatch(r"[A-Z]{2}", normalized):
+            raise ValueError("country 必须是两位国家代码或 ALL")
+        return normalized
+
+    @field_validator("search_lang")
+    @classmethod
+    def _validate_search_lang(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if not re.fullmatch(r"[a-z]{2,8}(?:-[a-z0-9]{2,8})?", normalized):
+            raise ValueError("search_lang 必须是有效语言代码")
+        return normalized
+
+    @field_validator("ui_lang")
+    @classmethod
+    def _validate_ui_lang(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not re.fullmatch(r"[A-Za-z]{2,8}(?:-[A-Za-z0-9]{2,8})?", normalized):
+            raise ValueError("ui_lang 必须是有效 locale")
+        return normalized
+
+    @field_validator("freshness")
+    @classmethod
+    def _validate_freshness(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not _FRESHNESS.fullmatch(normalized):
+            raise ValueError("freshness 必须是 pd/pw/pm/py 或 YYYY-MM-DDtoYYYY-MM-DD")
+        if "to" in normalized:
+            start_text, end_text = normalized.split("to", 1)
+            try:
+                start = date.fromisoformat(start_text)
+                end = date.fromisoformat(end_text)
+            except ValueError as exc:
+                raise ValueError("freshness 日期范围包含无效日期") from exc
+            if start > end:
+                raise ValueError("freshness 日期范围起始日期不能晚于结束日期")
+        return normalized
+
+    def resolve_api_key(self, environ: Mapping[str, str] | None = None) -> str | None:
+        """Resolve the configured environment reference without retaining the secret."""
+        match = _ENV_SECRET_REF.fullmatch(self.api_key_ref)
+        if not self.enabled or match is None:
+            return None
+        source = os.environ if environ is None else environ
+        value = source.get(match.group(1), "").strip()
+        return value or None
+
+
+class SearchConfig(BaseSettings):
+    """Ordered web-search routing and provider options."""
+
+    model_config = SettingsConfigDict(env_prefix="NAUMI_SEARCH__")
+
+    provider_order: tuple[Literal["brave", "duckduckgo", "browser"], ...] = (
+        "brave",
+        "duckduckgo",
+        "browser",
+    )
+    brave: BraveSearchConfig = Field(default_factory=BraveSearchConfig)
+
+    @field_validator("provider_order", mode="before")
+    @classmethod
+    def _provider_order_must_be_non_empty(cls, value: object) -> object:
+        if not isinstance(value, (list, tuple)) or not value:
+            raise ValueError("provider_order 必须是非空数组")
+        return value
+
+    @model_validator(mode="after")
+    def _provider_order_must_be_unique(self) -> SearchConfig:
+        if len(set(self.provider_order)) != len(self.provider_order):
+            raise ValueError("provider_order 不能包含重复提供方")
+        return self
+
+
 class UIConfig(BaseSettings):
     """CLI/TUI theme and output verbosity configuration."""
 
@@ -194,6 +310,7 @@ class AppConfig(BaseSettings):
         env_nested_delimiter="__",
         env_file=str(Path(__file__).resolve().parents[3] / ".env"),
         env_file_encoding="utf-8",
+        hide_input_in_errors=True,
     )
 
     models: ModelConfig = Field(default_factory=ModelConfig)
@@ -204,6 +321,7 @@ class AppConfig(BaseSettings):
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     browser_daemon: BrowserDaemonConfig = Field(default_factory=BrowserDaemonConfig)
+    search: SearchConfig = Field(default_factory=SearchConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
     keybindings: dict[str, str | list[str]] = Field(default_factory=dict)
     workspace_root: str = Field(default_factory=lambda: str(Path.cwd()))

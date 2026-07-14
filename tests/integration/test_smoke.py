@@ -44,6 +44,21 @@ class TestSmokeInit:
         assert "delegate_task" in names
         assert "list_agents" in names
 
+    def test_web_search_uses_engine_search_config(self) -> None:
+        config = AppConfig(
+            search={
+                "provider_order": ["duckduckgo"],
+                "brave": {"enabled": False},
+            }
+        )
+        engine = AgentEngine(config)
+
+        tool = engine.tool_registry.get("web_search")
+
+        assert tool is not None
+        assert tool._search_config is config.search
+        assert tool.metadata.concurrency_safe is True
+
     def test_engine_components(self, engine: AgentEngine) -> None:
         assert engine.router is not None
         assert engine.session_store is not None

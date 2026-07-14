@@ -13,6 +13,15 @@ memory:
   vector_db_path: "/app/data/chroma"
   compaction_threshold: 0.75
 
+search:
+  provider_order: [brave, duckduckgo, browser]
+  brave:
+    enabled: true
+    api_key_ref: "{env:BRAVE_SEARCH_API_KEY}"
+    safesearch: moderate
+    spellcheck: true
+    timeout_seconds: 10
+
 workspace_root: "/workspace"
 
 safety:

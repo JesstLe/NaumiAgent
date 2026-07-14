@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from naumi_agent.config.settings import SearchConfig
 from naumi_agent.tools.web import (
     SearchItem,
     SearchOutcome,
@@ -82,6 +83,13 @@ class TestWebTools:
         assert "query 不能为空" in output
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("query", ["x" * 401, " ".join(["word"] * 51)])
+    async def test_search_rejects_queries_beyond_brave_contract(self, query: str) -> None:
+        output = await WebSearchTool().execute(query=query)
+
+        assert "最多 400 个字符和 50 个词" in output
+
+    @pytest.mark.asyncio
     async def test_search_without_key_uses_keyless_provider(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -128,6 +136,113 @@ class TestWebTools:
         assert "已自动回退" in output
         tool._brave_search.assert_awaited_once()
         tool._ddg_search.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_search_uses_custom_brave_environment_reference(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("NAUMI_CUSTOM_BRAVE_KEY", "custom-secret")
+        config = SearchConfig(
+            provider_order=("brave",),
+            brave={"api_key_ref": "{env:NAUMI_CUSTOM_BRAVE_KEY}"},
+        )
+        tool = WebSearchTool(search_config=config)
+        tool._brave_search = AsyncMock(
+            return_value=SearchOutcome(
+                status=SearchStatus.SUCCESS,
+                provider="brave",
+                items=(SearchItem("Brave 结果", "https://example.com", ""),),
+            )
+        )
+
+        output = await tool.execute(query="naumi")
+
+        assert "搜索来源：Brave" in output
+        tool._brave_search.assert_awaited_once_with("naumi", 5, "custom-secret")
+
+    @pytest.mark.asyncio
+    async def test_search_skips_disabled_brave_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "configured-secret")
+        config = SearchConfig(brave={"enabled": False})
+        tool = WebSearchTool(search_config=config)
+        tool._brave_search = AsyncMock()
+        tool._ddg_search = AsyncMock(
+            return_value=SearchOutcome(
+                status=SearchStatus.SUCCESS,
+                provider="duckduckgo",
+                items=(SearchItem("结果", "https://example.com", ""),),
+            )
+        )
+
+        output = await tool.execute(query="naumi")
+
+        assert "搜索来源：DuckDuckGo" in output
+        tool._brave_search.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_brave_request_uses_validated_advanced_options(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        class _Response:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "web": {
+                        "results": [{
+                            "title": "结果",
+                            "url": "https://example.com",
+                            "description": "摘要",
+                        }]
+                    }
+                }
+
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def get(self, url, **kwargs):
+                captured.update({"url": url, **kwargs})
+                return _Response()
+
+        monkeypatch.setattr("naumi_agent.tools.web.httpx.AsyncClient", _Client)
+        config = SearchConfig(brave={
+            "country": "CN",
+            "search_lang": "zh-hans",
+            "ui_lang": "zh-CN",
+            "safesearch": "strict",
+            "spellcheck": False,
+            "freshness": "pw",
+            "timeout_seconds": 12,
+        })
+        tool = WebSearchTool(search_config=config)
+
+        outcome = await tool._brave_search("naumi", 5, "secret")
+
+        assert outcome.status is SearchStatus.SUCCESS
+        assert captured["params"] == {
+            "q": "naumi",
+            "count": 5,
+            "country": "CN",
+            "search_lang": "zh-hans",
+            "ui_lang": "zh-CN",
+            "safesearch": "strict",
+            "spellcheck": False,
+            "freshness": "pw",
+        }
+        assert captured["timeout"] == 12
+        assert captured["headers"] == {
+            "X-Subscription-Token": "secret",
+            "Accept": "application/json",
+        }
 
     @pytest.mark.asyncio
     async def test_direct_search_failure_uses_browser_once_and_closes_it(
