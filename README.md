@@ -14,7 +14,7 @@
 - **工具执行**：文件读写、代码执行、shell、Web、浏览器、记忆、任务、调度等工具走统一权限与预算控制。
 - **会话与记忆**：SQLite 会话历史、Chroma 长期记忆、上下文压缩、`/resume` 与 `/history` 恢复链路。
 - **运行态面板**：`/todo`、`/tasks`、`/runtime` 汇总 todo、subagent、后台任务、浏览器任务和 hook 状态。
-- **自我演进**：`/self-review`、`/evolve`、`/forge`、`/pursue` 支持源码审查、自我修改、工具锻造和目标追踪。
+- **持续目标与自我演进**：`/goal` 跨轮次保持工作方向，`/goal pursue` 复用 `/pursue` 启动自主循环；`/self-review`、`/evolve`、`/forge` 支持源码审查、自我修改和工具锻造。
 - **多界面**：Node Terminal UI、Textual fallback、REST API/WebSocket 和原生 Mac Workbench。
 - **跨平台终端**：适配 macOS Terminal/iTerm2、Kitty、WezTerm、常见 Linux
   终端与 Windows Terminal；启动时协商颜色、Unicode、高级键盘协议和动画能力，异常退出会恢复光标、raw mode 与备用屏幕。
@@ -184,7 +184,8 @@ NAUMI_SHOW_STARTUP_WARNINGS=1 naumi chat
 | 运行态 | `/runtime [分区]` `/team` `/background` `/schedule` | 查看运行态、团队协议、后台任务和调度提醒 |
 | 浏览器 | `/browse` `/autobrowse` `/browser-state` `/bdaemon` | 浏览器操作、本地浏览器 daemon 和 SoM 调试 |
 | 分析 | `/chaos` `/scale` `/state` `/graph` `/self-review` | 架构、扩展性、状态、图谱和源码自审查 |
-| 自进化 | `/evolve <描述>` `/evolve-history` `/forge` `/pursue` | 自我修改、进化历史、工具锻造和目标追踪 |
+| 持续目标 | `/goal [目标|子命令]` `/goal pursue` `/pursue <目标>` | 跨轮次保持目标；按需启动自主追踪循环 |
+| 自进化 | `/evolve <描述>` `/evolve-history` `/forge` | 自我修改、进化历史和工具锻造 |
 
 命令补全来自 `src/naumi_agent/cli/completer.py`。输入 `/` 可查看全部命令，输入关键词可模糊匹配，例如 `hs` 可匹配 `/history`。`/histroy` 也会被容错映射到 `/history`。
 

@@ -2464,6 +2464,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
             else:
                 await _run_pursue(engine, arg)
+        case "/goal":
+            await _run_goal(engine, arg)
         case "/worktree":
             await _run_worktree(engine, arg)
         case "/background":
@@ -2692,6 +2694,7 @@ def _print_help() -> None:
         ("/vision <目标>", "AI 视觉数据提取 — 反封锁视觉管线"),
         ("/hook <目标>", "逆向插桩 — 黑盒解剖"),
         ("/pursue <目标>", "目标追踪 — 自主循环执行直至真正达成"),
+        ("/goal [目标|子命令]", "持久目标 — 跨轮次保持方向，可选启动 Pursuit"),
         ("/worktree <子命令>", "隔离执行区 — create/status/bind/keep/remove"),
         ("/background <子命令>", "后台任务 — run/status/list/cancel/output/cleanup"),
         ("/schedule <子命令>", "调度提醒 — create/list/cancel/pause/resume"),
@@ -3479,6 +3482,91 @@ async def _run_self_review(engine: Any, arg: str) -> None:
             border_style="yellow",
             padding=(1, 2),
         ),
+    )
+    console.print()
+
+
+async def _run_goal(engine: Any, arg: str) -> None:
+    """Manage the durable workspace goal through Engine tool execution."""
+    from rich.panel import Panel
+
+    normalized = arg.strip()
+    subcommand, _, remainder = normalized.partition(" ")
+    subcommand = subcommand.lower()
+    remainder = remainder.strip()
+
+    if not normalized:
+        tool_name = "goal_status"
+        kwargs: dict[str, Any] = {}
+    elif subcommand == "status":
+        tool_name = "goal_status"
+        kwargs = {"goal_id": remainder} if remainder else {}
+    elif subcommand == "list":
+        extra = remainder.split()
+        unknown = [item for item in extra if item != "--active"]
+        if unknown:
+            console.print("[yellow]用法: /goal list [--active][/yellow]")
+            return
+        tool_name = "goal_list"
+        kwargs = {"include_finished": "--active" not in extra}
+    elif subcommand == "create":
+        if not remainder:
+            console.print("[yellow]用法: /goal create <目标>[/yellow]")
+            return
+        tool_name = "goal_create"
+        kwargs = {"objective": remainder}
+    elif subcommand in {"pause", "resume", "block", "complete", "cancel"}:
+        if subcommand == "block" and not remainder:
+            console.print("[yellow]用法: /goal block <阻塞原因>[/yellow]")
+            return
+        target_status = {
+            "pause": "paused",
+            "resume": "active",
+            "block": "blocked",
+            "complete": "completed",
+            "cancel": "cancelled",
+        }[subcommand]
+        tool_name = "goal_update"
+        kwargs = {"status": target_status, "note": remainder}
+    elif subcommand == "pursue":
+        if remainder:
+            console.print("[yellow]用法: /goal pursue[/yellow]")
+            return
+        tool_name = "goal_pursue"
+        kwargs = {}
+    else:
+        tool_name = "goal_create"
+        kwargs = {"objective": normalized}
+
+    tool = engine.tool_registry.get(tool_name)
+    if tool is None:
+        console.print(f"[red]工具未注册: {tool_name}[/red]")
+        return
+
+    execute_tool = getattr(engine, "_execute_tool", None)
+    if callable(execute_tool):
+        from naumi_agent.tools.base import ToolCall
+
+        tool_call = ToolCall(
+            id=f"slash-goal-{uuid.uuid4()}",
+            name=tool_name,
+            arguments=json.dumps(kwargs, ensure_ascii=False),
+        )
+        tool_result = await execute_tool(tool_call, agent_name="cli")
+        if tool_result.status != "success":
+            console.print(f"[yellow]{tool_result.content}[/yellow]")
+            return
+        result = tool_result.content
+    else:
+        result = await tool.execute(**kwargs)
+
+    console.print(
+        Panel(
+            Markdown(result),
+            title="[bold cyan]持久目标[/bold cyan]",
+            border_style="cyan",
+            padding=(1, 2),
+        )
     )
     console.print()
 

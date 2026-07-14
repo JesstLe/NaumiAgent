@@ -1419,8 +1419,19 @@ def test_bridge_status_payload_exposes_runtime_slash_commands() -> None:
     assert "/btemplate-list" in command_names
     assert "/models" in command_names
     assert "/harness" in command_names
+    assert "/goal" in command_names
     harness = next(item for item in slash_commands if item["command"] == "/harness")
     assert "知识" in harness["description"]
+
+
+def test_bridge_fallback_slash_registry_keeps_goal_available() -> None:
+    commands = {
+        item["command"]: item
+        for item in ui_bridge._fallback_slash_command_registry()
+    }
+
+    assert "/goal" in commands
+    assert "持久目标" in commands["/goal"]["description"]
 
 
 def test_bridge_status_payload_can_omit_static_slash_commands() -> None:

@@ -18,6 +18,7 @@ from naumi_agent.worktree.models import WorktreeRecord
 if TYPE_CHECKING:
     from naumi_agent.background.runner import BackgroundRunner
     from naumi_agent.mcp.client import MCPClientManager
+    from naumi_agent.orchestrator.goal_store import GoalStore
     from naumi_agent.orchestrator.pursuit_store import PursuitStore
     from naumi_agent.scheduler.runner import SchedulerRunner
     from naumi_agent.skills.loader import SkillLoader
@@ -42,6 +43,7 @@ class HarnessContextInput:
     background_runner: BackgroundRunner
     scheduler_runner: SchedulerRunner
     worktree_manager: WorktreeManager
+    goal_store: GoalStore
     pursuit_store: PursuitStore
     mcp_manager: MCPClientManager | None
     context_info: dict[str, Any]
@@ -65,6 +67,7 @@ class HarnessContextAssembler:
             self._background_section(data.background_runner),
             self._scheduler_section(data.scheduler_runner),
             await self._worktree_section(data.worktree_manager),
+            self._goal_section(data.goal_store),
             self._pursuit_section(data.pursuit_store),
             self._mcp_section(data.mcp_manager),
             self._budget_section(data.context_info, data.budget_info),
@@ -208,6 +211,29 @@ class HarnessContextAssembler:
             lines.append(f"- ... 还有 {len(runs) - _MAX_LINES_PER_SECTION} 个")
         return "### Pursuit\n" + "\n".join(lines)
 
+    def _goal_section(self, store: GoalStore) -> str:
+        try:
+            goal = store.current()
+        except Exception as e:
+            logger.debug("Goal context assembly failed: %s", e)
+            return "### 当前目标\n- 持久目标状态读取失败。"
+        if goal is None:
+            return "### 当前目标\n- 当前没有未完成目标。"
+        lines = [
+            f"- ID：{goal.id}",
+            f"- 状态：{goal.status.value}",
+            f"- 目标：{goal.objective}",
+            f"- 创建会话：{goal.session_id or '未绑定'}",
+            f"- Pursuit：{goal.pursuit_run_id or '未启动'}",
+        ]
+        if goal.note:
+            lines.append(f"- 说明：{goal.note}")
+        lines.append(
+            "- 行为边界：目标用于跨轮次保持方向；"
+            "只有明确调用 goal_pursue 才启动自主循环。"
+        )
+        return "### 当前目标\n" + "\n".join(lines)
+
     def _mcp_section(self, manager: MCPClientManager | None) -> str:
         if manager is None:
             return "### MCP\n- 当前没有已连接 MCP server。"
@@ -248,6 +274,7 @@ def _tool_family(name: str) -> str:
         "background",
         "schedule",
         "worktree",
+        "goal",
         "pursuit",
         "task",
         "memory",

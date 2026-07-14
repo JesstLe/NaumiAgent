@@ -54,6 +54,7 @@ async def test_harness_context_snapshot_includes_live_state(engine: AgentEngine)
         criteria_total=2,
         criteria_verified=1,
     ))
+    engine.goal_store.create("持续完善持久目标能力", session_id="session-context")
 
     await engine._inject_harness_context_snapshot()
     snapshot = engine._messages[-1]
@@ -67,7 +68,32 @@ async def test_harness_context_snapshot_includes_live_state(engine: AgentEngine)
     assert "复查长期任务" in content
     assert "pursuit_ctx" in content
     assert "完成上下文快照" in content
+    assert "### 当前目标" in content
+    assert "持续完善持久目标能力" in content
+    assert "session-context" in content
     assert "预算：不限 · 已用 $0.0000" in content
+
+
+@pytest.mark.asyncio
+async def test_harness_context_snapshot_reports_no_unfinished_goal(
+    engine: AgentEngine,
+) -> None:
+    await engine._inject_harness_context_snapshot()
+
+    content = engine._messages[-1]["content"]
+    assert "### 当前目标" in content
+    assert "当前没有未完成目标" in content
+
+
+@pytest.mark.asyncio
+async def test_engine_registers_goal_tools(engine: AgentEngine) -> None:
+    assert {
+        "goal_create",
+        "goal_status",
+        "goal_list",
+        "goal_update",
+        "goal_pursue",
+    }.issubset(engine.tool_registry.names)
 
 
 @pytest.mark.asyncio
