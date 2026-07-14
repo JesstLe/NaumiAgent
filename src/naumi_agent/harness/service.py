@@ -6,11 +6,12 @@ import asyncio
 import shlex
 import time
 from collections import OrderedDict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from naumi_agent.harness.checks import (
     HarnessCheckResult,
@@ -34,6 +35,7 @@ from naumi_agent.harness.context import (
     KnowledgeContextBundle,
     safe_markdown_fence,
 )
+from naumi_agent.harness.evidence import EvidenceCollector
 from naumi_agent.harness.fingerprint import (
     TreeFingerprint,
     TreeFingerprintError,
@@ -134,6 +136,9 @@ class HarnessService:
         self.workspace_root = Path(workspace_root).expanduser().resolve()
         self._trust_store = trust_store
         self._store = store
+        self._evidence_collector = (
+            EvidenceCollector(store=store) if store is not None else None
+        )
         self._profile_path = profile_path
         self._knowledge_index = RepositoryKnowledgeIndex(self.workspace_root)
         self._check_runner = HarnessCheckRunner(workspace_root=self.workspace_root)
@@ -235,6 +240,29 @@ class HarnessService:
                 return ()
             self._check_results.move_to_end(normalized_run_id)
             return tuple(results.values())
+
+    async def observe_tool_event(
+        self,
+        *,
+        run_id: str,
+        event: str,
+        data: Mapping[str, Any],
+    ) -> HarnessEvidenceRef | None:
+        """Collect one tool event for a live, durably started Harness run."""
+        collector = self._evidence_collector
+        if collector is None or not await self._run_is_persisted(run_id):
+            return None
+        try:
+            return await collector.observe(run_id=run_id, event=event, data=data)
+        except HarnessStoreError:
+            await self._record_persistence_warning(run_id)
+            return None
+
+    async def list_evidence_refs(self, run_id: str) -> tuple[HarnessEvidenceRef, ...]:
+        collector = self._evidence_collector
+        if collector is None:
+            return ()
+        return await collector.list_refs(run_id)
 
     async def begin_completion_run(
         self,
@@ -350,6 +378,8 @@ class HarnessService:
                 available_check_ids=state.available_check_ids,
             )
 
+        collected_evidence = await self.list_evidence_refs(state.contract.run_id)
+        merged_evidence = _merge_evidence_refs(evidence, collected_evidence)
         result = self._completion_gate.evaluate(
             state.contract,
             CompletionGateInput(
@@ -357,7 +387,7 @@ class HarnessService:
                 current_profile_digest=current_profile_digest,
                 changed_paths=changed_paths,
                 checks=await self.list_check_results(state.contract.run_id),
-                evidence=evidence,
+                evidence=merged_evidence,
                 pending_todo_ids=pending_todo_ids,
                 known_failure_ids=known_failure_ids,
                 disclosed_failure_ids=disclosed_failure_ids,
@@ -499,6 +529,8 @@ class HarnessService:
         async with self._store_state_lock:
             self._persisted_run_ids.pop(run_id, None)
             self._store_warnings.pop(run_id, None)
+        if self._evidence_collector is not None:
+            await self._evidence_collector.forget_run(run_id)
 
     async def required_check_ids(
         self,
@@ -1081,6 +1113,19 @@ def _knowledge_unavailable(
             message="Harness Profile 未受信任；不会注入仓库知识。",
         )
     return None
+
+
+def _merge_evidence_refs(
+    explicit: tuple[HarnessEvidenceRef, ...],
+    collected: tuple[HarnessEvidenceRef, ...],
+) -> tuple[HarnessEvidenceRef, ...]:
+    merged: OrderedDict[str, HarnessEvidenceRef] = OrderedDict()
+    for evidence in (*explicit, *collected):
+        existing = merged.get(evidence.id)
+        if existing is not None and existing != evidence:
+            raise ValueError(f"evidence id {evidence.id} 对应多个不同证据。")
+        merged[evidence.id] = evidence
+    return tuple(merged.values())
 
 
 def _unavailable_check_result(

@@ -2249,6 +2249,23 @@ class AgentEngine:
             session_id=session_id,
         )
 
+    async def _observe_harness_tool_event(
+        self,
+        event: str,
+        data: dict[str, Any],
+    ) -> None:
+        state = self._active_harness_run
+        if state is None or state.finalized:
+            return
+        try:
+            await self.harness_service.observe_tool_event(
+                run_id=state.contract.run_id,
+                event=event,
+                data=data,
+            )
+        except Exception as exc:
+            logger.warning("Harness EvidenceCollector event failed: %s", exc)
+
     async def _evaluate_harness_completion(
         self,
         on_event: EventCallback | None = None,
@@ -2873,6 +2890,8 @@ class AgentEngine:
         """Execute one model tool-call response with deterministic ordering."""
         scheduled: list[ScheduledToolCall] = []
         outcomes: dict[int, ToolResult] = {}
+        parsed_calls: dict[int, ToolCall] = {}
+        observed_tool_indices: set[int] = set()
         signatures: list[str] = []
         skip_remaining_reason = ""
 
@@ -2888,6 +2907,7 @@ class AgentEngine:
                     )
                 continue
 
+            parsed_calls[index] = call
             signatures.append(f"{call.name}:{call.arguments}")
             if skip_remaining_reason:
                 outcomes[index] = ToolResult(
@@ -2935,16 +2955,23 @@ class AgentEngine:
             )
             ready: list[ScheduledToolCall] = []
             for item in batch.calls:
+                observed_tool_indices.add(item.index)
+                registered_tool = self._tool_registry.get(item.call.name)
+                start_payload = {
+                    "name": item.call.name,
+                    "call_id": item.call.id,
+                    "args": item.call.arguments,
+                    "read_only": bool(
+                        registered_tool is not None and registered_tool.is_read_only
+                    ),
+                    "destructive": bool(
+                        registered_tool is not None and registered_tool.is_destructive
+                    ),
+                    **metadata,
+                }
+                await self._observe_harness_tool_event("tool_start", start_payload)
                 if on_event is not None:
-                    await on_event(
-                        "tool_start",
-                        {
-                            "name": item.call.name,
-                            "call_id": item.call.id,
-                            "args": item.call.arguments,
-                            **metadata,
-                        },
-                    )
+                    await on_event("tool_start", start_payload)
                 hook_ctx = await self._fire_hook(
                     HookContext(
                         point=HookPoint.TOOL_EXECUTE_START,
@@ -3000,18 +3027,27 @@ class AgentEngine:
 
             for item in batch.calls:
                 result = outcomes[item.index]
+                registered_tool = self._tool_registry.get(item.call.name)
+                end_payload = {
+                    "name": item.call.name,
+                    "call_id": item.call.id,
+                    "status": result.status,
+                    "duration_ms": result.duration_ms,
+                    "content": result.content[:2000],
+                    "content_length": len(
+                        result.content.encode("utf-8", errors="replace")
+                    ),
+                    "read_only": bool(
+                        registered_tool is not None and registered_tool.is_read_only
+                    ),
+                    "destructive": bool(
+                        registered_tool is not None and registered_tool.is_destructive
+                    ),
+                    **metadata,
+                }
+                await self._observe_harness_tool_event("tool_end", end_payload)
                 if on_event is not None:
-                    await on_event(
-                        "tool_end",
-                        {
-                            "name": item.call.name,
-                            "call_id": item.call.id,
-                            "status": result.status,
-                            "duration_ms": result.duration_ms,
-                            "content": result.content[:2000],
-                            **metadata,
-                        },
-                    )
+                    await on_event("tool_end", end_payload)
                 await self._fire_hook(
                     HookContext(
                         point=HookPoint.TOOL_EXECUTE_END,
@@ -3030,6 +3066,69 @@ class AgentEngine:
                 batch_id,
                 int((time.perf_counter() - batch_started_at) * 1000),
             )
+
+        for index, result in outcomes.items():
+            if index in observed_tool_indices:
+                continue
+            call = parsed_calls.get(index)
+            raw_call = raw_calls[index]
+            function = raw_call.get("function")
+            function_data = function if isinstance(function, dict) else {}
+            tool_name = (
+                call.name
+                if call is not None
+                else str(
+                    function_data.get("name")
+                    or raw_call.get("name")
+                    or "invalid_tool_call"
+                )
+            )
+            raw_arguments = (
+                call.arguments
+                if call is not None
+                else function_data.get("arguments", raw_call.get("arguments", "{}"))
+            )
+            arguments = (
+                raw_arguments
+                if isinstance(raw_arguments, str)
+                else json.dumps(raw_arguments, ensure_ascii=False, default=str)
+            )
+            registered_tool = self._tool_registry.get(tool_name)
+            metadata = {
+                "batch_id": f"turn-{turn}-preflight",
+                "batch_size": 1,
+                "parallel": False,
+            }
+            start_payload = {
+                "name": tool_name,
+                "call_id": result.call_id,
+                "args": arguments,
+                "read_only": bool(
+                    registered_tool is not None and registered_tool.is_read_only
+                ),
+                "destructive": bool(
+                    registered_tool is not None and registered_tool.is_destructive
+                ),
+                **metadata,
+            }
+            end_payload = {
+                "name": tool_name,
+                "call_id": result.call_id,
+                "status": result.status,
+                "duration_ms": result.duration_ms,
+                "content": result.content[:2000],
+                "content_length": len(
+                    result.content.encode("utf-8", errors="replace")
+                ),
+                "read_only": start_payload["read_only"],
+                "destructive": start_payload["destructive"],
+                **metadata,
+            }
+            await self._observe_harness_tool_event("tool_start", start_payload)
+            await self._observe_harness_tool_event("tool_end", end_payload)
+            if on_event is not None:
+                await on_event("tool_start", start_payload)
+                await on_event("tool_end", end_payload)
 
         for index, raw_call in enumerate(raw_calls):
             result = outcomes.get(index)
@@ -4158,6 +4257,7 @@ class AgentEngine:
             "timestamp": time.time(),
         }
         self._append_permission_bubble(payload)
+        await self._observe_harness_tool_event("permission_bubble", payload)
         if on_event is not None:
             await on_event("permission_bubble", payload)
 

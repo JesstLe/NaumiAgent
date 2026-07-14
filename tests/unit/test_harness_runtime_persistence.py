@@ -145,3 +145,87 @@ async def test_finish_failure_is_added_to_the_returned_receipt(tmp_path: Path) -
     assert len(result.receipt.warnings) == 1
     assert result.receipt.warnings[0].startswith("infrastructure_error:")
     assert state.receipt == result.receipt
+
+
+@pytest.mark.asyncio
+async def test_service_collects_tool_events_for_the_active_run(tmp_path: Path) -> None:
+    db_path = tmp_path / "state" / "harness.db"
+    service = _service(tmp_path, store_path=db_path)
+    await service.trust(source="test")
+    state = await service.begin_completion_run(
+        task="读取代码并形成证据",
+        run_id="tool-evidence-run",
+        session_id="runtime-session",
+    )
+    assert state is not None
+
+    await service.observe_tool_event(
+        run_id="tool-evidence-run",
+        event="tool_start",
+        data={
+            "call_id": "service-call",
+            "name": "read",
+            "args": json.dumps({"path": "source.py"}),
+            "read_only": True,
+        },
+    )
+    evidence = await service.observe_tool_event(
+        run_id="tool-evidence-run",
+        event="tool_end",
+        data={
+            "call_id": "service-call",
+            "name": "read",
+            "status": "success",
+            "duration_ms": 4,
+            "content": "VALUE = 1",
+        },
+    )
+
+    restored = await HarnessStore(db_path).get_run("tool-evidence-run")
+    assert evidence is not None
+    assert restored is not None
+    assert len(restored.evidence) == 1
+    assert await service.list_evidence_refs("tool-evidence-run") == (evidence,)
+
+
+@pytest.mark.asyncio
+async def test_evidence_store_failure_only_adds_one_runtime_warning(
+    tmp_path: Path,
+) -> None:
+    state_dir = tmp_path / "state"
+    db_path = state_dir / "harness.db"
+    service = _service(tmp_path, store_path=db_path)
+    await service.trust(source="test")
+    state = await service.begin_completion_run(
+        task="收集失败也必须保留主任务结果",
+        run_id="evidence-store-failure",
+        session_id="runtime-session",
+    )
+    assert state is not None
+    for path in state_dir.iterdir():
+        path.unlink()
+    state_dir.rmdir()
+    state_dir.write_text("store parent became a file", encoding="utf-8")
+
+    await service.observe_tool_event(
+        run_id="evidence-store-failure",
+        event="tool_start",
+        data={"call_id": "failed-evidence", "name": "read", "args": "{}"},
+    )
+    evidence = await service.observe_tool_event(
+        run_id="evidence-store-failure",
+        event="tool_end",
+        data={
+            "call_id": "failed-evidence",
+            "name": "read",
+            "status": "success",
+            "content": "tool result remains available",
+        },
+    )
+    result = await service.evaluate_completion_run(state)
+
+    assert evidence is None
+    assert result.status == "completed_verified"
+    assert result.receipt is not None
+    assert len(result.receipt.warnings) == 1
+    assert result.receipt.warnings[0].startswith("infrastructure_error:")
