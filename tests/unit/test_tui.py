@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from naumi_agent.config.settings import AppConfig, ModelConfig
+from naumi_agent.config.settings import AppConfig, ModelConfig, ModelMeta
 from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
 from naumi_agent.tui.app import (
     ActivityPanel,
@@ -361,6 +361,68 @@ class TestNaumiApp:
 
             assert "预算: 不限 · 已用 $0.0000" in rendered
             assert "/$0.00" not in rendered
+
+    @pytest.mark.asyncio
+    async def test_status_bar_distinguishes_reasoning_text_and_effort(self) -> None:
+        engine = AgentEngine(
+            AppConfig(
+                models=ModelConfig(
+                    default_model="openai/reasoner",
+                    reasoning_effort="medium",
+                    model_info={
+                        "openai/reasoner": ModelMeta(
+                            reasoning_efforts=("low", "medium", "high")
+                        )
+                    },
+                )
+            )
+        )
+        app = NaumiApp(engine, show_reasoning=False)
+
+        async with app.run_test(size=(120, 30)) as pilot:
+            await pilot.pause(0.1)
+            rendered = str(app.query_one(StatusBar).render())
+
+            assert "思考文本: off" in rendered
+            assert "强度: medium" in rendered
+
+    @pytest.mark.asyncio
+    async def test_effort_slash_updates_persistent_tui_status(self) -> None:
+        engine = AgentEngine(
+            AppConfig(
+                models=ModelConfig(
+                    default_model="openai/reasoner",
+                    model_info={
+                        "openai/reasoner": ModelMeta(
+                            reasoning_efforts=("low", "medium", "high")
+                        )
+                    },
+                )
+            )
+        )
+        app = NaumiApp(engine)
+
+        async with app.run_test(size=(120, 30)) as pilot:
+            app._handle_slash_command("/effort high")
+            await pilot.pause(0.2)
+            status = app.query_one(StatusBar)
+
+            assert status.effort_text == "high"
+            assert "强度: high" in str(status.render())
+
+    @pytest.mark.asyncio
+    async def test_reasoning_slash_updates_text_visibility_not_effort(self) -> None:
+        engine = AgentEngine(AppConfig())
+        app = NaumiApp(engine, show_reasoning=False)
+
+        async with app.run_test(size=(120, 30)) as pilot:
+            app._handle_slash_command("/reasoning on")
+            await pilot.pause(0.1)
+            status = app.query_one(StatusBar)
+
+            assert app._show_reasoning is True
+            assert status.reasoning_text == "on"
+            assert status.effort_text == "auto"
 
     @pytest.mark.asyncio
     async def test_startup_status_renders_catalog_provider_protocol_and_upstream(
