@@ -55,7 +55,7 @@ export function renderCompletionReceiptCard(receipt, ctx) {
   if (!git.available && view.outcome !== "completed") {
     rows.push(line(gitSummary(git)));
   } else if (git.available && (hasReviewableChanges || Number(git.behind) > 0)) {
-    rows.push(line(color(ANSI.dim, gitSummary(git))));
+    rows.push(line(gitSummary(git)));
   }
 
   for (const approval of actionableApprovals.slice(0, 3)) {
@@ -90,9 +90,12 @@ function outcomeView(outcome) {
 function gitSummary(value) {
   const git = value && typeof value === "object" ? value : {};
   if (!git.available) return color(ANSI.yellow, "Git 未核查");
-  const parts = [`Git ${git.branch || "detached"}`, git.dirty ? "工作区有改动" : "工作区干净"];
-  if (Number(git.ahead) > 0) parts.push(`领先 ${Number(git.ahead)}`);
-  if (Number(git.behind) > 0) parts.push(`落后 ${Number(git.behind)}`);
+  const parts = [
+    color(ANSI.cyan, `Git ${git.branch || "detached"}`),
+    color(git.dirty ? ANSI.yellow : ANSI.green, git.dirty ? "工作区有改动" : "工作区干净"),
+  ];
+  if (Number(git.ahead) > 0) parts.push(color(ANSI.green, `领先 ${Number(git.ahead)}`));
+  if (Number(git.behind) > 0) parts.push(color(ANSI.red, `落后 ${Number(git.behind)}`));
   return parts.join(" · ");
 }
 
@@ -107,26 +110,28 @@ function validationCounts(validation) {
   return counts.join(" · ");
 }
 
-function changeStatus(status) {
+function changeView(status) {
   return {
-    modified: "修改",
-    added: "新增",
-    deleted: "删除",
-    renamed: "重命名",
-    untracked: "新增",
-    copied: "复制",
-    conflicted: "冲突",
-    restored: "还原",
-    removed_untracked: "删除",
-  }[status] ?? compactText(status || "变化", 40);
+    modified: { label: "修改", style: ANSI.yellow },
+    added: { label: "新增", style: ANSI.green },
+    deleted: { label: "删除", style: ANSI.red },
+    renamed: { label: "重命名", style: ANSI.cyan },
+    untracked: { label: "新增", style: ANSI.green },
+    copied: { label: "复制", style: ANSI.cyan },
+    conflicted: { label: "冲突", style: `${ANSI.bold}${ANSI.red}` },
+    restored: { label: "还原", style: ANSI.blue },
+    removed_untracked: { label: "删除", style: ANSI.red },
+  }[status] ?? { label: compactText(status || "变化", 40), style: ANSI.dim };
 }
 
 function changeSummary(changes) {
-  const order = ["删除", "新增", "修改", "重命名", "还原", "冲突"];
+  const order = ["删除", "新增", "修改", "重命名", "复制", "还原", "冲突"];
   const counts = new Map();
   for (const change of changes) {
-    const label = changeStatus(change.status);
-    counts.set(label, (counts.get(label) || 0) + 1);
+    const view = changeView(change.status);
+    const current = counts.get(view.label) || { count: 0, style: view.style };
+    current.count += 1;
+    counts.set(view.label, current);
   }
   return [...counts.entries()]
     .sort(([left], [right]) => {
@@ -134,7 +139,7 @@ function changeSummary(changes) {
       const rightIndex = order.indexOf(right);
       return (leftIndex < 0 ? order.length : leftIndex) - (rightIndex < 0 ? order.length : rightIndex);
     })
-    .map(([label, count]) => `${label} ${count} 个文件`)
+    .map(([label, view]) => color(view.style, `${label} ${view.count} 个文件`))
     .join(" · ");
 }
 
