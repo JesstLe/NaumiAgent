@@ -16,6 +16,8 @@
 - **运行态面板**：`/todo`、`/tasks`、`/runtime` 汇总 todo、subagent、后台任务、浏览器任务和 hook 状态。
 - **自我演进**：`/self-review`、`/evolve`、`/forge`、`/pursue` 支持源码审查、自我修改、工具锻造和目标追踪。
 - **多界面**：Node Terminal UI、Textual fallback、REST API/WebSocket 和原生 Mac Workbench。
+- **跨平台终端**：适配 macOS Terminal/iTerm2、Kitty、WezTerm、常见 Linux
+  终端与 Windows Terminal；启动时协商颜色、Unicode、高级键盘协议和动画能力，异常退出会恢复光标、raw mode 与备用屏幕。
 
 ## 快速开始
 
@@ -95,6 +97,11 @@ naumi
 ```
 
 `naumiagent` 作为 Windows 早期版本的兼容别名继续可用，默认行为与 `naumi` 相同；`naumiagent --tui` 显式启动 Textual。脚本会检查 Python 3.12+、uv、可选 Node.js 20+ 与 Git Bash，创建 `.venv` 和无密钥的本地 `.naumi/config.yaml`，并验证配置。若 Git Bash 不在标准 Git for Windows 目录，可设置 `NAUMI_GIT_BASH` 指向 `bin\bash.exe`。脚本不会覆盖已有的现代配置；若发现旧根目录 `config.yaml`，会继续使用旧配置而不生成竞争副本。
+
+新版 UI 必须运行在交互式 TTY 中，重定向或管道启动不会输出全屏控制序列。设置
+`NO_COLOR=1` 可关闭语义色，`FORCE_COLOR=1` 可显式开启；设置
+`NAUMI_REDUCE_MOTION=1` 可关闭工作动画。高级键盘协议只在已知支持的 Kitty、
+WezTerm、Ghostty 和 foot 中启用，其他终端继续使用可移植按键序列。
 
 ### 配置
 

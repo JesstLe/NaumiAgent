@@ -133,6 +133,16 @@ naumi tui
 当前能力：
 
 - 全屏独立渲染，不和普通 stdout 抢输入区。
+- 启动前建立终端能力画像：非交互 stdin/stdout 或 `TERM=dumb` 会在 Bridge
+  启动前退出；颜色遵守 `NO_COLOR`/`FORCE_COLOR`，动画遵守
+  `NAUMI_REDUCE_MOTION`/CI，Windows 主目录支持 `USERPROFILE` 回退。
+- macOS Terminal/iTerm2、常见 Linux xterm 系终端和 Windows Terminal 使用可移植
+  基线；Kitty、WezTerm、Ghostty、foot 才启用增强键盘协商，避免向不支持的终端
+  无条件发送私有控制序列。
+- 终端生命周期是幂等状态机：Bridge 启动失败、普通退出、信号、未捕获异常和
+  Promise 拒绝都会恢复 raw mode、光标、bracketed paste 与 alternate screen。
+- UI 状态使用同目录唯一临时文件落盘；Windows 目标文件替换失败时通过回滚备份
+  安装新状态，写入失败不会终止对话界面。
 - 通过 JSONL 连接 Python bridge。
 - assistant streaming 增量渲染。
 - thinking 折叠为一行摘要。
@@ -170,6 +180,9 @@ naumi tui
 - Bridge v1 仍缺少跨客户端幂等键、断线增量重放和 accepted task 的服务端 resume/link 协议；当前客户端不会自动重发 uncertain 请求。
 - 工具调用卡片已优先通过稳定 `tool_call_id` 关联结果，缺失时才回退到 tool name。
 - 代码高亮是内置轻量关键词高亮，不等价于 Pygments/Tree-sitter。
+- 跨平台发布门禁包含 macOS 真实 PTY 冒烟、Windows/Unix 能力模拟、Windows shell
+  单元测试和 PowerShell 初始化脚本；最终 Windows 安装包仍需要在真实 Windows
+  Terminal CI/主机上执行一次端到端验收，当前 macOS 主机不能替代该验证。
 
 ## 第一阶段验证
 
