@@ -7,6 +7,7 @@ import shlex
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal
@@ -22,6 +23,7 @@ from naumi_agent.harness.completion import (
     CompletionGate,
     CompletionGateInput,
     CompletionGateResult,
+    HarnessCompletionReceipt,
     HarnessEvidenceRef,
     HarnessRunState,
     build_completion_contract,
@@ -50,12 +52,18 @@ from naumi_agent.harness.models import (
     HarnessTaskKind,
 )
 from naumi_agent.harness.profile import load_harness_profile
+from naumi_agent.harness.store import HarnessStore, HarnessStoreError
 from naumi_agent.harness.trust import (
     HarnessTrustRecord,
     HarnessTrustStore,
     HarnessTrustStoreError,
 )
 from naumi_agent.safety.guardrails import OutputGuardrail
+
+_STORE_WARNING = (
+    "infrastructure_error: Harness 状态库写入失败，本次主任务结果仍会返回；"
+    "请检查用户状态目录权限。"
+)
 
 
 class HarnessStatusCode(StrEnum):
@@ -121,9 +129,11 @@ class HarnessService:
         workspace_root: str | Path,
         trust_store: HarnessTrustStore,
         profile_path: str | Path | None = None,
+        store: HarnessStore | None = None,
     ) -> None:
         self.workspace_root = Path(workspace_root).expanduser().resolve()
         self._trust_store = trust_store
+        self._store = store
         self._profile_path = profile_path
         self._knowledge_index = RepositoryKnowledgeIndex(self.workspace_root)
         self._check_runner = HarnessCheckRunner(workspace_root=self.workspace_root)
@@ -134,6 +144,10 @@ class HarnessService:
         ] = OrderedDict()
         self._check_results_lock = asyncio.Lock()
         self._max_check_runs = 128
+        self._store_state_lock = asyncio.Lock()
+        self._persisted_run_ids: OrderedDict[str, None] = OrderedDict()
+        self._store_warnings: OrderedDict[str, list[str]] = OrderedDict()
+        self._max_persisted_runs = 128
         self._knowledge_composer = HarnessKnowledgeContextComposer(
             self._knowledge_index
         )
@@ -149,6 +163,10 @@ class HarnessService:
         ] = OrderedDict()
         self._last_git_audit_at = 0.0
         self._git_audit_interval_seconds = 30.0
+
+    @property
+    def store(self) -> HarnessStore | None:
+        return self._store
 
     async def run_check(self, *, check_id: str, run_id: str) -> HarnessCheckResult:
         """Run one exact check from the currently trusted Profile."""
@@ -205,6 +223,7 @@ class HarnessService:
             profile_is_current=profile_is_current,
         )
         await self._record_check_result(result)
+        await self._persist_check_result(result, argv=check.argv)
         return result
 
     async def list_check_results(self, run_id: str) -> tuple[HarnessCheckResult, ...]:
@@ -252,7 +271,7 @@ class HarnessService:
             source_refs=("user:current",),
         )
         available_check_ids = tuple(check.id for check in profile.checks)
-        return HarnessRunState(
+        state = HarnessRunState(
             contract=contract,
             initial_tree=initial_tree,
             available_check_ids=available_check_ids,
@@ -261,6 +280,8 @@ class HarnessService:
                 available_check_ids=available_check_ids,
             ),
         )
+        await self._persist_run_start(state, status=status)
+        return state
 
     async def evaluate_completion_run(
         self,
@@ -341,6 +362,9 @@ class HarnessService:
                 known_failure_ids=known_failure_ids,
                 disclosed_failure_ids=disclosed_failure_ids,
                 infrastructure_errors=infrastructure_errors,
+                informational_warnings=await self._persistence_warnings_for(
+                    state.contract.run_id
+                ),
                 mutating_tool_used=state.mutating_tool_used,
             ),
             correction_attempt=state.correction_attempt,
@@ -348,8 +372,15 @@ class HarnessService:
         if result.status == "needs_correction":
             state.correction_attempt += 1
         else:
+            if result.receipt is not None:
+                receipt = await self._persist_completion_receipt(
+                    state,
+                    result.receipt,
+                )
+                result = result.model_copy(update={"receipt": receipt})
             state.finalized = True
             state.receipt = result.receipt
+            await self._forget_persistence_state(state.contract.run_id)
         return result
 
     async def _record_check_result(self, result: HarnessCheckResult) -> None:
@@ -363,6 +394,111 @@ class HarnessService:
             self._check_results.move_to_end(result.run_id)
             while len(self._check_results) > self._max_check_runs:
                 self._check_results.popitem(last=False)
+
+    async def _persist_run_start(
+        self,
+        state: HarnessRunState,
+        *,
+        status: HarnessStatus,
+    ) -> None:
+        if self._store is None or status.profile_digest is None:
+            return
+        now = datetime.now(UTC).isoformat()
+        trust = status.stored_trust
+        try:
+            await self._store.record_profile(
+                workspace_root=self.workspace_root,
+                profile_digest=status.profile_digest,
+                schema_version=1,
+                loaded_at=now,
+                trusted_at=trust.trusted_at if trust is not None else now,
+                trust_source=trust.source if trust is not None else "runtime",
+                status="trusted",
+            )
+            await self._store.start_run(
+                workspace_root=self.workspace_root,
+                contract=state.contract,
+                tree_fingerprint_before=state.initial_tree.digest,
+                started_at=now,
+            )
+        except HarnessStoreError:
+            await self._record_persistence_warning(state.contract.run_id)
+            return
+        async with self._store_state_lock:
+            self._persisted_run_ids[state.contract.run_id] = None
+            self._persisted_run_ids.move_to_end(state.contract.run_id)
+            while len(self._persisted_run_ids) > self._max_persisted_runs:
+                self._persisted_run_ids.popitem(last=False)
+
+    async def _persist_check_result(
+        self,
+        result: HarnessCheckResult,
+        *,
+        argv: tuple[str, ...],
+    ) -> None:
+        if self._store is None or not await self._run_is_persisted(result.run_id):
+            return
+        completed = datetime.now(UTC)
+        started = completed - timedelta(milliseconds=max(result.duration_ms, 0))
+        try:
+            await self._store.record_check(
+                result=result,
+                argv=argv,
+                cwd=self.workspace_root,
+                started_at=started.isoformat(),
+                completed_at=completed.isoformat(),
+            )
+        except HarnessStoreError:
+            await self._record_persistence_warning(result.run_id)
+
+    async def _persist_completion_receipt(
+        self,
+        state: HarnessRunState,
+        receipt: HarnessCompletionReceipt,
+    ) -> HarnessCompletionReceipt:
+        run_id = state.contract.run_id
+        if self._store is None or not await self._run_is_persisted(run_id):
+            return receipt
+        try:
+            await self._store.finish_run(
+                run_id=run_id,
+                receipt=receipt,
+                completed_at=datetime.now(UTC).isoformat(),
+                contract=state.contract,
+            )
+            return receipt
+        except HarnessStoreError:
+            await self._record_persistence_warning(run_id)
+            return receipt.model_copy(
+                update={
+                    "warnings": tuple(
+                        dict.fromkeys((*receipt.warnings, _STORE_WARNING))
+                    )
+                }
+            )
+
+    async def _record_persistence_warning(self, run_id: str) -> None:
+        async with self._store_state_lock:
+            warnings = self._store_warnings.setdefault(run_id, [])
+            if _STORE_WARNING not in warnings:
+                warnings.append(_STORE_WARNING)
+            self._store_warnings.move_to_end(run_id)
+            while len(self._store_warnings) > self._max_persisted_runs:
+                self._store_warnings.popitem(last=False)
+
+    async def _persistence_warnings_for(self, run_id: str) -> tuple[str, ...]:
+        async with self._store_state_lock:
+            warnings = self._store_warnings.get(run_id, ())
+            return tuple(warnings)
+
+    async def _run_is_persisted(self, run_id: str) -> bool:
+        async with self._store_state_lock:
+            return run_id in self._persisted_run_ids
+
+    async def _forget_persistence_state(self, run_id: str) -> None:
+        async with self._store_state_lock:
+            self._persisted_run_ids.pop(run_id, None)
+            self._store_warnings.pop(run_id, None)
 
     async def required_check_ids(
         self,

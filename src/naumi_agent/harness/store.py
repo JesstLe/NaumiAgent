@@ -507,6 +507,7 @@ class HarnessStore:
         run_id: str,
         receipt: HarnessCompletionReceipt,
         completed_at: str,
+        contract: HarnessCompletionContract | None = None,
     ) -> HarnessStoredRun:
         if receipt.run_id != run_id:
             raise ValueError("receipt.run_id 与目标 Harness run 不一致。")
@@ -518,9 +519,23 @@ class HarnessStore:
             async with self._write_lock, self._connection() as db:
                 await db.execute("BEGIN IMMEDIATE")
                 run = await self._require_run(db, run_id)
+                final_contract = await self._validate_final_contract(
+                    db,
+                    run=run,
+                    contract=contract,
+                )
+                final_contract_json = _model_json(final_contract)
+                if receipt.task_kind is not final_contract.task_kind:
+                    await db.rollback()
+                    raise HarnessStoreConflictError(
+                        "完成回执的 task kind 与最终 Harness contract 不一致。"
+                    )
                 existing_receipt = str(run["receipt_json"])
                 if existing_receipt:
-                    if existing_receipt != receipt_json:
+                    if (
+                        existing_receipt != receipt_json
+                        or str(run["contract_json"]) != final_contract_json
+                    ):
                         await db.rollback()
                         raise HarnessStoreConflictError(
                             f"Harness run {run_id} 已完成，不能用不同回执覆盖。"
@@ -548,13 +563,18 @@ class HarnessStore:
                     """
                     UPDATE harness_runs SET
                         status = ?, tree_fingerprint_after = ?, completed_at = ?,
-                        receipt_json = ?
+                        task_kind = ?, objective = ?, profile_digest = ?,
+                        contract_json = ?, receipt_json = ?
                     WHERE id = ?
                     """,
                     (
                         receipt.status,
                         _normalize_fingerprint(receipt.tree_fingerprint),
                         completed,
+                        final_contract.task_kind.value,
+                        final_contract.objective,
+                        final_contract.profile_digest or "",
+                        final_contract_json,
                         receipt_json,
                         run_id,
                     ),
@@ -578,7 +598,12 @@ class HarnessStore:
                 await db.commit()
         except HarnessStoreConflictError:
             raise
-        except (aiosqlite.Error, OSError) as exc:
+        except (
+            aiosqlite.Error,
+            OSError,
+            json.JSONDecodeError,
+            ValueError,
+        ) as exc:
             raise HarnessStoreError(
                 "无法完成 Harness 运行记录。主任务结果仍保留，但回执未持久化。"
             ) from exc
@@ -668,9 +693,9 @@ class HarnessStore:
         async with self._schema_lock:
             if self._schema_ready:
                 return
-            self._db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            _restrict_permissions(self._db_path.parent, 0o700)
             try:
+                self._db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                _restrict_permissions(self._db_path.parent, 0o700)
                 async with self._connection() as db:
                     cursor = await db.execute("PRAGMA user_version")
                     version = int((await cursor.fetchone())[0])
@@ -690,6 +715,33 @@ class HarnessStore:
                 ) from exc
             _restrict_permissions(self._db_path, 0o600)
             self._schema_ready = True
+
+    async def _validate_final_contract(
+        self,
+        db: aiosqlite.Connection,
+        *,
+        run: aiosqlite.Row,
+        contract: HarnessCompletionContract | None,
+    ) -> HarnessCompletionContract:
+        initial = HarnessCompletionContract.model_validate_json(
+            str(run["contract_json"])
+        )
+        if contract is None:
+            return initial
+        final_json = _model_json(contract)
+        final = HarnessCompletionContract.model_validate_json(final_json)
+        expected = initial.model_copy(
+            update={
+                "task_kind": final.task_kind,
+                "required_checks": final.required_checks,
+            }
+        )
+        if final != expected:
+            raise HarnessStoreConflictError(
+                f"Harness run {initial.run_id} 的最终 contract 改写了不可变字段。"
+            )
+        await self._verify_criteria_match(db, final)
+        return final
 
     @asynccontextmanager
     async def _connection(self) -> AsyncIterator[aiosqlite.Connection]:
