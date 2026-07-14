@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | ARC-01.1 Import graph | 已实现 | `src/naumi_agent/architecture/import_graph.py`、`docs/architecture/arc-01-import-graph-baseline.json` |
 | ARC-01.2 Domain ownership | 已实现 | `src/naumi_agent/architecture/ownership.py`、`docs/architecture/arc-01-domain-ownership.json`、[设计](ARC-01-2-domain-ownership-design.md) · [实现计划](ARC-01-2-domain-ownership-implementation-plan.md) |
-| ARC-01.3 Ports | 待开发 | 必须逐个 Port 独立实现，不创建空 Protocol 集合 |
+| ARC-01.3 Ports | 进行中 | SessionPort：[设计](ARC-01-3a-session-port-design.md)；必须逐个 Port 独立实现，不创建空 Protocol 集合 |
 | ARC-01.4 Composition root | 待开发 | 等待真实 Port 完成 |
 | ARC-01.5 Legacy adapters | 待开发 | 等待 composition root 契约稳定 |
 | ARC-01.6 Import rules CI | 待开发 | 消费 ARC-01.1 graph 与 ARC-01.2 ownership，不重复扫描源码 |
