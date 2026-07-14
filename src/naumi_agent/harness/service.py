@@ -36,6 +36,10 @@ from naumi_agent.harness.context import (
     safe_markdown_fence,
 )
 from naumi_agent.harness.evidence import EvidenceCollector
+from naumi_agent.harness.explain import (
+    HarnessExplainer,
+    HarnessExplainLookup,
+)
 from naumi_agent.harness.fingerprint import (
     TreeFingerprint,
     TreeFingerprintError,
@@ -143,6 +147,7 @@ class HarnessService:
         self._knowledge_index = RepositoryKnowledgeIndex(self.workspace_root)
         self._check_runner = HarnessCheckRunner(workspace_root=self.workspace_root)
         self._completion_gate = CompletionGate()
+        self._explainer = HarnessExplainer()
         self._check_results: OrderedDict[
             str,
             OrderedDict[str, HarnessCheckResult],
@@ -263,6 +268,51 @@ class HarnessService:
         if collector is None:
             return ()
         return await collector.list_refs(run_id)
+
+    async def explain_run(self, run_id: str | None = None) -> HarnessExplainLookup:
+        """Explain one durable run without exposing records from other workspaces."""
+        store = self._store
+        if store is None:
+            return HarnessExplainLookup(
+                status="unavailable",
+                message=(
+                    "Harness 状态库尚未初始化。请重启 NaumiAgent；若问题持续，"
+                    "运行 `/harness doctor` 检查用户状态目录。"
+                ),
+            )
+        normalized_run_id = None
+        if run_id is not None and run_id.strip().lower() != "latest":
+            normalized_run_id = validate_run_id(run_id)
+        try:
+            if normalized_run_id is None:
+                runs = await store.list_runs(self.workspace_root, limit=1)
+                stored_run = runs[0] if runs else None
+            else:
+                stored_run = await store.get_run(normalized_run_id)
+                if stored_run is not None and (
+                    Path(stored_run.workspace_root).resolve() != self.workspace_root
+                ):
+                    stored_run = None
+        except HarnessStoreError:
+            return HarnessExplainLookup(
+                status="unavailable",
+                message=(
+                    "Harness 运行记录损坏或暂时无法读取。请检查用户状态目录权限，"
+                    "然后运行 `/harness doctor`。"
+                ),
+            )
+        if stored_run is None:
+            return HarnessExplainLookup(
+                status="not_found",
+                message=(
+                    "当前工作区没有匹配的 Harness 运行记录。"
+                    "请先执行一次任务，或检查 run id 是否属于当前工作区。"
+                ),
+            )
+        return HarnessExplainLookup(
+            status="ok",
+            explanation=self._explainer.explain(stored_run),
+        )
 
     async def begin_completion_run(
         self,
