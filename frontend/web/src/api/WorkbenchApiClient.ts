@@ -185,6 +185,17 @@ export class WorkbenchApiClient {
     })
   }
 
+  async uploadChatSource(sessionId: string, file: File): Promise<ChatSource> {
+    const formData = new FormData()
+    formData.append('file', file)
+    return this.request<ChatSource>({
+      method: 'POST',
+      url: this.route('upload_chat_source', { session_id: sessionId }),
+      data: formData,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  }
+
   async resolvePermission(sessionId: string, callId: string, resolution: PermissionResolution): Promise<{ status: string }> {
     return this.request<{ status: string }>({
       method: 'POST',
