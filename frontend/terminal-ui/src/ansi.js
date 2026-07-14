@@ -34,21 +34,6 @@ export function sanitizeTerminalText(value) {
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
 }
 
-export function colorDiffLine(line) {
-  if (line.startsWith("+") && !line.startsWith("+++")) return color(ANSI.green, line);
-  if (line.startsWith("-") && !line.startsWith("---")) return color(ANSI.red, line);
-  if (line.startsWith("@@")) return color(ANSI.magenta, line);
-  return color(ANSI.dim, line);
-}
-
-export function colorCodeLine(line) {
-  let result = line
-    .replace(/\b(class|def|function|const|let|var|return|if|else|for|while|import|from|async|await)\b/g, `${ANSI.cyan}$1${ANSI.reset}`)
-    .replace(/\b(True|False|None|null|undefined)\b/g, `${ANSI.yellow}$1${ANSI.reset}`);
-  if (/^\s*(#|\/\/)/.test(line)) result = color(ANSI.dim, line);
-  return result;
-}
-
 export function looksLikeDiff(text) {
   const sample = String(text).split("\n").slice(0, 20);
   return sample.some((line) => line.startsWith("@@") || line.startsWith("---") || line.startsWith("+++"));
