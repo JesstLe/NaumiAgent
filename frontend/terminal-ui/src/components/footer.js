@@ -117,10 +117,12 @@ export function StatusFooter({ state, env = {} }) {
       const providerIdentity = status.provider || status.api_format
         ? formatProviderIdentity(status)
         : null;
+      const reasoningEffort = String(status.reasoning_effort?.effective || "auto");
       const parts = [
         time,
         `mode: ${state.mode}`,
-        `reasoning: ${state.showReasoning ? "on" : "off"}`,
+        `思考文本: ${state.showReasoning ? "on" : "off"}`,
+        `强度: ${reasoningEffort}`,
         `运行: ${state.cancelPending ? "正在停止" : state.running ? "进行中" : "空闲"}`,
         session,
         ...(tasks ? [`tasks: ${tasks}`] : []),

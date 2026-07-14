@@ -243,7 +243,11 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
             "aliases": ["/mode"],
             "description": "切换 runtime 模式 default / plan / bypass",
         },
-        {"command": "/reasoning", "description": "显示/切换思考过程输出"},
+        {
+            "command": "/effort",
+            "description": "查看或切换模型思考强度",
+        },
+        {"command": "/reasoning", "description": "显示/切换思考文本"},
         {"command": "/clear", "aliases": ["/c"], "description": "清空当前会话显示"},
         {"command": "/debug", "description": "显示前端与后端调试路径"},
         {"command": "/pwd", "description": "显示工作区与会话库路径"},
@@ -467,6 +471,20 @@ class JsonlEngineBridge:
                 upstream_model = identity.upstream_model
             except Exception:
                 pass
+        reasoning_effort = {
+            "model": model,
+            "effective": "auto",
+            "source": "auto",
+            "supported": [],
+            "default": None,
+            "warning": None,
+        }
+        try:
+            reasoning_effort = self.engine.router.get_reasoning_effort_status(
+                model or None
+            ).to_dict()
+        except Exception:
+            pass
         try:
             context = self.engine.get_context_info()
         except Exception:
@@ -487,6 +505,7 @@ class JsonlEngineBridge:
             "provider": provider,
             "api_format": api_format,
             "upstream_model": upstream_model,
+            "reasoning_effort": reasoning_effort,
             "workspace_root": str(workspace_root),
             "usage": {
                 "input_tokens": usage.total_input_tokens,

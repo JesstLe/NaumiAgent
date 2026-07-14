@@ -14,6 +14,8 @@ const AGENT_STATES = new Set(["uninitialized", "spawned", "ready", "running", "i
 const EXECUTION_STATUSES = new Set(["running", "stopping", "completed", "error", "failed", "timeout", "max_turns", "cancelled"]);
 const EXECUTION_PHASES = new Set(["starting", "running", "preparing_tool", "running_tool", "stopping", "finished"]);
 const TEAM_PRIORITIES = new Set(["low", "normal", "high", "critical"]);
+const REASONING_EFFORTS = new Set(["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const REASONING_EFFORT_SOURCES = new Set(["runtime", "model", "global", "auto"]);
 
 export function parseArgs(argv) {
   const parsed = { config: ".naumi/config.yaml", bridgeCommand: "", bridgeCommandJson: "" };
@@ -277,7 +279,51 @@ function normalizeRuntimeStatus(payload, source = "runtime/status") {
   if (Object.hasOwn(status, "budget")) {
     normalized.budget = normalizeBudgetStatus(status.budget, `${source}.budget`);
   }
+  if (Object.hasOwn(status, "reasoning_effort")) {
+    normalized.reasoning_effort = normalizeReasoningEffort(
+      status.reasoning_effort,
+      `${source}.reasoning_effort`,
+    );
+  }
   return normalized;
+}
+
+function normalizeReasoningEffort(value, source) {
+  const effort = requireObject(value, source);
+  const effective = strictStatusText(effort.effective, `${source}.effective`).toLowerCase();
+  const effortSource = strictStatusText(effort.source, `${source}.source`).toLowerCase();
+  if (!REASONING_EFFORTS.has(effective)) {
+    throw new Error(`${source}.effective 无效: ${effective}`);
+  }
+  if (!REASONING_EFFORT_SOURCES.has(effortSource)) {
+    throw new Error(`${source}.source 无效: ${effortSource}`);
+  }
+  if (!Array.isArray(effort.supported) || effort.supported.length > 8) {
+    throw new Error(`${source}.supported 必须是最多 8 项的字符串数组`);
+  }
+  const supported = effort.supported.map((item, index) => {
+    const normalized = strictStatusText(item, `${source}.supported[${index}]`).toLowerCase();
+    if (normalized === "auto" || !REASONING_EFFORTS.has(normalized)) {
+      throw new Error(`${source}.supported[${index}] 无效: ${normalized}`);
+    }
+    return normalized;
+  });
+  const defaultEffort = effort.default == null
+    ? null
+    : strictStatusText(effort.default, `${source}.default`).toLowerCase();
+  if (defaultEffort !== null && !supported.includes(defaultEffort)) {
+    throw new Error(`${source}.default 必须出现在 supported 中`);
+  }
+  return {
+    model: strictStatusText(effort.model ?? "", `${source}.model`),
+    effective,
+    source: effortSource,
+    supported,
+    default: defaultEffort,
+    warning: effort.warning == null
+      ? null
+      : strictStatusText(effort.warning, `${source}.warning`),
+  };
 }
 
 export function normalizeBudgetStatus(value, source = "budget") {

@@ -39,8 +39,26 @@ test("terminal UI welcome consumes identity from the real Python JSONL Bridge", 
   try {
     await waitForLatestScreen(output, "NaumiAgent v0.1.214", 7000);
     await waitForLatestScreen(output, "模型 python-fixture-capable", 7000);
+    await waitForLatestScreen(output, "思考强度 medium", 7000);
     await waitForLatestScreen(output, "模式 default · 权限 moderate", 7000);
     await waitForLatestScreen(output, "预算: 不限", 7000);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI effort command uses shared Python backend and refreshed status", async () => {
+  const app = launchTerminalUi("python-bridge-fixture.py", {
+    bridgeCommandJson: [pythonExecutable(), "test/fixtures/python-bridge-fixture.py"],
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForLatestScreen(output, "思考强度 medium", 7000);
+    app.stdin.write("/effort high\n");
+    await waitForLatestScreen(output, "思考强度 high", 7000);
+    await waitForLatestScreen(output, "强度: high", 7000);
     assert.equal(await stopTerminalUi(app), 0);
   } finally {
     forceKill(app);
@@ -748,10 +766,10 @@ test("terminal UI process toggles reasoning display through bridge protocol", as
 
   try {
     await waitForReadyWelcome(output, 7000);
-    await waitForOutput(output, "reasoning: off");
+    await waitForOutput(output, "思考文本: off");
     app.stdin.write("/reasoning on\n");
-    await waitForOutput(output, "reasoning 文本显示已开启。");
-    await waitForOutput(output, "reasoning: on");
+    await waitForOutput(output, "思考文本显示已开启。");
+    await waitForOutput(output, "思考文本: on");
 
     const code = await stopTerminalUi(app);
 

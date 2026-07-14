@@ -7,6 +7,11 @@ from typing import Any
 
 from naumi_agent.agent_control import AgentControlSnapshot
 from naumi_agent.inspector import RuntimeInspectorSnapshot
+from naumi_agent.model.reasoning import (
+    ReasoningEffort,
+    ReasoningEffortSetting,
+    ReasoningEffortStatus,
+)
 from naumi_agent.orchestrator.engine import AgentResult, AgentRuntimeMode, AgentUsage
 from naumi_agent.orchestrator.subagent_manager import StopExecutionResult
 from naumi_agent.safety.permissions import PermissionMode
@@ -15,8 +20,40 @@ from naumi_agent.ui.bridge import JsonlEngineBridge, serve_stdio
 
 
 class FakeRouter:
+    def __init__(self) -> None:
+        self.runtime_effort: ReasoningEffortSetting | None = None
+
     def resolve_model(self, tier: str) -> str:
         return f"python-fixture-{tier}"
+
+    def get_reasoning_effort_status(
+        self,
+        model: str | None = None,
+    ) -> ReasoningEffortStatus:
+        return ReasoningEffortStatus(
+            model=model or self.resolve_model("capable"),
+            effective=self.runtime_effort or ReasoningEffortSetting.MEDIUM,
+            source="runtime" if self.runtime_effort is not None else "model",
+            supported=(ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH),
+            default=ReasoningEffort.MEDIUM,
+        )
+
+    def set_reasoning_effort(
+        self,
+        value: str,
+        *,
+        model: str | None = None,
+    ) -> ReasoningEffortStatus:
+        self.runtime_effort = ReasoningEffortSetting(value)
+        return self.get_reasoning_effort_status(model)
+
+    def reset_reasoning_effort(
+        self,
+        *,
+        model: str | None = None,
+    ) -> ReasoningEffortStatus:
+        self.runtime_effort = None
+        return self.get_reasoning_effort_status(model)
 
 
 class FakeTaskStore:
