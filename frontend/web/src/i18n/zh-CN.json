@@ -23,7 +23,24 @@
   "chat": {
     "title": "对话",
     "composerPlaceholder": "输入问题或指令...",
-    "emptyState": "开始与 Agent 对话，或发送一条指令。"
+    "emptyState": "开始与 Agent 对话，或发送一条指令。",
+    "thinking": "思考等级",
+    "thinkingDefault": "默认",
+    "thinkingPlan": "规划",
+    "thinkingBypass": "直达",
+    "model": "模型",
+    "copyOutput": "复制输出",
+    "copyImage": "复制图片",
+    "editMessage": "编辑",
+    "retryMessage": "重新发送",
+    "permission": "权限",
+    "permissionAllow": "允许",
+    "permissionDeny": "拒绝",
+    "permissionBypass": "绕过",
+    "permissionReason": "原因",
+    "uploadFile": "上传文件",
+    "sources": "来源",
+    "noSources": "没有附加来源"
   },
   "status": {
     "online": "在线",

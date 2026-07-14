@@ -23,7 +23,24 @@
   "chat": {
     "title": "Chat",
     "composerPlaceholder": "Type a question or command...",
-    "emptyState": "Start a conversation with the Agent, or send a command."
+    "emptyState": "Start a conversation with the Agent, or send a command.",
+    "thinking": "Thinking level",
+    "thinkingDefault": "Default",
+    "thinkingPlan": "Plan",
+    "thinkingBypass": "Bypass",
+    "model": "Model",
+    "copyOutput": "Copy output",
+    "copyImage": "Copy image",
+    "editMessage": "Edit",
+    "retryMessage": "Retry",
+    "permission": "Permission",
+    "permissionAllow": "Allow",
+    "permissionDeny": "Deny",
+    "permissionBypass": "Bypass",
+    "permissionReason": "Reason",
+    "uploadFile": "Upload file",
+    "sources": "Sources",
+    "noSources": "No attached sources"
   },
   "status": {
     "online": "Online",
