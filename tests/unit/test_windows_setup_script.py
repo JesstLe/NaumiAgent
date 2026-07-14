@@ -33,13 +33,27 @@ def test_setup_script_checks_required_runtimes() -> None:
 def test_setup_script_creates_config_only_when_missing() -> None:
     script = _script()
 
+    assert '$configDir = Join-Path $repoRoot ".naumi"' in script
+    assert '$configPath = Join-Path $configDir "config.yaml"' in script
+    assert '$legacyConfigPath = Join-Path $repoRoot "config.yaml"' in script
     assert "Test-Path -LiteralPath $configPath" in script
+    assert "Test-Path -LiteralPath $legacyConfigPath" in script
+    assert "New-Item -ItemType Directory -Path $configDir" in script
     assert 'workspace_root: "."' in script
     assert '    - "."' in script
     assert 'host: "127.0.0.1"' in script
     assert "enabled: false" in script
     assert "temperature: 1.0" in script
     assert "long_term_enabled: false" in script
+    assert "max_budget_usd: null" in script
+    assert "max_turns: 50" in script
+
+
+def test_setup_script_verifies_the_shared_resolved_config() -> None:
+    script = _script()
+
+    assert "from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path" in script
+    assert "AppConfig.from_yaml(resolve_config_path(DEFAULT_CONFIG_PATH))" in script
 
 
 def test_setup_script_reads_user_key_without_printing_or_accepting_it() -> None:

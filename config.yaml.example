@@ -1,10 +1,10 @@
 # NaumiAgent 配置文件（示例）
-# 复制为 config.yaml 并填入实际值
+# 复制为 .naumi/config.yaml；密钥请存入系统凭据库或环境变量
 
 models:
   provider: "kimi"
   # 可选：provider catalog 路径；相对路径以此配置文件所在目录为基准。
-  # catalog_path: "catalogs/providers.json"
+  # catalog_path: "providers.json"
   default_model: "openai/kimi-for-coding"
   fast_model: "openai/kimi-for-coding"
   reasoning_model: "openai/kimi-for-coding"

@@ -87,7 +87,7 @@ def run_onboarding(config_path: Path, *, project_root: Path | None = None) -> bo
     if not api_key:
         console.print(
             "[yellow]未提供 API Key，跳过配置。"
-            "后续可通过环境变量或 config.yaml 设置。[/yellow]"
+            "后续可运行 naumi configure，或设置 NAUMI_MODELS__API_KEY。[/yellow]"
         )
         return False
 

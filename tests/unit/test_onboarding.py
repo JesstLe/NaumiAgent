@@ -100,6 +100,26 @@ def test_run_onboarding_reuses_environment_key_without_keyring(
     assert onboarding.run_onboarding(config_path, project_root=tmp_path) is True
 
 
+def test_skipped_key_recommends_secure_configuration_sources(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output = StringIO()
+    monkeypatch.setattr(onboarding, "console", Console(file=output, force_terminal=False))
+    monkeypatch.setattr(onboarding, "_choose_provider", lambda: "kimi")
+    monkeypatch.setattr(onboarding, "_prompt_api_key", lambda _name: "")
+
+    assert onboarding.run_onboarding(
+        tmp_path / ".naumi" / "config.yaml",
+        project_root=tmp_path,
+    ) is False
+
+    text = output.getvalue()
+    assert "naumi configure" in text
+    assert "NAUMI_MODELS__API_KEY" in text
+    assert "config.yaml 设置" not in text
+
+
 def test_migrate_legacy_key_moves_secret_before_rewriting_yaml(
     tmp_path: Path,
     monkeypatch,
