@@ -6,7 +6,7 @@
 
 | 阶段 | 缺口 | 完成证据要求 |
 |---|---|---|
-| H3（进行中） | CheckRunner 已完成；仍缺 Completion Contract、Receipt、一次纠正 Gate 与 Engine final 接入 | 变更任务缺少当前 tree fingerprint 检查时不能 verified；真实小变更闭环通过 |
+| H3（进行中） | CheckRunner 与 Completion 内核已完成；仍缺 Engine final/事件/UI 接入 | 真实 Engine 先被 Gate 要求纠正，补跑检查后输出 verified Receipt |
 | H4 | Evidence Store、artifact、replay | SQLite/文件损坏、脱敏、trace 丢失、重放一致性通过 |
 | H5 | Static/Replay/Live Eval 与 baseline | 离线确定性重跑一致；live 显式预算和 Worktree |
 | H6 | Failure fingerprint、Proposal、人工 promotion | 无自动改 Profile；去重和阈值可审计 |
@@ -22,8 +22,8 @@
 - NaumiAgent 写工具成功后会立即失效缓存；外部编辑器新增未跟踪文件最多等待 30 秒 Git 审计周期才进入候选集。
 - Windows 的路径归一化和 argv 行为有单元边界，仍需要 Windows CI 的真实 Git/NTFS 验证。
 - CheckRunner success cache 只在当前进程内有效；H4 Evidence Store 才会提供跨重启证据。
-- 当前检查结果尚未进入 final Completion Gate，Agent 仍可能在未运行 required check 时结束；
-  这是 H3 下一切片必须关闭的核心缺口。
+- Completion Gate 尚未接到 Engine final，Agent 仍可能在未运行 required check 时结束；这是
+  H3 下一切片必须关闭的核心缺口。
 
 ## 当前不应做的事情
 

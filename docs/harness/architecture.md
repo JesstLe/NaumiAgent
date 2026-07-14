@@ -1,9 +1,9 @@
-# Harness 当前架构（H1-H2 + H3 CheckRunner）
+# Harness 当前架构（H1-H2 + H3 Completion Kernel）
 
 ## 目标
 
-Harness 负责把“仓库事实、用户意图、执行环境和验证边界”组织成 Agent 可可靠消费的工程上下文。H1/H2 负责安全加载 Profile、用户信任和确定性知识；H3 已加入按需 CheckRunner，
-但 Completion Contract 和 final Gate 尚未完成，因此它还不是完整的完成判定器。
+Harness 负责把“仓库事实、用户意图、执行环境和验证边界”组织成 Agent 可可靠消费的工程上下文。H1/H2 负责安全加载 Profile、用户信任和确定性知识；H3 已加入按需 CheckRunner、
+Completion Contract/Gate/Receipt 内核，但尚未接入 Engine final，因此还不会自动阻止提前结束。
 
 ## 模块所有权
 
@@ -16,6 +16,7 @@ Harness 负责把“仓库事实、用户意图、执行环境和验证边界”
 | `context.py` | L0/L1 渐进披露、模型窗口预算、闭合 Markdown 证据块 |
 | `fingerprint.py` | HEAD、index、dirty/untracked bytes 的 Git tree fingerprint |
 | `checks.py` | required check 选择、受信任执行、success cache 与 single-flight |
+| `completion.py` | task kind 升级、scope/Todo/check/evidence Gate 与结构化 Receipt |
 | `validation/` | Workbench/Harness 共用 argv policy、cwd containment 与进程组执行器 |
 | `service.py` | 信任门、知识/检查并发缓存、统一用户/Agent facade |
 | `tools.py` | 三个只读 Tool 与一个检查 Tool；不包含 trust/untrust |

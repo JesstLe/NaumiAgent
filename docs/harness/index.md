@@ -1,7 +1,7 @@
 # NaumiAgent Harness 知识地图
 
 本文是仓库 Harness 的权威入口。它描述已经存在的 H1/H2 能力，以及 H3 已落地的安全
-CheckRunner 切片；尚未完成的 Completion Contract/Gate 和未来阶段记录在
+CheckRunner 与 Completion Gate 内核；尚未完成的 Engine final 接入和未来阶段记录在
 [debt.md](debt.md)，不会伪装成已实现功能。
 
 ## 快速导航
@@ -28,8 +28,8 @@ CheckRunner 切片；尚未完成的 Completion Contract/Gate 和未来阶段记
 - 受信任 Profile 中的精确检查可由 `/harness check <id>` 或 `harness_run_check` 按需执行。
 - 检查结果绑定 run id、Profile digest 与 Git tree fingerprint；并发相同检查 single-flight，
   Profile/工作树变化会阻止缓存复用或使运行结果失效。
-- H3 Completion Contract、最终 Gate 与自动纠正尚未完成，当前不能把“检查通过”等同于
-  “任务已验证完成”。
+- Completion Contract/Gate 已能机械区分 verified、unverified、blocked，并最多要求一次纠正；
+  当前尚未接入 Engine final，因此运行中的 Agent 还不会被自动拦截。
 
 ## 新鲜度记录
 

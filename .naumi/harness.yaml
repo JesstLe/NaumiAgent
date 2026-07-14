@@ -50,6 +50,7 @@ checks:
       - -q
       - tests/unit/test_harness_profile.py
       - tests/unit/test_harness_checks.py
+      - tests/unit/test_harness_completion.py
       - tests/unit/test_harness_trust.py
       - tests/unit/test_harness_service.py
       - tests/unit/test_harness_tools.py
@@ -85,6 +86,7 @@ checks:
       - src/naumi_agent/workbench/validation.py
       - tests/unit/test_harness_profile.py
       - tests/unit/test_harness_checks.py
+      - tests/unit/test_harness_completion.py
       - tests/unit/test_harness_trust.py
       - tests/unit/test_harness_service.py
       - tests/unit/test_harness_tools.py
