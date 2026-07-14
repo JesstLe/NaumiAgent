@@ -16,6 +16,8 @@ except Exception:  # pragma: no cover - backward-compatible fallback path
         ("/help", "显示帮助", False),
         ("/keybindings", "显示当前快捷键配置", False),
         ("/style", "显示当前主题和输出风格", False),
+        ("/reasoning", "显示或隐藏模型思考文本", True),
+        ("/effort", "查看或切换模型思考强度", True),
         ("/doctor", "运行环境诊断", False),
         ("/copy", "复制/导出完整记录、最近一轮或最近错误", True),
         ("/debug", "显示本次结构化调试日志位置", False),

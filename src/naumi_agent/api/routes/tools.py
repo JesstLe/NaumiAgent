@@ -5,7 +5,12 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from naumi_agent.api.deps import AuthDep
-from naumi_agent.api.schemas import ConfigResponse, ModelInfo, ToolInfo
+from naumi_agent.api.schemas import (
+    ConfigResponse,
+    ModelInfo,
+    ReasoningEffortInfo,
+    ToolInfo,
+)
 from naumi_agent.model.discovery import ModelDiscoveryError
 
 router = APIRouter(tags=["tools", "config"])
@@ -67,6 +72,12 @@ async def get_config(request: Request, auth: str = AuthDep):
                     max_output=model.max_output,
                     supports_tools=model.supports_tools,
                     supports_reasoning=model.supports_reasoning,
+                    reasoning_efforts=[value.value for value in model.reasoning_efforts],
+                    default_reasoning_effort=(
+                        model.default_reasoning_effort.value
+                        if model.default_reasoning_effort is not None
+                        else None
+                    ),
                     supports_vision=model.supports_vision,
                 )
             )
@@ -88,9 +99,11 @@ async def get_config(request: Request, auth: str = AuthDep):
                 )
             )
 
+    effort_status = engine.router.get_reasoning_effort_status()
     return ConfigResponse(
         models=models,
         model_warnings=model_warnings,
+        reasoning_effort=ReasoningEffortInfo(**effort_status.to_dict()),
         tools=[
             ToolInfo(name=t.name, description=t.description, parameters=t.schema.parameters)
             for t in engine.tool_registry.all()
