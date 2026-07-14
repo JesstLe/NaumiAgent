@@ -1,5 +1,11 @@
 # NaumiAgent 文档地图
 
+## 后续开发权威入口
+
+大型后续工程统一从 [`development/README.md`](development/README.md) 进入。该目录包含
+33 个可独立交付模块，覆盖 Harness、CLI/TUI/New UI、Claude Code 源码对齐、未来架构和
+自进化闭环，并提供机器注册表、验收证据标准及最终审核清单。
+
 这里是 NaumiAgent 当前文档的唯一总入口。根目录 [README](../README.md) 负责安装和快速开始；
 本页负责区分当前使用说明、产品规格、历史工程记录、迁移资料和参考材料。
 
