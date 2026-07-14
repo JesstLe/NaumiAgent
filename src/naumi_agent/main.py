@@ -28,6 +28,7 @@ from naumi_agent.config.configurator import ConfigurationError, configure_projec
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.log_setup import suppress_startup_import_warnings
+from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.ui.budget import format_budget_detail
 from naumi_agent.ui.code_excerpt import (
     DEFAULT_CODE_BLOCK_MAX_LINES,
@@ -184,6 +185,16 @@ def _build_style_help_text(config: Any) -> str:
 
 class TerminalUiLaunchError(RuntimeError):
     """Raised when the next terminal UI cannot be launched."""
+
+
+_TERMINAL_UI_NO_FALLBACK_EXIT_CODES = frozenset({0, 130, 143})
+
+
+def _safe_launch_error(exc: BaseException) -> str:
+    """Return one short, redacted launch failure for terminal output."""
+    raw = str(exc).strip()
+    first_line = raw.splitlines()[0] if raw else type(exc).__name__
+    return OutputGuardrail.redact(first_line)[:300]
 
 # Friendly tool name mapping for display
 _TOOL_ICONS: dict[str, str] = {
@@ -490,16 +501,33 @@ def terminal_ui(
 
 
 def _exit_after_terminal_ui(config: str) -> None:
-    """Launch the Node terminal UI and translate launch failures for Typer."""
+    """Launch the preferred interactive UI and translate its exit for Typer."""
+    raise typer.Exit(_launch_interactive_ui(config))
+
+
+def _launch_interactive_ui(config_path: str) -> int:
+    """Launch the Node UI and fall back once to Textual on failure."""
+    failure: str
     try:
-        raise typer.Exit(_launch_terminal_ui(config))
-    except TerminalUiLaunchError as exc:
-        console.print(f"[red]{exc}[/red]")
+        returncode = _launch_terminal_ui(config_path)
+    except (TerminalUiLaunchError, OSError) as exc:
+        failure = _safe_launch_error(exc)
+    else:
+        if returncode in _TERMINAL_UI_NO_FALLBACK_EXIT_CODES:
+            return returncode
+        failure = f"新终端 UI 异常退出（退出码 {returncode}）"
+
+    console.print(f"[yellow]新终端 UI 启动失败：{failure}[/yellow]")
+    console.print("[yellow]正在切换到 Textual TUI。[/yellow]")
+    try:
+        _launch_tui(config_path)
+    except Exception as exc:
         console.print(
-            "[dim]可暂时使用 legacy fallback："
-            "naumi chat --classic 或 naumi ui --legacy[/dim]"
+            "[red]Textual TUI 也无法启动："
+            f"{_safe_launch_error(exc)}[/red]"
         )
-        raise typer.Exit(1) from exc
+        return 1
+    return 0
 
 
 @naumiagent_app.callback(invoke_without_command=True)
