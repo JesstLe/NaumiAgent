@@ -1,7 +1,7 @@
 # Windows NaumiAgent Workbench 实现计划（Web-first 版）
 
-> 生成日期：2026-07-14  
-> 本计划基于现有 macOS SwiftUI Workbench 的设计文档与 Python 后端 API 合同，规划 Windows 客户端与 Web 前端的实现路径。  
+> 生成日期：2026-07-14
+> 本计划基于现有 macOS SwiftUI Workbench 的设计文档与 Python 后端 API 合同，规划 Windows 客户端与 Web 前端的实现路径。
 > 核心决策：Windows app 与 Web 前端共享同一套 React + TypeScript UI 代码，Windows 端使用 Tauri 2 包装为原生桌面应用。
 
 ---
