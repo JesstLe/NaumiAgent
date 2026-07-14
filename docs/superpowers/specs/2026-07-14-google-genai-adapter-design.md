@@ -218,7 +218,8 @@ Naumi 继续向 LiteLLM 提交统一 OpenAI message/tool schema：
 ### 8.4 实施证据
 
 - 最终聚焦验收覆盖 provider catalog、runtime、discovery、targets、Router、Router
-  transport 和 Google loopback 七个文件：`225 passed in 3.46s`；
+  transport 和 Google loopback 七个文件：分支上 `225 passed in 3.46s`，快进合并后的
+  `main` 再验为 `225 passed in 5.20s`；
 - Ruff 对上述生产文件与测试文件通过，四个生产模块 `py_compile` 通过，
   `git diff --check` 通过；
 - 本地 Gemini 回环真实经过已安装 LiteLLM，覆盖 `/models`、动态模型立即执行、

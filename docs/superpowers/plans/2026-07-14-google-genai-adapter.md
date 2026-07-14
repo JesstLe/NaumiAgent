@@ -868,7 +868,7 @@ git add docs/15-model-provider-configuration.md README.md \
 git commit -m "docs: document Google GenAI provider support"
 ```
 
-- [ ] **Step 8: Fast-forward merge, verify on main, and push**
+- [x] **Step 8: Fast-forward merge, verify on main, and push**
 
 Fetch `origin/main`; if remote advanced, inspect and integrate it without discarding user changes. Fast-forward merge the feature branch into `main`, rerun only Steps 3-4 on merged `main`, push `origin/main`, and preserve external worktrees plus `.superpowers/`.
 
@@ -877,6 +877,7 @@ Fetch `origin/main`; if remote advanced, inspect and integrate it without discar
 Final implementation evidence before merge:
 
 - targeted acceptance: `225 passed in 3.46s` across the seven provider/Router files;
+- merged `main` re-verification: `225 passed in 5.20s` with the same focused scope;
 - Ruff, four-module `py_compile`, and `git diff --check`: passed;
 - temporary real `.naumi/config.yaml` + `providers.json` loopback smoke: passed and cleaned;
 - review-discovered correction: native catalog now exposes positive `requestTimeoutMs` /
