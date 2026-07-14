@@ -34,8 +34,8 @@ source_paths:
   - src/naumi_agent/orchestrator/engine.py
   - .naumi/harness.yaml
 verified_on: 2026-07-14
-verified_at_commit: pending-h2-feature-commit
+verified_at_commit: 079932413af11f2e1da9a928c23cfe7f2fb5b79d
 evidence: docs/superpowers/plans/2026-07-14-harness-knowledge-plane.md
 ```
 
-完成 H2 feature commit 后，必须把 `verified_at_commit` 更新为实际提交，并以独立证据提交保存，避免在同一提交中写无法成立的自引用 hash。
+`verified_at_commit` 指向包含 H2 生产代码与测试的 feature commit；本记录由后续独立证据提交保存，避免在同一提交中写无法成立的自引用 hash。
