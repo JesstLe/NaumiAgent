@@ -28,7 +28,6 @@ from naumi_agent.config.configurator import ConfigurationError, configure_projec
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.log_setup import suppress_startup_import_warnings
-from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.ui.budget import format_budget_detail
 from naumi_agent.ui.code_excerpt import (
     DEFAULT_CODE_BLOCK_MAX_LINES,
@@ -188,6 +187,8 @@ _TERMINAL_UI_NO_FALLBACK_EXIT_CODES = frozenset({0, 130, 143})
 
 def _safe_launch_error(exc: BaseException) -> str:
     """Return one short, redacted launch failure for terminal output."""
+    from naumi_agent.safety.guardrails import OutputGuardrail
+
     raw = str(exc).strip()
     first_line = raw.splitlines()[0] if raw else type(exc).__name__
     return OutputGuardrail.redact(first_line)[:300]

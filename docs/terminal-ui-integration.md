@@ -101,27 +101,34 @@ uv run naumi-ui-bridge --config config.yaml
 启动：
 
 ```bash
-naumi ui --config config.yaml
+naumi --config .naumi/config.yaml
 ```
 
-`naumi ui` 会由 Python CLI 直接拉起 `frontend/terminal-ui/src/index.js` 并连接
+`naumi` 会由 Python 命令层直接拉起 `frontend/terminal-ui/src/index.js` 并连接
 `naumi_agent.ui.bridge`。启动时会保留用户当前工作目录；前端 UI state、
-debug log 和 Python bridge 的相对 `--config` 解析都以这个目录为准。旧版 Textual
-TUI 保留为 fallback：
+debug log 和 Python bridge 的相对 `--config` 解析都以这个目录为准。启动状态机为：
+
+- Node UI 返回 `0` 时正常结束；
+- 返回 `130` 或 `143` 时视为用户中断或进程终止，不启动另一个界面；
+- Node/资源预检失败、spawn 失败或其他非零退出时，显示安全的中文原因并只回退一次到 Textual；
+- Textual 也无法启动时返回 `1`，不会递归重试；
+- `naumi tui` 直接启动 Textual，不探测 Node。
 
 开发态启动时，launcher 优先使用仓库根目录下的 `frontend/terminal-ui`；wheel/pip
 安装态启动时，则使用打包进 `naumi_agent/frontend/terminal-ui` 的运行时前端资源。
 wheel 只包含 `package.json` 和 `src/`，不会把前端测试文件打包进用户安装环境。
-正式入口 `naumi ui` 会把当前 Python 解释器通过 `--bridge-command-json` 传给
+正式入口 `naumi` 会把当前 Python 解释器通过 `--bridge-command-json` 传给
 前端，用 `python -m naumi_agent.ui.bridge` 启动 bridge，避免安装态依赖 `uv`
 或误用其它 Python 环境。前端源码直接开发调试时，如果没有传 bridge command，
 仍保留 `uv run python -m naumi_agent.ui.bridge` 作为本地 fallback。
 
 ```bash
-naumi ui --legacy
-# 或
-naumi chat --tui
+naumi tui
 ```
+
+`naumi chat`、`naumi ui` 与 `naumiagent` 暂时保留为默认入口兼容别名；根 `--tui`、
+`chat --tui` 和 `ui --legacy` 暂时保留为 Textual 迁移别名。Prompt Toolkit 旧 CLI 的
+源码、测试和必要依赖继续保留，但 `--classic` 已不再是公共命令。
 
 当前能力：
 
