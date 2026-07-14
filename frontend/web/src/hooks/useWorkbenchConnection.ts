@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useCallback, useSyncExternalStore } from 'react'
 import { usePlatform } from '@/platform/PlatformContext'
 import { WorkbenchConnectionCoordinator } from '@/api/WorkbenchConnectionCoordinator'
 import type { WorkbenchApiClient } from '@/api/WorkbenchApiClient'
@@ -18,96 +18,152 @@ interface UseWorkbenchConnectionResult {
   disconnect: () => void
 }
 
+// --- Module-level singleton ---
+// The connection coordinator is shared across all components that call
+// useWorkbenchConnection(). Previously each component created its own
+// coordinator, which meant client/sessionId were not shared and only the
+// ConnectionBootstrap instance could drive the connection lifecycle.
+
+interface SharedState {
+  status: ConnectionStatus
+  currentSessionId: string | null
+  snapshot: WorkbenchSnapshot | null
+  isReady: boolean
+  error: string | null
+}
+
+let coordinator: WorkbenchConnectionCoordinator | null = null
+let sharedState: SharedState = {
+  status: { isConnected: false, daemon: null, error: null },
+  currentSessionId: null,
+  snapshot: null,
+  isReady: false,
+  error: null,
+}
+const listeners = new Set<() => void>()
+let onSnapshotListener: ((snapshot: WorkbenchSnapshot) => void) | null = null
+
+function notifyListeners() {
+  for (const listener of listeners) {
+    listener()
+  }
+}
+
+function getSnapshot(): SharedState {
+  return sharedState
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+function ensureCoordinator(tokenProvider: () => Promise<string | null>, options?: ConnectionCoordinatorOptions): WorkbenchConnectionCoordinator {
+  if (coordinator) return coordinator
+  coordinator = new WorkbenchConnectionCoordinator(tokenProvider, {
+    ...options,
+    onSnapshot: (next) => {
+      sharedState = { ...sharedState, snapshot: next }
+      onSnapshotListener?.(next)
+      notifyListeners()
+    },
+  })
+  // Subscribe to status changes from the coordinator.
+  coordinator.subscribeToStatus((next) => {
+    sharedState = { ...sharedState, status: next }
+    notifyListeners()
+  })
+  return coordinator
+}
+
 export function useWorkbenchConnection(options: ConnectionCoordinatorOptions = {}): UseWorkbenchConnectionResult {
   const platform = usePlatform()
-  const coordinatorRef = useRef<WorkbenchConnectionCoordinator | null>(null)
-  const [status, setStatus] = useState<ConnectionStatus>({
-    isConnected: false,
-    daemon: null,
-    error: null,
-  })
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
-  const [snapshot, setSnapshot] = useState<WorkbenchSnapshot | null>(null)
-  const [isReady, setIsReady] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
+  // Keep the snapshot listener in sync with the caller's onSnapshot option.
   useEffect(() => {
-    const coordinator = new WorkbenchConnectionCoordinator(
-      async () => platform.getToken(),
-      {
-        ...options,
-        onSnapshot: (next) => {
-          setSnapshot(next)
-          options.onSnapshot?.(next)
-        },
-      },
-    )
-    coordinatorRef.current = coordinator
-    const unsubscribe = coordinator.subscribeToStatus((next) => setStatus(next))
+    onSnapshotListener = options.onSnapshot ?? null
     return () => {
-      unsubscribe()
-      coordinator.disconnect()
-      coordinatorRef.current = null
+      if (onSnapshotListener === options.onSnapshot) {
+        onSnapshotListener = null
+      }
     }
-  }, [platform, options])
+  }, [options.onSnapshot])
+
+  // Initialize the singleton coordinator once.
+  useEffect(() => {
+    ensureCoordinator(async () => platform.getToken(), options)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [platform])
+
+  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 
   const connect = useCallback(async () => {
-    const coordinator = coordinatorRef.current
     if (!coordinator) return
     try {
       await coordinator.connect()
-      setError(null)
+      sharedState = { ...sharedState, error: null }
+      notifyListeners()
     } catch (err) {
       const message = err instanceof Error ? err.message : '连接失败'
-      setError(message)
+      sharedState = { ...sharedState, error: message }
+      notifyListeners()
       throw err
     }
   }, [])
 
-  const selectSession = useCallback(
-    async (sessionId: string) => {
-      const coordinator = coordinatorRef.current
-      if (!coordinator) return
-      const next = await coordinator.selectSession(sessionId)
-      setCurrentSessionId(sessionId)
-      setSnapshot(next)
-      setError(null)
-    },
-    [],
-  )
+  const selectSession = useCallback(async (sessionId: string) => {
+    if (!coordinator) return
+    const next = await coordinator.selectSession(sessionId)
+    sharedState = {
+      ...sharedState,
+      currentSessionId: sessionId,
+      snapshot: next,
+      error: null,
+    }
+    notifyListeners()
+  }, [])
 
   const bootstrap = useCallback(async () => {
-    const coordinator = coordinatorRef.current
     if (!coordinator) return
     try {
       await coordinator.connect()
       const result = await coordinator.bootstrap()
-      setCurrentSessionId(result.sessionId)
-      setSnapshot(result.snapshot)
-      setIsReady(true)
-      setError(null)
+      sharedState = {
+        ...sharedState,
+        currentSessionId: result.sessionId,
+        snapshot: result.snapshot,
+        isReady: true,
+        error: null,
+      }
+      notifyListeners()
     } catch (err) {
       const message = err instanceof Error ? err.message : '启动失败'
-      setError(message)
-      setIsReady(false)
+      sharedState = { ...sharedState, error: message, isReady: false }
+      notifyListeners()
       throw err
     }
   }, [])
 
   const disconnect = useCallback(() => {
-    coordinatorRef.current?.disconnect()
-    setCurrentSessionId(null)
-    setSnapshot(null)
-    setIsReady(false)
+    coordinator?.disconnect()
+    sharedState = {
+      ...sharedState,
+      currentSessionId: null,
+      snapshot: null,
+      isReady: false,
+    }
+    notifyListeners()
   }, [])
 
   return {
-    client: coordinatorRef.current?.client ?? null,
-    status,
-    currentSessionId,
-    snapshot,
-    isReady,
-    error,
+    client: coordinator?.client ?? null,
+    status: state.status,
+    currentSessionId: state.currentSessionId,
+    snapshot: state.snapshot,
+    isReady: state.isReady,
+    error: state.error,
     connect,
     selectSession,
     bootstrap,
