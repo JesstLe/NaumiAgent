@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
-import sys
 from dataclasses import dataclass
 
+from naumi_agent.validation.executor import (
+    CommandExecutionStatus,
+    ValidationExecutor,
+)
+from naumi_agent.validation.policy import ValidationCommandPolicy
 from naumi_agent.workbench.models import FailureKind, now_iso
 from naumi_agent.workbench.store import WorkbenchStore
 
@@ -33,10 +36,12 @@ class ValidationRunner:
         store: WorkbenchStore,
         allowed_commands: list[list[str]],
         timeout_seconds: int = 120,
+        executor: ValidationExecutor | None = None,
     ) -> None:
         self._store = store
-        self._allowed_commands = allowed_commands
+        self._policy = ValidationCommandPolicy(allowed_commands=allowed_commands)
         self._timeout_seconds = timeout_seconds
+        self._executor = executor or ValidationExecutor()
 
     async def run(
         self,
@@ -46,28 +51,21 @@ class ValidationRunner:
         actor: str,
         command: ValidationCommand,
     ) -> ValidationResult:
-        self._ensure_allowed(command.argv)
+        approved = self._policy.approve(argv=command.argv, cwd=command.cwd)
         started = now_iso()
-        runtime_argv = list(command.argv)
-        if sys.platform == "win32" and runtime_argv[0] == "python3":
-            runtime_argv[0] = sys.executable
-        proc = await asyncio.create_subprocess_exec(
-            *runtime_argv,
-            cwd=command.cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+        execution = await self._executor.run(
+            argv=approved.argv,
+            cwd=approved.cwd,
+            timeout_seconds=self._timeout_seconds,
         )
-        try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=self._timeout_seconds)
-            output = stdout.decode("utf-8", errors="replace")
-            exit_code = proc.returncode or 0
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            output = "验证命令超时"
-            exit_code = 124
+        output = execution.output or _execution_status_message(execution.status)
+        exit_code = _workbench_exit_code(execution.status, execution.exit_code)
         completed = now_iso()
-        status = "passed" if exit_code == 0 else "failed"
+        status = (
+            "passed"
+            if execution.status is CommandExecutionStatus.PASSED
+            else "failed"
+        )
         run = await self._store.record_validation_run(
             session_id=session_id,
             task_id=task_id,
@@ -96,8 +94,23 @@ class ValidationRunner:
             output=output,
         )
 
-    def _ensure_allowed(self, argv: list[str]) -> None:
-        for prefix in self._allowed_commands:
-            if argv[: len(prefix)] == prefix:
-                return
-        raise ValueError(f"验证命令不在允许列表：{' '.join(argv)}")
+
+def _workbench_exit_code(
+    status: CommandExecutionStatus,
+    exit_code: int | None,
+) -> int:
+    if exit_code is not None:
+        return exit_code
+    return {
+        CommandExecutionStatus.TIMED_OUT: 124,
+        CommandExecutionStatus.INFRASTRUCTURE_ERROR: 125,
+        CommandExecutionStatus.CANCELLED: 130,
+    }.get(status, 1)
+
+
+def _execution_status_message(status: CommandExecutionStatus) -> str:
+    return {
+        CommandExecutionStatus.TIMED_OUT: "验证命令超时，进程组已终止。",
+        CommandExecutionStatus.CANCELLED: "验证命令已取消，进程组已终止。",
+        CommandExecutionStatus.INFRASTRUCTURE_ERROR: "验证命令未能启动。",
+    }.get(status, "验证命令失败。")
