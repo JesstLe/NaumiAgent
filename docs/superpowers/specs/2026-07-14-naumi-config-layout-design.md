@@ -48,8 +48,8 @@ are returned, and missing paths remain missing so the relevant command can creat
 exact path. The resolver never replaces an explicit missing path with an unrelated repository file
 or example configuration.
 
-Paths containing `~` are expanded. Relative paths remain relative to the caller's working directory
-until `AppConfig.from_yaml()` resolves them, preserving current config-relative anchoring.
+Paths containing `~` are expanded. The resolver returns an absolute selected file path;
+`AppConfig.from_yaml()` still anchors paths inside that YAML to the selected file's parent.
 
 ## Surface integration
 
@@ -75,8 +75,10 @@ Existing root `config.yaml` files are read in place through the legacy fallback.
 copy, move, rewrite, or delete them automatically. Automatic copying could create two competing
 configurations and could duplicate plaintext legacy credentials before credential migration runs.
 
-New onboarding and Windows setup create `.naumi/config.yaml`. Git ignores the local config,
-`.naumi/providers.json`, and `.naumi/data/`, while tracked reusable `.naumi/skills/` remain visible.
+New onboarding and Windows setup create `.naumi/config.yaml` when neither modern nor legacy config
+exists. Windows setup leaves an existing legacy root config active instead of creating a competing
+modern file. Git ignores the local config, `.naumi/providers.json`, and `.naumi/data/`, while tracked
+reusable `.naumi/skills/` remain visible.
 
 ## User experience and errors
 
