@@ -31,6 +31,10 @@ import type {
   IntentLocksResponse,
   Decision,
   IntentLock,
+  ChatSource,
+  ChatSourceCreate,
+  PermissionResolution,
+  ChatEnvironmentResponse,
 } from './types'
 
 export type TokenProvider = () => Promise<string | null>
@@ -153,6 +157,29 @@ export class WorkbenchApiClient {
       method: 'POST',
       url: this.route('send_message', { session_id: sessionId }),
       data: payload,
+    })
+  }
+
+  async fetchChatEnvironment(sessionId: string): Promise<ChatEnvironmentResponse> {
+    return this.request<ChatEnvironmentResponse>({
+      method: 'GET',
+      url: this.route('chat_environment', { session_id: sessionId }),
+    })
+  }
+
+  async addChatSource(sessionId: string, source: ChatSourceCreate): Promise<ChatSource> {
+    return this.request<ChatSource>({
+      method: 'POST',
+      url: this.route('add_chat_source', { session_id: sessionId }),
+      data: source,
+    })
+  }
+
+  async resolvePermission(sessionId: string, callId: string, resolution: PermissionResolution): Promise<{ status: string }> {
+    return this.request<{ status: string }>({
+      method: 'POST',
+      url: this.route('resolve_permission', { session_id: sessionId, call_id: callId }),
+      data: resolution,
     })
   }
 
