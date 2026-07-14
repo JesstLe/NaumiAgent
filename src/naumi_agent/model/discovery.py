@@ -21,6 +21,7 @@ from naumi_agent.model.catalog import (
 from naumi_agent.model.provider_runtime import (
     ProviderRuntimeError,
     build_provider_http_config,
+    normalize_google_model_id,
 )
 from naumi_agent.model.reasoning import ReasoningEffort
 
@@ -96,6 +97,7 @@ class _ParsedModels:
     ids: tuple[str, ...]
     invalid_count: int = 0
     duplicate_count: int = 0
+    unsupported_count: int = 0
     truncated: bool = False
 
     @property
@@ -105,6 +107,10 @@ class _ParsedModels:
             messages.append(f"忽略 {self.invalid_count} 条无效模型记录")
         if self.duplicate_count:
             messages.append(f"忽略 {self.duplicate_count} 条重复模型记录")
+        if self.unsupported_count:
+            messages.append(
+                f"忽略 {self.unsupported_count} 条不支持 generateContent 的模型记录"
+            )
         if self.truncated:
             messages.append(f"远程模型超过 {_MAX_REMOTE_MODELS} 项，已截断")
         return "；".join(messages) or None
@@ -274,6 +280,7 @@ class ModelDiscoveryService:
         if provider.api_format not in {
             APIFormat.OPENAI_CHAT,
             APIFormat.OPENAI_RESPONSES,
+            APIFormat.GOOGLE_GENAI,
             APIFormat.OLLAMA,
         }:
             api_format = provider.api_format.value if provider.api_format else "未声明"
@@ -318,6 +325,8 @@ class ModelDiscoveryService:
 
         if provider.api_format in {APIFormat.OPENAI_CHAT, APIFormat.OPENAI_RESPONSES}:
             return _parse_openai_models(provider.id, payload)
+        if provider.api_format is APIFormat.GOOGLE_GENAI:
+            return _parse_google_models(provider.id, payload)
         return _parse_ollama_models(provider.id, payload)
 
     @staticmethod
@@ -402,6 +411,54 @@ def _parse_ollama_models(provider_id: str, payload: object) -> _ParsedModels:
     return _parse_rows(provider_id, rows, keys=("model", "name"))
 
 
+def _parse_google_models(provider_id: str, payload: object) -> _ParsedModels:
+    if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
+        raise ModelDiscoveryError(
+            f'provider "{provider_id}" 模型发现返回结构无效。'
+        )
+
+    rows = payload["models"]
+    normalized: list[object] = []
+    invalid_count = 0
+    unsupported_count = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            invalid_count += 1
+            continue
+        raw_name = row.get("name")
+        if not isinstance(raw_name, str) or not raw_name.startswith("models/"):
+            invalid_count += 1
+            continue
+        try:
+            model_id = normalize_google_model_id(raw_name)
+        except ProviderRuntimeError:
+            invalid_count += 1
+            continue
+
+        methods = row.get("supportedGenerationMethods")
+        if methods is not None:
+            if not isinstance(methods, list) or not all(
+                isinstance(method, str) for method in methods
+            ):
+                invalid_count += 1
+                continue
+            if "generateContent" not in methods:
+                unsupported_count += 1
+                continue
+        normalized.append({"id": model_id})
+
+    if rows and not normalized:
+        raise ModelDiscoveryError(
+            f'provider "{provider_id}" 模型发现结果不含有效模型。'
+        )
+    parsed = _parse_rows(provider_id, normalized, keys=("id",))
+    return replace(
+        parsed,
+        invalid_count=parsed.invalid_count + invalid_count,
+        unsupported_count=unsupported_count,
+    )
+
+
 def _parse_rows(
     provider_id: str,
     rows: list[object],
@@ -476,7 +533,7 @@ def _merge_models(
         for model in provider.models.values()
         if visible(model.id)
     )
-    static_upstream_ids = {model.upstream_id for model in provider.models.values()}
+    static_upstream_ids = _static_upstream_ids(provider)
     static_local_ids = set(provider.models)
     discovered = tuple(
         AvailableModel(
@@ -492,6 +549,19 @@ def _merge_models(
         and visible(model_id)
     )
     return static_models + discovered
+
+
+def _static_upstream_ids(provider: ProviderSpec) -> set[str]:
+    upstream_ids: set[str] = set()
+    for model in provider.models.values():
+        upstream_id = model.upstream_id
+        if provider.api_format is APIFormat.GOOGLE_GENAI:
+            try:
+                upstream_id = normalize_google_model_id(upstream_id)
+            except ProviderRuntimeError:
+                pass
+        upstream_ids.add(upstream_id)
+    return upstream_ids
 
 
 def _available_static(provider_id: str, model: ProviderModelSpec) -> AvailableModel:

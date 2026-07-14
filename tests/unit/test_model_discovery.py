@@ -9,6 +9,7 @@ from types import MappingProxyType
 import httpx
 import pytest
 
+import naumi_agent.model.discovery as discovery
 from naumi_agent.model.catalog import (
     APIFormat,
     AuthType,
@@ -17,6 +18,7 @@ from naumi_agent.model.catalog import (
     ProviderCatalog,
     ProviderModelSpec,
     ProviderSpec,
+    SecretSource,
 )
 from naumi_agent.model.discovery import ModelDiscoveryError, ModelDiscoveryService
 from naumi_agent.model.reasoning import ReasoningEffort
@@ -28,6 +30,7 @@ def _provider(
     api_format: APIFormat = APIFormat.OPENAI_CHAT,
     base_url: str = "https://provider.example/v1",
     path: str = "/models",
+    auth: ProviderAuthSpec | None = None,
     models: tuple[ProviderModelSpec, ...] = (),
     enabled: bool = True,
     whitelist: tuple[str, ...] = (),
@@ -39,7 +42,7 @@ def _provider(
         name=provider_id.title(),
         api_format=api_format,
         base_url=base_url,
-        auth=ProviderAuthSpec(type=AuthType.NONE),
+        auth=auth or ProviderAuthSpec(type=AuthType.NONE),
         headers=MappingProxyType({}),
         models=MappingProxyType({model.id: model for model in models}),
         discovery=ModelDiscoverySpec(
@@ -158,6 +161,162 @@ async def test_ollama_discovery_uses_tags_and_accepts_model_or_name() -> None:
     assert [model.id for model in listing.models] == [
         "llama3.3:latest",
         "qwen3:8b",
+    ]
+
+
+def test_google_models_strip_resource_prefix_and_filter_generation_support() -> None:
+    parsed = discovery._parse_google_models(
+        "google",
+        {
+            "models": [
+                {
+                    "name": "models/gemini-3.5-flash",
+                    "supportedGenerationMethods": [
+                        "generateContent",
+                        "countTokens",
+                    ],
+                },
+                {
+                    "name": "models/text-embedding-current",
+                    "supportedGenerationMethods": ["embedContent"],
+                },
+                {"name": "models/gemini-proxy"},
+                {"name": "invalid-without-resource-prefix"},
+            ],
+        },
+    )
+
+    assert parsed.ids == ("gemini-3.5-flash", "gemini-proxy")
+    assert parsed.invalid_count == 1
+    assert parsed.unsupported_count == 1
+    assert "不支持 generateContent" in (parsed.warning or "")
+
+
+def test_google_models_preserve_bounds_and_duplicate_accounting() -> None:
+    rows = [
+        {
+            "name": f"models/gemini-{index:04d}",
+            "supportedGenerationMethods": ["generateContent"],
+        }
+        for index in range(501)
+    ]
+    rows.insert(1, dict(rows[0]))
+
+    parsed = discovery._parse_google_models("google", {"models": rows})
+
+    assert len(parsed.ids) == 500
+    assert parsed.ids[0] == "gemini-0000"
+    assert parsed.ids[-1] == "gemini-0499"
+    assert parsed.duplicate_count == 1
+    assert parsed.truncated is True
+
+
+def test_google_models_allow_an_empty_endpoint_listing() -> None:
+    parsed = discovery._parse_google_models("google", {"models": []})
+
+    assert parsed.ids == ()
+    assert parsed.warning is None
+
+
+def test_google_models_fail_safely_when_every_row_is_unusable() -> None:
+    private_rows = [
+        {"name": "models/a/b"},
+        {"name": "models/a%2Fescaped"},
+        {"name": "models/a\\backslash"},
+        {"name": "models/a with-space"},
+        {"name": "models/a\ncontrol"},
+        {
+            "name": "models/malformed-methods",
+            "supportedGenerationMethods": "generateContent",
+        },
+        {
+            "name": "models/private-embedding-model",
+            "supportedGenerationMethods": ["embedContent"],
+        },
+        "invalid-row",
+    ]
+
+    with pytest.raises(ModelDiscoveryError, match="不含有效模型") as error:
+        discovery._parse_google_models("google", {"models": private_rows})
+
+    message = str(error.value)
+    assert "private-embedding-model" not in message
+    assert "a%2Fescaped" not in message
+
+
+@pytest.mark.asyncio
+async def test_google_discovery_uses_models_path_key_header_and_dynamic_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[httpx.Request] = []
+    monkeypatch.setenv("DISCOVERY_GOOGLE_KEY", "selected-google-secret")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "models": [
+                    {
+                        "name": "models/gemini-3.5-flash",
+                        "supportedGenerationMethods": ["generateContent"],
+                    }
+                ],
+            },
+        )
+
+    provider = _provider(
+        provider_id="google",
+        api_format=APIFormat.GOOGLE_GENAI,
+        base_url="https://generativelanguage.googleapis.com/v1beta",
+        auth=ProviderAuthSpec(
+            type=AuthType.API_KEY_HEADER,
+            secret_source=SecretSource.ENV,
+            secret_ref="DISCOVERY_GOOGLE_KEY",
+            header="X-Goog-Api-Key",
+        ),
+        path="/models",
+    )
+    listing = await _service(provider, handler).list_provider("google")
+
+    assert [model.id for model in listing.models] == ["gemini-3.5-flash"]
+    assert requests[0].url.path == "/v1beta/models"
+    assert requests[0].headers["x-goog-api-key"] == "selected-google-secret"
+    assert "authorization" not in requests[0].headers
+    assert "selected-google-secret" not in repr(listing)
+    assert "selected-google-secret" not in (listing.warning or "")
+
+
+@pytest.mark.asyncio
+async def test_google_discovery_deduplicates_prefixed_static_upstream_id() -> None:
+    static = ProviderModelSpec(
+        id="flash-alias",
+        upstream_id="models/gemini-3.5-flash",
+        name="Gemini Flash",
+    )
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "models": [
+                    {
+                        "name": "models/gemini-3.5-flash",
+                        "supportedGenerationMethods": ["generateContent"],
+                    }
+                ]
+            },
+        )
+
+    provider = _provider(
+        provider_id="google",
+        api_format=APIFormat.GOOGLE_GENAI,
+        models=(static,),
+    )
+    listing = await _service(provider, handler).list_provider("google")
+
+    assert [(model.id, model.source) for model in listing.models] == [
+        ("flash-alias", "static")
     ]
 
 
@@ -299,12 +458,12 @@ async def test_discovery_rejects_unsupported_format_without_network() -> None:
         calls += 1
         return httpx.Response(200, json={})
 
-    provider = _provider(api_format=APIFormat.GOOGLE_GENAI)
+    provider = _provider(api_format=APIFormat.AZURE_OPENAI)
     listing = await _service(provider, handler).list_provider("gateway")
 
     assert listing.models == ()
     assert listing.warning is not None
-    assert "google_genai" in listing.warning
+    assert "azure_openai" in listing.warning
     assert "尚未实现" in listing.warning
     assert calls == 0
 

@@ -133,7 +133,7 @@ def build_google_genai_transport(
     """Map one catalog target to LiteLLM's native Gemini transport."""
     provider = _require_catalog_provider(target)
     _validate_provider_format(provider, expected_format=APIFormat.GOOGLE_GENAI)
-    model_id = _normalize_google_model_id(target)
+    model_id = normalize_google_model_id(target.upstream_model)
 
     static_headers = dict(provider.headers)
     _assert_no_auth_header_conflict(provider, static_headers)
@@ -367,8 +367,9 @@ def _resolve_anthropic_auth(
     return _resolve_auth(provider, catalog_source=catalog_source)
 
 
-def _normalize_google_model_id(target: ResolvedModelTarget) -> str:
-    value = target.upstream_model.strip()
+def normalize_google_model_id(raw_model_id: str) -> str:
+    """Return one safe Google model resource ID without the official prefix."""
+    value = raw_model_id.strip()
     if value.startswith("models/"):
         value = value.removeprefix("models/")
     if (
