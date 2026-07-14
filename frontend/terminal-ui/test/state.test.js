@@ -28,6 +28,7 @@ import {
   toggleComposerIntent,
   toggleAgentControlCenter,
   toggleRuntimeInspector,
+  updateBridgeHeartbeat,
 } from "../src/state.js";
 
 function interactionRecord(requestId, question = "请选择方案") {
@@ -686,6 +687,24 @@ test("run queued marks a Bridge-confirmed message as scheduled until it starts",
   });
   assert.equal(pending.deliveryStatus, "accepted");
   assert.equal(pending.queuePosition, 0);
+});
+
+test("bridge heartbeat warns once on stale and reports recovery", () => {
+  const state = createInitialState();
+
+  updateBridgeHeartbeat(state, { status: "healthy", rttMs: 18, ageMs: 0 });
+  assert.equal(state.bridgeHeartbeat.status, "healthy");
+  assert.equal(state.messages.length, 0);
+
+  updateBridgeHeartbeat(state, { status: "stale", rttMs: null, ageMs: 15_000 });
+  updateBridgeHeartbeat(state, { status: "stale", rttMs: null, ageMs: 20_000 });
+  assert.equal(state.bridgeHeartbeat.status, "stale");
+  assert.equal(state.messages.filter((message) => message.title === "Bridge 心跳").length, 1);
+  assert.match(state.messages.at(-1).content, /15 秒/);
+
+  updateBridgeHeartbeat(state, { status: "healthy", rttMs: 42, ageMs: 0 });
+  assert.equal(state.bridgeHeartbeat.status, "healthy");
+  assert.match(state.messages.at(-1).content, /已恢复.*42ms/);
 });
 
 test("synchronous sender failure leaves one retryable failed message", () => {

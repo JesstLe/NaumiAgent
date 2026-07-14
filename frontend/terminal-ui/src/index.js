@@ -4,6 +4,7 @@ import process from "node:process";
 import { ANSI, configureAnsiColors, sanitizeTerminalText } from "./ansi.js";
 import { bridgeEnvironment, isIgnorableBridgeStderr } from "./bridge-stderr.js";
 import { createDebugLog } from "./debug-log.js";
+import { createHeartbeatController, heartbeatTimingFromEnv } from "./heartbeat.js";
 import {
   INPUT_KEYS,
   backspaceInput,
@@ -67,6 +68,7 @@ import {
   requestRunCancel,
   toggleComposerIntent,
   toggleRuntimeInspector,
+  updateBridgeHeartbeat,
 } from "./state.js";
 import { captureViewportAnchor, renderScreen, restoreViewportAnchor } from "./render.js";
 import {
@@ -97,11 +99,13 @@ const launchUiStateStore = {
   sessions: { ...uiStateStore.sessions },
 };
 const explicitlyRestoredSessionIds = new Set();
+const heartbeatTiming = heartbeatTimingFromEnv(process.env);
 state.inputHistory = getProjectInputHistory(uiStateStore);
 let debugLog = null;
 
 let bridge = null;
 let send = null;
+let heartbeat = null;
 let redrawTimer = null;
 let uiSnapshotTimer = null;
 let inputEscapeTimer = null;
@@ -140,6 +144,24 @@ function main() {
   bridge = startBridge();
   bridge.on("error", handleFatalError);
   send = createEventSender(bridge.stdin, { debugLog });
+  heartbeat = createHeartbeatController({
+    sendPing: (id) => send("ping", {}, { id }),
+    onHealth(value) {
+      const previousStatus = state.bridgeHeartbeat?.status;
+      const addedMessage = updateBridgeHeartbeat(state, value);
+      logDebug("heartbeat.health", value);
+      if (addedMessage) {
+        markTimelineOutput(
+          state,
+          { type: "heartbeat/status", payload: value },
+          `heartbeat-${value.status}-${Date.now()}`,
+        );
+      }
+      if (addedMessage || previousStatus !== value.status) scheduleRedraw();
+    },
+    onDebug: logDebug,
+    ...heartbeatTiming,
+  });
   attachJsonlLineReader(bridge.stdout, handleBridgeLine);
   bridge.stderr.on("data", (chunk) => {
     const lines = chunk.toString("utf8").split(/\r?\n/);
@@ -220,6 +242,7 @@ function setupTerminal() {
 }
 
 function restoreTerminal() {
+  heartbeat?.stop();
   workingAnimation.stop();
   terminalSession.restore();
 }
@@ -307,6 +330,11 @@ function handleBridgeLine(line) {
     return;
   }
   debugLog?.log("protocol.receive.record", { type: record.type, request_id: record.request_id, seq: record.seq, payload: record.payload });
+  if (record.type === "ready") heartbeat?.start();
+  if (record.type === "pong") {
+    heartbeat?.receivePong(record.request_id);
+    return;
+  }
   const previousSessionId = state.currentSessionId;
   const previousSnapshot = createUiSnapshot(state);
   const actions = reduceServerEvent(state, record);

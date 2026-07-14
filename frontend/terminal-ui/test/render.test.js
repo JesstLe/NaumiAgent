@@ -349,6 +349,17 @@ test("footer shows compact task activity when backend reports active work", () =
   assert(footer.includes("tasks: bg 2 bg! 1 agent 3 browser 1 queue 2 perm 1"));
 });
 
+test("footer only surfaces heartbeat when the Bridge is stale", () => {
+  const state = createInitialState();
+  state.bridgeHeartbeat = { status: "healthy", rttMs: 25, ageMs: 0 };
+  const healthy = renderFooter(state, 160).map(stripAnsi).join("\n");
+  assert.doesNotMatch(healthy, /Bridge:/);
+
+  state.bridgeHeartbeat = { status: "stale", rttMs: null, ageMs: 17_000 };
+  const stale = renderFooter(state, 160).map(stripAnsi).join("\n");
+  assert.match(stale, /Bridge: 无响应/);
+});
+
 test("footer shows 首字时间", () => {
   const state = createInitialState();
   state.status = {

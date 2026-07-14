@@ -640,6 +640,33 @@ def test_protocol_contract_ui_message_fields_match_python_messages() -> None:
     assert "prepare_end" in contract["ui_messages"]["tool_prepare"]["notes"]
 
 
+@pytest.mark.asyncio
+async def test_bridge_pong_reports_control_plane_runtime_facts() -> None:
+    engine = _SlowFakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("active", request_id="submit-active")
+    await asyncio.sleep(0)
+    await bridge.submit("queued", request_id="submit-queued")
+    await bridge.handle_client_record({
+        "id": "heartbeat-7",
+        "type": ClientEventType.PING,
+        "payload": {},
+    })
+
+    pong = next(record for record in _records(writer) if record["type"] == "pong")
+    assert pong["request_id"] == "heartbeat-7"
+    assert pong["payload"] == {
+        "ok": True,
+        "active_run": True,
+        "queued_conversations": 1,
+    }
+
+    await bridge.shutdown()
+
+
 def test_protocol_normalizes_known_client_event_payloads() -> None:
     run_cancel = normalize_client_record({
         "id": "cancel-1",
