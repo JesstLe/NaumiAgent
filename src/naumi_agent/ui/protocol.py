@@ -70,6 +70,7 @@ class ServerEventType(StrEnum):
     AGENTS_SNAPSHOT = "agents/snapshot"
     AGENTS_UPDATE = "agents/update"
     AGENTS_ACTION = "agents/action"
+    RUN_QUEUED = "run/queued"
     RUN_STARTED = "run/started"
     RUN_COMPLETED = "run/completed"
     RUN_CANCELLED = "run/cancelled"

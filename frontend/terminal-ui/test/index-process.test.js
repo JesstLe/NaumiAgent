@@ -998,29 +998,26 @@ test("terminal UI process preserves detached scroll and jumps back to live outpu
   }
 });
 
-test("terminal UI process shows queued, accepted, failed, and retried delivery lifecycle", async () => {
+test("terminal UI process immediately queues a second chat and starts it automatically", async () => {
   const app = launchTerminalUi("message-lifecycle-bridge.js");
   const output = collectOutput(app);
 
   try {
     await waitForReadyWelcome(output, 7000);
     app.stdin.write("生命周期测试\n");
-    await waitForLatestScreen(output, "发送中...");
-    await waitForLatestScreen(output, "已确认普通消息");
+    await waitForLatestScreen(output, "第一条处理中");
     assert.equal(countLatestScreen(output, "生命周期测试"), 1);
 
-    app.stdin.write("失败后重试\n");
-    await waitForLatestScreen(output, "发送中...");
-    await waitForLatestScreen(output, "发送失败: 当前任务仍在执行。");
-    app.stdin.write("/retry\n");
-    await waitForLatestScreen(output, "重试已接受");
-    assert.equal(countLatestScreen(output, "失败后重试"), 1);
+    app.stdin.write("排队执行\n");
+    await waitForLatestScreen(output, "已排队 · 第 1 位");
+    await waitForLatestScreen(output, "第二条自动执行");
+    assert.equal(countLatestScreen(output, "排队执行"), 1);
 
     const submits = readDebugEvents(app.debugLogPath).filter(
       (record) => record.event === "protocol.send" && record.payload.record.type === "submit",
     );
-    assert.equal(submits.length, 3);
-    assert.notEqual(submits[1].payload.record.id, submits[2].payload.record.id);
+    assert.equal(submits.length, 2);
+    assert.notEqual(submits[0].payload.record.id, submits[1].payload.record.id);
     assert.equal(await stopTerminalUi(app), 0);
   } finally {
     forceKill(app);

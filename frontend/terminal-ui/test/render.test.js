@@ -339,13 +339,14 @@ test("footer shows compact task activity when backend reports active work", () =
       background_attention: 1,
       subagents_active: 3,
       browser_active: 1,
+      queued_conversations: 2,
       permissions_pending: 1,
     },
   };
 
   const footer = renderFooter(state, 220, { cwd: "/tmp", home: "/Users/lv" }).map(stripAnsi).join("\n");
 
-  assert(footer.includes("tasks: bg 2 bg! 1 agent 3 browser 1 perm 1"));
+  assert(footer.includes("tasks: bg 2 bg! 1 agent 3 browser 1 queue 2 perm 1"));
 });
 
 test("footer shows 首字时间", () => {

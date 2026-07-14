@@ -292,6 +292,7 @@ function formatTaskActivity(tasks) {
   if (Number(tasks.background_attention) > 0) parts.push(`bg! ${Number(tasks.background_attention)}`);
   if (Number(tasks.subagents_active) > 0) parts.push(`agent ${Number(tasks.subagents_active)}`);
   if (Number(tasks.browser_active) > 0) parts.push(`browser ${Number(tasks.browser_active)}`);
+  if (Number(tasks.queued_conversations) > 0) parts.push(`queue ${Number(tasks.queued_conversations)}`);
   if (Number(tasks.permissions_pending) > 0) parts.push(`perm ${Number(tasks.permissions_pending)}`);
   if (Number(tasks.interactions_pending) > 0) parts.push(`ask ${Number(tasks.interactions_pending)}`);
   return parts.join(" ");

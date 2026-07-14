@@ -358,8 +358,10 @@ class _SlowFakeEngine(_FakeEngine):
     def __init__(self) -> None:
         super().__init__()
         self.release_run = asyncio.Event()
+        self.run_tasks: list[str] = []
 
     async def run_streaming(self, task: str, on_event: Any) -> AgentResult:
+        self.run_tasks.append(task)
         await on_event("response_start", {})
         await on_event("token", {"content": f"处理中: {task}"})
         await self.release_run.wait()
@@ -2985,7 +2987,7 @@ async def test_bridge_rejects_resume_while_run_is_active() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bridge_rejects_second_submit_with_correlated_error_and_no_echo() -> None:
+async def test_bridge_queues_second_submit_and_runs_it_after_active_turn() -> None:
     engine = _SlowFakeEngine()
     writer = io.StringIO()
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
@@ -3002,21 +3004,229 @@ async def test_bridge_rejects_second_submit_with_correlated_error_and_no_echo() 
     )
 
     records = _records(writer)
-    rejection = next(
+    queued = next(
         record
         for record in records
-        if record["type"] == "error"
+        if record["type"] == "run/queued"
         and record.get("request_id") == "submit-second"
     )
-    assert rejection["payload"]["code"] == "run_in_progress"
-    assert not any(
+    assert queued["payload"] == {"task": "第二条", "position": 1, "queued": 1}
+    assert any(
         record["type"] == "user/message"
         and record.get("request_id") == "submit-second"
         for record in records
     )
+    assert bridge.status_payload()["tasks"]["queued_conversations"] == 1
+    assert engine.run_tasks == ["长任务"]
 
     engine.release_run.set()
     await bridge._run_task
+    await asyncio.sleep(0)
+
+    assert engine.run_tasks == ["长任务", "第二条"]
+    assert bridge.status_payload()["tasks"]["queued_conversations"] == 0
+    assert any(
+        record["type"] == "run/started"
+        and record.get("request_id") == "submit-second"
+        for record in _records(writer)
+    )
+
+
+@pytest.mark.asyncio
+async def test_bridge_rejects_submit_when_chat_queue_is_full() -> None:
+    engine = _SlowFakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("active", request_id="submit-active")
+    await asyncio.sleep(0)
+    for index in range(20):
+        await bridge.submit(f"queued-{index}", request_id=f"submit-{index}")
+
+    await bridge.submit("overflow", request_id="submit-overflow")
+
+    records = _records(writer)
+    rejection = next(
+        record
+        for record in records
+        if record["type"] == "error"
+        and record.get("request_id") == "submit-overflow"
+    )
+    assert rejection["payload"]["code"] == "queue_full"
+    assert "20" in rejection["payload"]["message"]
+    assert not any(
+        record["type"] == "user/message"
+        and record.get("request_id") == "submit-overflow"
+        for record in records
+    )
+
+    await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_refreshes_remaining_chat_queue_positions_after_advancing() -> None:
+    engine = _SlowFakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("active", request_id="submit-active")
+    await asyncio.sleep(0)
+    first_run = bridge._run_task
+    await bridge.submit("next", request_id="submit-next")
+    await bridge.submit("later", request_id="submit-later")
+    engine.release_run.set()
+    assert first_run is not None
+    await first_run
+
+    later_positions = [
+        record["payload"]["position"]
+        for record in _records(writer)
+        if record["type"] == "run/queued"
+        and record.get("request_id") == "submit-later"
+    ]
+    assert later_positions == [2, 1]
+
+    await asyncio.sleep(0)
+    await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_advances_queued_chat_after_active_run_failure() -> None:
+    class _FailFirstEngine(_FakeEngine):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release_first = asyncio.Event()
+            self.run_tasks: list[str] = []
+
+        async def run_streaming(self, task: str, on_event: Any) -> AgentResult:
+            self.run_tasks.append(task)
+            if len(self.run_tasks) == 1:
+                self.started.set()
+                await self.release_first.wait()
+                raise RuntimeError("private provider payload")
+            return await super().run_streaming(task, on_event)
+
+    engine = _FailFirstEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("first", request_id="submit-first")
+    await engine.started.wait()
+    first_run = bridge._run_task
+    await bridge.submit("second", request_id="submit-second")
+    engine.release_first.set()
+    assert first_run is not None
+    await first_run
+    await asyncio.sleep(0)
+    assert bridge._run_task is not None
+    await bridge._run_task
+
+    assert engine.run_tasks == ["first", "second"]
+    assert any(
+        record["type"] == "run/completed"
+        and record.get("request_id") == "submit-second"
+        and record["payload"]["status"] == "completed"
+        for record in _records(writer)
+    )
+
+
+@pytest.mark.asyncio
+async def test_bridge_cancel_active_run_then_starts_queued_chat() -> None:
+    engine = _SlowFakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("active", request_id="submit-active")
+    await asyncio.sleep(0)
+    await bridge.submit("queued", request_id="submit-queued")
+    await bridge.cancel_run({"reason": "切换到下一条"}, request_id="cancel-active")
+    await asyncio.sleep(0)
+
+    assert engine.run_tasks == ["active", "queued"]
+    assert bridge._run_task is not None
+    engine.release_run.set()
+    await bridge._run_task
+    records = _records(writer)
+    cancelled_index = next(
+        index for index, record in enumerate(records)
+        if record["type"] == "run/cancelled"
+    )
+    queued_start_index = next(
+        index for index, record in enumerate(records)
+        if record["type"] == "run/started"
+        and record.get("request_id") == "submit-queued"
+    )
+    assert cancelled_index < queued_start_index
+
+
+@pytest.mark.asyncio
+async def test_bridge_shutdown_cancels_chat_queue_without_starting_it() -> None:
+    engine = _SlowFakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("active", request_id="submit-active")
+    await asyncio.sleep(0)
+    await bridge.submit("queued", request_id="submit-queued")
+
+    await bridge.shutdown()
+
+    assert engine.run_tasks == ["active"]
+    assert bridge.status_payload()["tasks"]["queued_conversations"] == 0
+    cancelled = next(
+        record for record in _records(writer)
+        if record["type"] == "run/cancelled"
+        and record.get("request_id") == "submit-queued"
+    )
+    assert cancelled["payload"]["target_request_id"] == "submit-queued"
+    assert "界面已关闭" in cancelled["payload"]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_bridge_starts_queued_chat_after_workbench_task_completes() -> None:
+    class _ReleasableTaskEngine(_TaskSubmitFakeEngine):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.chat_tasks: list[str] = []
+
+        async def run_streaming(
+            self,
+            task: str,
+            on_event: Any,
+            turn_context: str = "",
+        ) -> AgentResult:
+            if turn_context:
+                self.started.set()
+                await self.release.wait()
+                return AgentResult(status="completed", response="任务完成", usage=self.usage)
+            self.chat_tasks.append(task)
+            return await _FakeEngine.run_streaming(self, task, on_event)
+
+    engine = _ReleasableTaskEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit_task({"text": "workbench"}, request_id="task-active")
+    await engine.started.wait()
+    task_run = bridge._run_task
+    await bridge.submit("chat-after-task", request_id="submit-chat")
+    engine.release.set()
+    assert task_run is not None
+    await task_run
+    await asyncio.sleep(0)
+    assert bridge._run_task is not None
+    await bridge._run_task
+
+    assert engine.chat_tasks == ["chat-after-task"]
 
 
 @pytest.mark.asyncio

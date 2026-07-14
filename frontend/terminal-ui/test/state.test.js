@@ -657,6 +657,37 @@ test("run start accepts a queued message when user echo is missing", () => {
   assert.equal(pending.deliveryStatus, "accepted");
 });
 
+test("run queued marks a Bridge-confirmed message as scheduled until it starts", () => {
+  const state = createInitialState();
+  const send = (_type, _payload, options = {}) => options.id;
+  handleSubmitText(state, "排队执行", send);
+  const pending = state.messages.at(-1);
+
+  reduceServerEvent(state, {
+    type: "user/message",
+    request_id: pending.requestId,
+    payload: { content: "排队执行" },
+  });
+  reduceServerEvent(state, {
+    type: "run/queued",
+    request_id: pending.requestId,
+    payload: { task: "排队执行", position: 2, queued: 3 },
+  });
+
+  assert.equal(pending.deliveryStatus, "scheduled");
+  assert.equal(pending.queuePosition, 2);
+  assert.equal(pending.localOutbox, false);
+  assert.equal(createUiSnapshot(state).outbox.length, 0);
+
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: pending.requestId,
+    payload: { task: "排队执行" },
+  });
+  assert.equal(pending.deliveryStatus, "accepted");
+  assert.equal(pending.queuePosition, 0);
+});
+
 test("synchronous sender failure leaves one retryable failed message", () => {
   const state = createInitialState();
   const send = () => {

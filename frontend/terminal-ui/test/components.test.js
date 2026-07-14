@@ -220,6 +220,20 @@ test("queued and uncertain user deliveries have distinct text status", () => {
   assert.match(uncertain, /发送状态待确认.*可能重复发送/);
 });
 
+test("server-confirmed user delivery renders its queue position", () => {
+  const scheduled = renderComponent(Message({
+    message: {
+      kind: "user",
+      content: "稍后执行",
+      deliveryStatus: "scheduled",
+      queuePosition: 3,
+    },
+  }), { width: 48 }).map(stripAnsi).join("\n");
+
+  assert.match(scheduled, /已排队 · 第 3 位/);
+  assert.doesNotMatch(scheduled, /发送中/);
+});
+
 test("task user message exposes task identity and lifecycle without color", () => {
   const running = renderComponent(Message({
     message: {

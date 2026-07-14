@@ -342,6 +342,9 @@ export function reduceServerEvent(state, record) {
       }
       state.running = true;
       break;
+    case "run/queued":
+      scheduleUserMessage(state, record.request_id, payload.position);
+      break;
     case "task/created":
       {
         dismissWelcome(state);
@@ -2159,6 +2162,23 @@ export function acceptUserMessage(state, requestId, content = "") {
   if (!message) return null;
   if (content) message.content = String(content);
   message.deliveryStatus = "accepted";
+  message.errorCode = "";
+  message.errorMessage = "";
+  message.localOutbox = false;
+  message.queuePosition = 0;
+  clearRenderCache(state.renderCache);
+  return message;
+}
+
+function scheduleUserMessage(state, requestId, position) {
+  const normalizedRequestId = String(requestId ?? "");
+  if (!normalizedRequestId) return null;
+  const message = state.messages.find(
+    (item) => item.kind === "user" && item.requestId === normalizedRequestId,
+  );
+  if (!message) return null;
+  message.deliveryStatus = "scheduled";
+  message.queuePosition = Math.max(1, Math.floor(Number(position) || 1));
   message.errorCode = "";
   message.errorMessage = "";
   message.localOutbox = false;
