@@ -4,6 +4,7 @@ import { Send, PlusCircle, Loader2, Brain, Cpu, Zap, Paperclip, X } from 'lucide
 import { useWorkbenchConnection } from '@/hooks/useWorkbenchConnection'
 import { useSessionStore } from '@/stores/sessionStore'
 import { isApiException } from '@/api/ApiException'
+import { MessageBubble } from './MessageBubble'
 import type { RuntimeMode, ChatSource } from '@/api/types'
 
 const MODE_ICON: Record<RuntimeMode, typeof Brain> = {
@@ -174,6 +175,21 @@ export function ChatPage() {
     }
   }
 
+  const handleEditMessage = async (message: { id: string; content: string }, newContent: string) => {
+    if (!client || !currentSessionId || newContent === message.content) return
+    // Truncate the conversation to just before this message, then resend the
+    // edited message. This is a frontend-driven edit: we drop everything after
+    // the edited user message and re-run the turn.
+    const index = messages.findIndex((m) => m.id === message.id)
+    if (index === -1) return
+    const keptMessages = messages.slice(0, index)
+    setMessages(keptMessages)
+    setInput(newContent)
+    // The user can press send to dispatch the edited message; this keeps the
+    // edit flow explicit and lets the user review before regenerating.
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+  }
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
@@ -232,16 +248,11 @@ export function ChatPage() {
           <div className="text-center text-sm text-neutral-500 py-12">{t('chat.emptyState')}</div>
         )}
         {messages.map((message) => (
-          <div
+          <MessageBubble
             key={message.id}
-            className={`max-w-3xl rounded-lg px-4 py-3 text-sm ${
-              message.role === 'user'
-                ? 'ml-auto bg-blue-600 text-white'
-                : 'bg-white text-neutral-800 shadow-sm'
-            }`}
-          >
-            {message.content}
-          </div>
+            message={message}
+            onEdit={message.role === 'user' ? handleEditMessage : undefined}
+          />
         ))}
         <div ref={bottomRef} />
       </div>
