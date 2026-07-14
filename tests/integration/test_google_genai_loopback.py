@@ -144,10 +144,14 @@ async def test_google_genai_real_loopback_text_tools_stream_and_discovery(
             if path == (
                 "/v1beta/models/gemini-loopback:streamGenerateContent"
             ):
-                events = [
-                    _text_response("流式", prompt=3, output=1),
-                    _text_response("成功", prompt=3, output=2),
-                ]
+                events = (
+                    [_tool_response()]
+                    if body.get("tools")
+                    else [
+                        _text_response("流式", prompt=3, output=1),
+                        _text_response("成功", prompt=3, output=2),
+                    ]
+                )
                 encoded = "".join(
                     f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                     for event in events
@@ -258,6 +262,13 @@ async def test_google_genai_real_loopback_text_tools_stream_and_discovery(
                 [{"role": "user", "content": "流式回答"}]
             )
         ]
+        tool_chunks = [
+            chunk
+            async for chunk in router.stream(
+                [{"role": "user", "content": "流式读取 README"}],
+                tools=TOOLS,
+            )
+        ]
     finally:
         server.shutdown()
         server.server_close()
@@ -283,13 +294,25 @@ async def test_google_genai_real_loopback_text_tools_stream_and_discovery(
     assert "".join(chunk.token for chunk in chunks) == "流式成功"
     assert any(chunk.usage and chunk.usage.total_tokens > 0 for chunk in chunks)
     assert chunks[-1].finish_reason == "stop"
+    streamed_tool_call = next(
+        chunk.tool_call for chunk in tool_chunks if chunk.tool_call
+    )
+    assert streamed_tool_call[0]["function"]["name"] == "file_read"
+    assert json.loads(streamed_tool_call[0]["function"]["arguments"]) == {
+        "path": "README.md"
+    }
+    assert any(
+        chunk.usage and chunk.usage.total_tokens == 11
+        for chunk in tool_chunks
+    )
 
     inference_requests = [request for request in requests if request["method"] == "POST"]
-    assert len(inference_requests) == 4
+    assert len(inference_requests) == 5
     assert [request["path"] for request in inference_requests] == [
         "/v1beta/models/gemini-loopback:generateContent",
         "/v1beta/models/gemini-loopback:generateContent",
         "/v1beta/models/gemini-loopback:generateContent",
+        "/v1beta/models/gemini-loopback:streamGenerateContent?alt=sse",
         "/v1beta/models/gemini-loopback:streamGenerateContent?alt=sse",
     ]
     text_body = inference_requests[0]["body"]
