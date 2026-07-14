@@ -449,7 +449,17 @@ def test_google_genai_maps_standard_key_model_base_headers_and_timeout(
         "extra_headers": {"X-Tenant": "tenant-a"},
         "timeout": 12.345,
     }
+    assert transport.registration is not None
+    assert transport.registration.model == "gemini/gemini-model-v2"
+    assert transport.registration.metadata == {
+        "litellm_provider": "gemini",
+        "mode": "chat",
+        "supports_system_messages": True,
+    }
     assert "google-selected-secret" not in repr(transport)
+
+    with pytest.raises(TypeError):
+        transport.registration.metadata["mode"] = "changed"  # type: ignore[index]
 
 
 def test_google_genai_strips_one_official_models_prefix(

@@ -24,6 +24,7 @@ from naumi_agent.model.discovery import (
     ProviderModelListing,
 )
 from naumi_agent.model.provider_runtime import (
+    ProviderModelRegistration,
     ProviderRuntimeError,
     build_provider_transport,
 )
@@ -146,6 +147,8 @@ class ModelRouter:
             ModelTier.REASONING: config.reasoning_model,
         }
         self._info_cache: dict[str, dict[str, Any]] = {}
+        self._registered_transport_models: set[str] = set()
+        self._transport_model_registration_lock = threading.Lock()
         self._registered_native_stream_models: set[str] = set()
         self._native_stream_registration_lock = threading.Lock()
         self._runtime_reasoning_effort: ReasoningEffortSetting | None = None
@@ -558,15 +561,46 @@ class ModelRouter:
             return requested_model, self._base_kwargs()
         if self._catalog is None:
             raise ProviderRuntimeError("catalog 模型缺少 catalog 来源。")
+        provider = target.provider
+        if provider is None:
+            raise ProviderRuntimeError("catalog 模型缺少 provider 定义。")
 
         transport = build_provider_transport(
             target,
             catalog_source=self._catalog.source,
         )
+        self._ensure_transport_model_registration(
+            provider.id,
+            transport.registration,
+        )
         kwargs = dict(transport.kwargs)
         if "extra_headers" in kwargs:
             kwargs["extra_headers"] = dict(kwargs["extra_headers"])
         return transport.model, kwargs
+
+    def _ensure_transport_model_registration(
+        self,
+        provider_id: str,
+        registration: ProviderModelRegistration | None,
+    ) -> None:
+        """Register transport-declared LiteLLM capabilities once per Router."""
+        if registration is None:
+            return
+
+        with self._transport_model_registration_lock:
+            if registration.model in self._registered_transport_models:
+                return
+            try:
+                litellm.register_model(
+                    {
+                        registration.model: dict(registration.metadata),
+                    }
+                )
+            except Exception:
+                raise ProviderRuntimeError(
+                    f'provider "{provider_id}" 无法注册模型能力。'
+                ) from None
+            self._registered_transport_models.add(registration.model)
 
     def _ensure_native_responses_streaming(self, model: str) -> None:
         """Prevent LiteLLM from fake-streaming unknown catalog Responses models."""

@@ -32,11 +32,23 @@ class ProviderRuntimeError(ValueError):
 
 
 @dataclass(frozen=True)
+class ProviderModelRegistration:
+    """Immutable LiteLLM capability metadata required by one transport model."""
+
+    model: str
+    metadata: Mapping[str, Any] = field(repr=False)
+
+
+@dataclass(frozen=True)
 class ProviderTransport:
     """LiteLLM model name and immutable provider-specific request arguments."""
 
     model: str
     kwargs: Mapping[str, Any] = field(repr=False)
+    registration: ProviderModelRegistration | None = field(
+        default=None,
+        repr=False,
+    )
 
 
 @dataclass(frozen=True)
@@ -154,9 +166,20 @@ def build_google_genai_transport(
     if timeout_seconds is not None:
         kwargs["timeout"] = timeout_seconds
 
+    transport_model = f"gemini/{model_id}"
     return ProviderTransport(
-        model=f"gemini/{model_id}",
+        model=transport_model,
         kwargs=MappingProxyType(kwargs),
+        registration=ProviderModelRegistration(
+            model=transport_model,
+            metadata=MappingProxyType(
+                {
+                    "litellm_provider": "gemini",
+                    "mode": "chat",
+                    "supports_system_messages": True,
+                }
+            ),
+        ),
     )
 
 
