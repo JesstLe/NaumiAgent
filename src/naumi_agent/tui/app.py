@@ -44,6 +44,10 @@ from naumi_agent.tui.completion_receipt import (
 )
 from naumi_agent.tui.runtime_inspector import RuntimeInspectorScreen
 from naumi_agent.tui.semantic_markdown import SemanticMarkdown as Markdown
+from naumi_agent.tui.working_indicator import (
+    WORKING_INDICATOR_FRAME_COUNT,
+    render_working_indicator_frame,
+)
 from naumi_agent.ui.budget import format_budget_detail
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
@@ -1283,7 +1287,6 @@ class TodoBar(Static):
 class Spinner(Static):
     """动画旋转指示器."""
 
-    _FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     _frame: reactive[int] = reactive(0)
     _active: reactive[bool] = reactive(False)
 
@@ -1291,11 +1294,11 @@ class Spinner(Static):
         self._timer = self.set_interval(0.08, self._tick, pause=True)
 
     def _tick(self) -> None:
-        self._frame = (self._frame + 1) % len(self._FRAMES)
+        self._frame = (self._frame + 1) % WORKING_INDICATOR_FRAME_COUNT
 
     def watch__frame(self, idx: int) -> None:
         if self._active:
-            self.update(Text(f"  {self._FRAMES[idx]}", style="bold green"))
+            self.update(render_working_indicator_frame(idx))
 
     def watch__active(self, active: bool) -> None:
         if active:
