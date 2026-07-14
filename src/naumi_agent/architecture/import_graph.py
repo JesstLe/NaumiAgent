@@ -1073,7 +1073,8 @@ def _git_source_base(repository_root: Path) -> str:
     return value if completed.returncode == 0 and value else "unknown"
 
 
-def _write_utf8_json(path: Path, content: str) -> None:
+def write_utf8_json(path: Path, content: str) -> None:
+    """Atomically write canonical UTF-8 JSON with a trailing newline."""
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.",
@@ -1115,12 +1116,12 @@ def main(argv: list[str] | None = None) -> int:
         report = scan_import_graph(source_root, repository_root=repository_root)
     except ImportGraphScanError as exc:
         parser.exit(2, f"{exc}\n")
-    _write_utf8_json(output_path, report.canonical_json())
+    write_utf8_json(output_path, report.canonical_json())
 
     if baseline_output_path is not None:
         source_base = args.source_base or _git_source_base(repository_root)
         baseline = build_baseline_summary(report, source_base=source_base)
-        _write_utf8_json(baseline_output_path, baseline.canonical_json())
+        write_utf8_json(baseline_output_path, baseline.canonical_json())
 
     all_static = report.graph(GraphScope.ALL_STATIC)
     import_time = report.graph(GraphScope.IMPORT_TIME)
@@ -1156,6 +1157,7 @@ __all__ = [
     "build_baseline_summary",
     "main",
     "scan_import_graph",
+    "write_utf8_json",
 ]
 
 
