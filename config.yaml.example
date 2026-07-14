@@ -56,6 +56,9 @@ safety:
   max_input_tokens: null
   max_output_tokens: null
   max_turns: 50
+  # 同一工具批次与整个 Agent 集群分别限流；1 可用于串行排障。
+  max_parallel_tools: 4
+  max_parallel_agents: 4
   # 如需主动限额，可改为明确数值，例如：
   # max_budget_usd: 5.0
   # max_input_tokens: 500000

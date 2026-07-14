@@ -16,6 +16,7 @@ class TestAppConfig:
         assert config.models.reasoning_effort is ReasoningEffortSetting.AUTO
         assert config.safety.max_turns == 50
         assert config.safety.max_parallel_tools == 4
+        assert config.safety.max_parallel_agents == 4
         assert config.memory.session_db_path == "data/sessions.db"
         assert config.ui.theme == "dark"
         assert config.ui.output_style == "detailed"
@@ -451,3 +452,14 @@ search:
         config = AppConfig(safety={"max_parallel_tools": value})  # type: ignore[arg-type]
 
         assert config.safety.max_parallel_tools == value
+
+    @pytest.mark.parametrize("value", [0, 33])
+    def test_parallel_agent_limit_rejects_out_of_range_values(self, value: int) -> None:
+        with pytest.raises(ValueError):
+            AppConfig(safety={"max_parallel_agents": value})  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("value", [1, 4, 32])
+    def test_parallel_agent_limit_accepts_supported_values(self, value: int) -> None:
+        config = AppConfig(safety={"max_parallel_agents": value})  # type: ignore[arg-type]
+
+        assert config.safety.max_parallel_agents == value
