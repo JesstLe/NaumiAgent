@@ -17,10 +17,15 @@ class TestEngineTaskRunnerProperty:
         assert engine._task_runner is None
 
     def test_task_runner_creates_on_access(self) -> None:
-        engine = AgentEngine(AppConfig())
+        engine = AgentEngine(AppConfig(browser={
+            "max_concurrent_runs": 3,
+            "run_history_limit": 80,
+        }))
         runner = engine.task_runner
         assert runner is not None
         assert engine._task_runner is not None
+        assert runner.max_concurrent_runs == 3
+        assert runner._run_history_limit == 80
 
     def test_task_runner_reuses(self) -> None:
         engine = AgentEngine(AppConfig())

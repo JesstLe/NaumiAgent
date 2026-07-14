@@ -221,6 +221,8 @@ def _build_config(
             "permission_mode": permission_mode,
             "allowed_dirs": ["."],
             "max_turns": DEFAULT_RUNTIME_MAX_TURNS,
+            "max_parallel_tools": 4,
+            "max_parallel_agents": 4,
         },
         "mcp": {"servers": {}},
         "api": {
@@ -232,6 +234,10 @@ def _build_config(
         "browser_daemon": {
             "enabled": False,
             "base_url": "http://127.0.0.1:3005",
+        },
+        "browser": {
+            "max_concurrent_runs": 2,
+            "run_history_limit": 200,
         },
         "log_level": "INFO",
     }

@@ -59,9 +59,11 @@ Terminal states: `completed`, `failed`, `aborted`
 - `base_dir: str` — storage directory
 - `runtime: BrowserRuntime`
 - `subagent: BrowserSubagent`
-- `max_concurrent: int` — from `BROWSER_MAX_CONCURRENT_RUNS` env (default 1)
+- `max_concurrent: int` — from validated `browser.max_concurrent_runs` config
+  (default 2, range 1-8; `NAUMI_BROWSER__MAX_CONCURRENT_RUNS` for env override)
 - `handoff_timeout_ms: int` — default 5 minutes
-- `run_history_limit: int` — from env (default 200)
+- `run_history_limit: int` — from validated `browser.run_history_limit` config
+  (default 200, range 20-5000)
 
 #### Methods
 

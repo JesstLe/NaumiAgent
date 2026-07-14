@@ -22,6 +22,8 @@ class TestAppConfig:
         assert config.ui.output_style == "detailed"
         assert config.browser_daemon.base_url == "http://127.0.0.1:3005"
         assert config.browser_daemon.project_dir.endswith("browser-debugging-daemon")
+        assert config.browser.max_concurrent_runs == 2
+        assert config.browser.run_history_limit == 200
         assert config.search.provider_order == ("brave", "duckduckgo", "browser")
         assert config.search.brave.api_key_ref == "{env:BRAVE_SEARCH_API_KEY}"
         assert config.search.brave.safesearch == "moderate"
@@ -463,3 +465,32 @@ search:
         config = AppConfig(safety={"max_parallel_agents": value})  # type: ignore[arg-type]
 
         assert config.safety.max_parallel_agents == value
+
+    @pytest.mark.parametrize("value", [0, 9])
+    def test_browser_concurrency_rejects_out_of_range_values(self, value: int) -> None:
+        with pytest.raises(ValueError):
+            AppConfig(browser={"max_concurrent_runs": value})  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("value", [1, 2, 8])
+    def test_browser_concurrency_accepts_supported_values(self, value: int) -> None:
+        config = AppConfig(browser={"max_concurrent_runs": value})  # type: ignore[arg-type]
+
+        assert config.browser.max_concurrent_runs == value
+
+    def test_browser_concurrency_loads_from_nested_environment(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("NAUMI_BROWSER__MAX_CONCURRENT_RUNS", "5")
+
+        config = AppConfig()
+
+        assert config.browser.max_concurrent_runs == 5
+
+    @pytest.mark.parametrize("value", [19, 5001])
+    def test_browser_history_limit_rejects_out_of_range_values(
+        self,
+        value: int,
+    ) -> None:
+        with pytest.raises(ValueError):
+            AppConfig(browser={"run_history_limit": value})  # type: ignore[arg-type]

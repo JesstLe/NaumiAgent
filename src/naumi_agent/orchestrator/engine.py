@@ -984,6 +984,10 @@ class AgentEngine:
                 options={
                     "runtime": self._browser_session,
                     "model_router": self._router,
+                    "max_concurrent_runs": (
+                        self._config.browser.max_concurrent_runs
+                    ),
+                    "run_history_limit": self._config.browser.run_history_limit,
                 },
             )
         return self._task_runner

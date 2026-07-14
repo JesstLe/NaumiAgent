@@ -117,6 +117,18 @@ class TestRuntimeStatus:
         assert "工作区" in output
 
     @pytest.mark.asyncio
+    async def test_resources_reports_browser_backpressure_without_starting_runner(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        assert engine._task_runner is None
+
+        output = await build_runtime_status(engine, sections="resources")
+
+        assert "浏览器队列：0/2 活跃 · 0 排队" in output
+        assert engine._task_runner is None
+
+    @pytest.mark.asyncio
     async def test_runtime_mcp_connect_registers_discovered_tools(
         self,
         engine: AgentEngine,
