@@ -3,11 +3,25 @@ import assert from "node:assert/strict";
 import {
   ANSI,
   color,
+  configureAnsiColors,
   sanitizeTerminalText,
   stripAnsi,
   visibleWidth,
   wrapAnsiLine,
 } from "../src/ansi.js";
+
+test("color negotiation disables only SGR styling", () => {
+  try {
+    configureAnsiColors(false);
+    assert.equal(color(ANSI.green, "完成"), "完成");
+    assert.notEqual(ANSI.clear, "");
+    assert.notEqual(ANSI.altOn, "");
+  } finally {
+    configureAnsiColors(true);
+  }
+
+  assert.match(color(ANSI.green, "完成"), /\x1b\[32m/);
+});
 
 test("wrapAnsiLine keeps double-width CJK text within terminal width", () => {
   const lines = wrapAnsiLine("permission: bash_run  y=允许 n=拒绝", 34);

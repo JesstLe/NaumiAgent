@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { stripAnsi, visibleWidth } from "../src/ansi.js";
+import { configureAnsiColors, stripAnsi, visibleWidth } from "../src/ansi.js";
 import {
   WORKING_FRAME_COUNT,
   renderWorkingIndicator,
@@ -61,6 +61,19 @@ test("working indicator uses compact and dumb-terminal fallbacks", () => {
   assert.equal(dumb.length, 1);
   assert.match(stripAnsi(dumb[0]), /^\[o\] 模型工作中 · 生成响应$/);
   assert.doesNotMatch(stripAnsi(dumb[0]), /[◐◓◑◒╭╮│─◉•]/);
+});
+
+test("working indicator follows negotiated no-color rendering", () => {
+  try {
+    configureAnsiColors(false);
+    const rendered = renderWorkingIndicator(runningState(), 100, {
+      bodyHeight: 12,
+      term: "xterm-256color",
+    });
+    assert.doesNotMatch(rendered.join("\n"), /\x1b\[/);
+  } finally {
+    configureAnsiColors(true);
+  }
 });
 
 test("working indicator bounds long untrusted CJK phase labels", () => {

@@ -1,3 +1,15 @@
+const COLOR_CODES = Object.freeze({
+  reset: "\x1b[0m",
+  dim: "\x1b[2m",
+  bold: "\x1b[1m",
+  red: "\x1b[31m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  cyan: "\x1b[36m",
+  magenta: "\x1b[35m",
+  blue: "\x1b[34m",
+});
+
 export const ANSI = {
   clear: "\x1b[2J\x1b[H",
   hideCursor: "\x1b[?25l",
@@ -8,16 +20,14 @@ export const ANSI = {
   bracketedPasteOff: "\x1b[?2004l",
   keyboardDisambiguateOn: "\x1b[>1u",
   keyboardDisambiguateOff: "\x1b[<u",
-  reset: "\x1b[0m",
-  dim: "\x1b[2m",
-  bold: "\x1b[1m",
-  red: "\x1b[31m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  cyan: "\x1b[36m",
-  magenta: "\x1b[35m",
-  blue: "\x1b[34m",
+  ...COLOR_CODES,
 };
+
+export function configureAnsiColors(enabled) {
+  for (const [name, sequence] of Object.entries(COLOR_CODES)) {
+    ANSI[name] = enabled ? sequence : "";
+  }
+}
 
 export function color(style, text) {
   return `${style}${text}${ANSI.reset}`;

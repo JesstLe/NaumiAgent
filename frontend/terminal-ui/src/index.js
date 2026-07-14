@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import process from "node:process";
-import { ANSI } from "./ansi.js";
+import { ANSI, configureAnsiColors } from "./ansi.js";
 import { bridgeEnvironment, isIgnorableBridgeStderr } from "./bridge-stderr.js";
 import { createDebugLog } from "./debug-log.js";
 import {
@@ -76,6 +76,7 @@ import {
 import { createTrackpadScrollFilter } from "./scroll-input.js";
 import { shouldAnimateWorkingIndicator } from "./components/working-indicator.js";
 import { createWorkingAnimationController } from "./working-animation.js";
+import { detectTerminalCapabilities } from "./terminal-capabilities.js";
 import {
   getProjectInputHistory,
   getUiSnapshot,
@@ -86,6 +87,7 @@ import {
 } from "./ui-state-store.js";
 
 const args = parseArgs(process.argv.slice(2));
+const terminalCapabilities = detectTerminalCapabilities();
 const state = createInitialState();
 const uiStateStore = loadUiStateStore(process.cwd());
 state.inputHistory = getProjectInputHistory(uiStateStore);
@@ -112,6 +114,14 @@ const workingAnimation = createWorkingAnimationController({
 main();
 
 function main() {
+  if (!terminalCapabilities.interactive) {
+    process.stderr.write(
+      "Naumi 新终端 UI 需要交互式 TTY；请在 Terminal、iTerm2、Kitty、WezTerm、Windows Terminal 或常见 Linux 终端中运行。\n",
+    );
+    process.exitCode = 2;
+    return;
+  }
+  configureAnsiColors(terminalCapabilities.colors);
   debugLog?.log("terminal_ui.state", { frontend_debug_log_path: state.frontendDebugLogPath });
   bridge = startBridge();
   send = createEventSender(bridge.stdin, { debugLog });
@@ -191,7 +201,10 @@ function startBridge() {
 
 function setupTerminal() {
   process.stdout.write(
-    ANSI.altOn + ANSI.bracketedPasteOn + ANSI.keyboardDisambiguateOn + ANSI.hideCursor,
+    ANSI.altOn
+      + ANSI.bracketedPasteOn
+      + (terminalCapabilities.enhancedKeyboard ? ANSI.keyboardDisambiguateOn : "")
+      + ANSI.hideCursor,
   );
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(true);
@@ -207,7 +220,7 @@ function setupTerminal() {
 function restoreTerminal() {
   workingAnimation.stop();
   process.stdout.write(
-    ANSI.keyboardDisambiguateOff
+    (terminalCapabilities.enhancedKeyboard ? ANSI.keyboardDisambiguateOff : "")
       + ANSI.bracketedPasteOff
       + ANSI.showCursor
       + ANSI.altOff
@@ -840,22 +853,18 @@ function redraw() {
 
 function syncWorkingAnimation() {
   workingAnimation.sync(shouldAnimateWorkingIndicator(state, {
-    isTTY: process.stdout.isTTY === true,
-    term: process.env.TERM,
-    ci: environmentFlag(process.env.CI),
-    reduceMotion: environmentFlag(process.env.NAUMI_REDUCE_MOTION),
+    isTTY: terminalCapabilities.animate,
+    term: terminalCapabilities.terminal,
+    ci: !terminalCapabilities.animate,
+    reduceMotion: !terminalCapabilities.animate,
   }));
 }
 
 function terminalRenderEnvironment() {
   return {
     cwd: process.cwd(),
-    home: process.env.HOME,
-    term: process.env.TERM,
+    home: terminalCapabilities.home,
+    term: terminalCapabilities.terminal,
+    forceAscii: !terminalCapabilities.unicode,
   };
-}
-
-function environmentFlag(value) {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  return Boolean(normalized) && !["0", "false", "no", "off"].includes(normalized);
 }
