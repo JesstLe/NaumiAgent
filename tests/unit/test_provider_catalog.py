@@ -10,6 +10,7 @@ import pytest
 from naumi_agent.model.catalog import (
     APIFormat,
     AuthType,
+    ProviderAuthSpec,
     ProviderCatalogError,
     SecretSource,
     load_provider_catalog,
@@ -213,6 +214,38 @@ def test_opencode_anthropic_api_key_uses_x_api_key_auth() -> None:
     assert provider.auth.header == "X-API-Key"
     assert provider.auth.secret_source is SecretSource.ENV
     assert provider.auth.secret_ref == "ANTHROPIC_PROXY_KEY"
+
+
+def test_opencode_google_provider_uses_x_goog_api_key() -> None:
+    catalog = parse_provider_catalog_json(
+        json.dumps(
+            {
+                "provider": {
+                    "google": {
+                        "npm": "@ai-sdk/google",
+                        "options": {
+                            "baseURL": (
+                                "https://generativelanguage.googleapis.com/v1beta"
+                            ),
+                            "apiKey": "{env:GEMINI_SELECTED_KEY}",
+                        },
+                        "models": {
+                            "flash": {"upstreamId": "gemini-3.5-flash"},
+                        },
+                    },
+                },
+            }
+        )
+    )
+
+    provider = catalog.providers["google"]
+    assert provider.api_format is APIFormat.GOOGLE_GENAI
+    assert provider.auth == ProviderAuthSpec(
+        type=AuthType.API_KEY_HEADER,
+        secret_source=SecretSource.ENV,
+        secret_ref="GEMINI_SELECTED_KEY",
+        header="X-Goog-Api-Key",
+    )
 
 
 @pytest.mark.parametrize("field", ["apiKey", "api_key"])

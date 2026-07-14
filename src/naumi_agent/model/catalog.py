@@ -381,6 +381,9 @@ def _parse_opencode_auth(
     if source and api_format is APIFormat.ANTHROPIC_MESSAGES:
         auth_type = AuthType.API_KEY_HEADER
         header = "X-API-Key"
+    elif source and api_format is APIFormat.GOOGLE_GENAI:
+        auth_type = AuthType.API_KEY_HEADER
+        header = "X-Goog-Api-Key"
     else:
         auth_type = AuthType.BEARER if source else AuthType.NONE
         header = None
