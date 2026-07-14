@@ -24,3 +24,6 @@ log = "0.4"
 tauri = { version = "2.10.3", features = [] }
 tauri-plugin-log = "2"
 keyring = "3.6.3"
+dirs = "6.0"
+chrono = "0.4"
+regex = "1.11"
