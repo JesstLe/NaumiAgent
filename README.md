@@ -10,7 +10,7 @@
 
 核心能力包括：
 
-- **多模型路由**：通过 LiteLLM 统一调用模型，支持 fast/capable/reasoning tier、模型发现与能力校验后的思考强度。
+- **多模型路由**：通过 LiteLLM 统一调用模型，已接入 OpenAI-compatible Chat、OpenAI Responses、Anthropic Messages 与 Google GenAI 原生协议，支持 fast/capable/reasoning tier、模型发现与能力校验后的思考强度。
 - **工具执行**：文件读写、代码执行、shell、Web、浏览器、记忆、任务、调度等工具走统一权限与预算控制。
 - **会话与记忆**：SQLite 会话历史、Chroma 长期记忆、上下文压缩、`/resume` 与 `/history` 恢复链路。
 - **运行态面板**：`/todo`、`/tasks`、`/runtime` 汇总 todo、subagent、后台任务、浏览器任务和 hook 状态。
@@ -126,6 +126,10 @@ models:
 模型需要在 provider catalog 的 `capabilities.reasoning` 或 `models.model_info` 中声明真实
 可用档位，NaumiAgent 不会盲目透传未验证值。完整配置见
 [模型、Provider 与思考强度配置](docs/15-model-provider-configuration.md)。
+
+Google AI Studio 可在 `.naumi/providers.json` 中声明 `apiFormat: "google_genai"`、
+`X-Goog-Api-Key` 的系统凭据/环境变量引用和 `/models` 动态发现；文本、系统消息、工具
+回合、流式输出与 usage 均走原生 Gemini transport，不需要伪装成 OpenAI 协议。
 
 ### 启动
 

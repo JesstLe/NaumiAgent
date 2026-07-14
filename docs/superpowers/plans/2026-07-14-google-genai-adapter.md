@@ -34,7 +34,7 @@
 | `tests/unit/test_provider_catalog.py` | Lock Google auth normalization and secret-safety behavior. |
 | `tests/unit/test_provider_runtime.py` | Lock model/auth/header/timeout/dispatcher mappings and pre-network failures. |
 | `tests/unit/test_model_discovery.py` | Lock Google model parsing, filtering, cache, auth, and dynamic listing behavior. |
-| `tests/unit/test_model_router.py` | Prove Google transport is used by non-stream/stream and discovered targets. |
+| `tests/unit/test_model_router_transport.py` | Prove Google transport is used by non-stream/stream and discovered targets. |
 | `tests/integration/test_google_genai_loopback.py` | Exercise real LiteLLM Gemini HTTP text, tools, streaming, usage, and discovery. |
 | `docs/15-model-provider-configuration.md` | Add current user configuration and `/models` behavior. |
 | `README.md` | Record Google GenAI among actually implemented native formats. |
@@ -53,7 +53,7 @@
 - Produces: OpenCode `@ai-sdk/google` secret references as `ProviderAuthSpec(type=API_KEY_HEADER, header="X-Goog-Api-Key", ...)`.
 - Preserves: native catalog auth, Anthropic `X-API-Key`, plaintext-secret rejection, and side-effect-free parsing.
 
-- [ ] **Step 1: Write the failing OpenCode Google auth test**
+- [x] **Step 1: Write the failing OpenCode Google auth test**
 
 Add beside the Anthropic OpenCode auth test:
 
@@ -84,7 +84,7 @@ def test_opencode_google_provider_uses_x_goog_api_key() -> None:
     )
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -96,7 +96,7 @@ NAUMI_MODELS__API_KEY=unit-test-placeholder uv run python -m pytest -q \
 
 Expected: FAIL because the current OpenCode parser produces bearer auth.
 
-- [ ] **Step 3: Implement the Google auth branch**
+- [x] **Step 3: Implement the Google auth branch**
 
 Change only `_parse_opencode_auth()`:
 
@@ -114,7 +114,7 @@ else:
 
 Do not add provider-name or base-URL heuristics.
 
-- [ ] **Step 4: Verify GREEN and catalog regressions**
+- [x] **Step 4: Verify GREEN and catalog regressions**
 
 Run:
 
@@ -128,7 +128,7 @@ git diff --check
 
 Expected: selected tests pass, Ruff passes, no whitespace errors.
 
-- [ ] **Step 5: Self-review and commit**
+- [x] **Step 5: Self-review and commit**
 
 Confirm the parser does not resolve `GEMINI_SELECTED_KEY`, echo references in an error, or change native provider auth. Commit:
 
@@ -151,7 +151,7 @@ git commit -m "fix: normalize Google provider authentication"
 - Produces: dispatcher support for `APIFormat.GOOGLE_GENAI`.
 - Transport model is `gemini/<normalized_upstream_id>`; kwargs remain immutable and secret-safe.
 
-- [ ] **Step 1: Write failing standard-key transport tests**
+- [x] **Step 1: Write failing standard-key transport tests**
 
 Import `build_google_genai_transport` and add:
 
@@ -177,7 +177,7 @@ def test_google_genai_maps_standard_key_model_base_headers_and_timeout(
         catalog_source="/tmp/providers.json",
     )
 
-    assert transport.model == "gemini/vendor/model-v2"
+    assert transport.model == "gemini/gemini-model-v2"
     assert transport.kwargs == {
         "api_base": "https://generativelanguage.googleapis.com/v1beta",
         "api_key": "google-selected-secret",
@@ -212,7 +212,7 @@ def test_google_genai_strips_one_official_models_prefix(
     assert transport.model == "gemini/gemini-3.5-flash"
 ```
 
-- [ ] **Step 2: Write failing custom/none/fallback tests**
+- [x] **Step 2: Write failing custom/none/fallback tests**
 
 ```python
 @pytest.mark.parametrize(
@@ -271,7 +271,7 @@ def test_google_none_auth_never_reads_ambient_keys(
 
 Add parametrized invalid upstream IDs `""`, `"models/"`, `"models/a/b"`, `"a:generateContent"`, `"a?key=x"`, and a control-character value. Each must raise `ProviderRuntimeError` before secret lookup and must not echo the full unsafe value.
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run:
 
@@ -283,7 +283,7 @@ NAUMI_MODELS__API_KEY=unit-test-placeholder uv run python -m pytest -q \
 
 Expected: import/dispatch failures because no Google transport exists.
 
-- [ ] **Step 4: Implement Google model normalization and auth**
+- [x] **Step 4: Implement Google model normalization and auth**
 
 Add these private helpers:
 
@@ -332,7 +332,7 @@ def _resolve_google_auth(
 
 Before `_resolve_google_auth()`, call `_assert_no_auth_header_conflict()` so conflicting static auth headers fail before secret resolution.
 
-- [ ] **Step 5: Implement the public builder and dispatcher**
+- [x] **Step 5: Implement the public builder and dispatcher**
 
 Add:
 
@@ -368,7 +368,7 @@ def build_google_genai_transport(
 
 Keep the existing positive-timeout validation by extracting/reusing one private helper rather than silently accepting zero. Add the `GOOGLE_GENAI` branch to `build_provider_transport()`.
 
-- [ ] **Step 6: Verify GREEN, regression set, and Ruff**
+- [x] **Step 6: Verify GREEN, regression set, and Ruff**
 
 Run:
 
@@ -383,7 +383,7 @@ git diff --check
 
 Expected: all selected transport tests pass; existing three formats remain unchanged.
 
-- [ ] **Step 7: Self-review and commit**
+- [x] **Step 7: Self-review and commit**
 
 Review secret repr, ambient env isolation, case-insensitive header conflicts, immutable copied headers, model path injection, zero timeout, and protocol mismatch. Commit:
 
@@ -405,7 +405,7 @@ git commit -m "feat: add Google GenAI provider transport"
 - Produces: `_parse_google_models(provider_id: str, payload: object) -> _ParsedModels`.
 - Produces: `GOOGLE_GENAI` in the allowed discovery formats and existing `ProviderModelListing` output.
 
-- [ ] **Step 1: Write failing pure parser tests**
+- [x] **Step 1: Write failing pure parser tests**
 
 Expose no new public parser. Test through `_parse_google_models` within the module or through a real `MockTransport` service call:
 
@@ -434,7 +434,7 @@ def test_google_models_strip_resource_prefix_and_filter_generation_support() -> 
 
 Add cases for duplicate normalized IDs, empty models, every row invalid/unsupported, control characters, `models/a/b`, and 501 valid rows. If the envelope contains rows but none can be called with `generateContent`, expect `ModelDiscoveryError` with no raw row content.
 
-- [ ] **Step 2: Write the failing HTTP/auth/listing test**
+- [x] **Step 2: Write the failing HTTP/auth/listing test**
 
 Use `httpx.MockTransport` and an explicit Google provider:
 
@@ -479,7 +479,7 @@ async def test_google_discovery_uses_models_path_key_header_and_dynamic_ids(
 
 Assert no Authorization header and no secret in `repr(listing)` or warning text.
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run:
 
@@ -491,7 +491,7 @@ NAUMI_MODELS__API_KEY=unit-test-placeholder uv run python -m pytest -q \
 
 Expected: FAIL because Google discovery is rejected and no parser/unsupported count exists.
 
-- [ ] **Step 4: Extend the parsed-result contract**
+- [x] **Step 4: Extend the parsed-result contract**
 
 Add `unsupported_count: int = 0` to `_ParsedModels` and include this exact warning fragment when nonzero:
 
@@ -504,7 +504,7 @@ if self.unsupported_count:
 
 Do not change OpenAI/Ollama call sites; the default preserves their behavior.
 
-- [ ] **Step 5: Implement the Google parser**
+- [x] **Step 5: Implement the Google parser**
 
 Implement one bounded pass:
 
@@ -545,11 +545,11 @@ def _parse_google_models(provider_id: str, payload: object) -> _ParsedModels:
 
 If `rows` is nonempty and `normalized` is empty, raise the same safe no-valid-model error after counting; do not leak model names. Preserve the 500-item cap by delegating final ID validation/deduplication to `_parse_rows()`.
 
-- [ ] **Step 6: Route Google discovery and keep cache policy unchanged**
+- [x] **Step 6: Route Google discovery and keep cache policy unchanged**
 
 Add `APIFormat.GOOGLE_GENAI` to `_fetch_remote_models()`'s allowed set and dispatch to `_parse_google_models()` after JSON parsing. Do not alter TTL/single-flight/stale/failure logic.
 
-- [ ] **Step 7: Verify GREEN and focused cache regressions**
+- [x] **Step 7: Verify GREEN and focused cache regressions**
 
 Run:
 
@@ -564,7 +564,7 @@ git diff --check
 
 Expected: Google and selected shared policy tests pass.
 
-- [ ] **Step 8: Self-review and commit**
+- [x] **Step 8: Self-review and commit**
 
 Review URL path composition, standard Google auth, unsupported method handling, invalid/duplicate counts, bounds, stable ordering, static-upstream deduplication, and no raw response leakage. Commit:
 
@@ -578,7 +578,7 @@ git commit -m "feat: discover Google GenAI models"
 ### Task 4: Router and Real Gemini Loopback
 
 **Files:**
-- Modify: `tests/unit/test_model_router.py`
+- Modify: `tests/unit/test_model_router_transport.py`
 - Create: `tests/integration/test_google_genai_loopback.py`
 
 **Interfaces:**
@@ -586,9 +586,9 @@ git commit -m "feat: discover Google GenAI models"
 - Proves: static and dynamically discovered `google_genai` targets use native Gemini transport for text, tools, streaming, usage, and tool-result continuation.
 - Production Router changes are allowed only if the RED tests expose a provider-neutral bug; do not add a Google branch to Router call/stream.
 
-- [ ] **Step 1: Write failing Router transport assertions**
+- [x] **Step 1: Write failing Router transport assertions**
 
-In `test_model_router.py`, create a Google catalog target and monkeypatch `litellm.acompletion` with one async recorder. Assert both `call()` and `stream()` receive:
+In `test_model_router_transport.py`, create a Google catalog target and monkeypatch `litellm.acompletion` with one async recorder. Assert both `call()` and `stream()` receive:
 
 ```python
 assert captured[0]["model"] == "gemini/gemini-3.5-flash"
@@ -599,19 +599,19 @@ assert captured[0]["extra_headers"] == {"X-Tenant": "tenant-a"}
 
 Also assert an explicit supported reasoning effort reaches `reasoning_effort`, while an undeclared effort fails before `litellm.acompletion`.
 
-- [ ] **Step 2: Verify the Router unit RED state**
+- [x] **Step 2: Verify the Router unit RED state**
 
 Run:
 
 ```bash
 NAUMI_MODELS__API_KEY=unit-test-placeholder uv run python -m pytest -q \
-  tests/unit/test_model_router.py \
+  tests/unit/test_model_router_transport.py \
   -k 'google_genai'
 ```
 
 Expected: FAIL before Task 2 is present; after Task 2 it may pass without Router production changes. Record that as proof the provider-neutral boundary works; do not invent a change merely to make the task look larger.
 
-- [ ] **Step 3: Create the local Google HTTP handler**
+- [x] **Step 3: Create the local Google HTTP handler**
 
 In `test_google_genai_loopback.py`, use `ThreadingHTTPServer` and capture `(method, path, headers, body)`. Implement:
 
@@ -661,7 +661,7 @@ def _tool_response() -> dict[str, Any]:
 
 The handler must select a final response when any request part contains `functionResponse`; this proves the second tool turn rather than only parsing a synthetic first response.
 
-- [ ] **Step 4: Write the real end-to-end test**
+- [x] **Step 4: Write the real end-to-end test**
 
 Build a native catalog with no static models, `discovery.enabled=true`, explicit loopback `/v1beta` base, and `GEMINI_LOOPBACK_KEY`. Then:
 
@@ -711,7 +711,7 @@ assert not any(
 
 Inspect captured request bodies to prove system/user parts, function declarations, functionCall and functionResponse were sent in Google native shape. Assert no `stream_options`, secret reference, or discovery metadata appears in inference bodies.
 
-- [ ] **Step 5: Verify RED against the real LiteLLM path**
+- [x] **Step 5: Verify RED against the real LiteLLM path**
 
 Run:
 
@@ -722,11 +722,11 @@ NAUMI_MODELS__API_KEY=unit-test-placeholder uv run python -m pytest -q \
 
 Expected before Tasks 1-3: transport/discovery failure. If the first run reveals an exact LiteLLM path or valid response-field difference, update only the local handler to the installed dependency's documented contract; do not weaken product assertions.
 
-- [ ] **Step 6: Make only provider-neutral Router corrections exposed by RED**
+- [x] **Step 6: Make only provider-neutral Router corrections exposed by RED**
 
-If needed, modify `router.py` only in shared response/stream normalization. Any change must add a focused failing test first and must preserve OpenAI/Anthropic/Kimi behavior. Do not branch on `provider.id == "google"`; transport-specific mapping belongs in LiteLLM/provider runtime.
+The real loopback exposed that LiteLLM treats a dynamically discovered unknown Gemini model as not supporting system messages. `ProviderTransport` now carries immutable model-registration metadata and Router registers any transport-declared capability through one generic, locked, idempotent path. No `provider.id == "google"` branch was added to `call()` or `stream()`; failures are Chinese, redacted, and occur before network I/O.
 
-- [ ] **Step 7: Verify GREEN and focused regressions**
+- [x] **Step 7: Verify GREEN and focused regressions**
 
 Run:
 
@@ -736,6 +736,7 @@ NAUMI_MODELS__API_KEY=unit-test-placeholder uv run python -m pytest -q \
   tests/unit/test_provider_runtime.py \
   tests/unit/test_model_discovery.py \
   tests/unit/test_model_router.py \
+  tests/unit/test_model_router_transport.py \
   tests/integration/test_google_genai_loopback.py \
   -k 'google or transport or dynamic or reasoning_effort'
 uv run ruff check src/naumi_agent/model/catalog.py \
@@ -746,21 +747,22 @@ uv run ruff check src/naumi_agent/model/catalog.py \
   tests/unit/test_provider_runtime.py \
   tests/unit/test_model_discovery.py \
   tests/unit/test_model_router.py \
+  tests/unit/test_model_router_transport.py \
   tests/integration/test_google_genai_loopback.py
 git diff --check
 ```
 
 Expected: selected tests and Ruff pass; no full suite runs.
 
-- [ ] **Step 8: Self-review and commit**
+- [x] **Step 8: Self-review and commit**
 
 Review real path/query, x-goog auth, ambient key isolation, tool round-trip, stream completion, usage, dynamic overlay, model filtering, error redaction, server shutdown, and test determinism. Commit:
 
 ```bash
-git add tests/unit/test_model_router.py \
+git add tests/unit/test_model_router_transport.py \
   tests/integration/test_google_genai_loopback.py \
   src/naumi_agent/model/router.py
-git commit -m "test: verify Google GenAI loopback runtime"
+git commit -m "fix: preserve Google system instructions"
 ```
 
 Omit `src/naumi_agent/model/router.py` from `git add` when no production correction was necessary.
@@ -779,7 +781,7 @@ Omit `src/naumi_agent/model/router.py` from `git add` when no production correct
 - Consumes: implemented `google_genai` transport and discovery behavior.
 - Produces: truthful user configuration, current support matrix, exact acceptance evidence, and next adapter order.
 
-- [ ] **Step 1: Update active configuration documentation**
+- [x] **Step 1: Update active configuration documentation**
 
 Add the native JSON example from the design to `docs/15-model-provider-configuration.md`, including:
 
@@ -791,11 +793,11 @@ Add the native JSON example from the design to `docs/15-model-provider-configura
 
 Update README's support statement to list only actually executable formats: OpenAI-compatible Chat, OpenAI Responses, Anthropic Messages, and Google GenAI.
 
-- [ ] **Step 2: Mark design implemented only after focused acceptance**
+- [x] **Step 2: Mark design implemented only after focused acceptance**
 
 Change design status to `已批准并实现` and add an evidence block with exact test counts, loopback scenarios, Ruff result, and the explicit statement that no Google external network, Keychain, or full suite ran.
 
-- [ ] **Step 3: Run the final focused Python acceptance**
+- [x] **Step 3: Run the final focused Python acceptance**
 
 Run the complete files for this small subsystem, not a broad repository suite:
 
@@ -806,12 +808,13 @@ NAUMI_MODELS__API_KEY=unit-test-placeholder uv run python -m pytest -q \
   tests/unit/test_model_discovery.py \
   tests/unit/test_model_targets.py \
   tests/unit/test_model_router.py \
+  tests/unit/test_model_router_transport.py \
   tests/integration/test_google_genai_loopback.py
 ```
 
 Record the exact pass count and duration in the design and this plan.
 
-- [ ] **Step 4: Run final Ruff, compile, and diff checks**
+- [x] **Step 4: Run final Ruff, compile, and diff checks**
 
 ```bash
 uv run ruff check src/naumi_agent/model/catalog.py \
@@ -821,7 +824,9 @@ uv run ruff check src/naumi_agent/model/catalog.py \
   tests/unit/test_provider_catalog.py \
   tests/unit/test_provider_runtime.py \
   tests/unit/test_model_discovery.py \
+  tests/unit/test_model_targets.py \
   tests/unit/test_model_router.py \
+  tests/unit/test_model_router_transport.py \
   tests/integration/test_google_genai_loopback.py
 uv run python -m py_compile \
   src/naumi_agent/model/catalog.py \
@@ -831,7 +836,7 @@ uv run python -m py_compile \
 git diff --check
 ```
 
-- [ ] **Step 5: Manual real configuration smoke**
+- [x] **Step 5: Manual real configuration smoke**
 
 In a temporary directory, create `.naumi/config.yaml` and `providers.json` pointing to the loopback server, set only a temporary env key, then run the shared model-list and one Router call. Confirm:
 
@@ -840,7 +845,7 @@ In a temporary directory, create `.naumi/config.yaml` and `providers.json` point
 - inference reaches `:generateContent` and returns a normalized response;
 - temporary files/state are removed and live `.naumi`/Keychain are unchanged.
 
-- [ ] **Step 6: Multi-round final review**
+- [x] **Step 6: Multi-round final review**
 
 Review at least:
 
@@ -854,7 +859,7 @@ Review at least:
 - Did the slice accidentally implement Vertex, Interactions, Azure, Ollama, or hardcoded model versions?
 - Are docs current and are historical design documents clearly separated from active user docs?
 
-- [ ] **Step 7: Commit documentation**
+- [x] **Step 7: Commit documentation**
 
 ```bash
 git add docs/15-model-provider-configuration.md README.md \
@@ -869,10 +874,19 @@ Fetch `origin/main`; if remote advanced, inspect and integrate it without discar
 
 ## Plan Self-Review
 
+Final implementation evidence before merge:
+
+- targeted acceptance: `225 passed in 3.46s` across the seven provider/Router files;
+- Ruff, four-module `py_compile`, and `git diff --check`: passed;
+- temporary real `.naumi/config.yaml` + `providers.json` loopback smoke: passed and cleaned;
+- review-discovered correction: native catalog now exposes positive `requestTimeoutMs` /
+  `request_timeout_ms`, so the transport timeout is user-configurable instead of test-only;
+- no Google external request, real Keychain access, live `.naumi` mutation, subagent, or full suite.
+
 - Spec coverage: catalog auth, explicit native transport, standard/custom/none auth, model normalization, Google discovery, dynamic routing, call, stream, tools, tool results, usage, reasoning, UI/TUI list reuse, docs and real loopback all have an owner.
 - Scope: Vertex AI, Interactions, OpenAI compatibility, Azure, Ollama inference, media APIs, built-in provider defaults and new picker remain explicit follow-ups.
 - Security: no ambient key fallback, plaintext catalog secret, raw response error, path/query model injection, unbounded discovery response, or startup eager fetch is introduced.
-- Type consistency: `build_google_genai_transport()` returns the existing immutable `ProviderTransport`; discovery returns existing `_ParsedModels`/`ProviderModelListing`; Router continues consuming `ResolvedModelTarget`.
+- Type consistency: `build_google_genai_transport()` returns immutable `ProviderTransport` plus optional immutable registration metadata; discovery returns existing `_ParsedModels`/`ProviderModelListing`; Router continues consuming `ResolvedModelTarget`.
 - Fidelity: the plan requires real local HTTP through installed LiteLLM, including a complete tool continuation, instead of treating a kwargs mapping test as protocol support.
 - UX: existing `/models`/REST/new UI/TUI data path is reused, failure remains Chinese/actionable, stale lists remain usable, and no API key is displayed.
 - Performance: existing per-provider TTL, negative cache, single-flight and list-all concurrency remain unchanged; no startup enumeration is added.
