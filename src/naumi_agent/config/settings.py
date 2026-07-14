@@ -29,10 +29,10 @@ _FRESHNESS = re.compile(
 class ModelMeta(BaseSettings):
     """单个模型的元数据覆盖（上下文窗口、价格等）."""
 
-    max_context: int | None = None
-    max_output: int | None = None
-    input_cost_per_million: float | None = None
-    output_cost_per_million: float | None = None
+    max_context: int | None = Field(default=None, gt=0)
+    max_output: int | None = Field(default=None, gt=0)
+    input_cost_per_million: float | None = Field(default=None, ge=0)
+    output_cost_per_million: float | None = Field(default=None, ge=0)
     reasoning_effort: ReasoningEffortSetting | None = None
     reasoning_efforts: tuple[ReasoningEffort, ...] | None = None
     default_reasoning_effort: ReasoningEffort | None = None
@@ -51,6 +51,12 @@ class ModelMeta(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_reasoning_capability(self) -> ModelMeta:
+        if (
+            self.max_context is not None
+            and self.max_output is not None
+            and self.max_output > self.max_context
+        ):
+            raise ValueError("max_output 不能大于 max_context")
         efforts = self.reasoning_efforts
         if efforts is None:
             if self.default_reasoning_effort is not None:

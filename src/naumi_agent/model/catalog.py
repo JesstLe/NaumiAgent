@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -92,6 +93,8 @@ class ProviderModelSpec:
     supports_vision: bool | None = None
     input_modalities: tuple[str, ...] = ()
     output_modalities: tuple[str, ...] = ()
+    input_cost_per_million: float | None = None
+    output_cost_per_million: float | None = None
 
 
 @dataclass(frozen=True)
@@ -526,6 +529,22 @@ def _parse_models(raw: Any, path: str) -> Mapping[str, ProviderModelSpec]:
         max_context = _optional_positive_int(limit, "context", f"{model_path}.limit")
         max_output = _optional_positive_int(limit, "output", f"{model_path}.limit")
         _reject_unknown(limit, f"{model_path}.limit")
+        if (
+            max_context is not None
+            and max_output is not None
+            and max_output > max_context
+        ):
+            raise ProviderCatalogError(
+                f"{model_path}.limit.output 不能大于 limit.context。"
+            )
+        cost = _mapping(model.pop("cost", {}), f"{model_path}.cost")
+        input_cost = _optional_non_negative_number(
+            cost, "input", f"{model_path}.cost"
+        )
+        output_cost = _optional_non_negative_number(
+            cost, "output", f"{model_path}.cost"
+        )
+        _reject_unknown(cost, f"{model_path}.cost")
         capabilities = _mapping(
             model.pop("capabilities", {}), f"{model_path}.capabilities"
         )
@@ -550,6 +569,17 @@ def _parse_models(raw: Any, path: str) -> Mapping[str, ProviderModelSpec]:
             modalities.pop("output", []), f"{model_path}.modalities.output"
         )
         _reject_unknown(modalities, f"{model_path}.modalities")
+        _reject_duplicate_values(
+            input_modalities, f"{model_path}.modalities.input"
+        )
+        _reject_duplicate_values(
+            output_modalities, f"{model_path}.modalities.output"
+        )
+        if supports_vision is False and "image" in input_modalities:
+            raise ProviderCatalogError(
+                f"{model_path}.modalities.input 在 capabilities.vision=false 时"
+                "不能声明 image。"
+            )
         _reject_unknown(model, model_path)
         models[model_id] = ProviderModelSpec(
             id=model_id,
@@ -564,6 +594,8 @@ def _parse_models(raw: Any, path: str) -> Mapping[str, ProviderModelSpec]:
             supports_vision=supports_vision,
             input_modalities=input_modalities,
             output_modalities=output_modalities,
+            input_cost_per_million=input_cost,
+            output_cost_per_million=output_cost,
         )
     return MappingProxyType(models)
 
@@ -697,6 +729,24 @@ def _optional_positive_int(
     return _positive_int(data.pop(key), f"{path}.{key}")
 
 
+def _optional_non_negative_number(
+    data: dict[str, Any],
+    key: str,
+    path: str,
+) -> float | None:
+    if key not in data:
+        return None
+    value = data.pop(key)
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < 0
+    ):
+        raise ProviderCatalogError(f"{path}.{key} 必须是非负有限数字。")
+    return float(value)
+
+
 def _optional_bool(data: dict[str, Any], key: str, path: str) -> bool | None:
     if key not in data:
         return None
@@ -767,6 +817,14 @@ def _parse_string_tuple(raw: Any, path: str) -> tuple[str, ...]:
     if not isinstance(raw, list):
         raise ProviderCatalogError(f"{path} 必须是字符串数组。")
     return tuple(_required_string(item, f"{path}[]") for item in raw)
+
+
+def _reject_duplicate_values(values: tuple[str, ...], path: str) -> None:
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            raise ProviderCatalogError(f"{path} 含重复值：{value}。")
+        seen.add(value)
 
 
 def _reject_unknown(data: dict[str, Any], path: str) -> None:

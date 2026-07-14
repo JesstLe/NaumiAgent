@@ -56,6 +56,8 @@ class AvailableModel:
     supports_vision: bool | None = None
     input_modalities: tuple[str, ...] = ()
     output_modalities: tuple[str, ...] = ()
+    input_cost_per_million: float | None = None
+    output_cost_per_million: float | None = None
 
     @property
     def canonical_id(self) -> str:
@@ -76,6 +78,8 @@ class AvailableModel:
             supports_vision=self.supports_vision,
             input_modalities=self.input_modalities,
             output_modalities=self.output_modalities,
+            input_cost_per_million=self.input_cost_per_million,
+            output_cost_per_million=self.output_cost_per_million,
         )
 
 
@@ -580,6 +584,8 @@ def _available_static(provider_id: str, model: ProviderModelSpec) -> AvailableMo
         supports_vision=model.supports_vision,
         input_modalities=model.input_modalities,
         output_modalities=model.output_modalities,
+        input_cost_per_million=model.input_cost_per_million,
+        output_cost_per_million=model.output_cost_per_million,
     )
 
 
