@@ -96,6 +96,16 @@ class _FakeRouter:
         self,
         model: str | None = None,
     ) -> ReasoningEffortStatus:
+        for listing in self.listings:
+            for available in listing.models:
+                if model in {available.id, available.canonical_id, available.upstream_id}:
+                    return ReasoningEffortStatus(
+                        model=model or available.canonical_id,
+                        effective=ReasoningEffortSetting.AUTO,
+                        source="auto",
+                        supported=available.reasoning_efforts,
+                        default=available.default_reasoning_effort,
+                    )
         selected = self.runtime_effort or ReasoningEffortSetting.MEDIUM
         return ReasoningEffortStatus(
             model=model or self.resolve_model("capable"),
@@ -375,3 +385,5 @@ async def test_rest_config_falls_back_to_configured_legacy_models() -> None:
     ]
     assert all(model.source == "legacy" for model in response.models)
     assert response.reasoning_effort.model == "remote-model"
+    assert response.models[0].reasoning_efforts == ["low", "medium", "high"]
+    assert response.models[0].default_reasoning_effort == "medium"

@@ -54,6 +54,24 @@ async def get_config(request: Request, auth: str = AuthDep):
         if listing.warning:
             model_warnings.append(f"{listing.provider_id}: {listing.warning}")
         for model in listing.models:
+            reasoning_efforts = [value.value for value in model.reasoning_efforts]
+            default_reasoning_effort = (
+                model.default_reasoning_effort.value
+                if model.default_reasoning_effort is not None
+                else None
+            )
+            try:
+                capability = engine.router.get_reasoning_effort_status(
+                    model.canonical_id
+                )
+                reasoning_efforts = [value.value for value in capability.supported]
+                default_reasoning_effort = (
+                    capability.default.value
+                    if capability.default is not None
+                    else None
+                )
+            except Exception:
+                pass
             matching_tiers = [
                 tier
                 for tier, configured in configured_tiers.items()
@@ -72,12 +90,8 @@ async def get_config(request: Request, auth: str = AuthDep):
                     max_output=model.max_output,
                     supports_tools=model.supports_tools,
                     supports_reasoning=model.supports_reasoning,
-                    reasoning_efforts=[value.value for value in model.reasoning_efforts],
-                    default_reasoning_effort=(
-                        model.default_reasoning_effort.value
-                        if model.default_reasoning_effort is not None
-                        else None
-                    ),
+                    reasoning_efforts=reasoning_efforts,
+                    default_reasoning_effort=default_reasoning_effort,
                     supports_vision=model.supports_vision,
                 )
             )
@@ -88,6 +102,7 @@ async def get_config(request: Request, auth: str = AuthDep):
             tiers_by_model.setdefault(configured, []).append(tier)
         for configured, tiers in tiers_by_model.items():
             identity = engine.router.get_runtime_identity(configured)
+            capability = engine.router.get_reasoning_effort_status(configured)
             models.append(
                 ModelInfo(
                     id=identity.canonical_model,
@@ -96,6 +111,14 @@ async def get_config(request: Request, auth: str = AuthDep):
                     tier=",".join(tiers),
                     upstream_id=identity.upstream_model,
                     source=identity.source,
+                    reasoning_efforts=[
+                        value.value for value in capability.supported
+                    ],
+                    default_reasoning_effort=(
+                        capability.default.value
+                        if capability.default is not None
+                        else None
+                    ),
                 )
             )
 
