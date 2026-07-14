@@ -28,8 +28,8 @@ memory:
   vector_db_path: "data/chroma"
   compaction_threshold: 0.75
 
-# 相对路径文件操作和 bash 默认执行目录。
-# "." 表示启动 naumi 进程时的当前目录。
+# 交互式 naumi 始终把启动命令所在目录绑定为本轮工作区。
+# 此字段保留给 API、部署等非交互高级场景；"." 表示进程当前目录。
 workspace_root: "."
 
 safety:

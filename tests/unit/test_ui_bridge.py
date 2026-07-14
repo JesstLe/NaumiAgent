@@ -81,6 +81,55 @@ def test_bridge_stdio_is_configured_as_utf8() -> None:
     assert stderr.calls == [{"encoding": "utf-8", "errors": "replace"}]
 
 
+@pytest.mark.asyncio
+async def test_create_bridge_binds_engine_to_process_launch_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy = tmp_path / "legacy"
+    launch = tmp_path / "launch"
+    legacy.mkdir()
+    launch.mkdir()
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "models:",
+                "  provider: openai",
+                "  default_model: test-model",
+                f'workspace_root: "{legacy}"',
+                "safety:",
+                "  permission_mode: moderate",
+                f'  allowed_dirs: ["{legacy}"]',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    captured: dict[str, AppConfig] = {}
+
+    def engine_factory(config: AppConfig) -> _FakeEngine:
+        captured["config"] = config
+        engine = _FakeEngine()
+        engine.workspace_root = config.resolve_workspace_root()
+        return engine
+
+    monkeypatch.chdir(launch)
+    monkeypatch.setenv("NAUMI_MODELS__API_KEY", "test-secret")
+
+    bridge = await ui_bridge.create_bridge(
+        config_path=str(config_path),
+        engine_factory=engine_factory,
+    )
+    bridge.bind_writer(io.StringIO())
+    try:
+        assert captured["config"].workspace_root == str(launch.resolve())
+        assert bridge.engine.workspace_root == launch.resolve()
+        assert bridge.status_payload()["workspace_root"] == str(launch.resolve())
+    finally:
+        await bridge.shutdown()
+
+
 @pytest.mark.parametrize(
     ("error", "expected_code"),
     [

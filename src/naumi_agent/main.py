@@ -673,6 +673,7 @@ def _launch_tui(config_path: str) -> None:
 
     resolved = _resolve_config_path(config_path)
     config = AppConfig.from_yaml(resolved)
+    config.bind_runtime_workspace(Path.cwd())
     global _show_reasoning_text
     _show_reasoning_text = bool(getattr(config.ui, "show_reasoning", False))
     setup_logging(config.log_level)

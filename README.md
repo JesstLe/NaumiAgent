@@ -126,7 +126,10 @@ models:
   api_base: "https://api.kimi.com/coding/v1"
 ```
 
-`workspace_root: "."` 表示文件工具和 shell 默认作用于启动 `naumi` 时的当前目录。
+首次引导不再询问或永久保存工作区。交互式执行 `naumi`、`naumi chat` 或 fallback TUI 时，
+启动命令所在目录会成为本轮工作区；即使旧配置保存了另一个绝对 `workspace_root`，新会话也
+不会跳回旧项目。`workspace_root` 仍保留给 API、部署等非交互高级场景；`bypass` 模式不受
+工作区边界限制，可以显式操作其他目录。
 
 项目配置、provider 目录和运行数据分别建议放在 `.naumi/config.yaml`、
 `.naumi/providers.json` 和 `.naumi/data/`；密钥只放系统凭据库或环境变量。支持思考强度的

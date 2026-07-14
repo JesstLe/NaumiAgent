@@ -110,25 +110,17 @@ def run_onboarding(config_path: Path, *, project_root: Path | None = None) -> bo
         preset["fast_model"] = Prompt.ask("快速模型", default=preset["default_model"])
         preset["reasoning_model"] = Prompt.ask("推理模型", default=preset["default_model"])
 
-    # 5. Workspace
-    workspace_default = str(Path.cwd())
-    workspace = Prompt.ask(
-        "工作区目录（文件/Shell 工具默认作用范围）",
-        default=workspace_default,
-    )
-
-    # 6. Permission mode
+    # 5. Permission mode
     permission_mode = Prompt.ask(
         "权限模式",
         choices=list(_PERMISSION_MODES.keys()),
         default="moderate",
     )
 
-    # 7. 写入配置
+    # 6. 写入配置
     config_data = _build_config(
         provider=provider,
         preset=preset,
-        workspace=workspace,
         permission_mode=permission_mode,
     )
 
@@ -138,7 +130,7 @@ def run_onboarding(config_path: Path, *, project_root: Path | None = None) -> bo
 
     console.print(f"[green]✅ 配置已写入 {config_path}[/green]")
 
-    # 8. Node UI 检查
+    # 7. Node UI 检查
     _check_node_ui(project_root)
     _report_search_readiness()
 
@@ -194,7 +186,6 @@ def _prompt_api_key(provider_name: str) -> str:
 def _build_config(
     provider: str,
     preset: dict[str, Any],
-    workspace: str,
     permission_mode: str,
 ) -> dict[str, Any]:
     return {
@@ -215,10 +206,10 @@ def _build_config(
             "vector_db_path": "data/chroma",
             "compaction_threshold": 0.75,
         },
-        "workspace_root": workspace,
+        "workspace_root": ".",
         "safety": {
             "permission_mode": permission_mode,
-            "allowed_dirs": [workspace],
+            "allowed_dirs": ["."],
             "max_turns": DEFAULT_RUNTIME_MAX_TURNS,
         },
         "mcp": {"servers": {}},

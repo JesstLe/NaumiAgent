@@ -686,10 +686,16 @@ class TestPermissionChecker:
             workspace_root=str(tmp_path),
         )
 
-        decision = checker.check("file_read", {"path": str(tmp_path.parent / "outside.txt")})
+        for tool_name in ("file_read", "file_write", "bash_run"):
+            args = (
+                {"command": "pwd", "cwd": str(tmp_path.parent)}
+                if tool_name == "bash_run"
+                else {"path": str(tmp_path.parent / "outside.txt")}
+            )
+            decision = checker.check(tool_name, args)
 
-        assert decision.outcome is PermissionOutcome.ALLOW
-        assert decision.code is PermissionReasonCode.ALLOWED
+            assert decision.outcome is PermissionOutcome.ALLOW
+            assert decision.code is PermissionReasonCode.ALLOWED
 
     def test_bypass_allows_destructive_tool_metadata(self) -> None:
         checker = PermissionChecker(PermissionMode.BYPASS)
