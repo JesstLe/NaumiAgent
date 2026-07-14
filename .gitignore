@@ -25,6 +25,9 @@ chroma/
 .naumi/terminal-ui-state.json
 .naumi/shell-output/
 
+# Local agent workflow scratch state (PID files, previews, review caches)
+.superpowers/
+
 # Local dev runtime logs (uvicorn/naumi serve output captured at repo root)
 backend.log
 *.log
