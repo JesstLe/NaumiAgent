@@ -231,6 +231,7 @@ docker compose up --build
 
 ## 文档
 
+- [完整文档地图与状态说明](docs/README.md)
 - [架构概览](docs/01-architecture-overview.md)
 - [工具系统](docs/03-tool-system.md)
 - [记忆系统](docs/04-memory-system.md)

@@ -48,7 +48,7 @@
 建议按这个顺序走：
 
 1. 先看 `课程大纲.md`，把项目能力和学习路线串起来。
-2. 按项目 README 跑通 NaumiAgent：`uv sync --extra dev`，再执行 `naumi chat` 或 `python -m naumi_agent.main chat`。
+2. 按项目 README 跑通 NaumiAgent：`uv sync --extra dev`，再执行 `uv run naumi`；需要显式使用 Textual fallback 时执行 `uv run naumi tui`。
 3. 看 `项目讲解稿.md`，先背 30 秒版和 3 分钟版。
 4. 看 `简历包装.md`，选择一个版本改成自己的经历。
 5. 刷 `面试题库.md`，把回答改成自己的表达。
@@ -60,7 +60,7 @@
 
 ```bash
 uv sync --extra dev
-python -m naumi_agent.main chat
+uv run naumi
 ```
 
 进入交互后可以演示：
@@ -101,4 +101,3 @@ uv run pytest tests/unit/test_permissions.py -q
 ## 诚实边界
 
 这套项目适合做「工程能力展示」和「面试表达训练」，不承诺任何录用结果。简历里的指标、截图、运行结果需要买家自己本地验证后再写。对于源码里属于雏形或二开方向的部分，材料会明确标出，不建议包装成已经大规模生产可用。
-

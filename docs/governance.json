@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "pattern": "README.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/README.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/deployment.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/terminal-ui-integration.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/15-model-provider-configuration.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/harness/*.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/product/terminal-ui/README.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/product/terminal-ui/01-default-entry-and-runtime-shell.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/product/terminal-ui/07-cli-compatibility-and-migration.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/superpowers/README.md",
+      "status": "current",
+      "enforce_current": true
+    },
+    {
+      "pattern": "docs/product/terminal-ui/0[2-68]-*.md",
+      "status": "product_spec"
+    },
+    {
+      "pattern": "docs/product/mac-agent-workbench-*.md",
+      "status": "product_spec"
+    },
+    {
+      "pattern": "docs/design/*.md",
+      "status": "product_spec"
+    },
+    {
+      "pattern": "docs/quality/*.md",
+      "status": "quality"
+    },
+    {
+      "pattern": "docs/release/*.md",
+      "status": "quality"
+    },
+    {
+      "pattern": "docs/migration/*.md",
+      "status": "migration"
+    },
+    {
+      "pattern": "docs/references/*.md",
+      "status": "reference"
+    },
+    {
+      "pattern": "docs/examples/**/*.md",
+      "status": "reference"
+    },
+    {
+      "pattern": "docs/product/naumiagent-lite/*.md",
+      "status": "reference"
+    },
+    {
+      "pattern": "docs/mac-app/**/*.md",
+      "status": "historical"
+    },
+    {
+      "pattern": "docs/superpowers/plans/*.md",
+      "status": "historical"
+    },
+    {
+      "pattern": "docs/superpowers/specs/*.md",
+      "status": "historical"
+    },
+    {
+      "pattern": "docs/0[1-9]-*.md",
+      "status": "historical"
+    },
+    {
+      "pattern": "docs/1[0-4]-*.md",
+      "status": "historical"
+    },
+    {
+      "pattern": "docs/pursuit_optimization_log.md",
+      "status": "historical"
+    }
+  ]
+}
