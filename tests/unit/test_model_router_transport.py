@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import AsyncIterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from typing import Any
 
 import httpx
 import pytest
 
-from naumi_agent.config.settings import ModelConfig
+from naumi_agent.config.settings import ModelConfig, ModelMeta
 from naumi_agent.model.catalog import parse_provider_catalog_json
 from naumi_agent.model.discovery import ModelDiscoveryService
 from naumi_agent.model.provider_runtime import ProviderRuntimeError
+from naumi_agent.model.reasoning import ReasoningEffortError
 from naumi_agent.model.router import ModelRouter
 from naumi_agent.model.targets import ModelResolutionError
 
@@ -56,6 +59,33 @@ def _responses_catalog():
                         "baseURL": "https://responses.vendor.example/v1",
                         "auth": {"type": "none"},
                         "models": {"chat": {"upstreamId": "vendor/model-v2"}},
+                    }
+                }
+            }
+        )
+    )
+
+
+def _reasoning_chat_catalog():
+    return parse_provider_catalog_json(
+        json.dumps(
+            {
+                "providers": {
+                    "vendor": {
+                        "apiFormat": "openai_chat",
+                        "baseURL": "https://reasoning.vendor.example/v1",
+                        "auth": {"type": "none"},
+                        "models": {
+                            "reasoner": {
+                                "upstreamId": "gpt-reasoner",
+                                "capabilities": {
+                                    "reasoning": {
+                                        "efforts": ["none", "low", "high", "xhigh"],
+                                        "defaultEffort": "low",
+                                    }
+                                },
+                            }
+                        },
                     }
                 }
             }
@@ -492,6 +522,220 @@ async def test_stream_uses_the_same_catalog_transport(
     assert dict(captured["extra_headers"]) == {"X-Tenant": "tenant-a"}
     assert captured["timeout"] == 12.5
     assert [chunk.token for chunk in chunks] == ["stream-ok"]
+
+
+@pytest.mark.asyncio
+async def test_call_sends_validated_reasoning_effort_and_omits_temperature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_acompletion(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return _completion_response()
+
+    monkeypatch.setattr("naumi_agent.model.router.litellm.get_model_info", lambda _: {})
+    monkeypatch.setattr("naumi_agent.model.router.litellm.acompletion", fake_acompletion)
+    router = ModelRouter(
+        ModelConfig(
+            provider="vendor",
+            default_model="reasoner",
+            reasoning_effort="xhigh",
+            temperature=0.3,
+        ),
+        catalog=_reasoning_chat_catalog(),
+    )
+
+    await router.call([{"role": "user", "content": "hello"}])
+
+    assert captured["reasoning_effort"] == "xhigh"
+    assert "temperature" not in captured
+
+
+@pytest.mark.asyncio
+async def test_stream_uses_same_reasoning_effort_request_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_acompletion(**kwargs: Any):
+        captured.update(kwargs)
+        return _completion_stream()
+
+    monkeypatch.setattr("naumi_agent.model.router.litellm.get_model_info", lambda _: {})
+    monkeypatch.setattr("naumi_agent.model.router.litellm.acompletion", fake_acompletion)
+    router = ModelRouter(
+        ModelConfig(provider="vendor", default_model="reasoner"),
+        catalog=_reasoning_chat_catalog(),
+    )
+    router.set_reasoning_effort("high")
+
+    _ = [
+        chunk
+        async for chunk in router.stream([{"role": "user", "content": "hello"}])
+    ]
+
+    assert captured["reasoning_effort"] == "high"
+    assert "temperature" not in captured
+
+
+@pytest.mark.asyncio
+async def test_unsupported_configured_effort_fails_before_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    async def fake_acompletion(**_kwargs: Any) -> SimpleNamespace:
+        nonlocal called
+        called = True
+        return _completion_response()
+
+    monkeypatch.setattr("naumi_agent.model.router.litellm.get_model_info", lambda _: {})
+    monkeypatch.setattr("naumi_agent.model.router.litellm.acompletion", fake_acompletion)
+    router = ModelRouter(
+        ModelConfig(
+            provider="vendor",
+            default_model="reasoner",
+            reasoning_effort="medium",
+        ),
+        catalog=_reasoning_chat_catalog(),
+    )
+
+    with pytest.raises(ReasoningEffortError, match="不支持.*medium"):
+        await router.call([{"role": "user", "content": "hello"}])
+
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_explicit_effort_conflicts_with_explicit_kimi_thinking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    async def fake_acompletion(**_kwargs: Any) -> SimpleNamespace:
+        nonlocal called
+        called = True
+        return _completion_response()
+
+    monkeypatch.setattr("naumi_agent.model.router.litellm.get_model_info", lambda _: {})
+    monkeypatch.setattr("naumi_agent.model.router.litellm.acompletion", fake_acompletion)
+    router = ModelRouter(
+        ModelConfig(
+            default_model="openai/kimi-k2.6",
+            reasoning_effort="high",
+            model_info={
+                "openai/kimi-k2.6": ModelMeta(reasoning_efforts=("low", "high"))
+            },
+        )
+    )
+
+    with pytest.raises(ReasoningEffortError, match="不能同时"):
+        await router.call(
+            [{"role": "user", "content": "hello"}],
+            thinking={"type": "enabled"},
+        )
+
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_installed_litellm_transports_reasoning_effort_to_loopback_bodies() -> None:
+    received: list[dict[str, Any]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            length = int(self.headers.get("content-length", "0"))
+            request_body = json.loads(self.rfile.read(length))
+            received.append(request_body)
+            if str(request_body.get("model", "")).startswith("claude-"):
+                response_body = {
+                    "id": "msg_loopback",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": request_body["model"],
+                    "content": [{"type": "text", "text": "ok"}],
+                    "stop_reason": "end_turn",
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                }
+            else:
+                response_body = {
+                    "id": "chatcmpl_loopback",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": request_body["model"],
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                }
+            encoded = json.dumps(response_body).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, _format: str, *_args: Any) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        openai_router = ModelRouter(
+            ModelConfig(
+                default_model="openai/gpt-5",
+                api_base=f"{base_url}/v1",
+                api_key="loopback-test",
+                reasoning_effort="high",
+                model_info={
+                    "openai/gpt-5": ModelMeta(
+                        reasoning_efforts=("low", "medium", "high")
+                    )
+                },
+                max_tokens=8,
+            )
+        )
+        await openai_router.call([{"role": "user", "content": "hello"}])
+
+        for effort in ("medium", "max"):
+            anthropic_router = ModelRouter(
+                ModelConfig(
+                    default_model="anthropic/claude-opus-4-6",
+                    api_base=base_url,
+                    api_key="loopback-test",
+                    reasoning_effort=effort,
+                    model_info={
+                        "anthropic/claude-opus-4-6": ModelMeta(
+                            reasoning_efforts=("low", "medium", "high", "max")
+                        )
+                    },
+                    max_tokens=8,
+                )
+            )
+            await anthropic_router.call([{"role": "user", "content": "hello"}])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert received[0]["reasoning_effort"] == "high"
+    assert "temperature" not in received[0]
+    assert received[1]["output_config"] == {"effort": "medium"}
+    assert received[1]["thinking"] == {"type": "adaptive"}
+    assert received[2]["output_config"] == {"effort": "max"}
+    assert received[2]["thinking"] == {"type": "adaptive"}
 
 
 @pytest.mark.asyncio

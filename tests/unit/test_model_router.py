@@ -10,6 +10,7 @@ import pytest
 from naumi_agent.config.settings import ModelConfig, ModelMeta
 from naumi_agent.model.catalog import parse_provider_catalog_json
 from naumi_agent.model.discovery import ModelDiscoveryService
+from naumi_agent.model.reasoning import ReasoningEffortError
 from naumi_agent.model.router import ModelRouter, ModelTier
 
 
@@ -34,6 +35,34 @@ def _discovery_catalog(*, static: bool = False):
             }
         ),
         source="/tmp/providers.json",
+    )
+
+
+def _reasoning_catalog():
+    return parse_provider_catalog_json(
+        json.dumps(
+            {
+                "providers": {
+                    "vendor": {
+                        "apiFormat": "openai_chat",
+                        "baseURL": "https://provider.example/v1",
+                        "auth": {"type": "none"},
+                        "models": {
+                            "chat": {
+                                "upstreamId": "vendor/reasoner",
+                                "capabilities": {
+                                    "reasoning": {
+                                        "efforts": ["low", "medium", "high"],
+                                        "defaultEffort": "medium",
+                                    }
+                                },
+                            },
+                            "plain": {"upstreamId": "vendor/plain"},
+                        },
+                    }
+                }
+            }
+        )
     )
 
 
@@ -337,6 +366,122 @@ class TestModelInfo:
         assert copy["max_output_tokens"] == 1_000
         assert primary is not copy
         assert requested_upstreams == ["z-ai/glm4.7", "z-ai/glm4.7"]
+
+
+class TestReasoningEffort:
+    def test_catalog_capability_reports_auto_and_supported_values(self) -> None:
+        router = ModelRouter(
+            ModelConfig(provider="vendor", default_model="chat"),
+            catalog=_reasoning_catalog(),
+        )
+
+        status = router.get_reasoning_effort_status("chat")
+
+        assert status.effective.value == "auto"
+        assert status.source == "auto"
+        assert tuple(value.value for value in status.supported) == (
+            "low",
+            "medium",
+            "high",
+        )
+        assert status.default is not None
+        assert status.default.value == "medium"
+        assert status.warning is None
+
+    def test_direct_model_info_supplies_capability_and_selection(self) -> None:
+        router = ModelRouter(
+            ModelConfig(
+                default_model="anthropic/claude-opus-4-6",
+                model_info={
+                    "anthropic/claude-opus-4-6": ModelMeta(
+                        reasoning_effort="max",
+                        reasoning_efforts=("low", "medium", "high", "max"),
+                        default_reasoning_effort="high",
+                    )
+                },
+            )
+        )
+
+        status = router.get_reasoning_effort_status()
+
+        assert status.effective.value == "max"
+        assert status.source == "model"
+        assert [value.value for value in status.supported] == [
+            "low",
+            "medium",
+            "high",
+            "max",
+        ]
+
+    def test_requested_alias_metadata_overrides_canonical_and_global(self) -> None:
+        router = ModelRouter(
+            ModelConfig(
+                provider="vendor",
+                default_model="chat",
+                reasoning_effort="low",
+                model_info={
+                    "vendor/chat": ModelMeta(reasoning_effort="medium"),
+                    "chat": ModelMeta(
+                        reasoning_effort="high",
+                        reasoning_efforts=("medium", "high"),
+                        default_reasoning_effort="medium",
+                    ),
+                },
+            ),
+            catalog=_reasoning_catalog(),
+        )
+
+        status = router.get_reasoning_effort_status("chat")
+
+        assert status.effective.value == "high"
+        assert status.source == "model"
+        assert [value.value for value in status.supported] == ["medium", "high"]
+
+    def test_runtime_auto_shadows_config_and_reset_restores_it(self) -> None:
+        router = ModelRouter(
+            ModelConfig(
+                provider="vendor",
+                default_model="chat",
+                reasoning_effort="high",
+            ),
+            catalog=_reasoning_catalog(),
+        )
+
+        router.set_reasoning_effort("auto")
+        runtime = router.get_reasoning_effort_status()
+        router.reset_reasoning_effort()
+        restored = router.get_reasoning_effort_status()
+
+        assert runtime.effective.value == "auto"
+        assert runtime.source == "runtime"
+        assert restored.effective.value == "high"
+        assert restored.source == "global"
+
+    def test_runtime_effort_rejects_invalid_or_unsupported_value(self) -> None:
+        router = ModelRouter(
+            ModelConfig(provider="vendor", default_model="chat"),
+            catalog=_reasoning_catalog(),
+        )
+
+        with pytest.raises(ReasoningEffortError, match="可选值.*low.*high"):
+            router.set_reasoning_effort("xhigh")
+        with pytest.raises(ReasoningEffortError, match="无效的思考强度"):
+            router.set_reasoning_effort("turbo")
+
+    def test_model_switch_recomputes_runtime_effort_warning(self) -> None:
+        router = ModelRouter(
+            ModelConfig(provider="vendor", default_model="chat"),
+            catalog=_reasoning_catalog(),
+        )
+        router.set_reasoning_effort("high", model="chat")
+
+        status = router.get_reasoning_effort_status("plain")
+
+        assert status.effective.value == "high"
+        assert status.source == "runtime"
+        assert status.supported == ()
+        assert status.warning is not None
+        assert "未声明" in status.warning
 
 
 class TestMaxTokens:

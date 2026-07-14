@@ -27,6 +27,13 @@ from naumi_agent.model.provider_runtime import (
     ProviderRuntimeError,
     build_provider_transport,
 )
+from naumi_agent.model.reasoning import (
+    ReasoningEffort,
+    ReasoningEffortError,
+    ReasoningEffortSetting,
+    ReasoningEffortStatus,
+    reasoning_effort_values,
+)
 from naumi_agent.model.targets import (
     ModelResolutionError,
     ResolvedModelTarget,
@@ -141,6 +148,7 @@ class ModelRouter:
         self._info_cache: dict[str, dict[str, Any]] = {}
         self._registered_native_stream_models: set[str] = set()
         self._native_stream_registration_lock = threading.Lock()
+        self._runtime_reasoning_effort: ReasoningEffortSetting | None = None
 
     # --- 模型元数据 ---
 
@@ -246,6 +254,159 @@ class ModelRouter:
             catalog=self._catalog,
             dynamic_models=self._dynamic_models,
         )
+
+    def get_reasoning_effort_status(
+        self,
+        model: str | None = None,
+    ) -> ReasoningEffortStatus:
+        """Resolve capability and selected effort for one model without network I/O."""
+        requested = model or self.resolve_model(ModelTier.CAPABLE)
+        try:
+            target = self.resolve_target(requested)
+        except ModelResolutionError:
+            target = None
+
+        supported: tuple[ReasoningEffort, ...] = ()
+        default: ReasoningEffort | None = None
+        if target is not None and target.model is not None:
+            supported = target.model.reasoning_efforts
+            default = target.model.default_reasoning_effort
+
+        canonical = target.canonical_model if target is not None else requested
+        metadata = self._reasoning_metadata(canonical, requested)
+        for meta in metadata:
+            if meta.reasoning_efforts is not None:
+                supported = meta.reasoning_efforts
+                default = meta.default_reasoning_effort
+
+        if self._runtime_reasoning_effort is not None:
+            effective = self._runtime_reasoning_effort
+            source = "runtime"
+        else:
+            selected = next(
+                (
+                    meta.reasoning_effort
+                    for meta in reversed(metadata)
+                    if meta.reasoning_effort is not None
+                ),
+                None,
+            )
+            if selected is not None:
+                effective = selected
+                source = "model"
+            elif self._config.reasoning_effort is not ReasoningEffortSetting.AUTO:
+                effective = self._config.reasoning_effort
+                source = "global"
+            else:
+                effective = ReasoningEffortSetting.AUTO
+                source = "auto"
+
+        warning = self._reasoning_effort_warning(
+            requested,
+            effective,
+            supported,
+        )
+        return ReasoningEffortStatus(
+            model=requested,
+            effective=effective,
+            source=source,
+            supported=supported,
+            default=default,
+            warning=warning,
+        )
+
+    def set_reasoning_effort(
+        self,
+        value: str | ReasoningEffortSetting,
+        *,
+        model: str | None = None,
+    ) -> ReasoningEffortStatus:
+        """Set and validate one process-local effort override."""
+        try:
+            selected = (
+                value
+                if isinstance(value, ReasoningEffortSetting)
+                else ReasoningEffortSetting(value.strip().lower())
+            )
+        except (AttributeError, ValueError) as exc:
+            raise ReasoningEffortError(
+                "无效的思考强度；可选值：auto、"
+                f"{reasoning_effort_values()}。"
+            ) from exc
+        previous = self._runtime_reasoning_effort
+        self._runtime_reasoning_effort = selected
+        status = self.get_reasoning_effort_status(model)
+        if selected is not ReasoningEffortSetting.AUTO and status.warning:
+            self._runtime_reasoning_effort = previous
+            raise ReasoningEffortError(status.warning)
+        return status
+
+    def reset_reasoning_effort(
+        self,
+        *,
+        model: str | None = None,
+    ) -> ReasoningEffortStatus:
+        """Clear the process-local effort override and return config resolution."""
+        self._runtime_reasoning_effort = None
+        return self.get_reasoning_effort_status(model)
+
+    def _reasoning_metadata(
+        self,
+        canonical_model: str,
+        requested_model: str,
+    ) -> tuple[ModelMeta, ...]:
+        metadata: list[ModelMeta] = []
+        canonical = self._config.model_info.get(canonical_model)
+        if canonical is not None:
+            metadata.append(canonical)
+        if requested_model != canonical_model:
+            requested = self._config.model_info.get(requested_model)
+            if requested is not None:
+                metadata.append(requested)
+        return tuple(metadata)
+
+    @staticmethod
+    def _reasoning_effort_warning(
+        model: str,
+        effective: ReasoningEffortSetting,
+        supported: tuple[ReasoningEffort, ...],
+    ) -> str | None:
+        explicit = effective.explicit
+        if explicit is None:
+            return None
+        if explicit in supported:
+            return None
+        if not supported:
+            return (
+                f'模型 "{model}" 未声明可选思考强度，无法发送 "{effective.value}"。'
+            )
+        available = "、".join(value.value for value in supported)
+        return (
+            f'模型 "{model}" 不支持思考强度 "{effective.value}"；'
+            f"可选值：{available}。"
+        )
+
+    @staticmethod
+    def _apply_reasoning_effort(
+        kwargs: dict[str, Any],
+        status: ReasoningEffortStatus,
+        *,
+        thinking: dict[str, str] | None,
+    ) -> bool:
+        """Validate and apply explicit effort; return whether one was applied."""
+        explicit = status.effective.explicit
+        if explicit is None:
+            return False
+        if status.warning:
+            raise ReasoningEffortError(status.warning)
+        if thinking is not None:
+            raise ReasoningEffortError(
+                "模型思考强度与显式 thinking 参数不能同时使用；"
+                "请将 /effort 设为 auto 或移除 thinking 参数。"
+            )
+        kwargs["reasoning_effort"] = explicit.value
+        kwargs.pop("temperature", None)
+        return True
 
     async def list_available_models(
         self,
@@ -619,6 +780,7 @@ class ModelRouter:
         transport_model, transport_kwargs = await self._resolve_transport_async(
             resolved
         )
+        effort_status = self.get_reasoning_effort_status(resolved)
         preserve_reasoning = self._should_preserve_reasoning_content(
             resolved, thinking,
         )
@@ -638,10 +800,16 @@ class ModelRouter:
 
         kwargs.update(transport_kwargs)
 
+        explicit_effort = self._apply_reasoning_effort(
+            kwargs,
+            effort_status,
+            thinking=thinking,
+        )
+
         # Kimi k2.6 thinking support
         if thinking is not None:
             self._apply_thinking(kwargs, thinking)
-        elif self._is_kimi_thinking_model(resolved):
+        elif not explicit_effort and self._is_kimi_thinking_model(resolved):
             self._apply_thinking(kwargs, {"type": "enabled"})
         response = await litellm.acompletion(**kwargs)
 
@@ -676,6 +844,7 @@ class ModelRouter:
         transport_model, transport_kwargs = await self._resolve_transport_async(
             resolved
         )
+        effort_status = self.get_reasoning_effort_status(resolved)
         self._ensure_native_responses_streaming(resolved)
         preserve_reasoning = self._should_preserve_reasoning_content(
             resolved, thinking,
@@ -696,10 +865,16 @@ class ModelRouter:
 
         kwargs.update(transport_kwargs)
 
+        explicit_effort = self._apply_reasoning_effort(
+            kwargs,
+            effort_status,
+            thinking=thinking,
+        )
+
         # Kimi k2.6 thinking support
         if thinking is not None:
             self._apply_thinking(kwargs, thinking)
-        elif self._is_kimi_thinking_model(resolved):
+        elif not explicit_effort and self._is_kimi_thinking_model(resolved):
             self._apply_thinking(kwargs, {"type": "enabled"})
         response = await litellm.acompletion(**kwargs)
 
