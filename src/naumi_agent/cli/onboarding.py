@@ -206,6 +206,16 @@ def _build_config(
             "vector_db_path": "data/chroma",
             "compaction_threshold": 0.75,
         },
+        "search": {
+            "provider_order": ["brave", "duckduckgo", "browser"],
+            "brave": {
+                "enabled": True,
+                "api_key_ref": "{env:BRAVE_SEARCH_API_KEY}",
+                "safesearch": "moderate",
+                "spellcheck": True,
+                "timeout_seconds": 10,
+            },
+        },
         "workspace_root": ".",
         "safety": {
             "permission_mode": permission_mode,

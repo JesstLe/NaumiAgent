@@ -69,6 +69,7 @@ async def run_doctor(
         api_key_check,
         provider_check,
         _check_search_readiness(
+            search_config=config.search,
             browser_fallback_available=browser_fallback_available,
         ),
         _check_workspace(root),
@@ -194,18 +195,30 @@ def _check_model_provider(config: AppConfig) -> DoctorCheck:
 
 def _check_search_readiness(
     *,
+    search_config: Any | None = None,
     direct_search_available: bool = True,
     browser_fallback_available: bool = True,
 ) -> DoctorCheck:
     """Report search capability separately from the required model credentials."""
-    if os.getenv("BRAVE_SEARCH_API_KEY", "").strip():
+    provider_order = tuple(
+        getattr(search_config, "provider_order", ("brave", "duckduckgo", "browser"))
+    )
+    brave = getattr(search_config, "brave", None)
+    brave_key = (
+        brave.resolve_api_key()
+        if brave is not None
+        else os.getenv("BRAVE_SEARCH_API_KEY", "").strip() or None
+    )
+    if "brave" in provider_order and brave_key:
         return DoctorCheck(
             "网络搜索",
             "pass",
             "已增强：检测到 Brave Search 凭据；失败时仍会自动回退。",
         )
-    if direct_search_available:
-        if not browser_fallback_available:
+    direct_enabled = direct_search_available and "duckduckgo" in provider_order
+    browser_enabled = browser_fallback_available and "browser" in provider_order
+    if direct_enabled:
+        if not browser_enabled:
             return DoctorCheck(
                 "网络搜索",
                 "warn",
@@ -218,7 +231,7 @@ def _check_search_readiness(
             "可用（零配置）：免 Key 直连搜索，并支持浏览器自动回退。",
             "BRAVE_SEARCH_API_KEY 仅用于提升质量和稳定性，不是安装必需项。",
         )
-    if browser_fallback_available:
+    if browser_enabled:
         return DoctorCheck(
             "网络搜索",
             "warn",

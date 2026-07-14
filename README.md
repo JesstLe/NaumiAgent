@@ -45,9 +45,26 @@ curl -sSL https://raw.githubusercontent.com/JesstLe/NaumiAgent/main/scripts/inst
 naumi
 ```
 
-首次启动会进入交互式引导，询问模型 API Key、模型提供商、工作区和权限模式，自动生成不含密钥的 `.naumi/config.yaml`。模型密钥保存在系统凭据库中；已经设置 `NAUMI_MODELS__API_KEY` 的环境不会重复保存。旧项目的根目录 `config.yaml` 仍会被兼容读取，不会被自动复制或删除。
+首次启动会进入交互式引导，询问模型 API Key、模型提供商和权限模式，自动生成不含密钥的 `.naumi/config.yaml`；工作区直接使用启动 `naumi` 时所在的目录。模型密钥保存在系统凭据库中；已经设置 `NAUMI_MODELS__API_KEY` 的环境不会重复保存。旧项目的根目录 `config.yaml` 仍会被兼容读取，不会被自动复制或删除。
 
-网络搜索默认无需搜索引擎 API Key：系统会依次尝试免 Key 搜索，并在失败时自动回退到浏览器搜索。`BRAVE_SEARCH_API_KEY` 只是可选增强项，用于提升结果质量和稳定性，不会阻塞首次安装或基本搜索。
+网络搜索默认无需搜索引擎 API Key：系统会依次尝试免 Key 搜索，并在失败时自动回退到浏览器搜索。Brave 是可选增强项，`.naumi/config.yaml` 只保存安全引用：
+
+```yaml
+search:
+  provider_order: [brave, duckduckgo, browser]
+  brave:
+    enabled: true
+    api_key_ref: "{env:BRAVE_SEARCH_API_KEY}"
+    country: CN          # 可选
+    search_lang: zh-hans # 可选
+    ui_lang: zh-CN       # 可选
+    safesearch: moderate
+    spellcheck: true
+    freshness: null      # pd / pw / pm / py / 日期范围
+    timeout_seconds: 10
+```
+
+macOS/Linux 可在启动前执行 `export BRAVE_SEARCH_API_KEY='...'`；PowerShell 使用 `$env:BRAVE_SEARCH_API_KEY='...'`。不要把真实 token 直接写进 YAML，配置校验会拒绝明文密钥。未设置该变量时自动跳过 Brave，不会阻塞基本搜索。
 
 需要更换 provider、模型或过期密钥时，运行：
 

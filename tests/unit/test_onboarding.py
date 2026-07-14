@@ -78,6 +78,7 @@ def test_build_config_never_serializes_model_api_key() -> None:
 
     assert "api_key" not in config["models"]
     assert config["models"]["provider"] == "custom"
+    assert config["search"]["brave"]["api_key_ref"] == "{env:BRAVE_SEARCH_API_KEY}"
 
 
 def test_build_config_uses_launch_relative_workspace_defaults() -> None:

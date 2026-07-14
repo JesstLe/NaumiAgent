@@ -28,6 +28,21 @@ memory:
   vector_db_path: "data/chroma"
   compaction_threshold: 0.75
 
+search:
+  # 实际 token 不写入 YAML；运行时从环境变量解析。
+  provider_order: [brave, duckduckgo, browser]
+  brave:
+    enabled: true
+    api_key_ref: "{env:BRAVE_SEARCH_API_KEY}"
+    # 以下均为可选 Brave Web Search 参数。
+    country: null
+    search_lang: null
+    ui_lang: null
+    safesearch: moderate
+    spellcheck: true
+    freshness: null
+    timeout_seconds: 10
+
 # 交互式 naumi 始终把启动命令所在目录绑定为本轮工作区。
 # 此字段保留给 API、部署等非交互高级场景；"." 表示进程当前目录。
 workspace_root: "."

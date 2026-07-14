@@ -7,8 +7,9 @@ keyed providers improve quality and latency but are never required for basic sea
 
 ## Existing Behavior
 
-`web_search` uses Brave when `BRAVE_SEARCH_API_KEY` is present and otherwise scrapes
-DuckDuckGo Lite. Provider failures and empty results are returned as human-readable strings.
+`web_search` uses the typed `search.provider_order` route. Brave resolves its token from
+`search.brave.api_key_ref` (default `{env:BRAVE_SEARCH_API_KEY}`) and otherwise the router
+continues to DuckDuckGo Lite. Provider failures and empty results are returned as human-readable strings.
 The orchestrator cannot reliably distinguish missing credentials, provider outage, parsing
 failure, and a genuine empty result, so browser automation fallback is an emergent model
 choice rather than a deterministic product behavior.
@@ -17,7 +18,7 @@ choice rather than a deterministic product behavior.
 
 `WebSearchTool` becomes a provider router with one stable result contract. The route is:
 
-1. Use Brave when a key is configured.
+1. Use Brave when it is enabled, ordered, and its environment reference resolves a key.
 2. If Brave is unavailable, unauthorized, rate-limited, times out, or returns no usable
    results, try the keyless HTTP provider.
 3. If keyless HTTP search fails, return a structured fallback request that the engine handles

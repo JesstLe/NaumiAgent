@@ -21,6 +21,81 @@ class TestAppConfig:
         assert config.ui.output_style == "detailed"
         assert config.browser_daemon.base_url == "http://127.0.0.1:3005"
         assert config.browser_daemon.project_dir.endswith("browser-debugging-daemon")
+        assert config.search.provider_order == ("brave", "duckduckgo", "browser")
+        assert config.search.brave.api_key_ref == "{env:BRAVE_SEARCH_API_KEY}"
+        assert config.search.brave.safesearch == "moderate"
+
+    def test_search_config_loads_advanced_brave_options(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "config.yaml"
+        yaml_path.write_text(
+            """
+search:
+  provider_order: [brave, duckduckgo]
+  brave:
+    enabled: true
+    api_key_ref: "{env:NAUMI_TEST_BRAVE_KEY}"
+    country: CN
+    search_lang: zh-hans
+    ui_lang: zh-CN
+    safesearch: strict
+    spellcheck: false
+    freshness: pw
+    timeout_seconds: 12
+""",
+            encoding="utf-8",
+        )
+
+        config = AppConfig.from_yaml(yaml_path)
+
+        assert config.search.provider_order == ("brave", "duckduckgo")
+        assert config.search.brave.country == "CN"
+        assert config.search.brave.search_lang == "zh-hans"
+        assert config.search.brave.ui_lang == "zh-CN"
+        assert config.search.brave.safesearch == "strict"
+        assert config.search.brave.spellcheck is False
+        assert config.search.brave.freshness == "pw"
+        assert config.search.brave.timeout_seconds == 12
+
+    def test_search_config_resolves_custom_environment_reference(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        config = AppConfig(
+            search={"brave": {"api_key_ref": "{env:NAUMI_CUSTOM_BRAVE_KEY}"}}
+        )
+        monkeypatch.setenv("NAUMI_CUSTOM_BRAVE_KEY", "custom-search-secret")
+
+        assert config.search.brave.resolve_api_key() == "custom-search-secret"
+        assert config.search.brave.resolve_api_key({}) is None
+        assert "custom-search-secret" not in repr(config.search.brave)
+
+    @pytest.mark.parametrize(
+        "freshness",
+        ["today", "2026-13-01to2026-14-01", "2026-07-14to2026-07-01"],
+    )
+    def test_search_config_rejects_invalid_freshness(self, freshness: str) -> None:
+        with pytest.raises(ValueError, match="freshness"):
+            AppConfig(search={"brave": {"freshness": freshness}})  # type: ignore[arg-type]
+
+    def test_search_config_rejects_inline_brave_secret_without_echo(self) -> None:
+        secret = "brave-inline-secret-value"
+
+        with pytest.raises(ValueError) as error:
+            AppConfig(search={"brave": {"api_key_ref": secret}})  # type: ignore[arg-type]
+
+        assert secret not in str(error.value)
+        assert "api_key_ref" in str(error.value)
+
+    @pytest.mark.parametrize(
+        "provider_order",
+        [[], ["brave", "brave"], ["brave", "unknown"]],
+    )
+    def test_search_config_rejects_invalid_provider_order(
+        self,
+        provider_order: list[str],
+    ) -> None:
+        with pytest.raises(ValueError, match="provider_order"):
+            AppConfig(search={"provider_order": provider_order})  # type: ignore[arg-type]
 
     def test_from_yaml(self, tmp_path) -> None:
         yaml_path = tmp_path / "config.yaml"
@@ -257,6 +332,7 @@ class TestAppConfig:
         assert "reasoning_effort: auto" in text
         assert "reasoning_efforts:" in text
         assert "default_reasoning_effort:" in text
+        assert 'api_key_ref: "{env:BRAVE_SEARCH_API_KEY}"' in text
         assert "api_key:" not in text
 
     @pytest.mark.parametrize(
