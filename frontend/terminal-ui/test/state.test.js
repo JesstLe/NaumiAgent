@@ -562,11 +562,20 @@ test("runtime status updates current session id and reasoning flag", () => {
       session_id: "sess-2026-06-03",
       ui: { show_reasoning: true },
       mode: "default",
+      reasoning_effort: {
+        model: "gpt-5",
+        effective: "high",
+        source: "runtime",
+        supported: ["low", "high"],
+        default: "low",
+        warning: null,
+      },
     },
   });
 
   assert.equal(state.currentSessionId, "sess-2026-06-03");
   assert.equal(state.showReasoning, true);
+  assert.equal(state.status.reasoning_effort.effective, "high");
 });
 
 test("replayed assistant token messages stay independent outside a running turn", () => {
@@ -1179,6 +1188,7 @@ test("slash commands route through protocol without adding chat noise", () => {
   handleSubmitText(state, "/permissions revoke all", send);
   handleSubmitText(state, "/doctor", send);
   handleSubmitText(state, "/reasoning on", send);
+  handleSubmitText(state, "/effort high", send);
   state.messages.push({ kind: "assistant", content: "old" });
   state.folds["message:old:code:0"] = { expanded: true };
   handleSubmitText(state, "/clear", send);
@@ -1195,6 +1205,7 @@ test("slash commands route through protocol without adding chat noise", () => {
     { type: "permission_revoke", payload: { scope: "all" } },
     { type: "doctor", payload: {} },
     { type: "set_reasoning", payload: { enabled: true } },
+    { type: "submit", payload: { text: "/effort high" } },
     { type: "submit", payload: { text: "/clear" } },
     { type: "submit", payload: { text: "/c" } },
     { type: "submit", payload: { text: "你好" } },

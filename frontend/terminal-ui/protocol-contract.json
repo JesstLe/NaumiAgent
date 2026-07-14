@@ -52,6 +52,13 @@
     "workbench/event",
     "shutdown"
   ],
+  "runtime_status": {
+    "reasoning_effort": {
+      "fields": ["model", "effective", "source", "supported", "default", "warning"],
+      "efforts": ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"],
+      "sources": ["runtime", "model", "global", "auto"]
+    }
+  },
   "ui_messages": {
     "assistant_stream": {
       "fields": ["phase", "content"],

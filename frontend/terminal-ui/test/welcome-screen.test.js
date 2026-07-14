@@ -20,6 +20,14 @@ function readyState() {
     upstream_model: "gpt-5.4-2026-06-01",
     mode: "default",
     permission_mode: "moderate",
+    reasoning_effort: {
+      model: "openai/gpt-5.4",
+      effective: "high",
+      source: "global",
+      supported: ["low", "high"],
+      default: "low",
+      warning: null,
+    },
   };
   return state;
 }
@@ -50,6 +58,7 @@ test("renders bounded authoritative facts in every layout", () => {
   assert.match(wide, /NaumiAgent v0\.1\.214/);
   assert.match(wide, /工作区 ~\/Workspace\/NaumiAgent/);
   assert.match(wide, /模型 openai\/gpt-5\.4/);
+  assert.match(wide, /思考强度 high/);
   assert.match(wide, /提供方 openai · 接口 OpenAI Responses/);
   assert.match(wide, /上游 gpt-5\.4-2026-06-01/);
   assert.match(wide, /模式 default · 权限 moderate/);

@@ -63,6 +63,7 @@ export function renderWelcomeScreen(state, width, bodyHeight, env = {}) {
   const provider = fact(status.provider);
   const apiFormat = formatApiFormat(status.api_format);
   const upstreamModel = upstreamModelMapping(status);
+  const reasoningEffort = fact(status.reasoning_effort?.effective);
 
   let content;
   if (layout === "minimal") {
@@ -82,6 +83,7 @@ export function renderWelcomeScreen(state, width, bodyHeight, env = {}) {
       `${color(ANSI.dim, "版本")} ${product} · ${readiness}`,
       `${color(ANSI.dim, "工作区")} ${workspace}`,
       `${color(ANSI.dim, "模型")} ${model}`,
+      `${color(ANSI.dim, "思考强度")} ${reasoningEffort}`,
       `${color(ANSI.dim, "提供方")} ${provider} · ${color(ANSI.dim, "接口")} ${apiFormat}`,
       ...(upstreamModel ? [`${color(ANSI.dim, "上游")} ${upstreamModel}`] : []),
       `${color(ANSI.dim, "模式")} ${renderedMode} · ${color(ANSI.dim, "权限")} ${renderedPermissionMode}`,

@@ -133,6 +133,8 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.server_events.includes("agents/snapshot"));
   assert(PROTOCOL_CONTRACT.server_events.includes("agents/update"));
   assert(PROTOCOL_CONTRACT.server_events.includes("agents/action"));
+  assert(PROTOCOL_CONTRACT.runtime_status.reasoning_effort.efforts.includes("xhigh"));
+  assert(PROTOCOL_CONTRACT.runtime_status.reasoning_effort.efforts.includes("max"));
   assert.deepEqual(PROTOCOL_CONTRACT.ui_messages.tool_prepare.phases, ["start", "snapshot", "end"]);
   assert(PROTOCOL_CONTRACT.ui_messages.tool_prepare.fields.includes("tool_call_id"));
   assert(PROTOCOL_CONTRACT.ui_messages.tool_prepare.fields.includes("content_lines"));
@@ -526,6 +528,14 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       upstream_model: " gpt-5.4-2026-06-01 ",
       mode: " DEFAULT ",
       permission_mode: " MODERATE ",
+      reasoning_effort: {
+        model: " openai/gpt-5.4 ",
+        effective: " HIGH ",
+        source: " GLOBAL ",
+        supported: [" low ", " high "],
+        default: " low ",
+        warning: null,
+      },
     },
   });
   const changed = normalizeServerRecord({
@@ -558,6 +568,7 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       upstream_model: ready.payload.upstream_model,
       mode: ready.payload.mode,
       permission_mode: ready.payload.permission_mode,
+      reasoning_effort: ready.payload.reasoning_effort,
     },
     {
       version: "0.1.214",
@@ -568,6 +579,14 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       upstream_model: "gpt-5.4-2026-06-01",
       mode: "default",
       permission_mode: "moderate",
+      reasoning_effort: {
+        model: "openai/gpt-5.4",
+        effective: "high",
+        source: "global",
+        supported: ["low", "high"],
+        default: "low",
+        warning: null,
+      },
     },
   );
   assert.equal(changed.payload.status.model, "anthropic/claude-opus-4-6");
@@ -590,6 +609,23 @@ test("rejects non-string terminal welcome identity fields", () => {
       payload: { api_format: { injected: true } },
     }),
     /ready.api_format 必须是字符串/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "ready",
+      version: 1,
+      payload: {
+        reasoning_effort: {
+          model: "gpt-5",
+          effective: "high",
+          source: "global",
+          supported: [{ injected: true }],
+          default: null,
+          warning: null,
+        },
+      },
+    }),
+    /supported\[0\] 必须是字符串/,
   );
 });
 

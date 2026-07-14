@@ -21,6 +21,11 @@ from naumi_agent.background.models import BackgroundStatus
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.inspector import RuntimeInspectorSnapshot
+from naumi_agent.model.reasoning import (
+    ReasoningEffort,
+    ReasoningEffortSetting,
+    ReasoningEffortStatus,
+)
 from naumi_agent.model.router import StreamChunk
 from naumi_agent.orchestrator.engine import AgentEngine, AgentResult, AgentRuntimeMode, AgentUsage
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
@@ -127,6 +132,9 @@ def test_git_snapshot_does_not_inherit_bridge_stdin(
 
 
 class _FakeRouter:
+    def __init__(self) -> None:
+        self.runtime_effort: ReasoningEffortSetting | None = None
+
     def resolve_model(self, tier: str) -> str:
         return f"fake-{tier}"
 
@@ -139,6 +147,35 @@ class _FakeRouter:
             api_format="openai_responses",
             source="catalog",
         )
+
+    def get_reasoning_effort_status(
+        self,
+        model: str | None = None,
+    ) -> ReasoningEffortStatus:
+        return ReasoningEffortStatus(
+            model=model or "fake-capable",
+            effective=self.runtime_effort or ReasoningEffortSetting.MEDIUM,
+            source="runtime" if self.runtime_effort is not None else "model",
+            supported=(ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH),
+            default=ReasoningEffort.MEDIUM,
+        )
+
+    def set_reasoning_effort(
+        self,
+        value: str,
+        *,
+        model: str | None = None,
+    ) -> ReasoningEffortStatus:
+        self.runtime_effort = ReasoningEffortSetting(value)
+        return self.get_reasoning_effort_status(model)
+
+    def reset_reasoning_effort(
+        self,
+        *,
+        model: str | None = None,
+    ) -> ReasoningEffortStatus:
+        self.runtime_effort = None
+        return self.get_reasoning_effort_status(model)
 
 
 class _FakeEngine:
@@ -1264,6 +1301,38 @@ def test_bridge_status_payload_exposes_authoritative_product_identity() -> None:
     assert payload["workspace_root"]
     assert payload["mode"] == "default"
     assert payload["permission_mode"] == "moderate"
+    assert payload["reasoning_effort"] == {
+        "model": "fake-capable",
+        "effective": "medium",
+        "source": "model",
+        "supported": ["low", "medium", "high"],
+        "default": "medium",
+        "warning": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_bridge_effort_slash_emits_refreshed_authoritative_status() -> None:
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "effort-1",
+            "type": ClientEventType.SUBMIT,
+            "payload": {"text": "/effort high"},
+        }
+    )
+
+    records = _records(writer)
+    status = [
+        record["payload"]
+        for record in records
+        if record["type"] == ServerEventType.STATUS
+    ][-1]
+    assert status["reasoning_effort"]["effective"] == "high"
+    assert status["reasoning_effort"]["source"] == "runtime"
 
 
 def test_bridge_status_payload_keeps_model_when_runtime_identity_fails() -> None:
