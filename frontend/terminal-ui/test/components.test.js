@@ -612,6 +612,68 @@ test("semantic event messages render as structured cards instead of JSON fallbac
   assert(rendered.every((item) => visibleWidth(item) <= 88));
 });
 
+test("subagent activity card is compact by default and expands into task details", () => {
+  const activity = {
+    kind: "subagent_activity",
+    id: "subagent-7",
+    taskId: "task-explore",
+    agentName: "Explore",
+    description: "探索项目结构与模块实现",
+    status: "completed",
+    latestMessage: "探索完成",
+    tokens: 2048,
+    cost: 0.0456,
+    durationMs: 3250,
+    startedAtMs: 100000,
+    updatedAtMs: 103250,
+    events: [
+      { status: "started", message: "子 Agent 已开始执行。", timestampMs: 100000 },
+      { status: "completed", message: "探索完成", timestampMs: 103250 },
+    ],
+  };
+
+  const collapsed = renderComponent(Message({ message: activity }), {
+    width: 72,
+    state: { folds: {} },
+  });
+  const collapsedPlain = stripAnsi(collapsed.join("\n"));
+  assert(collapsedPlain.includes("子智能体"));
+  assert(collapsedPlain.includes("▸ 已完成 · Explore · 探索项目结构与模块实现"));
+  assert(!collapsedPlain.includes("任务 ID"));
+  assert(collapsed.join("\n").includes(ANSI.green));
+
+  const expanded = renderComponent(Message({ message: activity }), {
+    width: 72,
+    state: { folds: { "subagent:subagent-7": { expanded: true } } },
+  });
+  const expandedPlain = stripAnsi(expanded.join("\n"));
+  assert(expandedPlain.includes("▾ 已完成 · Explore"));
+  assert(expandedPlain.includes("任务 ID · task-explore"));
+  assert(expandedPlain.includes("资源 · 2,048 tokens · $0.0456 · 3.3s"));
+  assert(expandedPlain.includes("时间 ·"));
+  assert(expandedPlain.includes("started · 子 Agent 已开始执行。"));
+  assert(expandedPlain.includes("completed · 探索完成"));
+  assert(expanded.every((item) => visibleWidth(item) <= 72));
+});
+
+test("subagent activity status colors distinguish running failure and cancellation", () => {
+  const base = {
+    kind: "subagent_activity",
+    id: "subagent-status",
+    taskId: "task-status",
+    agentName: "reviewer",
+    description: "检查实现",
+    events: [],
+  };
+  const running = renderComponent(Message({ message: { ...base, status: "started" } }), { width: 60, state: { folds: {} } }).join("\n");
+  const failed = renderComponent(Message({ message: { ...base, status: "failed" } }), { width: 60, state: { folds: {} } }).join("\n");
+  const cancelled = renderComponent(Message({ message: { ...base, status: "cancelled" } }), { width: 60, state: { folds: {} } }).join("\n");
+
+  assert(running.includes(ANSI.cyan));
+  assert(failed.includes(ANSI.red));
+  assert(cancelled.includes(ANSI.yellow));
+});
+
 test("task panel component structures task sections like a dedicated UI surface", () => {
   const content = [
     "\x1b[1m任务面板\x1b[0m",

@@ -3014,7 +3014,12 @@ class TestSubagentVisualization:
             coder,
             "execute",
             new_callable=AsyncMock,
-            return_value=AgentResult(status="completed", response="检查完成"),
+            return_value=AgentResult(
+                status="completed",
+                response="检查完成",
+                total_tokens=256,
+                total_cost_usd=0.0123,
+            ),
         ):
             result = await engine._execute_tool(ToolCall(
                 id="delegate-1",
@@ -3033,6 +3038,11 @@ class TestSubagentVisualization:
         assert refreshed.status.value == "completed"
         subagent_events = [data for event, data in events if event == "subagent_event"]
         assert [event["status"] for event in subagent_events] == ["started", "completed"]
+        assert all("检查实现是否完整" in str(event["description"]) for event in subagent_events)
+        assert all("给出明确结论" in str(event["description"]) for event in subagent_events)
+        assert subagent_events[-1]["tokens"] == 256
+        assert subagent_events[-1]["cost"] == 0.0123
+        assert all(float(event["timestamp"]) > 0 for event in subagent_events)
         assert any(event == "task_snapshot" for event, _ in events)
 
     @pytest.mark.asyncio

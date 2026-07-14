@@ -49,6 +49,100 @@ function interactionRecord(requestId, question = "请选择方案") {
   };
 }
 
+function subagentRecord({
+  taskId = "task-explore",
+  status = "started",
+  timestamp = 100,
+  message = "子 Agent 已开始执行。",
+  description = "探索项目结构与模块实现",
+  tokens = 0,
+  cost = 0,
+} = {}) {
+  return {
+    type: "ui/message",
+    payload: {
+      type: "subagent_event",
+      message_id: `msg-${taskId}-${status}-${timestamp}`,
+      task_id: taskId,
+      agent_name: "Explore",
+      status,
+      description,
+      message,
+      tokens,
+      cost,
+      timestamp,
+    },
+  };
+}
+
+test("subagent lifecycle events aggregate into one task activity", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, subagentRecord());
+  reduceServerEvent(state, subagentRecord({
+    status: "completed",
+    timestamp: 103.25,
+    message: "探索完成",
+    tokens: 2048,
+    cost: 0.0456,
+  }));
+
+  const activities = state.messages.filter((item) => item.kind === "subagent_activity");
+  assert.equal(activities.length, 1);
+  assert.equal(activities[0].taskId, "task-explore");
+  assert.equal(activities[0].agentName, "Explore");
+  assert.equal(activities[0].description, "探索项目结构与模块实现");
+  assert.equal(activities[0].status, "completed");
+  assert.equal(activities[0].latestMessage, "探索完成");
+  assert.equal(activities[0].tokens, 2048);
+  assert.equal(activities[0].cost, 0.0456);
+  assert.equal(activities[0].durationMs, 3250);
+  assert.equal(activities[0].events.length, 2);
+});
+
+test("subagent reused task id starts a new card only after the prior terminal event", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, subagentRecord());
+  reduceServerEvent(state, subagentRecord({ status: "completed", timestamp: 101 }));
+  reduceServerEvent(state, subagentRecord({ status: "started", timestamp: 200, message: "重新执行" }));
+
+  const activities = state.messages.filter((item) => item.kind === "subagent_activity");
+  assert.equal(activities.length, 2);
+  assert.equal(activities[0].status, "completed");
+  assert.equal(activities[1].status, "started");
+  assert.equal(activities[1].events.length, 1);
+});
+
+test("subagent activity ignores a replayed typed UI message", () => {
+  const state = createInitialState();
+  const event = subagentRecord();
+
+  reduceServerEvent(state, event);
+  reduceServerEvent(state, event);
+
+  const activities = state.messages.filter((item) => item.kind === "subagent_activity");
+  assert.equal(activities.length, 1);
+  assert.equal(activities[0].events.length, 1);
+});
+
+test("subagent activity bounds its event history and registers a fold entry", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, subagentRecord());
+  for (let index = 1; index <= 25; index += 1) {
+    reduceServerEvent(state, subagentRecord({
+      status: "running",
+      timestamp: 100 + index,
+      message: `进度 ${index}`,
+    }));
+  }
+
+  const activity = state.messages.find((item) => item.kind === "subagent_activity");
+  assert.equal(activity.events.length, 20);
+  assert.equal(activity.events[0].message, "进度 6");
+  const folds = getFoldEntries(state);
+  assert(folds.some((item) => item.key === `subagent:${activity.id}`));
+});
+
 test("welcome becomes ready without creating a timeline message", () => {
   const state = createInitialState();
   assert.deepEqual(state.welcome, { phase: "booting", dismissed: false });

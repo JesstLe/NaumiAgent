@@ -245,7 +245,11 @@ class SubagentEventMessage(UIMessage):
     agent_name: str = ""
     task_id: str = ""
     status: str = ""  # "completed" | "error" | "failed" | ...
+    description: str = ""
     message: str = ""
+    tokens: int = 0
+    cost: float = 0.0
+    timestamp: float = 0.0
 
     def summary(self) -> str:
         return f"[subagent] {self.agent_name} {self.status}"

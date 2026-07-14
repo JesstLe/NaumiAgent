@@ -1,4 +1,4 @@
-import { looksLikeDiff } from "./ansi.js";
+import { looksLikeDiff, sanitizeTerminalText } from "./ansi.js";
 import {
   INPUT_KEYS,
   backspaceInput,
@@ -19,6 +19,7 @@ const MAX_RUN_ACTIVITY_PERF_PHASES = 5;
 const MAX_RUN_ACTIVITY_TOOLS = 100;
 const MAX_RUN_ACTIVITY_PERMISSION_IDS = 100;
 const MAX_RUN_ACTIVITY_PHASE_LABEL_CHARS = 160;
+const MAX_SUBAGENT_ACTIVITY_EVENTS = 20;
 const RUNTIME_INSPECTOR_TABS = Object.freeze(["plan", "tools", "context", "changes", "tests"]);
 const AGENT_CONTROL_TABS = Object.freeze(["agents", "executions", "team"]);
 
@@ -1273,6 +1274,85 @@ function updateRunActivityPermission(state, requestId) {
   clearRenderCache(state.renderCache);
 }
 
+function handleSubagentEvent(state, message) {
+  const sourceMessageId = boundedText(message.message_id, 200).trim();
+  if (sourceMessageId && state.messages.some(
+    (item) => item.kind === "subagent_activity" && item.sourceMessageIds?.includes(sourceMessageId),
+  )) return;
+  const status = boundedText(sanitizeTerminalText(message.status), 80).trim().toLowerCase() || "event";
+  const taskId = boundedText(sanitizeTerminalText(message.task_id), 200).trim();
+  const incomingAgentName = boundedText(sanitizeTerminalText(message.agent_name), 200).trim();
+  const description = boundedText(sanitizeTerminalText(message.description), 4000).trim();
+  const latestMessage = boundedText(sanitizeTerminalText(message.message), 2000).trim();
+  const aggregationKey = taskId || `agent:${incomingAgentName || "未匹配"}:${description.slice(0, 200)}`;
+  const matching = [...state.messages].reverse().find(
+    (item) => item.kind === "subagent_activity" && item.aggregationKey === aggregationKey,
+  );
+  const agentName = incomingAgentName || matching?.agentName || "未匹配";
+  const startsNewRun = status === "started" && matching && isTerminalSubagentStatus(matching.status);
+  let activity = startsNewRun ? null : matching;
+  const timestampMs = normalizeSubagentTimestamp(message.timestamp);
+
+  if (!activity) {
+    activity = {
+      kind: "subagent_activity",
+      id: nextMessageId(state, "subagent"),
+      aggregationKey,
+      taskId,
+      agentName,
+      description,
+      status,
+      latestMessage,
+      tokens: normalizeNonNegativeNumber(message.tokens, true),
+      cost: normalizeNonNegativeNumber(message.cost, false),
+      startedAtMs: timestampMs,
+      updatedAtMs: timestampMs,
+      durationMs: 0,
+      events: [],
+      sourceMessageIds: [],
+    };
+    state.messages.push(activity);
+  }
+
+  activity.taskId = taskId || activity.taskId;
+  activity.agentName = incomingAgentName || activity.agentName;
+  activity.description = description || activity.description;
+  activity.status = status;
+  activity.latestMessage = latestMessage || activity.latestMessage;
+  activity.tokens = normalizeNonNegativeNumber(message.tokens, true) || activity.tokens || 0;
+  activity.cost = normalizeNonNegativeNumber(message.cost, false) || activity.cost || 0;
+  activity.startedAtMs = Number(activity.startedAtMs) || timestampMs;
+  activity.updatedAtMs = Math.max(Number(activity.updatedAtMs) || 0, timestampMs);
+  activity.durationMs = Math.max(0, activity.updatedAtMs - activity.startedAtMs);
+  activity.events = [
+    ...(activity.events || []),
+    { status, message: latestMessage, timestampMs },
+  ].slice(-MAX_SUBAGENT_ACTIVITY_EVENTS);
+  activity.sourceMessageIds = [
+    ...(activity.sourceMessageIds || []),
+    sourceMessageId,
+  ].filter(Boolean).slice(-MAX_SUBAGENT_ACTIVITY_EVENTS);
+  clearRenderCache(state.renderCache);
+}
+
+function normalizeSubagentTimestamp(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return Date.now();
+  return parsed >= 1_000_000_000_000 ? Math.round(parsed) : Math.round(parsed * 1000);
+}
+
+function normalizeNonNegativeNumber(value, integer) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return integer ? Math.round(parsed) : parsed;
+}
+
+function isTerminalSubagentStatus(status) {
+  return ["completed", "failed", "error", "cancelled", "canceled"].includes(
+    String(status || "").toLowerCase(),
+  );
+}
+
 export function handleUiMessage(state, message) {
   switch (message.type) {
     case "user":
@@ -1318,10 +1398,12 @@ export function handleUiMessage(state, message) {
         state.activeRuntimePhase = `${message.label}: ${message.duration_ms}ms`;
       }
       break;
+    case "subagent_event":
+      handleSubagentEvent(state, message);
+      break;
     case "recovery":
     case "context_compact":
     case "runtime_notification":
-    case "subagent_event":
     case "team_event":
     case "hook_trace":
     case "error":
@@ -2465,6 +2547,14 @@ export function getFoldEntries(state) {
       entries.push({
         key,
         label: `${message.name || "tool"} diff`,
+        expanded: isFoldExpanded(state.folds, key),
+      });
+    }
+    if (message.kind === "subagent_activity") {
+      const key = `subagent:${message.id}`;
+      entries.push({
+        key,
+        label: `子智能体 ${message.agentName || message.taskId || "activity"}`,
         expanded: isFoldExpanded(state.folds, key),
       });
     }

@@ -24,6 +24,7 @@ from naumi_agent.ui.messages import (
     ToolResultMessage,
     ToolUseMessage,
 )
+from naumi_agent.ui.protocol import ui_message_payload
 
 
 @pytest.fixture
@@ -371,19 +372,39 @@ class TestSubagentEvents:
             "agent_name": "security-analyst",
             "task_id": "task-123",
             "status": "completed",
+            "description": "扫描安全边界",
             "message": "扫描完成",
+            "tokens": 321,
+            "cost": 0.0123,
+            "timestamp": 1784000000.5,
         })
         assert isinstance(msg, SubagentEventMessage)
         assert msg.agent_name == "security-analyst"
         assert msg.status == "completed"
+        assert msg.description == "扫描安全边界"
+        assert msg.message == "扫描完成"
+        assert msg.tokens == 321
+        assert msg.cost == 0.0123
+        assert msg.timestamp == 1784000000.5
+        payload = ui_message_payload(msg)
+        assert payload["description"] == "扫描安全边界"
+        assert payload["tokens"] == 321
+        assert payload["cost"] == 0.0123
+        assert payload["timestamp"] == 1784000000.5
 
     def test_failed(self, adapter: EngineEventAdapter) -> None:
         msg = adapter.adapt("subagent_event", {
             "status": "error",
             "agent_name": "reviewer",
+            "tokens": "invalid",
+            "cost": "nan",
+            "timestamp": "inf",
         })
         assert isinstance(msg, SubagentEventMessage)
         assert msg.status == "error"
+        assert msg.tokens == 0
+        assert msg.cost == 0.0
+        assert msg.timestamp == 0.0
 
 
 class TestTeamEvents:

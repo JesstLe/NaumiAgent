@@ -20,6 +20,7 @@ import rich.markup
 from rich.text import Text
 from textual.widgets import Static
 
+from naumi_agent.clipboard import strip_ansi
 from naumi_agent.ui.messages.base import MessageType, UIMessage
 from naumi_agent.ui.messages.events import (
     AssistantStreamMessage,
@@ -207,23 +208,43 @@ def _render_subagent_event(
     status: StatusBarLike,
     todo: TodoBarLike,
 ) -> None:
+    status_label = {
+        "started": "进行中",
+        "running": "进行中",
+        "completed": "已完成",
+        "error": "失败",
+        "failed": "失败",
+        "cancelled": "已取消",
+    }.get(msg.status, msg.status or "状态更新")
     style = (
         "green" if msg.status == "completed"
         else "red" if msg.status in {"error", "failed"}
+        else "yellow" if msg.status == "cancelled"
         else "cyan"
     )
-    suffix = f" · {rich.markup.escape(msg.message)}" if msg.message else ""
+    output = Text()
+    output.append(f"  子智能体 {status_label}: ", style=style)
+    agent_name = strip_ansi(msg.agent_name) or "未匹配"
+    task_id = strip_ansi(msg.task_id) or "?"
+    output.append(f"{agent_name} / {task_id}", style=style)
+    if msg.description:
+        output.append(f"\n    任务 · {strip_ansi(msg.description)}", style="dim")
+    if msg.message:
+        output.append(f"\n    最新 · {strip_ansi(msg.message)}")
+    resources = []
+    if msg.tokens:
+        resources.append(f"{msg.tokens:,} tokens")
+    if msg.cost:
+        resources.append(f"${msg.cost:.4f}")
+    if resources:
+        output.append(f"\n    资源 · {' · '.join(resources)}", style="dim")
     chat.mount(
         Static(
-            Text.from_markup(
-                f"  [{style}]subagent {rich.markup.escape(msg.status)}: "
-                f"{rich.markup.escape(msg.agent_name)} / "
-                f"{rich.markup.escape(msg.task_id)}{suffix}[/{style}]"
-            ),
+            output,
             classes="tool-done",
         )
     )
-    status.status_text = f"subagent {msg.status}: {msg.agent_name}"
+    status.status_text = f"子智能体 {status_label}: {agent_name}"
 
 
 def _render_permission_bubble(
