@@ -292,40 +292,13 @@ class SubAgentManager:
 
 ### 3.2 并行子任务执行
 
-```python
-class ParallelSubAgentExecutor:
-    """并行执行多个子 Agent 任务"""
+当前实现由 `SubAgentManager.execute_parallel()` 统一调度，不再对整个列表直接
+`asyncio.gather()`。每个批次只创建有限 worker，多个同时批次共享
+`safety.max_parallel_agents`（默认 4，范围 1-32）的 Semaphore。任务按输入顺序领取，
+结果按输入顺序返回；普通异常只影响对应任务，父级取消会停止活跃 worker，尚未领取的任务
+不会启动。`execute_dag()` 的每一层也复用同一调度器。
 
-    def __init__(self, manager: SubAgentManager):
-        self.manager = manager
-
-    async def execute_level(
-        self,
-        steps: list[Step],
-        session: Session,
-        context: str = "",
-    ) -> list[StepResult]:
-        """并行执行同一层级的步骤"""
-        tasks = [
-            self.manager.delegate(step, session, context)
-            for step in steps
-        ]
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        processed = []
-        for step, result in zip(steps, results):
-            if isinstance(result, Exception):
-                processed.append(StepResult(
-                    step_id=step.id,
-                    status="error",
-                    content=f"Sub-agent failed: {type(result).__name__}: {result}",
-                ))
-            else:
-                processed.append(result)
-
-        return processed
-```
+运行 `/runtime subagent` 可以查看当前“活跃/上限”和排队数。
 
 ## 4. Agent 间通信
 
@@ -413,18 +386,15 @@ async def execute_map_reduce(
     self, task: str, subtasks: list[str], session: Session
 ) -> str:
     """并行分治 — 多个子任务并行，然后综合"""
-    # Map: 并行执行
-    results = await asyncio.gather(*[
-        self.manager.delegate(
-            Step(id=f"map_{i}", description=subtask, ...),
-            session,
-        )
+    # Map: 使用有界集群调度，不直接创建无界协程
+    results = await self.manager.execute_parallel([
+        SubTask(id=f"map_{i}", description=subtask)
         for i, subtask in enumerate(subtasks)
     ])
 
     # Reduce: 综合结果
     combined = "\n\n---\n\n".join(
-        f"### 子任务 {i+1}\n{r.content}"
+        f"### 子任务 {i+1}\n{r.response}"
         for i, r in enumerate(results)
     )
 

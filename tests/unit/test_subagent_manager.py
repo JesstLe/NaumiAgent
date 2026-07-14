@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult
-from naumi_agent.config.settings import AppConfig
+from naumi_agent.config.settings import AppConfig, SafetyConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.subagent_manager import (
     AgentState,
@@ -49,6 +49,162 @@ class TestSubAgentManager:
         assert len(agents) == 3
         names = {a["name"] for a in agents}
         assert names == {"coder", "researcher", "browser"}
+
+    @pytest.mark.asyncio
+    async def test_execute_parallel_applies_fifo_backpressure(self) -> None:
+        engine = AgentEngine(
+            AppConfig(safety=SafetyConfig(max_parallel_agents=2))
+        )
+        manager = SubAgentManager(engine)
+        active = 0
+        peak = 0
+        started: list[str] = []
+        release = asyncio.Event()
+        first_wave = asyncio.Event()
+
+        async def fake_delegate(task: SubTask, **kwargs: object) -> AgentResult:
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            started.append(task.id)
+            if len(started) == 2:
+                first_wave.set()
+            try:
+                await release.wait()
+                return AgentResult(status="completed", response=task.id)
+            finally:
+                active -= 1
+
+        manager.delegate = fake_delegate  # type: ignore[method-assign]
+        running = asyncio.create_task(
+            manager.execute_parallel(
+                [SubTask(str(index), f"task {index}") for index in range(6)]
+            )
+        )
+        try:
+            await asyncio.wait_for(first_wave.wait(), timeout=1)
+            await asyncio.sleep(0)
+            assert started == ["0", "1"]
+            assert peak == 2
+            assert manager.queued_parallel_agent_count == 4
+            release.set()
+            results = await asyncio.wait_for(running, timeout=1)
+        finally:
+            release.set()
+            if not running.done():
+                running.cancel()
+                await asyncio.gather(running, return_exceptions=True)
+
+        assert [result.response for result in results] == [
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+        ]
+        assert started == ["0", "1", "2", "3", "4", "5"]
+        assert peak == 2
+        assert manager.queued_parallel_agent_count == 0
+
+    @pytest.mark.asyncio
+    async def test_execute_parallel_isolates_failure_and_preserves_order(self) -> None:
+        engine = AgentEngine(
+            AppConfig(safety=SafetyConfig(max_parallel_agents=3))
+        )
+        manager = SubAgentManager(engine)
+
+        async def fake_delegate(task: SubTask, **kwargs: object) -> AgentResult:
+            if task.id == "1":
+                raise RuntimeError("boom")
+            await asyncio.sleep(0)
+            return AgentResult(status="completed", response=task.id)
+
+        manager.delegate = fake_delegate  # type: ignore[method-assign]
+        results = await manager.execute_parallel(
+            [SubTask(str(index), f"task {index}") for index in range(3)]
+        )
+
+        assert [result.status for result in results] == [
+            "completed",
+            "error",
+            "completed",
+        ]
+        assert "RuntimeError: boom" in (results[1].error or "")
+        assert results[2].response == "2"
+
+    @pytest.mark.asyncio
+    async def test_execute_parallel_parent_cancel_stops_workers_and_queue(self) -> None:
+        engine = AgentEngine(
+            AppConfig(safety=SafetyConfig(max_parallel_agents=2))
+        )
+        manager = SubAgentManager(engine)
+        started: list[str] = []
+        cancelled: list[str] = []
+        first_wave = asyncio.Event()
+
+        async def fake_delegate(task: SubTask, **kwargs: object) -> AgentResult:
+            started.append(task.id)
+            if len(started) == 2:
+                first_wave.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.append(task.id)
+                raise
+            return AgentResult(status="completed")
+
+        manager.delegate = fake_delegate  # type: ignore[method-assign]
+        running = asyncio.create_task(
+            manager.execute_parallel(
+                [SubTask(str(index), f"task {index}") for index in range(20)]
+            )
+        )
+        await asyncio.wait_for(first_wave.wait(), timeout=1)
+        running.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await running
+        assert started == ["0", "1"]
+        assert set(cancelled) == {"0", "1"}
+        assert manager.queued_parallel_agent_count == 0
+
+    @pytest.mark.asyncio
+    async def test_parallel_limit_is_shared_across_simultaneous_batches(self) -> None:
+        engine = AgentEngine(
+            AppConfig(safety=SafetyConfig(max_parallel_agents=2))
+        )
+        manager = SubAgentManager(engine)
+        active = 0
+        peak = 0
+
+        async def fake_delegate(task: SubTask, **kwargs: object) -> AgentResult:
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            try:
+                await asyncio.sleep(0.01)
+                return AgentResult(status="completed", response=task.id)
+            finally:
+                active -= 1
+
+        manager.delegate = fake_delegate  # type: ignore[method-assign]
+        left, right = await asyncio.gather(
+            manager.execute_parallel(
+                [SubTask(f"left-{index}", "left") for index in range(5)]
+            ),
+            manager.execute_parallel(
+                [SubTask(f"right-{index}", "right") for index in range(5)]
+            ),
+        )
+
+        assert peak == 2
+        assert [result.response for result in left] == [
+            f"left-{index}" for index in range(5)
+        ]
+        assert [result.response for result in right] == [
+            f"right-{index}" for index in range(5)
+        ]
 
     @pytest.mark.asyncio
     async def test_dynamic_spawn_starts_reaper_lazily(self, manager: SubAgentManager) -> None:

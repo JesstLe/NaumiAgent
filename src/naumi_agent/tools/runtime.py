@@ -393,7 +393,13 @@ class _RuntimeSnapshot:
 
     def subagent_section(self) -> str:
         lines = ["### Subagent"]
-        agents = self.engine.subagent_manager.list_agents()
+        manager = self.engine.subagent_manager
+        lines.append(
+            "- 集群并发："
+            f"{manager.active_execution_count}/{manager.max_parallel_agents} 活跃 · "
+            f"{manager.queued_parallel_agent_count} 排队"
+        )
+        agents = manager.list_agents()
         if agents:
             lines.append("- 生命周期：")
             for agent in agents[: self.limit]:
@@ -404,7 +410,7 @@ class _RuntimeSnapshot:
         else:
             lines.append("- 当前没有可用子 Agent。")
 
-        events = self.engine.subagent_manager.get_recent_events(limit=self.limit)
+        events = manager.get_recent_events(limit=self.limit)
         if events:
             lines.append("- 最近事件：")
             for event in events:

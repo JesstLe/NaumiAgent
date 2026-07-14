@@ -87,6 +87,7 @@ class TestRuntimeStatus:
         assert "等待用户确认范围" in output
         assert "接手 runtime_status 验证" in output
         assert "没有找到合适的子 Agent" in output
+        assert "集群并发：0/4 活跃 · 0 排队" in output
         assert "权限冒泡" in output
         assert "bash_run" in output
         assert "blocked todo" in output
