@@ -16,6 +16,8 @@ config.yaml
 .venv/
 venv/
 node_modules/
+frontend/web/test-results/
+frontend/web/playwright-report/
 *.db
 chroma/
 .coverage
