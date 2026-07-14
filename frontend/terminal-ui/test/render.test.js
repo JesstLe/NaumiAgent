@@ -377,6 +377,7 @@ test("screen renderer stays stable after resume replay then a new run starts", (
 
 test("screen renderer keeps oversized task panel header visible", () => {
   const state = createInitialState();
+  state.welcome = { phase: "dismissed", dismissed: true };
   state.status = {
     model: "openai/kimi-for-coding",
     workspace_root: "/Users/lv/Workspace/NaumiAgent",
