@@ -1643,6 +1643,9 @@ export function handleTodoPrepare(state, message) {
 
 export function handleSubmitText(state, text, send) {
   const commandText = String(text ?? "").trim();
+  if (["/q", "/quit", "/exit"].includes(commandText.toLowerCase())) {
+    return { type: "exit" };
+  }
   if (commandText === "/agents") {
     toggleAgentControlCenter(state, send, true);
     return;
