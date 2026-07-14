@@ -9,9 +9,9 @@
   ],
   "commands": {
     "allow": [
-      "plugin:secure-storage|get_token",
-      "plugin:secure-storage|set_token",
-      "plugin:secure-storage|remove_token"
+      "get_token",
+      "set_token",
+      "remove_token"
     ]
   }
 }
