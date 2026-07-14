@@ -663,6 +663,7 @@ human_judgment_required 需要产品或风险判断
 ### `harness_runs`
 
 - `id`
+- `workspace_root`
 - `session_id`
 - `task_id`
 - `issue_id`
@@ -674,6 +675,8 @@ human_judgment_required 需要产品或风险判断
 - `tree_fingerprint_after`
 - `started_at`
 - `completed_at`
+- `contract_json`（写入前脱敏的规范化完成契约）
+- `receipt_json`（规范化完成回执，用于幂等恢复）
 
 ### `harness_contract_criteria`
 
@@ -683,6 +686,7 @@ human_judgment_required 需要产品或风险判断
 - `source_kind`
 - `source_ref`
 - `status`
+- `evidence_ids_json`
 
 ### `harness_checks`
 
@@ -693,9 +697,11 @@ human_judgment_required 需要产品或风险判断
 - `cwd`
 - `status`
 - `exit_code`
+- `duration_ms`
 - `started_at`
 - `completed_at`
 - `tree_fingerprint`
+- `profile_digest`
 - `artifact_path`
 
 ### `harness_evidence`
@@ -708,6 +714,7 @@ human_judgment_required 需要产品或风险判断
 - `summary_json`
 - `producer`
 - `created_at`
+- `criterion_ids_json`
 
 ### `harness_eval_results`
 
@@ -732,7 +739,10 @@ human_judgment_required 需要产品或风险判断
 - `status`
 - `workbench_proposal_id`
 
-迁移必须幂等；删除 Session 时使用现有 session deletion reconciliation 清理或归档关联 Harness 派生记录。
+H4 使用独立的用户状态库 `harness.db`；原始大文件仍由 DebugTrace、ChatRun 或 artifact
+目录保存，数据库只持有引用、摘要和 digest。迁移必须幂等；删除 Session 时使用现有
+session deletion reconciliation 清理或归档关联 Harness 派生记录。H5/H6 表在对应阶段
+启用时再创建，H4 迁移不预建空表。
 
 ---
 
