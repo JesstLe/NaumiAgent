@@ -1752,10 +1752,9 @@ test("slash completion merges backend and local commands", () => {
 });
 
 test("harness command is available before backend metadata arrives", () => {
-  assert.equal(
-    DEFAULT_SLASH_COMMAND_CANDIDATES.some((item) => item.command === "/harness"),
-    true,
-  );
+  const harness = DEFAULT_SLASH_COMMAND_CANDIDATES.find((item) => item.command === "/harness");
+  assert.equal(Boolean(harness), true);
+  assert.equal(harness.description.includes("知识"), true);
 });
 
 test("slash completion filters by partial command", () => {

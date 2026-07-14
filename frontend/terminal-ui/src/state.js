@@ -35,7 +35,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/permissions", description: "显示待确认权限面板" },
   { command: "/agents", description: "打开 Agent 控制中心" },
   { command: "/doctor", description: "运行环境诊断" },
-  { command: "/harness", description: "Harness Profile 状态、诊断与信任" },
+  { command: "/harness", description: "Harness Profile 状态、诊断、知识与信任" },
   { command: "/mode", description: "切换 runtime 模式 default / plan / bypass" },
   { command: "/reasoning", description: "显示/切换思考文本" },
   { command: "/effort", description: "查看或切换模型思考强度" },

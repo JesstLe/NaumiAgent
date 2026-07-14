@@ -12,6 +12,8 @@ from naumi_agent.orchestrator.engine import AgentEngine
 
 PROFILE = """\
 schema_version: 1
+knowledge:
+  entrypoints: [AGENTS.md]
 checks:
   - id: unit
     label: 单元测试
@@ -29,6 +31,7 @@ def _engine(tmp_path: Path) -> AgentEngine:
     profile = workspace / ".naumi" / "harness.yaml"
     profile.parent.mkdir(parents=True)
     profile.write_text(PROFILE, encoding="utf-8")
+    (workspace / "AGENTS.md").write_text("HARNESS_SURFACE_RULE", encoding="utf-8")
     config = AppConfig(
         workspace_root=str(workspace),
         memory=MemoryConfig(
@@ -50,8 +53,11 @@ async def test_engine_registers_only_read_only_harness_tools(tmp_path: Path) -> 
     try:
         status = engine.tool_registry.get("harness_status")
         doctor = engine.tool_registry.get("harness_doctor")
+        knowledge = engine.tool_registry.get("harness_read_knowledge")
         assert status is not None and status.metadata.read_only
         assert doctor is not None and doctor.metadata.read_only
+        assert knowledge is not None and knowledge.metadata.read_only
+        assert knowledge.metadata.concurrency_safe
         assert engine.tool_registry.get("harness_trust") is None
         assert engine.tool_registry.get("harness_untrust") is None
     finally:
@@ -71,6 +77,9 @@ async def test_harness_slash_flow_previews_confirms_and_revokes_trust(
             await execute_slash_command(engine, "/harness trust --confirm")
         )
         ready = _plain(await execute_slash_command(engine, "/harness status"))
+        knowledge = _plain(
+            await execute_slash_command(engine, "/harness knowledge AGENTS.md")
+        )
         revoked = _plain(await execute_slash_command(engine, "/harness untrust"))
 
         assert "配置未受信任" in initial
@@ -79,6 +88,8 @@ async def test_harness_slash_flow_previews_confirms_and_revokes_trust(
         assert not still_untrusted.trusted
         assert "已信任" in confirmed
         assert "Harness 已就绪" in ready
+        assert "HARNESS_SURFACE_RULE" in knowledge
+        assert "AGENTS.md" in knowledge
         assert "已撤销" in revoked
         assert not (await engine.harness_service.status()).trusted
     finally:
@@ -95,12 +106,23 @@ async def test_harness_slash_doctor_and_invalid_usage_are_actionable(
         invalid = _plain(await execute_slash_command(engine, "/harness trust now"))
         unknown = _plain(await execute_slash_command(engine, "/harness unknown"))
         malformed = _plain(await execute_slash_command(engine, "/harness 'broken"))
+        missing_knowledge = _plain(
+            await execute_slash_command(engine, "/harness knowledge")
+        )
+        invalid_knowledge = _plain(
+            await execute_slash_command(
+                engine,
+                "/harness knowledge AGENTS.md --unknown",
+            )
+        )
 
         assert "Harness 诊断" in doctor
         assert "不会执行" in doctor
         assert "用法" in invalid
         assert "用法" in unknown
         assert "用法" in malformed
+        assert "用法" in missing_knowledge
+        assert "用法" in invalid_knowledge
         assert "No closing quotation" not in malformed
     finally:
         await engine.shutdown()

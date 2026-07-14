@@ -64,6 +64,7 @@ class TestSlashCommandCompleter:
         assert "/harness" in _complete("/")
         descriptions = {cmd: desc for cmd, desc, _ in COMMANDS}
         assert "profile" in descriptions["/harness"].lower()
+        assert "知识" in descriptions["/harness"]
 
     def test_reasoning_effort_command_registered(self):
         assert "/effort" in _complete("/")

@@ -2129,9 +2129,40 @@ class AgentEngine:
                 budget_info=self.get_budget_info(),
             )
         )
+        extra_sections: list[str] = []
+        knowledge_result = None
+        try:
+            current_task = self._latest_user_task()
+            if current_task:
+                model = self._router.resolve_model(ModelTier.CAPABLE)
+                model_window = self._router.get_context_window(model)
+                knowledge_result = await self.harness_service.knowledge_context(
+                    current_task,
+                    model_window=model_window,
+                )
+                if knowledge_result.bundle is not None:
+                    extra_sections.append(knowledge_result.bundle.rendered)
+        except Exception as exc:
+            logger.warning("Harness knowledge context unavailable: %s", exc)
+        if on_event is not None and knowledge_result is not None:
+            await on_event("harness_knowledge", {
+                "status": knowledge_result.code.value,
+                "cache_hit": knowledge_result.cache_hit,
+                "elapsed_ms": knowledge_result.elapsed_ms,
+                "tokens": (
+                    knowledge_result.bundle.total_tokens
+                    if knowledge_result.bundle is not None
+                    else 0
+                ),
+                "sources": (
+                    list(knowledge_result.bundle.source_paths)
+                    if knowledge_result.bundle is not None
+                    else []
+                ),
+            })
         end_ctx = await self._fire_hook(HookContext(
             point=HookPoint.CONTEXT_ASSEMBLE_END,
-            data={"snapshot": snapshot, "extra_sections": []},
+            data={"snapshot": snapshot, "extra_sections": extra_sections},
             session_id=session_id,
         ), on_event)
         snapshot = str(end_ctx.data.get("snapshot", snapshot))
@@ -2144,6 +2175,16 @@ class AgentEngine:
                 [str(section) for section in extra_sections if str(section).strip()],
             )
         self._messages.append({"role": "system", "content": snapshot})
+
+    def _latest_user_task(self) -> str:
+        """Return the latest user text without consulting persistent history."""
+        for message in reversed(self._messages):
+            if message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+        return ""
 
     async def _fire_user_prompt_submit(
         self,
@@ -3671,6 +3712,20 @@ class AgentEngine:
             duration = int((time.time() - start) * 1000)
 
             logger.info("Tool %s executed in %dms", tc.name, duration)
+            if not tool.metadata.read_only:
+                try:
+                    await self.harness_service.invalidate_knowledge_cache()
+                    if on_event is not None:
+                        await on_event("harness_knowledge_invalidated", {
+                            "source": tc.name,
+                            "reason": "mutating_tool_succeeded",
+                        })
+                except Exception as exc:
+                    logger.warning(
+                        "Harness knowledge invalidation failed after %s: %s",
+                        tc.name,
+                        exc,
+                    )
             await self._emit_task_snapshot(on_event, source=tc.name)
             return ToolResult(
                 call_id=tc.id,

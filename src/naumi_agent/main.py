@@ -2601,7 +2601,10 @@ def _print_help() -> None:
         ("/reasoning [on|off|toggle]", "显示或隐藏模型思考文本"),
         ("/effort [auto|none|minimal|low|medium|high|xhigh|max|reset]", "查看或切换模型思考强度"),
         ("/doctor", "运行环境诊断"),
-        ("/harness [status|doctor|trust|untrust]", "管理仓库 Harness Profile"),
+        (
+            "/harness [status|doctor|knowledge|trust|untrust]",
+            "管理仓库 Harness Profile 与只读知识",
+        ),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
         ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),
@@ -2709,12 +2712,14 @@ async def _run_harness(engine: Any, arg: str) -> None:
     from naumi_agent.harness.service import (
         HarnessStatusCode,
         render_harness_doctor,
+        render_harness_knowledge,
         render_harness_status,
     )
     from naumi_agent.harness.trust import HarnessTrustStoreError
 
     usage = (
-        "用法：/harness [status|doctor|trust|untrust]\n"
+        "用法：/harness [status|doctor|knowledge|trust|untrust]\n"
+        "      /harness knowledge <查询|相对路径> [--max-tokens 1..4000]\n"
         "      /harness trust --confirm"
     )
     try:
@@ -2733,6 +2738,47 @@ async def _run_harness(engine: Any, arg: str) -> None:
         return
     if subcommand == "doctor" and len(parts) == 1:
         console.print(Markdown(render_harness_doctor(await service.doctor())))
+        return
+    if subcommand == "knowledge":
+        knowledge_args = parts[1:]
+        max_tokens = 2_000
+        if "--max-tokens" in knowledge_args:
+            option_index = knowledge_args.index("--max-tokens")
+            if (
+                option_index != len(knowledge_args) - 2
+                or knowledge_args.count("--max-tokens") != 1
+            ):
+                console.print(f"[yellow]{usage}[/yellow]")
+                return
+            try:
+                max_tokens = int(knowledge_args[-1])
+            except ValueError:
+                console.print(f"[yellow]{usage}[/yellow]")
+                return
+            knowledge_args = knowledge_args[:option_index]
+        if (
+            not knowledge_args
+            or any(item.startswith("--") for item in knowledge_args)
+            or not 1 <= max_tokens <= 4_000
+        ):
+            console.print(f"[yellow]{usage}[/yellow]")
+            return
+        target = " ".join(knowledge_args).strip()
+        try:
+            if _looks_like_harness_knowledge_path(target, knowledge_args):
+                result = await service.read_knowledge(
+                    path=target,
+                    max_tokens=max_tokens,
+                )
+            else:
+                result = await service.read_knowledge(
+                    query=target,
+                    max_tokens=max_tokens,
+                )
+        except ValueError as exc:
+            console.print(f"[yellow]Harness 知识参数无效：{exc}[/yellow]")
+            return
+        console.print(Markdown(render_harness_knowledge(result)))
         return
     if subcommand == "trust" and len(parts) == 1:
         report = await service.doctor()
@@ -2785,6 +2831,30 @@ async def _run_harness(engine: Any, arg: str) -> None:
             console.print("[yellow]当前工作区没有 Harness 信任记录。[/yellow]")
         return
     console.print(f"[yellow]{usage}[/yellow]")
+
+
+def _looks_like_harness_knowledge_path(
+    target: str,
+    parts: list[str],
+) -> bool:
+    if len(parts) != 1:
+        return False
+    if "/" in target or "\\" in target or target.startswith("."):
+        return True
+    return Path(target).suffix.lower() in {
+        ".js",
+        ".json",
+        ".md",
+        ".mdx",
+        ".py",
+        ".rst",
+        ".swift",
+        ".toml",
+        ".ts",
+        ".tsx",
+        ".yaml",
+        ".yml",
+    }
 
 
 def _parse_scale_arg(arg: str) -> tuple[str, int]:
