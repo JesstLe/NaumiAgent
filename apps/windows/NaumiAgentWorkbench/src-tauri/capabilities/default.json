@@ -11,7 +11,12 @@
     "allow": [
       "get_token",
       "set_token",
-      "remove_token"
+      "remove_token",
+      "get_setting",
+      "set_setting",
+      "get_daemon_launch_config",
+      "set_daemon_launch_config",
+      "write_app_log"
     ]
   }
 }
