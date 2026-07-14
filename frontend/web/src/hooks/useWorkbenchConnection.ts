@@ -4,6 +4,7 @@ import { WorkbenchConnectionCoordinator } from '@/api/WorkbenchConnectionCoordin
 import type { WorkbenchApiClient } from '@/api/WorkbenchApiClient'
 import type { ConnectionCoordinatorOptions, ConnectionStatus } from '@/api/WorkbenchConnectionCoordinator'
 import type { WorkbenchSnapshot } from '@/api/types'
+import { useSessionStore } from '@/stores/sessionStore'
 
 interface UseWorkbenchConnectionResult {
   client: WorkbenchApiClient | null
@@ -74,6 +75,32 @@ function ensureCoordinator(tokenProvider: () => Promise<string | null>, options?
   coordinator.subscribeToStatus((next) => {
     sharedState = { ...sharedState, status: next }
     notifyListeners()
+  })
+  // Subscribe to events so permission requests can be surfaced in the UI.
+  coordinator.subscribeToEvents((event) => {
+    if (event.type === 'permission_bubble') {
+      const data = event.payload as {
+        call_id?: string
+        agent_name?: string
+        tool_name?: string
+        reason?: string
+        risk_level?: string
+        status?: string
+      }
+      const callId = data?.call_id
+      if (!callId) return
+      if (data.status === 'needs_confirmation') {
+        useSessionStore.getState().addPendingPermission({
+          call_id: callId,
+          agent_name: data.agent_name || 'Agent',
+          tool_name: data.tool_name || 'tool',
+          reason: data.reason || '',
+          risk_level: data.risk_level,
+        })
+      } else {
+        useSessionStore.getState().removePendingPermission(callId)
+      }
+    }
   })
   return coordinator
 }

@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 import type { Session, MessageResponse, Issue, Mission, Worktree, AgentProfileEnriched, WorkbenchSnapshot, Event } from '@/api/types'
 
+export interface PendingPermission {
+  call_id: string
+  agent_name: string
+  tool_name: string
+  reason: string
+  risk_level?: string
+}
+
 export interface SessionState {
   sessions: Session[]
   currentSessionId: string | null
@@ -11,6 +19,7 @@ export interface SessionState {
   worktrees: Worktree[]
   agents: AgentProfileEnriched[]
   events: Event[]
+  pendingPermissions: PendingPermission[]
   isLoading: boolean
   error: string | null
 
@@ -24,6 +33,8 @@ export interface SessionState {
   setWorktrees: (worktrees: Worktree[]) => void
   setAgents: (agents: AgentProfileEnriched[]) => void
   setEvents: (events: Event[]) => void
+  addPendingPermission: (permission: PendingPermission) => void
+  removePendingPermission: (callId: string) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
 }
@@ -38,6 +49,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   worktrees: [],
   agents: [],
   events: [],
+  pendingPermissions: [],
   isLoading: false,
   error: null,
 
@@ -51,6 +63,17 @@ export const useSessionStore = create<SessionState>((set) => ({
   setWorktrees: (worktrees) => set({ worktrees }),
   setAgents: (agents) => set({ agents }),
   setEvents: (events) => set({ events }),
+  addPendingPermission: (permission) =>
+    set((state) => ({
+      pendingPermissions: [
+        ...state.pendingPermissions.filter((p) => p.call_id !== permission.call_id),
+        permission,
+      ],
+    })),
+  removePendingPermission: (callId) =>
+    set((state) => ({
+      pendingPermissions: state.pendingPermissions.filter((p) => p.call_id !== callId),
+    })),
   setLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
 }))

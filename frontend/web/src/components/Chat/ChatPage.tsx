@@ -47,6 +47,23 @@ export function ChatPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>('default')
   const [sources, setSources] = useState<ChatSource[]>([])
+  const pendingPermissions = useSessionStore((state) => state.pendingPermissions)
+  const removePendingPermission = useSessionStore((state) => state.removePendingPermission)
+  const [resolvingId, setResolvingId] = useState<string | null>(null)
+
+  const handleResolvePermission = async (callId: string, decision: 'allow' | 'deny' | 'bypass') => {
+    if (!client || !currentSessionId || resolvingId) return
+    setResolvingId(callId)
+    try {
+      await client.resolvePermission(currentSessionId, callId, { decision })
+      removePendingPermission(callId)
+    } catch (error) {
+      setError(isApiException(error) ? error.message : String(error))
+    } finally {
+      setResolvingId(null)
+    }
+  }
+
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -258,6 +275,52 @@ export function ChatPage() {
       </div>
 
       <div className="p-4 border-t border-neutral-200 bg-white">
+        {pendingPermissions.length > 0 && (
+          <div className="mb-3 space-y-2">
+            {pendingPermissions.map((permission) => (
+              <div
+                key={permission.call_id}
+                className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm"
+              >
+                <div className="font-medium text-amber-900">
+                  {t('chat.permission')} · {permission.agent_name} / {permission.tool_name}
+                </div>
+                {permission.reason && (
+                  <div className="mt-1 text-amber-800">
+                    {t('chat.permissionReason')}: {permission.reason}
+                  </div>
+                )}
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleResolvePermission(permission.call_id, 'allow')}
+                    disabled={resolvingId === permission.call_id}
+                    className="rounded-md bg-success px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+                  >
+                    {t('chat.permissionAllow')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleResolvePermission(permission.call_id, 'deny')}
+                    disabled={resolvingId === permission.call_id}
+                    className="rounded-md border border-danger px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
+                  >
+                    {t('chat.permissionDeny')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleResolvePermission(permission.call_id, 'bypass')}
+                    disabled={resolvingId === permission.call_id}
+                    className="rounded-md border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                  >
+                    {t('chat.permissionBypass')}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="flex items-center gap-2 mb-2">
           <span className="text-xs text-neutral-500">{t('chat.thinking')}:</span>
           {(['default', 'plan', 'bypass'] as RuntimeMode[]).map((mode) => {
