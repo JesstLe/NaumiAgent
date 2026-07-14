@@ -2185,7 +2185,7 @@ requires-dist = [
     { name = "opentelemetry-api", specifier = ">=1.30" },
     { name = "opentelemetry-sdk", specifier = ">=1.30" },
     { name = "playwright", specifier = ">=1.50" },
-    { name = "prompt-toolkit", specifier = ">=3.0" },
+    { name = "prompt-toolkit", specifier = ">=3.0.52" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pydantic-settings", specifier = ">=2.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },

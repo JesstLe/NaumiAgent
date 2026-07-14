@@ -23,6 +23,52 @@ def _preset() -> dict[str, str]:
     }
 
 
+def test_choose_provider_routes_tty_selection_through_keyboard_component(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def choose(message, options, *, default, fallback):
+        captured.update(
+            message=message,
+            options=options,
+            default=default,
+            fallback=fallback,
+        )
+        return "openai"
+
+    monkeypatch.setattr(onboarding, "select_terminal_choice", choose)
+
+    assert onboarding._choose_provider() == "openai"
+    assert captured["message"] == "选择模型提供商"
+    assert captured["default"] == "kimi"
+    assert [option.value for option in captured["options"]] == [
+        "kimi",
+        "openai",
+        "anthropic",
+        "custom",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [("2", "openai"), ("anthropic", "anthropic")],
+)
+def test_choose_provider_fallback_accepts_number_or_name(
+    answer: str,
+    expected: str,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        onboarding,
+        "select_terminal_choice",
+        lambda _message, options, *, default, fallback: fallback(tuple(options), default),
+    )
+    monkeypatch.setattr(onboarding.Prompt, "ask", lambda *_args, **_kwargs: answer)
+
+    assert onboarding._choose_provider() == expected
+
+
 def test_build_config_never_serializes_model_api_key(tmp_path: Path) -> None:
     config = _build_config(
         provider="custom",
