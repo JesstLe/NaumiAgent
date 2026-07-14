@@ -109,7 +109,7 @@ app = typer.Typer(
 )
 naumiagent_app = typer.Typer(
     name="naumiagent",
-    help="Launch the new NaumiAgent terminal UI",
+    help="NaumiAgent 兼容命令入口",
     add_completion=False,
 )
 workbench_app = typer.Typer(
@@ -147,8 +147,7 @@ def _ensure_onboarding_ready(config: str) -> None:
 def _default_command(
     ctx: typer.Context,
     config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
-    classic: bool = typer.Option(False, "--classic", help="启动旧版命令行对话"),
-    legacy: bool = typer.Option(False, "--legacy", help="启动旧版 Textual TUI"),
+    tui: bool = typer.Option(False, "--tui", help="显式启动 Textual TUI fallback"),
     version: bool = typer.Option(False, "--version", "-v", help="显示版本"),
 ) -> None:
     """默认无子命令时启动新一代终端 UI."""
@@ -162,10 +161,7 @@ def _default_command(
         raise typer.Exit()
     if ctx.invoked_subcommand is None:
         _ensure_onboarding_ready(config)
-        if classic:
-            asyncio.run(_chat(config))
-            return
-        if legacy:
+        if tui:
             _launch_tui(config)
             return
         _exit_after_terminal_ui(config)
@@ -463,24 +459,28 @@ def doctor_command(
 @app.command()
 def chat(
     config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
-    classic: bool = typer.Option(False, "--classic", help="启动旧版命令行对话"),
     tui: bool = typer.Option(
         False,
         "--tui",
         "-t",
-        help="兼容入口：启动旧版 Textual TUI",
+        help="显式启动 Textual TUI fallback",
     ),
 ) -> None:
-    """启动以对话为中心的新一代终端 UI."""
+    """兼容入口：启动新一代终端 UI。"""
     _ensure_onboarding_ready(config)
-    if classic and tui:
-        raise typer.BadParameter("--classic 与 --tui 不能同时使用。")
     if tui:
         _launch_tui(config)
-    elif classic:
-        asyncio.run(_chat(config))
     else:
         _exit_after_terminal_ui(config)
+
+
+@app.command("tui")
+def textual_ui(
+    config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
+) -> None:
+    """显式启动 Textual TUI fallback。"""
+    _ensure_onboarding_ready(config)
+    _launch_tui(config)
 
 
 @app.command("ui")
@@ -489,12 +489,13 @@ def terminal_ui(
     legacy: bool = typer.Option(
         False,
         "--legacy",
-        help="启动旧版 Textual TUI，而不是新一代终端 UI",
+        help="弃用别名：显式启动 Textual TUI fallback",
     ),
 ) -> None:
-    """启动新一代终端 UI（legacy CLI/TUI 仍可通过 chat 使用）."""
+    """兼容入口：启动新一代终端 UI。"""
     _ensure_onboarding_ready(config)
     if legacy:
+        console.print("[yellow]“--legacy” 已弃用，请改用 “naumi tui”。[/yellow]")
         _launch_tui(config)
         return
     _exit_after_terminal_ui(config)
@@ -532,24 +533,24 @@ def _launch_interactive_ui(config_path: str) -> int:
 
 @naumiagent_app.callback(invoke_without_command=True)
 def naumiagent_entry(
-    ctx: typer.Context,
     tui: bool = typer.Option(
         False,
         "--tui",
-        help="Launch the new Node terminal UI",
+        help="显式启动 Textual TUI fallback",
     ),
     config: str = typer.Option(
         DEFAULT_CONFIG_PATH,
         "--config",
         "-c",
-        help="Configuration file path",
+        help="配置文件路径",
     ),
 ) -> None:
-    """Launch the new terminal UI through the short compatibility command."""
-    if not tui:
-        console.print(ctx.get_help())
+    """兼容入口：默认启动新 Terminal UI。"""
+    _ensure_onboarding_ready(config)
+    if tui:
+        _launch_tui(config)
         return
-    terminal_ui(config=config, legacy=False)
+    _exit_after_terminal_ui(config)
 
 
 def _launch_terminal_ui(config_path: str, *, cwd: Path | None = None) -> int:

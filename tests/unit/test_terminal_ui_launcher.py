@@ -298,7 +298,7 @@ def test_naumi_without_subcommand_launches_terminal_ui(
 ) -> None:
     calls: list[str] = []
     monkeypatch.setattr(
-        "naumi_agent.main._launch_terminal_ui",
+        "naumi_agent.main._launch_interactive_ui",
         lambda config_path: calls.append(config_path) or 0,
     )
     monkeypatch.setattr(
@@ -317,7 +317,7 @@ def test_chat_command_launches_terminal_ui_by_default(
 ) -> None:
     calls: list[str] = []
     monkeypatch.setattr(
-        "naumi_agent.main._launch_terminal_ui",
+        "naumi_agent.main._launch_interactive_ui",
         lambda config_path: calls.append(config_path) or 0,
     )
 
@@ -327,24 +327,42 @@ def test_chat_command_launches_terminal_ui_by_default(
     assert calls == ["custom.yaml"]
 
 
-def test_chat_classic_uses_prompt_toolkit_cli(
+def test_classic_prompt_toolkit_option_is_not_registered() -> None:
+    root_result = runner.invoke(naumi_app, ["--classic"])
+    chat_result = runner.invoke(naumi_app, ["chat", "--classic"])
+
+    assert root_result.exit_code != 0
+    assert chat_result.exit_code != 0
+    assert "No such option" in root_result.output
+    assert "No such option" in chat_result.output
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--tui", "--config", "root.yaml"],
+        ["chat", "--tui", "--config", "chat.yaml"],
+        ["tui", "--config", "tui.yaml"],
+    ],
+)
+def test_explicit_tui_entries_bypass_terminal_ui(
     monkeypatch: pytest.MonkeyPatch,
+    args: list[str],
 ) -> None:
-    calls: list[str] = []
-
-    async def fake_chat(config_path: str) -> None:
-        calls.append(config_path)
-
-    monkeypatch.setattr("naumi_agent.main._chat", fake_chat)
+    tui_calls: list[str] = []
     monkeypatch.setattr(
-        "naumi_agent.main._launch_terminal_ui",
-        lambda _config: pytest.fail("classic mode must not launch terminal UI"),
+        "naumi_agent.main._launch_tui",
+        lambda config: tui_calls.append(config),
+    )
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_interactive_ui",
+        lambda _config: pytest.fail("explicit TUI must bypass Node UI"),
     )
 
-    result = runner.invoke(naumi_app, ["chat", "--classic"])
+    result = runner.invoke(naumi_app, args)
 
     assert result.exit_code == 0
-    assert calls == [DEFAULT_CONFIG_PATH]
+    assert tui_calls == [args[-1]]
 
 
 def test_ui_command_launches_next_terminal_ui_by_default(
@@ -352,11 +370,14 @@ def test_ui_command_launches_next_terminal_ui_by_default(
 ) -> None:
     calls: list[str] = []
 
-    def fake_launch_terminal_ui(config_path: str) -> int:
+    def fake_launch_interactive_ui(config_path: str) -> int:
         calls.append(config_path)
         return 3
 
-    monkeypatch.setattr("naumi_agent.main._launch_terminal_ui", fake_launch_terminal_ui)
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_interactive_ui",
+        fake_launch_interactive_ui,
+    )
 
     result = runner.invoke(naumi_app, ["ui", "--config", "custom.yaml"])
 
@@ -374,7 +395,7 @@ def test_ui_command_legacy_flag_uses_old_textual_tui(
         lambda config_path: calls.append(config_path),
     )
     monkeypatch.setattr(
-        "naumi_agent.main._launch_terminal_ui",
+        "naumi_agent.main._launch_interactive_ui",
         lambda config_path: pytest.fail("legacy flag must not launch terminal-ui"),
     )
 
@@ -382,69 +403,34 @@ def test_ui_command_legacy_flag_uses_old_textual_tui(
 
     assert result.exit_code == 0
     assert calls == ["legacy.yaml"]
+    assert "--legacy" in result.output
+    assert "naumi tui" in result.output
 
 
-def test_ui_command_reports_legacy_fallback_when_next_ui_cannot_launch(
+def test_naumiagent_defaults_to_terminal_ui_and_tui_is_explicit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fake_launch_terminal_ui(config_path: str) -> int:
-        raise TerminalUiLaunchError("未找到 Node.js")
-
-    monkeypatch.setattr("naumi_agent.main._launch_terminal_ui", fake_launch_terminal_ui)
-
-    result = runner.invoke(naumi_app, ["ui"])
-
-    assert result.exit_code == 1
-    assert "未找到 Node.js" in result.output
-    assert "naumi ui --legacy" in result.output
-    assert "naumi chat --classic" in result.output
-
-
-def test_naumiagent_tui_launches_new_terminal_ui(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[str] = []
+    terminal_calls: list[str] = []
+    tui_calls: list[str] = []
     monkeypatch.setattr(
-        "naumi_agent.main._launch_terminal_ui",
-        lambda config_path: calls.append(config_path) or 0,
+        "naumi_agent.main._launch_interactive_ui",
+        lambda config: terminal_calls.append(config) or 0,
+    )
+    monkeypatch.setattr(
+        "naumi_agent.main._launch_tui",
+        lambda config: tui_calls.append(config),
     )
 
-    result = runner.invoke(naumiagent_app, ["--tui"])
-
-    assert result.exit_code == 0
-    assert calls == [DEFAULT_CONFIG_PATH]
-
-
-def test_naumiagent_tui_forwards_custom_config(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[str] = []
-    monkeypatch.setattr(
-        "naumi_agent.main._launch_terminal_ui",
-        lambda config_path: calls.append(config_path) or 0,
-    )
-
-    result = runner.invoke(
+    default_result = runner.invoke(naumiagent_app, [])
+    tui_result = runner.invoke(
         naumiagent_app,
         ["--tui", "--config", "custom.yaml"],
     )
 
-    assert result.exit_code == 0
-    assert calls == ["custom.yaml"]
-
-
-def test_naumiagent_without_tui_displays_help(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "naumi_agent.main._launch_terminal_ui",
-        lambda _config: pytest.fail("no arguments must not launch the UI"),
-    )
-
-    result = runner.invoke(naumiagent_app, [])
-
-    assert result.exit_code == 0
-    assert "--tui" in result.output
+    assert default_result.exit_code == 0
+    assert tui_result.exit_code == 0
+    assert terminal_calls == [DEFAULT_CONFIG_PATH]
+    assert tui_calls == ["custom.yaml"]
 
 
 def test_naumiagent_console_script_is_registered() -> None:
