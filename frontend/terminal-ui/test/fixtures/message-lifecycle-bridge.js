@@ -3,7 +3,8 @@ import process from "node:process";
 import { attachJsonlLineReader } from "../../src/protocol.js";
 
 let sequence = 1;
-const attempts = new Map();
+let active = null;
+const queue = [];
 
 attachJsonlLineReader(process.stdin, (line) => {
   if (!line.trim()) return;
@@ -16,24 +17,15 @@ attachJsonlLineReader(process.stdin, (line) => {
   }
   if (record.type === "submit") {
     const text = String(payload.text ?? "");
-    const attempt = (attempts.get(text) ?? 0) + 1;
-    attempts.set(text, attempt);
-    if (text === "失败后重试" && attempt === 1) {
-      setTimeout(() => {
-        emit("error", { code: "run_in_progress", message: "当前任务仍在执行。" }, record.id);
-      }, 160);
+    const submission = { id: record.id, text };
+    if (active) {
+      queue.push(submission);
+      emit("user/message", { content: text }, record.id);
+      emit("run/queued", { task: text, position: queue.length, queued: queue.length }, record.id);
+      emit("runtime/status", statusPayload(), record.id);
       return;
     }
-    setTimeout(() => {
-      emit("user/message", { content: text }, record.id);
-      emit("run/started", { task: text }, record.id);
-      emit("ui/message", {
-        type: "assistant_stream",
-        phase: "token",
-        content: attempt > 1 ? "重试已接受" : "已确认普通消息",
-      }, record.id);
-      emit("run/completed", { status: "completed" }, record.id);
-    }, 160);
+    startSubmission(submission, 700);
     return;
   }
   if (record.type === "shutdown") {
@@ -52,6 +44,26 @@ function emit(type, payload, requestId = "") {
   })}\n`);
 }
 
+function startSubmission(submission, durationMs) {
+  active = submission;
+  emit("user/message", { content: submission.text }, submission.id);
+  emit("run/started", { task: submission.text }, submission.id);
+  emit("runtime/status", statusPayload(), submission.id);
+  emit("ui/message", {
+    type: "assistant_stream",
+    phase: "token",
+    content: submission.text === "生命周期测试" ? "第一条处理中" : "第二条自动执行",
+  }, submission.id);
+  setTimeout(() => {
+    emit("ui/message", { type: "assistant_stream", phase: "end" }, submission.id);
+    emit("run/completed", { status: "completed" }, submission.id);
+    active = null;
+    const next = queue.shift();
+    if (next) startSubmission(next, 120);
+    else emit("runtime/status", statusPayload(), submission.id);
+  }, durationMs);
+}
+
 function statusPayload() {
   return {
     version: "0.1.214",
@@ -62,5 +74,6 @@ function statusPayload() {
     usage: { total_tokens: 0 },
     context: { used: 0, window: 256000, percentage: 0 },
     budget: { enabled: false, used_usd: 0, max_usd: null, percentage: null },
+    tasks: { queued_conversations: queue.length },
   };
 }

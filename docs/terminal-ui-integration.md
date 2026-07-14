@@ -67,6 +67,7 @@ uv run naumi-ui-bridge --config config.yaml
 - `engine/event`
 - `permission/request`
 - `permission/resolved`
+- `run/queued`
 - `run/started`
 - `run/completed`
 - `run/cancelled`

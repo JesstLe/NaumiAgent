@@ -39,6 +39,7 @@
     "agents/snapshot",
     "agents/update",
     "agents/action",
+    "run/queued",
     "run/started",
     "run/completed",
     "run/cancelled",

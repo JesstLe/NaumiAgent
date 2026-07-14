@@ -25,10 +25,11 @@
 用户消息发送生命周期：
 
 - 普通提交立即创建右缩进的本地用户消息并显示“发送中...”，不再等待 Agent 回包后才出现。
-- 本地 `request_id` 与 Bridge `user/message`、`run/started`、`error` 关联；确认后原地变为 accepted，不重复追加用户消息。
+- 本地 `request_id` 与 Bridge `user/message`、`run/queued`、`run/started`、`error` 关联；确认后原地更新，不重复追加用户消息。
+- 模型运行中继续发送的普通对话由 Bridge 立即接收，并显示“已排队 · 第 N 位”；当前轮结束或取消后按 FIFO 自动开始，最多等待 20 条。
 - 确认前的 Bridge 拒绝和管道异常会把同一消息标为发送失败，并展示可操作的 `/retry`。
 - `/retry [request_id]` 使用新请求 ID 原地重试同一气泡，保留尝试次数，不制造重复用户消息。
-- UI state 只保存 queued/failed/uncertain outbox，最多 20 条且单条内容受限；accepted 消息仍以后端会话为准。
+- UI state 只保存 queued/failed/uncertain outbox，最多 20 条且单条内容受限；服务端已确认的 scheduled/accepted 消息不进入本地重试队列，仍以后端会话为准。
 - 进程重启后 queued 变为 uncertain，并明确提示“可能重复发送”；不会自动重发，只有用户显式 `/retry` 才执行。
 - 后端重放的同内容用户消息可以调和一条 uncertain outbox；异常值、超限条目和重复快照应用均被安全处理。
 

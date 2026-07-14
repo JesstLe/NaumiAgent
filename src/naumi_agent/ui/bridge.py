@@ -8,6 +8,7 @@ import logging
 import subprocess
 import sys
 import threading
+from collections import deque
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
@@ -53,6 +54,7 @@ _TERMINAL_MISSION_STATUSES = frozenset({
     "archived",
 })
 _SUPPORTED_PERMISSION_CHOICES = frozenset({"allow_once", "deny", "grant_session"})
+_MAX_QUEUED_CONVERSATIONS = 20
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
@@ -69,6 +71,14 @@ class PendingPermission:
     choices: tuple[str, ...]
     session_id: str
     call_id: str
+
+
+@dataclass(frozen=True)
+class QueuedChatSubmission:
+    """One Bridge-accepted chat turn waiting for serialized execution."""
+
+    text: str
+    request_id: str
 
 
 @dataclass
@@ -421,6 +431,7 @@ class JsonlEngineBridge:
         self._writer: TextIO | None = None
         self._writer_lock = asyncio.Lock()
         self._run_task: asyncio.Task[Any] | None = None
+        self._queued_chat_submissions: deque[QueuedChatSubmission] = deque()
         self._active_run_context: dict[str, str] = {}
         self._active_completion_receipt: CompletionReceipt | None = None
         self._inspector_subscribed = False
@@ -560,6 +571,7 @@ class JsonlEngineBridge:
             "browser_active": 0,
             "permissions_pending": len(self._pending_permissions),
             "interactions_pending": len(self._pending_interactions),
+            "queued_conversations": len(self._queued_chat_submissions),
         }
 
         try:
@@ -746,20 +758,49 @@ class JsonlEngineBridge:
         if normalized_text.startswith("/"):
             await self._run_cli_slash_command(normalized_text, request_id=request_id)
             return
+        submission = QueuedChatSubmission(text=text, request_id=request_id)
         if self._run_task is not None and not self._run_task.done():
-            await self.emit_error(
-                "当前任务仍在执行，请等待完成后再发送。",
-                code="run_in_progress",
+            if len(self._queued_chat_submissions) >= _MAX_QUEUED_CONVERSATIONS:
+                await self.emit_error(
+                    f"对话队列已满（最多 {_MAX_QUEUED_CONVERSATIONS} 条），请稍后再发送。",
+                    code="queue_full",
+                    request_id=request_id,
+                )
+                return
+            self._queued_chat_submissions.append(submission)
+            position = len(self._queued_chat_submissions)
+            await self.emit(
+                ServerEventType.USER_MESSAGE,
+                {"content": text},
                 request_id=request_id,
             )
+            await self.emit(
+                ServerEventType.RUN_QUEUED,
+                {"task": text, "position": position, "queued": position},
+                request_id=request_id,
+            )
+            await self.emit(ServerEventType.STATUS, self.status_payload())
             return
 
-        await self.emit(ServerEventType.USER_MESSAGE, {"content": text}, request_id=request_id)
+        await self._start_chat_submission(submission, emit_user_message=True)
+
+    async def _start_chat_submission(
+        self,
+        submission: QueuedChatSubmission,
+        *,
+        emit_user_message: bool,
+    ) -> None:
+        """Start exactly one chat submission on the shared AgentEngine."""
+        text = submission.text
+        request_id = submission.request_id
+        if emit_user_message:
+            await self.emit(ServerEventType.USER_MESSAGE, {"content": text}, request_id=request_id)
         await self.emit(ServerEventType.RUN_STARTED, {"task": text}, request_id=request_id)
         await self.emit(ServerEventType.STATUS, self.status_payload())
         self._active_completion_receipt = None
 
         async def run() -> None:
+            was_cancelled = False
             try:
                 result = await self.engine.run_streaming(text, self.handle_engine_event)
                 await self.emit(
@@ -776,6 +817,7 @@ class JsonlEngineBridge:
                     request_id=request_id,
                 )
             except asyncio.CancelledError:
+                was_cancelled = True
                 raise
             except Exception as exc:
                 if self.debug_trace is not None:
@@ -800,13 +842,41 @@ class JsonlEngineBridge:
             finally:
                 if self._active_run_context.get("request_id") == request_id:
                     self._active_run_context = {}
-                await self.emit(ServerEventType.STATUS, self.status_payload())
+                if not self._closed and not was_cancelled:
+                    await self._start_next_queued_chat()
+                    await self.emit(ServerEventType.STATUS, self.status_payload())
 
         self._active_run_context = {
             "request_id": request_id,
             "intent": "chat",
         }
         self._run_task = asyncio.create_task(run())
+
+    async def _start_next_queued_chat(self) -> bool:
+        """Advance the FIFO queue if the Bridge is open and no run is active."""
+        if self._closed or not self._queued_chat_submissions:
+            return False
+        current = asyncio.current_task()
+        if (
+            self._run_task is not None
+            and self._run_task is not current
+            and not self._run_task.done()
+        ):
+            return False
+        submission = self._queued_chat_submissions.popleft()
+        await self._emit_queued_chat_positions()
+        await self._start_chat_submission(submission, emit_user_message=False)
+        return True
+
+    async def _emit_queued_chat_positions(self) -> None:
+        """Refresh visible positions after the queue head advances."""
+        queued = len(self._queued_chat_submissions)
+        for position, submission in enumerate(self._queued_chat_submissions, start=1):
+            await self.emit(
+                ServerEventType.RUN_QUEUED,
+                {"task": submission.text, "position": position, "queued": queued},
+                request_id=submission.request_id,
+            )
 
     async def submit_task(self, payload: dict[str, Any], *, request_id: str) -> None:
         """Create one Workbench issue and execute it in the active conversation."""
@@ -896,6 +966,7 @@ class JsonlEngineBridge:
         self._active_completion_receipt = None
 
         async def run() -> None:
+            was_cancelled = False
             try:
                 result = await self.engine.run_streaming(
                     text,
@@ -931,6 +1002,7 @@ class JsonlEngineBridge:
                     request_id=request_id,
                 )
             except asyncio.CancelledError:
+                was_cancelled = True
                 await task_store.update_task(task_id, status=TaskStatus.BLOCKED)
                 cancelled_snapshot = await service.dashboard_snapshot(session_id)
                 await self.emit(
@@ -963,7 +1035,9 @@ class JsonlEngineBridge:
             finally:
                 if self._active_run_context.get("request_id") == request_id:
                     self._active_run_context = {}
-                await self.emit(ServerEventType.STATUS, self.status_payload())
+                if not self._closed and not was_cancelled:
+                    await self._start_next_queued_chat()
+                    await self.emit(ServerEventType.STATUS, self.status_payload())
 
         self._active_run_context = {
             "request_id": request_id,
@@ -1025,6 +1099,7 @@ class JsonlEngineBridge:
             cancelled,
             request_id=request_id,
         )
+        await self._start_next_queued_chat()
         await self.emit(ServerEventType.STATUS, self.status_payload())
 
     async def resend_completion_receipt(
@@ -2081,6 +2156,19 @@ class JsonlEngineBridge:
         if self._closed:
             return
         self._closed = True
+        queued_submissions = list(self._queued_chat_submissions)
+        self._queued_chat_submissions.clear()
+        for submission in queued_submissions:
+            await self.emit(
+                ServerEventType.RUN_CANCELLED,
+                {
+                    "status": "cancelled",
+                    "target_request_id": submission.request_id,
+                    "intent": "chat",
+                    "reason": "界面已关闭，排队对话未执行。",
+                },
+                request_id=submission.request_id,
+            )
         for pending in list(self._pending_permissions.values()):
             if not pending.future.done():
                 pending.future.set_result("deny")

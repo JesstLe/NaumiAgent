@@ -116,6 +116,10 @@ function userDeliveryStatus(message) {
   if (message.deliveryStatus === "queued") {
     return { text: "发送中...", style: ANSI.dim };
   }
+  if (message.deliveryStatus === "scheduled") {
+    const position = Math.max(1, Math.floor(Number(message.queuePosition) || 1));
+    return { text: `已排队 · 第 ${position} 位`, style: ANSI.cyan };
+  }
   if (message.deliveryStatus === "failed") {
     const reason = compactText(message.errorMessage || "发送未完成");
     return { text: `发送失败: ${reason} · /retry 重试`, style: ANSI.red };
