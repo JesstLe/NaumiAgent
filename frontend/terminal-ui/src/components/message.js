@@ -8,6 +8,7 @@ import { PermissionCard } from "./permission-card.js";
 import { InteractionCard } from "./interaction-card.js";
 import { PermissionPanel } from "./permission-panel.js";
 import { RunActivityCard } from "./run-activity-card.js";
+import { SubagentCard } from "./subagent-card.js";
 import { TaskPanel } from "./task-panel.js";
 import { ToolCard } from "./tool-card.js";
 
@@ -39,6 +40,9 @@ export function renderMessage(message, width, ctx = { width }) {
   }
   if (message.kind === "run_activity") {
     return renderComponent(RunActivityCard({ activity: message }), ctx);
+  }
+  if (message.kind === "subagent_activity") {
+    return renderComponent(SubagentCard({ activity: message }), ctx);
   }
   if (message.kind === "completion_receipt") {
     return renderComponent(CompletionReceiptCard({ receipt: message.receipt }), ctx);

@@ -1985,27 +1985,59 @@ class NaumiApp(App):
                     status.status_text = f"todo 已更新：{source}"
                 case "subagent_event":
                     event_status = str(data.get("status", "?"))
-                    agent = str(data.get("agent_name", "") or "未匹配")
-                    task_id = str(data.get("task_id", "?"))
-                    message = str(data.get("message", "") or "")
+                    agent = strip_ansi(str(data.get("agent_name", "") or "未匹配"))
+                    task_id = strip_ansi(str(data.get("task_id", "?")))
+                    description = strip_ansi(str(data.get("description", "") or ""))
+                    message = strip_ansi(str(data.get("message", "") or ""))
+                    try:
+                        tokens = max(0, int(data.get("tokens", 0) or 0))
+                    except (TypeError, ValueError):
+                        tokens = 0
+                    try:
+                        cost = max(0.0, float(data.get("cost", 0.0) or 0.0))
+                    except (TypeError, ValueError):
+                        cost = 0.0
+                    status_label = {
+                        "started": "进行中",
+                        "running": "进行中",
+                        "completed": "已完成",
+                        "error": "失败",
+                        "failed": "失败",
+                        "cancelled": "已取消",
+                    }.get(event_status, event_status)
                     style = (
                         "green"
                         if event_status == "completed"
                         else "red"
                         if event_status in {"error", "failed"}
+                        else "yellow"
+                        if event_status == "cancelled"
                         else "cyan"
                     )
-                    suffix = f" · {message}" if message else ""
+                    output = Text()
+                    output.append(f"  子智能体 {status_label}: ", style=style)
+                    output.append(f"{agent} / {task_id}", style=style)
+                    if description:
+                        output.append(f"\n    任务 · {description}", style="dim")
+                    if message:
+                        output.append(f"\n    最新 · {message}")
+                    resources = []
+                    if tokens:
+                        resources.append(f"{tokens:,} tokens")
+                    if cost:
+                        resources.append(f"${cost:.4f}")
+                    if resources:
+                        output.append(
+                            f"\n    资源 · {' · '.join(resources)}",
+                            style="dim",
+                        )
                     chat.mount(
                         Static(
-                            Text.from_markup(
-                                f"  [{style}]subagent {event_status}: "
-                                f"{agent} / {task_id}{suffix}[/{style}]"
-                            ),
+                            output,
                             classes="tool-done",
                         )
                     )
-                    status.status_text = f"subagent {event_status}: {agent}"
+                    status.status_text = f"子智能体 {status_label}: {agent}"
                 case "permission_bubble":
                     agent = str(data.get("agent_name", "?"))
                     tool = str(data.get("tool_name", "?"))

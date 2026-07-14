@@ -124,6 +124,37 @@ def test_recovery_renderer_escapes_markup_sensitive_text() -> None:
     assert len(chat.mounted) == 1
 
 
+def test_subagent_renderer_shows_chinese_status_and_resource_details() -> None:
+    adapter = EngineEventAdapter()
+    renderer = TUIRenderer()
+    chat = FakeChat()
+    status = FakeStatus()
+    msg = adapter.adapt(
+        "subagent_event",
+        {
+            "agent_name": "Explore",
+            "task_id": "task-explore",
+            "status": "completed",
+            "description": "探索项目结构与模块实现",
+            "message": "探索完成",
+            "tokens": 1200,
+            "cost": 0.0345,
+            "timestamp": 1784000000.5,
+        },
+    )
+    assert msg is not None
+
+    renderer.render(msg, chat, status, FakeTodo())
+
+    mounted = _mounted_plain_text(chat)
+    assert "子智能体 已完成" in mounted
+    assert "Explore / task-explore" in mounted
+    assert "探索项目结构与模块实现" in mounted
+    assert "1,200 tokens" in mounted
+    assert "$0.0345" in mounted
+    assert status.status_text == "子智能体 已完成: Explore"
+
+
 def test_tui_renderer_skips_duplicate_message_id() -> None:
     adapter = EngineEventAdapter()
     renderer = TUIRenderer()

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from typing import Any
 
@@ -62,6 +63,17 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Extract a finite float from event data, defaulting gracefully."""
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if math.isfinite(parsed) else default
 
 
 def _safe_bool(value: Any, default: bool = False) -> bool:
@@ -496,7 +508,11 @@ class EngineEventAdapter:
             agent_name=_safe_str(data.get("agent_name")),
             task_id=_safe_str(data.get("task_id")),
             status=_safe_str(data.get("status")),
+            description=_safe_str(data.get("description")),
             message=_safe_str(data.get("message")),
+            tokens=max(0, _safe_int(data.get("tokens"))),
+            cost=max(0.0, _safe_float(data.get("cost"))),
+            timestamp=max(0.0, _safe_float(data.get("timestamp"))),
             raw_event=event,
             raw_data=None,
         )

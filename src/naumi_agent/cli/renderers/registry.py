@@ -17,6 +17,7 @@ import json
 import shutil
 from collections.abc import Callable
 
+from naumi_agent.clipboard import strip_ansi
 from naumi_agent.ui.messages.base import MessageType, UIMessage
 from naumi_agent.ui.messages.events import (
     AssistantStreamMessage,
@@ -176,10 +177,25 @@ def _render_subagent_event(msg: SubagentEventMessage) -> str | None:
         else "31" if msg.status in {"error", "failed"}
         else "36"
     )
-    suffix = f" · {msg.message}" if msg.message else ""
+    status = {
+        "started": "进行中",
+        "running": "进行中",
+        "completed": "已完成",
+        "error": "失败",
+        "failed": "失败",
+        "cancelled": "已取消",
+    }.get(msg.status, msg.status or "状态更新")
+    details = []
+    if msg.description:
+        details.append(f"任务: {strip_ansi(msg.description)}")
+    if msg.message:
+        details.append(f"最新: {strip_ansi(msg.message)}")
+    if msg.tokens or msg.cost:
+        details.append(f"资源: {msg.tokens:,} tokens · ${msg.cost:.4f}")
+    suffix = "" if not details else "\n    " + "\n    ".join(details)
     return (
-        f"\033[{color}m  subagent {msg.status}: "
-        f"{msg.agent_name} / {msg.task_id}{suffix}\033[0m\n"
+        f"\033[{color}m  子智能体 {status}: "
+        f"{strip_ansi(msg.agent_name)} / {strip_ansi(msg.task_id)}{suffix}\033[0m\n"
     )
 
 
