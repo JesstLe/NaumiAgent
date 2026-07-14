@@ -14,6 +14,17 @@
 - ARC-01.5 Legacy adapters：旧 Engine/CLI 调用逐项适配并记录移除条件。
 - ARC-01.6 Import rules CI：禁止 UI→tool implementation、tool→UI、core→frontend 等反向依赖。
 
+## 执行状态
+
+| 子模块 | 状态 | 权威证据 |
+| --- | --- | --- |
+| ARC-01.1 Import graph | 已实现 | `src/naumi_agent/architecture/import_graph.py`、`docs/architecture/arc-01-import-graph-baseline.json` |
+| ARC-01.2 Domain ownership | 设计已冻结、实现中 | [ARC-01-2-domain-ownership-design.md](ARC-01-2-domain-ownership-design.md) |
+| ARC-01.3 Ports | 待开发 | 必须逐个 Port 独立实现，不创建空 Protocol 集合 |
+| ARC-01.4 Composition root | 待开发 | 等待真实 Port 完成 |
+| ARC-01.5 Legacy adapters | 待开发 | 等待 composition root 契约稳定 |
+| ARC-01.6 Import rules CI | 待开发 | 消费 ARC-01.1 graph 与 ARC-01.2 ownership，不重复扫描源码 |
+
 ## 验收标准
 
 - 依赖图可重复生成；所有现有循环列入显式 debt 或消除。
