@@ -16,7 +16,11 @@
       "set_setting",
       "get_daemon_launch_config",
       "set_daemon_launch_config",
-      "write_app_log"
+      "write_app_log",
+      "start_daemon",
+      "stop_daemon",
+      "get_daemon_status",
+      "get_daemon_logs"
     ]
   }
 }

@@ -45,7 +45,7 @@ pub fn rotate_logs() -> Result<(), String> {
 }
 
 /// Redacts secrets from a log message.
-fn redact_secrets(message: &str) -> String {
+pub fn redact_secrets(message: &str) -> String {
     // Bearer tokens after "Bearer " or "bearer ".
     let bearer_re = Regex::new(r#"(?i)(Bearer\s+)\S+"#).unwrap();
     // API keys in query strings, JSON values, or form fields.
