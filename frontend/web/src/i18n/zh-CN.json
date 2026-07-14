@@ -1,0 +1,33 @@
+{
+  "appTitle": "NaumiAgent Workbench",
+  "nav": {
+    "dashboard": "总览",
+    "chat": "对话",
+    "taskMarket": "任务市场",
+    "worktrees": "工作区",
+    "reviews": "审查",
+    "timeline": "时间线",
+    "settings": "设置"
+  },
+  "action": {
+    "newMission": "新建 Mission",
+    "pauseAgents": "暂停 Agent",
+    "syncContext": "同步上下文",
+    "search": "搜索",
+    "send": "发送",
+    "createLinkedIssue": "同时创建任务"
+  },
+  "chat": {
+    "composerPlaceholder": "输入问题或指令...",
+    "emptyState": "开始与 Agent 对话，或发送一条指令。"
+  },
+  "status": {
+    "online": "在线",
+    "offline": "离线",
+    "starting": "启动中",
+    "unknown": "未知"
+  },
+  "panel": {
+    "context": "页面上下文"
+  }
+}
