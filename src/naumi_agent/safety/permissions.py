@@ -77,6 +77,19 @@ class PermissionAwareTool(Protocol):
 
 # 工具权限表
 TOOL_PERMISSIONS: dict[str, PermissionRule] = {
+    "harness_run_check": PermissionRule(
+        tool_name="harness_run_check",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=50,
+        risk_level=PermissionRiskLevel.LOW,
+        tool_family="harness_validation",
+    ),
     "file_read": PermissionRule(
         tool_name="file_read",
         allowed_modes=[

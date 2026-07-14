@@ -45,6 +45,7 @@ async def test_knowledge_tool_schema_metadata_and_shared_service(tmp_path: Path)
         "harness_status",
         "harness_doctor",
         "harness_read_knowledge",
+        "harness_run_check",
     ]
     assert tool.metadata.read_only
     assert tool.metadata.concurrency_safe

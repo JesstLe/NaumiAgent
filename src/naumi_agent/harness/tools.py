@@ -1,4 +1,4 @@
-"""Read-only Agent tools for Harness status, doctor, and repository knowledge."""
+"""Agent tools for Harness status, knowledge, and trusted checks."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from typing import Any
 
 from naumi_agent.harness.service import (
     HarnessService,
+    render_harness_check,
     render_harness_doctor,
     render_harness_knowledge,
     render_harness_status,
@@ -18,6 +19,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessStatusTool(service),
         HarnessDoctorTool(service),
         HarnessReadKnowledgeTool(service),
+        HarnessRunCheckTool(service),
     ]
 
 
@@ -131,3 +133,64 @@ class HarnessReadKnowledgeTool(_HarnessReadOnlyTool):
         except ValueError as exc:
             return f"Harness 知识读取参数无效：{exc}"
         return render_harness_knowledge(result)
+
+
+class HarnessRunCheckTool(Tool):
+    def __init__(self, service: HarnessService) -> None:
+        self._service = service
+
+    @property
+    def name(self) -> str:
+        return "harness_run_check"
+
+    @property
+    def description(self) -> str:
+        return "运行当前受信任 Harness Profile 中精确声明的一项验证检查"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            command_argument_names=(),
+            user_facing_name=self.description,
+            search_hint="harness validation check test lint verify completion evidence",
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "check_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "description": "Profile 中声明的 check id",
+                },
+                "run_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": "当前 Harness run 的稳定标识",
+                },
+            },
+            "required": ["check_id", "run_id"],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        check_id = kwargs.get("check_id")
+        run_id = kwargs.get("run_id")
+        if not isinstance(check_id, str) or not isinstance(run_id, str):
+            return "Harness 检查参数无效：check_id 和 run_id 必须是字符串。"
+        try:
+            result = await self._service.run_check(
+                check_id=check_id,
+                run_id=run_id,
+            )
+        except ValueError as exc:
+            return f"Harness 检查参数无效：{exc}"
+        return render_harness_check(result)

@@ -2708,8 +2708,8 @@ def _print_help() -> None:
         ("/effort [auto|none|minimal|low|medium|high|xhigh|max|reset]", "查看或切换模型思考强度"),
         ("/doctor", "运行环境诊断"),
         (
-            "/harness [status|doctor|knowledge|trust|untrust]",
-            "管理仓库 Harness Profile 与只读知识",
+            "/harness [status|doctor|knowledge|check|trust|untrust]",
+            "管理仓库 Harness Profile、知识与验证检查",
         ),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
@@ -2818,6 +2818,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
     """Run user-only Harness commands through the shared service facade."""
     from naumi_agent.harness.service import (
         HarnessStatusCode,
+        render_harness_check,
         render_harness_doctor,
         render_harness_knowledge,
         render_harness_status,
@@ -2825,8 +2826,9 @@ async def _run_harness(engine: Any, arg: str) -> None:
     from naumi_agent.harness.trust import HarnessTrustStoreError
 
     usage = (
-        "用法：/harness [status|doctor|knowledge|trust|untrust]\n"
+        "用法：/harness [status|doctor|knowledge|check|trust|untrust]\n"
         "      /harness knowledge <查询|相对路径> [--max-tokens 1..4000]\n"
+        "      /harness check <check-id>\n"
         "      /harness trust --confirm"
     )
     try:
@@ -2887,6 +2889,20 @@ async def _run_harness(engine: Any, arg: str) -> None:
             return
         console.print(Markdown(render_harness_knowledge(result)))
         return
+    if subcommand == "check" and len(parts) == 2:
+        session = getattr(engine, "_session", None)
+        session_id = getattr(session, "id", "")
+        run_id = f"manual:{session_id or uuid.uuid4().hex}"
+        try:
+            result = await service.run_check(
+                check_id=parts[1],
+                run_id=run_id,
+            )
+        except ValueError as exc:
+            console.print(f"[yellow]Harness 检查参数无效：{exc}[/yellow]")
+            return
+        console.print(Markdown(render_harness_check(result)))
+        return
     if subcommand == "trust" and len(parts) == 1:
         report = await service.doctor()
         status = report.status
@@ -2900,7 +2916,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
             f"工作区：`{service.workspace_root}`",
             f"Profile digest：`{digest}`",
             "",
-            "### 配置中的命令（H1 不执行）",
+            "### 配置中的命令（信任后仅按需执行）",
         ]
         lines.extend(
             f"- `{command}`" for command in report.command_summaries

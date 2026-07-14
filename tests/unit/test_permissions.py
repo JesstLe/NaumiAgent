@@ -33,6 +33,23 @@ class TestPermissionChecker:
         assert checker.check("file_read", {"path": "/workspace/test.txt"}).allowed
         assert checker.check("file_write", {"path": "/workspace/test.txt"}).allowed
 
+    def test_harness_check_has_explicit_permission_rule(self) -> None:
+        moderate = PermissionChecker(PermissionMode.MODERATE)
+        lockdown = PermissionChecker(PermissionMode.LOCKDOWN)
+
+        allowed = moderate.check(
+            "harness_run_check",
+            {"check_id": "unit", "run_id": "run-1"},
+        )
+        blocked = lockdown.check(
+            "harness_run_check",
+            {"check_id": "unit", "run_id": "run-1"},
+        )
+
+        assert allowed.allowed
+        assert not allowed.requires_confirmation
+        assert not blocked.allowed
+
     def test_lockdown_blocks_write(self) -> None:
         checker = PermissionChecker(PermissionMode.LOCKDOWN, allowed_dirs=["/workspace"])
         result = checker.check("file_write", {"path": "/workspace/test.txt"})

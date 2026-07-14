@@ -11,6 +11,9 @@
 
 ## Task 1：提取公共验证命令策略与进程执行器
 
+**状态：已完成并推送。** 真实进程组 timeout/cancel、大输出 artifact、策略越界与
+Workbench 兼容路径共 18 项定向测试通过。
+
 **文件**
 
 - 新建 `src/naumi_agent/validation/executor.py`
@@ -30,6 +33,9 @@
 - Workbench 继续写原有 ValidationRun/FailureCard，行为保持兼容。
 
 ## Task 2：实现受信任 Profile CheckRunner
+
+**状态：已完成，等待本提交推送。** CheckRunner、Git tree fingerprint、success cache、
+single-flight、Agent Tool、`/harness check` 与真实仓库小检查均已打通。
 
 **文件**
 
