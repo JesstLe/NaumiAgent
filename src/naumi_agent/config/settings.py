@@ -217,6 +217,31 @@ class AppConfig(BaseSettings):
             root = Path.cwd() / root
         return root.resolve()
 
+    def bind_runtime_workspace(self, launch_dir: str | Path | None = None) -> Path:
+        """Bind an interactive run to its launch directory without rewriting YAML."""
+        requested = Path.cwd() if launch_dir is None else Path(launch_dir).expanduser()
+        if not requested.exists() or not requested.is_dir():
+            raise ValueError(f"启动工作区不存在或不是目录：{requested}")
+
+        launch = requested.resolve()
+        previous = self.resolve_workspace_root()
+        allowed_dirs: list[str] = []
+        for raw in self.safety.allowed_dirs:
+            candidate = Path(raw).expanduser()
+            if not candidate.is_absolute():
+                candidate = launch / candidate
+            resolved = candidate.resolve()
+            value = str(launch if resolved == previous else resolved)
+            if value not in allowed_dirs:
+                allowed_dirs.append(value)
+
+        launch_value = str(launch)
+        if launch_value not in allowed_dirs:
+            allowed_dirs.insert(0, launch_value)
+        self.workspace_root = launch_value
+        self.safety.allowed_dirs = allowed_dirs
+        return launch
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> AppConfig:
         p = Path(path).resolve()

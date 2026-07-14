@@ -181,6 +181,60 @@ class TestAppConfig:
 
         assert config.resolve_workspace_root() == tmp_path / "workspace"
 
+    def test_bind_runtime_workspace_replaces_legacy_root_and_preserves_extra_dirs(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        legacy = tmp_path / "legacy"
+        launch = tmp_path / "launch"
+        shared = tmp_path / "shared"
+        for path in (legacy, launch, shared):
+            path.mkdir()
+        config = AppConfig(
+            workspace_root=str(legacy),
+            safety={
+                "allowed_dirs": [
+                    str(legacy),
+                    str(shared),
+                    str(shared),
+                    "relative-extra",
+                ],
+            },
+        )
+
+        result = config.bind_runtime_workspace(launch)
+
+        assert result == launch.resolve()
+        assert config.workspace_root == str(launch.resolve())
+        assert config.safety.allowed_dirs == [
+            str(launch.resolve()),
+            str(shared.resolve()),
+            str((launch / "relative-extra").resolve()),
+        ]
+
+    def test_bind_runtime_workspace_uses_current_directory(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        config = AppConfig(workspace_root=".", safety={"allowed_dirs": ["."]})
+
+        result = config.bind_runtime_workspace()
+
+        assert result == tmp_path.resolve()
+        assert config.safety.allowed_dirs == [str(tmp_path.resolve())]
+
+    def test_bind_runtime_workspace_rejects_missing_directory(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        missing = tmp_path / "missing"
+        config = AppConfig()
+
+        with pytest.raises(ValueError, match="启动工作区不存在或不是目录"):
+            config.bind_runtime_workspace(missing)
+
     def test_api_host_defaults_to_localhost(self) -> None:
         assert AppConfig().api.host == "127.0.0.1"
 

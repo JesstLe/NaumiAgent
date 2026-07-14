@@ -2131,6 +2131,7 @@ async def create_bridge(
 ) -> JsonlEngineBridge:
     resolved = resolve_config_path(config_path)
     config = AppConfig.from_yaml(resolved)
+    config.bind_runtime_workspace(Path.cwd())
     setup_logging(config.log_level)
     if engine_factory is None:
         from naumi_agent.orchestrator.engine import AgentEngine

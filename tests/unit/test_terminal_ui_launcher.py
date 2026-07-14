@@ -12,11 +12,13 @@ import pytest
 from typer.testing import CliRunner
 
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH
+from naumi_agent.config.settings import AppConfig
 from naumi_agent.main import (
     TerminalUiLaunchError,
     _build_terminal_ui_command,
     _launch_interactive_ui,
     _launch_terminal_ui,
+    _launch_tui,
     _parse_node_major,
     _resolve_terminal_ui_frontend_dir,
     naumiagent_app,
@@ -42,6 +44,58 @@ def _write_terminal_ui_entry(frontend: Path) -> Path:
     entry.parent.mkdir(parents=True)
     entry.write_text("#!/usr/bin/env node\n", encoding="utf-8")
     return entry
+
+
+def test_textual_fallback_binds_engine_to_process_launch_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy = tmp_path / "legacy"
+    launch = tmp_path / "launch"
+    legacy.mkdir()
+    launch.mkdir()
+    config = AppConfig(
+        models={"api_key": "test-secret"},
+        workspace_root=str(legacy),
+        safety={"allowed_dirs": [str(legacy)]},
+    )
+    captured: dict[str, object] = {}
+
+    class FakeEngine:
+        def __init__(self, runtime_config):
+            captured["config"] = runtime_config
+            self.workspace_root = runtime_config.resolve_workspace_root()
+            self.router = SimpleNamespace(resolve_model=lambda _tier: "test-model")
+
+    class FakeTrace:
+        def output(self, *_args, **_kwargs) -> None:
+            return None
+
+    class FakeApp:
+        def __init__(self, engine, **_kwargs):
+            captured["engine"] = engine
+
+        def run(self) -> None:
+            captured["ran"] = True
+
+    monkeypatch.chdir(launch)
+    monkeypatch.setattr(
+        "naumi_agent.main.AppConfig.from_yaml",
+        lambda _path: config,
+    )
+    monkeypatch.setattr("naumi_agent.orchestrator.engine.AgentEngine", FakeEngine)
+    monkeypatch.setattr("naumi_agent.tui.app.NaumiApp", FakeApp)
+    monkeypatch.setattr(
+        "naumi_agent.debug_trace.DebugTrace.create",
+        lambda **_kwargs: FakeTrace(),
+    )
+    monkeypatch.setattr("naumi_agent.log_setup.setup_logging", lambda _level: None)
+
+    _launch_tui(str(tmp_path / "config.yaml"))
+
+    assert config.workspace_root == str(launch.resolve())
+    assert captured["engine"].workspace_root == launch.resolve()
+    assert captured["ran"] is True
 
 
 def test_build_terminal_ui_command_uses_direct_node_entry(tmp_path: Path) -> None:

@@ -69,11 +69,10 @@ def test_choose_provider_fallback_accepts_number_or_name(
     assert onboarding._choose_provider() == expected
 
 
-def test_build_config_never_serializes_model_api_key(tmp_path: Path) -> None:
+def test_build_config_never_serializes_model_api_key() -> None:
     config = _build_config(
         provider="custom",
         preset=_preset(),
-        workspace=str(tmp_path),
         permission_mode="moderate",
     )
 
@@ -81,24 +80,22 @@ def test_build_config_never_serializes_model_api_key(tmp_path: Path) -> None:
     assert config["models"]["provider"] == "custom"
 
 
-def test_build_config_limits_default_permissions_to_workspace(tmp_path: Path) -> None:
+def test_build_config_uses_launch_relative_workspace_defaults() -> None:
     config = _build_config(
         provider="custom",
         preset=_preset(),
-        workspace=str(tmp_path),
         permission_mode="moderate",
     )
 
-    assert config["safety"]["allowed_dirs"] == [str(tmp_path)]
+    assert config["workspace_root"] == "."
+    assert config["safety"]["allowed_dirs"] == ["."]
 
 
 def test_build_config_keeps_runtime_budgets_unlimited_by_default(
-    tmp_path: Path,
 ) -> None:
     config = _build_config(
         provider="custom",
         preset=_preset(),
-        workspace=str(tmp_path),
         permission_mode="bypass",
     )
 
@@ -115,11 +112,16 @@ def test_run_onboarding_stores_key_outside_yaml(
 ) -> None:
     config_path = tmp_path / "config.yaml"
     stored: list[tuple[str | None, str]] = []
-    answers = iter([str(tmp_path), "moderate"])
+    answers = iter(["moderate"])
+    prompts: list[str] = []
 
     monkeypatch.setattr(onboarding, "_choose_provider", lambda: "kimi")
     monkeypatch.setattr(onboarding, "_prompt_api_key", lambda _name: "secret-value")
-    monkeypatch.setattr(onboarding.Prompt, "ask", lambda *_args, **_kwargs: next(answers))
+    monkeypatch.setattr(
+        onboarding.Prompt,
+        "ask",
+        lambda message, **_kwargs: prompts.append(str(message)) or next(answers),
+    )
     monkeypatch.setattr(onboarding.Confirm, "ask", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(onboarding, "_check_node_ui", lambda _root: None)
     monkeypatch.setenv("NAUMI_MODELS__API_KEY", "")
@@ -135,6 +137,9 @@ def test_run_onboarding_stores_key_outside_yaml(
     persisted = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert stored == [("kimi", "secret-value")]
     assert "api_key" not in persisted["models"]
+    assert persisted["workspace_root"] == "."
+    assert persisted["safety"]["allowed_dirs"] == ["."]
+    assert not any("工作区" in prompt for prompt in prompts)
 
 
 def test_run_onboarding_reuses_environment_key_without_keyring(
@@ -142,7 +147,7 @@ def test_run_onboarding_reuses_environment_key_without_keyring(
     monkeypatch,
 ) -> None:
     config_path = tmp_path / "config.yaml"
-    answers = iter([str(tmp_path), "moderate"])
+    answers = iter(["moderate"])
     monkeypatch.setenv("NAUMI_MODELS__API_KEY", "environment-secret")
     monkeypatch.setattr(onboarding, "_choose_provider", lambda: "kimi")
     monkeypatch.setattr(
