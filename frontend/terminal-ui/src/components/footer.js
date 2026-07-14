@@ -152,12 +152,16 @@ export function StatusFooter({ state, env = {} }) {
         ? formatProviderIdentity(status)
         : null;
       const reasoningEffort = String(status.reasoning_effort?.effective || "auto");
+      const heartbeatWarning = state.bridgeHeartbeat?.status === "stale"
+        ? "Bridge: 无响应"
+        : null;
       const parts = [
         time,
         `mode: ${state.mode}`,
         `思考文本: ${state.showReasoning ? "on" : "off"}`,
         `强度: ${reasoningEffort}`,
         `运行: ${state.cancelPending ? "正在停止" : state.running ? "进行中" : "空闲"}`,
+        ...(heartbeatWarning ? [heartbeatWarning] : []),
         session,
         ...(tasks ? [`tasks: ${tasks}`] : []),
         ...(providerIdentity ? [`提供方: ${providerIdentity}`] : []),

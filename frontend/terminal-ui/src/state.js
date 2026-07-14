@@ -278,6 +278,7 @@ export function createInitialState() {
     unreadOutputCount: 0,
     unreadOutputKeys: {},
     bridgeReady: false,
+    bridgeHeartbeat: { status: "starting", rttMs: null, ageMs: 0 },
     debugTrace: null,
     frontendDebugLogPath: "",
     folds: {},
@@ -299,6 +300,42 @@ export function dismissWelcome(state) {
   state.welcome.phase = "dismissed";
   state.welcome.dismissed = true;
   return true;
+}
+
+export function updateBridgeHeartbeat(state, value = {}) {
+  const previousStatus = String(state.bridgeHeartbeat?.status ?? "starting");
+  const status = value.status === "stale" ? "stale" : "healthy";
+  const rttMs = Number.isFinite(Number(value.rttMs))
+    ? Math.max(0, Math.round(Number(value.rttMs)))
+    : null;
+  const ageMs = Math.max(0, Math.round(Number(value.ageMs) || 0));
+  state.bridgeHeartbeat = { status, rttMs, ageMs };
+  let notificationAdded = false;
+
+  if (status === "stale" && previousStatus !== "stale") {
+    const seconds = Math.max(1, Math.ceil(ageMs / 1_000));
+    pushSystemMessage(
+      state,
+      "Bridge 心跳",
+      `后端控制面已连续 ${seconds} 秒无响应；当前任务不会被自动重启。`,
+      "warning",
+      { dismissWelcome: true },
+    );
+    notificationAdded = true;
+  } else if (status === "healthy" && previousStatus === "stale") {
+    pushSystemMessage(
+      state,
+      "Bridge 心跳",
+      `后端控制面已恢复，往返延迟 ${rttMs ?? 0}ms。`,
+      "info",
+      { dismissWelcome: true },
+    );
+    notificationAdded = true;
+  }
+  if (status !== previousStatus || notificationAdded) {
+    clearRenderCache(state.renderCache);
+  }
+  return notificationAdded;
 }
 
 export function reduceServerEvent(state, record) {
@@ -2637,6 +2674,7 @@ function showDebugInfo(state) {
     `Bridge transcript: ${trace.transcript_path || "-"}`,
     `Bridge run: ${trace.run_id || "-"}`,
     `Bridge ready: ${state.bridgeReady ? "yes" : "no"}`,
+    `Bridge heartbeat: ${state.bridgeHeartbeat?.status || "starting"}`,
     `当前消息: ${state.messages.length}`,
     `工具卡片: ${state.tools.length}`,
     `模式: ${state.mode}`,

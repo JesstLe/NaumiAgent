@@ -84,6 +84,12 @@ uv run naumi-ui-bridge --config config.yaml
 - `cycle_mode`
 - `permission_response`
 - `resume`
+
+## Bridge 心跳
+
+新 UI 在 Bridge `ready` 后通过既有 `ping` / `pong` 控制通道执行单飞心跳：默认每 5 秒探测，15 秒无关联响应时在底栏显示 `Bridge: 无响应`，恢复后报告实际往返延迟。心跳只检测 JSONL 控制面，不依赖模型 token 输出，因此长时间推理不会被误判为掉线；系统也不会在活动运行期间擅自重启 Bridge。
+
+`pong` 同时返回 `active_run` 与 `queued_conversations`，便于调试时区分“后端存活但正在工作”和“控制面失联”。UI 退出、Bridge 退出或 fatal error 都会清理心跳 timer。
 - `ping`
 - `shutdown`
 

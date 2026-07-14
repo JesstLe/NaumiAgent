@@ -30,6 +30,31 @@ test("terminal UI startup welcome transitions from booting to ready and dismisse
   }
 });
 
+test("terminal UI heartbeat detects an unresponsive Bridge and reports recovery", async () => {
+  const app = launchTerminalUi("heartbeat-bridge.js", {
+    env: {
+      NAUMI_HEARTBEAT_INTERVAL_MS: "20",
+      NAUMI_HEARTBEAT_TIMEOUT_MS: "60",
+    },
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForLatestScreen(output, "Bridge: 无响应", 7000);
+    await waitForLatestScreen(output, "后端控制面已恢复", 7000);
+    const events = readDebugEvents(app.debugLogPath);
+    assert(events.some((record) => record.event === "heartbeat.timeout"));
+    assert(events.some((record) => record.event === "heartbeat.pong"));
+    assert(events.filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "ping",
+    ).length >= 2);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI welcome consumes identity from the real Python JSONL Bridge", async () => {
   const app = launchTerminalUi("python-bridge-fixture.py", {
     bridgeCommandJson: [pythonExecutable(), "test/fixtures/python-bridge-fixture.py"],

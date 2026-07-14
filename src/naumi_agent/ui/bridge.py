@@ -638,7 +638,17 @@ class JsonlEngineBridge:
             return
 
         if event_type == ClientEventType.PING:
-            await self.emit(ServerEventType.PONG, {"ok": True}, request_id=request_id)
+            await self.emit(
+                ServerEventType.PONG,
+                {
+                    "ok": True,
+                    "active_run": bool(
+                        self._run_task is not None and not self._run_task.done()
+                    ),
+                    "queued_conversations": len(self._queued_chat_submissions),
+                },
+                request_id=request_id,
+            )
             return
 
         if event_type == ClientEventType.SET_MODE:
