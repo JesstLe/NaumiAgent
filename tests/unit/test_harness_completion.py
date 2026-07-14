@@ -161,6 +161,26 @@ def test_current_check_and_criterion_evidence_produce_verified_receipt() -> None
     )
 
 
+def test_informational_warning_does_not_downgrade_verified_completion() -> None:
+    warning = "infrastructure_error: Harness 状态库暂时不可写。"
+    result = CompletionGate().evaluate(
+        _contract(profile_digest="profile"),
+        CompletionGateInput(
+            current_tree_fingerprint="sha256:current",
+            current_profile_digest="profile",
+            changed_paths=("src/naumi_agent/harness/completion.py",),
+            checks=(_passed_check(),),
+            evidence=(_evidence(),),
+            informational_warnings=(warning,),
+        ),
+        correction_attempt=0,
+    )
+
+    assert result.status == "completed_verified"
+    assert result.receipt is not None
+    assert result.receipt.warnings == (warning,)
+
+
 def test_stale_passed_check_does_not_verify_current_tree() -> None:
     result = CompletionGate().evaluate(
         _contract(),

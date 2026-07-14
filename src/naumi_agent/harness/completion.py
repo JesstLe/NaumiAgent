@@ -69,6 +69,7 @@ class CompletionGateInput(_CompletionModel):
     known_failure_ids: tuple[str, ...] = ()
     disclosed_failure_ids: tuple[str, ...] = ()
     infrastructure_errors: tuple[str, ...] = ()
+    informational_warnings: tuple[str, ...] = ()
     mutating_tool_used: bool = False
 
     @field_validator("current_tree_fingerprint")
@@ -93,10 +94,13 @@ class CompletionGateInput(_CompletionModel):
             "known_failure_ids",
             "disclosed_failure_ids",
             "infrastructure_errors",
+            "informational_warnings",
         ):
             values = getattr(self, field_name)
             if len(values) != len(set(values)):
                 raise ValueError(f"{field_name} 中存在重复值")
+            if any(not value.strip() for value in values):
+                raise ValueError(f"{field_name} 不能包含空值")
         return self
 
 
@@ -402,7 +406,14 @@ class CompletionGate:
             changed_files=tuple(sorted(set(facts.changed_paths))),
             checks=tuple(checks),
             criteria=criteria,
-            warnings=tuple(issue.message for issue in issues),
+            warnings=tuple(
+                dict.fromkeys(
+                    (
+                        *(issue.message for issue in issues),
+                        *facts.informational_warnings,
+                    )
+                )
+            ),
             tree_fingerprint=facts.current_tree_fingerprint,
         )
 

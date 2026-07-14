@@ -10,6 +10,7 @@ import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.harness.service import HarnessService
+from naumi_agent.harness.store import HarnessStore, resolve_harness_db_path
 from naumi_agent.harness.tools import create_harness_tools
 from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.model.router import ModelResponse, StreamChunk, TokenUsage
@@ -69,6 +70,33 @@ async def _engine(tmp_path: Path) -> AgentEngine:
     engine.task_store.set_session(session.id)
     await engine._begin_harness_completion_run("修改 source.py", run_id="engine-gate")
     return engine
+
+
+@pytest.mark.asyncio
+async def test_engine_wires_user_state_harness_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace-default-store"
+    workspace.mkdir()
+    state_home = tmp_path / "user-state"
+    monkeypatch.setenv("NAUMI_STATE_HOME", str(state_home))
+    engine = AgentEngine(
+        AppConfig(
+            workspace_root=str(workspace),
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions-default-store.db"),
+                vector_db_path=str(tmp_path / "chroma-default-store"),
+                long_term_enabled=False,
+            ),
+        )
+    )
+    try:
+        assert isinstance(engine.harness_service.store, HarnessStore)
+        assert engine.harness_service.store.db_path == resolve_harness_db_path()
+        assert not engine.harness_service.store.db_path.is_relative_to(workspace)
+    finally:
+        await engine.shutdown()
 
 
 @pytest.mark.asyncio

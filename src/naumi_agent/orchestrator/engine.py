@@ -24,6 +24,7 @@ from naumi_agent.harness.completion import (
     HarnessRunState,
 )
 from naumi_agent.harness.service import HarnessService
+from naumi_agent.harness.store import HarnessStore, resolve_harness_db_path
 from naumi_agent.harness.tools import create_harness_tools
 from naumi_agent.harness.trust import (
     HarnessTrustStore,
@@ -431,6 +432,7 @@ class AgentEngine:
             trust_store=HarnessTrustStore(
                 resolve_harness_trust_db_path()
             ),
+            store=HarnessStore(resolve_harness_db_path()),
         )
         self.chat_run_store = ChatRunStore(self._runtime_data_dir / "chat-runs.db")
         catalog = (
