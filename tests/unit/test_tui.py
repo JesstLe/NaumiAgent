@@ -22,7 +22,11 @@ from naumi_agent.tui.app import (
     _find_latest_user_session_id,
     _format_tool_output_markdown,
 )
-from naumi_agent.tui.completion_receipt import format_completion_receipt_markdown
+from naumi_agent.tui.completion_receipt import (
+    format_completion_receipt_markdown,
+    format_completion_receipt_text,
+)
+from naumi_agent.tui.semantic_markdown import semantic_markdown_parser
 from naumi_agent.ui.keybindings import build_keybindings
 from naumi_agent.ui.theme import build_ui_style_config
 
@@ -56,6 +60,62 @@ class _PagedSessionEngine:
 
 
 class TestNaumiApp:
+    def test_semantic_markdown_parser_preserves_math_as_visible_content(self) -> None:
+        tokens = semantic_markdown_parser().parse(
+            "内联 $x^2$，未闭合 $y\n\n$$\ny=x+1\n$$"
+        )
+        inline = next(token for token in tokens if token.type == "inline")
+        math = next(child for child in inline.children or [] if child.type == "code_inline")
+        block = next(token for token in tokens if token.type == "fence")
+
+        assert math.content == "$x^2$"
+        assert any(
+            child.type == "text" and "$y" in child.content
+            for child in inline.children or []
+        )
+        assert block.info == "latex"
+        assert "y=x+1" in block.content
+
+    def test_completion_receipt_text_colors_git_statuses_semantically(self) -> None:
+        rendered = format_completion_receipt_text(
+            {
+                "schema_version": 1,
+                "receipt_id": "receipt-colors",
+                "run_id": "run-colors",
+                "outcome": "partial",
+                "summary": "颜色检查。",
+                "changes": [
+                    {"path": f"src/{status}.py", "status": status}
+                    for status in (
+                        "added",
+                        "deleted",
+                        "modified",
+                        "renamed",
+                        "conflicted",
+                        "restored",
+                    )
+                ],
+                "validations": [],
+                "unverified": [],
+                "approvals": [],
+                "risks": [],
+                "git_state": {
+                    "available": True,
+                    "branch": "codex/colors",
+                    "dirty": True,
+                    "ahead": 1,
+                    "behind": 2,
+                },
+                "next_actions": [],
+                "duration_ms": 100,
+            }
+        )
+
+        styles = {str(span.style) for span in rendered.spans}
+        assert "新增 1 个文件" in rendered.plain
+        assert "删除 1 个文件" in rendered.plain
+        assert {"green", "red", "yellow", "cyan", "blue", "bold red"} <= styles
+
     def test_completion_receipt_markdown_matches_terminal_evidence(self) -> None:
         rendered = format_completion_receipt_markdown(
             {

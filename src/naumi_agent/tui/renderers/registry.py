@@ -18,7 +18,7 @@ from typing import Any
 
 import rich.markup
 from rich.text import Text
-from textual.widgets import Markdown, Static
+from textual.widgets import Static
 
 from naumi_agent.ui.messages.base import MessageType, UIMessage
 from naumi_agent.ui.messages.events import (
@@ -408,12 +408,12 @@ def _render_completion_receipt(
 ) -> None:
     from naumi_agent.tui.completion_receipt import (
         completion_outcome_label,
-        format_completion_receipt_markdown,
+        format_completion_receipt_text,
     )
 
     chat.mount(
-        Markdown(
-            format_completion_receipt_markdown(msg.receipt),
+        Static(
+            format_completion_receipt_text(msg.receipt),
             classes="agent-msg",
         )
     )

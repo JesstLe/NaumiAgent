@@ -29,7 +29,6 @@ from textual.widgets import (
     Footer,
     Header,
     Input,
-    Markdown,
     Static,
 )
 
@@ -41,9 +40,10 @@ from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.tui.agent_control import AgentControlScreen
 from naumi_agent.tui.completion_receipt import (
     completion_outcome_label,
-    format_completion_receipt_markdown,
+    format_completion_receipt_text,
 )
 from naumi_agent.tui.runtime_inspector import RuntimeInspectorScreen
+from naumi_agent.tui.semantic_markdown import SemanticMarkdown as Markdown
 from naumi_agent.ui.budget import format_budget_detail
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
@@ -1781,8 +1781,8 @@ class NaumiApp(App):
                 case "completion_receipt":
                     receipt = CompletionReceipt.from_dict(data)
                     chat.mount(
-                        Markdown(
-                            format_completion_receipt_markdown(receipt),
+                        Static(
+                            format_completion_receipt_text(receipt),
                             classes="agent-msg",
                         )
                     )

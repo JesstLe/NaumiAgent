@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from rich.text import Text
+
 from naumi_agent.tui.renderers.registry import TUIRenderer, _highlightable_tool_preview
 from naumi_agent.ui.messages import EngineEventAdapter, ToolResultMessage
 from naumi_agent.ui.messages.base import MessageType
@@ -167,4 +169,7 @@ def test_completion_receipt_renderer_mounts_authoritative_card() -> None:
     renderer.render(msg, chat, status, FakeTodo())
 
     assert len(chat.mounted) == 1
+    assert isinstance(chat.mounted[0].content, Text)
+    assert "完成回执" in chat.mounted[0].content.plain
+    assert any(str(span.style) == "green" for span in chat.mounted[0].content.spans)
     assert status.status_text == "完成回执：已完成"
