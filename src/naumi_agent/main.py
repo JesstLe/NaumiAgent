@@ -25,6 +25,7 @@ from rich.text import Text
 
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.config.configurator import ConfigurationError, configure_project
+from naumi_agent.config.paths import resolve_config_path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.log_setup import suppress_startup_import_warnings
 from naumi_agent.ui.budget import format_budget_detail
@@ -292,11 +293,8 @@ def _show_cli_status(cli: Any, engine: Any) -> None:
 
 
 def _resolve_config_path(path: str) -> str:
-    """如果指定路径存在就直接用，否则回退到项目根目录的 config.yaml."""
-    if Path(path).exists():
-        return path
-    fallback = str(_PROJECT_ROOT / "config.yaml")
-    return fallback
+    """Resolve the active project configuration through the shared contract."""
+    return resolve_config_path(path)
 
 
 def _runtime_debug_metadata(

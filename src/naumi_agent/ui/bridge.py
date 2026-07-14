@@ -17,6 +17,7 @@ from uuid import uuid4
 from naumi_agent import __version__
 from naumi_agent.agent_control import AgentControlSnapshot
 from naumi_agent.clipboard import strip_ansi
+from naumi_agent.config.paths import resolve_config_path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
 from naumi_agent.inspector import RuntimeInspectorSnapshot
@@ -221,28 +222,6 @@ def _present_run_error(exc: Exception) -> tuple[str, str]:
         "执行失败，详细信息已写入调试日志。请运行 `/debug` 查看诊断路径。",
         "run_failed",
     )
-
-
-def resolve_config_path(path: str) -> str:
-    """Resolve a CLI config path with the same fallback as the legacy CLI."""
-    candidate = Path(path)
-    if candidate.exists():
-        return str(candidate)
-    fallback = _find_default_config_path(Path(__file__).resolve())
-    return str(fallback) if fallback is not None else path
-
-
-def _find_default_config_path(start_path: Path) -> Path | None:
-    """Find the source-tree config.yaml from a module path, regardless of depth."""
-    start_dir = start_path if start_path.is_dir() else start_path.parent
-    for directory in (start_dir, *start_dir.parents):
-        config_path = directory / "config.yaml"
-        if config_path.exists():
-            return config_path
-        example_path = directory / "config.yaml.example"
-        if example_path.exists():
-            return example_path
-    return None
 
 
 def _fallback_slash_command_registry() -> list[dict[str, Any]]:
