@@ -18,6 +18,7 @@ import pytest
 from naumi_agent import __version__
 from naumi_agent.agents.base import AgentResult as SubAgentResult
 from naumi_agent.background.models import BackgroundStatus
+from naumi_agent.config.paths import DEFAULT_CONFIG_PATH
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.model.router import StreamChunk
@@ -455,15 +456,17 @@ def test_bridge_resolve_config_path_uses_existing_relative_path(
     config.write_text("log_level: DEBUG\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
-    assert resolve_config_path("config.yaml") == "config.yaml"
+    assert resolve_config_path("config.yaml") == str(config)
 
 
-def test_bridge_resolve_config_path_falls_back_to_repo_config() -> None:
-    resolved = Path(resolve_config_path("__missing_naumi_config__.yaml"))
+def test_bridge_resolve_config_path_targets_project_naumi_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    resolved = Path(resolve_config_path(DEFAULT_CONFIG_PATH))
 
-    assert resolved.name in {"config.yaml", "config.yaml.example"}
-    assert resolved.exists()
-    assert resolved.parent == Path(__file__).resolve().parents[2]
+    assert resolved == tmp_path / ".naumi" / "config.yaml"
 
 
 def test_protocol_decodes_strict_jsonl() -> None:
